@@ -89,20 +89,38 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: section. A document that names one of those gets a specific error telling
 #: the author it belongs in a suppression file instead of a generic
 #: "unknown key".
-_KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
-    "finding_id", "symbol", "change_kind",
-    "component", "baseline", "candidate",
-    "reason", "reference", "expires",
-})
+_KNOWN_ENTRY_KEYS: frozenset[str] = frozenset(
+    {
+        "finding_id",
+        "symbol",
+        "change_kind",
+        "component",
+        "baseline",
+        "candidate",
+        "reason",
+        "reference",
+        "expires",
+    }
+)
 
 #: Suppression-only broad selectors that would make an acknowledgment an
 #: unbounded rule rather than a record about specific findings.
-_FORBIDDEN_BROAD_KEYS: frozenset[str] = frozenset({
-    "symbol_pattern", "type_pattern", "member_name", "namespace",
-    "entity_namespace", "cause_namespace", "source_location", "binding",
-    "reachability", "allow_public_break", "allow_unknown_reachability",
-    "label",
-})
+_FORBIDDEN_BROAD_KEYS: frozenset[str] = frozenset(
+    {
+        "symbol_pattern",
+        "type_pattern",
+        "member_name",
+        "namespace",
+        "entity_namespace",
+        "cause_namespace",
+        "source_location",
+        "binding",
+        "reachability",
+        "allow_public_break",
+        "allow_unknown_reachability",
+        "label",
+    }
+)
 
 
 class AmbiguousAcknowledgmentError(ValueError):
@@ -184,10 +202,13 @@ class Acknowledgment:
                 "source_location) is a suppression, not an acknowledgment "
                 "(ADR-067 D5)."
             )
-        if self.change_kind is not None and self.symbol is None and self.finding_id is None:
+        if (
+            self.change_kind is not None
+            and self.symbol is None
+            and self.finding_id is None
+        ):
             raise ValueError(
-                "'change_kind' narrows 'symbol' or 'finding_id' and cannot "
-                "stand alone"
+                "'change_kind' narrows 'symbol' or 'finding_id' and cannot stand alone"
             )
         # `finding_id`/`symbol`/`change_kind` are exactly the bounded subset
         # of SelectorSet's grammar this record type permits — see the module
@@ -208,18 +229,22 @@ class Acknowledgment:
         change: Change,
         *,
         component: str | None = None,
+        baseline: str | None = None,
         release_label: str | None = None,
         today: date | None = None,
     ) -> bool:
         """True if this record acknowledges *change* in the given scope.
 
-        *component*/*release_label* are the caller's own declared scope for
-        this run (e.g. the library name being compared, and the candidate
-        snapshot's version label). A record that names a component/candidate
-        the caller did not supply, or that disagrees with what was supplied,
-        never matches — D5's bound is enforced by refusing an unverifiable
-        match, never by "resolving to the nearest" one (see the module
-        docstring).
+        *component*/*baseline*/*release_label* are the caller's own declared
+        scope for this run (e.g. the library name being compared, and the
+        old/new snapshot version labels). A record that names a
+        component/baseline/candidate the caller did not supply, or that
+        disagrees with what was supplied, never matches — D5's bound is
+        enforced by refusing an unverifiable match, never by "resolving to
+        the nearest" one (see the module docstring). *baseline* is checked
+        the same way *candidate* already is: a record naming one release
+        transition (baseline -> candidate) must not silently also cover a
+        comparison from a different baseline to the same candidate.
         """
         canonical_finding_id: str | None = None
         if self.finding_id is not None:
@@ -231,6 +256,8 @@ class Acknowledgment:
         ):
             return False
         if self.component is not None and self.component != component:
+            return False
+        if self.baseline is not None and self.baseline != baseline:
             return False
         if self.candidate is not None and self.candidate != release_label:
             return False
@@ -247,7 +274,12 @@ class Acknowledgment:
         """
         subject = self.finding_id or self.symbol or ""
         return "::".join(
-            [self.component or "*", self.baseline or "*", self.candidate or "*", subject]
+            [
+                self.component or "*",
+                self.baseline or "*",
+                self.candidate or "*",
+                subject,
+            ]
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -340,7 +372,7 @@ class AcknowledgmentList:
                     f"Acknowledgment entry {i} uses suppression-only broad "
                     f"selector(s) {sorted(forbidden)}, which an acknowledgment "
                     "may never use (ADR-067 D5 / vision.md: "
-                    "\"a broad regex is a suppression, not an acknowledgment\"). "
+                    '"a broad regex is a suppression, not an acknowledgment"). '
                     "Use 'finding_id' or an exact 'symbol' instead, or write "
                     "this rule as a suppression."
                 )
@@ -375,6 +407,7 @@ class AcknowledgmentList:
         change: Change,
         *,
         component: str | None = None,
+        baseline: str | None = None,
         release_label: str | None = None,
         today: date | None = None,
     ) -> Acknowledgment | None:
@@ -388,7 +421,11 @@ class AcknowledgmentList:
             record
             for record in self._acknowledgments
             if record.matches(
-                change, component=component, release_label=release_label, today=today
+                change,
+                component=component,
+                baseline=baseline,
+                release_label=release_label,
+                today=today,
             )
         ]
         if not matches:

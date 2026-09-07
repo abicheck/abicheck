@@ -106,6 +106,7 @@ def _resolve_acknowledgments(
     acknowledgments: object | None,
     *,
     component: str | None = None,
+    baseline: str | None = None,
     release_label: str | None = None,
 ) -> None:
     """Fill in ``acknowledged_by`` (ADR-067 D5/C-S3) -- the acknowledgment
@@ -126,7 +127,9 @@ def _resolve_acknowledgments(
     ):
         if record.acknowledged_by is not None:
             continue  # already resolved (e.g. a re-closed scoped record)
-        ack = evaluate(change, component=component, release_label=release_label)
+        ack = evaluate(
+            change, component=component, baseline=baseline, release_label=release_label
+        )
         if ack is None:
             continue
         record_id_fn = getattr(ack, "record_id", None)
@@ -245,9 +248,7 @@ def record_and_maybe_suppress_overlay(
     # it only when suppressed would make adding a matching rule change the
     # *detected* total rather than move the finding between dispositions --
     # exactly the conservation the audit exists to make checkable.
-    record_consumer_overlay(
-        ledger, change, result, application_point=application_point
-    )
+    record_consumer_overlay(ledger, change, result, application_point=application_point)
     # `withheld_unknown_rule` never applies here: every caller of this helper
     # constructs its overlay with `reachability_state=PROVEN_REACHABLE` (it is
     # by construction consumer/host-proven), and
@@ -397,21 +398,18 @@ def finalize_ledger(
         )
     ledger.resolve_verdict_classes(result)
     ledger.resolve_reclassifications(result)
-    # ADR-067 D5/D6/C-S3: read generically off `result` -- a run that never
+    # ADR-067 D5/C-S3: read generically off `result` -- a run that never
     # supplied `acknowledgments` (every pre-existing caller) is a no-op.
-    acks = getattr(result, "acknowledgments", None)
+    # Mutates only `ledger`, never `result` -- `ledger_for()`'s fallback path
+    # (a hand-built `DiffResult` with no persisted ledger) reaches this too,
+    # and its own contract is "never mutates *result*" (Codex review).
     _resolve_acknowledgments(
-        ledger, acks,
+        ledger,
+        getattr(result, "acknowledgments", None),
         component=getattr(result, "library", None),
+        baseline=getattr(result, "old_version", None),
         release_label=getattr(result, "new_version", None),
     )
-    if acks is not None:
-        from .acknowledgment_gate import evaluate_unacknowledged_additions_for_result
-
-        result.unacknowledged_additions_review = evaluate_unacknowledged_additions_for_result(
-            result, acks, getattr(result.policy_file, "acknowledgment_policy", None),
-            component=result.library, release_label=result.new_version,
-        )
     return ledger
 
 
@@ -504,6 +502,7 @@ def close_consumer_scope(
         ledger,
         getattr(result, "acknowledgments", None),
         component=getattr(result, "library", None),
+        baseline=getattr(result, "old_version", None),
         release_label=getattr(result, "new_version", None),
     )
 

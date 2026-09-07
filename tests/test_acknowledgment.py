@@ -145,6 +145,27 @@ def test_bounded_symbol_match_scoped_by_component_and_release(tmp_path: Path) ->
     assert acks.evaluate(change) is None
 
 
+def test_baseline_is_enforced_the_same_way_as_candidate(tmp_path: Path) -> None:
+    """A record naming one release transition (baseline -> candidate) must
+    not silently also cover a comparison from a different baseline to the
+    same candidate (CodeRabbit review, PR #1137)."""
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        "version: 1\n"
+        "acknowledgments:\n"
+        "  - symbol: bar\n"
+        "    baseline: '1.0.0'\n"
+        "    candidate: '2.0.0'\n"
+        "    reason: 'intentional new API'\n"
+    )
+    acks = AcknowledgmentList.load(p)
+    change = Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="x")
+
+    assert acks.evaluate(change, baseline="1.0.0", release_label="2.0.0") is not None
+    assert acks.evaluate(change, baseline="0.9.0", release_label="2.0.0") is None
+    assert acks.evaluate(change, release_label="2.0.0") is None
+
+
 def test_ambiguous_match_is_a_hard_error_not_a_nearest_match(tmp_path: Path) -> None:
     """D5: 'an ambiguous or unknown identity requires review and is never
     resolved to the nearest old acknowledgment.'"""
@@ -358,6 +379,30 @@ def test_policy_file_rejects_invalid_acknowledgment_action(tmp_path: Path) -> No
         PolicyFile.load(p)
 
 
+@pytest.mark.parametrize("bad_yaml", ["[]", "{}"])
+def test_policy_file_rejects_non_string_acknowledgment_action(
+    tmp_path: Path, bad_yaml: str
+) -> None:
+    """A YAML list/mapping is valid `safe_load` input but unhashable --
+    membership-testing it directly against the valid-action set would raise
+    `TypeError` instead of the documented `PolicyError` (CodeRabbit review,
+    PR #1137)."""
+    p = tmp_path / "policy.yml"
+    p.write_text(
+        f"base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: {bad_yaml}\n"
+    )
+    with pytest.raises(Exception, match="invalid value"):
+        PolicyFile.load(p)
+
+
+def test_acknowledgment_policy_validates_direct_construction() -> None:
+    """`Literal` is not enforced at runtime -- a caller constructing
+    `AcknowledgmentPolicy` directly (bypassing the YAML loader) must still be
+    rejected for an invalid action (CodeRabbit review, PR #1137)."""
+    with pytest.raises(ValueError, match="unacknowledged_additions"):
+        AcknowledgmentPolicy(unacknowledged_additions="typo")  # type: ignore[arg-type]
+
+
 # --- end-to-end through checker.compare() ---------------------------------
 
 
@@ -457,3 +502,93 @@ def test_an_acknowledgment_never_matches_a_different_finding_by_proximity(
     acks = AcknowledgmentList.load(p)
     sibling = Change(kind=ChangeKind.FUNC_ADDED, symbol="foo_v3", description="x")
     assert acks.evaluate(sibling) is None
+
+
+# --- ledger_for() no-mutation contract + fold (CodeRabbit review, PR #1137) -
+
+
+def test_ledger_for_never_mutates_a_hand_built_result_with_acknowledgments() -> None:
+    """`ledger_for()`'s fallback path (a `DiffResult` with no persisted
+    ledger) must not write `unacknowledged_additions_review` back onto
+    *result* -- that violates its own documented no-mutation contract."""
+    change = Change(kind=ChangeKind.FUNC_ADDED, symbol="bar", description="x")
+    diff = DiffResult(
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
+        acknowledgments=AcknowledgmentList([]),
+    )
+    assert diff.unacknowledged_additions_review is None
+    ledger_for(diff)
+    assert diff.unacknowledged_additions_review is None
+
+
+def test_fold_disposition_audits_preserves_unacknowledged_entries() -> None:
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        fold_disposition_audits,
+    )
+
+    zero = DispositionAudit(
+        detected_total=0,
+        effective_total=0,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+    )
+    member_a = DispositionAudit(
+        detected_total=1,
+        effective_total=0,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+        unacknowledged_additions_review={
+            "policy": "warn",
+            "unacknowledged": [
+                {"kind": "func_added", "symbol": "a", "finding_id": "1"}
+            ],
+            "gate_contribution": 0,
+        },
+    )
+    member_b = DispositionAudit(
+        detected_total=1,
+        effective_total=0,
+        counts=(),
+        rules=(),
+        not_evaluated_detectors=(),
+        unacknowledged_additions_review={
+            "policy": "block",
+            "unacknowledged": [
+                {"kind": "func_added", "symbol": "b", "finding_id": "2"}
+            ],
+            "gate_contribution": 1,
+        },
+    )
+    folded = fold_disposition_audits([zero, member_a, member_b])
+    review = folded.unacknowledged_additions_review
+    assert review is not None
+    assert review["gate_contribution"] == 1
+    assert review["policy"] == "mixed"
+    symbols = {entry["symbol"] for entry in review["unacknowledged"]}
+    assert symbols == {"a", "b"}
+
+
+def test_fold_disposition_audits_reports_none_when_no_member_evaluated() -> None:
+    from abicheck.report.disposition_audit import (
+        DispositionAudit,
+        fold_disposition_audits,
+    )
+
+    folded = fold_disposition_audits(
+        [
+            DispositionAudit(
+                detected_total=0,
+                effective_total=0,
+                counts=(),
+                rules=(),
+                not_evaluated_detectors=(),
+            )
+        ]
+    )
+    assert folded.unacknowledged_additions_review is None

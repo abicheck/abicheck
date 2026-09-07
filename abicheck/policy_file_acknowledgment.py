@@ -27,12 +27,13 @@ growing the capped one). ``policy_file.py`` calls
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .errors import PolicyError
 from .policy.acknowledgment_policy import (
     VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS,
     AcknowledgmentPolicy,
+    UnacknowledgedAdditionsAction,
     built_in_default_acknowledgment_policy,
 )
 
@@ -62,10 +63,19 @@ def parse_acknowledgment_policy(raw: Any, path: Path) -> AcknowledgmentPolicy:
         )
     default = built_in_default_acknowledgment_policy()
     action = raw.get("unacknowledged_additions", default.unacknowledged_additions)
-    if action not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS:
+    # `isinstance` first: a YAML list/mapping is valid `safe_load` input but
+    # unhashable, so `not in` on the frozenset below would raise `TypeError`
+    # instead of this function's documented `PolicyError` contract (Codex
+    # review) -- e.g. `unacknowledged_additions: []`.
+    if (
+        not isinstance(action, str)
+        or action not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
+    ):
         raise PolicyError(
             f"acknowledgment.unacknowledged_additions in {path}: invalid "
             f"value {action!r}. Valid values: "
             f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}"
         )
-    return AcknowledgmentPolicy(unacknowledged_additions=action)
+    return AcknowledgmentPolicy(
+        unacknowledged_additions=cast("UnacknowledgedAdditionsAction", action)
+    )

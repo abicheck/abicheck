@@ -53,6 +53,25 @@ class AcknowledgmentPolicy:
 
     unacknowledged_additions: UnacknowledgedAdditionsAction = "allow"
 
+    def __post_init__(self) -> None:
+        # A `Literal` annotation is not enforced at runtime (Codex review):
+        # a caller constructing this directly (rather than through
+        # `policy_file_acknowledgment.parse_acknowledgment_policy`, which
+        # already validates its own raw YAML input) can otherwise pass any
+        # value through unchecked, silently disabling `block` for a typo'd
+        # spelling that never equals `"block"` in `evaluate_unacknowledged_
+        # additions`'s own comparison.
+        if (
+            not isinstance(self.unacknowledged_additions, str)
+            or self.unacknowledged_additions
+            not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
+        ):
+            raise ValueError(
+                "unacknowledged_additions must be one of "
+                f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}, got "
+                f"{self.unacknowledged_additions!r}"
+            )
+
 
 def built_in_default_acknowledgment_policy() -> AcknowledgmentPolicy:
     """The policy every run has when nothing states otherwise: ``allow``."""

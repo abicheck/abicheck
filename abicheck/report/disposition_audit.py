@@ -304,6 +304,8 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
     detectors: dict[str, NotEvaluatedDetector] = {}
     unacknowledged_gate_contribution = 0
     any_additions_review = False
+    unacknowledged_entries: list[dict[str, object]] = []
+    additions_policies: set[str] = set()
     for audit in audits:
         detected_total += audit.detected_total
         effective_total += audit.effective_total
@@ -334,15 +336,14 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
             ack_tally[record_id] += count
         if audit.unacknowledged_additions_review is not None:
             any_additions_review = True
+            review = audit.unacknowledged_additions_review
             unacknowledged_gate_contribution = max(
                 unacknowledged_gate_contribution,
-                int(
-                    cast(
-                        "int",
-                        audit.unacknowledged_additions_review.get("gate_contribution")
-                        or 0,
-                    )
-                ),
+                int(cast("int", review.get("gate_contribution") or 0)),
+            )
+            additions_policies.add(str(review.get("policy") or "allow"))
+            unacknowledged_entries.extend(
+                cast("list[dict[str, object]]", review.get("unacknowledged") or [])
             )
         for det in audit.not_evaluated_detectors:
             if det.name not in detectors:
@@ -362,14 +363,28 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
         scope_reasons=tuple((reason, reason_tally[reason]) for reason in reason_order),
         acknowledged_total=acknowledged_total,
         acknowledgments=tuple((rid, ack_tally[rid]) for rid in ack_order),
-        # A folded, orthogonal ``0``/``1`` -- matching how every other axis
-        # here (counts, totals) is a plain sum-or-max fold of a conserved
-        # per-member fact, per `fold_disposition_audits`'s own docstring.
-        # `None` (never a synthetic zero dict) when no member carried a
-        # review at all, so "no member ever evaluated this" stays
-        # distinguishable from "every member evaluated it and found nothing".
+        # A folded, orthogonal ``0``/``1`` `gate_contribution` -- matching how
+        # every other axis here (counts, totals) is a plain sum-or-max fold
+        # of a conserved per-member fact. `unacknowledged` concatenates every
+        # member's own list rather than dropping it (Codex review: an
+        # aggregate report must still be able to name which additions were
+        # unacknowledged, not just how many). `policy` is the single value
+        # when every member agreed, or ``"mixed"`` when they configured
+        # different allow/warn/block settings -- never silently defaulted to
+        # ``"allow"`` for a fold that never asked the question. `None` (never
+        # a synthetic zero dict) when no member carried a review at all, so
+        # "no member ever evaluated this" stays distinguishable from "every
+        # member evaluated it and found nothing".
         unacknowledged_additions_review=(
-            {"gate_contribution": unacknowledged_gate_contribution}
+            {
+                "policy": (
+                    next(iter(additions_policies))
+                    if len(additions_policies) == 1
+                    else "mixed"
+                ),
+                "unacknowledged": unacknowledged_entries,
+                "gate_contribution": unacknowledged_gate_contribution,
+            }
             if any_additions_review
             else None
         ),
@@ -403,9 +418,7 @@ def disposition_audit_dict_reusing_document(
     """
     if report_document is None:
         return compute_disposition_audit(result, severity_config).to_dict()
-    return cast(
-        "dict[str, object]", report_document.to_mapping()["disposition_audit"]
-    )
+    return cast("dict[str, object]", report_document.to_mapping()["disposition_audit"])
 
 
 def render_disposition_audit_note(audit: DispositionAudit) -> str:

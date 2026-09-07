@@ -1335,11 +1335,24 @@ def compare(
         contract_conflicts=contract_conflicts,
         acknowledgments=acknowledgments,
     )
-    # ADR-067 C-S1/D3 (also resolves acknowledgment, D5/D6): `verdict_scored`
+    # ADR-067 C-S1/D3 (also resolves `acknowledged_by`, D5): `verdict_scored`
     # is the redundant subset the verdict was scored over.
     result.disposition_ledger = finalize_ledger(
         ledger, result, verdict_scored=verdict_redundant
     )
+    if acknowledgments is not None:  # ADR-067 D6 additions-review gate
+        from .policy.acknowledgment_gate import (
+            evaluate_unacknowledged_additions_for_result as _eval_uar,
+        )
+
+        result.unacknowledged_additions_review = _eval_uar(
+            result,
+            acknowledgments,
+            getattr(policy_file, "acknowledgment_policy", None),
+            component=old.library,
+            baseline=old.version,
+            release_label=new.version,
+        )
 
     # P0.4 — computed last, from data the pipeline above already produced
     # (evidence tiers, comparability outcome, contract context, whatever

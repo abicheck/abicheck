@@ -92,7 +92,8 @@ class AdditionsReviewResult:
         return cls(
             policy=str(d.get("policy", "allow")),
             unacknowledged=tuple(
-                UnacknowledgedAddition.from_dict(u) for u in d.get("unacknowledged") or ()
+                UnacknowledgedAddition.from_dict(u)
+                for u in d.get("unacknowledged") or ()
             ),
             gate_contribution=int(d.get("gate_contribution", 0)),
         )
@@ -104,6 +105,7 @@ def evaluate_unacknowledged_additions(
     policy: AcknowledgmentPolicy | None,
     *,
     component: str | None = None,
+    baseline: str | None = None,
     release_label: str | None = None,
 ) -> AdditionsReviewResult:
     """D6's evaluation over *changes* — the public additions review gate.
@@ -131,7 +133,10 @@ def evaluate_unacknowledged_additions(
             continue
         if acknowledgments is not None:
             ack = acknowledgments.evaluate(
-                change, component=component, release_label=release_label
+                change,
+                component=component,
+                baseline=baseline,
+                release_label=release_label,
             )
             if ack is not None:
                 continue
@@ -156,6 +161,7 @@ def evaluate_unacknowledged_additions_for_result(
     policy: AcknowledgmentPolicy | None,
     *,
     component: str | None = None,
+    baseline: str | None = None,
     release_label: str | None = None,
 ) -> AdditionsReviewResult:
     """:func:`evaluate_unacknowledged_additions` over a ``DiffResult``'s own
@@ -165,7 +171,12 @@ def evaluate_unacknowledged_additions_for_result(
     ``disposition_ledger.py``'s own convention)."""
     changes = list(getattr(result, "changes", None) or ())
     return evaluate_unacknowledged_additions(
-        changes, acknowledgments, policy, component=component, release_label=release_label
+        changes,
+        acknowledgments,
+        policy,
+        component=component,
+        baseline=baseline,
+        release_label=release_label,
     )
 
 
