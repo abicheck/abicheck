@@ -1338,7 +1338,10 @@ def compare(
     # ADR-067 C-S1/D3 (also resolves `acknowledged_by`, D5): `verdict_scored`
     # is the redundant subset the verdict was scored over.
     result.disposition_ledger = finalize_ledger(
-        ledger, result, verdict_scored=verdict_redundant
+        ledger,
+        result,
+        verdict_scored=verdict_redundant,
+        strict_acknowledgments=True,
     )
     if acknowledgments is not None:  # ADR-067 D6 additions-review gate
         from .policy.acknowledgment_gate import (

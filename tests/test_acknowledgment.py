@@ -31,6 +31,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change, DiffResult
+from abicheck.errors import PolicyError
 from abicheck.model import AbiSnapshot
 from abicheck.model.declarations import Function
 from abicheck.policy.acknowledgment import (
@@ -616,7 +617,7 @@ def test_policy_file_rejects_invalid_acknowledgment_action(tmp_path: Path) -> No
     p.write_text(
         "base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: nope\n"
     )
-    with pytest.raises(Exception, match="invalid value"):
+    with pytest.raises(PolicyError, match="invalid value"):
         PolicyFile.load(p)
 
 
@@ -632,21 +633,21 @@ def test_policy_file_rejects_non_string_acknowledgment_action(
     p.write_text(
         f"base_policy: strict_abi\nacknowledgment:\n  unacknowledged_additions: {bad_yaml}\n"
     )
-    with pytest.raises(Exception, match="invalid value"):
+    with pytest.raises(PolicyError, match="invalid value"):
         PolicyFile.load(p)
 
 
 def test_policy_file_rejects_non_mapping_acknowledgment_block(tmp_path: Path) -> None:
     p = tmp_path / "policy.yml"
     p.write_text("base_policy: strict_abi\nacknowledgment: 'not a mapping'\n")
-    with pytest.raises(Exception, match="must be a YAML mapping"):
+    with pytest.raises(PolicyError, match="must be a YAML mapping"):
         PolicyFile.load(p)
 
 
 def test_policy_file_rejects_unknown_acknowledgment_key(tmp_path: Path) -> None:
     p = tmp_path / "policy.yml"
     p.write_text("base_policy: strict_abi\nacknowledgment:\n  bogus: 1\n")
-    with pytest.raises(Exception, match="unknown key"):
+    with pytest.raises(PolicyError, match="unknown key"):
         PolicyFile.load(p)
 
 
@@ -777,6 +778,59 @@ def test_ledger_for_never_mutates_a_hand_built_result_with_acknowledgments() -> 
     assert diff.unacknowledged_additions_review is None
     ledger_for(diff)
     assert diff.unacknowledged_additions_review is None
+
+
+def test_compare_raises_on_an_ambiguous_acknowledgment_for_any_change_kind(
+    tmp_path: Path,
+) -> None:
+    """D5's hard error is not limited to the additions-review gate's own
+    direct `evaluate()` call -- `checker.compare()` (the run that owns the
+    comparison) must raise for *any* ambiguously-acknowledged finding, a
+    removal included, not only a public addition (CodeRabbit review, PR
+    #1137: `_resolve_acknowledgments` must stay strict for the owning run
+    even though it also has to tolerate ambiguity in a report-projection
+    fallback -- see `test_ledger_for_reconciliation_fallback_tolerates_an_
+    ambiguous_match` below)."""
+    from abicheck import checker
+
+    p = tmp_path / "ack.yml"
+    p.write_text(
+        "version: 1\n"
+        "acknowledgments:\n"
+        "  - symbol: foo\n    reason: 'first'\n"
+        "  - symbol: foo\n    reason: 'second, conflicting'\n"
+    )
+    acks = AcknowledgmentList.load(p)
+    old = _snapshot("1.0.0", [_func("foo")])
+    new = _snapshot("2.0.0", [])  # foo removed -- not an addition
+    with pytest.raises(AmbiguousAcknowledgmentError):
+        checker.compare(old, new, acknowledgments=acks)
+
+
+def test_ledger_for_reconciliation_fallback_tolerates_an_ambiguous_match() -> None:
+    """The counterpart of the strict test above: `ledger_for()`'s fallback
+    for a hand-built `DiffResult` (no persisted ledger -- the exact
+    `compute_disposition_audit()` path CodeRabbit's finding was about) must
+    not crash report rendering over an ambiguous acknowledgment. The
+    affected finding's `acknowledged_by` stays unresolved (`None`) rather
+    than the whole projection raising."""
+
+    class _AlwaysAmbiguous:
+        def evaluate(self, change: object, **kwargs: object) -> None:
+            raise AmbiguousAcknowledgmentError("ambiguous for this test")
+
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
+    diff = DiffResult(
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
+        acknowledgments=_AlwaysAmbiguous(),
+    )
+    ledger = ledger_for(diff)  # must not raise
+    record = ledger.record_for(change)
+    assert record is not None
+    assert record.acknowledged_by is None
 
 
 def test_fold_disposition_audits_preserves_unacknowledged_entries() -> None:

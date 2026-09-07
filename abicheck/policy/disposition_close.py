@@ -108,6 +108,7 @@ def _resolve_acknowledgments(
     component: str | None = None,
     baseline: str | None = None,
     release_label: str | None = None,
+    strict: bool = False,
 ) -> None:
     """Fill in ``acknowledged_by`` (ADR-067 D5/C-S3) -- the acknowledgment
     counterpart of ``DispositionLedger.resolve_reclassifications``, living
@@ -115,10 +116,26 @@ def _resolve_acknowledgments(
     cap (same reason :func:`conservation_holds` lives here). Reaches
     ``ledger``'s private record/anchor lists directly, the same private
     access this module's other helpers already use (``_GateContext``/
-    ``_kept_disposition``). Duck-typed (only ``.evaluate`` is called) so no
-    new import is needed; a no-op when *acknowledgments* is ``None``/empty
-    (every pre-existing caller).
+    ``_kept_disposition``). Duck-typed (only ``.evaluate`` is called); a
+    no-op when *acknowledgments* is ``None``/empty (every pre-existing
+    caller).
+
+    *strict* controls what happens on an ambiguous match
+    (:class:`~abicheck.policy.acknowledgment.AmbiguousAcknowledgmentError`,
+    D5: "an ambiguous or unknown identity requires review"). This function
+    runs from two different contexts that need two different answers:
+    ``checker.compare()`` (via :func:`finalize_ledger`, ``strict=True``) is
+    the run that *owns* the comparison, and must let the error propagate
+    for every finding kind, not only the additions-review gate's own direct
+    ``evaluate()`` call covers. ``ledger_for()``'s reconciliation fallback
+    (a report projection over an already-produced, hand-built
+    ``DiffResult`` with no persisted ledger, ``strict=False``) must still be
+    able to state D3's counts rather than take the whole render down over
+    one unresolved overlay fact — the run that could have raised already
+    had its chance (CodeRabbit review, PR #1137).
     """
+    from .acknowledgment import AmbiguousAcknowledgmentError
+
     evaluate = getattr(acknowledgments, "evaluate", None)
     if not callable(evaluate):
         return
@@ -127,9 +144,17 @@ def _resolve_acknowledgments(
     ):
         if record.acknowledged_by is not None:
             continue  # already resolved (e.g. a re-closed scoped record)
-        ack = evaluate(
-            change, component=component, baseline=baseline, release_label=release_label
-        )
+        try:
+            ack = evaluate(
+                change,
+                component=component,
+                baseline=baseline,
+                release_label=release_label,
+            )
+        except AmbiguousAcknowledgmentError:
+            if strict:
+                raise
+            continue  # unresolved -- see the docstring's non-strict note above
         if ack is None:
             continue
         record_id_fn = getattr(ack, "record_id", None)
@@ -282,6 +307,7 @@ def finalize_ledger(
     severity_config: object | None = None,
     *,
     verdict_scored: Iterable[Change] = (),
+    strict_acknowledgments: bool = False,
 ) -> DispositionLedger:
     """Close *ledger* over *result*, labelling every not-yet-recorded change.
 
@@ -292,6 +318,12 @@ def finalize_ledger(
     that reached ``result`` without passing one of the recording call sites
     (a ``DiffResult`` assembled by a caller other than ``checker.compare``).
     After it returns, the per-disposition counts sum to the detected total.
+
+    *strict_acknowledgments* is threaded straight to
+    :func:`_resolve_acknowledgments` -- see that function's own docstring.
+    ``checker.compare()`` (the run that owns the comparison) passes
+    ``True``; ``ledger_for()``'s reconciliation fallback leaves the default
+    ``False`` (ADR-067 D5, CodeRabbit review, PR #1137).
     """
 
     # Every bucket read defensively, for the same reason ``_kept_disposition``
@@ -409,6 +441,7 @@ def finalize_ledger(
         component=getattr(result, "library", None),
         baseline=getattr(result, "old_version", None),
         release_label=getattr(result, "new_version", None),
+        strict=strict_acknowledgments,
     )
     return ledger
 
