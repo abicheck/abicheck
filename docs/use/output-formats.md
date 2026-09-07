@@ -760,6 +760,34 @@ symbol linkage was captured also carries `symbol_binding`
 [Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
 match/no-match is auditable from `scan --against` too.
 
+Since schema 3.5, every `compare --format json` report carries an
+unconditional top-level `finding_evolution` object: `counts` (one entry per
+`FindingEvolution` state — `introduced`/`resolved`/`persistent`/
+`not_evaluated`) and `resolved` (findings that no longer appear in this
+comparison). A plain, single `compare()` run reports every finding
+`not_evaluated` and an empty `resolved` list — evolution is only ever
+computed by a caller with the extra context needed to answer it (either an
+explicit N>1-comparison chain, or a check migrated onto this model — see
+below), never guessed. Authority is unaffected either way: a finding's
+`kind`/severity/category never changes based on its `evolution` state.
+
+`private_header_leak` (§3 rows 3-4 of
+`docs/contribute/plans/one-comparison-product.md`) is the first cross-source
+check (`abicheck/buildsource/crosscheck.py`) migrated onto this model: run
+per side inside `compare`'s own pipeline rather than only under the
+now-retiring `scan --against`
+(`docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md`
+D3), its own findings now carry a real, non-default `evolution` value
+(reflected in `finding_evolution.counts` above) — `introduced` (absent on
+OLD with sufficient evidence, present on NEW), `resolved` (present on OLD,
+absent on NEW with sufficient evidence), `persistent` (present on both), or
+`not_evaluated` when the side needed to answer lacked the evidence to do so
+(never conflate this with "clean" — a pre-existing leak whose baseline had
+no header evidence reads as `not_evaluated`, never as `introduced`). Every
+other, unmigrated finding kind is unaffected. Authority is unchanged here
+too — a `private_header_leak` finding stays `RISK` regardless of its own
+`evolution` value; evolution never promotes a finding to `BREAKING`.
+
 Since schema 1.13, the block also carries an always-on `additions` array —
 the addition-shaped subset of the `compatible` bucket (new public-API
 surface, `ChangeKind`'s `ADDITION_KINDS`), itemized the same shape as

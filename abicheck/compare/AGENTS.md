@@ -46,7 +46,6 @@ severity, or a CLI flag is in the wrong layer.
   (Codex review, PR #1033) — that function's own evidence-reliability gate
   (a snapshot-level question, not a raw change) stays in
   `diff_param_qualifiers.py` as a thin facade.
-
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.
