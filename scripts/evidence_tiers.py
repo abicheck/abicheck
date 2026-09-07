@@ -318,6 +318,13 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_became_opaque": "L1",
     "func_virtual_added": "L1",
     "func_pure_virtual_added": "L1",
+    # The non-polymorphic -> polymorphic transition (catalog case203). A `-g`
+    # build records the record's size, its members' offsets and its vtable
+    # holder in DWARF, which is everything the finding rests on; L0 sees the
+    # new _ZTV/_ZTI symbols appear but cannot attribute the member-offset
+    # shift to them. Same tier as type_vtable_changed/func_virtual_added,
+    # which observe the same DWARF evidence.
+    "vptr_introduced": "L1",
     # Same is_virtual/is_pure_virtual DWARF comparison as func_pure_virtual_added
     # (diff_types.py); only the old function's is_virtual value picks which of
     # the two kinds fires, not the evidence source.
@@ -342,6 +349,13 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "constant_changed": "L2",
     "param_default_value_changed": "L2",
     "param_default_value_removed": "L2",
+    # `restrict` is a declaration property recorded by the header-AST backends
+    # (Param.is_restrict, compared through its Fact[bool] sibling in
+    # diff_param_qualifiers.py). It is not part of the mangled name (L0), and
+    # abicheck reads the qualifier from the public header rather than from
+    # DWARF's own DW_TAG_restrict_type on the defining subprogram -- which is
+    # exactly the distinction catalog case207/case208 pin.
+    "param_restrict_changed": "L2",
     # ── L2: CastXML schema-completeness (all castxml/header-only facts) ──
     "field_default_initializer_removed": "L2",
     "field_default_initializer_changed": "L2",
@@ -504,6 +518,14 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # (cv_qualifiers_only_differ); DWARF alone doesn't carry the distinction
     # abicheck relies on here.
     "case186_c_api_pointee_const_abi_neutral": "L2",
+    # Phase 4 paired negative controls. Each is a NO_CHANGE fixture whose
+    # claim is the *absence* of a finding its positive sibling produces, so
+    # its tier is the one at which the change it does make is visible at all
+    # -- the public header AST. Below that the two sides are trivially
+    # identical and the case proves nothing.
+    "case202_public_header_declaration_order_changed": "L2",
+    "case206_deprecation_documented_without_attribute": "L2",
+    "case208_restrict_added_to_definition_only": "L2",
 }
 
 

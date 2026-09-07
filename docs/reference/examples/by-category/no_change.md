@@ -3,7 +3,7 @@
 
 Identical ABI/API — sanity-check baselines.
 
-_7 case(s)._ [← back to all examples](../index.md)
+_10 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -14,3 +14,6 @@ _7 case(s)._ [← back to all examples](../index.md)
 | [case164_preproc_conditional_field](../case164_preproc_conditional_field.md) | Preprocessor-Conditional Field (Build-Context False Positive) | ✅ NO_CHANGE | No Change |
 | [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | Internal Enum Churn, Scoped Out by Private-Header Origin | ✅ NO_CHANGE | No Change |
 | [case186_c_api_pointee_const_abi_neutral](../case186_c_api_pointee_const_abi_neutral.md) | C API Pointee const-Qualification Is ABI-Neutral | ✅ NO_CHANGE | No Change |
+| [case202_public_header_declaration_order_changed](../case202_public_header_declaration_order_changed.md) | Public Header Declaration Order Changed | ✅ NO_CHANGE | No Change |
+| [case206_deprecation_documented_without_attribute](../case206_deprecation_documented_without_attribute.md) | Deprecation Documented Without the Attribute | ✅ NO_CHANGE | No Change |
+| [case208_restrict_added_to_definition_only](../case208_restrict_added_to_definition_only.md) | `restrict` Added to the Definition Only | ✅ NO_CHANGE | No Change |

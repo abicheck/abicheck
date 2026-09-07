@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **197 cases** (192 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **208 cases** (203 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -41,12 +41,12 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 107 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 111 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 17 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 31 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
-| COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 7 | — | ✅ |
+| COMPATIBLE (addition) | 11 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE (quality) | 23 | `QUALITY_KINDS` | 🟡 |
+| NO_CHANGE | 10 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/contribute/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -468,6 +468,17 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [195](cases/case195_header_graph_ambiguous_rename_not_reconciled/README.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [196](cases/case196_header_graph_move_reconciled/README.md) | Declaration Reconciled as Moved Across a Compound Edit | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [197](cases/case197_header_graph_identity_reconciled/README.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [198](cases/case198_public_struct_field_reorder/README.md) | Public Struct Field Reorder | Breaking | 🔴 BREAKING |
+| [199](cases/case199_public_function_parameter_added/README.md) | Parameter Added to an Exported Function | Breaking | 🔴 BREAKING |
+| [200](cases/case200_new_entry_point_instead_of_parameter_added/README.md) | New Entry Point Instead of a Changed Arity | Addition | 🟢 COMPATIBLE |
+| [201](cases/case201_public_function_parameters_reordered/README.md) | Public Function Parameters Reordered | Breaking | 🔴 BREAKING |
+| [202](cases/case202_public_header_declaration_order_changed/README.md) | Public Header Declaration Order Changed | No Change | ✅ NO_CHANGE |
+| [203](cases/case203_class_gained_vtable_pointer/README.md) | Class Gained a Vtable Pointer | Breaking | 🔴 BREAKING |
+| [204](cases/case204_class_gained_non_virtual_method/README.md) | Class Gained a Non-Virtual Method | Addition | 🟢 COMPATIBLE |
+| [205](cases/case205_public_function_marked_deprecated/README.md) | Public Function Marked Deprecated | Quality | 🟢 COMPATIBLE |
+| [206](cases/case206_deprecation_documented_without_attribute/README.md) | Deprecation Documented Without the Attribute | No Change | ✅ NO_CHANGE (bad practice) |
+| [207](cases/case207_pointer_parameter_gained_restrict/README.md) | Pointer Parameter Gained `restrict` | Quality | 🟢 COMPATIBLE (bad practice) |
+| [208](cases/case208_restrict_added_to_definition_only/README.md) | `restrict` Added to the Definition Only | No Change | ✅ NO_CHANGE |
 <!-- END GENERATED: case-index -->
 
 ---

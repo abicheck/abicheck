@@ -1,0 +1,97 @@
+# Case 207: Pointer Parameter Gained `restrict`
+
+**Category:** Quality | **Verdict:** ✅ COMPATIBLE
+
+## Verdict and consumer impact
+
+`blend()`'s two pointer parameters gain `restrict`. Nothing about the calling
+convention changes — a `float *` is still one machine word in the same
+register — so no prebuilt consumer fails to link and no call site fails to
+compile. What changed is the *caller's* obligation: under v1 a caller could
+legally pass overlapping buffers; under v2 doing so is undefined behaviour,
+and the callee's compiler is now free to vectorise the loop on that promise.
+
+That is why this is a reportable fact rather than a silent one. It is the
+mirror image of
+[`case186_c_api_pointee_const_abi_neutral`](../case186_c_api_pointee_const_abi_neutral/README.md),
+where a qualifier change tightened what the *callee* promises (safe, and
+fully suppressed). Here the tightening runs the other way, onto the caller.
+
+Its negative control is
+[`case208_restrict_added_to_definition_only`](../case208_restrict_added_to_definition_only/README.md),
+where `restrict` appears only inside the implementation and never in the
+published declaration. The pair proves two things about these two fixtures:
+a `restrict` change on the *published contract* is reported, and one confined
+to the implementation is not.
+
+## Old/new diff
+
+| v1.h | v2.h |
+|------|------|
+| `void blend(float *dst, const float *src, int n);` | `void blend(float *restrict dst, const float *restrict src, int n);` |
+
+## abicheck command
+
+```bash
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -shared -fPIC -g v2.c -o libv2.so
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h
+```
+
+## Expected abicheck finding
+
+```text
+Verdict: COMPATIBLE (exit 0)
+
+param_restrict_changed: Parameter restrict qualifier added: blend param dst
+param_restrict_changed: Parameter restrict qualifier added: blend param src
+```
+
+## Minimum evidence
+
+`min_evidence: L2` — `restrict` is a declaration property the header-AST
+backends record (`Param.is_restrict`). It is not part of the mangled name
+(L0) and DWARF's own `DW_TAG_restrict_type` is not what abicheck reads here,
+so the public header is the evidence tier this finding rests on.
+
+## Why abicheck catches it
+
+`diff_param_qualifiers.py` compares each matched parameter's
+`is_restrict_fact` between the two sides and emits `param_restrict_changed`
+when the determination differs. It compares the `Fact[bool]` sibling rather
+than the raw flag precisely so "not collected" and "confirmed not
+restrict-qualified" are not folded together — a snapshot produced by a
+backend that never populated the field would otherwise read as every
+qualifier having just been added.
+
+## Runtime failure demonstration
+
+**Severity: latent undefined behaviour — correct today, wrong after the next
+optimiser change.**
+
+```bash
+gcc -shared -fPIC -g v1.c -o libv1.so
+gcc -g app.c -L. -lv1 -Wl,-rpath,. -o app
+./app
+# → 1.0 3.0 5.0 7.0 9.0 6.0 7.0 8.0   (overlapping blend, well-defined under v1)
+
+gcc -shared -fPIC -g -O2 v2.c -o libv1.so   # swap in v2, no recompile
+./app
+# → the same call is now undefined; an -O2/-O3 vectorised v2 may produce
+#   different values for the overlapping region
+```
+
+## Safe redesign
+
+Do not add `restrict` to an already-published parameter. Introduce a new
+entry point that carries the stronger precondition (the case200 pattern) and
+document the aliasing contract there, leaving the original function's weaker
+promise intact for existing callers.
+
+## Cross-tool comparison
+
+`abidiff` treats `restrict` as part of the parameter's type and reports a
+subtype change; ABICC reports a parameter-type change. abicheck reports it as
+its own `param_restrict_changed` kind at `COMPATIBLE` severity, which keeps
+the aliasing-contract signal visible without claiming a binary break that did
+not happen.
