@@ -496,7 +496,8 @@ comparability record — implemented ([#1098](https://github.com/abicheck/abiche
 proven to preserve an earlier-proven change through a later incomplete
 stage; profile-delta explanation beyond the per-dimension record itself
 remains open. **S3's multi-source contract conflicts with provenance —
-implemented (PR TBD):** `model/contract_conflicts.py` (shape:
+implemented ([#1126](https://github.com/abicheck/abicheck/pull/1126)):**
+`model/contract_conflicts.py` (shape:
 `ContractSourceConflict`/`ConflictSourceClaim`, never fewer than two
 sources per conflict, ADR-067 "record before disposing"),
 `policy/contract_conflicts.py` (cases 1-2), and
