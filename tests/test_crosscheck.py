@@ -2025,6 +2025,41 @@ def test_unversioned_exported_symbol_silent_without_scheme():
     assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "present"
 
 
+def test_unversioned_exported_symbol_silent_under_unattached_private_marker_only():
+    """An unattached ``*PRIVATE*``-only version node is linker bookkeeping, not
+    a real versioning scheme (``diff_versioning._is_unattached_private_version_node``'s
+    own definition, reused here) -- an unversioned export must not be flagged
+    purely because such a marker exists. Regression for the false positive
+    ``checker.compare()``'s automatic cross-source stage surfaced against
+    ``tests/test_sprint2_elf.py::test_marker_only_private_version_script_removed_emits_no_warning``'s
+    exact fixture shape once the check started running on an ordinary compare.
+    """
+    snap = _snap(
+        elf=_velf([("_Z3apiv", "", "default")], versions_defined=["LIBFOO_PRIVATE"])
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL) == []
+    assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "present"
+
+
+def test_unversioned_exported_symbol_still_flags_alongside_unattached_private_marker():
+    """The unattached-marker exemption is scoped to the marker node itself --
+    a real, attached scheme flags an unversioned export exactly as before even
+    when an unattached private marker also happens to be present."""
+    snap = _snap(
+        elf=_velf(
+            [
+                ("_Z3apiv", "FOO_1.0", "default"),
+                ("_Z6legacyv", "", "default"),
+            ],
+            versions_defined=["FOO_1.0", "LIBFOO_PRIVATE"],
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL)
+    assert [c.symbol for c in hits] == ["_Z6legacyv"]
+
+
 def test_unversioned_exported_symbol_skips_hidden_and_structors():
     snap = _snap(
         elf=_velf(

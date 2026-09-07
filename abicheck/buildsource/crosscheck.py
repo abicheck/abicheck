@@ -1080,6 +1080,9 @@ def _check_unversioned_exported_symbol(
     consumers bind the bare name with no version guarantee. ELF-only — PE/Mach-O
     have no GNU symbol versioning — so it skips cleanly on every other format and
     on an unversioned ELF.
+
+    An unattached ``*PRIVATE*``-only marker is bookkeeping, not a real
+    scheme -- reuses ``diff_versioning``'s own definition of that.
     """
     providers = [PROVIDER_BINARY_EXPORTS]
     elf = snapshot.elf
@@ -1090,7 +1093,15 @@ def _check_unversioned_exported_symbol(
             "symbol versioning is ELF-only; no ELF symbol table",
             providers,
         )
-    if not elf.versions_defined:
+
+    from ..diff_versioning import _is_unattached_private_version_node
+
+    real_versions_defined = [
+        v
+        for v in elf.versions_defined
+        if not _is_unattached_private_version_node(elf, v)
+    ]
+    if not real_versions_defined:
         return _CheckOutput(
             [], "present", "library defines no symbol-versioning scheme", providers
         )
@@ -1116,7 +1127,7 @@ def _check_unversioned_exported_symbol(
                 ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
                 sym.name,
                 f"Symbol {sym.name!r} is exported with no version node even though the "
-                f"library defines a versioning scheme ({len(elf.versions_defined)} "
+                f"library defines a versioning scheme ({len(real_versions_defined)} "
                 "version(s)). Add it to the version script so it can be evolved "
                 "compatibly — or hide it if it is not public API.",
                 new_value=sym.name,
@@ -1126,7 +1137,7 @@ def _check_unversioned_exported_symbol(
     findings.sort(key=lambda c: c.symbol)
     detail = (
         f"binary exports ↔ version table: {len(findings)} exported symbol(s) with no "
-        f"version under a {len(elf.versions_defined)}-node scheme"
+        f"version under a {len(real_versions_defined)}-node scheme"
     )
     return _CheckOutput(findings, "present", detail, providers)
 
