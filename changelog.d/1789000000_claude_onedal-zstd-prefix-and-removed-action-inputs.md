@@ -13,6 +13,17 @@
   low-ratio snapshots were affected (a highly-compressible one decodes past
   the probe boundary on the first attempt), which is why the pre-existing
   toy-scale fixtures never reached the branch.
+- **A valid multi-frame (concatenated) zstd snapshot is no longer read as
+  just its first frame.** A single `read()` on a decompressing stream is not
+  guaranteed to return the requested number of bytes even when the stream
+  holds them, and `zstandard`'s `stream_reader` stops at every frame
+  boundary in particular — so a snapshot stored as back-to-back frames
+  decoded to only the first frame's payload, however small. Reads now
+  continue to true EOF, in a new dependency-free
+  `abicheck/storage/bounded_read.py` leaf that owns that rule for any
+  reader. The prefix-classification logic it serves moved to
+  `abicheck/storage/snapshot_prefix.py`; `snapshot_io` re-exports
+  `bounded_decoded_prefix` unchanged.
 
 ### Changed
 

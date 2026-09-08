@@ -59,6 +59,7 @@ rather than pinned to the one reported oneDAL file.
 
 from __future__ import annotations
 
+import io
 import json
 import random
 
@@ -221,6 +222,88 @@ def test_randomized_ratio_sweep(tmp_path):
             f"case={case} entries={entries} entropy_bits={entropy_bits} "
             f"compression={compression.value} n={n}"
         )
+
+
+# ── Multi-frame (concatenated) envelopes ────────────────────────────────────
+#
+# A second, independent way for a decode to come back short: `zstandard`'s
+# `stream_reader.read()` stops at every *frame* boundary, so a valid
+# concatenated stream yields only its first frame's payload on one call --
+# however small that frame is. The escalation rule above cannot help here,
+# because the file is not truncated at all; reading a larger raw prefix
+# returns the same first frame. Codex review on PR #1165 caught this: the
+# original fix accepted that short result as final once the file was
+# exhausted, so a snapshot split after its opening `{` classified as `b"{"`.
+
+
+def _concatenated(payload: bytes, *, cuts: list[int]) -> bytes:
+    """Compress *payload* as several back-to-back zstd frames, split at *cuts*."""
+    zstandard = pytest.importorskip("zstandard")
+
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    bounds = [0, *cuts, len(payload)]
+    return b"".join(
+        cctx.compress(payload[a:b]) for a, b in zip(bounds, bounds[1:]) if b > a
+    )
+
+
+@pytest.mark.parametrize(
+    "cuts",
+    [
+        [1],  # the reported shape: a single byte, then everything else
+        [1, 2, 3],  # several pathologically tiny leading frames
+        [10, 5000],  # a small frame, then two large ones
+        [4095],  # a frame ending one byte short of the probe
+        [4096],  # ... and exactly at it
+    ],
+)
+def test_multi_frame_envelope_honors_the_invariant(tmp_path, cuts):
+    """The invariant must hold for a concatenated envelope too, not only a
+    single-frame one -- otherwise "for every valid storage envelope" is a
+    claim the suite does not actually check."""
+    pytest.importorskip("zstandard")
+
+    data = _payload(entries=1500, entropy_bits=32, seed=sum(cuts))
+    path = tmp_path / "multiframe.json.zst"
+    path.write_bytes(_concatenated(data, cuts=cuts))
+
+    full = read_snapshot_bytes(path)
+    assert full == data, "oracle: the concatenated envelope is itself lossless"
+    assert bounded_decoded_prefix(path) == full[:4096]
+
+
+@pytest.mark.parametrize("n", [1, 512, 4096, 9000])
+def test_multi_frame_prefix_length_is_honored(tmp_path, n):
+    """...and independently of the requested length, since the frame
+    boundary that truncates the read has nothing to do with `n`."""
+    pytest.importorskip("zstandard")
+
+    data = _payload(entries=1500, entropy_bits=32, seed=n)
+    path = tmp_path / "multiframe_n.json.zst"
+    path.write_bytes(_concatenated(data, cuts=[1, 37, 900]))
+
+    assert bounded_decoded_prefix(path, n) == data[:n]
+
+
+def test_a_tiny_leading_frame_would_regress_without_the_fix(tmp_path):
+    """Guards the mechanism: assert a single `read()` really does stop at the
+    first frame, so this file keeps exercising the branch rather than
+    silently passing if the dependency's behavior changes."""
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _try_decode_prefix
+
+    data = _payload(entries=1500, entropy_bits=32, seed=11)
+    blob = _concatenated(data, cuts=[1])
+    dctx = zstandard.ZstdDecompressor()
+    with dctx.stream_reader(io.BytesIO(blob)) as reader:
+        assert len(reader.read(4096)) == 1, (
+            "the dependency no longer stops at a frame boundary; this file's "
+            "fixtures no longer reproduce the multi-frame regime"
+        )
+
+    # The module's own decode crosses the boundary anyway.
+    assert _try_decode_prefix(blob, SnapshotCompression.ZSTD, 4096) == data[:4096]
 
 
 # ── The reported symptom, through the real public surface ───────────────────

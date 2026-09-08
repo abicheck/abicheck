@@ -600,101 +600,29 @@ def read_snapshot_text(
 _BOUNDED_PREFIX_MAX_RAW_BYTES = 1024 * 1024  # 1 MiB
 
 
-def _try_decode_prefix(
-    head: bytes, compression: SnapshotCompression, n: int
-) -> bytes | None:
-    """One decode attempt of a raw prefix; ``None`` means "try a larger raw
-    prefix" (truncated mid-frame) rather than "this is not a snapshot".
+#: Names that moved to `storage/snapshot_prefix.py` (prefix classification;
+#: see that module's docstring) but stay importable from here.
+_MOVED_TO_SNAPSHOT_PREFIX = frozenset({"bounded_decoded_prefix", "_try_decode_prefix"})
 
-    A returned value of *fewer than* ``n`` bytes is **not** by itself a
-    success signal either: a decoder handed a frame cut at an arbitrary raw
-    byte boundary may return a short result -- including ``b""`` -- without
-    raising at all (``zstandard``'s ``stream_reader.read()`` does exactly
-    that when the first compressed block is still incomplete, and gzip's
-    reader can do the same). Only the caller knows whether a larger raw
-    prefix exists, so this function reports what it decoded and
-    :func:`bounded_decoded_prefix` owns the "short means truncated" rule.
+
+def __getattr__(name: str) -> Any:
+    """Resolve the prefix-classification names from their new home.
+
+    A lazy shim rather than a static `from .storage.snapshot_prefix import
+    ...`: that module reads this one's constants and helpers, so a
+    module-level import in both directions is a real cycle -- exactly what
+    `check_ai_readiness.py`'s `import-cycle-growth` gate rejects, and
+    extending `IMPORT_CYCLE_ALLOWLIST` to accommodate a split is what
+    AGENTS.md's "Don't" list forbids. The same pattern (and the same
+    reasoning) as `cli_buildsource.py`'s own relocation shim.
     """
-    try:
-        if compression is SnapshotCompression.GZIP:
-            with gzip.GzipFile(fileobj=io.BytesIO(head), mode="rb") as gz:
-                return bytes(gz.read(n))
-        zstandard = _zstd_module()
-        dctx = zstandard.ZstdDecompressor(
-            max_window_size=_zstd_max_window_size_bytes(zstandard)
+    if name in _MOVED_TO_SNAPSHOT_PREFIX:
+        import importlib
+
+        return getattr(
+            importlib.import_module("abicheck.storage.snapshot_prefix"), name
         )
-        with dctx.stream_reader(io.BytesIO(head)) as reader:
-            return bytes(reader.read(n))
-    except Exception:
-        return None
-
-
-def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | None:
-    """Return up to *n* decoded bytes of *path*, or ``None`` if it cannot be
-    decoded as a snapshot storage envelope at all (corrupt, or a format this
-    module doesn't recognize as plain/gzip/zstd, e.g. a `.tar.zst` archive).
-
-    Used for input classification: distinguishing a compressed *snapshot*
-    from an unrelated compressed *archive* without a full decompression.
-
-    Reading exactly *n* raw (stored) bytes is not always enough to produce
-    *n* *decoded* bytes -- for low-compression-ratio content (already-dense
-    data, or a very small file whose compressor overhead dominates), a
-    frame truncated at the raw-byte boundary can legitimately fail to
-    decode at all (CodeRabbit review, fresh evidence). Escalating the raw
-    read (doubling up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`) before giving up
-    still keeps this bounded and cheap for the common case (typically
-    succeeds on the first, smallest attempt for real ABI snapshot JSON,
-    which compresses well) while no longer misclassifying a valid but
-    less-compressible compressed snapshot as unreadable.
-    """
-    p = Path(path)
-    try:
-        with open(p, "rb") as f:
-            probe = f.read(4)
-            # Escalate only when ambiguous (a leading skippable-frame
-            # magic) -- a plain/gzip/real-zstd-frame probe never has more
-            # to find past it, so the common case pays nothing extra
-            # (Codex review, fresh evidence).
-            saw_skippable_magic = starts_with_skippable_frame_magic(probe)
-            if saw_skippable_magic:
-                probe = _read_past_leading_skippable_frames(f, probe)
-            compression = _classify_with_skippable_fallback(probe, saw_skippable_magic)
-            if compression is SnapshotCompression.NONE:
-                more_needed = max(n, 4) - len(probe)
-                if more_needed > 0:
-                    probe += f.read(more_needed)
-                return probe[:n]
-            raw_size = max(n, len(probe))
-            while True:
-                f.seek(0)
-                head = f.read(raw_size)
-                # A short read means EOF: `head` is the entire file, so no
-                # larger raw prefix exists and whatever the decoder
-                # produced is final.
-                exhausted = len(head) < raw_size
-                result = _try_decode_prefix(head, compression, n)
-                # "No exception" is not the same as "decoded everything the
-                # file has to offer". A frame cut at the raw-byte boundary
-                # decodes to *fewer* than `n` bytes -- commonly zero, when
-                # the first compressed block is still incomplete -- with no
-                # error raised, so a short result is a truncation signal and
-                # must escalate exactly like a raised exception does.
-                # Accepting one is what made a real, less-compressible
-                # `.json.zst` snapshot classify as `b""` and surface as
-                # "Cannot detect format".
-                if result is not None and (len(result) >= n or exhausted):
-                    return result
-                if exhausted or raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
-                    # Either the whole file was already read (genuinely
-                    # corrupt/incompatible, not just truncated-at-the-
-                    # boundary) or the escalation cap was reached; return
-                    # the best-effort short decode rather than discarding
-                    # real decoded content.
-                    return result
-                raw_size = min(raw_size * 4, _BOUNDED_PREFIX_MAX_RAW_BYTES)
-    except OSError:
-        return None
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ── Compression (write path) ────────────────────────────────────────────
