@@ -139,7 +139,19 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
                 if more_needed > 0:
                     probe += f.read(more_needed)
                 return probe[:n]
-            raw_size = max(n, len(probe))
+            # Clamp to the budget *before* the first read, not only in the
+            # escalation step. `n` is caller-supplied and the only caller
+            # asking for a large window happens to pass exactly
+            # `_BOUNDED_PREFIX_MAX_RAW_BYTES` today -- one constant change
+            # away from this "bounded" function reading and allocating an
+            # unbounded amount on its very first pass, before the cap check
+            # below ever runs (CodeRabbit review). A request larger than the
+            # budget is answered from the budget, and falls through to the
+            # same past-budget `None` if that cannot produce `n` bytes.
+            raw_size = min(
+                max(n, len(probe)),
+                _BOUNDED_PREFIX_MAX_RAW_BYTES,
+            )
             while True:
                 f.seek(0)
                 # One byte past the window, purely as an EOF probe: a file
