@@ -24,7 +24,7 @@ abicheck supports multiple output formats for different use cases:
 
 All five formats support the report filtering options described below.
 The ABICC-compatible XML output (via `abicheck compat check`) includes
-redundancy annotations but does not support `--show-only` filtering.
+redundancy annotations but does not support the `--view show=...` display filter.
 
 In addition to report formats, the composite GitHub Action can emit
 **GitHub Actions workflow command annotations** (`annotate: true`) that
@@ -173,17 +173,20 @@ active):
 per-finding fields, camelCased; `reason` included when known), present only
 when scoping is active.
 
-## `--show-only` filter
+## `--view show=...` filter
 
 Limit displayed changes by severity, element, or action (AND across dimensions,
-OR within each). Does not affect the verdict or exit codes.
+OR within each). Does not affect the verdict or exit codes. Repeat `--view
+show=...` to OR further groups of tokens together.
 
 ```bash
-abicheck compare old.json new.json --show-only breaking,functions,removed
+abicheck compare old.json new.json --view show=breaking,functions,removed
 ```
 
 **Markdown / JSON / HTML**: Changes are filtered before rendering. A note shows
-how many changes matched: `> Filtered by: --show-only ... (5 of 42 changes shown)`.
+how many changes matched: `> Filtered by: --show-only ... (5 of 42 changes shown)`
+(the note keeps the `--show-only` spelling for the token vocabulary it names —
+only the outer flag is now `--view show=...`).
 
 **SARIF**: The `show_only` parameter filters which results appear in the SARIF
 output.
@@ -215,16 +218,16 @@ quick`'s own one-line default (`--profile quick --format json` returns the
 full JSON report above, not the one-line text) — the profile only supplies a
 default when nothing else asked for a specific format.
 
-## `--report-mode leaf`
+## `--view leaf`
 
 Groups output by root type changes with affected interface lists, instead of
 listing every change individually. Available in Markdown and JSON formats.
 
 ```bash
-abicheck compare old.json new.json --report-mode leaf
+abicheck compare old.json new.json --view leaf
 ```
 
-## `--report-mode root-cause`
+## `--view root-cause`
 
 Groups findings that share a root cause under one entry, instead of listing
 every change individually — e.g. an internal helper's `func_removed` finding
@@ -240,7 +243,7 @@ a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
 
 ```bash
-abicheck compare old.json new.json --report-mode root-cause --format json
+abicheck compare old.json new.json --view root-cause --format json
 ```
 
 ```json
@@ -259,10 +262,10 @@ abicheck compare old.json new.json --report-mode root-cause --format json
 ```
 
 The Markdown/text rendering groups the same way, one `### root` heading per
-group instead of `--report-mode full`'s severity-bucketed sections:
+group instead of the default full mode's severity-bucketed sections:
 
 ```bash
-abicheck compare old.json new.json --report-mode root-cause
+abicheck compare old.json new.json --view root-cause
 ```
 
 ```markdown
@@ -280,7 +283,7 @@ SARIF/code-scanning consumer keeps working unchanged) but adds
 yourself by `rootCauseId` if you want the same buckets JSON/markdown show:
 
 ```bash
-abicheck compare old.so new.so --report-mode root-cause --format sarif
+abicheck compare old.so new.so --view root-cause --format sarif
 ```
 
 ```json
@@ -293,13 +296,13 @@ abicheck compare old.so new.so --report-mode root-cause --format sarif
 }
 ```
 
-## `--report-mode impact`
+## `--view impact`
 
 Renders the `full` report plus an impact summary table showing root changes and
 how many interfaces each affects. Available in Markdown and HTML formats.
 
 ```bash
-abicheck compare old.json new.json --report-mode impact
+abicheck compare old.json new.json --view impact
 ```
 
 ## A second output format from the same run (`--write`)
@@ -321,7 +324,7 @@ abicheck compare old.json new.json \
 - `PATH` must point at a different file than `--output`/`-o` — otherwise the
   secondary render would silently overwrite the primary report.
 - The secondary render always emits the full, unfiltered report: it ignores
-  `--show-only`, which describes only the primary format's display.
+  `--view show=...`, which describes only the primary format's display.
 - Also works for a directory/package (release) comparison: the per-library
   fan-out renders its second format from the same already-computed
   per-library results, without re-running any library's comparison. Only
@@ -447,7 +450,7 @@ by design.
 Each finding in `changes[]` also carries:
 
 - **`operation`** — a structured `"added"` / `"removed"` / `"modified"`
-  classification, derived from the same kind-suffix rule `--show-only`'s
+  classification, derived from the same kind-suffix rule `--view show=...`'s
   `added`/`removed`/`changed` tokens already use. Lets a consumer group or
   filter findings by operation without hand-maintaining its own list of
   `_added`/`_removed` kind-name suffixes.

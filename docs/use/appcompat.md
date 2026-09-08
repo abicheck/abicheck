@@ -212,7 +212,7 @@ is still folded into the top-level `changes`/`summary` arrays, since that
 *is* a genuine fact about the library from this consumer's point of view —
 it just never changes what verdict/exit code the run reports.
 
-Note that `--show-only`/the JSON report alone, **without** `--used-by`,
+Note that `--view show=...`/the JSON report alone, **without** `--used-by`,
 cannot substitute for this: only `--used-by` actually reads the app's
 imports and computes the app-relevant subset in the first place — plain
 `compare` has no app to scope against, and its own gate (identical to a

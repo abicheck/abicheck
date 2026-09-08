@@ -776,14 +776,14 @@ reachability/impact evidence at all won't have this key, only
 `reachability_state: "unknown"`.
 
 Both fields appear everywhere a finding is serialized: the full `changes[]`
-list, `--report-mode leaf`'s `leaf_changes[]`/`changes[]` union (root type
+list, `--view leaf`'s `leaf_changes[]`/`changes[]` union (root type
 changes route through a separate builder that mirrors the same fields), and
 each entry in `suppression.suppressed_changes[]` — a suppressed finding's
 `decision.state` is always `"suppressed"` there, so its `impact_assessment`
 is always present. SARIF carries the same two fields as `properties.reachabilityState`/
 `properties.impactAssessment`. JUnit does not carry the full object (a
 structured node/edge object is a poor fit for JUnit's `<properties>`
-text-value model) — but `--report-mode root-cause --format junit` does add
+text-value model) — but `--view root-cause --format junit` does add
 additive `rootCauseId`/`rootCause` attributes to each `<failure>` element,
 without restructuring JUnit's per-symbol `<testcase>` tree; see
 [Root-cause grouping](../learn/impact-analysis.md#root-cause-grouping) below.

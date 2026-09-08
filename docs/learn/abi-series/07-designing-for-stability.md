@@ -369,10 +369,11 @@ or handle guarantee, so that a hidden layout becomes reachable, is raised
 as `opaque_invariant_broken` or `handle_type_changed`.
 
 ```bash
-abicheck compare old.so new.so -H include/ --pattern-verdicts --explain-patterns
+abicheck compare old.so new.so -H include/ --view patterns
 ```
 
-`--explain-patterns` prints the idiom evidence behind each modulation. Two
+Modulation itself is unconditional (there is no flag to enable or disable
+it); `--view patterns` prints the idiom evidence behind each modulation. Two
 cases show the two directions: a Pimpl switching its pointer type, which
 the checker judges hidden ([case80](../../reference/examples/case80_pimpl_shared_to_unique.md)),
 and a `detail::` Pimpl whose vtable change *does* reach consumers

@@ -139,8 +139,8 @@ Beyond the core `compare`/`dump` flow:
 - [Evidence, Build-Context, and Debug Flags](dump-compare-flags.md) — language
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
-- [Output Formats](output-formats.md) — `--show-only` filtering,
-  `--profile quick`'s one-line summary, `--report-mode leaf|impact`,
+- [Output Formats](output-formats.md) — `--view show=...` filtering,
+  `--profile quick`'s one-line summary, `--view leaf|impact`,
   redundancy filtering, SARIF/JUnit output, evidence-tier confidence, JSON
   schema.
 - `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
@@ -186,10 +186,10 @@ abicheck compare old.json new.json --profile ci-gate
 abicheck compare old.json new.json --profile release-cut --format json
 ```
 
-> `--show-only` filtering, `scope.show_redundant: true`, `--profile quick`'s
-> one-line summary format, and `--report-mode leaf|impact` are covered in full
-> on [Output Formats](output-formats.md). `--show-only`/`show_redundant`/
-> `--report-mode` are display-only and do not affect the verdict or exit
+> `--view show=...` filtering, `scope.show_redundant: true`, `--profile quick`'s
+> one-line summary format, and `--view leaf|impact` are covered in full
+> on [Output Formats](output-formats.md). `--view show=...`/`show_redundant`/
+> `--view leaf|impact|root-cause` are display-only and do not affect the verdict or exit
 > code. `--profile quick` is not purely display-only, though: it is also an
 > *analysis* profile (its `--depth binary` skips deeper evidence collection),
 > so it can change coverage and findings, not just the summary's shape —

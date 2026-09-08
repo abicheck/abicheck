@@ -1355,6 +1355,26 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        "--report-mode/--show-only/--demangle/--no-demangle/--explain-patterns"
+        " (ADR-068 D4/Phase 5: collapsed into one repeatable --view option)",
+        ("--report-mode", "--show-only", "--demangle", "--no-demangle", "--explain-patterns"),
+        # config-key-review.md/goals.md: historical-record framing (design
+        # review / milestones ledger). what-each-level-sees.md: `nm -D
+        # --demangle` is the standalone `nm` tool's own flag, not abicheck's.
+        # output-formats.md/api-surface-intelligence.md: each names the old
+        # flag only in the sentence explaining its own fold into --view.
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/config-key-review.md",
+                "contribute/goals.md",
+                "learn/what-each-level-sees.md",
+                "use/output-formats.md",
+                "use/api-surface-intelligence.md",
+            }
+        ),
+    ),
+    (
         "aggregate --expect/--optional/--report-prefix (the expected-target"
         " set is declared by --manifest or --run-plan, or waived with"
         " --discovered-only; the report-filename prefix is fixed)",

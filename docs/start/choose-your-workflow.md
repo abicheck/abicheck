@@ -106,9 +106,9 @@ when the default doesn't reach the layer you need.
 abicheck separates two independent questions: **what fails the build**
 (verdict/severity/exit code — `--severity-*` flags or GitHub Action
 `fail-on-*`/`severity-*` inputs) and **what appears in the report**
-(display-only `--show-only`, which never changes the verdict or exit code).
+(display-only `--view show=...`, which never changes the verdict or exit code).
 See [Severity Configuration](../use/severity.md) for the full failure-policy
-recipe table and [Output Formats → `--show-only` filter](../use/output-formats.md#-show-only-filter)
+recipe table and [Output Formats → `--view show=...` filter](../use/output-formats.md#-view-show-filter)
 for display filtering.
 
 Beyond severity, two more mechanisms can each independently decide what

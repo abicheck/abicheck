@@ -49,7 +49,7 @@ and [§ `impact_assessment`](../reference/source-graph-schema.md#impact_assessme
 
 ## Root-cause grouping
 
-`--report-mode root-cause` groups findings that share a root cause —
+`--view root-cause` groups findings that share a root cause —
 today, findings whose `caused_by_type` names the same internal entity, or
 that share a `symbol` another finding's `caused_by_type` actually
 references (see `reporter_markdown._root_cause_key_and_display` for the
@@ -68,7 +68,7 @@ When a `root_causes[]` group is also one of the `RootCauseCorrelator`'s own
 multi-piece groups (see `root_cause_evidence` above), the group entry gains
 `strongest_evidence_level`/`evidence_levels` — the group-level counterpart
 of each member finding's own `impact_assessment.root_cause_evidence`.
-Absent for a group `--report-mode root-cause` groups by the broader
+Absent for a group `--view root-cause` groups by the broader
 `caused_by_type`/`symbol` rule but that the narrower, four-kind correlator
 doesn't cover.
 
@@ -141,7 +141,7 @@ can't see on its own — the caller resolves it per report/scope
 (`reporter_markdown.root_cause_lookup_for_changes`) and passes it in; see
 the [Detector Impact Contract](../contribute/detector-impact-contract.md)
 for why the underlying grouping stays a report-level decision
-(`--report-mode root-cause` above) rather than something a detector sets
+(`--view root-cause` above) rather than something a detector sets
 directly. Adding empty placeholder fields for data no producer can populate
 would misrepresent what abicheck actually knows, so unimplemented fields are
 left out of the schema entirely rather than always-`null`. See

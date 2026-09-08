@@ -452,7 +452,7 @@
     },
     "root_causes": {
       "type": "array",
-      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.16): present only under `--report-mode root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for --format markdown (the default rendered text output; slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
+      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.16): present only under `--view root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for --format markdown (the default rendered text output; slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
       "items": {
         "type": "object",
         "required": [
@@ -511,7 +511,7 @@
     "root_cause_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `--report-mode root-cause`. Length of `root_causes`."
+      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `--view root-cause`. Length of `root_causes`."
     },
     "disposition_audit": {
       "type": "object",
@@ -2343,7 +2343,7 @@
         },
         "operation": {
           "type": "string",
-          "description": "Structured classification of the finding derived from its kind's own suffix (the same classification --show-only's added/removed/changed tokens use): 'added'/'removed' kinds map directly, everything else (parameter/type/layout changes, renames, etc.) is 'modified'.",
+          "description": "Structured classification of the finding derived from its kind's own suffix (the same classification --view show=...'s added/removed/changed tokens use): 'added'/'removed' kinds map directly, everything else (parameter/type/layout changes, renames, etc.) is 'modified'.",
           "enum": [
             "added",
             "removed",
@@ -2482,7 +2482,7 @@
             },
             "root_cause_id": {
               "type": "string",
-              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19): a stable hash of this finding's root-cause grouping key -- the same computation `--report-mode root-cause`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19): a stable hash of this finding's root-cause grouping key -- the same computation `--view root-cause`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
             },
             "root_cause_display": {
               "type": "string",

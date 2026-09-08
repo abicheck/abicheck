@@ -80,10 +80,10 @@ the severity-aware scheme).
 | `--debug-info-dir2 DIR` / `--d2` | `--debug-root new=DIR` | `--debug-root DIR` applies to both sides |
 | *(no equivalent)* | `--debuginfod` | Fetch debug info from a debuginfod server |
 | `--stat` | `--profile quick` | One-line summary instead of the full report — not purely display-only: `--profile quick` also bundles `--depth binary`, which can change coverage/findings, not just the summary's shape; add `--depth headers`/`--depth source` alongside it to keep the deeper evidence level libabigail's own `--stat` didn't affect |
-| `--leaf-changes-only` / `-l` | `--report-mode leaf` | Root-type-grouped leaf view |
-| `--impacted-interfaces` | `--report-mode impact` | Impact summary appended to the report |
-| `--no-added-syms` | `--show-only removed,changed` | Display-only filter; verdict and exit code unchanged |
-| `--harmless` | *(default)* | Compatible changes are already reported; isolate them with `--show-only compatible` |
+| `--leaf-changes-only` / `-l` | `--view leaf` | Root-type-grouped leaf view |
+| `--impacted-interfaces` | `--view impact` | Impact summary appended to the report |
+| `--no-added-syms` | `--view show=removed,changed` | Display-only filter; verdict and exit code unchanged |
+| `--harmless` | *(default)* | Compatible changes are already reported; isolate them with `--view show=compatible` |
 | `--exported-interfaces-only` | *(default)* | abicheck always analyses the exported ABI surface |
 | `--fail-no-debug-info` | *(no direct flag)* | abicheck degrades gracefully and reports the evidence it had — check `abicheck dump LIB --dry-run` or the report's evidence tier |
 | `--verbose` | `-v` / `--verbose` | |
