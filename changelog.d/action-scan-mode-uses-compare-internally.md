@@ -74,3 +74,19 @@ it should read in CHANGELOG.md. Delete the other sections.
   one. Resolving this fully means the report-schema unification ADR-068's
   own plan already scopes as separate, later work (Phase 5's "one canonical
   report" gap), not something this internal-dispatch change attempts.
+  A fourth review round closed three more gaps: an auto-discovered
+  `.abicheck.yml`/`.abicheck.yaml` stating an explicit `source: {method:
+  auto}` now also stays on the legacy CLI (identical auto-depth-resolution
+  mismatch class as `since`/`changed-path` and `build-info`, but via project
+  config rather than an Action input — `compare`'s own auto-resolution has
+  no equivalent for this value and raises a usage error outright); a
+  migrated invocation's `not_comparable` result (exit `16`, `compare`'s own
+  code) is now mapped to `scan`'s own `NOT_COMPARABLE` verdict/exit `6`
+  rather than falling into the generic `ERROR` branch, which was silently
+  changing the published verdict and suppressing the sticky PR comment for
+  this valid, reportable outcome; and a bare (unscoped) `--sources`/
+  `--build-info`/`--compile-db` reaching a migrated invocation through
+  `extra-args` now also stays on the legacy CLI, since an unscoped value
+  means "the one candidate" on `scan` but "both operands" on `compare` —
+  previously reachable without any error, silently applying the candidate's
+  evidence to the baseline side too.

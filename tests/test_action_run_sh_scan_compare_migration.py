@@ -463,3 +463,103 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
     # `scan` invocation is one flag away is itself the wrong outcome, so
     # these are now covered by the parametrized case above instead of
     # exempted here.
+
+    @pytest.mark.parametrize("flag", ["--sources", "--build-info", "--compile-db"])
+    def test_bare_scoped_evidence_flag_via_extra_args_stays_on_scan(
+        self, flag: str
+    ) -> None:
+        # Fourth Codex review round, P1 (fresh evidence): a BARE (unscoped)
+        # occurrence of any of these three shares a name with a `compare`
+        # option that means something different -- unscoped on `scan`
+        # applies only to the single candidate; unscoped on `compare`
+        # applies to BOTH operands. Forwarded verbatim through `extra-args`,
+        # this would silently apply the candidate's own evidence to the
+        # baseline side too, with no usage error to catch it.
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS=f"{flag} ./evidence"))
+        assert cmd[1] == "scan", cmd
+
+    def test_sided_spelling_also_stays_on_scan(self) -> None:
+        # `scan --build-info` has no `old=`/`new=`-scoped form at all
+        # (confirmed against the real CLI: it takes a plain PATH, unlike
+        # `compare`'s sided `-H`/`--header`) -- there is no "safe" spelling
+        # of this option through `extra-args` for a migrated scan, so a
+        # `new=`-prefixed value must force the legacy CLI exactly like the
+        # bare form does, not be mistaken for a `compare`-side scoping
+        # convention `scan` doesn't share.
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--build-info new=./build"))
+        assert cmd[1] == "scan", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForAutoSourceMethodConfig:
+    """Fourth Codex review round, P1 (fresh evidence): an auto-discovered
+    ``.abicheck.yml``/``.abicheck.yaml`` stating an explicit ``source:
+    {method: auto}`` hits the identical auto-depth-resolution mismatch class
+    as ``since``/``changed-path`` and ``build-info``-without-``sources``,
+    but via project config rather than any Action input -- `compare`'s own
+    auto-resolution has no equivalent for this value and raises a usage
+    error outright (`scan --dry-run` resolves it to the PR preset's
+    `source-target`).
+    """
+
+    def _run_cmd_in(self, cwd: Path, env_extra: dict[str, str]) -> list[str]:
+        script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+        ) as f:
+            f.write(script)
+            script_path = f.name
+        env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+        env.update(env_extra)
+        try:
+            result = subprocess.run(
+                [_bash_executable(), script_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                cwd=str(cwd),
+            )
+        finally:
+            os.unlink(script_path)
+        if result.returncode != 0:
+            raise AssertionError(
+                f"harness script failed (exit {result.returncode})\n"
+                f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+            )
+        return [item for item in result.stdout.split("\x1f") if item]
+
+    def test_config_with_source_method_auto_stays_on_scan(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "source:\n  method: auto\n", encoding="utf-8"
+        )
+        cmd = self._run_cmd_in(tmp_path, _base_env())
+        assert cmd[1] == "scan", cmd
+
+    def test_config_without_source_method_auto_still_migrates(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "scope:\n  public: true\n", encoding="utf-8"
+        )
+        cmd = self._run_cmd_in(tmp_path, _base_env())
+        assert cmd[1] == "compare", cmd
+
+    def test_no_config_still_migrates(self, tmp_path: Path) -> None:
+        cmd = self._run_cmd_in(tmp_path, _base_env())
+        assert cmd[1] == "compare", cmd
+
+    def test_pinned_depth_with_auto_method_config_still_stays_on_scan(
+        self, tmp_path: Path
+    ) -> None:
+        # Overlaps with the pinned-depth condition already covered
+        # elsewhere -- proves the new config check doesn't need a pinned
+        # depth to fire, and a pinned depth alone (unrelated to config)
+        # already keeps this on scan regardless.
+        (tmp_path / ".abicheck.yml").write_text(
+            "source:\n  method: auto\n", encoding="utf-8"
+        )
+        cmd = self._run_cmd_in(tmp_path, _base_env(INPUT_DEPTH="source"))
+        assert cmd[1] == "scan", cmd

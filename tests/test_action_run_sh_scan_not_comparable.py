@@ -156,6 +156,24 @@ def test_exit_6_maps_to_not_comparable_not_error():
     assert "VERDICT=NOT_COMPARABLE" in result.stdout
 
 
+def test_exit_16_maps_to_not_comparable_not_error():
+    # Fourth Codex review round, P1 (fresh evidence, ADR-068 Phase 4 item
+    # 1): a migrated `mode: scan` invocation runs the real `abicheck
+    # compare` CLI, whose own not_comparable exit code is 16, not scan's
+    # own 6 (docs/reference/exit-codes.md -- every abicheck command
+    # maintains an independent exit-code scheme). Without this, the exact
+    # same operational outcome fell into the generic ERROR branch for a
+    # migrated run only, silently changing the published verdict and (via
+    # `_maybe_post_pr_comment`'s ERROR guard) suppressing the sticky
+    # comment a direct `scan --against` run would have posted for the
+    # identical operand pair. Reached only inside this `MODE == scan`
+    # dispatch, so native `compare`'s own `16` handling (a separate code
+    # path entirely) is unaffected by this mapping.
+    result = _run_exit_mapping(16)
+    assert result.returncode == 0, result.stderr
+    assert "VERDICT=NOT_COMPARABLE" in result.stdout
+
+
 def test_exit_4_still_maps_to_breaking():
     result = _run_exit_mapping(4)
     assert result.returncode == 0, result.stderr

@@ -714,6 +714,41 @@ _effective_format() {
 # `--format` forces the legacy CLI only when its value isn't `json` --
 # `compare` has no `text` format at all (scan's own default), matching the
 # dedicated `INPUT_FORMAT` condition in the gate below.
+# Whether a project `.abicheck.yml`/`.abicheck.yaml` -- auto-discovered by
+# the real `abicheck` CLI itself upward from the current directory, per
+# `cli_scan.py`'s own `--config` help text ("auto-discovered upward from the
+# current directory when [no explicit --config]"); no Action input names
+# this file's path at all, so `run.sh` has no other way to see it -- states
+# an explicit `source: {method: auto}`. Checked only at the checkout root
+# (`$PWD`, where the Action's own working directory always is), not a full
+# upward walk: the common case (repo-root config) is covered, and a config
+# discovered from a directory *above* the checkout is not a shape this
+# Action's own single-repo checkout model produces anyway.
+#
+# `source.method: auto` behaves identically to `scan`'s own CLI `--depth
+# auto`/omitted-depth default (`cli_scan._resolve_auto_source_method`'s
+# risk-scored preset) -- but `compare`'s own auto-resolution
+# (`cli_compare_helpers._resolve_compare_collect_mode`) has no config-driven
+# equivalent for it at all and raises a usage error outright on this
+# specific value (Codex review, fresh evidence: `scan --dry-run` resolves it
+# to the PR preset's `source-target`, while the equivalent migrated
+# `compare` invocation exits 64). A narrow textual check (not a real YAML
+# parse) on purpose, matching this file's existing no-YAML-dependency
+# convention elsewhere -- a false-positive match (a config that happens to
+# contain this text outside the `source:` mapping) only ever costs staying
+# on the already-correct legacy CLI, never a wrong answer.
+_config_sets_source_method_auto() {
+  local _cfg=""
+  if [[ -f "$PWD/.abicheck.yml" ]]; then
+    _cfg="$PWD/.abicheck.yml"
+  elif [[ -f "$PWD/.abicheck.yaml" ]]; then
+    _cfg="$PWD/.abicheck.yaml"
+  else
+    return 1
+  fi
+  grep -Eq '^\s*method\s*:\s*"?'\''?auto'\''?"?\s*(#.*)?$' "$_cfg" 2>/dev/null
+}
+
 _extra_args_forces_legacy_scan_cli() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
@@ -746,6 +781,27 @@ _extra_args_forces_legacy_scan_cli() {
         # evidence: an existing successful `--write text=report.txt` scan
         # workflow would otherwise start hard-failing).
         [[ "$_value" == text=* ]] && return 0
+        ;;
+      --sources | --build-info | --compile-db)
+        # These three share a name with a `compare` option that means
+        # something different: on `scan`, every one of them applies only to
+        # the single candidate artifact being scanned (`scan --help-all`
+        # confirms none of the three takes a sided `old=`/`new=` value at
+        # all -- a plain PATH only, unlike `compare`'s sided `-H`/
+        # `--header`); on `compare --help-all`, the identical bare flag
+        # applies to BOTH operands (old and new alike), with `new=PATH`/
+        # `old=PATH` needed to scope it to one side. A migrated invocation
+        # forwarding `extra-args: --sources ./src` (or `--build-info ...`,
+        # bare OR `new=`/`old=`-prefixed -- `scan` understands neither
+        # prefix) verbatim would therefore either silently apply the
+        # candidate's own source/build evidence to the baseline side too
+        # (bare form) or pass a literal `new=./src`-shaped string as if it
+        # were a real path (prefixed form) — never rejected as a usage
+        # error either way, just quietly analyzing the wrong evidence
+        # (Codex review, fresh evidence). Forced to the legacy CLI outright
+        # for any value: there is no spelling of this option through
+        # `extra-args` that means the same thing to both commands.
+        return 0
         ;;
       -o?*)
         # An attached-value short option (Click's `-oPATH` spelling,
@@ -1956,6 +2012,8 @@ elif [[ "$MODE" == "scan" ]]; then
      || { { [[ -z "${INPUT_DEPTH:-}" ]] || [[ "${INPUT_DEPTH:-}" == "auto" ]]; } \
           && { [[ -n "${INPUT_BUILD_INFO:-}" ]] || [[ -n "${INPUT_COMPILE_DB:-}" ]]; } \
           && [[ -z "${INPUT_SOURCES:-}" ]]; } \
+     || { { [[ -z "${INPUT_DEPTH:-}" ]] || [[ "${INPUT_DEPTH:-}" == "auto" ]]; } \
+          && _config_sets_source_method_auto; } \
      || [[ "$FORCE_AUDIT_ONLY" == "true" ]] \
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
@@ -3879,7 +3937,7 @@ elif [[ "$MODE" == "scan" ]]; then
           echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
         fi
         ;;
-      6)
+      6 | 16)
         # NOT_COMPARABLE (ADR-050 D2: a scope/profile mismatch between the
         # candidate and --against baseline) is a valid, reportable outcome,
         # not a CLI/operational failure -- keeping it out of VERDICT="ERROR"
@@ -3888,6 +3946,23 @@ elif [[ "$MODE" == "scan" ]]; then
         # made a real, JSON-report-carrying NOT_COMPARABLE result silently
         # produce no sticky comment even though `pr_comment_scan.py` renders
         # it as a blocking "analysis incomplete" finding (Codex review).
+        #
+        # `16` joins `6` here because of the ADR-068 Phase 4 item 1
+        # migration below: a migrated `mode: scan` invocation runs the real
+        # `abicheck compare` CLI, whose own NOT_COMPARABLE exit code is `16`
+        # (`docs/reference/exit-codes.md` -- every abicheck command
+        # maintains its own independent exit-code scheme, `scan`'s own is
+        # `6`), not `6`. Without this, a migrated run hitting this exact,
+        # valid, reportable outcome fell into the generic `ERROR` branch
+        # below instead -- changing the published verdict and, via the
+        # same `_maybe_post_pr_comment` ERROR guard, suppressing the sticky
+        # comment a direct `scan --against` run would have posted for the
+        # identical operand pair (Codex review, fresh evidence, reproduced
+        # against snapshots with mismatched `dependency_scope` values).
+        # Reached only for `MODE == scan` (this whole branch is scoped to
+        # it), so a native `compare` invocation's own `16` is unaffected --
+        # this maps *scan's* published verdict for *scan's* exit-code
+        # contract, not compare's.
         VERDICT="NOT_COMPARABLE"
         ;;
       *)
