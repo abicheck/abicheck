@@ -159,14 +159,29 @@ def compute_pattern_prescan_side(
     sources: Path | None,
     depth: str | None,
     changed_paths: tuple[str, ...] | None,
+    *,
+    seeded: bool = False,
 ) -> PatternScanResult:
     """One side's lexical pre-scan result (never raises; degrades to an empty,
     ``NOT_COLLECTED`` result when *headers* is empty and *sources* is
-    ``None`` -- the honest "nothing to scan" case, not a failure)."""
+    ``None`` -- the honest "nothing to scan" case, not a failure).
+
+    *seeded* is the same "a changed-path scope was actually attempted" bit
+    :class:`~abicheck.workflows.changed_paths.ChangedPathSeed` carries
+    (``ChangedPathSeed.seeded``) and ``scan_engine.py``'s own pattern
+    pre-scan call already keys off (``changed if seeded else None``) --
+    *not* ``bool(changed_paths)``. A successfully-resolved but *empty*
+    ``--since``/``--changed-path`` diff (a no-op PR) is a real, valid,
+    empty scope: the scan must cover **zero** files, not fall back to an
+    unseeded whole-tree scan just because the tuple happens to be empty
+    (Codex review, fresh evidence) -- ``changed_paths or None`` collapsed
+    those two, materially different cases onto the same "scan everything"
+    behavior.
+    """
     from ..buildsource.pattern_scan import scan_files
 
     roots = _pattern_scan_roots(headers, sources, depth)
-    return scan_files(roots, changed_paths or None)
+    return scan_files(roots, changed_paths if seeded else None)
 
 
 def _resolve_prescan_clang_bin(compile_context: CompileContext | None) -> str:
@@ -202,6 +217,39 @@ def compute_preprocessor_prescan_side(
     )
 
 
+def _pattern_side_dict(scan: PatternScanResult) -> dict[str, Any]:
+    """``PatternScanResult.to_dict()`` plus an explicit ``coverage`` block.
+
+    ADR-035 D2 coverage honesty, made explicit rather than merely inferable:
+    a consumer must be able to tell "this side was genuinely scanned and
+    found nothing" from "this side had nothing to scan at all" (e.g. a
+    stored snapshot compared with no ``-H``/``--sources`` re-supplied,
+    Codex review) without having to reverse-engineer that distinction from
+    ``files_scanned == 0`` on its own -- the same
+    ``LayerCoverage``-shaped row every other evidence tier's report block
+    already carries (``layer_coverage``, ``diff_embedded_build_source``'s
+    own coverage rows).
+    """
+    d = scan.to_dict()
+    d["coverage"] = scan.coverage().to_dict()
+    return d
+
+
+def _preprocessor_side_dict(scan: PreprocessorScanResult) -> dict[str, Any]:
+    """``PreprocessorScanResult.to_dict()`` plus an explicit ``coverage``
+    block -- mirrors :func:`_pattern_side_dict`. In particular this is what
+    distinguishes ``ran=True`` with every probe having failed (e.g. a
+    stored snapshot's embedded build evidence naming compile paths that no
+    longer exist on this filesystem) from a genuinely clean scan: ``scan()``
+    downgrades that ``all_failed`` case to ``NOT_COLLECTED`` with a
+    diagnostic sample, which the raw ``ran``/``attempted``/``succeeded``
+    fields alone do not spell out as directly.
+    """
+    d = scan.to_dict()
+    d["coverage"] = scan.coverage().to_dict()
+    return d
+
+
 def fold_lexical_prescan(
     result: DiffResult,
     *,
@@ -213,6 +261,7 @@ def fold_lexical_prescan(
     new_snapshot: AbiSnapshot,
     depth: str | None,
     changed_paths: tuple[str, ...] | None = None,
+    seeded: bool = False,
     old_compile_context: CompileContext | None = None,
     new_compile_context: CompileContext | None = None,
 ) -> None:
@@ -226,16 +275,32 @@ def fold_lexical_prescan(
     rather than being conditionally skipped by this function itself; see the
     module docstring for why no ``Change``/``ChangeKind``/evolution axis is
     involved.
+
+    *old_headers*/*old_sources* (and their ``new_*`` counterparts) must be
+    the **raw** per-run values a caller resolved evidence from -- not a
+    post-embed/post-clearing view a caller already consumed for its own
+    purposes elsewhere in the same pipeline (Codex review: an earlier
+    revision of the native CLI's own call site passed the CLI's
+    already-``None``-d-out ``old_sources``/``new_sources`` locals, since
+    ``_embed_inline_source_sides`` overwrites them once it has consumed the
+    tree -- silently losing the whole source-tree half of the pattern
+    pre-scan for exactly the runs (a real ``--old-sources``/``--new-sources``
+    compare) it exists to cover).
+
+    *seeded* is :class:`~abicheck.workflows.changed_paths.ChangedPathSeed
+    .seeded` (or the typed API's equivalent) -- see
+    :func:`compute_pattern_prescan_side` for why this must not be
+    re-derived from ``bool(changed_paths)``.
     """
     old_pattern = compute_pattern_prescan_side(
-        old_headers, old_sources, depth, changed_paths
+        old_headers, old_sources, depth, changed_paths, seeded=seeded
     )
     new_pattern = compute_pattern_prescan_side(
-        new_headers, new_sources, depth, changed_paths
+        new_headers, new_sources, depth, changed_paths, seeded=seeded
     )
     result.pattern_prescan = {
-        "old": old_pattern.to_dict(),
-        "new": new_pattern.to_dict(),
+        "old": _pattern_side_dict(old_pattern),
+        "new": _pattern_side_dict(new_pattern),
     }
 
     old_pack = old_snapshot.build_source
@@ -249,8 +314,8 @@ def fold_lexical_prescan(
         new_build, new_headers, new_compile_context
     )
     result.preprocessor_prescan = {
-        "old": old_preproc.to_dict(),
-        "new": new_preproc.to_dict(),
+        "old": _preprocessor_side_dict(old_preproc),
+        "new": _preprocessor_side_dict(new_preproc),
     }
 
 

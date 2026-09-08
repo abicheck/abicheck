@@ -147,6 +147,72 @@ def test_fold_lexical_prescan_always_populates_both_blocks(
     assert result.verdict == Verdict.NO_CHANGE
 
 
+def test_seeded_empty_diff_scans_nothing_not_the_whole_tree(tmp_path: Path) -> None:
+    """Codex review (P1, finding #3): a successfully-resolved but *empty*
+    ``--since``/``--changed-path`` diff (a no-op PR) is a real, valid, empty
+    scope -- the scan must cover zero files, not fall back to an unseeded
+    whole-tree scan just because the tuple happens to be empty. Mirrors
+    ``scan_engine.py``'s own ``scan_files(pattern_roots, changed if seeded
+    else None)`` -- ``seeded`` must be read as its own bit, not re-derived
+    from ``bool(changed_paths)``.
+    """
+    header = tmp_path / "risky.hpp"
+    header.write_text("template class Widget<int>;\n", encoding="utf-8")
+
+    # seeded=True, changed_paths=() -- a real, empty diff: scan nothing.
+    seeded_empty = compute_pattern_prescan_side([header], None, None, (), seeded=True)
+    assert seeded_empty.files_scanned == 0
+    assert seeded_empty.facts == []
+
+    # seeded=False, changed_paths=() -- no diff was ever attempted: broad scan.
+    unseeded = compute_pattern_prescan_side([header], None, None, (), seeded=False)
+    assert unseeded.files_scanned == 1
+    kinds = {f.kind.value for f in unseeded.facts}
+    assert "explicit_template_instantiation" in kinds
+
+    # The historical (buggy) `changed_paths or None` collapse would have
+    # treated the two cases identically -- this is the regression it must
+    # not reintroduce.
+    assert seeded_empty.files_scanned != unseeded.files_scanned
+
+
+def test_binary_depth_clears_headers_for_the_typed_api_pattern_prescan(
+    tmp_path: Path,
+) -> None:
+    """Codex review (P2, finding #2): a typed ``CompareRequest(depth=
+    "binary")`` clears both sides' headers before evidence resolution
+    (``service_compare_evidence._headers``) -- ``classify_compare_pair``'s
+    fold must read that *resolved* ``SideEvidence.headers``, not the raw
+    ``CompareRequest.old/new.headers``, or a binary-only-depth typed
+    comparison would run an L2-style lexical scan outside its own requested
+    scope (while the native CLI, whose header list is already normalized
+    the same way, would not -- a CLI/API divergence)."""
+    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.serialization import save_snapshot
+    from abicheck.service import classify_compare_pair, resolve_compare_request
+
+    old_p = tmp_path / "old.json"
+    new_p = tmp_path / "new.json"
+    save_snapshot(AbiSnapshot(library="libtest", version="1.0"), old_p)
+    save_snapshot(AbiSnapshot(library="libtest", version="1.0"), new_p)
+    header = tmp_path / "risky.hpp"
+    header.write_text("template class Widget<int>;\n", encoding="utf-8")
+
+    request = CompareRequest(
+        old=InputSpec.of(old_p, headers=[header]),
+        new=InputSpec.of(new_p, headers=[header]),
+        depth="binary",
+    )
+    result = classify_compare_pair(request, resolve_compare_request(request))
+    block = result.diff.pattern_prescan
+    assert block is not None
+    for side in ("old", "new"):
+        assert block[side]["files_scanned"] == 0, (
+            "depth='binary' must clear headers before the pattern pre-scan "
+            f"runs -- got {block[side]}"
+        )
+
+
 def test_fold_lexical_prescan_is_deterministic_for_identical_inputs(
     tmp_path: Path,
 ) -> None:

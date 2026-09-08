@@ -549,14 +549,27 @@ def classify_compare_pair(
 
     fold_lexical_prescan(
         result,
-        old_headers=list(request.old.headers),
-        new_headers=list(request.new.headers),
+        # pair.{old,new}_evidence.headers, not request.{old,new}.headers
+        # (Codex review): SideEvidence.headers is already resolved through
+        # `_headers()`, which clears the list for `depth="binary"` -- reading
+        # the raw request field would run this L2-style lexical scan outside
+        # a caller's requested binary-only scope, silently reaching further
+        # than resolve_compare_request already decided this run should.
+        old_headers=list(pair.old_evidence.headers),
+        new_headers=list(pair.new_evidence.headers),
         old_sources=request.old.sources,
         new_sources=request.new.sources,
         old_snapshot=old,
         new_snapshot=new,
         depth=request.depth,
         changed_paths=request.changed_paths,
+        # The typed API has no separate "seed resolution failed" state the
+        # way `--since`'s live git-diff attempt does (ChangedPathSeed.seeded)
+        # -- a caller states `changed_paths` outright, so "non-empty" is
+        # already this path's own established seeded signal everywhere else
+        # (e.g. `localized_collect_mode`'s identical `if changed_paths`
+        # check) rather than a regression introduced here.
+        seeded=bool(request.changed_paths),
         old_compile_context=pair.old_evidence.compile,
         new_compile_context=pair.new_evidence.compile,
     )
