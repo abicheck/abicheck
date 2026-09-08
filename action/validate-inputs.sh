@@ -65,13 +65,31 @@ _is_release_style_operand() {
   return 1
 }
 
+# Workflow-command injection defense (bug class
+# `trust_boundary.shell_workflow_injection`; #705 -> #758).
+#
+# Every message below interpolates at least one INPUT_* value, and those are
+# workflow-controlled. A GitHub annotation is line-delimited, so a value
+# carrying a newline ends the annotation and whatever follows is parsed as a
+# *new* workflow command: `jobs: "1\n::error::spoofed"` emits a spoofed
+# error, and `::set-output`/`::add-mask` are reachable the same way. Command
+# substitution is not the risk here (the value is expanded once, into a
+# double-quoted string, and bash does not re-expand it) -- line breaks are.
+#
+# Collapsing CR/LF in the one place every annotation is emitted covers each
+# interpolation site in this file at once, including the ones that predate
+# this helper, rather than asking every future message to remember.
+_sanitize_annotation() {
+  printf '%s' "$1" | tr '\r\n' '  '
+}
+
 _fail() {
-  echo "::error::$1"
+  echo "::error::$(_sanitize_annotation "$1")"
   exit 1
 }
 
 _warn() {
-  echo "::warning::$1"
+  echo "::warning::$(_sanitize_annotation "$1")"
 }
 
 case "$MODE" in

@@ -25,3 +25,18 @@
   resource-use consequence; setting `bundle-system-providers`, which
   configured analysis semantics rather than tuning, is a hard error naming
   its `.abicheck.yml` `bundle.system_providers:` replacement.
+
+### Security
+
+- **A workflow-controlled Action input can no longer forge a GitHub workflow
+  command from `action/validate-inputs.sh`.** Every message that script emits
+  interpolates an `INPUT_*` value into a GitHub annotation, which is
+  line-delimited — a value carrying a newline ended the annotation and had
+  whatever followed parsed as a *new* workflow command, so
+  `build-info: "x\n::error::spoofed"` emitted a spoofed error (and
+  `::set-output`/`::add-mask` were reachable the same way). CR/LF is now
+  collapsed in the shared `_warn`/`_fail` emitters, covering every
+  interpolation site in the file at once. `action/run.sh` builds its
+  annotations with inline `echo` calls rather than a shared helper and is not
+  covered by this fix; that pass is recorded as a known gap on the
+  `trust_boundary.shell_workflow_injection` bug class.

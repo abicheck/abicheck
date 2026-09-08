@@ -554,11 +554,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758, 836, 919),
+        fixed_by=(705, 758, 836, 919, 1165),
         seed_tests=(
             "tests/test_reusable_workflow_execution.py",
             "tests/test_check_project_workflow_execution.py",
             "tests/test_action_run_sh_helpers.py",
+            # PR #1165: `action/validate-inputs.sh`'s own annotation
+            # emitters. Every message there interpolates a
+            # workflow-controlled INPUT_* value into a line-delimited
+            # GitHub annotation, so a value carrying a newline forged an
+            # `::error::`/`::set-output::` command of its own -- a live
+            # defect on the pre-existing `build-info` site, not only on
+            # the tombstones the same PR added. Fixed once in the shared
+            # `_warn`/`_fail` helpers.
+            "tests/test_action_validate_inputs.py",
         ),
         public_surfaces=("github-action",),
         axes={
@@ -578,6 +587,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             )
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "`action/run.sh` emits its own annotations with "
+                    'inline `echo "::error::..."` calls rather than '
+                    "through a shared helper, and several interpolate an "
+                    "INPUT_* value the same way validate-inputs.sh did. "
+                    "PR #1165 fixed validate-inputs.sh at its two "
+                    "emitters (covering every site in that file at once) "
+                    "but deliberately did not widen into run.sh's ~20 "
+                    "inline sites, which need their own pass and their "
+                    "own executing corpus."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
             KnownGap(
                 description=(
                     "The hostile-input execution corpus (shared via "
