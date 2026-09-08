@@ -33,13 +33,21 @@
   (the ODR conflict's own per-TU layout hashes; the identity collision's
   own transition USR) onto `Change.old_value`/`new_value`, and their
   per-check identity functions read the extra field(s) (Codex review, PR
-  #1147 finding 1). Follow-up (Codex review, PR #1148 finding 1): that
-  distinguishing evidence is assigned by TU/entity visitation order within
-  one side's own replay, not by any OLD/NEW-snapshot meaning, so the same
-  persistent conflict/collision could be recorded as `(A, B)` on one side
-  and `(B, A)` on the other and read as a spurious RESOLVED+INTRODUCED pair
-  instead of one PERSISTENT finding. Both checks now sort the pair before
-  storing it, making the identity order-independent.
+  #1147 finding 1). Two follow-up rounds (Codex review, PR #1148): first,
+  that distinguishing evidence is assigned by TU/entity visitation order
+  within one side's own replay, not by any OLD/NEW-snapshot meaning, so the
+  same persistent conflict/collision could be recorded as `(A, B)` on one
+  side and `(B, A)` on the other and read as a spurious RESOLVED+INTRODUCED
+  pair instead of one PERSISTENT finding — sorting each pairwise record
+  fixed the two-variant/two-participant case. Second, sorting a *pairwise*
+  record is still traversal-dependent for three or more variants/
+  participants: `{A, B, C}` visited in different orders yields different
+  sets of pairwise edges even though the underlying unordered set is
+  identical. Both checks were rewritten to group their producer's raw
+  per-pair records by the same key `source_link._route_type`/
+  `_route_declaration` themselves group by (`(qualified_name, header)`;
+  `identity`) and union each group's evidence into one order-independent
+  `Change` per group, rather than one `Change` per pairwise record.
 - **`odr_type_variant` findings on a public type could be wrongly demoted
   as "not-exported."** `abicheck/surface.py`'s public-surface scoping
   classifies a finding as symbol-level or type-level before deciding
