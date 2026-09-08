@@ -438,6 +438,22 @@ def compare_release_cmd(
     # rung outright. `None` (the default) is a true no-op, matching every
     # pre-existing caller.
     depth: str | None = None,
+    # Codex review (PR #1154 follow-up): `compare`'s directory/package
+    # fan-out forwards --view's derived show_only/demangle/explain_patterns
+    # here too -- `report_mode` is not accepted: `_dispatch_release_compare`
+    # already rejects every value but "full" before this is ever called, so
+    # there is nothing left for this engine itself to branch on. `None`/
+    # `False` (the defaults) are true no-ops, matching every pre-existing
+    # caller (this command has no `--view`/`--show-only`/`--demangle` Click
+    # option of its own; only `compare`'s directory/package dispatch above
+    # ever supplies a non-default value). *demangle* stays the raw tri-state
+    # (unresolved against any one format) -- this command's own body
+    # resolves it separately against `fmt`/`secondary_fmt`, mirroring
+    # single-pair `compare`'s own `demangle_explicit` split for its
+    # `--write` render.
+    show_only: str | None = None,
+    demangle: bool | None = None,
+    explain_patterns: bool = False,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -764,6 +780,8 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 compile_context=compile_context,
                 depth=depth,
+                show_only=show_only,
+                explain_patterns=explain_patterns,
             )
 
             for key in matched_keys:
@@ -1091,6 +1109,7 @@ def compare_release_cmd(
                 worst_verdict,
                 severity_config,
                 needs_annotations=(fmt == "json" or secondary_fmt == "json"),
+                show_only=show_only,
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).
@@ -1117,6 +1136,8 @@ def compare_release_cmd(
                     matrix_result,
                     gate,
                 )
+
+            from .cli_compare_options import _resolve_demangle
 
             if secondary_output is not None:
                 # CLI cleanup phase two, PR E: --write, now supported for a
@@ -1153,6 +1174,7 @@ def compare_release_cmd(
                     pack_application=pack_application,
                     scope_public_headers=scope_public_headers,
                     scope_terms=scope_terms,
+                    demangle=_resolve_demangle(secondary_fmt, demangle),
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1183,6 +1205,7 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 scope_public_headers=scope_public_headers,
                 scope_terms=scope_terms,
+                demangle=_resolve_demangle(fmt, demangle),
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

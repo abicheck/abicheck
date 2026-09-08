@@ -201,6 +201,7 @@ def _finalize_release_output(
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    demangle: bool = False,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -235,6 +236,7 @@ def _finalize_release_output(
         pack_application=pack_application,
         scope_public_headers=scope_public_headers,
         scope_terms=scope_terms,
+        demangle=demangle,
     )
     _write_or_echo(output, text)
 
@@ -454,6 +456,7 @@ def _release_gating_buckets(
 def _release_finding_dicts(
     diff: DiffResult,
     severity_config: SeverityConfig | None = None,
+    show_only: str | None = None,
 ) -> list[dict[str, object]]:
     """Project a library's gating findings into small, capped dicts.
 
@@ -462,9 +465,29 @@ def _release_finding_dicts(
     decide the cap so a large diff never builds more dicts than the cap can
     ever keep. See :func:`_release_gating_buckets` for which findings this
     walks under a legacy vs. severity-aware exit-code scheme.
+
+    *show_only* (Codex review, PR #1154 follow-up: `compare --view
+    show=...` on a directory/package input) filters each gating bucket the
+    same way a single-pair `compare`'s own report filters `result.changes`
+    (`reporter_markdown.apply_show_only`, resolved against this library's
+    own effective kind sets/policy file so it never disagrees with the
+    per-finding severity a single-pair report for the same library would
+    show) -- applied before the cap, so a filtered-out finding never
+    occupies one of the ``_MAX_RELEASE_FINDINGS_PER_LIBRARY`` slots a
+    displayed one needed.
     """
+    from .reporter_markdown import apply_show_only
+
     findings: list[dict[str, object]] = []
     for bucket_name, bucket_changes in _release_gating_buckets(diff, severity_config):
+        if show_only:
+            bucket_changes = apply_show_only(
+                bucket_changes,
+                show_only,
+                policy=diff.policy or "strict_abi",
+                kind_sets=diff._effective_kind_sets(),
+                policy_file=diff.policy_file,
+            )
         remaining = _MAX_RELEASE_FINDINGS_PER_LIBRARY - len(findings)
         if remaining <= 0:
             break
@@ -488,6 +511,7 @@ def _strip_diff_results_and_adjust_verdict(
     severity_config: SeverityConfig | None = None,
     *,
     needs_annotations: bool = True,
+    show_only: str | None = None,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -521,11 +545,28 @@ def _strip_diff_results_and_adjust_verdict(
             continue
         diff = entry.get("_diff_result")
         if isinstance(diff, DiffResult):
+            # show_only-filtered (Codex review, PR #1154 follow-up): counting
+            # the *raw* gating buckets here while _release_finding_dicts caps
+            # the *filtered* ones would flag `findings_truncated` for a
+            # library whose true (post-filter) finding count never exceeded
+            # the cap at all.
+            from .reporter_markdown import apply_show_only as _apply_show_only
+
             total_gating = sum(
-                len(cat_changes)
+                len(
+                    _apply_show_only(
+                        cat_changes,
+                        show_only,
+                        policy=diff.policy or "strict_abi",
+                        kind_sets=diff._effective_kind_sets(),
+                        policy_file=diff.policy_file,
+                    )
+                    if show_only
+                    else cat_changes
+                )
                 for _, cat_changes in _release_gating_buckets(diff, severity_config)
             )
-            findings = _release_finding_dicts(diff, severity_config)
+            findings = _release_finding_dicts(diff, severity_config, show_only)
             if findings:
                 entry["findings"] = findings
                 if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:

@@ -78,8 +78,33 @@ class TestReleaseMarkdownCarriesSymbolNames:
         assert code == 4, out
         assert "## Per-Library Findings" in out
         assert "`libfoo.json` Findings" in out
-        assert "_Z3foov" in out
+        # Codex review (PR #1154 follow-up): the release Markdown render now
+        # threads `compare`'s own default demangle resolution through
+        # (previously always raw/mangled, regardless of format) -- markdown
+        # defaults to demangled, matching a single-pair `compare`'s own
+        # default (`_Z3foov` -> `foo()`, confirmed against real `c++filt`).
+        assert "foo()" in out
+        assert "_Z3foov" not in out
         assert "func_removed" in out
+
+    def test_broken_symbol_name_stays_mangled_with_no_demangle(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair()
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "--view", "no-demangle",
+        )
+        assert code == 4, out
+        assert "_Z3foov" in out
+        assert "foo()" not in out
 
     def test_no_findings_section_when_nothing_gates(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

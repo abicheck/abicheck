@@ -1057,9 +1057,21 @@ def _format_release_summary(
     suppress: Path | None = None, pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    demangle: bool = False,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
-    *scope_terms* (ADR-065 S2): the one resolved scope every format reads."""
+    *scope_terms* (ADR-065 S2): the one resolved scope every format reads.
+
+    *demangle* (Codex review, PR #1154 follow-up: `compare --view demangle`/
+    `--no-demangle` on a directory/package input) only affects the markdown
+    render below, applied as the identical post-hoc whole-text
+    ``demangle.demangle_text`` pass a single-pair `compare`'s own markdown
+    render uses (`service_render.render_output`'s markdown branch) --
+    json/junit are machine formats whose consumers match on the raw mangled
+    symbol, so *demangle* is a no-op for either, matching that same
+    single-pair behaviour (``service_render.render_output``'s own
+    docstring: "machine formats ... always keep raw mangled symbols").
+    """
     if fmt == "junit":
         return _format_release_junit(
             diff_pairs, matrix_result, library_results, severity_config=severity_config,
@@ -1079,12 +1091,17 @@ def _format_release_summary(
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
         )
-    return _format_release_markdown(
+    md = _format_release_markdown(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
         old_map, new_map, bundle_result, matrix_result,
         scope_section=scope_terms.section if scope_terms is not None else None,
         severity_config=severity_config,
     )
+    if demangle:
+        from .demangle import demangle_text
+
+        md = demangle_text(md)
+    return md
 
 
 def _format_release_junit(

@@ -1645,6 +1645,12 @@ def run_compare(
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
             depth=release_depth,
+            # Codex review (PR #1154 follow-up): --view's derived values were
+            # silently dropped from this dispatch -- forwarded raw
+            # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
+            # _dispatch_release_compare resolves and validates them.
+            report_mode=report_mode, show_only=show_only,
+            demangle=demangle, explain_patterns=explain_patterns,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

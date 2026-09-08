@@ -121,6 +121,8 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     "CompileContext | None",
     "str | None",
+    "str | None",
+    bool,
 ]
 
 
@@ -269,6 +271,8 @@ def _compare_one_library(
     need_full_snapshots: bool = False,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    show_only: str | None = None,
+    explain_patterns: bool = False,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -285,6 +289,10 @@ def _compare_one_library(
     *severity_config* is forwarded to the ``--output-dir`` JSON write below
     (Codex review): without it, that write always used the legacy
     exit-code scheme regardless of the release's own severity config.
+    *show_only* (PR #1154 follow-up) is forwarded to that same write.
+    *explain_patterns* echoes this library's pattern-verdict modulation
+    ledger to stderr (``cli_audit.echo_pattern_modulations``), same as a
+    single-pair `compare --view patterns`.
     """
     old_path = old_map[key]
     new_path = new_map[key]
@@ -315,6 +323,11 @@ def _compare_one_library(
             depth=depth,
         )
         result = compare_result.diff
+        if explain_patterns:
+            from .cli_audit import echo_pattern_modulations
+
+            click.echo(f"\n== {old_path.name} ==", err=True)
+            echo_pattern_modulations(result)
         v = result.verdict.value
         # compatible_additions historically counts *all* compatible changes
         # (additions + quality issues). Emit the quality subset separately so
@@ -395,7 +408,8 @@ def _compare_one_library(
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
             _safe_write_output(
-                lib_report_path, to_json(result, severity_config=severity_config)
+                lib_report_path,
+                to_json(result, severity_config=severity_config, show_only=show_only),
             )
         return entry
     except (ProfileMismatchError, ScopeMismatchError) as exc:
@@ -454,6 +468,7 @@ def _suppress_lockstep_soname_findings(
     worst_verdict: str,
     output_dir: Path | None,
     severity_config: SeverityConfig | None = None,
+    show_only: str | None = None,
 ) -> int:
     """Drop ``SONAME_BUMP_UNNECESSARY`` when the release is a coordinated break.
 
@@ -506,7 +521,8 @@ def _suppress_lockstep_soname_findings(
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
             _safe_write_output(
-                lib_report_path, to_json(result, severity_config=severity_config)
+                lib_report_path,
+                to_json(result, severity_config=severity_config, show_only=show_only),
             )
     return suppressed
 
@@ -541,6 +557,8 @@ def _compare_release_libraries(
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    show_only: str | None = None,
+    explain_patterns: bool = False,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -611,6 +629,8 @@ def _compare_release_libraries(
         need_full_snapshots,
         compile_context,
         depth,
+        show_only,
+        explain_patterns,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -656,6 +676,7 @@ def _compare_release_libraries(
         worst_verdict,
         output_dir,
         severity_config,
+        show_only,
     )
     if suppressed_soname:
         click.echo(

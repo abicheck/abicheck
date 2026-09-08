@@ -125,6 +125,30 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
+    # Codex review (PR #1154 follow-up): --view's derived values used to be
+    # silently dropped here. show_only/demangle/explain_patterns are threaded
+    # through the release engine below (cli_compare_release.py); demangle
+    # stays an unresolved tri-state since --write can name a different
+    # secondary format, resolved per-format inside compare_release_cmd.
+    # report_mode's "leaf"/"root-cause" restructure a single DiffResult's own
+    # root-cause graph -- the release report has no such graph to
+    # restructure (the same mismatch --format sarif/html/review hits below),
+    # so those two are rejected; "impact" degrades to a silent "full".
+    report_mode = kwargs.pop("report_mode", "full")
+    kwargs["show_only"] = kwargs.pop("show_only", None)
+    kwargs["demangle"] = kwargs.pop("demangle", None)
+    kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
+    if report_mode == "impact":
+        report_mode = "full"
+    if report_mode not in ("full",):
+        raise click.UsageError(
+            f"--view {report_mode} is not available when comparing directories "
+            "or packages: 'leaf'/'root-cause' restructure a single comparison's "
+            "own root-cause graph, and the release summary is an aggregate "
+            "report across every library with no single such graph to "
+            "restructure. Compare one library at a time (a single old/new "
+            f".so pair) to use --view {report_mode}."
+        )
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"--format {fmt} is not available when comparing directories or "
