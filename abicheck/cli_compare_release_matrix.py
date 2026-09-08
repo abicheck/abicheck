@@ -495,11 +495,21 @@ def _release_display_buckets(
             kind_sets=kind_sets,
             policy_file=diff.policy_file,
         )
+        # Dict + name-lookup (matching `_release_gating_buckets`'s own
+        # shape above), not a literal list of tuples -- `categorize_changes`
+        # types each field as `list[HasKind]`, and building the return list
+        # this way is what keeps mypy happy the same way it already is above.
+        cat_changes_by_name = {
+            "abi_breaking": categorized.abi_breaking,
+            "potential_breaking": categorized.potential_breaking,
+            "quality_issues": categorized.quality_issues,
+            "addition": categorized.addition,
+        }
         return [
-            ("abi_breaking", categorized.abi_breaking),
-            ("potential_breaking", categorized.potential_breaking),
-            ("quality_issues", categorized.quality_issues),
-            ("addition", categorized.addition),
+            (name, cat_changes_by_name[name])
+            for name in (
+                "abi_breaking", "potential_breaking", "quality_issues", "addition",
+            )
         ]
     return [
         ("breaking", diff.breaking),
