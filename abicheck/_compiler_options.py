@@ -488,6 +488,51 @@ def explicit_target_triple(
     return value
 
 
+def _forwarded_driver_mode_override(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> str | None:
+    """The last explicitly-forwarded ``--driver-mode=<value>``, or ``None``
+    if none was forwarded. Shared by :func:`effective_driver_mode_is_cl`
+    and :func:`forwarded_driver_mode_token`.
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            pass
+    tokens.extend(gcc_option_tokens)
+    override: str | None = None
+    for token in tokens:
+        if token.startswith("--driver-mode="):
+            override = token[len("--driver-mode=") :]
+    return override
+
+
+def forwarded_driver_mode_token(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """The last explicitly-forwarded ``--driver-mode=<value>`` token, as a
+    single-element tuple ready to splice into a re-probe's own argument
+    list, or ``()`` if none was forwarded.
+
+    Exists so a caller re-probing ``clang_bin`` with a deliberately
+    narrowed argument list (e.g. :func:`dumper._run_clang`'s bare,
+    option-free re-probe of a probe-failure fallback) can still preserve
+    the one option that changes Clang's own *interpretation* of that
+    narrowed probe -- an explicit ``--driver-mode=`` override changes
+    whether the SAME binary parses as a CL-style or GNU-style driver, so
+    dropping it entirely would silently revert to the binary's own
+    name-based default (Codex review, fresh evidence: a real
+    ``clang-cl --driver-mode=g++ -print-target-triple`` reports the host
+    GNU target, while a bare ``clang-cl -print-target-triple`` reports
+    Windows -- two different answers for the identical binary, so a
+    stripped-down re-probe that omits the override would silently record
+    the wrong one for a probe that had it configured)."""
+    override = _forwarded_driver_mode_override(gcc_options, gcc_option_tokens)
+    return () if override is None else (f"--driver-mode={override}",)
+
+
 def effective_driver_mode_is_cl(
     is_cl_style_name: bool,
     gcc_options: str | None,
@@ -518,17 +563,7 @@ def effective_driver_mode_is_cl(
     else the name -- covers both by construction instead of accumulating
     a third one-off case alongside the first two.
     """
-    tokens: list[str] = []
-    if gcc_options:
-        try:
-            tokens = split_gcc_options(gcc_options)
-        except ValueError:
-            pass
-    tokens.extend(gcc_option_tokens)
-    override: str | None = None
-    for token in tokens:
-        if token.startswith("--driver-mode="):
-            override = token[len("--driver-mode=") :]
+    override = _forwarded_driver_mode_override(gcc_options, gcc_option_tokens)
     if override is not None:
         return override == "cl"
     return is_cl_style_name
@@ -536,17 +571,21 @@ def effective_driver_mode_is_cl(
 
 def _opaque_option_source_tokens(tokens: list[str]) -> bool:
     """Whether ``tokens`` forwards an external options source this module
-    cannot see into: a Clang/GCC ``@response-file`` token, or an explicit
-    ``--config=<file>``/``--config <file>`` (real Clang, confirmed by
-    invocation: a config file's contents are honored by both AST
-    generation and ``-print-target-triple``, exactly like a response file
-    -- Codex review, fresh evidence). Shared by
+    cannot see into: a Clang/GCC ``@response-file`` token, an explicit
+    ``--config=<file>``/``--config <file>``, or a ``--config-user-dir=
+    <dir>``/``--config-system-dir=<dir>`` (real Clang, confirmed by
+    invocation: a directory pointing at an implicitly-loaded
+    ``clang.cfg`` is honored by both AST generation and
+    ``-print-target-triple`` with no explicit ``--config=`` at all,
+    exactly like a response file -- Codex review, fresh evidence; only
+    the attached ``=`` spelling is honored for either directory flag, a
+    separate-argument form completes with "unknown argument"). Shared by
     :func:`explicit_target_triple` and :func:`forwards_response_file`.
     """
     for i, token in enumerate(tokens):
         if token.startswith("@") and len(token) > 1:
             return True
-        if token.startswith("--config="):
+        if token.startswith(("--config=", "--config-user-dir=", "--config-system-dir=")):
             return True
         if token == "--config" and i + 1 < len(tokens):
             return True

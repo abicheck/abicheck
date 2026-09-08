@@ -828,6 +828,90 @@ def test_a_cl_style_name_explicitly_overridden_to_gnu_mode_is_not_cl_style(
     assert parser._target_triple == "x86_64-unknown-linux-gnu"
 
 
+def test_probe_failure_bare_reprobe_preserves_the_driver_mode_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install: bare ``clang-cl -print-target-triple`` reports
+    Windows, but ``clang-cl --driver-mode=g++ -print-target-triple``
+    reports the host GNU target -- two different answers for the
+    identical binary. The bare re-probe must therefore preserve an
+    explicit ``--driver-mode=`` override, or it would silently revert to
+    the binary's own name-based default."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+
+    def _fake_configured_target_triple(
+        gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+    ) -> str | None:
+        if gcc_options is None and gcc_option_tokens == ("--driver-mode=g++",):
+            return "x86_64-pc-linux-gnu"
+        return None
+
+    monkeypatch.setattr(
+        dumper, "_configured_target_triple", _fake_configured_target_triple
+    )
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="--driver-mode=g++",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-pc-linux-gnu"
+
+
+def test_probe_failure_with_a_config_user_dir_does_not_guess_sys_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A forwarded ``--config-user-dir=<dir>`` implicitly loads a
+    ``clang.cfg`` from that directory with no explicit ``--config=`` at
+    all (empirically verified against a real Clang 18 install), so it is
+    just as opaque as a response file or an explicit config file."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="--config-user-dir=/etc/clang",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None
+
+
 def test_probe_failure_with_option_selected_cl_mode_recovers_the_honored_spelling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

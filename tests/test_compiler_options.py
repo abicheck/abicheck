@@ -9,6 +9,7 @@ from abicheck._compiler_options import (
     effective_driver_mode_is_cl,
     explicit_language_standard,
     explicit_target_triple,
+    forwarded_driver_mode_token,
     forwards_response_file,
     has_explicit_cpp_std,
     has_explicit_std,
@@ -648,6 +649,36 @@ class TestEffectiveDriverModeIsCl:
         )
 
 
+class TestForwardedDriverModeToken:
+    """The one option a caller re-probing `clang_bin` with a deliberately
+    narrowed argument list must still preserve, or the SAME binary's own
+    interpretation silently reverts to its name-based default (Codex
+    review, fresh evidence: a real ``clang-cl --driver-mode=g++
+    -print-target-triple`` reports the host GNU target, while a bare
+    ``clang-cl -print-target-triple`` reports Windows -- two different
+    answers for the identical binary)."""
+
+    def test_empty_when_no_override_forwarded(self) -> None:
+        assert forwarded_driver_mode_token(None, ()) == ()
+        assert forwarded_driver_mode_token("-O2", ("-Wall",)) == ()
+
+    def test_returns_the_override_as_a_single_token(self) -> None:
+        assert forwarded_driver_mode_token(None, ("--driver-mode=g++",)) == (
+            "--driver-mode=g++",
+        )
+        assert forwarded_driver_mode_token("--driver-mode=cl", ()) == (
+            "--driver-mode=cl",
+        )
+
+    def test_last_override_wins(self) -> None:
+        assert forwarded_driver_mode_token(
+            None, ("--driver-mode=cl", "--driver-mode=g++")
+        ) == ("--driver-mode=g++",)
+
+    def test_separate_argument_spelling_is_not_an_override(self) -> None:
+        assert forwarded_driver_mode_token(None, ("--driver-mode", "cl")) == ()
+
+
 class TestForwardsResponseFile:
     """A ``@response-file`` token's contents are invisible to this module
     without expanding it, so its mere presence must be treated as
@@ -688,7 +719,18 @@ class TestForwardsResponseFile:
         # No following argument -- not a real `--config <file>` pair.
         assert forwards_response_file(None, ("--config",)) is False
 
-    def test_config_user_dir_alone_does_not_match(self) -> None:
-        # A related but distinct flag; only `--config`/`--config=` itself
-        # selects a specific file whose contents this module can't see.
-        assert forwards_response_file("--config-user-dir=/etc", ()) is False
+    def test_config_user_dir_and_system_dir_also_match(self) -> None:
+        # Codex review, fresh evidence, empirically verified against a
+        # real Clang 18 install: `--config-user-dir=<dir>` (and its
+        # `--config-system-dir=` sibling) implicitly loads a `clang.cfg`
+        # from that directory with no explicit `--config=` at all, and it
+        # is honored the same way (both AST generation and
+        # `-print-target-triple` apply it).
+        assert forwards_response_file("--config-user-dir=/etc", ()) is True
+        assert forwards_response_file("--config-system-dir=/etc", ()) is True
+
+    def test_config_user_dir_separate_argument_does_not_match(self) -> None:
+        # Only the attached `--config-user-dir=<dir>` spelling is honored
+        # by real Clang -- a separate-argument form completes with
+        # "unknown argument ignored" and selects nothing.
+        assert forwards_response_file(None, ("--config-user-dir", "/etc")) is False

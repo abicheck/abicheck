@@ -40,6 +40,7 @@ from . import deadline, dumper_cache, qualified_name_segments
 from ._compiler_options import (
     effective_driver_mode_is_cl as _effective_driver_mode_is_cl,
     explicit_target_triple as _explicit_target_triple,
+    forwarded_driver_mode_token as _forwarded_driver_mode_token,
     forwards_response_file as _forwards_response_file,
 )
 from .castxml_policy import evaluate_castxml_version
@@ -624,17 +625,16 @@ def _header_ast_parser(
         )
         # Probe-failure fallback chain (Codex/CodeRabbit review, fresh
         # evidence): explicit `--target=` (CL-style spellings only under CL
-        # mode, no further guess); else, under GNU mode, a bare re-probe of
-        # `clang_bin` (real evidence -- the earlier failure may be an
-        # unrelated option, and Clang's own argv[0]-driven default beats a
-        # static name-shape guess like the former exact-basename check,
-        # which wrongly flagged any custom rename as a cross-compiler);
-        # else `_is_default_clang_bin`-gated `sys.platform`. No fallback
-        # while `@response-file` may hide the real target.
+        # mode); else, under GNU mode, a bare re-probe of `clang_bin` plus
+        # only its effective `--driver-mode=` (dropping it would silently
+        # revert a `clang-cl --driver-mode=g++` re-probe to CL mode); else
+        # `_is_default_clang_bin`-gated `sys.platform`. No fallback while
+        # `@response-file`/`--config[-*-dir]=` may hide the real target.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
+        _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
         target_triple = _configured_target_triple(
             gcc_options, gcc_option_tokens, clang_bin
         ) or (
@@ -642,7 +642,7 @@ def _header_ast_parser(
             if is_cl_mode
             else _explicit_target_triple(gcc_options, gcc_option_tokens)
             or (
-                _configured_target_triple(None, (), clang_bin)
+                _configured_target_triple(None, _bare_reprobe_args, clang_bin)
                 if _target_known
                 else None
             )

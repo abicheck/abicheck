@@ -114,7 +114,20 @@ it should read in CHANGELOG.md. Delete the other sections.
   file's contents to both AST generation and `-print-target-triple`
   exactly like a response file, so it is an equally opaque, equally
   unsafe-to-guess-past evidence source (empirically verified against a
-  real Clang 18 install).
+  real Clang 18 install). The same check also recognizes
+  `--config-user-dir=<dir>`/`--config-system-dir=<dir>`: a real Clang
+  invocation with one of these implicitly loads a `clang.cfg` from that
+  directory with no explicit `--config=` at all, and honors it the same
+  way (only the attached `=` spelling is recognized for either flag — a
+  separate-argument form completes with "unknown argument" and applies
+  nothing). Separately, the bare re-probe itself now preserves an
+  explicit `--driver-mode=<value>` override
+  (`_compiler_options.forwarded_driver_mode_token`) rather than dropping
+  every option: a real `clang-cl --driver-mode=g++ -print-target-triple`
+  reports the host GNU target while a bare `clang-cl -print-target-triple`
+  reports Windows — two different answers for the identical binary — so
+  omitting the override entirely would have silently reverted a
+  GNU-mode-forced re-probe back to CL mode.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in
