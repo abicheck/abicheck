@@ -1468,11 +1468,17 @@ orchestration conflation of the shape Phase 5 already solved for
   already this ADR's own documented `workflows` re-export surface for "the
   probe matrix" — which legally imports both `compare` (for the
   `ProbeResult`/`MatrixSnapshot` dataclasses) and `abicheck.serialization`
-  (the `public_root_surfaces` facade). `probe_harness.py` now defines only
-  pure value objects and imports nothing from `storage`. `probe_harness.py`
-  is an internal `compare`-layer module, not documented Python API, so no
-  compatibility shim was owed at the old path — every internal caller (CLI,
-  tests) was switched to the new home in the same slice.
+  (the `public_root_surfaces` facade). `ProbeResult`/`MatrixSnapshot` are
+  now pure value objects with no `storage` import; `probe_harness.py`
+  itself still owns `load_probe_spec`/`run_probe_matrix` (YAML parsing and
+  compile orchestration), unchanged. `probe_harness.py` *is* documented
+  Python API (`docs/use/probe-harness.md`) — the compatibility question was
+  never whether the module is public, only whether the removed
+  *serialization* helpers specifically needed a shim at their old path;
+  they didn't, since the documented workflow's supported path is that doc
+  page, which now imports the moved names from `workflows.findings`
+  instead (verified round-tripping) — every internal caller (CLI, tests)
+  was switched to the new home in the same slice.
 
 The owners to establish are: `model` for snapshot/bundle value types and
 their invariants; `storage` for codecs, schemas, persistence, and schema
