@@ -357,6 +357,38 @@ def _read_compile_config_overlay(cmd: list[str]) -> dict[str, Any]:
     return doc.get("compile", {})
 
 
+class TestCompileContextOverlayMktempIsRunnerTempAnchored:
+    """Regression: the mktemp call minting the synthesized --config overlay
+    path used to be a bare ``mktemp`` -- unlike every other temp-file mktemp
+    call in run.sh -- which on windows-latest's Git Bash resolves under its
+    own MSYS-internal /tmp mount. That path is later opened directly by a
+    native (non-MSYS) Python process (this module's own
+    ``_read_compile_config_overlay``, and the real `--config`-consuming CLI
+    invocation `run.sh` itself makes), which cannot resolve an MSYS-only
+    spelling and fails with FileNotFoundError -- confirmed as the
+    windows-latest unit-tests CI job's only failure on main.
+
+    A platform-specific end-to-end reproduction only fails on windows-latest,
+    so it can't by itself guard against a regression on the Linux/macOS
+    lanes that run every PR. This asserts the *source pattern* directly
+    (same technique test_action_run_sh_py_safe_path.py and siblings already
+    use for adjacent mktemp calls), which fails on every platform the moment
+    the anchored template reverts to a bare mktemp."""
+
+    def test_mktemp_is_anchored_under_runner_temp(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index(_COMPILE_CONTEXT_FN_START)
+        # Only the overlay's own creation site, not every mktemp in the file.
+        marker = "_COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp"
+        idx = text.index(marker, start)
+        line_end = text.index("\n", idx)
+        line = text[idx:line_end]
+        assert line == (
+            "_COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "
+            '"${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")'
+        ), line
+
+
 class TestCompileContextForwardingParity:
     """scan forwards the six flags directly; dump/compare (Phase 7) forward
     the identical settings via a synthesized --config compile: block."""
