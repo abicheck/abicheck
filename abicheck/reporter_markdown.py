@@ -425,6 +425,71 @@ class ShowOnlyFilter:
         return self._check_action(change.kind.value, self.actions)
 
 
+#: Separator between OR'd ``ShowOnlyFilter`` groups in a single ``show_only``
+#: string (CodeRabbit/Codex review, PR #1154). ``--view show=...`` is
+#: repeatable; each occurrence is one AND-across-dimensions/OR-within-
+#: dimension group (``ShowOnlyFilter``'s own pre-existing single-string
+#: grammar, unchanged), and repeat occurrences must OR *those groups*
+#: together -- joining them with "," instead (the bug this fixes) collapsed
+#: two different-dimension groups into one AND-group instead, and two
+#: same-dimension groups into a wider OR *within* that one dimension, either
+#: way losing the promised "match either group" semantics. ";" was never a
+#: legal character in a single group's own token grammar (severity/element/
+#: action words only), so splitting on it first is a strict, backward-
+#: compatible generalization: a string with no ";" is exactly one group,
+#: identical to every pre-existing single-string caller/test.
+SHOW_ONLY_GROUP_SEP = ";"
+
+
+def parse_show_only_groups(show_only: str) -> tuple[ShowOnlyFilter, ...]:
+    """Parse a ``show_only`` string into its OR'd ``ShowOnlyFilter`` groups.
+
+    See ``SHOW_ONLY_GROUP_SEP``'s own comment for the grammar. Each group is parsed
+    with the existing, unchanged ``ShowOnlyFilter.parse`` -- a bad token
+    inside any group raises the identical ``ValueError`` it always did.
+    """
+    return tuple(
+        ShowOnlyFilter.parse(part) for part in show_only.split(SHOW_ONLY_GROUP_SEP)
+    )
+
+
+def show_only_matches(
+    show_only: str,
+    change: Change,
+    policy: str = "strict_abi",
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> bool:
+    """Return True if *change* matches ANY OR'd group of *show_only*."""
+    return any(
+        group.matches(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
+        )
+        for group in parse_show_only_groups(show_only)
+    )
+
+
+def show_only_matches_severity_label(show_only: str | None, label: str) -> bool:
+    """Return True if *label* passes any OR'd group's severity dimension.
+
+    For a finding with no backing ``Change`` (a missing-contract label) --
+    ``apply_show_only``'s element/action dimensions don't apply to "a symbol
+    is simply absent", so only the severity dimension is checked, the same
+    narrowing every one of this function's call sites already documented
+    for the single-group case. A group with no severity tokens at all
+    matches every label (mirrors ``ShowOnlyFilter._check_severity``'s own
+    "unconstrained dimension passes" rule) -- so this generalizes the
+    pre-existing ``not show_only_severities or label in show_only_severities``
+    check at each call site to OR across every group instead of just one.
+    """
+    if not show_only:
+        return True
+    return any(
+        not group.severities or label in group.severities
+        for group in parse_show_only_groups(show_only)
+    )
+
+
 def apply_show_only(
     changes: Sequence[Change],
     show_only: str,
@@ -440,12 +505,17 @@ def apply_show_only(
     the rest of the report — including kind-level ``PolicyFile.overrides``
     and per-finding ``effective_verdict`` — so the filter never disagrees
     with the JSON severity field for the same change.
+
+    *show_only* may hold several ``SHOW_ONLY_GROUP_SEP``-joined OR'd groups (see
+    :func:`parse_show_only_groups`) -- a change is kept if it matches ANY
+    one of them.
     """
-    filt = ShowOnlyFilter.parse(show_only)
     return [
         c
         for c in changes
-        if filt.matches(c, policy=policy, kind_sets=kind_sets, policy_file=policy_file)
+        if show_only_matches(
+            show_only, c, policy=policy, kind_sets=kind_sets, policy_file=policy_file
+        )
     ]
 
 
@@ -792,12 +862,9 @@ def _resolve_scoped_gate_findings(
     # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
     # symbol is simply absent", so only the severity dimension is checked.
     missing_severity_label = "breaking" if blocks else "compatible"
-    show_only_severities = (
-        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
-    )
     missing_labels = list(
         getattr(result, "scoped_missing_labels", ()) or ()
-        if not show_only_severities or missing_severity_label in show_only_severities
+        if show_only_matches_severity_label(show_only, missing_severity_label)
         else ()
     )
     return scoped_only, missing_labels, blocks, missing_kind

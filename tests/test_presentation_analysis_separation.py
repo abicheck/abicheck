@@ -409,12 +409,49 @@ class TestViewGrammar:
     def test_show_tokens_across_two_view_occurrences_are_ored_together(
         self, tmp_path: Path
     ) -> None:
+        # Both `show=removed` and `show=added` are the *same* dimension
+        # (action) -- a comma-joined single AND-group would still pass this
+        # case (comma is also the legitimate OR-within-dimension separator),
+        # so this alone does not prove groups from separate `--view show=...`
+        # occurrences are ORed together rather than collapsed into one
+        # AND-group. See the cross-dimension test right below for that.
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
             [
                 "compare", str(old_p), str(new_p), "--format", "markdown",
                 "--view", "show=removed", "--view", "show=added",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "api_removed" in result.output
+        assert "api_added" in result.output
+
+    def test_show_tokens_across_different_dimensions_are_ored_not_anded(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit/Codex review, PR #1154: two ``--view show=...``
+        occurrences naming *different* dimensions (severity, then action)
+        must OR the two groups together -- a finding shown if it matches
+        EITHER occurrence's own group -- never collapsed into one AND-group
+        the way naively joining with ``,`` would (``ShowOnlyFilter``'s own
+        grammar joins different-dimension tokens with AND, so
+        ``"breaking,added"`` parsed as one group means "breaking AND
+        added", which neither fixture change satisfies: the removal is
+        breaking/removed, the addition is compatible/added).
+
+        ``--view show=breaking`` alone matches only the removal (its own
+        severity); ``--view show=added`` alone matches only the addition
+        (its own action) -- combined, a correct OR-of-groups implementation
+        must show both, while the AND-collapse bug this regression targets
+        would show neither.
+        """
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--format", "markdown",
+                "--view", "show=breaking", "--view", "show=added",
             ],
         )
         assert result.exit_code == 4, result.output

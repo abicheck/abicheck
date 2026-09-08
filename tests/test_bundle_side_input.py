@@ -374,7 +374,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
             ),
         )
@@ -485,7 +485,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         captured: dict[str, object] = {}
 
         def _fake_compare_snapshots(
-            old, new, suppress=None, *, policy, policy_file=None
+            old, new, suppress=None, *, policy, policy_file=None, **_kwargs
         ):
             captured["policy_file"] = policy_file
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
@@ -540,7 +540,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         captured: dict[str, object] = {}
 
         def _fake_compare_snapshots(
-            old, new, suppress=None, *, policy, policy_file=None
+            old, new, suppress=None, *, policy, policy_file=None, **_kwargs
         ):
             captured["suppress"] = suppress
             return _diff("libcore.so", verdict=Verdict.NO_CHANGE)
@@ -593,7 +593,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
             ),
         )
@@ -741,7 +741,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
             ),
         )
@@ -788,7 +788,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 "libcore.so", verdict=Verdict.NO_CHANGE
             ),
         )
@@ -853,7 +853,7 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         monkeypatch.setattr(
             service_mod,
             "compare_snapshots",
-            lambda old, new, suppress=None, *, policy, policy_file=None: _diff(
+            lambda old, new, suppress=None, *, policy, policy_file=None, **_kwargs: _diff(
                 new.library, verdict=Verdict.NO_CHANGE
             ),
         )
@@ -880,6 +880,119 @@ class TestCompareReleaseAgainstBundleFactsResolutionUnit:
         assert captured_kwargs[dpc_so]["headers"] == dpc_headers
         assert captured_kwargs[dpc_so]["includes"] == dpc_includes
         assert captured_kwargs[dpc_so]["compile"] is dpc_ctx
+
+
+class TestSurfaceMetricsReachesLiveBundleFactsDriver:
+    """CodeRabbit/Codex review on PR #1154: ``--surface-metrics`` computation
+    is unconditional on every path reaching the Tier-2
+    ``service.compare_snapshots()`` chokepoint -- this stored-OLD-facts/
+    live-NEW driver used to be one of three call sites that never forwarded
+    ``surface_metrics=True``, silently omitting ``public_surface_grew``/
+    ``public_surface_shrank`` findings a scalar ``compare`` of the identical
+    pair would report (AGENTS.md's "One model, any cardinality" rule)."""
+
+    def test_surface_metrics_true_is_forwarded_to_compare_snapshots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+
+        metadata = {"libcore.so": _meta(soname="libcore.so", exports=["core_fn"])}
+        facts = capture_bundle_facts(_per_library_snapshots(metadata))
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(facts, facts_path)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            ),
+        )
+
+        real_compare_snapshots = service_mod.compare_snapshots
+        seen_surface_metrics: list[object] = []
+
+        def _spy_compare_snapshots(old, new, *args, **kwargs):
+            seen_surface_metrics.append(kwargs.get("surface_metrics"))
+            return real_compare_snapshots(old, new, *args, **kwargs)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+
+        compare_release_against_bundle_facts(facts_path, new_dir)
+
+        assert seen_surface_metrics == [True]
+
+    def test_public_surface_growth_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end proof, not just the kwarg spy above: a stored-OLD/
+        live-NEW pair whose public surface genuinely grew must report
+        ``public_surface_grew`` the same way a scalar `compare` of the
+        identical pair does."""
+        import abicheck.package as package_mod
+        import abicheck.service as service_mod
+
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[
+                Function(
+                    name="core_fn", mangled="core_fn", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        facts_path = tmp_path / "old.bundlefacts.json"
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), facts_path)
+
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        new_so = new_dir / "libcore.so"
+        new_so.write_bytes(b"")
+
+        monkeypatch.setattr(
+            package_mod,
+            "discover_shared_libraries",
+            lambda d, include_private=False: [new_so],
+        )
+        monkeypatch.setattr(
+            service_mod,
+            "resolve_input",
+            lambda path, **kwargs: AbiSnapshot(
+                library="libcore.so",
+                version="new",
+                elf=_meta(soname="libcore.so", exports=["core_fn", "new_fn"]),
+                functions=[
+                    Function(
+                        name="core_fn", mangled="core_fn", return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    ),
+                    Function(
+                        name="new_fn", mangled="new_fn", return_type="int",
+                        visibility=Visibility.PUBLIC,
+                    ),
+                ],
+            ),
+        )
+
+        result = compare_release_against_bundle_facts(facts_path, new_dir)
+
+        (diff,) = result.per_library
+        assert ChangeKind.PUBLIC_SURFACE_GREW in {c.kind for c in diff.changes}
 
 
 # ---------------------------------------------------------------------------

@@ -516,8 +516,20 @@ def compare_release_against_bundle_facts(
         # the fan-out's own per-library rule, never an escape that discards
         # every sibling's completed comparison.
         try:
+            # CodeRabbit/Codex review on PR #1154: surface_metrics is
+            # unconditional on every other path that reaches this Tier-2
+            # chokepoint (the native `compare` CLI and, since this same
+            # fix, the release fan-out) -- omitting it here silently dropped
+            # public_surface_grew/public_surface_shrank findings for a
+            # stored-OLD-facts-vs-live-NEW comparison that an identical
+            # library pair would get from `compare` directly.
             diff = service.compare_snapshots(
-                old_snapshot, new_snapshot, suppress, policy=policy, policy_file=policy_file
+                old_snapshot,
+                new_snapshot,
+                suppress,
+                policy=policy,
+                policy_file=policy_file,
+                surface_metrics=True,
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:
             not_comparable[key] = (mismatch_kind(exc), str(exc))

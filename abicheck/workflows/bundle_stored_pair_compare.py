@@ -285,12 +285,19 @@ def compare_stored_bundle_facts_pair(
         # whose extraction contracts disagree is `not_comparable` on the
         # record; the sibling comparisons survive, as in the fan-out.
         try:
+            # CodeRabbit/Codex review on PR #1154: surface_metrics is
+            # unconditional on every other path reaching this Tier-2
+            # chokepoint -- omitting it here silently dropped
+            # public_surface_grew/public_surface_shrank findings a
+            # stored/stored comparison of the identical library pair would
+            # get from a live `compare`.
             diff = compare_snapshots(
                 projected_old_snapshots[key],
                 projected_new_snapshots[key],
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
+                surface_metrics=True,
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:
             not_comparable[key] = (mismatch_kind(exc), str(exc))

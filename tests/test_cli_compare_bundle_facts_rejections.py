@@ -898,12 +898,22 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--dwarf-only" in out
 
-    def test_surface_metrics_is_rejected(self, tmp_path: Path) -> None:
-        # ADR-068 D4/Phase 5: --pattern-verdicts is gone (unconditional
-        # everywhere now), but --surface-metrics stays a real opt-in flag
-        # this dispatcher still never wires into
-        # compare_release_against_bundle_facts() -- reject it loudly rather
-        # than silently producing no metric-drift finding.
+    def test_surface_metrics_is_accepted_as_a_no_op(self, tmp_path: Path) -> None:
+        # CodeRabbit/Codex review on PR #1154: compare_release_against_
+        # bundle_facts() now forwards surface_metrics=True unconditionally
+        # to every per-library service.compare_snapshots() call, the same
+        # "always on regardless of the (now vestigial) flag" treatment
+        # every other `compare` path already gets -- so --surface-metrics
+        # is accepted here too rather than rejected as unsupported.
+        #
+        # Like every other test in this class (see the module docstring),
+        # OLD_INPUT/NEW_INPUT here are placeholders that never reach a real
+        # comparison -- the empty stub facts match nothing in the empty
+        # new_dir, so this run legitimately reports exit 1
+        # ("no_comparison_completed", ADR-065 D6/D7 -- an orthogonal axis
+        # this test isn't about). What this test actually pins is that the
+        # flag reaches dispatch() without being rejected as unsupported
+        # (exit 64, the pre-fix behavior) -- not that a comparison ran.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
@@ -918,8 +928,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "json",
         )
 
-        assert code == 64
-        assert "--surface-metrics" in out
+        assert code != 64, out
+        assert "--surface-metrics" not in out
 
     def test_config_debug_block_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"

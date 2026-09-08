@@ -225,7 +225,12 @@ class TestStoredVersusLiveReleaseParity:
         assert outcomes["liba.so"][0] == "BREAKING"
         assert outcomes["liba.so"][1] == 1  # one breaking change (foo removed)
         assert outcomes["libb.so"][0] == "COMPATIBLE"
-        assert outcomes["libb.so"][4] == 1  # one compatible addition (baz)
+        # PR #1154 review fix: surface_metrics is now unconditional on the
+        # release fan-out too (matching the scalar `compare` path), so a
+        # library that gained a public function also gets the ADR-027
+        # PUBLIC_SURFACE_GREW roll-up finding alongside the per-symbol
+        # addition itself -- two compatible findings, not one.
+        assert outcomes["libb.so"][4] == 2  # baz added + public_surface_grew
         assert outcomes["libc.so"][0] == "NO_CHANGE"
 
     def test_stored_stored_matches_live_live(self, tmp_path: Path) -> None:

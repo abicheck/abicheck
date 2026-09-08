@@ -113,7 +113,13 @@ class TestNoOpWithoutSuppress:
 
 
 class TestRejectedOnSetInputs:
-    def test_rejected_on_directory_inputs(self, tmp_path):
+    def test_rejected_on_directory_inputs_with_a_real_suppress_file(self, tmp_path):
+        """CodeRabbit/Codex review, PR #1154: this combination -- a real
+        ``--suppress`` file *and* ``--audit-suppressions`` -- is still
+        rejected on a directory/package operand: it asks for a genuine
+        per-finding audit result the per-library fan-out has no single
+        place to attach. See the no-op test right below for the
+        combination this same review fixed (no ``--suppress`` at all)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -131,8 +137,36 @@ class TestRejectedOnSetInputs:
             ],
         )
         assert result.exit_code != 0
-        assert "not supported for directory/package" in result.output
+        assert "not supported" in result.output
+        assert "directory/package" in result.output
         assert "--audit-suppressions" in result.output
+
+    def test_accepted_as_a_no_op_on_directory_inputs_without_suppress(
+        self, tmp_path
+    ) -> None:
+        """CodeRabbit/Codex review on PR #1154: ``--audit-suppressions``
+        with no ``--suppress`` is a harmless no-op on the scalar `compare`
+        path (nothing to audit) -- it must be equally harmless on a
+        directory/package operand instead of the blanket usage error this
+        class used to assert for every ``--audit-suppressions`` regardless
+        of ``--suppress``."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_dir), str(new_dir),
+                "--audit-suppressions", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "--audit-suppressions" not in result.output
 
 
 class TestJsonReport:

@@ -24,10 +24,14 @@ Grammar (each ``--view TOKEN`` occurrence contributes one of):
 * ``full`` / ``leaf`` / ``impact`` / ``root-cause`` -- report mode
   (``--report-mode``'s exact former ``Choice`` values; last one given wins).
 * ``show=<tokens>`` -- the ``--show-only`` token vocabulary, unchanged
-  (severity/element/action, AND across dimensions, OR within); repeatable,
-  and multiple ``show=`` occurrences are ORed together by joining with a
-  comma, since a comma-separated list is already ``ShowOnlyFilter``'s own
-  OR-within-dimension separator.
+  within one occurrence (severity/element/action, AND across dimensions, OR
+  within a dimension via comma); repeatable, and each ``show=`` occurrence is
+  its own AND-group, ORed against every other occurrence's group (a finding
+  is shown if it matches ANY occurrence's group) -- joined internally with
+  ``reporter_markdown.SHOW_ONLY_GROUP_SEP`` (``";"``), never comma: joining with comma
+  would instead AND two different-dimension groups together, or widen the OR
+  *within* one dimension for two same-dimension groups, either way losing
+  "match either group" (CodeRabbit/Codex review, PR #1154).
 * ``demangle`` / ``no-demangle`` -- the demangle tri-state (last one given
   wins); omitted keeps the ``None`` "auto per format" default.
 * ``patterns`` -- render the pattern-verdict modulation ledger
@@ -91,14 +95,21 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
                 "'no-demangle', or 'patterns'."
             )
 
-    show_only = ",".join(show_only_parts) if show_only_parts else None
-    if show_only is not None:
-        # Reuse ShowOnlyFilter's own validation so a bad token inside
-        # `show=...` is rejected with the identical message the old
-        # `--show-only` flag gave -- a lossless rename, not a new grammar.
-        from ....reporter import ShowOnlyFilter
+    # Each `--view show=...` occurrence is joined with the reporter's own
+    # OR-of-groups separator (";"), not ",": a comma instead would AND two
+    # different-dimension groups (or widen the OR within one dimension for
+    # two same-dimension groups) rather than OR the groups themselves
+    # together, silently breaking the documented "repeat to OR further
+    # groups" contract (CodeRabbit/Codex review, PR #1154).
+    from ....reporter_markdown import SHOW_ONLY_GROUP_SEP, parse_show_only_groups
 
-        ShowOnlyFilter.parse(show_only)
+    show_only = SHOW_ONLY_GROUP_SEP.join(show_only_parts) if show_only_parts else None
+    if show_only is not None:
+        # Reuse ShowOnlyFilter's own per-group validation so a bad token
+        # inside any `show=...` occurrence is rejected with the identical
+        # message the old `--show-only` flag gave -- a lossless rename, not
+        # a new per-group grammar.
+        parse_show_only_groups(show_only)
 
     return {
         "report_mode": report_mode,

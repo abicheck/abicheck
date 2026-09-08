@@ -1054,6 +1054,7 @@ def _reject_flags_unsupported_for_set_inputs(
     include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
+    suppress: Path | None = None,
 ) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -1080,6 +1081,7 @@ def _reject_flags_unsupported_for_set_inputs(
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
         audit_suppressions=audit_suppressions,
+        suppress=suppress,
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
     )
@@ -1504,6 +1506,7 @@ def run_compare(
             include_labels=include_labels,
             require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
+            suppress=suppress,
         )
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx

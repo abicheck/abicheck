@@ -532,6 +532,7 @@ def classify_compare_pair(
             else None
         ),
         pattern_verdicts=request.pattern_verdicts,
+        surface_metrics=True,  # unconditional here too (PR #1154 review)
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=service.load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,

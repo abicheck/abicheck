@@ -467,3 +467,92 @@ class TestCompareStoredBundleFactsPair:
         seen.clear()
         compare_stored_bundle_facts_pair(old_path, new_path, depth="headers")
         assert seen == [None, None]
+
+
+class TestSurfaceMetricsReachesStoredStoredPair:
+    """CodeRabbit/Codex review on PR #1154: ``--surface-metrics`` computation
+    is unconditional on every path that reaches the Tier-2
+    ``workflows.compare_policy.compare_snapshots()`` chokepoint (ADR-068
+    D4/Phase 5's "vestigial, always-on" treatment) -- this stored/stored
+    driver used to be one of three call sites that never forwarded
+    ``surface_metrics=True``, silently omitting ``public_surface_grew``/
+    ``public_surface_shrank`` findings a scalar ``compare`` of the identical
+    pair would report (AGENTS.md's "One model, any cardinality" rule)."""
+
+    def test_surface_metrics_true_is_forwarded_to_compare_snapshots(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[
+                Function(
+                    name="core_fn", mangled="core_fn", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), new_path)
+
+        import abicheck.workflows.compare_policy as compare_policy_module
+
+        seen_surface_metrics: list[object] = []
+        real_compare_snapshots = compare_policy_module.compare_snapshots
+
+        def _spy_compare_snapshots(old, new, *args, **kwargs):
+            seen_surface_metrics.append(kwargs.get("surface_metrics"))
+            return real_compare_snapshots(old, new, *args, **kwargs)
+
+        monkeypatch.setattr(
+            compare_policy_module, "compare_snapshots", _spy_compare_snapshots
+        )
+
+        compare_stored_bundle_facts_pair(old_path, new_path)
+        assert seen_surface_metrics == [True]
+
+    def test_public_surface_growth_is_reported(self, tmp_path: Path) -> None:
+        """End-to-end proof, not just the kwarg spy above: a stored/stored
+        pair whose public surface genuinely grew must report
+        ``public_surface_grew`` the same way a scalar `compare` of the
+        identical pair does."""
+        from abicheck.checker_policy import ChangeKind
+
+        old_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="old",
+            elf=_meta(soname="libcore.so", exports=["core_fn"]),
+            functions=[
+                Function(
+                    name="core_fn", mangled="core_fn", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        new_snapshot = AbiSnapshot(
+            library="libcore.so",
+            version="new",
+            elf=_meta(soname="libcore.so", exports=["core_fn", "new_fn"]),
+            functions=[
+                Function(
+                    name="core_fn", mangled="core_fn", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="new_fn", mangled="new_fn", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
+        save_bundle_facts(capture_bundle_facts({"libcore.so": new_snapshot}), new_path)
+
+        result = compare_stored_bundle_facts_pair(old_path, new_path)
+
+        kinds = {c.kind for c in result.per_library[0].changes}
+        assert ChangeKind.PUBLIC_SURFACE_GREW in kinds

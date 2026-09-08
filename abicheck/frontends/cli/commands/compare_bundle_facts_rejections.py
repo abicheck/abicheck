@@ -181,6 +181,12 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         use_cases_manifest=kwargs.get("use_cases_manifest"),
         diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
         audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
+        # CodeRabbit/Codex review on PR #1154: --audit-suppressions with no
+        # --suppress is a harmless no-op on every other `compare` path now
+        # (nothing to audit) -- only a real --suppress alongside it is a
+        # genuine conflict this driver's per-library fan-out can't honor
+        # (see _reject_set_input_flags's own comment for the full reasoning).
+        suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
         require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
     )
@@ -314,15 +320,13 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
     # unconditional everywhere else on `compare` now) -- nothing left to
     # reject a user for asking for; --explain-patterns is likewise harmless
     # here (it only echoes result.pattern_modulations, empty on this path).
-    # --surface-metrics is still a real flag, though, and this dispatcher
-    # still never wires it into compare_release_against_bundle_facts() (a
-    # pre-existing internal limitation of that engine call) -- so a
-    # requested metric-drift finding would still silently never happen.
-    if kwargs.get("surface_metrics"):
-        raise click.UsageError(
-            "--surface-metrics is not supported together with a "
-            "stored-bundle-facts OLD_INPUT."
-        )
+    # --surface-metrics used to be rejected here because
+    # compare_release_against_bundle_facts() never wired it into its
+    # per-library service.compare_snapshots() call -- CodeRabbit/Codex
+    # review on PR #1154 closed that gap (surface_metrics=True is now
+    # unconditional there too, matching every other path that reaches the
+    # Tier-2 chokepoint), so the (now vestigial, accepted-everywhere-else)
+    # flag is a harmless no-op here as well, not a usage error.
     depth = kwargs.get("depth")
     if depth in ("build", "source"):
         # Codex review: run_compare's own --depth build/source dial collects
