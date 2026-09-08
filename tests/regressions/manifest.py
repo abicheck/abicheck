@@ -361,31 +361,57 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # closed out all eleven cross-source checks (plan §3 row 3):
             # `odr_type_variant`, `identity_collision_detected`, and
             # `compile_context_conflict` (`(symbol, old_value)`, unaffected
-            # by the follow-up below). The first two's initial identities --
+            # by anything below). The first two's initial identities --
             # `(symbol, source_location)` and `(symbol, new_value)`
             # respectively -- were themselves found non-injective against
-            # each check's *own* findings on a single side (Codex review,
-            # PR #1147 finding 1): `_route_type` never updates an ODR
-            # conflict's stored baseline hash once first recorded, so a
-            # *third* divergent per-TU definition of the same type in the
-            # same header compares against that same baseline and appends
-            # another conflict sharing `(symbol, source_location)` with the
-            # one before it; `_route_declaration` records one collision
-            # entry per *additional* colliding declaration, so a three-way
-            # collision on one L4 identity key produces two records sharing
-            # `(symbol, new_value)` too (found post-merge; fixed by #1148).
-            # Both checks were silently building
-            # `Change` objects with no field left to distinguish the
-            # genuinely distinct records, so the caller-side dict
+            # each check's *own* findings on a single side (found post-merge;
+            # fixed by #1148, three rounds of Codex review on that PR):
+            # `_route_type` never updates an ODR conflict's stored baseline
+            # hash once first recorded, so a *third* divergent per-TU
+            # definition of the same type in the same header compares
+            # against that same baseline and appends another conflict
+            # sharing `(symbol, source_location)` with the one before it;
+            # `_route_declaration` records one collision entry per
+            # *additional* colliding declaration, so a three-way collision
+            # on one L4 identity key produces two records sharing
+            # `(symbol, new_value)` too (round 1). Both checks were silently
+            # building `Change` objects with no field left to distinguish
+            # the genuinely distinct records, so the caller-side dict
             # comprehension (keyed by identity) dropped all but the last
-            # one. Fixed by stamping the distinguishing evidence each check
-            # already computes (the ODR conflict's own per-TU layout hashes;
-            # the identity collision's own transition USR) onto
-            # `Change.old_value`/`new_value`, and widening both identity
-            # functions to read the extra field(s): `odr_type_variant` is
-            # now `(symbol, source_location, old_value, new_value)`,
-            # `identity_collision_detected` is now `(symbol, new_value,
-            # old_value)`.
+            # one. Round 1's fix stamped the distinguishing evidence each
+            # check already computes (the ODR conflict's own per-TU layout
+            # hashes; the identity collision's own transition USR)
+            # *positionally* onto `Change.old_value`/`new_value`. Round 2
+            # found that positional storage was itself order-dependent: both
+            # `_route_type`'s stored-baseline-vs-new hash and
+            # `_route_declaration`'s previous-vs-current USR are assigned by
+            # TU/entity visitation order within one side's own replay, not
+            # by any OLD/NEW-snapshot meaning, so the same persistent
+            # conflict/collision could be recorded as `(A, B)` on one side
+            # and `(B, A)` on the other -- fixed by sorting each pairwise
+            # pair before storing it. Round 3 found that sorting a
+            # *pairwise* record is still traversal-dependent for three or
+            # more variants/participants: `{A, B, C}` visited in different
+            # orders yields different sets of pairwise edges even though the
+            # underlying unordered set is identical. The actual fix: both
+            # checks were rewritten to stop emitting one `Change` per
+            # pairwise record at all, and instead group the producer's raw
+            # records by the same key `_route_type`/`_route_declaration`
+            # themselves group by (`(qualified_name, header)`; `identity`),
+            # unioning each group's evidence into one order-independent
+            # `Change` per group. That grouping is what makes
+            # `(symbol, source_location)`/`(symbol, new_value)` unique again
+            # on their own, so the widened, positional identity functions
+            # from rounds 1-2 were reverted back to that un-widened shape.
+            # Round 4 found grouping alone still left one order-dependent
+            # seam in `identity_collision_detected`: when colliding
+            # declarations carry *different* qualified names, retaining
+            # "whichever record's qualified name is first in the group" for
+            # the group's own `symbol` is exactly as order-dependent as the
+            # USR pair was before round 2 -- fixed by deriving the group's
+            # canonical `symbol` as `min()` over the *set* of qualified
+            # names seen for that group, a deterministic function of the
+            # set rather than of arrival order.
             "tests/test_cross_source_evolution.py",
             "tests/test_cross_source_evolution_build_source.py",
         ),

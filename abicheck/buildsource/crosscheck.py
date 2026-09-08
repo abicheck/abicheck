@@ -803,71 +803,68 @@ def _check_odr_type_variant(
             counters,
         )
 
-    findings: list[Change] = []
+    # `_route_type` keys ODR detection by (qualified_name, header) and never
+    # updates that key's stored baseline hash once a conflict is first
+    # recorded (see its own docstring) -- a *third* divergent definition of
+    # the same type in the same header compares against the same original
+    # baseline and appends a second conflict record sharing (qualified_name,
+    # header) with the first. Sorting each pairwise (old_type_hash,
+    # new_type_hash) tuple is not enough to make the resulting identity
+    # order-independent: for three layouts {A, B, C}, visiting A,B,C records
+    # the pairs (A,B) and (A,C), while visiting B,A,C records (A,B) and
+    # (B,C) -- the same *set* of conflicting layouts, but two different sets
+    # of pairwise edges, so an unchanged type recorded under a different TU
+    # visitation order between OLD and NEW would still read as one
+    # PERSISTENT conflict plus a spurious RESOLVED/INTRODUCED pair (Codex
+    # review, P2 finding 1, second follow-up). The fix is to stop treating
+    # each pairwise record as its own finding at all: group every record by
+    # its (qualified_name, header) key -- the same key `_route_type` itself
+    # groups by -- and union each group's `old_type_hash`/`new_type_hash`
+    # into the complete, order-independent set of distinct layouts observed
+    # for that type. Regardless of visitation order, every layout that ever
+    # participated in a conflict appears as one endpoint of some pairwise
+    # record in its group (the chain `_route_type` builds always connects
+    # each newly divergent layout to whatever was then the stored
+    # baseline), so the union is the same set no matter which edges of that
+    # chain got recorded. One `Change` per group, keyed by (qualified_name,
+    # header) alone, is then naturally unique within a single side's own
+    # findings -- no positional old_value/new_value needed for identity at
+    # all, and the aggregated sorted set is carried on `new_value` purely
+    # for the message/report, not because uniqueness depends on it.
+    groups: dict[tuple[str, str], set[str]] = {}
     for conflict in surface.odr_conflicts:
         name = str(conflict.get("qualified_name", "")) or "<anonymous>"
         header = str(conflict.get("header", ""))
+        hashes = groups.setdefault((name, header), set())
+        for hash_field in ("old_type_hash", "new_type_hash"):
+            value = str(conflict.get(hash_field, ""))
+            if value:
+                hashes.add(value)
+
+    findings: list[Change] = []
+    for (name, header), hashes in groups.items():
         where = f" in {header!r}" if header else ""
-        # `_route_type` keys ODR detection by (qualified_name, header) and
-        # never updates that key's stored hash once a conflict is first
-        # recorded (see its own docstring) -- a *third* divergent definition
-        # of the same type in the same header compares against the same
-        # original baseline hash and appends a second, otherwise-identical
-        # conflict record sharing this finding's (symbol, source_location).
-        # The per-TU layout hashes are the only thing that still tells the
-        # two conflicts apart, so they ride on the ``Change`` itself
-        # (old_value/new_value) rather than being dropped after this
-        # function returns -- both this check's own message and any
-        # identity built from its findings need them (Codex review:
-        # ``workflows.cross_source_evolution``'s per-check identity
-        # otherwise silently collapses one conflict onto the other).
-        #
-        # `old_type_hash`/`new_type_hash` are assigned by *TU visitation
-        # order* within one side's own replay, not by any OLD/NEW-snapshot
-        # meaning -- the same two conflicting definitions can land as
-        # (A, B) when one snapshot's source replay happens to visit its TUs
-        # in one order and (B, A) when the other snapshot's replay visits
-        # them in a different order, even though nothing about the conflict
-        # itself changed. Carrying the pair positionally would then key the
-        # *same* persistent conflict as two different identities across
-        # sides -- one spurious RESOLVED and one spurious INTRODUCED instead
-        # of one PERSISTENT (Codex review, P2 finding 1 follow-up). Sort the
-        # two hashes before storing them so the identity this check's own
-        # findings key on is order-independent; a three-way conflict still
-        # keys distinctly because each successive conflict pairs a
-        # *different* baseline/divergent hash (see `_route_type`: only the
-        # first-recorded hash is ever compared against, so the two conflicts
-        # from a three-way case share one hash but not the other).
-        old_hash = str(conflict.get("old_type_hash", ""))
-        new_hash = str(conflict.get("new_type_hash", ""))
-        sorted_hashes = sorted(h for h in (old_hash, new_hash) if h)
-        canonical_old = sorted_hashes[0] if sorted_hashes else None
-        canonical_new = sorted_hashes[1] if len(sorted_hashes) > 1 else None
+        sorted_hashes = sorted(hashes)
+        variants = "|".join(sorted_hashes)
         findings.append(
             _change(
                 ChangeKind.ODR_TYPE_VARIANT,
                 name,
                 f"Type {name!r} has divergent per-translation-unit definitions"
-                f"{where}: the source-replay surface recorded different layouts for "
-                "the same type. Linking code that mixes them is undefined behavior — "
-                "a consumer compiled against one layout silently reads the other. "
-                "Reconcile the definitions (usually a macro/flag that changes the "
-                "type per TU).",
-                old_value=canonical_old,
-                new_value=canonical_new or name,
+                f"{where}: the source-replay surface recorded different "
+                "layouts for the same type. Linking code that mixes them is "
+                "undefined behavior — a consumer compiled against one layout "
+                "silently reads the other. "
+                "Reconcile the definitions (usually a macro/flag that changes "
+                "the type per TU).",
+                old_value=sorted_hashes[0] if sorted_hashes else None,
+                new_value=variants or name,
                 confidence=Confidence.MEDIUM,
                 caused_by_type=name,
                 source_location=header or None,
             )
         )
-    findings.sort(
-        key=lambda c: (
-            c.symbol,
-            c.source_location or "",
-            c.old_value or "",
-            c.new_value or "",
-        )
-    )
+    findings.sort(key=lambda c: (c.symbol, c.source_location or ""))
     detail = (
         f"L4 per-TU type layouts: {len(findings)} type(s) with divergent "
         "cross-TU definitions (ODR conflict)"
@@ -1347,48 +1344,69 @@ def _check_identity_collision(
             counters,
         )
 
-    findings: list[Change] = []
+    # `_route_declaration` records one collision entry per *additional*
+    # colliding declaration once `identity_to_usr` already holds a USR for
+    # this key -- for three participants {A, B, C}, visiting A,B,C records
+    # the transitions (A,B) and (B,C), while visiting A,C,B records (A,C)
+    # and (C,B). Sorting each pairwise transition is not enough to make the
+    # resulting identity order-independent: the same unordered set of three
+    # colliding declarations produces two different sets of pairwise edges
+    # depending purely on visitation order, so an unchanged collision
+    # recorded under a different order between OLD and NEW would still read
+    # as one PERSISTENT collision plus a spurious RESOLVED/INTRODUCED pair
+    # (Codex review, P2 finding 1, second follow-up). The fix, mirroring
+    # `_check_odr_type_variant`'s identical fix: stop treating each pairwise
+    # transition as its own finding. Group every record by its `identity`
+    # key -- the same key `_route_declaration` itself groups by -- and union
+    # each group's `usr_a`/`usr_b` into the complete, order-independent set
+    # of participants. Regardless of visitation order, every declaration
+    # that ever collided appears as one endpoint of some transition in its
+    # group (the chain `_route_declaration` builds always connects each
+    # newly-colliding declaration to whatever was then the stored USR), so
+    # the union is the same set no matter which edges of that chain got
+    # recorded. One `Change` per group, keyed by `identity` alone, is then
+    # naturally unique within a single side's own findings.
+    # `qname` is collected as a *set* per group, not retained from whichever
+    # record happens to be first in `surface.identity_collisions` -- when
+    # colliding declarations have different qualified names, `setdefault`
+    # would otherwise keep whichever name `_route_declaration` happened to
+    # record second (the qname of the *newly arriving* declaration in each
+    # transition), which is exactly as order-dependent as the USR pair
+    # itself. `min(qnames)` is a deterministic function of the group's
+    # *set* of names, so it is stable regardless of visitation order (Codex
+    # review, third follow-up).
+    groups: dict[str, tuple[set[str], set[str]]] = {}
     for collision in surface.identity_collisions:
         identity = str(collision.get("identity", "")) or "<unknown>"
         qname = str(collision.get("qualified_name", "")) or identity
-        usr_a = str(collision.get("usr_a", ""))
-        usr_b = str(collision.get("usr_b", ""))
-        # `identity` (`new_value`) alone is not unique across this check's
-        # own findings: `_route_declaration` records one collision entry per
-        # *additional* colliding declaration, so a three-way collision on
-        # one identity key produces two records sharing both `qname` and
-        # `identity`. `identity_to_usr` is overwritten after every recorded
-        # collision, so the *unordered pair* {usr_a, usr_b} is what tells
-        # successive collisions on the same key apart -- but which USR
-        # lands in `usr_a` vs `usr_b` depends on *entity/TU visitation
-        # order* within one side's own replay (`_route_declaration` calls
-        # whichever USR it saw first "prev"), not on any OLD/NEW-snapshot
-        # meaning. Storing them positionally would key the same persistent
-        # collision as (A, B) on one side and (B, A) on the other -- one
-        # spurious RESOLVED and one spurious INTRODUCED instead of one
-        # PERSISTENT (Codex review, P2 finding 1 follow-up). Sort the pair
-        # before storing it on `old_value` so the identity is
-        # order-independent; a three-way collision still keys distinctly
-        # because each successive collision shares only one USR with the
-        # one before it, not both.
-        usr_pair = sorted(u for u in (usr_a, usr_b) if u)
-        canonical_pair = "|".join(usr_pair) if usr_pair else None
+        qnames, usrs = groups.setdefault(identity, (set(), set()))
+        qnames.add(qname)
+        for usr_field in ("usr_a", "usr_b"):
+            value = str(collision.get(usr_field, ""))
+            if value:
+                usrs.add(value)
+
+    findings: list[Change] = []
+    for identity, (qnames, usrs) in groups.items():
+        qname = min(qnames)
+        sorted_usrs = sorted(usrs)
+        usr_list = ", ".join(repr(u) for u in sorted_usrs)
         findings.append(
             _change(
                 ChangeKind.IDENTITY_COLLISION_DETECTED,
                 qname,
-                f"Two distinct declarations (USR {usr_a!r} and {usr_b!r}) were both "
-                f"linked onto the L4 identity key {identity!r}. The identity fallback "
-                "chain accepts this rare collision by design for unmangled "
-                "cross-scope declarations — any L4/L5 finding attributed to this "
-                "identity may actually describe either declaration; treat it as "
-                "ambiguous between the two USRs above.",
-                old_value=canonical_pair,
+                f"{len(sorted_usrs)} distinct declarations (USRs {usr_list}) were "
+                f"all linked onto the L4 identity key {identity!r}. The identity "
+                "fallback chain accepts this rare collision by design for "
+                "unmangled cross-scope declarations — any L4/L5 finding "
+                "attributed to this identity may actually describe any one of "
+                "the declarations above; treat it as ambiguous between them.",
+                old_value="|".join(sorted_usrs) or None,
                 new_value=identity,
                 confidence=Confidence.MEDIUM,
             )
         )
-    findings.sort(key=lambda c: (c.symbol, c.new_value or "", c.old_value or ""))
+    findings.sort(key=lambda c: (c.symbol, c.new_value or ""))
     facts, counters = _surface_boundary_counters(surface)
     detail = (
         f"L4 identity() collisions: {len(findings)} distinct-declaration "

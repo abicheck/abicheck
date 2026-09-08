@@ -256,54 +256,61 @@ def _default_identity(change: Change) -> Hashable:
 #:   same anonymous-namespace type name recorded in two different headers,
 #:   or two genuinely different anonymous types each falling back to the
 #:   same placeholder). ``source_location`` (the header the conflict was
-#:   recorded against) is *not* always enough on its own, either: a first
-#:   version of this identity used only ``(symbol, source_location)``, on
-#:   the premise that those two together are unique per conflict the way
-#:   ``_check_odr_type_variant``'s own sort key treats them
-#:   (``(c.symbol, c.source_location or "")``). That premise breaks the
-#:   moment a *third* divergent definition of the same type is recorded in
-#:   the same header: ``source_link._route_type`` keys ODR detection by
+#:   recorded against) resolves that residual ambiguity, and two rounds of
+#:   Codex review (P2 finding 1, and its follow-up) each found a way
+#:   ``(symbol, source_location)`` alone was *not* yet sufficient on its
+#:   own: ``source_link._route_type`` keys ODR detection by
 #:   ``(qualified_name, header)`` and never updates that key's stored
-#:   baseline hash once a first conflict is recorded, so every later
-#:   divergent definition compares against the same original baseline and
-#:   appends another conflict record sharing both ``symbol`` and
-#:   ``source_location`` with the one before it (Codex review, P2 finding
-#:   1) -- and, before this fix, sharing every other field too, since
-#:   neither the per-TU layout hashes nor anything else distinguishing was
-#:   even carried onto the ``Change`` object at all. ``_check_odr_type_
-#:   variant`` now stamps the conflict's own ``old_type_hash``/
-#:   ``new_type_hash`` onto ``old_value``/``new_value`` (falling back to the
-#:   type name for ``new_value`` when no hash was recorded, e.g. in tests
-#:   that only ever construct one conflict), so this identity reads all
-#:   four fields. The two hashes are stored **sorted**, not positionally --
-#:   ``old_type_hash``/``new_type_hash`` are assigned by TU visitation order
-#:   within one side's own replay (see ``_route_type``), which is unrelated
-#:   to which snapshot is OLD vs NEW, so the same persistent conflict could
-#:   otherwise land as ``(A, B)`` on one side and ``(B, A)`` on the other and
-#:   read as a spurious RESOLVED+INTRODUCED pair instead of one PERSISTENT
-#:   conflict (Codex review, P2 finding 1 follow-up).
+#:   baseline hash once a first conflict is recorded, so a third divergent
+#:   definition of the same type in the same header appends another
+#:   conflict record sharing ``(symbol, source_location)`` with the first --
+#:   and carrying the two per-TU layout hashes *positionally*
+#:   (``old_value``/``new_value``, even sorted per-pair) still wasn't
+#:   order-independent: for three layouts ``{A, B, C}``, visiting them
+#:   ``A, B, C`` records the pairs ``(A, B)`` and ``(A, C)``, while visiting
+#:   ``B, A, C`` records ``(A, B)`` and ``(B, C)`` -- the same *set* of
+#:   layouts, but two different sets of pairwise edges, so an unchanged type
+#:   recorded under a different TU visitation order between OLD and NEW
+#:   still read as one PERSISTENT conflict plus a spurious RESOLVED and
+#:   INTRODUCED pair (Codex review, P2 finding 1, second follow-up). The
+#:   actual fix lives in ``_check_odr_type_variant`` itself, not here: it no
+#:   longer emits one ``Change`` per pairwise record at all. It groups every
+#:   record by ``(qualified_name, header)`` -- the same key ``_route_type``
+#:   groups by -- and unions each group's hashes into the complete,
+#:   order-independent set of distinct layouts, emitting exactly one
+#:   ``Change`` per group. That grouping is what makes ``(symbol,
+#:   source_location)`` unique again: there is now at most one finding per
+#:   ``(qualified_name, header)`` pair by construction, so this identity
+#:   function needs no positional tiebreaker at all.
 #: - ``identity_collision_detected`` -- ``symbol`` is the colliding
-#:   declarations' shared qualified name, which is not unique across
-#:   collisions the moment a *third* declaration collides onto the same L4
-#:   ``identity()`` key: ``source_link._route_declaration`` records one
-#:   collision entry per additional colliding declaration, so a three-way
-#:   collision produces two ``Change`` objects sharing one ``symbol``.
-#:   ``new_value`` (the L4 identity key itself) does not disambiguate this
-#:   case either -- a three-way collision on one key means every record
-#:   shares the same ``new_value`` too, not just ``symbol`` (Codex review,
-#:   P2 finding 1; the module's earlier reasoning here understated the risk
-#:   as "residual, narrower"). ``_route_declaration`` overwrites
-#:   ``identity_to_usr`` after every recorded collision, so the
-#:   *unordered pair* of the transition's two USRs genuinely differs
-#:   between successive collisions on the same key; ``_check_identity_
-#:   collision`` now stamps that pair, **sorted** (not positionally --
-#:   which USR lands in ``usr_a`` vs ``usr_b`` depends on entity/TU
-#:   visitation order within one side's own replay, unrelated to which
-#:   snapshot is OLD vs NEW, so storing them positionally could key one
-#:   persistent collision as ``(A, B)``/``(B, A)`` across sides and read as
-#:   a spurious RESOLVED+INTRODUCED pair -- Codex review, P2 finding 1
-#:   follow-up), onto ``old_value``, and this identity reads all three
-#:   fields.
+#:   declarations' shared qualified name, and ``new_value`` is the L4
+#:   ``identity()`` key those declarations all collided onto. Two rounds of
+#:   Codex review (P2 finding 1, and its follow-up) each found a way
+#:   ``(symbol, new_value)`` alone was *not* yet sufficient on its own:
+#:   ``source_link._route_declaration`` records one collision entry per
+#:   *additional* colliding declaration, so a three-way collision on one
+#:   identity key produced two ``Change`` objects sharing both fields -- and
+#:   carrying the transition's own USR pair *positionally* (even sorted per
+#:   pair) still wasn't order-independent, for the identical reason as the
+#:   ODR sibling above: three participants ``{A, B, C}`` produce two
+#:   different sets of pairwise transition edges depending purely on
+#:   visitation order. The actual fix lives in ``_check_identity_collision``
+#:   itself, not here: it no longer emits one ``Change`` per pairwise
+#:   transition at all. It groups every record by ``identity`` -- the same
+#:   key ``_route_declaration`` groups by -- and unions each group's
+#:   ``usr_a``/``usr_b`` into the complete, order-independent participant
+#:   set, emitting exactly one ``Change`` per group. That grouping is what
+#:   makes ``(symbol, new_value)`` unique again: there is now at most one
+#:   finding per ``identity`` key by construction. A third Codex round found
+#:   grouping alone was not quite enough: when colliding declarations carry
+#:   *different* qualified names, retaining "whichever record's qualified
+#:   name is first in the group" is exactly as order-dependent as the USR
+#:   pair was before this fix, and would make ``symbol`` itself vary between
+#:   OLD/NEW even after the USR-pair fix already made ``new_value`` and the
+#:   participant set agree. ``_check_identity_collision`` now derives the
+#:   group's canonical ``symbol`` as ``min()`` over the *set* of qualified
+#:   names seen for that group -- a deterministic function of the set, not
+#:   of arrival order.
 #: - ``compile_context_conflict`` -- ``symbol`` is the build *target*
 #:   label (``target_id`` or the literal ``"(unscoped compile units)"``
 #:   fallback), and one target's compile units can violate more than one
@@ -326,28 +333,23 @@ _IDENTITY_FUNCS: dict[str, Callable[[Change], Hashable]] = {
     # conflict is recorded, so a *third* divergent definition of the same
     # type in the same header compares against the same baseline and appends
     # a second conflict record sharing (symbol, source_location) with the
-    # first. `_check_odr_type_variant` now carries the two per-TU layout
-    # hashes, **sorted** (order-independent -- see its own comment), on
-    # `old_value`/`new_value` for exactly this reason (Codex review, P2
-    # finding 1; sorted per the same review's follow-up finding).
-    CHECK_ODR_TYPE_VARIANT: lambda c: (
-        c.symbol,
-        c.source_location,
-        c.old_value,
-        c.new_value,
-    ),
-    # (symbol, new_value) alone is not unique across a single side's own
-    # findings either: `_route_declaration` records one collision entry per
-    # *additional* colliding declaration, so a three-way collision on one L4
-    # identity key produces two `Change` objects sharing both `symbol` (the
-    # colliding qualified name) and `new_value` (the shared identity key).
-    # `_check_identity_collision` now carries the transition's own USR pair,
-    # **sorted** (order-independent -- see its own comment), on `old_value`
-    # for exactly this reason (Codex review, P2 finding 1; sorted per the
-    # same review's follow-up finding): `identity_to_usr` is overwritten
-    # after every recorded collision, so each successive collision's own
-    # unordered USR pair differs from the one before it.
-    CHECK_IDENTITY_COLLISION: lambda c: (c.symbol, c.new_value, c.old_value),
+    # first, in isolation. `_check_odr_type_variant` now groups every
+    # pairwise conflict record by (qualified_name, header) and emits exactly
+    # one Change per group (see its own comment; Codex review, P2 finding 1
+    # and its order-independence follow-up), which is what makes
+    # `(symbol, source_location)` genuinely unique here -- no positional
+    # old_value/new_value tiebreaker needed.
+    CHECK_ODR_TYPE_VARIANT: lambda c: (c.symbol, c.source_location),
+    # (symbol, new_value) was not unique across a single side's own findings
+    # before the producer-side fix, in isolation: `_route_declaration`
+    # records one collision entry per *additional* colliding declaration, so
+    # a three-way collision on one L4 identity key produced two `Change`
+    # objects sharing both fields. `_check_identity_collision` now groups
+    # every pairwise transition record by `identity` and emits exactly one
+    # Change per group (see its own comment; Codex review, P2 finding 1 and
+    # its order-independence follow-up), which is what makes
+    # `(symbol, new_value)` genuinely unique here.
+    CHECK_IDENTITY_COLLISION: lambda c: (c.symbol, c.new_value),
     CHECK_COMPILE_CONTEXT_CONFLICT: lambda c: (c.symbol, c.old_value),
 }
 
