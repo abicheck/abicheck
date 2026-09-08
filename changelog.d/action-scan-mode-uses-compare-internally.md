@@ -44,4 +44,33 @@ it should read in CHANGELOG.md. Delete the other sections.
   legacy CLI, since `scan`'s risk-driven auto depth resolution and
   `compare`'s own (which infers depth only from `--sources`/`--build-info`,
   never from a diff seed) can resolve to different effective depths for
-  the same inputs.
+  the same inputs. A third review round closed five more gaps: `annotate:
+  true` is now suppressed for `mode: scan` regardless of which CLI actually
+  ran (a migrated compare report carries real `annotations` scan's own
+  report shape never did, which would have silently reversed the
+  documented "no effect for scan mode" contract); `build-info`/`compile-db`
+  given without `sources` and an unpinned depth now also stays on the
+  legacy CLI (the identical auto-depth-resolution mismatch as the
+  `since`/`changed-path` case, since scan's own auto preset elevates a
+  captured build pack all the way to source-target depth, while compare's
+  resolver infers only `build` from the same input); the cross-source
+  hygiene fallback now also fires on a non-empty `pattern_modulations`
+  ledger (ADR-068 D4's pattern-verdict modulation is unconditional on every
+  `compare` invocation, but `scan`'s own default is off, so a migrated
+  invocation could synthesize a real finding scan's default behavior never
+  would have); `-oPATH`-shaped (attached-value) `extra-args` output
+  overrides, which this file's tokenizer has never parsed the concatenated
+  value of, now force the legacy CLI outright rather than risk the
+  cross-source/pattern-verdict fallback silently missing the real report
+  location; and `--write text=...` via `extra-args` (valid on `scan`,
+  rejected by `compare`, which has no `text` secondary format) now also
+  stays on the legacy CLI. One further, deliberately unresolved gap from
+  this round: a migrated scan's raw JSON report is compare-shaped
+  (`report_schema_version`, top-level `changes`), not scan's own separately
+  versioned `scan_schema_version`/`diff`/`coverage`/`crosscheck` contract —
+  this Action's own internal logic (job summary, PR comment, exit code)
+  already reads either shape identically, but a workflow that parses the
+  `report-path` artifact itself expecting scan's shape will see a different
+  one. Resolving this fully means the report-schema unification ADR-068's
+  own plan already scopes as separate, later work (Phase 5's "one canonical
+  report" gap), not something this internal-dispatch change attempts.

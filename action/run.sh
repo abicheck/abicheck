@@ -720,11 +720,51 @@ _extra_args_forces_legacy_scan_cli() {
     case "$_name" in
       --against | --artifact-set | --budget | --build-target | --crosscheck | \
       --manifest | --max-findings | --pattern-verdicts | --no-pattern-verdicts | \
-      --public-header-dir | --risk-rules | --show-suppressed | --depth)
+      --public-header-dir | --risk-rules | --show-suppressed | --depth | \
+      --since | --changed-path)
+        # `--since`/`--changed-path` mirror the dedicated `INPUT_SINCE`/
+        # `INPUT_CHANGED_PATH` condition in the gate below (scan's
+        # risk-driven auto-depth resolution vs compare's own, which never
+        # scores a diff seed for depth at all) -- forced unconditionally
+        # here, not gated on the extra-args-visible `--depth` state, since
+        # `--depth` above already forces the legacy CLI for ANY value it
+        # sees, so the only case left needing this row at all is exactly
+        # the one where no `--depth` appears anywhere (extra-args or a
+        # dedicated input) — precisely where scan's own auto-resolution
+        # risk-scores the seed (Codex/CodeRabbit review, fresh evidence).
         return 0
         ;;
       --format)
         [[ "$_value" != "json" ]] && return 0
+        ;;
+      --write)
+        # `compare --write` accepts json/markdown/sarif/html/junit/review
+        # only; `text` is scan's own secondary-format spelling
+        # (`cli_scan.py`), so `--write text=PATH` reaching `compare` is a
+        # real CLI usage error, not just an ignored value like an
+        # already-covered `--format` mismatch (CodeRabbit review, fresh
+        # evidence: an existing successful `--write text=report.txt` scan
+        # workflow would otherwise start hard-failing).
+        [[ "$_value" == text=* ]] && return 0
+        ;;
+      -o?*)
+        # An attached-value short option (Click's `-oPATH` spelling,
+        # distinct from the bare `-o PATH`/`--output PATH`/`--output=PATH`
+        # forms `_extra_args_output_path` already recovers) — this file's
+        # tokenizer deliberately never parses a short option's
+        # concatenated value (documented limit, `_extra_args_options`'s
+        # own docstring), so an `-oPATH`-shaped token reaches here as one
+        # opaque `NAME` with the whole `-oPATH` text and an empty value,
+        # rather than as a recognized `-o`/PATH pair. Without the real
+        # destination, the cross-source-hygiene fallback's own report
+        # lookup (`_json_report_src`/`_primary_output_path`) could silently
+        # miss the actual written report and publish compare's raw,
+        # unstripped verdict instead of falling back to scan's advisory one
+        # (Codex review, fresh evidence) — force the legacy CLI outright
+        # rather than risk that, the same safe-by-construction direction
+        # this tokenizer already takes everywhere else it can't fully
+        # parse a token.
+        return 0
         ;;
     esac
   done <<<"$(_extra_args_options)"
@@ -1876,6 +1916,22 @@ elif [[ "$MODE" == "scan" ]]; then
   #     attempted here; staying on the already-correct legacy CLI is the
   #     safe fix for this PR, the same principle the pinned-depth condition
   #     above already applies.
+  #   - `build-info`/`compile-db` given, `sources` NOT given, and `depth` is
+  #     empty/`auto`: the identical auto-resolution mismatch as the
+  #     `since`/`changed-path` case just above, for a different trigger.
+  #     `cli_scan.py`'s auto PR preset resolves a build-info-only input all
+  #     the way to `source-target` (it treats a captured build pack as
+  #     evidence source-level analysis is worth attempting), while
+  #     `cli_compare_helpers.py`'s `_resolve_compare_collect_mode` infers
+  #     only `build` from a build-info operand with no `--sources` alongside
+  #     it. So the identical Action inputs (`build-info: ...`, no `sources`,
+  #     no `depth`) can silently drop from L4 source-ABI/L5 graph facts a
+  #     captured build pack contains to L3 build-evidence-only analysis
+  #     under the migrated path, potentially losing real API findings
+  #     (Codex review, verified against `cli_scan.py:1728-1753` vs
+  #     `cli_compare_helpers.py:177-214`). Same fix as every other
+  #     auto-resolution mismatch here: stay on the already-correct legacy
+  #     CLI rather than reproduce scan's own preset logic a second time.
   #
   # Every one of these is a genuine, verified gap in `compare`'s current
   # capability surface, not a shortcut -- see this PR's own report for the
@@ -1897,6 +1953,9 @@ elif [[ "$MODE" == "scan" ]]; then
      || { [[ -n "${INPUT_DEPTH:-}" ]] && [[ "${INPUT_DEPTH:-}" != "auto" ]]; } \
      || { { [[ -z "${INPUT_DEPTH:-}" ]] || [[ "${INPUT_DEPTH:-}" == "auto" ]]; } \
           && { [[ -n "${INPUT_SINCE:-}" ]] || [[ -n "${INPUT_CHANGED_PATH:-}" ]]; }; } \
+     || { { [[ -z "${INPUT_DEPTH:-}" ]] || [[ "${INPUT_DEPTH:-}" == "auto" ]]; } \
+          && { [[ -n "${INPUT_BUILD_INFO:-}" ]] || [[ -n "${INPUT_COMPILE_DB:-}" ]]; } \
+          && [[ -z "${INPUT_SOURCES:-}" ]]; } \
      || [[ "$FORCE_AUDIT_ONLY" == "true" ]] \
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
@@ -2340,7 +2399,19 @@ elif [[ "$MODE" == "scan" ]]; then
   add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
   add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  # `auto` is never forwarded: it's scan's own no-op spelling of "let the
+  # mode preset/risk-scoring decide" (see `_SCAN_USES_LEGACY_CLI`'s own
+  # pinned-depth gate above), but `compare --depth` has no `auto` choice at
+  # all (only binary/headers/build/source) -- forwarding the literal word
+  # would be a real CLI usage error (exit 64) for a scan whose `depth`
+  # input was spelled out as `auto` rather than left unset (CodeRabbit
+  # review, fresh evidence). Reaching this branch at all already means
+  # depth is empty or exactly `auto` (any other value forces the legacy
+  # CLI, above), so omitting it here is always the correct "let compare
+  # infer from sources/build-info" behavior either way.
+  if [[ -n "${INPUT_DEPTH:-}" && "${INPUT_DEPTH:-}" != "auto" ]]; then
+    add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  fi
 
   add_single_flag "--since" "${INPUT_SINCE:-}"
   add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
@@ -2772,29 +2843,41 @@ query = sys.argv[2]
 if query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
 elif query == "cross_source_finding_present":
-    # ADR-068 D3/D4/D5's automatic cross-source-hygiene stage (schema 3.3,
-    # `report/cross_source_evolution.py`): every `Change` it adds carries a
-    # `cross_source_evolution` key (never on a change from any other
-    # detector), read straight off `report["changes"]` -- this block is a
-    # per-change annotation, not the separate summary block of the same
-    # name, so it needs no `_either()`/`diff`-nesting lookup of its own.
-    # `mode: scan`'s migrated-to-`compare` Action path
-    # (`_SCAN_MIGRATED_TO_COMPARE` in run.sh) uses this to detect the one
-    # divergence from `scan --against`'s own baseline semantics that
-    # `compare` cannot yet reproduce inline (`cli_scan_baseline.py`'s
-    # `_strip_automatic_cross_source_findings` keeps these advisory-only for
-    # a baseline comparison, but a real `abicheck compare` subprocess run
-    # has no such stripping) -- printing 1 tells run.sh to discard this
-    # run's result and re-run through the legacy `scan` CLI instead, which
-    # already strips them correctly.
+    # Two independent divergences between `compare` and `scan --against`'s
+    # own baseline semantics that a migrated `mode: scan` Action run cannot
+    # yet reproduce inline, checked together since either one means: discard
+    # this run's result and re-run through the legacy `scan` CLI instead.
+    #
+    # 1. ADR-068 D3/D4/D5's automatic cross-source-hygiene stage (schema
+    #    3.3, `report/cross_source_evolution.py`): every `Change` it adds
+    #    carries a `cross_source_evolution` key (never on a change from any
+    #    other detector), read straight off `report["changes"]` -- this
+    #    block is a per-change annotation, not the separate summary block of
+    #    the same name, so it needs no `_either()`/`diff`-nesting lookup of
+    #    its own. `cli_scan_baseline.py`'s
+    #    `_strip_automatic_cross_source_findings` keeps these advisory-only
+    #    for a baseline comparison, but a real `abicheck compare` subprocess
+    #    run has no such stripping.
+    # 2. ADR-068 D4's pattern-verdict modulation (`checker.py`,
+    #    `pattern_verdicts.apply_pattern_verdicts`): unconditional on every
+    #    `compare` invocation with no opt-out, but `scan`'s own
+    #    `--pattern-verdicts` default is `false` -- so a migrated scan can
+    #    synthesize a real, non-empty `pattern_modulations` ledger entry
+    #    (schema top-level `pattern_modulations`, only present when
+    #    non-empty) that a default scan run would never have produced at
+    #    all (Codex review, fresh evidence: an opaque-handle idiom
+    #    modulation turning a compatible addition into `opaque_invariant_
+    #    broken`/BREAKING).
     changes = report.get("changes")
-    found = False
+    cross_source_found = False
     if isinstance(changes, list):
-        found = any(
+        cross_source_found = any(
             isinstance(c, dict) and c.get("cross_source_evolution") is not None
             for c in changes
         )
-    print(1 if found else 0)
+    pattern_modulations = report.get("pattern_modulations")
+    pattern_verdicts_found = bool(pattern_modulations)
+    print(1 if (cross_source_found or pattern_verdicts_found) else 0)
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
     # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
@@ -3022,24 +3105,28 @@ PYQUERY
 # the migrated `compare` invocation (e.g. `API_BREAK`, exit 2) -- verified
 # directly against `catalog/cases/case148_xcheck_header_build_mismatch`.
 #
-# Detected here by reading the compare run's own JSON report for any
-# `changes[].cross_source_evolution` (present on, and only on, a `Change`
-# the automatic stage itself added -- `cross_source_finding_present` above).
-# When one is present, this compare run is NOT scan-baseline-equivalent, so
-# its result is discarded entirely and this exact same logical invocation is
-# re-run through the legacy `abicheck scan` CLI instead -- reusing
-# `_build_legacy_scan_cmd` (the same builder `_SCAN_USES_LEGACY_CLI=true`
-# itself calls above) rather than reimplementing
+# Detected here by reading the compare run's own JSON report for either of
+# two independent divergences (`cross_source_finding_present` above, despite
+# its name, checks both): a `changes[].cross_source_evolution` (present on,
+# and only on, a `Change` the automatic cross-source-hygiene stage itself
+# added), or a non-empty `pattern_modulations` (ADR-068 D4's unconditional
+# pattern-verdict modulation, which `scan`'s own `--pattern-verdicts false`
+# default never runs at all). When either is present, this compare run is
+# NOT scan-baseline-equivalent, so its result is discarded entirely and this
+# exact same logical invocation is re-run through the legacy `abicheck scan`
+# CLI instead -- reusing `_build_legacy_scan_cmd` (the same builder
+# `_SCAN_USES_LEGACY_CLI=true` itself calls above) rather than reimplementing
 # `_strip_automatic_cross_source_findings`'s stripping/verdict-recompute
-# logic a second time in bash. This costs a second `abicheck` invocation
-# only in this uncommon case (a cross-source finding actually present); the
-# common case (no such finding) uses the compare run's own result as-is,
-# since nothing would have been stripped from it anyway.
+# logic (or a pattern-verdict-aware equivalent) a second time in bash. This
+# costs a second `abicheck` invocation only in the uncommon case one of these
+# is actually present; the common case (neither) uses the compare run's own
+# result as-is, since nothing would have differed from scan's own baseline
+# path anyway.
 if [[ "$MODE" == "scan" && "${_SCAN_MIGRATED_TO_COMPARE:-false}" == "true" ]]; then
   _cross_source_report_src="$(_json_report_src)"
   if [[ -n "$_cross_source_report_src" ]] \
      && [[ "$(_report_query "$_cross_source_report_src" cross_source_finding_present)" == "1" ]]; then
-    echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) found a cross-source hygiene finding in this comparison. scan's own baseline path keeps such findings advisory-only unless explicitly promoted via --crosscheck KEY=error, but a direct 'abicheck compare' subprocess run does not -- re-running via the legacy 'abicheck scan' CLI to match scan's own semantics, and using that result instead."
+    echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) found a cross-source hygiene finding, or a pattern-verdict modulation, in this comparison that scan's own default behavior wouldn't have produced (cross-source findings stay advisory-only unless explicitly promoted via --crosscheck KEY=error; pattern-verdict modulation is off by default). Re-running via the legacy 'abicheck scan' CLI to match scan's own semantics, and using that result instead."
     # Rebuild CMD from scratch as the equivalent legacy `scan` invocation --
     # same builder, same INPUT_* values, so every flag this run already
     # resolved (headers, build evidence, policy, depth, ...) is forwarded
@@ -3064,7 +3151,7 @@ if [[ "$MODE" == "scan" && "${_SCAN_MIGRATED_TO_COMPARE:-false}" == "true" ]]; t
     # `_run_abicheck_invocation` needs it: its own `_STDOUT_JSON_FILE`
     # capture decision.
     _EFFECTIVE_FORMAT="$(_effective_format)"
-    _run_abicheck_invocation "abicheck scan (legacy CLI rerun -- cross-source hygiene finding found in the migrated compare run)"
+    _run_abicheck_invocation "abicheck scan (legacy CLI rerun -- a cross-source hygiene finding or pattern-verdict modulation was found in the migrated compare run)"
   fi
 fi
 
@@ -4512,7 +4599,22 @@ _post_pr_comment() {
     || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
-_emit_annotations
+if [[ "$MODE" != "scan" ]]; then
+  # action.yml's own `annotate` input documentation states "has no effect
+  # on scan mode as of this Action version" -- true for the legacy scan
+  # CLI's report (it carries no top-level `annotations` field at all,
+  # `_report_query` finds nothing, `_emit_annotations` returns early), but
+  # NOT true for a migrated `mode: scan` run under `_SCAN_USES_LEGACY_CLI
+  # == false`: that run's underlying report is compare-shaped and DOES
+  # carry `annotations` (compare's own, unrelated, documented feature), so
+  # calling `_emit_annotations` unconditionally would start emitting real
+  # inline annotations for `annotate: true` scan runs -- silently reversing
+  # a documented "no effect" contract for exactly the subset of scans this
+  # PR migrates (Codex review, fresh evidence). Gated on the Action's own
+  # `MODE` input, not which CLI binary produced the report, so this holds
+  # regardless of the migration gate's own logic changing over time.
+  _emit_annotations
+fi
 _maybe_post_pr_comment
 
 # ---------------------------------------------------------------------------

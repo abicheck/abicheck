@@ -80,7 +80,14 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     ) as f:
         f.write(script)
         script_path = f.name
-    env = dict(os.environ)
+    # Ambient INPUT_* variables are dropped, not just overlaid: every
+    # assertion in this module reads the gate decision from `cmd[1]`
+    # ("compare" vs "scan"), and a stray ambient INPUT_BUDGET/INPUT_DEPTH/
+    # INPUT_FORMAT (e.g. leaked from the calling process's own environment)
+    # would silently flip that decision. The sibling module
+    # (test_action_run_sh_scan_cross_source_fallback.py) already filters
+    # these out for the identical reason (CodeRabbit review).
+    env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env.update(env_extra)
     try:
         result = subprocess.run(

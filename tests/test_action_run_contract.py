@@ -27,14 +27,12 @@ action→CLI flag drift, for every mode, not just the one that broke.
 """
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
+from click.testing import CliRunner
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 ACTION_YML = Path(__file__).resolve().parents[1] / "action.yml"
@@ -78,9 +76,6 @@ def _flags_by_subcommand() -> dict[str, set[str]]:
 def _valid_flags(subcommand: str) -> set[str]:
     """The set of long options the real CLI accepts for *subcommand*."""
     parts = subcommand.split()  # e.g. "stack-check" stays one token
-    # rich-click renders help with UTF-8 box-drawing chars. On Windows the child
-    # would otherwise encode stdout as cp1252 and crash (exit 1) on those chars,
-    # so force UTF-8 in the child too — not just in our decode.
     # COLUMNS is forced wide: with no TTY, rich-click falls back to an 80-col
     # default, and at that width it truncates a long option name in its own
     # option-name column with an ellipsis (e.g. "--bundle-system-provide…")
@@ -90,40 +85,38 @@ def _valid_flags(subcommand: str) -> set[str]:
     # (a false "action/run.sh passes an option scan doesn't accept" failure,
     # reproduced deterministically at COLUMNS=80/unset).
     #
-    # PYTHONPATH is dropped rather than inherited (`{**os.environ}` would
-    # otherwise pass it straight through): this test's whole point is asking
-    # the real, pip-installed `abicheck` what its own CLI accepts, and
-    # `action/run.sh` itself documents (see its own `PYTHONPATH=` clearing
-    # before every `abicheck`-importing invocation, e.g. around line 773)
-    # that an inherited `PYTHONPATH` can make `import abicheck` resolve a
-    # same-named module/package elsewhere on that path instead of the real
-    # one — silently shrinking (or otherwise changing) the CLI surface this
-    # subprocess reports. Reproduced directly under a full `pytest -n auto`
-    # run: this test, scheduled last on its worker, intermittently saw
-    # `compare` missing exactly `compile_context_options`'s flag group
-    # (`--ast-frontend`/`--compiler`/`--compiler-prefix`/`--lang`/
-    # `--nostdinc`/`--sysroot`) — never reproduced in isolation, consistent
-    # with some earlier test in the same xdist worker leaving a stale
-    # `PYTHONPATH` in `os.environ` for the remainder of that worker's
-    # session. `sys.executable`'s own resolution and every other ambient
-    # variable (`PATH` included) stay inherited — only `PYTHONPATH` is a
-    # known, previously-documented shadowing vector in this codebase.
-    env = {
-        **{k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
-        "PYTHONUTF8": "1",
-        "PYTHONIOENCODING": "utf-8",
-        "COLUMNS": "300",
-    }
+    # Invoked in-process via Click's own CliRunner rather than a
+    # `subprocess.run([sys.executable, "-m", "abicheck", ...])` child, which
+    # this test used until it started intermittently failing under a full
+    # `pytest -n auto` run (never in isolation): scheduled as the very last
+    # test on its xdist worker, it would occasionally see `compare` missing
+    # exactly `compile_context_options`'s flag group (`--ast-frontend`/
+    # `--compiler`/`--compiler-prefix`/`--lang`/`--nostdinc`/`--sysroot`).
+    # Root cause not fully pinned down (a `PYTHONPATH` leak from an earlier
+    # test in the same worker was one candidate, ruled out directly — the
+    # same failure reproduced again with `PYTHONPATH` explicitly stripped
+    # from the child's env), but the whole class of subprocess-environment/
+    # resource risk this was chasing doesn't exist for an in-process call:
+    # every other test in the very same worker session already imports and
+    # exercises the real `abicheck.cli.main` Click group directly, with no
+    # comparable flakiness, so invoking that same already-loaded command
+    # object here removes the extra process spawn entirely rather than
+    # trying to further harden it.
+    from abicheck.cli import main
+
     # `compare`/`dump`/`scan --help` only show a curated common subset (G21.8
     # collapse M2); `--help-all` is the full surface and is what this test
     # needs to validate action/run.sh's flags against. Other subcommands
     # don't have the curated/full split, so they keep plain --help.
     help_flag = "--help-all" if subcommand in ("compare", "dump", "scan") else "--help"
-    out = subprocess.run(
-        [sys.executable, "-m", "abicheck", *parts, help_flag],
-        capture_output=True, text=True, check=True,
-        encoding="utf-8", errors="replace", env=env,
-    ).stdout
+    result = CliRunner().invoke(
+        main, [*parts, help_flag], env={"COLUMNS": "300"}, color=False
+    )
+    assert result.exit_code == 0, (
+        f"`abicheck {subcommand} {help_flag}` exited {result.exit_code} "
+        f"instead of rendering help:\n{result.output}"
+    )
+    out = result.output
     # rich-click wraps help lines, so a flag can be split across the box; join
     # first, then scoop every "--flag" token.
     joined = out.replace("\n", " ")
