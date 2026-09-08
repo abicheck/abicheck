@@ -22,6 +22,7 @@ from abicheck.cli_helpers_compare import (
     discover_project_config,
     dry_run_compile_db_matched,
     fold_l0_hard_removals,
+    load_required_symbols,
 )
 from abicheck.errors import AbicheckError
 from abicheck.model import AbiSnapshot
@@ -829,4 +830,50 @@ def test_pair_wide_dialect_override_skipped_with_no_headers():
         "c++", [], [], compile_ctx, side_ctx
     )
     assert result_compile is compile_ctx
-    assert result_side is side_ctx
+
+
+def test_load_required_symbols_plain_values_only():
+    """No ``@`` entries: everything is literal, no file was consulted."""
+    combined, from_file, digest, path = load_required_symbols(("a", "b"))
+    assert combined == ("a", "b")
+    assert from_file == ()
+    assert digest is None
+    assert path is None
+
+
+def test_load_required_symbols_rejects_more_than_one_file(tmp_path):
+    """Two ``@FILE`` values in one invocation is a usage error naming both --
+    matches the singular ``--required-symbol``/``--required-symbols`` flag
+    this merge replaced (ADR-068 D5 / plan Phase 7h)."""
+    f1 = tmp_path / "one.txt"
+    f2 = tmp_path / "two.txt"
+    f1.write_text("a\n", encoding="utf-8")
+    f2.write_text("b\n", encoding="utf-8")
+    with pytest.raises(click.UsageError, match="at most one"):
+        load_required_symbols((f"@{f1}", f"@{f2}"))
+
+
+def test_load_required_symbols_rejects_a_missing_file(tmp_path):
+    """A named ``@FILE`` that does not exist on disk is a usage error, not a
+    silent empty contribution."""
+    missing = tmp_path / "does-not-exist.txt"
+    with pytest.raises(click.UsageError, match="no such file"):
+        load_required_symbols((f"@{missing}",))
+
+
+def test_load_required_symbols_combines_literal_and_file(tmp_path):
+    """A plain value and an ``@FILE`` value combine, comments/blanks in the
+    file are ignored, and the digest/path name the real file that
+    contributed (Codex review: a receipt must tell "no file" from "a file
+    that parsed to nothing")."""
+    import hashlib
+
+    listed = tmp_path / "symbols.txt"
+    listed.write_text("# comment\nfile_sym\n\nanother_sym\n", encoding="utf-8")
+    combined, from_file, digest, path = load_required_symbols(
+        ("literal_sym", f"@{listed}")
+    )
+    assert combined == ("literal_sym", "file_sym", "another_sym")
+    assert from_file == ("file_sym", "another_sym")
+    assert digest == hashlib.sha256(listed.read_bytes()).hexdigest()
+    assert path == str(listed)

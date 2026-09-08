@@ -199,8 +199,6 @@ class TestManifestScopedToRetainedMembers:
             "compare",
             str(old),
             str(new / "libalgo.so.json"),
-            "-j",
-            "1",
             "--on-incomplete-scope",
             policy,
         )
@@ -226,7 +224,7 @@ class TestManifestScopedToRetainedMembers:
         _write_stored_package_with_manifest(old, libs, _manifest(("core_fn", None)))
         new = tmp_path / "new_pkg"
         _write_stored_package(new, {"libalgo.so": libs["libalgo.so"]})
-        code, doc = _invoke_json("compare", str(old), str(new), "-j", "1")
+        code, doc = _invoke_json("compare", str(old), str(new))
         assert "core_fn" in _manifest_findings(doc)
         assert doc["comparison_scope"]["completeness"] == "complete"
         assert not doc.get("bundle_analysis_errors")
@@ -359,8 +357,6 @@ class TestDsoOnlyUnclassifiedIsFailed:
             "compare",
             str(old),
             str(new),
-            "-j",
-            "1",
             "--dso-only",
             "--fail-on-removed-library",
             "--on-incomplete-scope",
@@ -399,8 +395,6 @@ class TestDsoOnlyUnclassifiedIsFailed:
             "compare",
             str(old),
             str(new),
-            "-j",
-            "1",
             "--dso-only",
             "--fail-on-removed-library",
         )
@@ -460,8 +454,6 @@ class TestFailedMemberIsNeverAProvenRemoval:
             "compare",
             str(old),
             str(new),
-            "-j",
-            "1",
             "--dso-only",
             "--fail-on-removed-library",
         )
@@ -608,7 +600,7 @@ class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
         if degraded_side == "old":
             old, new = new, old
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "-j", "1", "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--on-incomplete-scope", policy
         )
         assert "func_removed" not in json.dumps(doc)
         assert doc["verdict"] != "BREAKING"
@@ -655,7 +647,7 @@ class TestDamagedMarkerSectionFailsClosed:
         assert is_multi_artifact_package(new) is True
         assert classify_compare_operand(new) == "directory"
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "-j", "1", "--format", "json"]
+            main, ["compare", str(old), str(new), "--format", "json"]
         )
         # Refused as a usage error by whichever reader meets the damage
         # first (materialization or the marker read), never compared.
@@ -849,8 +841,6 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
             "compare",
             str(old),
             str(so),
-            "-j",
-            "1",
             "--dso-only",
             "--on-incomplete-scope",
             policy,
@@ -1153,8 +1143,6 @@ class TestGhostMarkerInAStoredPackageIsRefused:
                 "compare",
                 str(old),
                 str(new),
-                "-j",
-                "1",
                 "--fail-on-removed-library",
                 "--format",
                 "json",

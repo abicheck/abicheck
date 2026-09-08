@@ -212,8 +212,6 @@ class TestBundleFactsOutDoesNotDuplicateStoredLibraries:
             str(new_pkg),
             "--format",
             "json",
-            "-j",
-            "1",
             "--bundle-facts-out",
             str(out_path),
         )
@@ -505,8 +503,6 @@ class TestBundleFactsOutNeverAttributesNewsManifestToOld:
             str(new_pkg),
             "--format",
             "json",
-            "-j",
-            "1",
             "--bundle-facts-out",
             str(out_path),
         )

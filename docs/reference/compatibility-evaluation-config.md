@@ -161,7 +161,7 @@ the shadowed input is retained in the receipt
 | `policy.base` | `--policy` `base_policy`; legacy `--policy` | `policy` | — | — |
 | `policy.overrides` | `--policy` `overrides:` | — | — | `policy` |
 | `policy.packs` | *(pack paths)* | — | — | — |
-| `gate.preset` | `--severity-preset`; `--profile` (see below) | — | `severity.preset` | — |
+| `gate.preset` | `--severity-preset` | — | `severity.preset` | — |
 | `gate.severity.*` | `severity.abi_breaking: error`, … | — | `severity.*` | `gate` |
 | `gate.packs` | *(pack paths)* | — | — | — |
 | `suppressions` | `--suppress` | `suppress` | — | — |
@@ -186,29 +186,17 @@ reason — there is no selector whose source layer it could name.
 `suppression.strict: true` and `suppression.require_justification: true` are real inputs with no
 field in ADR-049's typed shape; they stay outside this object.
 
-### The `run_profile` tier and `--profile ci-gate`
+### The `run_profile` tier: removed
 
-`--profile` fills each setting its bundle declares only where you left the
-corresponding flag alone, so it sits at D7's `run_profile` tier: below an
-explicit flag, above `.abicheck.yml`. Exactly one field of this object is
-reachable that way — `gate.preset`, which `ci-gate` sets to `default`. The
-bundle's other keys (`depth`, the report format) are execution and report
-settings with no field here. (Before CLI cleanup phase two PR G2, `ci-gate`
-reached this tier through `gate.exit_code_scheme` instead, set to
-`"severity"` directly — that field no longer exists at all, so `ci-gate` was
-migrated to state `severity.preset: default` instead: the identical
-`SeverityConfig` the old forced scheme paired with, expressed as an actual
-severity setting, which is what now drives the purely-automatic algorithm to
-`"severity"` and preserves the profile's exact prior behavior.)
-
-That one field is a **known deviation** from D7, which scopes the
-`run_profile` tier to execution fields and puts severity in the `gate`
-namespace. It is recorded as what it is rather than smoothed over: `ci-gate`
-predates ADR-049 and really does select a severity preset, so resolving the
-field without the profile would report a value the run was not scored with.
-Removing the deviation means either moving the key out of `ci-gate` into a
-gate pack or amending D7 — both user-visible changes in their own right. Any
-*other* field a future profile tried to assign is rejected.
+D7 originally reserved a `run_profile` precedence tier (below an explicit
+flag, above `.abicheck.yml`) for `--profile`'s injected values — in
+practice, exactly one field, `gate.preset` (`ci-gate` set it to `default`).
+ADR-068 D5 / plan Phase 7e removed `--profile` outright rather than
+replacing it (it bundled evidence depth, report rendering, and gate policy
+behind one word), and its own D7 amendment note removed the now-permanently-
+unpopulated `run_profile` tier along with it. `SelectorLayer` has five
+tiers today, not six. State `--severity-preset` (or `.abicheck.yml`'s
+`severity:` block) directly instead of relying on a preset bundle.
 
 ## Pack manifests
 

@@ -19,7 +19,7 @@ doesn't fully capture on its own:
 
 > **History note:** this used to be a standalone `abicheck plugin-check`
 > command. The pre-1.0 CLI reset folded it into
-> `compare --required-symbol`/`--required-symbols` (ADR-043) — the full
+> `compare --required-symbol` (ADR-043) — the full
 > library comparison runs once, and its own result is always the primary
 > verdict/exit code (workstream D-S1); the entrypoint contract's own
 > confirmed/potential/unresolved impact is reported alongside it,
@@ -31,7 +31,7 @@ doesn't fully capture on its own:
 ## `compare --required-symbol` — the host's load contract
 
 Give the old and new plugin (binary **or** JSON snapshot) plus the host's
-required entrypoints, and `--required-symbol`/`--required-symbols` reports
+required entrypoints, and `--required-symbol` reports
 whether the new plugin still satisfies the host — the plugin-load mirror of
 `--used-by`.
 
@@ -41,7 +41,7 @@ abicheck compare plugin.v1.so plugin.v2.so \
   --required-symbol plugin_init --required-symbol plugin_run
 
 # …or from a file (one symbol per line, '#' comments allowed):
-abicheck compare plugin.v1.so plugin.v2.so --required-symbols host.syms
+abicheck compare plugin.v1.so plugin.v2.so --required-symbol @host.syms
 ```
 
 A `host.syms` file is just the symbols the host resolves:
@@ -52,8 +52,8 @@ plugin_run     # core entrypoint
 plugin_shutdown
 ```
 
-`--required-symbol` and `--required-symbols` combine: values from both are
-merged into one required-entrypoint set.
+`--required-symbol` values combine: a plain symbol name and an `@FILE`
+value merge into one required-entrypoint set.
 
 ### What it reports
 
@@ -72,7 +72,7 @@ whole point.
 
 ### Exit codes
 
-`compare --required-symbol`/`--required-symbols` uses the same exit codes as
+`compare --required-symbol` uses the same exit codes as
 plain `compare` (see [Exit Codes](../reference/exit-codes.md)), computed from
 the worst of the full-library verdict and the entrypoint-scoped verdict:
 

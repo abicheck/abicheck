@@ -58,8 +58,6 @@ class TestUnmatchedDegradedMemberIsFailedNotProven:
             "compare",
             str(old),
             str(new),
-            "-j",
-            "1",
             "--fail-on-removed-library",
             "--on-incomplete-scope",
             policy,

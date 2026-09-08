@@ -162,7 +162,7 @@ class TestOnlyTheAssertionProves:
         _write_stored_package(old, libs)
         _write_stored_package(new, _LIBS, inventory_complete=asserted)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "-j", "1", "--fail-on-removed-library"
+            "compare", str(old), str(new), "--fail-on-removed-library"
         )
         scope = doc["comparison_scope"]
         assert isinstance(scope, dict)

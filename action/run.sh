@@ -294,7 +294,7 @@ add_single_flag() {
 # two, PR E, the release engine supports --write directly (json/markdown/
 # junit, the same set --format itself accepts there) -- this helper is no
 # longer needed to skip the --write PR-comment JSON injection, but stays in
-# use for the release-only flags below (--jobs, --output-dir, --dso-only,
+# use for the release-only flags below (--output-dir, --dso-only,
 # --require-complete-analysis's own rejection, ...).
 _is_release_style_operand() {
   local path="$1"
@@ -348,14 +348,14 @@ _extra_args_is_value_option() {
     --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
     --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
     --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
-    --frontend-context | --header | --include | --instantiation-manifest | --jobs | \
+    --frontend-context | --header | --include | --instantiation-manifest | \
     --lang | --ld-library-path | --manifest | --max-findings | --max-json-object-nodes | \
     --new-variant | --old-variant | --output | --output-dir | --pack | \
-    --pdb-path | --policy | --post-manifest | --probe-matrix | --profile | \
-    --public-header-dir | --report-mode | --required-symbol | --required-symbols | --risk-rules | \
+    --pdb-path | --policy | --post-manifest | --probe-matrix | \
+    --public-header-dir | --report-mode | --required-symbol | --risk-rules | \
     --search-path | --severity-preset | --show-only | --since | --sources | \
     --suppress | --sysroot | --use-cases | --used-by | --version | \
-    --write | -H | -I | -j | -o)
+    --write | -H | -I | -o)
       return 0
       ;;
   esac
@@ -1552,20 +1552,24 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
   fi
 
-  # Scoped comparison (ADR-043): --used-by/--required-symbol(s) contracts.
-  # The CLI itself enforces --used-by vs --required-symbol/--required-symbols
-  # mutual exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
+  # Scoped comparison (ADR-043): --used-by/--required-symbol contracts.
+  # The CLI itself enforces --used-by vs --required-symbol mutual
+  # exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
   add_flag "--used-by-manifest" "${INPUT_USED_BY_MANIFEST:-}"
   add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
-  add_single_flag "--required-symbols" "${INPUT_REQUIRED_SYMBOLS:-}"
+  # ADR-068 D5 / plan Phase 7h: the CLI's own --required-symbols FILE flag
+  # is gone -- --required-symbol now accepts '@FILE' as one of its
+  # repeatable values. The Action's required-symbols input is unchanged;
+  # only its translation to the CLI moves.
+  if [[ -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+    CMD+=(--required-symbol "@${INPUT_REQUIRED_SYMBOLS}")
+  fi
 
   # Package-specific options — only meaningful (and only forwarded) when
   # old-library/new-library are directories or packages; gated here rather
-  # than left to the CLI's own single-file warning so a plain single-pair
-  # compare doesn't get a spurious "-j/--jobs ignored" warning on every run
-  # just because jobs defaults to '0'.
+  # than left to the CLI's own single-file warning.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     add_sided_flag "--debug-info" "old" "${INPUT_DEBUG_INFO1:-}"
@@ -1585,7 +1589,6 @@ elif [[ "$MODE" == "compare" ]]; then
     if [[ "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" == "true" ]]; then
       CMD+=(--fail-on-removed-library)
     fi
-    add_single_flag "--jobs" "${INPUT_JOBS:-0}"
   fi
 
 elif [[ "$MODE" == "deps-tree" ]]; then

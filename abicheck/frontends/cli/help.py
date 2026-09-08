@@ -155,7 +155,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Release (directory/package inputs)",
             "options": [
-                "--jobs",
                 "--dso-only",
                 "--output-dir",
                 "--fail-on-removed-library",
@@ -406,7 +405,6 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "used_by_apps",
         "used_by_manifests",
         "required_symbols_opt",
-        "required_symbols_file",
         # Build & source evidence
         "depth",
         "sources",

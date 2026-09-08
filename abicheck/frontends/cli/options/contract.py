@@ -80,7 +80,7 @@ def pack_option(f: F) -> F:
         "severity setting is in effect, so a pack asserting it is rejected "
         "at load time). Composition "
         "is D8's: an explicitly stated value (--policy, "
-        "--severity-preset, a --profile, or .abicheck.yml) "
+        "--severity-preset, or .abicheck.yml) "
         "always outranks a pack, and two selected packs assigning "
         "different values to the same field are a usage error unless "
         "something else already states it. A manifest assigning a field "

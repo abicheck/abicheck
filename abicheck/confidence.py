@@ -276,8 +276,8 @@ _compute_confidence = compute_confidence
 #: of which variant fires -- the one stable marker a consumer can filter
 #: `coverage_warnings` on to isolate this specific warning from the rest
 #: (detector-disabled notices, missing-metadata notes), used by both
-#: ``cli_compare_options.echo_coverage_warnings``'s ``--profile quick`` filter
-#: and ``junit_coverage_warnings``'s JUnit rendering.
+#: ``cli_compare_options.echo_coverage_warnings``'s ``--format oneline``
+#: filter and ``junit_coverage_warnings``'s JUnit rendering.
 SAME_BINARY_WARNING_MARKER = "byte-identical"
 
 

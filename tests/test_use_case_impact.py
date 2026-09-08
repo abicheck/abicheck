@@ -323,16 +323,15 @@ class TestSetInputsAreRejected:
 
 
 class TestStatKeepsItsSummaryOnlyShape:
-    """The internal one-line format's documented contract is one shape: a
-    bare one-line summary. A use-case attribution block is the opposite of a
+    """The one-line format's documented contract is one shape: a bare
+    one-line summary. A use-case attribution block is the opposite of a
     summary, so the combination is rejected rather than silently dropping
     the manifest — the same reasoning as the set-input rejection above
     (Codex review, originally about ``--stat``; CLI cleanup phase two, PR 1
-    moved the one-line output behind ``--profile quick`` instead of a
-    boolean flag, but the summary-only contract is unchanged). Unlike the
-    old ``--stat`` boolean, this format is reached only when nothing else
-    (an explicit ``--format``) overrides the profile's own injected value —
-    so there is exactly one combination to check, not one per format."""
+    moved the one-line output behind the built-in ``quick`` --profile
+    instead of a boolean flag, and plan Phase 7e later removed --profile
+    outright, promoting ``--format oneline`` to a first-class choice — the
+    summary-only contract is unchanged throughout)."""
 
     @staticmethod
     def _pair(tmp_path: Path) -> tuple[Path, Path]:
@@ -359,7 +358,7 @@ class TestStatKeepsItsSummaryOnlyShape:
             paths.append(path)
         return paths[0], paths[1]
 
-    def test_quick_profile_with_use_cases_is_a_usage_error(
+    def test_oneline_format_with_use_cases_is_a_usage_error(
         self, tmp_path: Path
     ) -> None:
         old, new = self._pair(tmp_path)
@@ -369,23 +368,18 @@ class TestStatKeepsItsSummaryOnlyShape:
             main,
             [
                 "compare", str(old), str(new),
-                "--profile", "quick", "--use-cases", str(manifest),
+                "--format", "oneline", "--use-cases", str(manifest),
             ],
         )
         assert result.exit_code == 64, result.output
-        assert "--profile quick emits only a one-line summary" in result.output
+        assert "no output this run renders" in result.output
+        assert "--format oneline" in result.output
 
-    def test_quick_profile_with_a_non_carrying_secondary_names_no_fake_flag(
+    def test_oneline_format_with_a_non_carrying_secondary_names_it_too(
         self, tmp_path: Path
     ) -> None:
-        """CodeRabbit review, fresh evidence: with `secondary_fmt` present
-        (e.g. `--write sarif=...`), the primary format's own message
-        branch used to run instead, naming `--format oneline` -- a value
-        the user never typed and cannot type (`oneline` is the internal
-        format `--profile quick` injects, never on the public `--format`
-        Choice list). The quick-profile message must fire regardless of
-        `secondary_fmt`, and should still mention the secondary output when
-        it is ALSO ledgerless."""
+        """The rejection message must still mention the secondary output
+        when it is ALSO ledgerless."""
         old, new = self._pair(tmp_path)
         manifest = tmp_path / "uc.yaml"
         manifest.write_text(_VALID_MANIFEST, encoding="utf-8")
@@ -393,13 +387,13 @@ class TestStatKeepsItsSummaryOnlyShape:
             main,
             [
                 "compare", str(old), str(new),
-                "--profile", "quick", "--use-cases", str(manifest),
+                "--format", "oneline", "--use-cases", str(manifest),
                 "--write", f"sarif={tmp_path / 'r.sarif'}",
             ],
         )
         assert result.exit_code == 64, result.output
-        assert "--profile quick emits only a one-line summary" in result.output
-        assert "--format oneline" not in result.output
+        assert "no output this run renders" in result.output
+        assert "--format oneline" in result.output
         assert "--write sarif=..." in result.output
 
     @pytest.mark.parametrize("fmt", ["sarif", "junit", "html"])
@@ -460,13 +454,13 @@ class TestStatKeepsItsSummaryOnlyShape:
         )
         assert "--use-cases is not supported" not in result.output, result.output
 
-    def test_quick_profile_without_the_manifest_still_emits_the_summary(
+    def test_oneline_format_without_the_manifest_still_emits_the_summary(
         self, tmp_path: Path
     ) -> None:
         # The rejection must not have narrowed the one-line format itself.
         old, new = self._pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--profile", "quick"]
+            main, ["compare", str(old), str(new), "--format", "oneline"]
         )
         assert result.exit_code == 4, result.output
         assert "use_case_impact" not in result.output

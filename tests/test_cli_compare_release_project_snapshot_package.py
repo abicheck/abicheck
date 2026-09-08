@@ -217,8 +217,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_dir"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         assert ec == 4  # a BREAKING library is present
         outcomes = _library_outcomes(out)
@@ -236,8 +234,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_dir"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         ec, stored_out = _invoke(
             "compare",
@@ -245,8 +241,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_pkg"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         assert ec == 4
         assert _sorted_outcomes(stored_out) == _sorted_outcomes(live_out)
@@ -259,8 +253,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_dir"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         ec, mixed_out = _invoke(
             "compare",
@@ -268,8 +260,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_dir"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         assert ec == 4
         assert _sorted_outcomes(mixed_out) == _sorted_outcomes(live_out)
@@ -282,8 +272,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_dir"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         ec, mixed_out = _invoke(
             "compare",
@@ -291,8 +279,6 @@ class TestStoredVersusLiveReleaseParity:
             str(paths["new_pkg"]),
             "--format",
             "json",
-            "-j",
-            "1",
         )
         assert ec == 4
         assert _sorted_outcomes(mixed_out) == _sorted_outcomes(live_out)
@@ -582,7 +568,7 @@ class TestVariantSelection:
         _write_package(new_pkg, new_libs, variant_id="gcc13")
 
         ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+            "compare", str(old_pkg), str(new_pkg), "--format", "json"
         )
         assert ec == 4
         outcomes = _sorted_outcomes(out)
@@ -640,7 +626,7 @@ class TestVariantSelection:
         _write_package(new_pkg, new_libs)
 
         ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+            "compare", str(old_pkg), str(new_pkg), "--format", "json"
         )
         assert ec == 64
         assert "variant" in out.lower()
@@ -660,8 +646,6 @@ class TestVariantSelection:
             "gcc13",
             "--format",
             "json",
-            "-j",
-            "1",
         )
         assert ec == 4
         outcomes = _sorted_outcomes(out)
@@ -736,8 +720,6 @@ class TestMultiVariantSingleArtifactClassification:
             "v2",
             "--format",
             "json",
-            "-j",
-            "1",
         )
         doc = json.loads(out)
         assert doc["libraries"] == []

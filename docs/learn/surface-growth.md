@@ -65,7 +65,7 @@ SONAME or SemVer action the change set implies, which turns "additions
 present" into "this is a minor release, not a patch":
 
 ```bash
-abicheck compare last-release.json new.so -H include/ --profile release-cut
+abicheck compare last-release.json new.so -H include/ --depth source --format markdown
 ```
 
 The field's shape is owned by

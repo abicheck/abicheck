@@ -172,12 +172,10 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             tuple(kwargs.get("used_by_apps") or ())
             + tuple(kwargs.get("used_by_manifests") or ())
         ),
-        required_symbols=(
-            tuple(kwargs.get("required_symbols_opt") or ())
-            or (
-                ("__file__",) if kwargs.get("required_symbols_file") is not None else ()
-            )
-        ),
+        # ADR-068 D5 / plan Phase 7h: the separate --required-symbols FILE
+        # flag is gone -- an '@FILE' value now arrives folded into this
+        # same tuple, so there is nothing left to OR in from a second kwarg.
+        required_symbols=tuple(kwargs.get("required_symbols_opt") or ()),
         use_cases_manifest=kwargs.get("use_cases_manifest"),
         diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
         audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
@@ -363,17 +361,6 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "--report-mode/--show-filtered are not supported together "
             "with a stored-bundle-facts OLD_INPUT."
         )
-    if kwargs.get("jobs"):
-        # Codex review: compare_release_against_bundle_facts() processes
-        # every matched library in a synchronous loop -- an explicit
-        # -j/--jobs N request was silently dropped. The silent default (0,
-        # "auto-detect") is left alone: unlike every other flag here,
-        # --jobs never changes the finding set/verdict/exit code, only
-        # wall-clock time, and dispatch() has no way to tell a default 0
-        # apart from the flag never having been given at all.
-        raise click.UsageError(
-            "--jobs is not supported together with a stored-bundle-facts OLD_INPUT."
-        )
     if kwargs.get("no_bundle_analysis"):
         # Codex review: compare_release_against_bundle_facts() has no
         # parameter to skip the cross-library BUNDLE_* analysis
@@ -523,8 +510,8 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         # (cli_compare_release_helpers._release_md_bundle_findings) has
         # this identical pre-existing gap, so implementing it only here
         # would disagree with what that shared renderer already does.
-        # Rejected only when the flag is given explicitly, matching the
-        # --jobs precedent: the silent default (demangle ON) is left alone
+        # Rejected only when the flag is given explicitly: the silent
+        # default (demangle ON) is left alone
         # since json/the common per-library table never show a mangled
         # symbol at all -- only a rare bundle_* finding on a C++ symbol
         # would show one.

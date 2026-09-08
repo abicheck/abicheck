@@ -489,10 +489,10 @@ class TestUseCaseImpactOnCompare:
         block = json.loads(secondary.read_text(encoding="utf-8"))["use_case_impact"]
         assert block["by_use_case"]["training workflow"]
 
-    def test_quick_profile_is_rescued_by_a_carrying_secondary_too(
+    def test_oneline_format_is_rescued_by_a_carrying_secondary_too(
         self, tmp_path: Path
     ) -> None:
-        """The internal one-line format (``--profile quick``) constrains the
+        """The one-line format (``--format oneline``) constrains the
         *primary* shape only.
 
         CLI cleanup phase two, PR 1: this used to be ``--stat``, which
@@ -513,15 +513,14 @@ class TestUseCaseImpactOnCompare:
         secondary = tmp_path / "full.json"
         res = _compare(
             manifest, old, new,
-            "--profile", "quick",
-            # Explicit flag overrides the profile's own `depth=binary`
-            # (apply_compare_profile's documented precedence) -- this test's
-            # `--use-cases` needs the fixtures' `build_source.source_graph`
-            # (an L5 fact) to resolve entrypoints, which ADR-063 Phase 8's
-            # `--depth` ceiling (project_snapshot_to_depth) now correctly
-            # clears below `source`, same as a real `--depth binary` run
-            # would. `quick`'s one-line *format* is what this test
-            # exercises, not its depth.
+            "--format", "oneline",
+            # This test's `--use-cases` needs the fixtures'
+            # `build_source.source_graph` (an L5 fact) to resolve
+            # entrypoints, which ADR-063 Phase 8's `--depth` ceiling
+            # (project_snapshot_to_depth) now correctly clears below
+            # `source`, same as a real `--depth binary` run would.
+            # `oneline`'s *format* is what this test exercises, not its
+            # depth.
             "--depth", "source",
             "--write", f"json={secondary}",
         )

@@ -44,7 +44,7 @@ targets:
     consumer_binary_pattern: "bin/myapp"
     library: libpvxs
   ioc-plugin-contract:
-    kind: plugin-contract  # compare --required-symbols
+    kind: plugin-contract  # compare --required-symbol @FILE
     contract_file: "contracts/ioc-plugin.syms"
     library: libpvxsIoc
 
@@ -85,7 +85,7 @@ accepts/requires depend on it:
 |--------|------------------|-------------------|---------|
 | `library` (default) | `binary_pattern` | `consumer_binary_pattern`, `contract_file` | An ordinary shared-library ABI contract (S1–S17, S26). |
 | `app-consumer` | `consumer_binary_pattern`, `library` | `binary_pattern`, `contract_file` | An application compatibility check (S22, `compare --used-by`). |
-| `plugin-contract` | `contract_file`, `library` | `binary_pattern`, `consumer_binary_pattern` | A plugin/dlopen entrypoint contract (S23, `compare --required-symbols`). |
+| `plugin-contract` | `contract_file`, `library` | `binary_pattern`, `consumer_binary_pattern` | A plugin/dlopen entrypoint contract (S23, `compare --required-symbol @FILE`). |
 
 Common optional fields for `kind: library`:
 
@@ -101,7 +101,7 @@ Common optional fields for `kind: library`:
 | Field | Type | Meaning |
 |-------|------|---------|
 | `consumer_binary_pattern` | string | (`app-consumer` only) Path pattern to the consumer binary under test. |
-| `contract_file` | string | (`plugin-contract` only) A **`.syms` file** — one required linker symbol per line, `#` comments allowed. This is `--required-symbols`'s actual on-disk format (`abicheck/cli_compare_helpers.py`'s `_load_required_symbols`), not YAML. |
+| `contract_file` | string | (`plugin-contract` only) A **`.syms` file** — one required linker symbol per line, `#` comments allowed. This is `--required-symbol @FILE`'s actual on-disk format (`abicheck/cli_helpers_compare.py`'s `load_required_symbols`), not YAML. |
 | `library` | string | The `kind: library` target this entry resolves its baseline **and** candidate-artifact lookup through (ADR-047 §3's "unstated rule" correction). Must name a real, declared `kind: library` target — never another `app-consumer`/`plugin-contract` entry. The check's own reporting identity (`check_id`/`target_id`) stays this entry's own name; only the *lookup* redirects to `library`. |
 
 ### `checks:`
@@ -114,7 +114,7 @@ channel/depth/policy a given target actually runs.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbols` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which the root Action's `scan` mode rejects outright). |
+| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbol` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which the root Action's `scan` mode rejects outright). |
 | `depth` | string | — (required) | One of `binary`, `headers`, `build`, `source` — the same four rungs `--depth`/the report envelope's `requested_depth` accept. |
 | `required` | boolean | `true` | Whether this check gates `aggregate`'s coverage requirement. |
 | `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (ADR-047 §8's S5 row: "Advisory by default"). Set `gate_mode` explicitly to override either default. |

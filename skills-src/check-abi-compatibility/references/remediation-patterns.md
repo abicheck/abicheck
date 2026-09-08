@@ -96,7 +96,7 @@ explicit handshake: the plugin reports the interface version and the
 capabilities it implements; the host uses only what was reported. Layout
 changes then become a version bump rather than a crash.
 
-Pair this with `--required-symbol`/`--required-symbols` verification — see
+Pair this with `--required-symbol` verification — see
 the parent skill's named-consumer step and
 [consumer scoping](../../shared/consumer-scoping.md).
 

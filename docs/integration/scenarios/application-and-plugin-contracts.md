@@ -64,13 +64,14 @@ targets:
         depth: binary
 ```
 
-`contract-file` forwards to the root Action's `--required-symbols`. See
+`contract-file` forwards to the root Action's `required-symbols` input
+(translated to the CLI's `--required-symbol @FILE`). See
 [Plugin Systems](../../use/plugin-systems.md) for the full
-`--required-symbol`/`--required-symbols`/`--policy plugin_abi` model.
+`--required-symbol`/`--policy plugin_abi` model.
 
 ## Neither works with `channel: none`
 
-`scan` mode has no `--used-by`/`--required-symbols` equivalent — an
+`scan` mode has no `--used-by`/`--required-symbol` equivalent — an
 app-consumer/plugin-contract check has no scope to audit without a baseline
 to compare against. Give it a real channel, or use `kind: library` for a
 no-baseline audit ([S5](single-build-audit.md)) instead.

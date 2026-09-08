@@ -162,8 +162,9 @@ case "$MODE" in
           _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', and 'junit' are available for a directory/package comparison."
         fi
       elif [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "sarif" \
-            && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" ]]; then
-        _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', and 'review' are supported."
+            && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" \
+            && "$FORMAT" != "oneline" ]]; then
+        _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', 'review', and 'oneline' are supported."
       fi
     fi
     # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc)
@@ -220,7 +221,7 @@ if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
 fi
 
 # debug-info1/2, devel-pkg1/2, dso-only, include-private-dso, keep-extracted,
-# fail-on-removed-library, jobs: compare mode, directory/package operands only
+# fail-on-removed-library: compare mode, directory/package operands only
 # (action/run.sh's `_is_release_style_operand()` guard). Name/value kept as
 # separate parallel arrays (not a single colon-joined string) since these
 # values are often paths and may legitimately contain a colon themselves.
@@ -249,11 +250,6 @@ for _i in "${!_bool_input_names[@]}"; do
     _warn "${_bool_input_names[$_i]} is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
   fi
 done
-
-_JOBS="${INPUT_JOBS:-0}"
-if [[ "$_JOBS" != "0" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
-  _warn "jobs is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
-fi
 
 # used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/

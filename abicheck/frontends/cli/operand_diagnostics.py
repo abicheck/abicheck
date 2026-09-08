@@ -51,7 +51,6 @@ def _reject_application_operand(
 
 def _warn_unused_set_flags(
     *,
-    jobs_explicit: bool,
     dso_only: bool,
     output_dir: Path | None,
     select: tuple[str, ...] = (),
@@ -59,8 +58,6 @@ def _warn_unused_set_flags(
 ) -> None:
     """Warn that the set-input fan-out flags do not apply to single-file inputs."""
     used = []
-    if jobs_explicit:
-        used.append("-j/--jobs")
     if dso_only:
         used.append("--dso-only")
     if output_dir is not None:

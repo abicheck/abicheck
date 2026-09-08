@@ -139,21 +139,28 @@ class TestEvidenceSearchRecordEnums:
 
 class TestSelectorLayer:
     def test_required_layers_present(self):
-        # ADR-049 D7: required selector layers. The set is explicitly
-        # extensible (a future adapter may add a layer), so this asserts
-        # the seven required members are present, not that they're the only
-        # ones -- a subset check, not exact-set equality, so a later
-        # extension doesn't spuriously break this test.
+        # ADR-049 D7 (amended 2026-09-07): required selector layers. The set
+        # is explicitly extensible (a future adapter may add a layer), so
+        # this asserts the six required members are present, not that
+        # they're the only ones -- a subset check, not exact-set equality,
+        # so a later extension doesn't spuriously break this test.
+        # ``run_profile`` was a seventh member until ADR-068 D5 / plan
+        # Phase 7e removed its only producer (--profile) outright.
         required = {
             "explicit_cli",
             "api_request",
             "legacy_alias",
             "run_recipe",
-            "run_profile",
             "project_config",
             "built_in_default",
         }
         assert required <= {layer.value for layer in SelectorLayer}
+
+    def test_run_profile_layer_is_removed(self):
+        # ADR-049 D7 amendment (2026-09-07): --profile (its only producer)
+        # was removed outright by ADR-068 D5 / plan Phase 7e, so the
+        # run_profile tier is gone rather than replaced.
+        assert "run_profile" not in {layer.value for layer in SelectorLayer}
 
 
 class TestContractReasonCodes:

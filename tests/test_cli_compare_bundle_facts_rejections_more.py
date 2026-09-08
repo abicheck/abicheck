@@ -225,51 +225,6 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--show-filtered" in out
 
-    def test_explicit_jobs_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: compare_release_against_bundle_facts() processes
-        # every matched library in a synchronous loop -- an explicit
-        # -j/--jobs N request was silently dropped.
-        facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-
-        code, out = _invoke(
-            "compare",
-            str(facts_path),
-            str(new_dir),
-            "--jobs",
-            "4",
-            "--format",
-            "json",
-        )
-
-        assert code == 64
-        assert "--jobs" in out
-
-    def test_default_jobs_is_not_rejected_by_itself(self, tmp_path: Path) -> None:
-        # The silent default (0, "auto-detect") is indistinguishable here
-        # from the flag never having been given, so it must not trip the
-        # --jobs rejection on its own -- confirmed via a malformed OLD_FACTS
-        # document that fails for an unrelated reason first.
-        facts_path = tmp_path / "old.bundlefacts.json"
-        facts_path.write_text(_MALFORMED_BUT_CLASSIFIABLE_JSON)
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-
-        code, out = _invoke(
-            "compare",
-            str(facts_path),
-            str(new_dir),
-            "--jobs",
-            "0",
-            "--format",
-            "json",
-        )
-
-        assert code == 1, out
-        assert "--jobs" not in out
-
     def test_malformed_package_extraction_failure_is_a_clean_error(
         self, tmp_path: Path
     ) -> None:

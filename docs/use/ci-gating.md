@@ -117,17 +117,17 @@ CI, and they should not be collapsed into one mental "ignored" bucket —
 each is visible in the report under a different field
 (`contract_relevance`, `suppressed_count`, `contract_coverage_failures`).
 
-**Display filtering is outside the pipeline.** `--show-only`, `--profile
-quick`'s one-line summary, `--report-mode`, and `--format` change what the
+**Display filtering is outside the pipeline.** `--show-only`, `--format
+oneline`'s one-line summary, `--report-mode`, and `--format` change what the
 report *renders*, never the verdict or the exit code.
 
-!!! tip "Shortcut: `--profile ci-gate`"
-    A single `--profile ci-gate` bundles the common gating knobs
-    (`--depth headers --format review --severity-preset default`) so you
-    don't retype them — an explicit flag still overrides the profile. It is a
-    single-pair convenience; for a directory/package (release) gate, configure
-    the same defaults in `.abicheck.yml`. See the `--profile` section of the
-    [CLI usage guide](cli-usage.md).
+!!! tip "No `--profile ci-gate` shortcut any more"
+    A `--profile ci-gate` used to bundle the common gating knobs
+    (`--depth headers --format review --severity-preset default`); it was
+    removed (ADR-068 D5 / plan Phase 7e) because it bundled evidence depth,
+    report rendering, and gate policy behind one word. State the three flags
+    directly, or put them in `.abicheck.yml` so every run picks them up
+    without retyping them — see [CLI usage guide](cli-usage.md).
 
 ## The two exit-code schemes
 
