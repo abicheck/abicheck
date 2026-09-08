@@ -442,3 +442,43 @@ def test_the_real_scenario_catalog_is_in_the_target_set(
     scenario_keys = {k for k in keys if k.startswith("tests/scenarios/")}
     assert scenario_keys, sorted(keys)[:5]
     assert "tests/scenarios/ci_gating.yaml" in scenario_keys
+
+
+def test_retired_surfaces_scans_the_root_readme(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The root README is swept, not just ``docs/``.
+
+    It is the first page a user reads and is entirely outside ``docs/`` --
+    PR #1159's own compare release/bundle-topology flag removal left it
+    advertising ``--fail-on-removed-library`` and ``--on-incomplete-scope``
+    well after both started exiting 64, invisible to every check above
+    because they scan ``docs/``/case-README/scenario/registry/ground-truth
+    sources only, never the root README (Codex review, fresh evidence).
+    """
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "README.md").write_text(
+        "Run `abicheck compare old.so new.so --on-incomplete-scope block`.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "README.md" in f.warnings[0][1]
+
+
+def test_the_real_root_readme_is_in_the_target_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring half: the real root README is actually reached.
+
+    The autouse fixture never isolates ``ROOT``, but a regression that
+    dropped this arm entirely (e.g. a typo'd key) would still leave the
+    whole file green without an explicit check that ``README.md`` itself is
+    among the returned target keys.
+    """
+    monkeypatch.undo()
+    keys = {rel for _, rel in dc._retired_surface_scan_targets()}
+    assert "README.md" in keys
