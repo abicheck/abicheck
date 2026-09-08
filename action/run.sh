@@ -373,6 +373,26 @@ _merge_config_overlay_with_discovered_project_config() {
   local out_path="$2"
   local base_source="$3"
   local merge_mode="${4:-discover}"
+  # Codex review, PR #1159, third round: in "explicit" mode base_source is
+  # the caller-supplied build-config input, which is very often a
+  # checkout-relative path (e.g. `build-config: .abicheck.yml`) -- exactly
+  # how a real workflow names it, and exactly what already works when passed
+  # straight to the native CLI (which never changes directory). The merge
+  # below runs inside `(cd "$_PY_SAFE_DIR" && ...)`, so a relative
+  # base_source would resolve against that scratch directory instead of the
+  # real Action working directory, and Python's own `Path(...).resolve()`
+  # would then report "does not exist" for a file that is right there in the
+  # checkout. Discover mode's own base_source ($PWD, passed by every caller)
+  # is already absolute, so this is a no-op there -- but absolutize
+  # unconditionally rather than special-casing on mode, since any future
+  # caller passing a relative discover-mode directory would hit the exact
+  # same bug class. Must happen here, in bash, before the value ever crosses
+  # into the $_PY_SAFE_DIR-scoped Python subprocess -- not via a Python-side
+  # directory trick, which would only fix this one call path and leave the
+  # same mistake available to the next relative-path input.
+  if [[ "$base_source" != /* ]]; then
+    base_source="$PWD/$base_source"
+  fi
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
     # Same "fail loud rather than silently produce a wrong compile/release
     # context" precedent as add_flag_shlex_split's own missing-interpreter

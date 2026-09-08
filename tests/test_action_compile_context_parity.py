@@ -1021,3 +1021,103 @@ class TestCompileContextMergesWithExplicitBuildConfig:
         )
         assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
         assert "build.query" not in stderr
+
+
+def _run_region_with_cwd(
+    mode_marker: str,
+    env_extra: dict[str, str],
+    cwd: Path,
+    start_marker: str = _COMPILE_CONTEXT_START,
+) -> tuple[list[str], str]:
+    """Like :func:`_run_region`, but the caller supplies the working
+    directory instead of a fresh, isolated one -- needed to exercise a
+    ``build-config`` path that is relative to the Action's real working
+    directory rather than ``$_PY_SAFE_DIR`` (see
+    ``TestCompileContextMergesWithRelativeBuildConfig`` below)."""
+    harness = (
+        f'MODE="{_mode_value_for_marker(mode_marker)}"\n'
+        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
+        + _merge_config_overlay_fn_source()
+        + _add_flag_source()
+        + _is_release_style_operand_source()
+        + _add_compile_context_flags_source()
+        + "\nCMD=()\n"
+    )
+    script = (
+        harness
+        + _compile_context_region(mode_marker, start_marker)
+        + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+    )
+    env = {**os.environ, **env_extra}
+    out = _run_bash_script(script, env, check=True, cwd=cwd)
+    return out.stdout.splitlines(), out.stderr
+
+
+class TestCompileContextMergesWithRelativeBuildConfig:
+    """Codex review, PR #1159 (P1, third round): ``build-config`` is
+    normally a checkout-relative path (``build-config: .abicheck.yml``), and
+    the merge helper's Python invocation runs inside ``(cd "$_PY_SAFE_DIR"
+    && ...)`` -- an unrelated scratch directory -- so a relative
+    ``base_source`` handed straight into that subprocess used to resolve
+    against ``$_PY_SAFE_DIR`` instead of the real Action working directory,
+    failing with "does not exist" even though the file is right there.
+    ``add_compile_context_flags`` shares ``_merge_config_overlay_with_
+    discovered_project_config`` with ``add_release_topology_config_flags``
+    (``test_action_release_topology_config.py`` carries the same regression
+    class for that function), so this confirms the shared fix covers this
+    call site too. Deliberately does NOT use ``_run_region``'s own isolated
+    ``TemporaryDirectory`` cwd -- the whole point is a real mismatch between
+    the Action's working directory (here, the caller-supplied ``cwd``) and
+    ``$_PY_SAFE_DIR`` (a distinct ``mktemp -d`` directory), the same
+    mismatch a real Action step has between its checkout and this script's
+    isolation directory."""
+
+    def test_relative_build_config_resolves_against_action_cwd_not_py_safe_dir(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_BUILD_CONFIG": ".abicheck.yml",
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        assert "does not exist" not in stderr
+        assert cmd.count("--config") == 1
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["severity"] == {"abi_breaking": "error"}
+        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
+
+    def test_nested_relative_build_config_resolves_against_action_cwd(
+        self, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "ci.yml").write_text(
+            "compile:\n  std: c++17\n", encoding="utf-8"
+        )
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_SYSROOT": "/opt/sysroot",
+                "INPUT_BUILD_CONFIG": "config/ci.yml",
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        assert "does not exist" not in stderr
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["std"] == "c++17"
+        assert doc["compile"]["sysroot"] == "/opt/sysroot"

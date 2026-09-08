@@ -654,3 +654,74 @@ class TestReleaseTopologyOverlayFailsLoudOnMalformedDiscoveredConfig:
         assert "failed to merge" in result.stdout
         # Must not silently write a merged overlay and proceed.
         assert "--config" not in result.stdout
+
+
+class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
+    """Codex review, PR #1159 (P1, third round): ``build-config`` is
+    normally a checkout-relative path (``build-config: .abicheck.yml`` or
+    ``build-config: config/ci.yml``, the natural way a workflow names it).
+    The merge helper's Python invocation runs inside ``(cd
+    "$_PY_SAFE_DIR" && ...)`` -- a scratch directory wholly unrelated to the
+    Action's real working directory -- so a *relative* ``base_source``
+    handed straight into that subprocess used to resolve
+    (``Path(base_source).resolve()``) against ``$_PY_SAFE_DIR`` instead of
+    the real checkout, failing with "does not exist" even though the file
+    is right there and the identical relative path works fine when passed
+    straight to the native CLI (which never changes directory).
+
+    These tests must exercise a genuine relative-vs-absolute distinction --
+    not a relative path that happens to already sit under ``$_PY_SAFE_DIR``
+    or under the test process's own cwd by coincidence. ``_run_bash_script``
+    is invoked with ``cwd=tmp_path`` (the Action's simulated real working
+    directory) while ``$_PY_SAFE_DIR`` is a *different*, freshly-``mktemp
+    -d``-ed directory elsewhere (real ``mktemp -d`` still runs for real, see
+    ``_harness``'s own docstring) -- exactly the same mismatch a real Action
+    step has between its checkout and this script's isolation directory.
+    """
+
+    def test_relative_build_config_resolves_against_action_cwd_not_py_safe_dir(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        # A checkout-relative path, exactly how a workflow would spell
+        # `build-config: .abicheck.yml`. $_PY_SAFE_DIR (an unrelated mktemp
+        # -d directory) has no such file, so without the fix this resolves
+        # to the wrong place and fails "does not exist".
+        script = _release_topology_script_with_preexisting_config_flag(".abicheck.yml")
+        result = _run_bash_script(
+            script,
+            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": ".abicheck.yml"},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "does not exist" not in result.stderr
+        lines = result.stdout.splitlines()
+        assert lines.count("--config") == 1
+        doc = _read_config_overlay(lines)
+        assert doc["severity"] == {"abi_breaking": "error"}
+        assert doc["release"] == {"dso_only": True}
+
+    def test_nested_relative_build_config_resolves_against_action_cwd(
+        self, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "ci.yml").write_text(
+            "scope:\n  on_incomplete: block\n", encoding="utf-8"
+        )
+        script = _release_topology_script_with_preexisting_config_flag("config/ci.yml")
+        result = _run_bash_script(
+            script,
+            {
+                "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
+                "INPUT_BUILD_CONFIG": "config/ci.yml",
+            },
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "does not exist" not in result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["scope"] == {"on_incomplete": "block"}
+        assert doc["gate"] == {"fail_on_removed_library": True}
