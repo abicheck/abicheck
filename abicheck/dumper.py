@@ -622,10 +622,8 @@ def _header_ast_parser(
             else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
-        # The EFFECTIVE driver mode -- an explicit `--driver-mode=<value>`
-        # override (either direction) wins over the binary's own name
-        # (Codex review, fresh evidence: `clang-cl --driver-mode=g++`
-        # is genuinely GNU-mode despite the CL-shaped binary name).
+        # An explicit `--driver-mode=<value>` override (either direction)
+        # wins over the binary's own name for the EFFECTIVE driver mode.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
@@ -636,13 +634,14 @@ def _header_ast_parser(
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
             # On a probe failure, recover an explicit `--target=`. Under
-            # CL mode, only the spellings the CL driver actually honors
-            # are recovered (`cl_style=True`, including `/clang:`-
-            # forwarded ones -- Codex review, fresh evidence), and there
-            # is no `sys.platform` guess (it mostly targets Windows
-            # regardless of host OS). The guess lives HERE, not in
-            # `is_darwin_target`, so a bare-`None` unit-test construction
-            # of `_ClangAstParser` is unaffected.
+            # CL mode, only spellings the CL driver actually honors are
+            # recovered (`cl_style=True`, `/clang:`-forwarded included).
+            # No `sys.platform` guess under CL mode (mostly Windows
+            # regardless of host OS) or under an explicit `--compiler`/
+            # `--compiler-prefix` cross-toolchain (no relation to host OS
+            # either -- Codex review, fresh evidence, both cases). Lives
+            # HERE, not in `is_darwin_target`, so a bare-`None` unit-test
+            # construction of `_ClangAstParser` is unaffected.
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
@@ -652,7 +651,11 @@ def _header_ast_parser(
                     if is_cl_mode
                     else (
                         _explicit_target_triple(gcc_options, gcc_option_tokens)
-                        or sys.platform
+                        or (
+                            sys.platform
+                            if gcc_path is None and gcc_prefix is None
+                            else None
+                        )
                     )
                 )
             ),

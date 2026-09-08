@@ -116,6 +116,87 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
     assert parser._target_triple == sys.platform
 
 
+@pytest.mark.parametrize(
+    "gcc_path,gcc_prefix",
+    [
+        ("aarch64-apple-darwin-clang", None),
+        (None, "aarch64-apple-darwin-"),
+    ],
+)
+def test_probe_failure_with_an_explicit_cross_compiler_does_not_guess_sys_platform(
+    monkeypatch: pytest.MonkeyPatch, gcc_path: str | None, gcc_prefix: str | None
+) -> None:
+    """An explicit ``--compiler``/``--compiler-prefix`` cross-toolchain (a
+    documented input) carries no relationship to the HOST OS at all -- an
+    Apple-targeting compiler run on Linux, or vice versa (Codex review,
+    fresh evidence). Guessing `sys.platform` there risks the same
+    misclassification in either direction the CL-mode guess already
+    guards against, just from a different evidence source. Stays bare
+    None -- the same conservative default ``is_darwin_target(None)``
+    already answers False for."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None
+
+
+def test_probe_failure_with_an_explicit_cross_compiler_still_recovers_explicit_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cross-compiler gate only ever suppresses the `sys.platform`
+    GUESS -- an explicit ``--target=`` is still real evidence and is
+    recovered regardless of whether a cross-compiler is also configured."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path="aarch64-apple-darwin-clang",
+        gcc_prefix=None,
+        gcc_options="--target=x86_64-unknown-linux-gnu",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-unknown-linux-gnu"
+
+
 def test_successful_probe_is_never_overridden_by_explicit_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
