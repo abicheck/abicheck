@@ -80,9 +80,18 @@ findings = diff_matrix(old, new)   # list[Change]: the three kinds above
 ```
 
 ```python
-Path("onedpl-2022.json").write_text(old.to_json())
-Path("onedpl-2023.json").write_text(new.to_json())
+from abicheck.workflows.findings import write_matrix_snapshot
+
+write_matrix_snapshot(old, "onedpl-2022.json")
+write_matrix_snapshot(new, "onedpl-2023.json")
 ```
+
+`MatrixSnapshot`'s JSON (de)serialization lives in
+`abicheck.workflows.findings` (`write_matrix_snapshot`/
+`load_matrix_snapshot`, or `matrix_snapshot_to_json`/
+`matrix_snapshot_from_dict` for an in-memory round trip), not on
+`probe_harness.py` itself — `probe_harness.py` is `compare`-classified and
+may not own a `storage` operation (ADR-061 gap E).
 
 Save each `MatrixSnapshot` this way to feed `compare --probe-matrix
 old=onedpl-2022.json --probe-matrix new=onedpl-2023.json` instead, so the
