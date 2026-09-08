@@ -613,6 +613,65 @@ _effective_format() {
   printf '%s' "$_found"
 }
 
+# Whether the user's own `extra-args` passthrough (mode: scan only) carries a
+# token the ADR-068 Phase 4 item 1 `_SCAN_USES_LEGACY_CLI` gate below cannot
+# see, because that gate only inspects dedicated `INPUT_*` fields -- but
+# `extra-args` is documented as forwarded verbatim to whichever command gets
+# selected (`CMD+=($INPUT_EXTRA_ARGS)`, near the end of this script), so a
+# scan-only flag reaching it this way would silently route to `compare`
+# anyway, either rejected outright as an unknown option (a CLI usage error,
+# exit 64) or -- for a `--format` override -- producing a format `compare`
+# renders differently or not at all (Codex review, P2).
+#
+# `--against | --artifact-set | --budget | --build-target | --crosscheck |
+# --manifest | --public-header-dir | --risk-rules` are exactly `scan`'s own
+# option set minus `compare`'s (`python3 -c "from abicheck.cli import main;
+# opts=lambda n:{o for p in main.commands[n].params for o in p.opts if
+# o.startswith('-')}; print(sorted(opts('scan')-opts('compare')))"` --
+# current as of this commit, see this function's own git history for drift)
+# that are also value-taking per `_extra_args_is_value_option` above, i.e.
+# reach here as a `NAME<TAB>VALUE` row at all. Three more names in that same
+# scan-minus-compare set are deliberately NOT listed below: `--max-findings`
+# (no dedicated Action input forwards it on either mode, so there is no
+# pre-existing "dedicated input wins" behavior for extra-args to race
+# against and silently override) and `--pattern-verdicts`/`--show-suppressed`
+# (both scan-only *boolean* flags -- `compare` rejects either outright as an
+# unknown option the same way it would reject any name below, but that
+# failure is a loud, immediate CLI usage error either way, not a silent
+# misbehavior producing a wrong-but-successful result, so there is no
+# distinct correctness gap here for this helper to close).
+#
+# `--depth` mirrors the dedicated `INPUT_DEPTH` condition in the gate below
+# for the identical reason (scan's own auto-strict pinned-depth evidence
+# contract, `_scan_explicit_flags`/`pinned_explicit` in `cli_scan.py`) --
+# unlike the scan-minus-compare set above, `--depth` exists on `compare`
+# too, so it is not a usage error there, just silently missing that safety
+# contract. ANY value forces the legacy CLI here (not just non-`auto`, as
+# the dedicated-input condition already narrows to) since there is no way to
+# tell "the user spelled out the literal word auto" from "the user meant
+# something else" without re-deriving Click's own default resolution --
+# the safe, over-inclusive direction this file's own tokenizer docstrings
+# already document as the deliberate failure mode throughout.
+#
+# `--format` forces the legacy CLI only when its value isn't `json` --
+# `compare` has no `text` format at all (scan's own default), matching the
+# dedicated `INPUT_FORMAT` condition in the gate below.
+_extra_args_forces_legacy_scan_cli() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      --against | --artifact-set | --budget | --build-target | --crosscheck | \
+      --manifest | --public-header-dir | --risk-rules | --depth)
+        return 0
+        ;;
+      --format)
+        [[ "$_value" != "json" ]] && return 0
+        ;;
+    esac
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1681,6 +1740,23 @@ elif [[ "$MODE" == "scan" ]]; then
   #   - `build-target`: `compare` has no `--build-target` option (it exists
   #     only on `dump`/`scan`), so an explicit L3 build-scoping request
   #     cannot be forwarded.
+  #   - `depth` explicitly pinned (any value other than the omitted/`auto`
+  #     default): `scan`'s pinned-depth contract is "auto-strict" --
+  #     `cli_scan.py`'s `_scan_explicit_flags`/`pinned_explicit` makes an
+  #     explicit `--depth source`/`--depth build` (or a `--source-method`
+  #     pin) that cannot collect its evidence unconditionally abort with
+  #     exit 7 (`EVIDENCE_CONTRACT_ERROR`, `_EXIT_EVIDENCE_CONTRACT_ERROR`
+  #     in `service_scan.py`). `compare` has no such unconditional contract
+  #     -- it only enforces evidence completeness when
+  #     `--require-complete-analysis` is separately passed, which this
+  #     migrated branch does not force on for a pinned depth. Without this
+  #     condition, a workflow pinning `depth: source`/`depth: build` with no
+  #     evidence available would go from reliably failing loud (exit 7)
+  #     under `scan` to silently passing (exit 0) under `compare` -- a
+  #     silent capability/safety regression (Codex review). Reproducing
+  #     scan's exit-7 evidence-contract semantics on the `compare` path is
+  #     real future work, not attempted here; staying on the already-
+  #     correct legacy CLI is the safe fix for this PR.
   #   - No `against`/`abi-baseline` resolved, or the `audit: true` alias
   #     (`FORCE_AUDIT_ONLY`): this is scan's one-build audit mode. Its
   #     `compare` equivalent, `compare --no-baseline`, self-diffs the
@@ -1710,6 +1786,13 @@ elif [[ "$MODE" == "scan" ]]; then
   #     `output_options(["json", "markdown", "sarif", "html", "junit",
   #     "review", "oneline"], ...)` on `compare_cmd`), so a `text`-format
   #     scan step has no `compare` rendering that reproduces its content.
+  #   - `extra-args` itself carries a scan-only flag or a non-`json`
+  #     `--format` override (`_extra_args_forces_legacy_scan_cli`, defined
+  #     above): every condition in this list so far only inspects a
+  #     dedicated `INPUT_*` field, but `extra-args` is forwarded to
+  #     whichever command this gate selects, so the same gaps this list
+  #     already names for a dedicated input apply identically when the same
+  #     flag arrives through `extra-args` instead (Codex review, P2).
   #
   # Every one of these is a genuine, verified gap in `compare`'s current
   # capability surface, not a shortcut -- see this PR's own report for the
@@ -1728,14 +1811,30 @@ elif [[ "$MODE" == "scan" ]]; then
      || [[ -n "${INPUT_CROSSCHECK:-}" ]] \
      || [[ -n "${INPUT_RISK_RULES:-}" ]] \
      || [[ -n "${INPUT_BUILD_TARGET:-}" ]] \
+     || { [[ -n "${INPUT_DEPTH:-}" ]] && [[ "${INPUT_DEPTH:-}" != "auto" ]]; } \
      || [[ "$FORCE_AUDIT_ONLY" == "true" ]] \
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
-     || [[ "${INPUT_FORMAT:-text}" != "json" ]]; then
+     || [[ "${INPUT_FORMAT:-text}" != "json" ]] \
+     || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
   fi
 
-  if [[ "$_SCAN_USES_LEGACY_CLI" == "true" ]]; then
+  # Split into two named builders (rather than left as an inline if/else
+  # body) so the migrated-compare builder can be called a second time, later
+  # in this script, as the ADR-068 D3/D4/D5 cross-source-hygiene fallback
+  # (`_SCAN_MIGRATED_TO_COMPARE`/`_build_legacy_scan_cmd`'s own second call
+  # site, near the "Map exit code to verdict" section below) -- see that
+  # site's own comment for why a second, correct invocation through the
+  # already-tested legacy `scan` CLI is preferable to reimplementing
+  # `cli_scan_baseline.py`'s `_strip_automatic_cross_source_findings` a
+  # second time in bash. Each builder appends onto the global `CMD` array
+  # exactly as its original inline body did; neither declares anything
+  # `local`, so every variable a builder sets (`SCAN_ARTIFACT`, `FORMAT`,
+  # `_EFFECTIVE_FORMAT`, `OUTPUT_FILE`, `PR_JSON`, ...) remains a global the
+  # rest of this script already expects to read, unchanged from before this
+  # split.
+  _build_legacy_scan_cmd() {
   CMD+=(scan)
   if [[ -n "$SCAN_ARTIFACT_SET" ]]; then
     # ADR-056: audit a *set* of libraries with no old side, as one
@@ -2090,8 +2189,9 @@ elif [[ "$MODE" == "scan" ]]; then
       CMD+=(--write "json=$PR_JSON")
     fi
   fi
+  }
 
-  else
+  _build_migrated_compare_cmd() {
   # ── Scan mode, reimplemented as `abicheck compare` (ADR-068 Phase 4 item
   # 1) ──────────────────────────────────────────────────────────────────
   # Reached only for a single-artifact `scan --against` run with none of
@@ -2201,6 +2301,14 @@ elif [[ "$MODE" == "scan" ]]; then
     # generic PR-comment rerun fallback (`_maybe_post_pr_comment`) covers
     # it exactly as it does for every other mode.
   fi
+  }
+
+  _SCAN_MIGRATED_TO_COMPARE=false
+  if [[ "$_SCAN_USES_LEGACY_CLI" == "true" ]]; then
+    _build_legacy_scan_cmd
+  else
+    _build_migrated_compare_cmd
+    _SCAN_MIGRATED_TO_COMPARE=true
   fi
 
 else
@@ -2231,12 +2339,6 @@ fi
 # sidecar-injection decision that needs it early).
 _EFFECTIVE_FORMAT="$(_effective_format)"
 
-echo "::group::abicheck $MODE"
-echo "Command: ${CMD[*]}"
-echo ""
-
-ABICHECK_EXIT=0
-ABICHECK_OUTPUT=""
 STDERR_FILE=$(mktemp)
 #: PR_JSON (Codex review) is created well after this trap is installed --
 #: either by the primary CMD's own --write
@@ -2299,60 +2401,98 @@ else:
     print(f"{st.st_mtime_ns}:{st.st_size}")
 ' "$_fingerprint_path") 2>/dev/null
 }
-_output_file_pre_fp=""
-if [[ -n "${OUTPUT_FILE:-}" ]]; then
-  _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
-fi
-_extra_write_json_path="$(_extra_args_write_json_path || true)"
-_extra_write_json_pre_fp=""
-if [[ -n "$_extra_write_json_path" ]]; then
-  _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
-fi
+# Runs the current `${CMD[@]}` once, capturing exit code/stdout/stderr into
+# the same globals every downstream reader already expects
+# (`ABICHECK_EXIT`/`ABICHECK_OUTPUT`/`STDERR_CONTENT`/`_STDOUT_JSON_FILE`),
+# plus the pre-run file-fingerprint bookkeeping `_json_report_src` needs.
+# Factored out (rather than inlined once, as before this fix) so the
+# ADR-068 D3/D4/D5 cross-source-hygiene fallback below (`mode: scan`
+# migrated to `compare`, but the result diverges from `scan --against`'s own
+# baseline semantics) can invoke a *second*, corrected run through this
+# exact same machinery instead of hand-duplicating it -- see that call
+# site's own comment. `$1` is this invocation's `::group::` label, the only
+# thing that differs between the two call sites.
+_run_abicheck_invocation() {
+  local _group_label="$1"
+  echo "::group::$_group_label"
+  echo "Command: ${CMD[*]}"
+  echo ""
 
-if [[ -n "${OUTPUT_FILE:-}" ]]; then
-  # Output goes to file; capture stderr separately for error detection
-  "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
-  if [[ -s "$STDERR_FILE" ]]; then
-    cat "$STDERR_FILE" >&2
+  ABICHECK_EXIT=0
+  ABICHECK_OUTPUT=""
+
+  _output_file_pre_fp=""
+  if [[ -n "${OUTPUT_FILE:-}" ]]; then
+    _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
   fi
-else
-  # Capture stdout for job summary; stderr goes to temp file
-  ABICHECK_OUTPUT=$("${CMD[@]}" 2>"$STDERR_FILE") || ABICHECK_EXIT=$?
-  echo "$ABICHECK_OUTPUT"
-  if [[ -s "$STDERR_FILE" ]]; then
-    cat "$STDERR_FILE" >&2
+  _extra_write_json_path="$(_extra_args_write_json_path || true)"
+  _extra_write_json_pre_fp=""
+  if [[ -n "$_extra_write_json_path" ]]; then
+    _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
   fi
-fi
-echo "::endgroup::"
+
+  if [[ -n "${OUTPUT_FILE:-}" ]]; then
+    # Output goes to file; capture stderr separately for error detection
+    "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
+    if [[ -s "$STDERR_FILE" ]]; then
+      cat "$STDERR_FILE" >&2
+    fi
+  else
+    # Capture stdout for job summary; stderr goes to temp file
+    ABICHECK_OUTPUT=$("${CMD[@]}" 2>"$STDERR_FILE") || ABICHECK_EXIT=$?
+    echo "$ABICHECK_OUTPUT"
+    if [[ -s "$STDERR_FILE" ]]; then
+      cat "$STDERR_FILE" >&2
+    fi
+  fi
+  echo "::endgroup::"
+
+  STDERR_CONTENT=""
+  if [[ -s "$STDERR_FILE" ]]; then
+    STDERR_CONTENT=$(cat "$STDERR_FILE")
+  fi
+
+  # `format: json` with no `output-file` is the documented stdout mode: the
+  # report exists only in $ABICHECK_OUTPUT, so it is persisted once here for
+  # the report queries below.
+  #
+  # Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- an
+  # `extra-args` `--format json` override (under `format: text`/`markdown`)
+  # really does produce JSON on stdout, and this capture used to miss it
+  # entirely (ADR-064's own "effective-format-override" gap; see
+  # `_effective_format`'s own docstring).
+  #
+  # Assigned here in this function's own body, deliberately -- this
+  # function is called directly (never as `$(_run_abicheck_invocation ...)`,
+  # which would fork a subshell), so the assignment lands in the same shell
+  # every caller below reads `_STDOUT_JSON_FILE` from, exactly like every
+  # other global this function sets. `_json_report_src` itself still creates
+  # nothing lazily on its own account, for the same original reason: each of
+  # its own several callers reads it through `_src=$(_json_report_src)`,
+  # itself a subshell, so minting the file there would leak one copy per
+  # caller instead of the one this function already produced.
+  #
+  # Any `_STDOUT_JSON_FILE` from a PRIOR call to this function (the
+  # discarded compare-path run, on the cross-source-hygiene fallback's
+  # second call) is removed first -- a stale stdout-capture file from a
+  # run this script has already decided to discard must never be readable
+  # by a `_json_report_src` caller once this invocation's own (possibly
+  # empty, non-JSON-primary-format) result is in place. `rm -f` on an
+  # empty/unset path is a safe no-op (see the EXIT trap's own identical
+  # `"${_STDOUT_JSON_FILE:-}"` handling below).
+  rm -f "${_STDOUT_JSON_FILE:-}"
+  _STDOUT_JSON_FILE=""
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
+    _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
+    printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
+  fi
+}
+
+_run_abicheck_invocation "abicheck $MODE"
 
 # ---------------------------------------------------------------------------
 # Map exit code to verdict
 # ---------------------------------------------------------------------------
-STDERR_CONTENT=""
-if [[ -s "$STDERR_FILE" ]]; then
-  STDERR_CONTENT=$(cat "$STDERR_FILE")
-fi
-
-# `format: json` with no `output-file` is the documented stdout mode: the
-# report exists only in $ABICHECK_OUTPUT, so it is persisted once here for the
-# report queries below.
-#
-# Gated on `$_EFFECTIVE_FORMAT`, not the nominal `$FORMAT` -- an `extra-args`
-# `--format json` override (under `format: text`/`markdown`) really does
-# produce JSON on stdout, and this capture used to miss it entirely (ADR-064's
-# "effective-format-override" gap; see `_effective_format`'s own docstring).
-#
-# In the *parent* shell, deliberately. Every caller reads the path through
-# `_src=$(_json_report_src)`, and a command substitution runs in a subshell —
-# so creating the file lazily inside that function wrote the memo to a shell
-# that then exited, making each of the three callers mint its own copy and
-# leaving the EXIT trap with an empty path to clean up. On a persistent
-# self-hosted runner that leaks a full report copy per lookup (Codex review).
-_STDOUT_JSON_FILE=""
-if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && "${ABICHECK_OUTPUT:-}" == "{"* ]]; then
-  _STDOUT_JSON_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-stdout-json.XXXXXX")
-  printf '%s' "$ABICHECK_OUTPUT" > "$_STDOUT_JSON_FILE"
-fi
 
 _is_cli_error() {
   echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try |Traceback|click\.)'
@@ -2523,6 +2663,30 @@ def _severity():
 query = sys.argv[2]
 if query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
+elif query == "cross_source_finding_present":
+    # ADR-068 D3/D4/D5's automatic cross-source-hygiene stage (schema 3.3,
+    # `report/cross_source_evolution.py`): every `Change` it adds carries a
+    # `cross_source_evolution` key (never on a change from any other
+    # detector), read straight off `report["changes"]` -- this block is a
+    # per-change annotation, not the separate summary block of the same
+    # name, so it needs no `_either()`/`diff`-nesting lookup of its own.
+    # `mode: scan`'s migrated-to-`compare` Action path
+    # (`_SCAN_MIGRATED_TO_COMPARE` in run.sh) uses this to detect the one
+    # divergence from `scan --against`'s own baseline semantics that
+    # `compare` cannot yet reproduce inline (`cli_scan_baseline.py`'s
+    # `_strip_automatic_cross_source_findings` keeps these advisory-only for
+    # a baseline comparison, but a real `abicheck compare` subprocess run
+    # has no such stripping) -- printing 1 tells run.sh to discard this
+    # run's result and re-run through the legacy `scan` CLI instead, which
+    # already strips them correctly.
+    changes = report.get("changes")
+    found = False
+    if isinstance(changes, list):
+        found = any(
+            isinstance(c, dict) and c.get("cross_source_evolution") is not None
+            for c in changes
+        )
+    print(1 if found else 0)
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
     # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
@@ -2730,6 +2894,71 @@ else:
     raise SystemExit(2)
 PYQUERY
 }
+
+# ---------------------------------------------------------------------------
+# ADR-068 Phase 4 item 1's cross-source-hygiene fallback (Codex review, P1)
+# ---------------------------------------------------------------------------
+# `mode: scan` migrated to a real `abicheck compare` subprocess above
+# (`_SCAN_MIGRATED_TO_COMPARE`, set only when the `_SCAN_USES_LEGACY_CLI`
+# gate decided `compare` could reach this exact invocation's behavior). But
+# `compare`'s pipeline runs the ADR-068 D4/D5 automatic cross-source-checks
+# stage on every call, unconditionally (`cross_source_checks` defaults
+# `True`, no front-end opt-out) -- while `scan --against`'s own, older
+# mechanism for the same checks (`cli_scan_baseline.py`'s
+# `_strip_automatic_cross_source_findings`) keeps a persistent
+# single-version finding advisory-only for a baseline comparison, promoting
+# it into the real diff only via explicit `--crosscheck KEY=error`. A real
+# `abicheck compare` subprocess run has no such stripping, so the exact same
+# inputs that `scan --against` would report as advisory (e.g.
+# `COMPATIBLE_WITH_RISK`, exit 0) can score as a real API/ABI break under
+# the migrated `compare` invocation (e.g. `API_BREAK`, exit 2) -- verified
+# directly against `catalog/cases/case148_xcheck_header_build_mismatch`.
+#
+# Detected here by reading the compare run's own JSON report for any
+# `changes[].cross_source_evolution` (present on, and only on, a `Change`
+# the automatic stage itself added -- `cross_source_finding_present` above).
+# When one is present, this compare run is NOT scan-baseline-equivalent, so
+# its result is discarded entirely and this exact same logical invocation is
+# re-run through the legacy `abicheck scan` CLI instead -- reusing
+# `_build_legacy_scan_cmd` (the same builder `_SCAN_USES_LEGACY_CLI=true`
+# itself calls above) rather than reimplementing
+# `_strip_automatic_cross_source_findings`'s stripping/verdict-recompute
+# logic a second time in bash. This costs a second `abicheck` invocation
+# only in this uncommon case (a cross-source finding actually present); the
+# common case (no such finding) uses the compare run's own result as-is,
+# since nothing would have been stripped from it anyway.
+if [[ "$MODE" == "scan" && "${_SCAN_MIGRATED_TO_COMPARE:-false}" == "true" ]]; then
+  _cross_source_report_src="$(_json_report_src)"
+  if [[ -n "$_cross_source_report_src" ]] \
+     && [[ "$(_report_query "$_cross_source_report_src" cross_source_finding_present)" == "1" ]]; then
+    echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) found a cross-source hygiene finding in this comparison. scan's own baseline path keeps such findings advisory-only unless explicitly promoted via --crosscheck KEY=error, but a direct 'abicheck compare' subprocess run does not -- re-running via the legacy 'abicheck scan' CLI to match scan's own semantics, and using that result instead."
+    # Rebuild CMD from scratch as the equivalent legacy `scan` invocation --
+    # same builder, same INPUT_* values, so every flag this run already
+    # resolved (headers, build evidence, policy, depth, ...) is forwarded
+    # identically; only the CLI subcommand and operand shape differ, exactly
+    # as `_build_legacy_scan_cmd`/`_build_migrated_compare_cmd` already
+    # documented above.
+    CMD=(abicheck)
+    _build_legacy_scan_cmd
+    if [[ "${INPUT_VERBOSE:-false}" == "true" ]]; then
+      CMD+=(-v)
+    fi
+    if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
+      # shellcheck disable=SC2206
+      CMD+=($INPUT_EXTRA_ARGS)
+    fi
+    # `_build_legacy_scan_cmd` sets its own `FORMAT="${INPUT_FORMAT:-text}"`
+    # -- always `json` here, since reaching this fallback at all required
+    # the original `_SCAN_USES_LEGACY_CLI` gate to have already accepted an
+    # effective `json` format (a non-json `extra-args --format` override, or
+    # `INPUT_FORMAT` itself not `json`, would have forced the legacy CLI on
+    # the very first invocation instead). Recomputed for the same reason
+    # `_run_abicheck_invocation` needs it: its own `_STDOUT_JSON_FILE`
+    # capture decision.
+    _EFFECTIVE_FORMAT="$(_effective_format)"
+    _run_abicheck_invocation "abicheck scan (legacy CLI rerun -- cross-source hygiene finding found in the migrated compare run)"
+  fi
+fi
 
 # CLI cleanup phase two, PR E: the Action's own annotation renderer. Reads
 # the persisted `annotations` array (schema 2.43/2.44) off whichever JSON

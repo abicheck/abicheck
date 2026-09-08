@@ -17,4 +17,17 @@ it should read in CHANGELOG.md. Delete the other sections.
   change. Invocations using any of the capabilities named above, a
   directory/package `against`, a non-`json` `format`, or scan's one-build
   audit mode (no `against` resolved) still invoke `abicheck scan` directly,
-  since `compare` has no equivalent for those yet.
+  since `compare` has no equivalent for those yet. Three more cases also
+  stay on (or fall back to) the legacy `scan` CLI, closing gaps a
+  follow-up review found: an explicitly pinned `depth` (`compare` lacks
+  scan's auto-strict pinned-depth evidence contract, so a pin with no
+  evidence available used to abort loudly under `scan` but would have
+  silently passed under `compare`); a scan-only flag or non-`json`
+  `--format` override reaching the same gate only through `extra-args`
+  rather than a dedicated Action input; and — the one genuine behavioral
+  gap in the migrated `compare` path itself — a cross-source hygiene
+  finding (`changes[].cross_source_evolution`) that `scan --against`'s own
+  baseline mechanism keeps advisory-only but a real `abicheck compare`
+  subprocess does not: detected after the fact from the compare run's own
+  JSON report, which is then discarded in favor of re-running through the
+  legacy `scan` CLI so the published result matches `scan`'s own semantics.

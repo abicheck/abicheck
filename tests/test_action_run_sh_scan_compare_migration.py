@@ -279,3 +279,114 @@ class TestScanStaysOnLegacyCliForUnmigratedCapabilities:
         pkg_dir.mkdir()
         cmd = _run_cmd(_base_env(INPUT_AGAINST=str(pkg_dir)))
         assert cmd[1] == "scan", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForPinnedDepth:
+    """Codex review, P1 (fresh evidence): `scan`'s pinned-depth contract is
+    "auto-strict" -- `cli_scan.py`'s `_scan_explicit_flags`/
+    `pinned_explicit` makes an explicit `--depth source`/`--depth build`
+    that cannot collect its evidence unconditionally abort with exit 7
+    (`EVIDENCE_CONTRACT_ERROR`). `compare` has no such unconditional
+    contract (it only enforces evidence completeness when
+    `--require-complete-analysis` is separately passed, which this migrated
+    branch does not force on for a pinned depth) -- so a pinned `depth`
+    must keep `mode: scan` on the legacy CLI, the same as
+    `budget`/`crosscheck`/`risk-rules`/`build-target` already do, to avoid
+    a workflow silently losing scan's own loud exit-7 safety contract.
+
+    The bug class here is "any explicitly pinned, non-`auto` depth value",
+    not just one reported value -- parametrized across every real `--depth`
+    choice `dump`/`scan`/`compare` share (`binary`/`headers`/`build`/
+    `source`), plus the literal string `auto` proving the *omitted*/`auto`
+    case is deliberately exempted (it is scan's own non-strict default, and
+    `compare` reaches an identical, non-strict result for it).
+    """
+
+    @pytest.mark.parametrize("depth", ["binary", "headers", "build", "source"])
+    def test_pinned_depth_stays_on_scan(self, depth: str) -> None:
+        cmd = _run_cmd(_base_env(INPUT_DEPTH=depth))
+        assert cmd[1] == "scan", cmd
+
+    def test_auto_depth_still_migrates_to_compare(self) -> None:
+        # The literal word "auto" is scan's own non-strict default spelled
+        # out explicitly -- it must NOT force the legacy CLI, the same as
+        # omitting `depth` entirely doesn't (see
+        # `TestScanMigratesToCompare.test_depth_since_changed_path_forwarded`
+        # for the omitted case already covered as a migrated-path input).
+        cmd = _run_cmd(_base_env(INPUT_DEPTH="auto"))
+        assert cmd[1] == "compare", cmd
+
+    def test_omitted_depth_still_migrates_to_compare(self) -> None:
+        cmd = _run_cmd(_base_env())
+        assert cmd[1] == "compare", cmd
+        assert "--depth" not in cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
+    """Codex review, P2 (fresh evidence): the `_SCAN_USES_LEGACY_CLI` gate
+    only inspected dedicated `INPUT_*` fields, but `extra-args` is
+    documented as forwarded verbatim to whichever command the gate selects
+    -- so a scan-only flag passed this way (e.g. `--crosscheck
+    private_header_leak=error`) silently routed to `compare` instead of
+    forcing the legacy CLI, either erroring outright (`compare` has no such
+    option) or, for `--format text`, producing a format `compare` doesn't
+    even have.
+
+    The bug class is "any scan-only or format-changing token reachable via
+    extra-args", not just the one `--crosscheck`/`--format text` combination
+    the review comment named -- parametrized across several independently-
+    chosen scan-only flags (mirroring the dedicated-input conditions this
+    gate already had) plus the `--format` override case, each via
+    `extra-args` alone with no matching dedicated input set.
+    """
+
+    @pytest.mark.parametrize(
+        "extra_args",
+        [
+            "--crosscheck private_header_leak=error",
+            "--budget 15m",
+            "--risk-rules rules.yml",
+            "--build-target //:math",
+            "--against other-baseline.json",
+            "--manifest manifest.json",
+            "--public-header-dir pub",
+            "--depth source",
+        ],
+    )
+    def test_scan_only_extra_arg_stays_on_scan(self, extra_args: str) -> None:
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS=extra_args))
+        assert cmd[1] == "scan", cmd
+
+    def test_format_text_override_via_extra_args_stays_on_scan(self) -> None:
+        # `format: json` (the dedicated input) with `extra-args: --format
+        # text` really does run `text` (Click's last-flag-wins) -- `compare`
+        # has no `text` format at all.
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--format text"))
+        assert cmd[1] == "scan", cmd
+
+    def test_format_json_via_extra_args_does_not_force_legacy_cli(self) -> None:
+        # The inverse of the `--format text` case above: an explicit
+        # `--format json` in extra-args (redundant with the already-json
+        # dedicated `INPUT_FORMAT`) must NOT itself force the legacy CLI --
+        # proves `_extra_args_forces_legacy_scan_cli`'s own `--format` arm
+        # reads the token's *value*, not merely whether `--format` is
+        # present in extra-args at all.
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--format json"))
+        assert cmd[1] == "compare", cmd
+
+    def test_unrelated_extra_arg_does_not_force_legacy_cli(self) -> None:
+        # A flag shared by both commands, with no scan-only meaning, must
+        # not trip the gate -- otherwise every migrated invocation with any
+        # extra-args at all would be forced back to legacy CLI.
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--severity-preset strict"))
+        assert cmd[1] == "compare", cmd
+
+    def test_pattern_verdicts_extra_arg_does_not_force_legacy_cli(self) -> None:
+        # `--pattern-verdicts` is a scan-only *boolean* flag `compare`
+        # rejects as an unknown option -- a loud, immediate CLI usage
+        # error either way, not a silent misbehavior, so this helper
+        # deliberately does not special-case it (see its own docstring).
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--pattern-verdicts"))
+        assert cmd[1] == "compare", cmd
