@@ -46,99 +46,9 @@ already apply to `ChangeKind`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from .bug_class_schema import BugClass, KnownGap
 
-
-@dataclass(frozen=True)
-class KnownGap:
-    """A residual the class's current tests deliberately do not close.
-
-    Per AGENTS.md's "Fix the cause, not the instance": a gap is tracked
-    here rather than left as prose only. `canary_test`, when set, must be
-    a *dedicated* executable canary written specifically for this gap that
-    fails loudly if the residual silently closes or silently widens — never
-    a pointer to an existing suite that happens to cover the same class but
-    doesn't encode this specific gap. Leave it `None` for a gap that is
-    tracked but not yet monitored by a canary; `None` is honest, a
-    mismatched path is not (Codex review, PR #885).
-
-    "Fails loudly" is a strict requirement, checked by
-    `tests/test_regressions_manifest.py::test_known_gap_canaries_exist`, not
-    just documented here: an ordinary `@pytest.mark.xfail` is non-strict by
-    this repository's own pytest config (no `xfail_strict` ini option), so
-    an unexpected pass (XPASS, i.e. the gap silently closed) still reports
-    green — use `@pytest.mark.xfail(..., strict=True)` instead. A bare
-    `@pytest.mark.skip` is rejected outright: a skipped test never executes
-    at all, so it cannot detect the residual closing *or* widening — it
-    only proves the file exists. A conditional runtime `pytest.xfail(...)`
-    call (`if not fixed_yet(): pytest.xfail(...)`) is **not** an equivalent
-    substitute for `strict=True`, despite looking like one: once the
-    guarding condition stops being met (the gap closes), execution falls
-    through to whatever follows and, if that now passes, pytest records an
-    ordinary PASS — not an XPASS — so nothing distinguishes it from any
-    other passing test and CI stays green with no alert (Codex review,
-    PR #885, fresh evidence after the first review round). A canary with no
-    xfail/skip decorator at all must instead directly assert the *residual's
-    own bound* (the specific degraded/wrong value the gap currently
-    produces) rather than the eventually-correct behavior — asserting the
-    bound fails loudly the moment the real behavior diverges from it, in
-    either direction.
-    """
-
-    #: What's not covered (one sentence — the full account lives in
-    #: AGENTS.md's "Known gaps" section or the linked issue/PR).
-    description: str
-    #: Issue or PR number this gap traces to, e.g. "PR #843".
-    reference: str
-    #: Path to a *dedicated* canary test for this exact gap, or `None` if
-    #: this residual is tracked but not yet monitored by one.
-    canary_test: str | None = None
-
-
-@dataclass(frozen=True)
-class BugClass:
-    """One durable, cross-PR bug-class entry."""
-
-    #: Stable, dotted identifier — e.g. "identity.environment_taint".
-    #: Referenced by a future PR's "Bug class" answer instead of restating
-    #: the invariant from scratch.
-    id: str
-    #: One-sentence statement of the invariant that must hold for every
-    #: input, not just the originally reported one.
-    invariant: str
-    #: Issue/PR numbers this class's own escape history traces through —
-    #: for traceability, not for the integrity check to validate against
-    #: GitHub (this registry has no network access).
-    fixed_by: tuple[int, ...]
-    #: Paths to the test(s) carrying the generalized/property/metamorphic
-    #: suite for this class. At least one is required — a class with no
-    #: test is a "Known gaps" AGENTS.md paragraph, not a registry entry.
-    seed_tests: tuple[str, ...]
-    #: Documented, user-facing entry points this class's own seed_tests
-    #: actually invoke — "cli" only for a real Click/`CliRunner`
-    #: invocation, "python-api" only for a call through `abicheck.service`,
-    #: "github-action" only for a real execution of a workflow/composite-
-    #: action step. A seed test that imports an internal module directly
-    #: (`abicheck.checker`, `abicheck.surface`, `abicheck.dumper_clang`,
-    #: ...) — which is most of this registry today — exercises none of
-    #: these, and this field must stay `()` for it: a claimed surface a
-    #: seed test doesn't reach conceals exactly the missing cross-surface
-    #: coverage a contributor is supposed to discover here (Codex review,
-    #: PR #885). Free-form beyond that rule; not yet cross-checked against
-    #: a fixed vocabulary.
-    public_surfaces: tuple[str, ...] = ()
-    #: Axis name -> the values *actually exercised*, e.g.
-    #: {"algorithm": ("zstd", "gzip")} when a seed test genuinely round-
-    #: trips through both. The same rule as `public_surfaces` applies to a
-    #: "frontend" axis specifically: {"frontend": ("castxml", "clang")}
-    #: requires a seed test that invokes the real castxml/clang backend —
-    #: not one that feeds a hand-built AST/XML fragment into an internal
-    #: parser class directly, which is frontend-agnostic and earns no
-    #: frontend axis entry at all. Free-form beyond that rule; documents
-    #: *coverage* breadth, not a schema this module enforces.
-    axes: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    #: Residuals this class's current tests do not close (see `KnownGap`).
-    known_gaps: tuple[KnownGap, ...] = ()
+__all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 
 
 #: The bug classes named in
@@ -510,6 +420,55 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="storage.short_decode_mistaken_for_complete_decode",
+        invariant=(
+            "A bounded read over a compressed/streamed source must never "
+            'treat "the decoder returned without raising" as "the '
+            'decode is complete": a stream cut at an arbitrary raw-byte '
+            "boundary yields a *short* result -- commonly zero bytes -- "
+            "with no exception at all, so a result shorter than the "
+            "requested length is a truncation signal that must escalate "
+            "the raw read exactly as a raised exception does, unless the "
+            "underlying source is already exhausted. Concretely: "
+            "bounded_decoded_prefix(p, n) == read_snapshot_bytes(p)[:n] "
+            "for every valid storage envelope whose first n decoded bytes "
+            "are reachable within the reader's own raw-input budget, at "
+            "every compression ratio; past that budget the answer is None "
+            '("no prefix within budget"), never a short value that would '
+            "read as the real prefix."
+        ),
+        fixed_by=(1164,),
+        seed_tests=("tests/test_bounded_decoded_prefix_properties.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "algorithm": ("zstd", "gzip"),
+            "compression_ratio": ("low", "high"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    'The same "short read is not EOF" shape exists in '
+                    "every other bounded/streamed reader in the tree "
+                    "(`workflows/bundle_compare_operand.py`'s own larger-"
+                    "window probe, `snapshot_cache.py`'s archive reader, "
+                    "the DWARF/PE section readers). Only the snapshot "
+                    "storage envelope's prefix primitive has a "
+                    "generalized suite; the siblings are untested against "
+                    "this invariant. Separately, the bounded reader's own "
+                    "guarantee stops at its raw-input cap: an envelope can "
+                    "place arbitrarily much stored input before its n-th "
+                    "decoded byte (a tiny data frame, a megabyte skippable "
+                    "frame, then the payload), and reading far enough to "
+                    "decode it is the whole-file decompression the bounded "
+                    "reader exists to avoid. That case answers None by "
+                    "design and is pinned by a test, but it is a real "
+                    "narrowing of the invariant above, not a closed case."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="trust_boundary.shell_workflow_injection",
         invariant=(
             "Every scalar input to a shell script or composite-Action "
@@ -517,11 +476,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758, 836, 919),
+        fixed_by=(705, 758, 836, 919, 1165),
         seed_tests=(
             "tests/test_reusable_workflow_execution.py",
             "tests/test_check_project_workflow_execution.py",
             "tests/test_action_run_sh_helpers.py",
+            # PR #1165: `action/validate-inputs.sh`'s own annotation
+            # emitters. Every message there interpolates a
+            # workflow-controlled INPUT_* value into a line-delimited
+            # GitHub annotation, so a value carrying a newline forged an
+            # `::error::`/`::set-output::` command of its own -- a live
+            # defect on the pre-existing `build-info` site, not only on
+            # the tombstones the same PR added. Fixed once in the shared
+            # `_warn`/`_fail` helpers.
+            "tests/test_action_validate_inputs.py",
         ),
         public_surfaces=("github-action",),
         axes={
@@ -541,6 +509,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             )
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "`action/run.sh` emits its own annotations with "
+                    'inline `echo "::error::..."` calls rather than '
+                    "through a shared helper, and several interpolate an "
+                    "INPUT_* value the same way validate-inputs.sh did. "
+                    "PR #1165 fixed validate-inputs.sh at its two "
+                    "emitters (covering every site in that file at once) "
+                    "but deliberately did not widen into run.sh's ~20 "
+                    "inline sites, which need their own pass and their "
+                    "own executing corpus."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
             KnownGap(
                 description=(
                     "The hostile-input execution corpus (shared via "
