@@ -321,7 +321,7 @@ debug, or obsolete).
 | `--scope-public-headers/--no-` | MERGE | `--contract public` / `--contract all` | One contract mechanism — **not before** ADR-049's relevance defects close | `public-contract-default.md` Phase 6 |
 | `--require-complete-analysis` | CONFIG | `assurance.require_complete` | Project CI strictness (vision E-S1 meaning preserved) | — |
 | `--profile` | REMOVE | — | Bundles depth + rendering + gate policy; D4/D5 separate them (reverses ADR-040 Lever 3) | Phase 7 |
-| `--ast-frontend` | CONFIG | `compile.ast_frontend` | Extraction backend is a host/toolchain property | — |
+| `--ast-frontend` | CONFIG | `compile.frontend` | Extraction backend is a host/toolchain property | — |
 | `--allow-ast-frontend-fallback` | CONFIG | `compile.ast_frontend_fallback` | as above | — |
 | `--allow-unsupported-castxml` | CONFIG | `compile.allow_unsupported_castxml` | as above | — |
 | `--compiler` | CONFIG | `compile.compiler` | Toolchain identity is stable per project/target | — |
@@ -644,6 +644,21 @@ No deprecated alias is kept. `abicheck scan` exits `64` with `No such
 command`, with an error message naming `compare --no-baseline`.
 
 ### Phase 7 — CLI/config cleanup
+
+**7a/7b/7c: done.** 7a deleted `compare`'s 4 hidden debug-resolution flags
+(`--dwarf-only`/`--debug-format`/`--debuginfod`/`--debuginfod-url`) outright,
+each already having a `debug.*` config-key twin. 7b removed the whole L2
+compile-context family (`--ast-frontend`, `--allow-ast-frontend-fallback`,
+`--allow-unsupported-castxml`, `--compiler`, `--compiler-prefix`,
+`--compiler-option`, `--sysroot`, `--nostdinc`, `--frontend-context`,
+`--lang`) from both `compare` and `dump` as one unit (ADR-037 D8.1), merging
+`--compiler`/`--compiler-prefix` into one `compile.compiler` key. 7c applied
+7a's identical treatment to `dump`'s own `--dwarf-only`/`--debug-format`/
+`--debuginfod`/`--debuginfod-url`/`--pdb-path` (`--debug-format` had been a
+*visible*, not hidden, flag on `dump` before this phase — removed anyway for
+front-end parity with `compare`, since ADR-037 D8.1 requires the two commands
+not to drift). `scan` is unaffected by any of 7a/7b/7c — it keeps every one
+of these flags as a real CLI option. 7d–7h remain open.
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —

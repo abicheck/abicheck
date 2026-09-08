@@ -141,6 +141,8 @@ def test_dump_manifest_end_to_end_merges_two_tus(tmp_path, runner):
         "    forced_includes: [b.h]\n",
     )
     out = tmp_path / "snap.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n  lang: c\n")
     result = runner.invoke(
         main,
         [
@@ -148,10 +150,8 @@ def test_dump_manifest_end_to_end_merges_two_tus(tmp_path, runner):
             str(so),
             "--dump-manifest",
             str(manifest),
-            "--ast-frontend",
-            "clang",
-            "--lang",
-            "c",
+            "--config",
+            str(cfg),
             "-o",
             str(out),
         ],
@@ -208,6 +208,10 @@ def test_dump_manifest_with_compiler_option_include_dir_still_works(tmp_path, ru
         "roots: [a.h]\ntranslation_units:\n  - name: tu_a\n    forced_includes: [a.h]\n",
     )
     out = tmp_path / "snap.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        f"compile:\n  frontend: clang\n  lang: c\n  options: [-I{include_dir}]\n"
+    )
     result = runner.invoke(
         main,
         [
@@ -215,12 +219,8 @@ def test_dump_manifest_with_compiler_option_include_dir_still_works(tmp_path, ru
             str(so),
             "--dump-manifest",
             str(manifest),
-            "--ast-frontend",
-            "clang",
-            "--lang",
-            "c",
-            "--compiler-option",
-            f"-I{include_dir}",
+            "--config",
+            str(cfg),
             "-o",
             str(out),
         ],

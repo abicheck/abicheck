@@ -42,6 +42,7 @@ from .frontends.cli.options.params import (
 )
 
 if TYPE_CHECKING:
+    from .buildsource.build_config import BuildConfig
     from .service_scan import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
@@ -659,6 +660,30 @@ _enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
 )
 
 
+def apply_compile_config_env_toggles(
+    ctx: click.Context, bc: BuildConfig | None
+) -> None:
+    """Apply ``compile.ast_frontend_fallback``/``compile.allow_unsupported_castxml``.
+
+    Phase 7 (one-comparison-product.md §4.1/§4.2): ``--allow-ast-frontend-
+    fallback``/``--allow-unsupported-castxml`` are removed from ``compare``/
+    ``dump`` (CONFIG class -- no CLI spelling survives, ADR-068 D5 guard #2).
+    Both were already pure per-invocation env-var togglers
+    (:func:`_scoped_env_flag_callback`), so a ``.abicheck.yml`` ``compile:``
+    block setting either to ``true`` reuses those same callbacks directly
+    (scoped to *ctx* the identical way, restored via ``ctx.call_on_close``)
+    rather than re-implementing the set/restore dance a second time.
+    ``scan`` is unaffected: it keeps both flags, which still win over a
+    config ``true`` simply by also being applied (idempotent env-var set).
+    """
+    if bc is None:
+        return
+    if bc.compile_ast_frontend_fallback:
+        _enable_ast_fallback_for_command(ctx, None, True)  # type: ignore[arg-type]
+    if bc.compile_allow_unsupported_castxml:
+        _enable_unsupported_castxml_for_command(ctx, None, True)  # type: ignore[arg-type]
+
+
 #: The AST frontends ``--ast-frontend`` accepts, in one place so the sided and
 #: single-valued spellings of the option cannot drift apart.
 AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
@@ -833,6 +858,7 @@ def merge_compile_config(
     *,
     frontend_explicit: bool = False,
     nostdinc_explicit: bool = False,
+    frontend_context_explicit: bool = False,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
@@ -861,7 +887,10 @@ def merge_compile_config(
     the project's ``compile:`` block for L2 the same way ``embed_build_source``
     honors its other non-executable settings for L3-L5 (Codex review). Only the
     non-executable ``compile:`` block is read here; ``build.query`` still requires
-    an explicit trusted ``--config`` (ADR-032 D5).
+    an explicit trusted ``--config`` (ADR-032 D5). ``compile.compiler`` gets the
+    identical trust gate for the identical reason: it names an executable to
+    invoke, so an auto-discovered config never selects one (CodeRabbit review,
+    PR #1146; see the ``compile.compiler`` handling below).
 
     A parse error is fail-loud for an **explicit** ``--config`` (``ClickException``)
     — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
@@ -928,6 +957,12 @@ def merge_compile_config(
         if bc.compile_std:
             config_tokens.append(f"-std={bc.compile_std}")
         config_tokens += [f"-D{d}" for d in bc.compile_defines]
+        # Phase 7 (compile.options — the demoted --compiler-option): raw
+        # pass-through tokens, appended after std/defines synthesis and
+        # before any surviving CLI --compiler-option tokens (scan only,
+        # since compare/dump no longer have the flag), same "config first,
+        # CLI wins a repeated flag" precedence as std/defines above.
+        config_tokens += list(bc.compile_options)
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI
@@ -946,19 +981,55 @@ def merge_compile_config(
     # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
     # direction; an unset flag inherits the config value (Codex review).
     nostdinc = cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
+    # Phase 7 (compile.compiler — the demoted --compiler/--compiler-prefix
+    # pair, merged into one config spelling): only consulted when the CLI
+    # gave neither (still possible on `scan`, which keeps both flags). A
+    # value ending in "-" is a cross-toolchain prefix; anything else is a
+    # full compiler path.
+    #
+    # Security (CodeRabbit review, PR #1146): this selects the executable
+    # invoked for header extraction, the same "arbitrary command from a
+    # config the operator didn't choose" shape ADR-032 D5 already gates for
+    # `build.query` — an auto-discovered `.abicheck.yml` (found by directory
+    # search, e.g. inside a fork PR's own branch content in CI) is never
+    # trusted to name it; only a config the operator explicitly passed via
+    # `--config` may. Ignored-not-silently-dropped: a clear diagnostic
+    # explains the skip, mirroring `build.query`'s own
+    # "ignored from auto-discovered .abicheck.yml" message.
+    gcc_path = cli_ctx.gcc_path
+    gcc_prefix = cli_ctx.gcc_prefix
+    if gcc_path is None and gcc_prefix is None and bc.compile_compiler:
+        if not explicit_config:
+            click.echo(
+                "warning: compile.compiler ignored from auto-discovered "
+                f"{cfg}; pass a trusted config with --config to permit "
+                "selecting a compiler executable.",
+                err=True,
+            )
+        elif bc.compile_compiler.endswith("-"):
+            gcc_prefix = bc.compile_compiler
+        else:
+            gcc_path = bc.compile_compiler
+    # Phase 7 (compile.frontend_context — the demoted --frontend-context):
+    # CLI > config, same explicitness-gated precedence as --nostdinc/
+    # --ast-frontend above. `scan` still carries a real Click default of
+    # "host" for this flag with no explicitness tracking of its own, so it
+    # always passes `frontend_context_explicit=False` here too -- a purely
+    # additive fallback with no prior config key to have collided with.
+    frontend_context = (
+        cli_ctx.frontend_context
+        if frontend_context_explicit
+        else (bc.compile_frontend_context or cli_ctx.frontend_context)
+    )
     merged = CompileContext(
-        gcc_path=cli_ctx.gcc_path,
-        gcc_prefix=cli_ctx.gcc_prefix,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=frontend,
-        # No config-file equivalent of --frontend-context exists (ADR-050
-        # D5) -- config merging only ever narrows CLI-unset fields, so the
-        # CLI-resolved value must simply survive the merge instead of
-        # silently reverting to CompileContext's "host" default.
-        frontend_context=cli_ctx.frontend_context,
+        frontend_context=frontend_context,
     )
     includes = tuple(cli_includes) + tuple(
         (base / p) if not Path(p).is_absolute() else Path(p)
@@ -1165,6 +1236,11 @@ def resolve_compile_context(
         sources=sources,
         frontend_explicit=_shared_frontend_explicit(ctx),
         nostdinc_explicit=_explicit("nostdinc"),
+        # `_explicit` reads `ctx.get_parameter_source`, which safely answers
+        # "not COMMANDLINE" for a parameter name a command no longer
+        # declares at all (compare/dump, Phase 7) rather than raising, so
+        # this always resolves False there and the config value applies.
+        frontend_context_explicit=_explicit("frontend_context"),
     )
 
 

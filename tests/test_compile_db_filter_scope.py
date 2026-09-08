@@ -392,6 +392,11 @@ class TestDumpCliHonorsTheFilterInTheFold:
 
         from abicheck.cli import main
 
+        # Phase 7 (one-comparison-product.md §4.1/§4.2): `dump` no longer
+        # accepts `--ast-frontend` -- `compile.frontend` in `.abicheck.yml`
+        # is the only spelling now.
+        cfg = out.parent / f"{out.stem}.abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         return CliRunner().invoke(
             main,
             [
@@ -410,8 +415,8 @@ class TestDumpCliHonorsTheFilterInTheFold:
                 # to be inconsistent. That refusal is unchanged by this fix.
                 "--depth",
                 "headers",
-                "--ast-frontend",
-                "clang",
+                "--config",
+                str(cfg),
                 "-o",
                 str(out),
                 *extra,
@@ -666,6 +671,8 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
         so_path, header, _compile_db = TestDumpCliHonorsTheFilterInTheFold._project(
             tmp_path
         )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -677,8 +684,8 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
                 str(header.parent),
                 "--depth",
                 "build",
-                "--ast-frontend",
-                "clang",
+                "--config",
+                str(cfg),
                 "--compile-db-filter",
                 "a.cpp",
                 "-o",
@@ -800,6 +807,8 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
         from abicheck.cli import main
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
+        cfg = tmp_path / "nested-build-info.abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -811,8 +820,8 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
                 str(build_info),
                 "--depth",
                 "build",
-                "--ast-frontend",
-                "clang",
+                "--config",
+                str(cfg),
                 "--compile-db-filter",
                 "a.cpp",
                 "-o",

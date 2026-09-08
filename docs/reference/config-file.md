@@ -91,7 +91,7 @@ actually validate that block's contents, deeply and independently of this
 loader.
 
 A *separate* load of the same `.abicheck.yml` — the `compile:` block shared
-by `compare`/`dump`/`scan`'s L2 compile context (`gcc-path`, includes,
+by `compare`/`dump`/`scan`'s L2 compile context (`compiler`, includes,
 sysroot, …), resolved by `merge_compile_config()` in `cli_options.py` — does
 distinguish explicit from auto-discovered: an explicit `--config` that
 fails to parse still fails loudly, but an
@@ -216,16 +216,44 @@ See [Scan levels](../use/scan-levels.md) and the
 
 ### `compile:`
 
-The stable half of the L2 header compile context (ADR-037 D4): AST
-`frontend:` (`auto`/`castxml`/`clang`/`hybrid`, case-insensitive — `hybrid`
-runs castxml and clang together and merges them), `std:` (C/C++ standard,
-e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
-`nostdinc:` (boolean). Per-invocation cross-compile flags stay CLI overrides
-(`CLI > config`).
+The L2 header compile context (ADR-037 D4). On `compare`/`dump` this is
+Phase 7's CONFIG surface (one-comparison-product.md §4.1/§4.2, ADR-037
+D8.1) — every field below has **no CLI spelling at all** on those two
+commands, with no escape hatch (ADR-068 D5 guard #2); `scan` still exposes
+the identical family as CLI flags (`--ast-frontend`/`--compiler`/
+`--compiler-prefix`/`--compiler-option`/`--sysroot`/`--nostdinc`/
+`--allow-ast-frontend-fallback`/`--allow-unsupported-castxml`/
+`--frontend-context`/`--lang`, `CLI > config`).
 
-> Values in `compile.std`/`compile.defines` must be a single whitespace-free
-> compiler-option atom (a config scalar cannot expand into multiple compiler
-> arguments).
+- `frontend:` — AST frontend (`auto`/`castxml`/`clang`/`hybrid`,
+  case-insensitive — `hybrid` runs castxml and clang together and merges
+  them). Was `--ast-frontend` on compare/dump.
+- `std:` — C/C++ standard, e.g. `c++17`.
+- `include_dirs:`/`defines:` — lists.
+- `sysroot:` — was `--sysroot` on compare/dump.
+- `nostdinc:` — boolean; was `--nostdinc`/`--no-nostdinc` on compare/dump.
+- `compiler:` — path to the compiler binary, **or** a cross-toolchain
+  prefix (e.g. `aarch64-linux-gnu-`) when the value ends in `-`. Merges the
+  former `--compiler`/`--compiler-prefix` pair into one spelling (ADR-068
+  D5 guard #1: "not one-for-one" — `--compiler-prefix` does not become its
+  own `compiler_prefix:` key).
+- `options:` — a list of raw compiler flags passed through verbatim, each a
+  single whitespace-free atom like `std:`/`defines:` below. Was the
+  repeatable `--compiler-option` on compare/dump.
+- `ast_frontend_fallback:` — boolean; was `--allow-ast-frontend-fallback`
+  (itself always a pure `ABICHECK_ALLOW_AST_FALLBACK` env-var toggle, so a
+  config `true` has the identical effect).
+- `allow_unsupported_castxml:` — boolean; was `--allow-unsupported-castxml`
+  (same env-var-toggle shape as `ast_frontend_fallback:` above, via
+  `ABICHECK_ALLOW_UNSUPPORTED_CASTXML`).
+- `frontend_context:` — `host`/`device`; was `--frontend-context`.
+- `lang:` — `c++`/`c`; was `--lang` on compare/dump. Defaults to `c++`
+  when unset (no header/source-content language inference exists in this
+  codebase to do better than that fixed default).
+
+> Values in `compile.std`/`compile.defines`/`compile.options` must each be a
+> single whitespace-free compiler-option atom (a config scalar cannot
+> expand into multiple compiler arguments).
 
 > A relative `compile.include_dirs` entry resolves against the *project
 > root* — the directory containing the discovered config, or the directory
@@ -237,17 +265,24 @@ e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
 
 ### `debug:`
 
-Separate-debug-file resolution for ELF (ADR-021a), demoted off the CLI in
-ADR-040 Lever 2 and later removed outright (ADR-068 D5) — stable per-project
-debug-artifact knobs, each the *only* remaining spelling of what used to be
-a `compare` CLI flag; the coarse per-run `--debug-root` stays a visible CLI
-flag. (`dump` keeps its own separate, visible copies of these four flags.)
+Separate-debug-file resolution for ELF (ADR-021a). On `compare`/`dump` this
+is Phase 7's CONFIG surface (one-comparison-product.md §4.1/§4.2) — every
+field below has **no CLI spelling at all** on those two commands (ADR-040
+Lever 2 first demoted them to a config-key-with-override; Phase 7 removed
+the override itself, since this repo runs no deprecation window). The
+coarse per-run `--debug-root` stays a visible CLI flag on both commands —
+it is a per-run evidence input (ADR-068 D5 guard #3), not a stable project
+property.
+
 `format:` (`auto`/`dwarf`/`btf`/`ctf`, case-insensitive, default auto-pick)
 forces the ELF debug format for both sides (was `--debug-format`);
 `dwarf_only:` (default `false`) uses DWARF as the primary source even when
 headers are available (was `--dwarf-only`); `debuginfod:` (default `false`)
 enables debuginfod network resolution (was `--debuginfod`); `debuginfod_url:`
-overrides `DEBUGINFOD_URLS` (was `--debuginfod-url`).
+overrides `DEBUGINFOD_URLS` (was `--debuginfod-url`); `pdb_path:` — explicit
+path to a Windows PE PDB file, overriding automatic PDB discovery (was
+`dump --pdb-path`; `compare`'s own sided `--pdb-path old=`/`new=` flag is
+unrelated and unaffected).
 
 ---
 

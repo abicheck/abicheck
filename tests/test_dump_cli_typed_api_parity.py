@@ -243,6 +243,8 @@ def _dump_via_cli(
     so_path: Path, header: Path, tmp_path: Path, compile_db: Path
 ) -> dict:
     baseline = tmp_path / "baseline_cli.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     result = CliRunner().invoke(
         main,
         [
@@ -256,8 +258,8 @@ def _dump_via_cli(
             str(compile_db),
             "--depth",
             "source",
-            "--ast-frontend",
-            "clang",
+            "--config",
+            str(cfg),
             "-o",
             str(baseline),
         ],
@@ -567,6 +569,8 @@ def test_dump_cli_and_typed_api_agree_on_extraction_contract(
 def _dump_via_cli_to_file(
     so_path: Path, header: Path, tmp_path: Path, compile_db: Path, baseline: Path
 ) -> None:
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     dump_result = CliRunner().invoke(
         main,
         [
@@ -580,8 +584,8 @@ def _dump_via_cli_to_file(
             str(compile_db),
             "--depth",
             "source",
-            "--ast-frontend",
-            "clang",
+            "--config",
+            str(cfg),
             "-o",
             str(baseline),
         ],
@@ -735,6 +739,8 @@ def test_compare_implicit_dump_against_real_dump_baseline_is_comparable(
     baseline = tmp_path / "baseline.json"
     _dump_via_cli_to_file(so_path, header, tmp_path, compile_db, baseline)
 
+    compare_cfg = tmp_path / ".abicheck.yml"
+    compare_cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     compare_result = CliRunner().invoke(
         main,
         [
@@ -749,8 +755,8 @@ def test_compare_implicit_dump_against_real_dump_baseline_is_comparable(
             str(compile_db),
             "--depth",
             "source",
-            "--ast-frontend",
-            "clang",
+            "--config",
+            str(compare_cfg),
         ],
     )
     assert "NOT_COMPARABLE" not in compare_result.output, (

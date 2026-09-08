@@ -147,6 +147,8 @@ class TestLegacyMatchReachesTheRealCliPath:
 
         so_path, header, compile_db = _project(tmp_path)
         out = tmp_path / "cli.json"
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -160,8 +162,8 @@ class TestLegacyMatchReachesTheRealCliPath:
                 str(compile_db),
                 "--depth",
                 "headers",
-                "--ast-frontend",
-                "clang",
+                "--config",
+                str(cfg),
                 "-o",
                 str(out),
             ],

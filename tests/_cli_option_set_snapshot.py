@@ -31,17 +31,19 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
         # ADR-068 Phase 2c/2d: changed-path localization + the candidate-side
         # abi3 audit, moved off `scan` (one-comparison-product.md §3 #12/#15).
+        # Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1) deleted 17
+        # flags outright, with no CLI spelling left at all:
+        # --allow-ast-frontend-fallback, --allow-unsupported-castxml,
+        # --ast-frontend, --compiler, --compiler-option, --compiler-prefix,
+        # --debug-format, --debuginfod, --debuginfod-url, --dwarf-only,
+        # --frontend-context, --lang, --no-debuginfod, --no-dwarf-only,
+        # --no-nostdinc, --nostdinc, --sysroot -- .abicheck.yml's compile:/
+        # debug: blocks are their only source now.
         "--abi3",
-        "--allow-ast-frontend-fallback",
-        "--allow-unsupported-castxml",
-        "--ast-frontend",
         "--audit-suppressions",
         "--bundle-facts-library-manifest",
         "--bundle-facts-out",
         "--changed-path",
-        "--compiler",
-        "--compiler-option",
-        "--compiler-prefix",
         "--config",
         "--contract",
         "--debug-root",
@@ -59,7 +61,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--fail-on-removed-library",
         "--follow-deps",
         "--format",
-        "--frontend-context",
         "--header",
         "--help",
         "--help-all",
@@ -68,7 +69,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--include-private-dso",
         "--instantiation-manifest",
         "--keep-extracted",
-        "--lang",
         "--ld-library-path",
         "--max-json-object-nodes",
         "--no-baseline",
@@ -76,9 +76,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--no-demangle",
         "--no-fail-on-removed-library",
         "--on-incomplete-scope",
-        "--no-nostdinc",
         "--no-scope-public-headers",
-        "--nostdinc",
         "--new-variant",
         "--old-variant",
         "--output",
@@ -104,7 +102,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--support-promise",
         "--suppress",
         "--surface-metrics",
-        "--sysroot",
         "--use-cases",
         "--used-by",
         "--used-by-manifest",

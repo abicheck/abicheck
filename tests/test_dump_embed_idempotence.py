@@ -237,7 +237,13 @@ def _build_library(tmp_path: Path) -> tuple[Path, Path, Path]:
                 {
                     "directory": str(tmp_path),
                     "arguments": [
-                        "g++", "-std=c++17", "-fPIC", "-c", str(src), "-o", "widget.o",
+                        "g++",
+                        "-std=c++17",
+                        "-fPIC",
+                        "-c",
+                        str(src),
+                        "-o",
+                        "widget.o",
                     ],
                     "file": str(src),
                 }
@@ -298,16 +304,25 @@ def test_cli_dump_depth_source_embeds_exactly_once(
     )
 
     out = tmp_path / "snap.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     result = CliRunner().invoke(
         main,
         [
-            "dump", str(so_path),
-            "-H", str(header),
-            "--sources", str(tmp_path),
-            "--build-info", str(compile_db),
-            "--depth", "source",
-            "--ast-frontend", "clang",
-            "-o", str(out),
+            "dump",
+            str(so_path),
+            "-H",
+            str(header),
+            "--sources",
+            str(tmp_path),
+            "--build-info",
+            str(compile_db),
+            "--depth",
+            "source",
+            "--config",
+            str(cfg),
+            "-o",
+            str(out),
         ],
     )
     assert result.exit_code == 0, result.output
