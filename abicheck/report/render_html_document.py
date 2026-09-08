@@ -292,10 +292,17 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     if not section_htmls:
         empty_state = d["empty_state"]
         if empty_state is not None and empty_state["kind"] == "filtered":
+            # Codex review (PR #1154 second follow-up: "Render repeated show
+            # groups as repeated view options") -- this "no changes match"
+            # note has the identical raw-separator problem the "Filtered
+            # by" note above does; same fix, same helper.
+            from ..reporter_markdown import render_show_only_cli_hint
+
+            cli_hint = render_show_only_cli_hint(empty_state["show_only"])
             section_htmls.append(
                 "<div class='section'><p class='empty'>"
                 f"No changes match the current filter "
-                f"(<code>--view show={h(empty_state['show_only'])}</code>). "
+                f"(<code>{h(cli_hint)}</code>). "
                 f"{empty_state['all_changes_count']} change(s) exist but are "
                 f"excluded by the filter."
                 "</p></div>"

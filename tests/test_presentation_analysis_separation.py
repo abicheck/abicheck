@@ -597,6 +597,32 @@ class TestShowOnlyCliHintIsReRunnable:
         assert ";" not in filter_section
         assert filter_section.count("--view show=") == 2
 
+    def test_html_empty_filter_state_hint_has_no_internal_separator(
+        self, tmp_path: Path
+    ) -> None:
+        """The HTML "No changes match the current filter" empty-state note
+        has the identical raw-separator problem the "Filtered by" note does
+        (Codex review: "the alternate Markdown and HTML filter notes have
+        the same problem") -- two different-dimension groups, neither of
+        which matches anything in the fixture, exercises it."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--format", "html",
+                "--view", "show=breaking,variables",
+                "--view", "show=compatible,variables",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "No changes match the current filter" in result.output
+        note_section = result.output[
+            result.output.index("No changes match the current filter") :
+        ]
+        note_section = note_section[: note_section.index("</p>")]
+        assert ";" not in note_section
+        assert note_section.count("--view show=") == 2
+
 
 class TestSurfaceMetricsFlagIsVestigial:
     """ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
