@@ -239,6 +239,21 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
         "standard_layout_lost",
         "tail_padding_reuse_changed",
         "layout_unverifiable",
+        # ADR-068 plan §3 row 3 (cross-source check migration): both
+        # ``Change.symbol`` and ``Change.caused_by_type`` name the
+        # ODR-conflicted *type* itself (``crosscheck._check_odr_type_variant``
+        # sets both to the same qualified name), never a function/variable
+        # symbol. Left out of this set, ``is_symbol_level_finding`` classified
+        # it through ``_classify_symbol_level`` first: a struct/class tag can
+        # legitimately share its bare name with an unrelated non-public
+        # function (a common C shape — e.g. a ``Widget`` struct and a private
+        # helper also named ``Widget``), and that symbol-level lookup would
+        # then read "not found in all_symbols" (or "found but not exported")
+        # and demote a real, public-type ODR-conflict finding before type
+        # reachability was ever consulted — the same collision class
+        # ``field_renamed``'s own comment above documents for a type name
+        # colliding with its own implicit constructor symbol (Codex review).
+        "odr_type_variant",
     }
 )
 

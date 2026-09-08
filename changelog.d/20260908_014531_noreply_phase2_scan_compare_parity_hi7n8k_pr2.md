@@ -15,3 +15,34 @@
   checks already did whenever a side lacks `--sources`/`--build-info`/
   `--depth source` evidence — no new mechanism, no new flag. `scan` is
   unaffected and not yet retired.
+
+### Fixed
+
+- **`odr_type_variant`/`identity_collision_detected` no longer silently
+  drop genuinely distinct findings sharing one identity key.**
+  `workflows.cross_source_evolution._run_one_side` folds a check's findings
+  into a dict keyed by a per-check identity function; for these two checks
+  the identity was not always unique across a single side's own findings —
+  three divergent per-TU definitions of one type recorded against the same
+  header all compare against the same original baseline hash and produce
+  multiple `Change` records sharing `(symbol, source_location)`, and a
+  three-way collision on one L4 identity key produces multiple records
+  sharing `(symbol, new_value)` — so the dict comprehension kept only the
+  last record, and `run_crosschecks` had returned all of them. Both checks
+  now stamp the additional distinguishing evidence they already compute
+  (the ODR conflict's own per-TU layout hashes; the identity collision's
+  own transition USR) onto `Change.old_value`/`new_value`, and their
+  per-check identity functions read the extra field(s) (Codex review, PR
+  #1147 finding 1).
+- **`odr_type_variant` findings on a public type could be wrongly demoted
+  as "not-exported."** `abicheck/surface.py`'s public-surface scoping
+  classifies a finding as symbol-level or type-level before deciding
+  in/out of surface; `odr_type_variant`'s `symbol`/`caused_by_type` both
+  name the conflicted *type*, but the kind was missing from
+  `_TYPE_LEVEL_KIND_NAMES`. When that type name also happened to exist in
+  the snapshot's `all_symbols` as an unrelated, non-public function (a
+  common C shape — a struct tag and a private helper sharing a spelling),
+  the symbol-level path ran first and demoted the finding before type
+  reachability was ever consulted. Now classified type-level, like
+  `rtti_for_internal_type`'s and the other cross-source kinds' own
+  carve-outs (Codex review, PR #1147 finding 2).

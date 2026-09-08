@@ -113,12 +113,12 @@
     },
     {
       "path": "abicheck/buildsource/crosscheck.py",
-      "baseline_lines": 1783,
+      "baseline_lines": 1817,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1773 -> 1783 (ADR-068 D3/D4/D5, cross-source-stage-automatic PR): `_check_unversioned_exported_symbol` now excludes an unattached `*PRIVATE*`-only version-script marker from its own real-scheme test, reusing `diff_versioning._is_unattached_private_version_node`'s definition -- a real correctness fix (a false positive this check's own findings could not previously avoid), found only once `checker.compare()` started running this check automatically on its ordinary path and a fixture with such a marker hit it. Ten lines: one import, one filter comprehension, two call-site renames, and a docstring sentence.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1773 -> 1783 (ADR-068 D3/D4/D5, cross-source-stage-automatic PR): `_check_unversioned_exported_symbol` now excludes an unattached `*PRIVATE*`-only version-script marker from its own real-scheme test, reusing `diff_versioning._is_unattached_private_version_node`'s definition -- a real correctness fix (a false positive this check's own findings could not previously avoid), found only once `checker.compare()` started running this check automatically on its ordinary path and a fixture with such a marker hit it. Ten lines: one import, one filter comprehension, two call-site renames, and a docstring sentence. Raised 1783 -> 1812 (PR #1147 Codex review, P2 finding 1): `_check_odr_type_variant` and `_check_identity_collision` now stamp the per-record distinguishing evidence `workflows.cross_source_evolution`'s per-check identity needs (the ODR conflict's own `old_type_hash`/`new_type_hash` onto `Change.old_value`/`new_value`; the identity-collision's own transition `usr_a` onto `Change.old_value`) onto the `Change` objects they already build, plus the corresponding sort-key and doc-comment updates -- both checks previously built a `Change` with no field distinguishing two genuinely distinct records sharing the same `(symbol, source_location)`/`(symbol, new_value)`, so the caller-side identity fix could not be made precise without this. Raised 1812 -> 1817 (same fix, `ruff format` reflow): the multi-line sort-key lambda `_check_odr_type_variant` gained exceeds ruff's line-length preference as a one-liner and reformats across five lines; no new behavior.",
       "review_by": "2026-11-30"
     },
     {

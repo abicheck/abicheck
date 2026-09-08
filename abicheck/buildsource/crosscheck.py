@@ -808,6 +808,21 @@ def _check_odr_type_variant(
         name = str(conflict.get("qualified_name", "")) or "<anonymous>"
         header = str(conflict.get("header", ""))
         where = f" in {header!r}" if header else ""
+        # `_route_type` keys ODR detection by (qualified_name, header) and
+        # never updates that key's stored hash once a conflict is first
+        # recorded (see its own docstring) -- a *third* divergent definition
+        # of the same type in the same header compares against the same
+        # original baseline hash and appends a second, otherwise-identical
+        # conflict record sharing this finding's (symbol, source_location).
+        # The per-TU layout hashes are the only thing that still tells the
+        # two conflicts apart, so they ride on the ``Change`` itself
+        # (old_value/new_value) rather than being dropped after this
+        # function returns -- both this check's own message and any
+        # identity built from its findings need them (Codex review:
+        # ``workflows.cross_source_evolution``'s per-check identity
+        # otherwise silently collapses one conflict onto the other).
+        old_hash = str(conflict.get("old_type_hash", ""))
+        new_hash = str(conflict.get("new_type_hash", ""))
         findings.append(
             _change(
                 ChangeKind.ODR_TYPE_VARIANT,
@@ -818,13 +833,21 @@ def _check_odr_type_variant(
                 "a consumer compiled against one layout silently reads the other. "
                 "Reconcile the definitions (usually a macro/flag that changes the "
                 "type per TU).",
-                new_value=name,
+                old_value=old_hash or None,
+                new_value=new_hash or name,
                 confidence=Confidence.MEDIUM,
                 caused_by_type=name,
                 source_location=header or None,
             )
         )
-    findings.sort(key=lambda c: (c.symbol, c.source_location or ""))
+    findings.sort(
+        key=lambda c: (
+            c.symbol,
+            c.source_location or "",
+            c.old_value or "",
+            c.new_value or "",
+        )
+    )
     detail = (
         f"L4 per-TU type layouts: {len(findings)} type(s) with divergent "
         "cross-TU definitions (ODR conflict)"
@@ -1320,11 +1343,22 @@ def _check_identity_collision(
                 "cross-scope declarations — any L4/L5 finding attributed to this "
                 "identity may actually describe either declaration; treat it as "
                 "ambiguous between the two USRs above.",
+                # `identity` (`new_value`) alone is not unique across this
+                # check's own findings: `_route_declaration` records one
+                # collision entry per *additional* colliding declaration, so
+                # a three-way collision on one identity key produces two
+                # records sharing both `qname` and `identity`.
+                # `identity_to_usr` is overwritten after every recorded
+                # collision, so `usr_a` (this transition's own "previous
+                # USR") is what still tells successive collisions on the
+                # same key apart -- carried on `old_value` for exactly that
+                # reason (Codex review, P2 finding 1).
+                old_value=usr_a or None,
                 new_value=identity,
                 confidence=Confidence.MEDIUM,
             )
         )
-    findings.sort(key=lambda c: c.symbol)
+    findings.sort(key=lambda c: (c.symbol, c.new_value or "", c.old_value or ""))
     facts, counters = _surface_boundary_counters(surface)
     detail = (
         f"L4 identity() collisions: {len(findings)} distinct-declaration "

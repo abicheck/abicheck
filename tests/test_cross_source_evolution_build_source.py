@@ -217,10 +217,68 @@ def test_odr_type_variant_identity_distinguishes_two_conflicts_same_symbol() -> 
     changes = compute_cross_source_evolution(old, new)
     hits = [c for c in changes if c.kind == ChangeKind.ODR_TYPE_VARIANT]
     by_evolution = {c.cross_source_evolution: identity(c) for c in hits}
+    # No per-TU layout hash in this fixture's conflict dict, so old_value is
+    # unset and new_value falls back to the type name -- the identity still
+    # carries all four components `_IDENTITY_FUNCS[CHECK_ODR_TYPE_VARIANT]`
+    # returns (symbol, source_location, old_value, new_value).
     assert by_evolution == {
-        CrossSourceEvolution.RESOLVED: ("<anonymous>", "a.h"),
-        CrossSourceEvolution.INTRODUCED: ("<anonymous>", "b.h"),
+        CrossSourceEvolution.RESOLVED: ("<anonymous>", "a.h", None, "<anonymous>"),
+        CrossSourceEvolution.INTRODUCED: ("<anonymous>", "b.h", None, "<anonymous>"),
     }
+
+
+def test_odr_type_variant_three_way_conflict_from_same_header_all_survive() -> None:
+    """Codex review, P2 finding 1: three divergent per-TU definitions of one
+    type recorded against the *same* header produce multiple ``Change``
+    records sharing both ``symbol`` and ``source_location`` -- ``_route_type``
+    keys ODR detection by ``(qualified_name, header)`` and never updates that
+    key's stored baseline hash once a first conflict is recorded, so a
+    second and third divergent definition both compare against the same
+    original baseline. Before this fix, ``_run_one_side``'s
+    ``{identity(c): c for c in ...}`` dict comprehension silently dropped
+    every record but the last sharing an identity -- reproduced directly
+    against ``_run_one_side`` (below `compute_cross_source_evolution`'s own
+    OLD/NEW pairing, which would only ever show one side's surviving record
+    regardless) so the fix is pinned at the layer that actually loses data."""
+    from abicheck.buildsource.crosscheck import CHECK_ODR_TYPE_VARIANT
+    from abicheck.workflows.cross_source_evolution import _run_one_side
+
+    surface = SourceAbiSurface(
+        odr_conflicts=[
+            {
+                "qualified_name": "Widget",
+                "header": "widget.h",
+                "old_type_hash": "sha256:base",
+                "new_type_hash": "sha256:variant-b",
+            },
+            {
+                "qualified_name": "Widget",
+                "header": "widget.h",
+                "old_type_hash": "sha256:base",
+                "new_type_hash": "sha256:variant-c",
+            },
+        ],
+        reachable_declarations=[
+            SourceEntity(id="d0", kind="function", qualified_name="f")
+        ],
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        build_source=BuildSourcePack(root="", source_abi=surface),
+    )
+    evaluated, by_identity = _run_one_side(snap, CHECK_ODR_TYPE_VARIANT)
+    assert evaluated
+    # Both conflicts share (symbol="Widget", source_location="widget.h") --
+    # only the per-TU layout hashes tell them apart. Losing either one here
+    # means a real, distinct ODR conflict silently vanished from the report.
+    assert len(by_identity) == 2, (
+        f"expected both divergent conflicts to survive identity-keying, got "
+        f"{len(by_identity)}: {sorted(str(k) for k in by_identity)}"
+    )
+    new_hashes = {c.new_value for c in by_identity.values()}
+    assert new_hashes == {"sha256:variant-b", "sha256:variant-c"}
 
 
 def test_odr_type_variant_authority_unchanged() -> None:
@@ -312,10 +370,14 @@ def test_identity_collision_detected_evolution_matrix(
 
 
 def test_identity_collision_detected_identity_distinguishes_two_collisions() -> None:
-    """This check's own identity is ``(symbol, new_value)`` -- ``symbol`` is
-    the colliding qualified name and ``new_value`` the L4 identity key,
-    which two distinct collisions sharing one qualified name (a three-way
-    collision) would otherwise not distinguish."""
+    """This check's own identity is ``(symbol, new_value, old_value)`` --
+    ``symbol`` is the colliding qualified name and ``new_value`` the L4
+    identity key, which two distinct collisions sharing one qualified name
+    (a three-way collision) would otherwise not distinguish; ``old_value``
+    (the transition's own "previous USR") is the check's own tiebreaker for
+    that residual case, exercised directly in
+    ``test_identity_collision_detected_three_way_collision_all_survive``
+    below."""
 
     def _snap_with_identity(identity_key: str) -> AbiSnapshot:
         surface = SourceAbiSurface(
@@ -347,10 +409,64 @@ def test_identity_collision_detected_identity_distinguishes_two_collisions() -> 
     changes = compute_cross_source_evolution(old, new)
     hits = [c for c in changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
     by_evolution = {c.cross_source_evolution: identity(c) for c in hits}
+    # Both fixtures share the same "usr_a" ("c:@F@f#"), so old_value is the
+    # same on both sides here -- the identity is (symbol, new_value,
+    # old_value), all three of which `_IDENTITY_FUNCS[CHECK_IDENTITY_
+    # COLLISION]` now returns.
     assert by_evolution == {
-        CrossSourceEvolution.RESOLVED: ("f", "f#sha256:aaa"),
-        CrossSourceEvolution.INTRODUCED: ("f", "f#sha256:bbb"),
+        CrossSourceEvolution.RESOLVED: ("f", "f#sha256:aaa", "c:@F@f#"),
+        CrossSourceEvolution.INTRODUCED: ("f", "f#sha256:bbb", "c:@F@f#"),
     }
+
+
+def test_identity_collision_detected_three_way_collision_all_survive() -> None:
+    """Codex review, P2 finding 1: a three-way collision on one L4 identity
+    key -- three distinct declarations (proven distinct by USR) all linked
+    onto the same ``identity()`` key -- produces *two* ``Change`` records
+    (one per additional colliding declaration, per
+    ``source_link._route_declaration``), both sharing ``symbol`` (the
+    colliding qualified name) *and* ``new_value`` (the shared identity key).
+    Before this fix, ``_run_one_side``'s identity-keyed dict comprehension
+    silently dropped one of the two. Reproduced directly against
+    ``_run_one_side`` for the same reason the ODR sibling test is."""
+    from abicheck.buildsource.crosscheck import CHECK_IDENTITY_COLLISION
+    from abicheck.workflows.cross_source_evolution import _run_one_side
+
+    surface = SourceAbiSurface(
+        identity_collisions=[
+            {
+                "identity": "f#sha256:abc",
+                "qualified_name": "f",
+                "usr_a": "c:@F@f#",
+                "usr_b": "c:@N@ns1@F@f#",
+            },
+            {
+                "identity": "f#sha256:abc",
+                "qualified_name": "f",
+                "usr_a": "c:@N@ns1@F@f#",
+                "usr_b": "c:@N@ns2@F@f#",
+            },
+        ],
+        reachable_declarations=[
+            SourceEntity(id="d0", kind="function", qualified_name="f")
+        ],
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        build_source=BuildSourcePack(root="", source_abi=surface),
+    )
+    evaluated, by_identity = _run_one_side(snap, CHECK_IDENTITY_COLLISION)
+    assert evaluated
+    # Both collisions share (symbol="f", new_value="f#sha256:abc") -- only
+    # the transition's own "previous USR" (old_value) tells them apart.
+    assert len(by_identity) == 2, (
+        f"expected both collision records to survive identity-keying, got "
+        f"{len(by_identity)}: {sorted(str(k) for k in by_identity)}"
+    )
+    old_values = {c.old_value for c in by_identity.values()}
+    assert old_values == {"c:@F@f#", "c:@N@ns1@F@f#"}
 
 
 def test_identity_collision_detected_authority_unchanged() -> None:
