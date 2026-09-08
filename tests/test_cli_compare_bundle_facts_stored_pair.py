@@ -538,6 +538,42 @@ class TestStoredPairEndToEnd:
         assert data["verdict"] == "NO_CHANGE"
         assert code == 0
 
+    def test_scope_on_incomplete_config_is_read_through_this_dispatch(
+        self, tmp_path: Path
+    ) -> None:
+        """Codecov patch-coverage gap: Phase 7d's ``dispatch()`` now passes
+        ``_bundle_cfg.scope_on_incomplete`` (read from a real ``--config``)
+        into ``scope_terms_for()`` instead of the removed ``compare
+        --on-incomplete-scope`` CLI kwarg, but no existing test in this file
+        ever supplied ``--config`` -- so that branch (a real, non-None
+        ``_bundle_cfg``) never ran. A complete scope like this pair's own
+        doesn't change the *outcome* under ``block`` vs. the default
+        ``warn`` (the policy only bites on an incomplete one); this proves
+        the config is read and the dispatch still completes cleanly rather
+        than crashing on the new code path."""
+        old_path = _write_facts(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        new_path = _write_facts(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  on_incomplete: block\n", encoding="utf-8")
+
+        code, out = _invoke(
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        data = json.loads(out)
+        assert data["verdict"] == "NO_CHANGE"
+        assert code == 0
+
     def test_markdown_output_labels_new_side_as_stored_facts(
         self, tmp_path: Path
     ) -> None:
