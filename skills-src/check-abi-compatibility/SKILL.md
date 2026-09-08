@@ -189,7 +189,7 @@ report the global verdict from step 5 and stop there.
   `--used-by CONSUMER` (repeatable), evidence-driven: the consumer binary is
   read and its actual imports become the scope.
 - **A plugin/host boundary** — scope with `--required-symbol SYM`
-  (repeatable) or `--required-symbols FILE`, declaration-driven: the caller
+  (repeatable) or `--required-symbol @FILE`, declaration-driven: the caller
   states the contract, because a host's requirement is not recoverable from
   the plugin's own imports.
 

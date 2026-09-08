@@ -345,7 +345,7 @@ class TestBug6RemovedLibraryVerdict:
         old_dir = self._old_dir(tmp_path)
         new_pkg = tmp_path / "new_pkg"
         _write_stored_package(new_pkg, {"libbar.so": _snap(library="libbar.so")})
-        result = _invoke("compare", str(old_dir), str(new_pkg), "-j", "1", "--format", "json")
+        result = _invoke("compare", str(old_dir), str(new_pkg), "--format", "json")
         d = json.loads(result.output)
         assert d["comparison_scope"]["proven_removed"] == ["libfoo.so.json"]
         assert d["verdict"] == "COMPATIBLE_WITH_RISK"

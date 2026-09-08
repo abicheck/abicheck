@@ -32,7 +32,7 @@ targets:
   with:
     name: libfoo
     target-kind: library   # required -- app-consumer/plugin-contract have
-                            # no scan-mode equivalent to --used-by/--required-symbols
+                            # no scan-mode equivalent to --used-by/--required-symbol
     baseline-channel: none
     requested-depth: source
 ```
@@ -48,7 +48,7 @@ for the equivalent one-step `mode: scan` (no `against:`) wiring.
   `baseline-channel: none` is a starting point, not a permanent choice for a
   project that will eventually publish a release or track `main`.
 - **`target-kind: app-consumer`/`plugin-contract`** — not supported with
-  `baseline-channel: none`: `scan` has no `--used-by`/`--required-symbols`
+  `baseline-channel: none`: `scan` has no `--used-by`/`--required-symbol`
   equivalent, so an app-consumer/plugin-contract audit with no baseline has
   no scope to check against. Use `kind: library` for a no-baseline audit.
 

@@ -98,7 +98,7 @@ use_cases:
       answers "does plugin v2 still satisfy host H's required entrypoints?" —
       the plugin-load mirror of appcompat, reusing its consumer-scoping.
       ADR-043 folded the standalone `plugin-check` CLI into
-      `compare --required-symbol`/`--required-symbols` (repeatable flag or a
+      `compare --required-symbol` (repeatable flag or a
       newline-delimited manifest file), scoping the comparison to an explicit
       required-entrypoint contract instead of the full diff, with the
       plugin_abi policy as the default. Validated end-to-end through

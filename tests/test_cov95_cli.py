@@ -652,8 +652,8 @@ class TestExitSchemeHelpers:
         assert capsys.readouterr().err == ""
 
     def test_announce_suppressed_for_oneline(self, capsys) -> None:
-        # The internal one-line format (service_render.ONELINE_FORMAT,
-        # reached via --profile quick) is suppressed the same way json/sarif/
+        # The one-line format (service_render.ONELINE_FORMAT,
+        # --format oneline) is suppressed the same way json/sarif/
         # junit are -- it isn't one of the three human-readable format names,
         # so the same `fmt not in {...}` check covers it with no separate
         # boolean (CLI cleanup phase two, PR 1: --stat removed).
@@ -866,12 +866,12 @@ class TestCompareCommand:
         assert result.exit_code == 64
         assert "No such option" in result.output
 
-    def test_quick_profile_one_line_summary(self, tmp_path: Path) -> None:
-        # --profile quick is --stat's sole surviving one-line-summary use.
+    def test_oneline_format_one_line_summary(self, tmp_path: Path) -> None:
+        # --format oneline is --stat's sole surviving one-line-summary use.
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
-        result = _invoke("compare", str(old_f), str(new_f), "--profile", "quick")
+        result = _invoke("compare", str(old_f), str(new_f), "--format", "oneline")
         assert result.exit_code == 4
         assert "\n" not in result.stdout.strip()  # stderr carries the scope warning
 
@@ -1824,11 +1824,11 @@ class TestUsedByScoping:
             "based on the full library verdict, BREAKING"
         ) in result.stdout
 
-    def test_quick_profile_one_liner_always_states_the_full_library_verdict(
+    def test_oneline_format_always_states_the_full_library_verdict(
         self, tmp_path, monkeypatch
     ) -> None:
         """CLI cleanup phase two, PR 1 originally made the internal one-line
-        format (``--profile quick``) route through a scoped-replacement
+        format (``--format oneline``, formerly ``--profile quick``) route through a scoped-replacement
         renderer so it printed the scoped-compatible verdict instead of the
         full-library BREAKING one, to match the (then-authoritative) scoped
         exit code.
@@ -1864,7 +1864,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick",
+            "--format", "oneline",
         )
         assert result.exit_code == 4  # the full-library BREAKING verdict
         # The verdict label leads with the full-library result (BREAKING),
@@ -1877,7 +1877,7 @@ class TestUsedByScoping:
         assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
         assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
-    def test_quick_profile_one_liner_does_not_count_a_scoped_only_finding(
+    def test_oneline_format_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch
     ) -> None:
         """Originally: a scoped-only finding (one with no backing
@@ -1907,13 +1907,13 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick",
+            "--format", "oneline",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
         assert "1 detected, 1 gating" in result.stdout
 
-    def test_quick_profile_one_liner_unaffected_by_show_only(
+    def test_oneline_format_unaffected_by_show_only(
         self, tmp_path, monkeypatch
     ) -> None:
         """Originally targeted a "self-contradictory 'BREAKING: no changes
@@ -1936,13 +1936,13 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick", "--show-only", "compatible",
+            "--format", "oneline", "--show-only", "compatible",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
         assert "1 detected, 1 gating" in result.stdout
 
-    def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
+    def test_oneline_format_counts_an_ordinary_in_scope_removal(
         self, tmp_path, monkeypatch
     ) -> None:
         """The far more common shape than either test above: an ordinary
@@ -1996,7 +1996,7 @@ class TestUsedByScoping:
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick",
+            "--format", "oneline",
             "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4

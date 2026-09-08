@@ -47,8 +47,8 @@ alongside it, informational only, never in place of it.
 
 | Old command | New flag | What it scopes to |
 |---|---|---|
-| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `--required-symbol`/`--required-symbols`. |
-| `plugin-check` | `compare --required-symbol SYM` (repeatable) / `--required-symbols FILE` (one symbol per line, `#` comments ignored) | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
+| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `--required-symbol`. |
+| `plugin-check` | `compare --required-symbol SYM` (repeatable) / `--required-symbol @FILE` (one symbol per line, `#` comments ignored) | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
 
 ```bash
 # Was: abicheck appcompat --app myapp old.so new.so
@@ -218,11 +218,16 @@ family (`--compiler` / `--compiler-prefix` / `--compiler-option` /
 `--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
 switch for public-surface scoping).
 
-### Run profiles (additive)
+### Run profiles: added, then removed
 
-New in the same line of work: `--profile {ci-gate,release-cut,quick}` bundles
-a workflow's common defaults into one token (explicit flags still win). It is
-additive — nothing to migrate — but it can replace habitual flag stacks.
+`--profile {ci-gate,release-cut,quick}` briefly bundled a workflow's common
+defaults into one token. It was removed outright (ADR-068 D5 / plan
+Phase 7e): it bundled evidence depth, report rendering, and CI gate policy
+behind one word, and a rendering choice may never carry a gate setting.
+There is no direct config-key replacement — state `--depth`, `--format`,
+and `--severity-preset` (or `.abicheck.yml`'s `severity:` block)
+independently. `quick`'s one-line summary survives as the first-class
+`--format oneline` choice; see [Output Formats](output-formats.md).
 
 ### GitHub Action
 

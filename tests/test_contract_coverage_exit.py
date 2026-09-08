@@ -265,21 +265,23 @@ class TestTheGatingConditionIsVisible:
         assert report["contract_coverage_exit_contribution"] == 1
         assert report["contract_coverage_failures"]
 
-    def test_quick_profile_is_ledgerless_so_it_still_explains(
+    def test_oneline_format_is_ledgerless_so_it_still_explains(
         self, tmp_path: Path
     ) -> None:
-        """The internal one-line format (``--profile quick``) is a summary
-        that omits both ledger keys -- so a one-line run is ledgerless
-        whatever else its output looks like, and suppressing on the format
-        name alone left it exiting 1 with no explanation anywhere (Codex
-        review, originally about ``--stat``; CLI cleanup phase two, PR 1
-        moved the one-line output behind ``--profile quick`` instead of a
-        boolean flag, but the ledgerless-summary property is unchanged)."""
+        """The one-line format (``--format oneline``) is a summary that
+        omits both ledger keys -- so a one-line run is ledgerless whatever
+        else its output looks like, and suppressing on the format name
+        alone left it exiting 1 with no explanation anywhere (Codex review,
+        originally about ``--stat``; CLI cleanup phase two, PR 1 moved the
+        one-line output behind the built-in ``quick`` --profile instead of
+        a boolean flag, and plan Phase 7e later removed --profile outright,
+        promoting ``--format oneline`` to a first-class choice -- the
+        ledgerless-summary property is unchanged throughout)."""
         result = _compare(
             tmp_path,
             _compatible_pair(),
-            "--profile",
-            "quick",
+            "--format",
+            "oneline",
             "--contract",
             "exports",
         )
@@ -288,10 +290,9 @@ class TestTheGatingConditionIsVisible:
         # a format that happens to also lack the ledger) -- the coverage
         # notice is appended after it, so the output leads with the
         # one-liner's own verdict label (CodeRabbit review). Checked on
-        # `result.stdout`, not the stderr-mixed `result.output`: `quick`'s
-        # `depth=binary` (ADR-063 Phase 8's ceiling fix) means this
-        # unscoped-headers fixture no longer resolves a public-header
-        # surface at that depth either, and that scope-fallback warning is
+        # `result.stdout`, not the stderr-mixed `result.output`: this
+        # fixture gives no `-H` headers, so no public-header surface
+        # resolves regardless of depth, and that scope-fallback warning is
         # by design routed to stderr so it never corrupts this contract.
         assert result.stdout.startswith("NO_CHANGE:"), result.output
         assert "Contract coverage incomplete" in result.output

@@ -126,7 +126,7 @@ def deps_tree_cmd(
         )
         emit_dry_run(dry_result)
 
-    from .stack_checker import check_single_env
+    from .stack_checker import check_single_env, exit_decision_for_stack_tree
     from .stack_report import stack_to_json, stack_to_markdown
 
     result = check_single_env(
@@ -149,8 +149,12 @@ def deps_tree_cmd(
     else:
         click.echo(text)
 
-    if result.loadability.value == "fail":
-        sys.exit(1)
+    # ADR-068 D6 / one-comparison-product.md Phase 8: the canonical
+    # ExitDecision fold, not a hand-rolled check -- see that function's own
+    # docstring for why this reproduces exit 0/1 bit-for-bit.
+    decision = exit_decision_for_stack_tree(result)
+    if decision.code:
+        sys.exit(decision.code)
 
 
 @deps_group.command("compare")
@@ -256,7 +260,7 @@ def deps_compare_cmd(
         )
         emit_dry_run(dry_result)
 
-    from .stack_checker import check_stack
+    from .stack_checker import check_stack, exit_decision_for_stack_compare
     from .stack_report import stack_to_json, stack_to_markdown
 
     result = check_stack(
@@ -280,16 +284,11 @@ def deps_compare_cmd(
     else:
         click.echo(text)
 
-    if any(sc.not_comparable_reason for sc in result.stack_changes):
-        # ADR-050 D2: at least one dependency's before/after DSOs were not
-        # extracted under a comparable profile/scope contract, so the
-        # per-library ABI diff for it never ran -- this dominates fail/warn
-        # the same way the comparability gate dominates elsewhere (a
-        # not_comparable result means the comparison couldn't establish
-        # what changed at all, so a coincidental pass/warn/fail computed
-        # from the rest of the stack is not the whole story).
-        sys.exit(5)
-    if result.loadability.value == "fail" or result.abi_risk.value == "fail":
-        sys.exit(4)
-    elif result.abi_risk.value == "warn" or result.loadability.value == "warn":
-        sys.exit(1)
+    # ADR-068 D6 / one-comparison-product.md Phase 8: the canonical
+    # ExitDecision fold (loadability/abi-risk/not-comparable axes), not the
+    # former hand-rolled sys.exit(1)/(4)/(5) chain -- see that function's
+    # own docstring for why this reproduces every documented code
+    # bit-for-bit, including not_comparable's dominance over fail/warn.
+    decision = exit_decision_for_stack_compare(result)
+    if decision.code:
+        sys.exit(decision.code)

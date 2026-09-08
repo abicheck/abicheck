@@ -839,7 +839,7 @@ from typing import Any
 #:       nothing else changes -- no existing invocation's disposition,
 #:       verdict, or exit code moves (both are opt-in via
 #:       ``checker.compare(acknowledgments=...)``).
-REPORT_SCHEMA_VERSION = "3.10"
+REPORT_SCHEMA_VERSION = "3.11"  #: 3.11 -- ADR-068 D6's always-0 ``exit.loadability_contribution`` (deps-only); renumbered from a 3.10 clash with ADR-067 D5/D6 above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

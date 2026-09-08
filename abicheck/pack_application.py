@@ -40,7 +40,7 @@ value -- which is a question the resolver already answered, in
 ``ValueProvenance.source_kind == "pack_manifest"``. Nothing here re-implements
 D7 precedence or D8 conflict detection, so a front end cannot apply a pack
 value the resolver would have ruled out: if ``--policy-file``, ``--exit-code-
-scheme``, a ``--profile``, or ``.abicheck.yml`` stated the field, its
+scheme``, or ``.abicheck.yml`` stated the field, its
 provenance names *that* source and this module contributes nothing for it.
 
 **2. A pack may only assign a field this build actually applies.**
@@ -414,7 +414,7 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     A no-op unless a gate pack supplied a severity level. Only reachable for
     a field ``resolve_compare_config`` left at its built-in default: the
     resolver exempts ``gate.severity.*`` from pack assignment whenever the
-    CLI, a ``--profile``, or ``.abicheck.yml`` stated it (or stated a preset
+    CLI or ``.abicheck.yml`` stated it (or stated a preset
     that owns it), so overwriting here can never displace a value the run
     was configured with.
 

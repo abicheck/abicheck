@@ -503,7 +503,6 @@ explicit_cli
 api_request
 legacy_alias
 run_recipe
-run_profile
 project_config
 built_in_default
 ```
@@ -515,10 +514,23 @@ selector of the value or manifest:
 explicit CLI or explicit API request for the field/manifest
 > legacy CLI alias (for the field it aliases)
 > selected run recipe
-> selected run profile (execution fields only)
 > project config (including manifests referenced there)
 > built-in default
 ```
+
+**Amended 2026-09-07 (ADR-068 D5 / `one-comparison-product.md` Phase 7e):**
+the `run_profile` selector layer (originally: "selected run profile,
+execution fields only", between `run_recipe` and `project_config`) is
+removed. Its only producer was ever `--profile` (ADR-040 Lever 3), and its
+one real field-level use (`gate.severity_preset`, via
+`RunProfileInputs`/`_severity_active`) was already recorded, in this ADR's
+own implementation, as a deliberate deviation from D7's "execution fields
+only" scope — a severity/gate field, not an execution field. `--profile`
+being removed outright by ADR-068 D5 (a rendering/depth/gate bundle D4/D5
+forbid) leaves the tier permanently unpopulated, so the precedence list
+above is now five tiers, not six. This is a removal, not a redesign: no
+replacement "run profile" concept is introduced, and D7's remaining
+precedence order is otherwise unchanged.
 
 Contradictory values at the same selector layer, or a legacy alias that
 disagrees with an explicit new option, are usage errors (64), except for the
@@ -555,9 +567,6 @@ surface_hints:
 
 assurance:
   require_evidence: true
-
-run:
-  profile: ci-gate
 ```
 
 The conceptual namespaces are:
@@ -569,8 +578,12 @@ The conceptual namespaces are:
 - **gate preset/packs**: what blocks CI; security hardening belongs here and is
   `NOT_APPLICABLE` to entity contract membership;
 - **surface hints**: evidence used by reachability or out-of-contract proofs;
-- **assurance**: evidence requirements and unresolved behavior;
-- **run profile**: depth, format, budget, and workflow.
+- **assurance**: evidence requirements and unresolved behavior.
+
+(A `run.profile` namespace bundling depth/format/budget/workflow was
+illustrated here originally, mirroring the `--profile` CLI flag. ADR-068 D5
+removes `--profile` outright rather than giving it a config-key twin — see
+the D7 amendment above — so no `run:` namespace is listed.)
 
 Object-format semantics that are universally true when evidence exists belong
 in core detection/classification, not optional packs (for example Mach-O load

@@ -1602,6 +1602,27 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 # not a new dependency direction.
                 "cli_compare_release_matrix",
                 "cli_compare_release_pairwise",
+                # one-comparison-product.md #35 Phase 2f: `compare --dry-run`'s
+                # new "Cost preview" section is a same-session size-split out
+                # of `cli_compare_helpers` (already a member, above) -- both
+                # `cli_compare_helpers.py` and `service_scan.py` (also already
+                # members) were already at their own `architecture/debt.yaml`
+                # `no_growth` baseline with no room for the new function, so
+                # the compute half (`workflows.compare_cost_preview`, reaching
+                # `service_scan.ScanRequest`/`estimate_scan` function-locally
+                # -- an edge `cli_scan.py`, already a member, already carries)
+                # and the render half (`frontends.cli.compare_dry_run`,
+                # reaching nothing outside `TYPE_CHECKING`) landed as two new
+                # leaf modules instead of growing either. `cli_compare_helpers`
+                # imports both back function-locally (the identical shape
+                # `frontends.cli.commands.compare`/`cli_compare_release_
+                # pairwise` above already reach their own split siblings
+                # through), so this closes the same cluster of cycles through
+                # already-member modules, not a new dependency direction. No
+                # init deadlock: neither new module imports anything outside
+                # this cluster or the stdlib at module load.
+                "frontends.cli.compare_dry_run",
+                "workflows.compare_cost_preview",
             }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot

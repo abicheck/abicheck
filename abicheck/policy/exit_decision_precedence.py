@@ -34,6 +34,18 @@ has since wired `resolve_scan_exit_decision` into real call sites --
 `abicheck.workflows.scan_abort_result`) its `_BudgetOverflow`/
 `_EvidenceContractError` aborts -- so this module is no longer additive-only
 dead code the way it was when first split out.
+
+`docs/contribute/plans/one-comparison-product.md` Phase 8 (ADR-068 D6):
+`deps compare`/`deps tree` needed no new resolver *here* -- unlike `scan`'s
+axes, `deps`'s "not comparable" case (ADR-050 D2's profile/scope mismatch,
+surfaced as `StackChange.not_comparable_reason`) and its independent
+loadability axis both fold through the sibling `exit_decision.
+resolve_exit_decision`'s existing generic contribution parameters
+(`not_comparable_contribution`, the new `loadability_contribution`) with no
+`_dominant_decision`-style override needed, since `deps`'s own numbers
+(0/1/4/5) already sort correctly under a plain tie-inclusive `max()` fold.
+See `stack_checker.exit_decision_for_stack_compare`/
+`exit_decision_for_stack_tree` for the two call sites.
 """
 
 from __future__ import annotations

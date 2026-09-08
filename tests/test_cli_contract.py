@@ -1010,6 +1010,26 @@ def test_legacy_header_backend_flag_is_rejected(
     assert "no such option" in res.output.lower() or "No such option" in res.output
 
 
+def test_profile_flag_is_removed(tmp_path: Path) -> None:
+    """ADR-068 D5 / plan Phase 7e: ``--profile`` is a hard usage error, no
+    hidden alias -- it bundled evidence depth, report rendering, and CI gate
+    policy behind one word, which D4/D5 forbid (reverses ADR-040 Lever 3).
+    There is no config-key replacement either: a project states depth, view
+    and severity independently in .abicheck.yml.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    old_p = _make_snap_file(tmp_path, "libdn", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libdn", "2.0", [_func("a")])
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--profile", "ci-gate"]
+    )
+    assert res.exit_code == 64
+    assert "no such option" in res.output.lower() or "No such option" in res.output
+
+
 # ── D8: --ast-frontend unifies L2 header AST + L4 source-ABI extractor ────────
 
 

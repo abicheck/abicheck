@@ -121,8 +121,9 @@ def stack_to_html(result: StackCheckResult) -> str:
 </div>"""
 
     # Binding summary
-    from .stack_report import _bindings_summary
-    binding_counts = _bindings_summary(result.bindings_candidate)
+    from .report.stack import bindings_summary
+
+    binding_counts = bindings_summary(result.bindings_candidate)
     binding_rows = "\n".join(
         f"<tr><td><code>{h(status)}</code></td><td>{count}</td></tr>"
         for status, count in sorted(binding_counts.items())

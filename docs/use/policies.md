@@ -318,7 +318,7 @@ assignments:
 A pack really configures the run: it changes the verdict and the exit code
 exactly as the equivalent `--policy` overrides would. It just never wins
 against one — an explicitly stated value (a `--policy` override, a
-`--severity-*` flag, a `--profile`, or `.abicheck.yml`)
+`--severity-*` flag, or `.abicheck.yml`)
 always outranks a pack, and two selected packs disagreeing about the same
 field are a usage error rather than a silent last-one-wins.
 

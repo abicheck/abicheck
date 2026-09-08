@@ -344,6 +344,7 @@ def _clang_header_dump(
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
+        force_cpp=force_cpp,
         force_cpp20=force_cpp20,
         frontend_context=frontend_context,
     )
@@ -883,6 +884,7 @@ def _castxml_dump(
         extra_hash_dirs=extra_hash_dirs,
         frontend_identity=frontend_identity,
         compiler_identity=compiler_identity,
+        force_cpp=force_cpp,
         force_cpp20=force_cpp20,
     )
     cached = _cache_path(key)

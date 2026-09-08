@@ -513,12 +513,12 @@
     },
     {
       "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1354,
+      "baseline_lines": 1426,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was. Baseline raised 1349 -> 1354 (ADR-067 D3): the baseline summary's `detectors[]` projection gained `not_evaluated`, the one field of ADR-067's audit that `scan --against` shares with `compare` -- detector provenance is an ADR-049 Phase 5 \u00a76.4 cross-command parity field, so it moves on both sides together or the parity test fails. Five lines, four of them the comment recording that; nothing to move elsewhere, since this projection is this file's own.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was. Baseline raised 1349 -> 1354 (ADR-067 D3): the baseline summary's `detectors[]` projection gained `not_evaluated`, the one field of ADR-067's audit that `scan --against` shares with `compare` -- detector provenance is an ADR-049 Phase 5 \u00a76.4 cross-command parity field, so it moves on both sides together or the parity test fails. Five lines, four of them the comment recording that; nothing to move elsewhere, since this projection is this file's own. Baseline raised 1354 -> 1426 (docs/contribute/plans/one-comparison-product.md §3 #3, five-more-crosschecks migration slice): with the last five cross-source checks landing on `compare()`'s automatic `cross_source_checks` stage (default `True`, ADR-068 D4/D5), `_run_baseline_compare`'s own pre-existing, documented invariant -- single-version cross-source findings stay advisory for a baseline comparison unless explicitly promoted via `--crosscheck KEY=error`, never folded into the old/new diff by default -- silently broke for the first time an API_BREAK-severity check (`header_build_context_mismatch`) migrated, since a RISK-severity one never raised the legacy exit code even while duplicated. `_strip_automatic_cross_source_findings` (new function, ~30 lines with its docstring) closes that regression generally, for every cross-source check, not just the two newly-API_BREAK ones -- nothing to move elsewhere, since this is this file's own pre-existing invariant losing its enforcement point to a sibling module's own default.",
       "review_by": "2026-11-30"
     },
     {
@@ -1102,6 +1102,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/service_compare_pipeline.py",
+      "baseline_lines": 811,
+      "target": "workflows-or-frontends (already home for the compare-pipeline shim; the new parameter is one keyword forwarded onto two pre-existing InputSpec constructions, not extractable further)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: 799 -> 811 to close a CodeRabbit review finding on PR #1138 -- run_compare's keyword-argument shim had no way to forward a project's scope.public_header_dirs to the release/package fan-out's per-library compare (cli_compare_release_pairwise._run_compare_pair calls this shim directly, not cli_resolve._resolve_compare_snapshots, which already threaded that config key for a single-pair compare), so a directory/package compare silently dropped the project's declared header-boundary scoping even though the identical library compared alone already honored it. The added public_header_dirs keyword-only parameter is folded into both sides' InputSpec.public_header_dirs identically to the existing compile_context/include_dependencies both-sides-only parameters already in this same shim -- there is no smaller diff that both documents the parameter (one docstring paragraph, matching every sibling parameter's own paragraph in this docstring) and threads it through the two pre-existing InputSpec(...) call sites.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/service_scan.py",
       "baseline_lines": 1954,
       "target": "workflows-or-frontends",
@@ -1209,6 +1219,16 @@
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
       "rationale": "Newly crossed the 800-line production cap (ADR-067 C-S2): `_LoadedReport` gained one `disposition_audit` field, read verbatim off each of its five real (non-early-failure) construction sites via the new sibling leaf `disposition_axis.disposition_audit_block` -- the same ADR-065 S2 `scope_axis.py` pattern this module already follows for `scope_completeness_exit`. The read logic itself lives in that new leaf, not here; what is added here is the field declaration, one import, and one line per construction site.",
+      "review_by": "2026-11-30"
+    },
+    {
+      "path": "tests/regressions/manifest.py",
+      "baseline_lines": 1317,
+      "target": "tests/regressions (already home; a BugClass entry's prose is not further extractable)",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: PR #1138's own root AGENTS.md 'bug fix's regression test targets the bug class' rule requires a new BugClass registry entry for a genuinely new bug class, not prose alone -- this file was already one line under its own 1200-line test-file cap when the Mach-O leading-underscore identity-normalization bug (a second, distinct root cause from the sibling extraction.language_mode_export_evidence entry just above, caught by CI's macOS integration-tests lane) needed its own entry plus a small extension to that sibling entry's own invariant text (the CodeRabbit per-header correlation fix narrowed what counts as evidence). No smaller diff exists that both states the new class's invariant and points at its seed tests without restating the class in prose only, which the file's own module docstring explicitly rejects as the failure mode this registry exists to prevent. Raised again 1243 -> 1259 for a second CodeRabbit round on the same PR: the per-header correlation fix's own `_header_declared_identifiers` collected tokens from comments/string literals/inactive `#if 0` blocks too, which the sibling entry's invariant now states explicitly, plus a `KnownGap` recording the deliberately out-of-scope macro-parameter-name residual (no general preprocessor evaluator) -- the same explicit-gap-over-silent-limitation discipline the Mach-O entry above already follows. Raised again 1259 -> 1274 for a third CI round on the same PR: the Mach-O entry's own fix (Itanium-shape decoration stripping only) turned out to be narrower than its invariant claimed -- a real, explicit extern \"C\"/plain-C bare-name declaration's Darwin-decorated `mangledName` (`_c_func` for source-level `c_func`) was left unstripped in the stored `mangled` field, caught by real compiled Mach-O output on the macOS CI runner itself (not a synthetic gap this time). The entry's invariant, axes, and known-gap text were extended to state the now-complete two-shape contract rather than adding a third sibling entry for what is the same root bug class (decoration not stripped at the point of origin), just a second shape of it. Raised again 1274 -> 1317 for a fourth CI round on the same PR: per-declaration `Function.mangled` identity was now fully correct on both frontends, yet real compiled Mach-O self-comparison still failed -- root-caused to a SEPARATE, independent double-strip bug in `model.export_index.default_versioned_names` (the export-table read side, not the header-AST-declared side the prior three rounds fixed): that projection re-stripped a Mach-O export's leading underscore a second time, a latent bug that predates this whole PR chain and was only self-consistently invisible because `Function.mangled` used to be doubly-stripped too. Added as its own new BugClass entry (`extraction.macho_export_index_double_strip`) rather than folding into the sibling entry above, since it is a genuinely different code path/root cause, not another shape of the same mechanism.",
       "review_by": "2026-11-30"
     },
     {
@@ -1403,12 +1423,12 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 4163,
+      "baseline_lines": 4174,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised 4163 -> 4174 (five-more-crosschecks migration slice): `_make_snap`'s own docstring now records why it stamps `parsed_with_build_context=True` -- a bare metadata double with no header declarations at all must not misread as a genuine header/build-context mismatch the moment a test attaches a `--build-info` pack, now that `header_build_context_mismatch` is reachable from `compare()`'s own automatic cross-source-check stage (ADR-068 D3/D4/D5). Eleven lines, all comment; nothing to move elsewhere, since the fixture itself is this file's own.",
       "review_by": "2026-11-30"
     },
     {

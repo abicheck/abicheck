@@ -223,6 +223,21 @@ class ExitReason(str, Enum):
     #: checked". A fold participant (never dominant), so a proven
     #: removed-library ``8`` or a ``not_comparable`` ``16`` still wins.
     NO_COMPARISON_COMPLETED = "no_comparison_completed"
+    #: `deps compare`/`deps tree` only (ADR-068 D6,
+    #: `one-comparison-product.md` Phase 8). `stack_checker.StackCheckResult.
+    #: loadability` -- "will the candidate environment's dynamic loader
+    #: actually resolve this binary and bind its required symbols" -- is a
+    #: real, independent fold participant alongside `COMPATIBILITY_GATE`
+    #: (which carries `deps compare`'s per-library ABI-risk axis there),
+    #: never a value folded into that axis before this decision is built:
+    #: a loadability failure and an independent ABI-risk failure can
+    #: genuinely tie (both stacks unrelated conditions) and must both be
+    #: named in `reasons` rather than one silently replacing the other's
+    #: reason -- the same rationale `OPERATIONAL_ERROR` above states for the
+    #: release fan-out. `deps tree` (a single environment, no ABI diff at
+    #: all) uses this axis alone, with `compatibility_contribution` fixed at
+    #: `0`.
+    LOADABILITY = "loadability"
 
 
 @dataclass(frozen=True)
@@ -366,6 +381,14 @@ class ExitDecision:
     #: a fold participant -- see :class:`ExitReason.NO_COMPARISON_
     #: COMPLETED`. ``0`` for every caller but `resolve_release_exit_decision`.
     no_comparison_completed_contribution: int = 0
+    #: `deps compare`/`deps tree` only (ADR-068 D6). `0`/`1`/`4` -- see
+    #: :class:`ExitReason.LOADABILITY`. `0` for every caller but
+    #: `stack_checker.exit_decision_for_stack_compare`/
+    #: `exit_decision_for_stack_tree`. Declared after every pre-existing
+    #: field (same convention `incomplete_scope_contribution` above
+    #: documents): a positional caller of this public constructor keeps
+    #: binding the older tail.
+    loadability_contribution: int = 0
 
     def to_dict(self) -> dict[str, object]:
         """JSON-serializable form, for the report's ``exit`` block.
@@ -396,6 +419,7 @@ class ExitDecision:
             "no_comparison_completed_contribution": (
                 self.no_comparison_completed_contribution
             ),
+            "loadability_contribution": self.loadability_contribution,
         }
 
     @classmethod
@@ -437,6 +461,7 @@ class ExitDecision:
             no_comparison_completed_contribution=d.get(
                 "no_comparison_completed_contribution", 0
             ),
+            loadability_contribution=d.get("loadability_contribution", 0),
         )
 
 
@@ -452,6 +477,7 @@ def resolve_exit_decision(
     not_comparable_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
+    loadability_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -509,6 +535,11 @@ def resolve_exit_decision(
     `resolve_release_exit_decision`) -- two more ``0``/``1`` fold
     participants, so a genuine tie with coverage/assurance/operational-error
     is named rather than hidden, exactly as for the coverage axis.
+    *loadability_contribution* (ADR-068 D6) defaults to ``0`` (every caller
+    but `stack_checker.exit_decision_for_stack_compare`/
+    `exit_decision_for_stack_tree`) -- `deps`'s own independent loadability
+    axis, folded the identical tie-inclusive way; see
+    :class:`ExitReason.LOADABILITY`.
     """
     contributions = {
         compatibility_reason: compatibility_contribution,
@@ -521,6 +552,7 @@ def resolve_exit_decision(
         ExitReason.NOT_COMPARABLE: not_comparable_contribution,
         ExitReason.INCOMPLETE_SCOPE: incomplete_scope_contribution,
         ExitReason.NO_COMPARISON_COMPLETED: no_comparison_completed_contribution,
+        ExitReason.LOADABILITY: loadability_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -544,6 +576,7 @@ def resolve_exit_decision(
         not_comparable_contribution=not_comparable_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
+        loadability_contribution=loadability_contribution,
     )
 
 

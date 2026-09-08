@@ -57,39 +57,6 @@ def _param_from_cli(name: str) -> bool:
     return bool(src == click.core.ParameterSource.COMMANDLINE)
 
 
-def _resolve_profile_severity_preset(
-    severity_preset: str | None, *, from_profile: bool, project_cfg: object
-) -> str | None:
-    """Drop a profile-injected ``severity_preset`` once the project already
-    configures its own severity policy (Codex review, PR #1062, fresh
-    evidence). A run profile is documented to outrank project config for
-    whatever it states -- correct for a real per-run choice, but
-    ``ci-gate``'s injected ``"default"`` (CLI cleanup phase two PR G2's
-    stand-in for the deleted ``exit_code_scheme: "severity"`` selector)
-    expresses no such choice; it exists only to make ``severity_active``
-    true when nothing else does. Pre-PR-G2 the profile never touched
-    ``severity_preset`` at all, so a project's own ``severity.preset:
-    info-only`` (or any per-category level) governed untouched -- restored
-    here by discarding the injected value whenever *project_cfg* already
-    states one, letting it fall through to project config instead of
-    silently overriding it. ``project_cfg`` is read structurally
-    (``getattr``, never imported) to keep this module dependency-free.
-    """
-    if not from_profile or project_cfg is None:
-        return severity_preset
-    project_states_severity = any(
-        getattr(project_cfg, attr, None) is not None
-        for attr in (
-            "severity_preset",
-            "severity_abi_breaking",
-            "severity_potential_breaking",
-            "severity_quality_issues",
-            "severity_addition",
-        )
-    )
-    return None if project_states_severity else severity_preset
-
-
 def _reject_set_input_flags(
     reconcile_build_context: bool,
     env_matrix_path: Path | None,
@@ -138,7 +105,7 @@ def _reject_set_input_flags(
         )
     if required_symbols:
         raise click.UsageError(
-            "--required-symbol/--required-symbols is not supported for "
+            "--required-symbol is not supported for "
             "directory/package (release) comparisons: the per-library "
             "fan-out has no plugin-host-contract scoping. Compare the "
             "specific library individually with --required-symbol."
@@ -331,7 +298,7 @@ def _reject_bundle_facts_out_for_single_pair(bundle_facts_out: Path | None) -> N
     baseline artifact, and a single-pair compare has no library map to
     build one from -- silently accepting it would report success while
     leaving automation believing a baseline was written when none was,
-    unlike ``--jobs``/``--dso-only``/``--output-dir``, which are merely
+    unlike ``--dso-only``/``--output-dir``, which are merely
     inert conveniences here.
     """
     if bundle_facts_out is not None:

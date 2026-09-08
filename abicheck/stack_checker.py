@@ -33,6 +33,7 @@ from .checker import DiffResult
 from .checker_policy import BREAKING_KINDS
 from .checker_types import Change
 from .errors import ProfileMismatchError, ScopeMismatchError, UnsupportedArtifactError
+from .policy.exit_decision import ExitDecision, resolve_exit_decision
 from .resolver import DependencyGraph, resolve_dependencies
 from .stack_binding_diff import diff_runtime_bindings
 
@@ -205,6 +206,76 @@ def _compute_risk_score(loadability: StackVerdict, abi_risk: StackVerdict) -> st
     if abi_risk == StackVerdict.WARN:
         return "medium"
     return "low"
+
+
+#: `deps compare`'s own documented 0/1/4 scale for one `StackVerdict` axis
+#: (`abi_risk` or `loadability`) -- FAIL is unconditionally exit-blocking
+#: (4, the same code a real compatibility-gate ABI break contributes),
+#: WARN raises without blocking (1), PASS contributes nothing.
+_STACK_VERDICT_GATE_CODE: dict[StackVerdict, int] = {
+    StackVerdict.PASS: 0,
+    StackVerdict.WARN: 1,
+    StackVerdict.FAIL: 4,
+}
+
+
+def exit_decision_for_stack_compare(result: StackCheckResult) -> ExitDecision:
+    """`deps compare`'s exit code, expressed through the canonical
+    :class:`~abicheck.policy.exit_decision.ExitDecision` fold (ADR-068 D6,
+    `one-comparison-product.md` Phase 8) instead of `cli_stack.py`'s
+    former hand-rolled ``sys.exit(1)``/``sys.exit(4)``/``sys.exit(5)`` chain.
+
+    Reproduces that chain's exact documented behaviour bit-for-bit:
+
+    * ``result.abi_risk`` and ``result.loadability`` are two independent
+      0/1/4 axes (:data:`_STACK_VERDICT_GATE_CODE`) folded via `max()` --
+      matching the old code's ``loadability == fail or abi_risk == fail``
+      / ``abi_risk == warn or loadability == warn`` pair of checks exactly,
+      since neither axis can ever mask the other under a tie-inclusive
+      fold. ``loadability`` folds under
+      :class:`~abicheck.policy.exit_decision.ExitReason.LOADABILITY`, a
+      real, separate contribution -- not merged into ``abi_risk``'s own
+      ``compatibility_contribution`` before the call -- so a loadability
+      failure and an independent ABI-risk failure can both be named in
+      ``ExitDecision.reasons`` on a tie.
+    * Any :class:`StackChange.not_comparable_reason` (ADR-050 D2: a
+      dependency pair not extracted under a comparable profile/scope
+      contract) contributes `deps compare`'s own documented exit ``5`` --
+      reusing :class:`~abicheck.policy.exit_decision.ExitReason.
+      NOT_COMPARABLE`'s existing, already-generalized meaning with `deps`'s
+      own number (`5`, not `scan`'s `6` or the release resolver's `16`),
+      via `resolve_exit_decision`'s generic ``not_comparable_contribution``
+      parameter -- no `_dominant_decision`-style override is needed since
+      `5` already exceeds every other axis's own max (`4`) under a plain
+      fold. Matches the old code's unconditional early `sys.exit(5)`
+      exactly, since it always dominated regardless of the other two axes.
+    """
+    not_comparable = any(sc.not_comparable_reason for sc in result.stack_changes)
+    return resolve_exit_decision(
+        compatibility_contribution=_STACK_VERDICT_GATE_CODE[result.abi_risk],
+        loadability_contribution=_STACK_VERDICT_GATE_CODE[result.loadability],
+        not_comparable_contribution=5 if not_comparable else 0,
+    )
+
+
+def exit_decision_for_stack_tree(result: StackCheckResult) -> ExitDecision:
+    """`deps tree`'s exit code, expressed through the canonical
+    :class:`~abicheck.policy.exit_decision.ExitDecision` fold (ADR-068 D6).
+
+    `deps tree` checks a single environment: there is no ABI-risk axis at
+    all (``check_single_env`` always reports ``abi_risk = PASS``) and its
+    own documented scale is narrower than `deps compare`'s -- only ``0``
+    (all dependencies/symbols resolved) and ``1`` (load would fail), with
+    no distinct code for a version-mismatch ``WARN`` (the pre-convergence
+    ``cli_stack.py`` code never raised on ``WARN`` either -- only
+    ``loadability == FAIL`` triggered ``sys.exit(1)``). Reproduces that
+    exactly: ``loadability_contribution`` is `1` only for `FAIL`, `0`
+    otherwise (`PASS` and `WARN` alike).
+    """
+    return resolve_exit_decision(
+        compatibility_contribution=0,
+        loadability_contribution=1 if result.loadability is StackVerdict.FAIL else 0,
+    )
 
 
 def under_sysroot(root: Path, binary: Path) -> Path:

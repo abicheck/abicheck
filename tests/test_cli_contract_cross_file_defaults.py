@@ -18,8 +18,8 @@
 Split out of ``test_cli_contract.py`` (already at its own `no_growth` line-
 count pin) rather than grown there: these two tests cover
 ``_check_one_default_per_flag``'s scan across ``cli_options.py`` *and* its
-``frontends/cli/options/`` siblings (``contract.py``/``profiles.py``/
-``secondary_output.py``/``release.py``), the gap CodeRabbit found on PR #973
+``frontends/cli/options/`` siblings (``contract.py``/``secondary_output.py``/
+``release.py``), the gap CodeRabbit found on PR #973
 — a hardcoded single-file scan stopped seeing a sibling's half of a
 conflicting-default comparison the moment the first such split landed
 (``frontends/cli/options/contract.py``, well before this PR). See
@@ -46,7 +46,7 @@ def test_gate_flags_conflicting_default_across_options_package(
 ) -> None:
     """D10.4 must also catch a flag split between ``cli_options.py`` and a
     sibling under ``frontends/cli/options/`` (e.g. ``contract.py``/
-    ``profiles.py``/``release.py``) -- a single-file scan stopped seeing the
+    ``release.py``) -- a single-file scan stopped seeing the
     sibling's half of the comparison the moment the first such split landed
     (CodeRabbit review, PR #973)."""
     import scripts.check_ai_readiness as gate
@@ -78,8 +78,8 @@ def test_gate_allows_matching_default_across_options_package(
 ) -> None:
     """The cross-file scan must not false-positive when the same flag is
     legitimately redeclared with an identical default in a sibling module
-    (the ``--policy``/``--profile`` shape already live in
-    ``frontends/cli/options/contract.py``/``profiles.py``)."""
+    (the ``--policy`` shape already live in
+    ``frontends/cli/options/contract.py``)."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"

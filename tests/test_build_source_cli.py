@@ -983,7 +983,20 @@ def test_dump_malformed_pack_dir_errors(tmp_path):
 
 
 def _make_snap(tmp_path, name, version):
-    snap = AbiSnapshot(library="libfoo.so", version=version, from_headers=True)
+    # `parsed_with_build_context=True`: this is a bare metadata double for
+    # exercising the L3/L4/L5 build/source-evidence CLI plumbing in this
+    # file, not a real header parse -- it carries no header declarations at
+    # all, so it must not read as a genuine "headers parsed under a
+    # different build context than the compiled binary" mismatch the moment
+    # a test attaches a `--build-info` pack carrying an ABI-relevant flag
+    # (`header_build_context_mismatch`, now reachable from `compare()`'s
+    # automatic cross-source-check stage -- ADR-068 D3/D4/D5).
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version=version,
+        from_headers=True,
+        parsed_with_build_context=True,
+    )
     p = tmp_path / name
     save_snapshot(snap, p)
     return p

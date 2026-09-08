@@ -173,8 +173,6 @@ class TestReleaseSummaryEffectiveConfigNeverDivergesFromSinglePair:
             str(old_dir),
             str(new_dir),
             *extra_args,
-            "--jobs",
-            "1",
             "--format",
             "json",
         )

@@ -45,6 +45,8 @@ _ADR_064_EXIT_FIELDS = (
     # treatment as the five ADR-064 fields above.
     "incomplete_scope_contribution",
     "no_comparison_completed_contribution",
+    # ADR-068 D6 (one-comparison-product.md Phase 8): same treatment again.
+    "loadability_contribution",
 )
 
 

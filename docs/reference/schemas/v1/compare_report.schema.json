@@ -1523,7 +1523,7 @@
     },
     "exit": {
       "type": "object",
-      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants — see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) — evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, with `compare --abi3` the first CLI-reachable trigger for evidence_contract_error_contribution (schema 3.8: a candidate that is not a recognisable CPython extension module cannot be audited at all) and no CLI-reachable trigger for budget_overflow_contribution yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports.",
+      "description": "CLI cleanup phase two, PR G1 (schema 2.41; PR E follow-up added crosscheck_promotion_contribution at schema 2.42; ADR-064 stage 1b added the five operational_error_contribution..removed_required_library_contribution keys at schema 2.47): exit_decision.ExitDecision, the canonical resolution of every orthogonal exit-code axis for this comparison — code is exactly max(compatibility_contribution, contract_coverage_contribution, analysis_assurance_contribution, crosscheck_promotion_contribution, operational_error_contribution) for a native compare report whose DiffResult carries no evidence_contract_error/budget_overflow (every existing report), since those two are early-return dominant axes, not fold participants — see ExitDecision's own docstring. This is the identical value cli._exit_with_severity_or_verdict computes for the real process exit. reasons names every axis tied for that maximum (a lower, non-winning contribution is excluded, since it did not determine the result). Unconditionally present on every real-verdict compare report — every comparison has a compatibility contribution, unlike contract_context which stays opt-in. compare's own code still never covers not_comparable/release-removed-library exits (raised through different code paths today, always 0 here) — evidence_contract_error_contribution/budget_overflow_contribution (schema 3.3, one-comparison-product.md P3) are the two ADR-064 axes compare *can* now emit, reusing scan --against's own precedence rule, with `compare --abi3` the first CLI-reachable trigger for evidence_contract_error_contribution (schema 3.8: a candidate that is not a recognisable CPython extension module cannot be audited at all) and no CLI-reachable trigger for budget_overflow_contribution yet; the remaining three (operational_error/not_comparable/removed_required_library) stay always-0 placeholders, meaningful only for scan/release reports. loadability_contribution (schema 3.11, ADR-068 D6) is a fourth always-0 placeholder here for the identical reason -- it is `deps compare`/`deps tree`'s own axis (stack_checker.exit_decision_for_stack_compare/exit_decision_for_stack_tree), and `deps` does not emit this schema's report shape at all.",
       "required": [
         "code",
         "reasons",
@@ -1537,7 +1537,8 @@
         "not_comparable_contribution",
         "removed_required_library_contribution",
         "incomplete_scope_contribution",
-        "no_comparison_completed_contribution"
+        "no_comparison_completed_contribution",
+        "loadability_contribution"
       ],
       "properties": {
         "code": {
@@ -1618,6 +1619,11 @@
           "type": "integer",
           "const": 0,
           "description": "schema 2.50 (ADR-065 S2, D7): a directory/package release comparison whose selected scope produced no valid comparison (0/1 fold participant, under every completeness policy). Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above."
+        },
+        "loadability_contribution": {
+          "type": "integer",
+          "const": 0,
+          "description": "schema 3.11 (ADR-068 D6, one-comparison-product.md Phase 8): `deps compare`/`deps tree`'s own loadability fold participant (0/1/4). Always 0 for a native compare report -- const, same rationale as crosscheck_promotion_contribution above -- since `deps` reports its own JSON shape and never emits this schema's `exit` block at all."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."

@@ -324,39 +324,39 @@ _collect_force_public_symbols = collect_force_public_symbols
 
 def load_required_symbols(
     symbols: tuple[str, ...],
-    symbols_file: Path | None,
-) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
-    """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None, str | None]:
+    """Combine ``--required-symbol`` values, expanding any ``@FILE`` entry
+    (ADR-068 D5 / plan Phase 7h merged ``--required-symbols FILE`` into this
+    form: one symbol per line, ``#`` comments ignored, ADR-043; at most one
+    ``@FILE`` per invocation, matching the singular flag it replaces).
 
-    The file format is one symbol per line; blank lines and ``#`` comments are
-    ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
-
-    Returns the combined contract, *what the file itself contributed*, and the
-    digest of its bytes (both empty/``None`` when no file was given), all from
-    the one read. A required-symbol contract selects the base policy
-    (ADR-043), so an ADR-049 receipt has to identify what really did it: the
-    file's own contribution is what decides whether naming that file is a true
-    claim, since a file that parsed to nothing selected nothing (Codex review,
-    fresh evidence). The digest is over raw bytes, so it matches the file on
-    disk rather than a newline-normalized rendering of it.
+    Returns ``(combined, from_file, digest, path)`` -- the last three
+    ``None``/empty when no ``@FILE`` was given, so a receipt can tell "no
+    file" from "a file that parsed to nothing" (Codex review).
     """
-    from_file: list[str] = []
-    digest: str | None = None
-    if symbols_file is not None:
-        import hashlib
+    import hashlib
 
-        data = symbols_file.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        for line in data.decode("utf-8").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                from_file.append(stripped)
+    literal = [v for v in symbols if not v.startswith("@")]
+    files = [v[1:] for v in symbols if v.startswith("@")]
+    if len(files) > 1:
+        raise click.UsageError(
+            f"--required-symbol accepts at most one '@FILE' value; got {files}. "
+            "Combine both files, or pass the extras as plain values."
+        )
+    from_file: list[str] = []
+    digest = path = None
+    if files:
+        candidate = Path(files[0])
+        if not candidate.is_file():
+            raise click.UsageError(f"--required-symbol @{candidate}: no such file.")
+        data = candidate.read_bytes()
+        digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
+        from_file = [
+            s for line in data.decode("utf-8").splitlines()
+            if (s := line.strip()) and not s.startswith("#")
+        ]
     # De-duplicate while preserving first-seen order.
-    return (
-        tuple(dict.fromkeys([*symbols, *from_file])),
-        tuple(from_file),
-        digest,
-    )
+    return tuple(dict.fromkeys([*literal, *from_file])), tuple(from_file), digest, path
 
 
 def resolve_force_public_scope(

@@ -976,6 +976,51 @@ def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
     }
 
 
+def _strip_automatic_cross_source_findings(
+    diff: Any, policy: str, policy_file: PolicyFile | None
+) -> None:
+    """Undo ``compare_snapshots``'s automatic ``cross_source_checks`` stage
+    (ADR-068 D3/D4/D5) for a baseline comparison, in place.
+
+    ``compare_snapshots`` above runs that stage on every call, with no
+    opt-out for a real front end (ADR-068 D4/D5). But ``scan`` already has
+    its own, older, single-snapshot mechanism for cross-source checks (the
+    dedicated ``crosscheck`` report block + ``--crosscheck KEY=error``
+    promotion), and this function's own docstring states the invariant that
+    mechanism relies on: single-version findings stay advisory for a
+    baseline comparison unless explicitly promoted, never folded into the
+    old/new diff by default -- else a candidate-side evidence-hygiene
+    finding (e.g. ``header_build_context_mismatch``) could turn a clean
+    old/new diff into a false-positive API break. Every check migrated onto
+    the automatic stage silently reintroduces its finding into
+    ``diff.changes`` unless undone here.
+
+    Every ``Change`` the automatic stage adds carries a non-``None``
+    ``cross_source_evolution`` (only that stage sets it), so it is
+    identified and stripped without touching any other finding, and the
+    verdict is recomputed from what remains -- mirroring ``checker.
+    _compute_verdict_for``'s own policy dispatch, so removing findings can
+    only ever lower the verdict, never leave a stale, too-severe one behind.
+    """
+    changes = getattr(diff, "changes", None)
+    if not changes:
+        # A test double (or any other caller not carrying a real DiffResult)
+        # has no `changes` list at all -- nothing to strip.
+        return
+    stripped_ids = {
+        id(c) for c in changes if getattr(c, "cross_source_evolution", None)
+    }
+    if not stripped_ids:
+        return
+    diff.changes = [c for c in changes if id(c) not in stripped_ids]
+    if policy_file is not None:
+        diff.verdict = policy_file.compute_verdict(diff.changes)
+    else:
+        from .checker_policy import compute_verdict
+
+        diff.verdict = compute_verdict(diff.changes, policy=policy)
+
+
 def _run_baseline_compare(
     baseline: Path,
     binary: Path,
@@ -1198,6 +1243,7 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
+    _strip_automatic_cross_source_findings(diff, policy, policy_file)
     # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 

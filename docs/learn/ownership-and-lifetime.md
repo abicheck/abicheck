@@ -147,7 +147,7 @@ enough to treat as proof:
   contract intact can go out as a patch or minor release.
 - **For plugin/callback boundaries**, document the ownership contract
   (who owns `user_data`, who frees it, and when) directly alongside the
-  entrypoint declarations `--required-symbol`/`--required-symbols` checks
+  entrypoint declarations `--required-symbol` checks
   — see [Plugin Systems](../use/plugin-systems.md). abicheck itself has no
   ownership-aware check to run here (`--required-symbol` verifies only
   entrypoint *availability*, not the contract around it, per "What abicheck
