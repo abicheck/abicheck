@@ -1159,11 +1159,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "Whole-TU C/C++ language-mode auto-detection must not rely on "
             "header syntax alone: a header with no structural C++ syntax "
             "gives that heuristic nothing to key on. A real Itanium/Mach-O/"
-            "MSVC mangled name in the binary's export table is direct proof "
-            "of C++ linkage and must resolve the WHOLE TU to C++, not patch "
-            "one symbol after the fact -- a wrong mode corrupts `mangled`/"
-            "`is_extern_c`/`visibility` together. An explicit `--lang` or "
-            "real C++ syntax still wins; a bare-name export is not evidence."
+            "MSVC mangled export that CORRELATES with an identifier this "
+            "header declares is direct proof of C++ linkage and must "
+            "resolve the WHOLE TU to C++, not patch one symbol after the "
+            "fact -- a wrong mode corrupts `mangled`/`is_extern_c`/"
+            "`visibility` together. An explicit `--lang`, real C++ syntax, "
+            "a bare-name export, an UNRELATED header's own export "
+            "elsewhere in the same multi-header binary, or a name that "
+            "only appears in a COMMENT/STRING LITERAL/inactive `#if 0` "
+            "block are all not evidence for THIS header -- only active "
+            "declaration text correlates."
         ),
         fixed_by=(1138,),
         seed_tests=(
@@ -1175,7 +1180,120 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "frontend": ("castxml", "clang"),
             "declaration_shape": ("function", "ns_function", "extern_c", "variable"),
             "export_mangling": ("itanium", "macho_itanium", "msvc", "bare_c"),
+            "excluded_text_source": ("comment", "string_literal", "if_zero_block"),
         },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No general preprocessor/macro-expansion evaluator: an "
+                    "identifier appearing only as a macro parameter name, "
+                    "or inside an #ifdef/#ifndef branch not a literal "
+                    "0/1/false/true guard, still counts as a correlation "
+                    "candidate -- conservative (widens what might confirm, "
+                    "never fabricates), but not fully precise."
+                ),
+                reference="PR #1138 follow-up, second CodeRabbit round",
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.macho_mangled_identity_normalization",
+        invariant=(
+            "On Darwin, a linker-decorated spelling must be stripped to "
+            "the pure spelling at the POINT OF ORIGIN in every header-AST "
+            "backend's own parse step, not only inside the castxml+clang "
+            "hybrid-merge path, for BOTH shapes decoration takes: a real "
+            "Itanium name (`__Z...` -> `_Z...`, unconditional -- that "
+            'shape is unambiguous) and a genuine extern "C"/plain-C bare '
+            "name (`_foo` -> `foo`, gated on the caller's own already-"
+            "computed `is_extern_c` -- entry.extern_c or the existing "
+            "bare-name-equality heuristic -- reusing that exact boolean "
+            "rather than re-deriving a separate, less precise condition). "
+            "`Function.mangled`/`Variable.mangled` must match on every "
+            "platform/frontend combination, including a bare "
+            "`--ast-frontend clang` dump with no castxml side. A `_foo` "
+            "with NO extern-C evidence stays untouched (indistinguishable "
+            'from a real `asm("_foo")` label). A name already pure must '
+            "not be stripped again."
+        ),
+        fixed_by=(1138,),
+        seed_tests=(
+            "tests/test_dumper_clang_extern_c_identity.py",
+            "tests/test_dumper_hybrid_macho_idempotence.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "frontend": ("clang",),
+            "declaration_shape": ("function", "variable"),
+            "mangled_shape": (
+                "macho_decorated_itanium",
+                "macho_decorated_extern_c",
+                "already_pure",
+                "bare_asm_label",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No Mach-O toolchain in this dev environment to verify "
+                    "end to end -- verified via code inspection + synthetic "
+                    "AST-JSON unit tests only; macOS CI is the only real-"
+                    "binary signal (which is what caught this class's own "
+                    "second, narrower residual: the extern-C/plain-C bare-"
+                    "name shape was originally missed, only the Itanium "
+                    "shape was fixed in the first pass)."
+                ),
+                reference=(
+                    "PR #1138 follow-up: CI's integration-tests "
+                    "(macos-latest) job reported 4 failures from this exact "
+                    "mismatch for a bare --ast-frontend clang dump, twice "
+                    "(Itanium shape, then the narrower extern-C shape)"
+                ),
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.macho_export_index_double_strip",
+        invariant=(
+            "`model.export_index.default_versioned_names`'s Mach-O branch "
+            "must not re-strip a leading underscore: `macho_metadata` "
+            "already strips the platform's own one underscore while "
+            "parsing the real export trie/symtab, so a `MachoExport.name` "
+            "reaching this projection is ALREADY the pure spelling "
+            "(`_ZN2ns3fooEv`, matching `Function.mangled`). Stripping "
+            "again corrupts every Mach-O C++ export by eating its own "
+            '"_Z" prefix, breaking `exported_not_public`/`public_not_'
+            "exported` correlation even though the declared side is "
+            "correctly normalized."
+        ),
+        fixed_by=(1138,),
+        seed_tests=(
+            "tests/test_export_index.py",
+            "tests/test_crosscheck_macho_export_index_normalization.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "declaration_shape": ("plain_c", "namespaced_cxx"),
+            "mangled_shape": ("macho_itanium",),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No Mach-O toolchain in this dev environment; verified "
+                    "via unit tests over model.export_index/crosscheck "
+                    "directly, constructing a MachoMetadata fixture rather "
+                    "than a real compiled binary."
+                ),
+                reference=(
+                    "PR #1140 follow-up: CI's integration-tests "
+                    "(macos-latest) job reported 3 residual failures after "
+                    "the sibling extraction.macho_mangled_identity_"
+                    "normalization fix landed -- per-declaration identity "
+                    "was already correct, but export-table correlation "
+                    "still disagreed for every Itanium-mangled sibling."
+                ),
+            ),
+        ),
     ),
 )
 

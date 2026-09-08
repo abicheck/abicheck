@@ -38,6 +38,7 @@ already in ``_resolve_force_cpp`` found nothing.
 from __future__ import annotations
 
 from abicheck.dumper import _resolve_force_cpp
+from abicheck.dumper_ast_config import _header_declared_identifiers
 
 
 class TestResolveForceCppExportedSymbolEvidence:
@@ -103,3 +104,151 @@ class TestResolveForceCppExportedSymbolEvidence:
         h = tmp_path / "h.h"
         h.write_text("namespace ns { int f(); }\n", encoding="utf-8")
         assert _resolve_force_cpp(None, [h], None, (), frozenset({"f"})) is True
+
+    def test_unrelated_cxx_export_elsewhere_in_binary_does_not_force_cpp(
+        self, tmp_path
+    ):
+        """CodeRabbit review, fresh evidence: a genuinely plain-C header
+        must not be forced into C++ mode merely because some *unrelated*
+        header/TU in the same multi-header binary happens to export real
+        C++ symbols. Concrete failure case: ``struct options { int new; };``
+        is valid C -- ``new`` is a C++ reserved word, so forcing C++ mode
+        on it breaks parsing outright. The export table here names a
+        function (``other_cxx_func``) this header's own text never
+        mentions at all -- correlation must reject it as evidence."""
+        h = tmp_path / "options.h"
+        h.write_text("struct options { int new; };\n", encoding="utf-8")
+        assert (
+            _resolve_force_cpp(
+                None, [h], None, (), frozenset({"_Z14other_cxx_funcv"})
+            )
+            is False
+        )
+
+    def test_export_matching_this_headers_own_identifier_still_forces_cpp(
+        self, tmp_path
+    ):
+        """Companion to the unrelated-export test above: when the export
+        DOES correlate with a name this header's own text declares, C++
+        mode is still (correctly) forced -- the fix narrows the evidence
+        to per-header correlation, it does not disable the fallback."""
+        h = tmp_path / "h.h"
+        h.write_text("int compute(int x);\n", encoding="utf-8")
+        assert (
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
+            is True
+        )
+
+    def test_coincidental_substring_without_length_prefix_does_not_correlate(
+        self, tmp_path
+    ):
+        """A bare textual substring match is not enough -- the correlation
+        requires the real Itanium length-prefix encoding of the declared
+        identifier, not just the name appearing anywhere in the mangled
+        string. ``compute`` appears inside ``_Z14recomputeStuff`` as a
+        plain substring but not as the length-prefixed token ``"7compute"``
+        (the export is a 14-character *different* identifier,
+        ``recomputeStuff``, that merely happens to contain ``compute``), so
+        this header's own ``compute`` declaration must not be matched to
+        that unrelated export."""
+        h = tmp_path / "h.h"
+        h.write_text("int compute(int x);\n", encoding="utf-8")
+        assert (
+            _resolve_force_cpp(
+                None, [h], None, (), frozenset({"_Z14recomputeStuffi"})
+            )
+            is False
+        )
+
+
+class TestHeaderDeclaredIdentifiersExcludesInactiveText:
+    """CodeRabbit review, fresh evidence (second round, on the correlation
+    fix itself): ``_header_declared_identifiers`` must only collect
+    identifiers from ACTIVE, non-comment, non-literal declaration text --
+    otherwise a name that merely appears in a comment or string literal
+    would wrongly correlate against a real, unrelated export elsewhere in
+    the binary, defeating the very per-header correlation the sibling
+    class above tests -- one level less obviously than the original
+    whole-binary-union bug it replaced."""
+
+    def test_line_comment_does_not_contribute_an_identifier(self, tmp_path):
+        h = tmp_path / "h.h"
+        h.write_text(
+            "// TODO: compute this differently\nint real_decl(int x);\n"
+        )
+        ids = _header_declared_identifiers([h])
+        assert "compute" not in ids
+        assert "real_decl" in ids
+
+    def test_block_comment_does_not_contribute_an_identifier(self, tmp_path):
+        h = tmp_path / "h.h"
+        h.write_text("/* also compute here */\nint real_decl(int x);\n")
+        ids = _header_declared_identifiers([h])
+        assert "compute" not in ids
+        assert "real_decl" in ids
+
+    def test_string_literal_does_not_contribute_an_identifier(self, tmp_path):
+        h = tmp_path / "h.h"
+        h.write_text('const char *s = "compute";\nint real_decl(int x);\n')
+        ids = _header_declared_identifiers([h])
+        assert "compute" not in ids
+        assert "real_decl" in ids
+
+    def test_inactive_if_zero_block_does_not_contribute_an_identifier(
+        self, tmp_path
+    ):
+        h = tmp_path / "h.h"
+        h.write_text(
+            "#if 0\nint compute(int x);\n#endif\nint real_decl(int x);\n"
+        )
+        ids = _header_declared_identifiers([h])
+        assert "compute" not in ids
+        assert "real_decl" in ids
+
+    def test_macro_definition_and_use_still_contribute_identifiers(
+        self, tmp_path
+    ):
+        """Control: active code -- including a macro's own name, its
+        parameter names, and its body -- is real source text, not a
+        comment/string/inactive-branch exclusion, so it must still
+        correlate. (Known residual limitation, matching this repo's own
+        documented-gap convention: a macro parameter name is real active
+        text this heuristic cannot distinguish from a genuine declared
+        name without a full preprocessor/macro-expansion evaluator, which
+        is out of scope here -- the conservative direction, since it can
+        only widen what correlation might confirm, never fabricate it.)"""
+        h = tmp_path / "h.h"
+        h.write_text("#define MY_MACRO(compute) foo(compute)\n")
+        ids = _header_declared_identifiers([h])
+        assert {"MY_MACRO", "compute", "foo"} <= ids
+
+    def test_end_to_end_comment_only_match_does_not_force_cpp(self, tmp_path):
+        """Full-stack regression through ``_resolve_force_cpp``: a comment
+        mentioning a name that happens to be a real C++ export elsewhere
+        must not force this genuinely plain-C header into C++ mode."""
+        h = tmp_path / "h.h"
+        h.write_text("// TODO: compute this differently\nint f(int x);\n")
+        assert (
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
+            is False
+        )
+
+    def test_end_to_end_string_literal_only_match_does_not_force_cpp(
+        self, tmp_path
+    ):
+        h = tmp_path / "h.h"
+        h.write_text('const char *s = "compute";\nint f(int x);\n')
+        assert (
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
+            is False
+        )
+
+    def test_end_to_end_inactive_if_zero_only_match_does_not_force_cpp(
+        self, tmp_path
+    ):
+        h = tmp_path / "h.h"
+        h.write_text("#if 0\nint compute(int x);\n#endif\nint f(int x);\n")
+        assert (
+            _resolve_force_cpp(None, [h], None, (), frozenset({"_Z7computei"}))
+            is False
+        )

@@ -438,6 +438,15 @@ def compare_release_cmd(
     # rung outright. `None` (the default) is a true no-op, matching every
     # pre-existing caller.
     depth: str | None = None,
+    # CodeRabbit review, PR #1138: a project's `.abicheck.yml`
+    # `scope.public_header_dirs` (`workflows.public_header_boundary.
+    # project_config_public_header_dirs`), resolved once by the caller
+    # (`cli_compare_helpers.run_compare`, the same place that already
+    # resolves `project_cfg` for the single-pair path) and forwarded here --
+    # same internal-parameter shape as `compile_context`/`pack_application`
+    # above. `None` (the default) is a true no-op: every library is compared
+    # exactly as it was before this parameter existed.
+    public_header_dirs: list[Path] | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -764,6 +773,7 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 compile_context=compile_context,
                 depth=depth,
+                public_header_dirs=public_header_dirs,
             )
 
             for key in matched_keys:
@@ -938,6 +948,7 @@ def compare_release_cmd(
                                 pdb=old_dbg,
                                 compile=compile_context,
                                 include_dependencies=include_dependencies,
+                                public_header_dirs=public_header_dirs,
                             ),
                             lang=lang,
                             depth=depth,

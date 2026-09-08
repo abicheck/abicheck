@@ -1282,10 +1282,9 @@ def test_public_not_exported_uses_pe_exports():
 
 
 def test_public_not_exported_normalizes_macho_underscore():
-    # The dumper stores Function.mangled without the Mach-O leading underscore,
-    # but the export table keeps it. A `foo` decl whose `_foo` is exported must
-    # be treated as present, not flagged (Codex review).
-    snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="_foo")]))
+    # `macho_metadata` already strips the leading underscore while parsing
+    # the real export table (PR #1140 follow-up) -- "foo", not "_foo".
+    snap = _snap(macho=MachoMetadata(exports=[MachoExport(name="foo")]))
     snap.functions = [
         Function(
             name="foo",

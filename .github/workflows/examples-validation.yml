@@ -494,6 +494,15 @@ jobs:
       # validator exit behind the reduced-evidence reported-only policy.
       - name: Run artifact-mode validation (build-source release proof + reported-only FP guard)
         if: always()
+        env:
+          # This workflow checks out and executes repository-owned fixtures
+          # only (same justification as the sharded debug-headers job's own
+          # identical setting) -- without it, every source_smoke-run-mode
+          # example case (7 across the catalog) silently SKIPs under this
+          # job's release-headers/stripped-headers legs instead of actually
+          # running, a real coverage loss this job's own reported-only
+          # false-positive guard cannot detect since a SKIP never reaches it.
+          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
         run: |
           if [ "${{ matrix.mode }}" = "build-source" ]; then
             CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
