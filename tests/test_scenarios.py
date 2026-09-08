@@ -469,11 +469,8 @@ def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
     # matrices folds those findings into the mainline gate: a comparison that is
     # NO_CHANGE on the binary surface becomes API_BREAK once the matrix raises
     # the floor 17 -> 20.
-    from abicheck.probe_harness import (
-        MatrixSnapshot,
-        ProbeResult,
-        write_matrix_snapshot,
-    )
+    from abicheck.probe_harness import MatrixSnapshot, ProbeResult
+    from abicheck.workflows.findings import write_matrix_snapshot
 
     same = [_fn("a")]
     o = _save(_lib("1", list(same)), tmp_path / "o.json")
@@ -777,11 +774,8 @@ def test_sc_cxx_std_floor(tmp_path: Path) -> None:
     # but the build raises the C++ standard floor 17 → 20. A per-binary diff is
     # NO_CHANGE; passing the probe matrices folds CXX_STANDARD_FLOOR_RAISED into
     # the verdict, surfacing the per-consumer source break (API_BREAK, exit 2).
-    from abicheck.probe_harness import (
-        MatrixSnapshot,
-        ProbeResult,
-        write_matrix_snapshot,
-    )
+    from abicheck.probe_harness import MatrixSnapshot, ProbeResult
+    from abicheck.workflows.findings import write_matrix_snapshot
 
     same = [_fn("a")]
     o = _save(_lib("1", list(same)), tmp_path / "o.json")

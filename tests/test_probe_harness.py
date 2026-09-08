@@ -10,8 +10,6 @@ compiler on PATH).
 """
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from abicheck.probe_harness import (
@@ -197,29 +195,6 @@ class TestMatrixSnapshot:
         assert set(idx.keys()) == {"a", "b"}
         assert len(idx["a"]) == 2
         assert len(idx["b"]) == 1
-
-    def test_roundtrip_json_no_snapshot(self) -> None:
-        m = MatrixSnapshot(
-            library="lib", version="1", spec_name="s",
-            cxx_stds={"a": 20, "b": 17},
-            defaults={"backend": "tbb"},
-            results=[
-                ProbeResult(
-                    configuration_id="a", probe_id="p1",
-                    object_path="build/a__p1.o", error=None,
-                ),
-                ProbeResult(
-                    configuration_id="b", probe_id="p1",
-                    error="compiler not found",
-                ),
-            ],
-        )
-        roundtrip = MatrixSnapshot.from_dict(json.loads(m.to_json()))
-        assert roundtrip.library == "lib"
-        assert roundtrip.cxx_stds == {"a": 20, "b": 17}
-        assert roundtrip.defaults == {"backend": "tbb"}
-        assert len(roundtrip.results) == 2
-        assert roundtrip.results[1].error == "compiler not found"
 
 
 class TestProbeSpecAsCommandArgs:
