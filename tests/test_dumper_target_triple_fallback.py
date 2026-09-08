@@ -384,6 +384,44 @@ def test_probe_failure_with_a_resolved_cross_compiler_still_recovers_explicit_ta
     assert parser._target_triple == "x86_64-unknown-linux-gnu"
 
 
+def test_probe_failure_with_an_explicit_config_file_does_not_guess_sys_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A forwarded ``--config=<file>`` may hide its own ``-target``/
+    ``--driver-mode=`` this module cannot see without reading it -- a real
+    Clang invocation honors one (empirically verified against a real
+    Clang 18 install), so a probe failure must not fall back to either the
+    bare re-probe or a `sys.platform` guess (Codex review, fresh
+    evidence)."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="--config=darwin.cfg",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None
+
+
 def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

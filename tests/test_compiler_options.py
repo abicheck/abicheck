@@ -481,6 +481,23 @@ class TestExplicitTargetTriple:
             is None
         )
 
+    def test_an_explicit_config_file_also_voids_the_recovery(self) -> None:
+        # Codex review, fresh evidence, empirically verified against a
+        # real Clang 18 install: `--config=<file>` is honored the same way
+        # a response file is (both AST generation and
+        # `-print-target-triple` apply it), so it must void recovery the
+        # identical way, regardless of position.
+        assert (
+            explicit_target_triple(
+                "--target=x86_64-unknown-linux-gnu --config=darwin.cfg", ()
+            )
+            is None
+        )
+        assert (
+            explicit_target_triple(None, ("--config", "darwin.cfg", "-target", "aarch64"))
+            is None
+        )
+
 
 class TestExplicitTargetTripleClStyle:
     """``cl_style=True`` (Codex review, third round, fresh evidence
@@ -656,3 +673,22 @@ class TestForwardsResponseFile:
     def test_malformed_gcc_options_does_not_raise(self) -> None:
         assert forwards_response_file('-DFOO="unterminated', ()) is False
         assert forwards_response_file('-DFOO="unterminated', ("@response.rsp",)) is True
+
+    def test_detects_an_attached_config_file(self) -> None:
+        # Codex review, fresh evidence, empirically verified against a real
+        # Clang 18 install: `--config=<file>` is honored by both AST
+        # generation and `-print-target-triple`, exactly like a response
+        # file -- its contents are equally invisible to this module.
+        assert forwards_response_file("--config=darwin.cfg", ()) is True
+
+    def test_detects_a_separate_config_file(self) -> None:
+        assert forwards_response_file(None, ("--config", "darwin.cfg")) is True
+
+    def test_a_trailing_bare_config_flag_does_not_match(self) -> None:
+        # No following argument -- not a real `--config <file>` pair.
+        assert forwards_response_file(None, ("--config",)) is False
+
+    def test_config_user_dir_alone_does_not_match(self) -> None:
+        # A related but distinct flag; only `--config`/`--config=` itself
+        # selects a specific file whose contents this module can't see.
+        assert forwards_response_file("--config-user-dir=/etc", ()) is False

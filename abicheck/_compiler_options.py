@@ -436,22 +436,23 @@ def explicit_target_triple(
     same honored-spelling check above for whatever the stripped token
     turns out to be, attached or the first half of a separate pair alike.
 
-    ANY ``@response-file`` token forwarded, regardless of its position
-    relative to a visible target, voids recovery back to ``None``: a
-    response file's own invisible contents could carry a further target
+    ANY ``@response-file``/``--config=<file>`` token forwarded, regardless
+    of its position relative to a visible target, voids recovery back to
+    ``None``: its own invisible contents could carry a further target
     that overrides an EARLIER visible one (a real compiler processes
     arguments left to right, later wins — Codex review, fresh evidence:
     ``clang --target=x86_64-unknown-linux-gnu @darwin.rsp
     -print-target-triple`` genuinely reports Darwin when the response
-    file itself sets that), but a response file BEFORE the visible target
-    is not safe either: real Clang determines its CL-vs-GNU driver mode
-    from an early scan of the *entire* argument list, response files
-    included, so one preceding the target could just as easily flip the
-    mode a caller's own ``cl_style`` was computed under, changing which
-    spellings are even honored for the visible token that follows
-    (CodeRabbit review, fresh evidence). With no way to see inside the
-    file, the only safe answer once ANY response file is forwarded is
-    "unknown" — not "trust whatever is visible".
+    file itself sets that; a real ``--config=<file>`` invocation confirms
+    the identical shape), but one BEFORE the visible target is not safe
+    either: real Clang determines its CL-vs-GNU driver mode from an early
+    scan of the *entire* argument list, these included, so one preceding
+    the target could just as easily flip the mode a caller's own
+    ``cl_style`` was computed under, changing which spellings are even
+    honored for the visible token that follows (CodeRabbit review, fresh
+    evidence). With no way to see inside the file, the only safe answer
+    once either is forwarded is "unknown" — not "trust whatever is
+    visible". See :func:`_opaque_option_source_tokens`.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -462,7 +463,7 @@ def explicit_target_triple(
             # above: malformed --gcc-options must not abort the dump.
             pass
     tokens.extend(gcc_option_tokens)
-    if any(t.startswith("@") and len(t) > 1 for t in tokens):
+    if _opaque_option_source_tokens(tokens):
         return None
     if cl_style:
         tokens = [
@@ -533,29 +534,50 @@ def effective_driver_mode_is_cl(
     return is_cl_style_name
 
 
+def _opaque_option_source_tokens(tokens: list[str]) -> bool:
+    """Whether ``tokens`` forwards an external options source this module
+    cannot see into: a Clang/GCC ``@response-file`` token, or an explicit
+    ``--config=<file>``/``--config <file>`` (real Clang, confirmed by
+    invocation: a config file's contents are honored by both AST
+    generation and ``-print-target-triple``, exactly like a response file
+    -- Codex review, fresh evidence). Shared by
+    :func:`explicit_target_triple` and :func:`forwards_response_file`.
+    """
+    for i, token in enumerate(tokens):
+        if token.startswith("@") and len(token) > 1:
+            return True
+        if token.startswith("--config="):
+            return True
+        if token == "--config" and i + 1 < len(tokens):
+            return True
+    return False
+
+
 def forwards_response_file(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
 ) -> bool:
-    """Whether forwarded options include a Clang/GCC ``@response-file``
-    token, whose contents this module cannot see without actually reading
-    and re-tokenizing that file on disk (a real compile toolchain expands
-    it natively at invocation time; :func:`explicit_target_triple` and
-    :func:`effective_driver_mode_is_cl` only ever see the literal ``@path``
-    token).
+    """Whether forwarded options include an unexpanded ``@response-file``
+    or an explicit ``--config=<file>``, whose contents this module cannot
+    see without actually reading and re-tokenizing that file on disk (a
+    real compile toolchain expands/applies it natively at invocation time;
+    :func:`explicit_target_triple` and :func:`effective_driver_mode_is_cl`
+    only ever see the literal ``@path``/``--config=<file>`` token).
 
     Exists so a caller with no other explicit-target evidence can tell
     "genuinely nothing else was requested" from "something may be hidden
-    in an unexpanded response file" -- a response file containing its own
-    ``-target``/``--driver-mode=`` is a real, working invocation shape
+    in an unexpanded response/config file" -- either can carry its own
+    ``-target``/``--driver-mode=`` and is a real, working invocation shape
     (Codex review, fresh evidence: ``tests/test_dumper_clang.py``'s own
     ``test_configured_target_triple_honors_clang_response_file`` proves a
-    real compiler process honors one), so a probe failure there must not
-    fall back to a `sys.platform` guess that could easily be wrong in
-    either direction. Deliberately does not attempt to read/expand the
-    file itself -- response-file quoting is platform-specific (POSIX
-    shell-like vs. Windows) and duplicating a compiler's own expansion
-    logic here would be speculative machinery this narrow uncertainty
-    check doesn't need; conservatively assuming "unknown" is sufficient.
+    real compiler process honors a response file; a real Clang invocation
+    with ``--config=<file>`` confirms the same for a config file), so a
+    probe failure there must not fall back to a `sys.platform` guess that
+    could easily be wrong in either direction. Deliberately does not
+    attempt to read/expand either file itself -- response-file quoting is
+    platform-specific (POSIX shell-like vs. Windows) and duplicating a
+    compiler's own expansion logic here would be speculative machinery
+    this narrow uncertainty check doesn't need; conservatively assuming
+    "unknown" is sufficient.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -564,7 +586,7 @@ def forwards_response_file(
         except ValueError:
             pass
     tokens.extend(gcc_option_tokens)
-    return any(token.startswith("@") and len(token) > 1 for token in tokens)
+    return _opaque_option_source_tokens(tokens)
 
 
 def language_standard_field(

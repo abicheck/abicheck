@@ -106,6 +106,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   against a real Clang 18 install). `_is_default_clang_bin`'s exact-name
   comparison now gates only the final, narrowest `sys.platform` guess,
   reached only when even the bare re-probe fails.
+  `forwards_response_file` (and `explicit_target_triple`'s own identical
+  internal check, now factored into one shared
+  `_opaque_option_source_tokens` helper) also recognizes an explicit
+  `--config=<file>`/`--config <file>` alongside `@response-file` — a real
+  Clang invocation with `--config=<file>` is confirmed to apply that
+  file's contents to both AST generation and `-print-target-triple`
+  exactly like a response file, so it is an equally opaque, equally
+  unsafe-to-guess-past evidence source (empirically verified against a
+  real Clang 18 install).
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in
