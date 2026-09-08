@@ -465,15 +465,20 @@ class TestExplicitTargetTriple:
         )
         assert explicit_target_triple(None, ("-target", "aarch64", "@resp.rsp")) is None
 
-    def test_a_response_file_before_the_target_does_not_void_the_recovery(
+    def test_a_response_file_before_the_target_also_voids_the_recovery(
         self,
     ) -> None:
-        # Nothing follows the recognized target token to override it, so
-        # it is exactly as trustworthy as if the response file weren't
-        # there at all.
+        # CodeRabbit review, fresh evidence, correcting the thirteenth
+        # round's own claim that a PRECEDING response file is safe: real
+        # Clang determines its CL-vs-GNU driver mode from an early scan
+        # of the entire argument list, response files included, so one
+        # before the visible target could flip the mode the caller's own
+        # `cl_style` was computed under -- changing which spellings are
+        # even honored for the token that follows. With no way to see
+        # inside the file, this must also be treated as unknown.
         assert (
             explicit_target_triple("@darwin.rsp --target=x86_64-unknown-linux-gnu", ())
-            == "x86_64-unknown-linux-gnu"
+            is None
         )
 
 

@@ -436,18 +436,22 @@ def explicit_target_triple(
     same honored-spelling check above for whatever the stripped token
     turns out to be, attached or the first half of a separate pair alike.
 
-    An ``@response-file`` token AFTER the last recognized target token
-    voids that recovery back to ``None`` rather than trusting it as
-    final: a real compiler processes arguments left to right with later
-    values winning, and this module cannot see whether the response
-    file's own (invisible) contents carry a further target that would
-    override the one just recovered here (Codex review, fresh evidence —
+    ANY ``@response-file`` token forwarded, regardless of its position
+    relative to a visible target, voids recovery back to ``None``: a
+    response file's own invisible contents could carry a further target
+    that overrides an EARLIER visible one (a real compiler processes
+    arguments left to right, later wins — Codex review, fresh evidence:
     ``clang --target=x86_64-unknown-linux-gnu @darwin.rsp
     -print-target-triple`` genuinely reports Darwin when the response
-    file itself sets that). A response file BEFORE the last recognized
-    target is unaffected — nothing follows the recognized token to
-    override it, so it is exactly as trustworthy as if the response file
-    weren't there.
+    file itself sets that), but a response file BEFORE the visible target
+    is not safe either: real Clang determines its CL-vs-GNU driver mode
+    from an early scan of the *entire* argument list, response files
+    included, so one preceding the target could just as easily flip the
+    mode a caller's own ``cl_style`` was computed under, changing which
+    spellings are even honored for the visible token that follows
+    (CodeRabbit review, fresh evidence). With no way to see inside the
+    file, the only safe answer once ANY response file is forwarded is
+    "unknown" — not "trust whatever is visible".
     """
     tokens: list[str] = []
     if gcc_options:
@@ -458,35 +462,28 @@ def explicit_target_triple(
             # above: malformed --gcc-options must not abort the dump.
             pass
     tokens.extend(gcc_option_tokens)
+    if any(t.startswith("@") and len(t) > 1 for t in tokens):
+        return None
     if cl_style:
         tokens = [
             token[len("/clang:") :] if token.startswith("/clang:") else token
             for token in tokens
         ]
     value: str | None = None
-    value_at = -1
     i = 0
     while i < len(tokens):
         token = tokens[i]
         if token.startswith("--target="):
             value = token[len("--target=") :]
-            value_at = i
         elif not cl_style and token.startswith("-target="):
             value = token.partition("=")[2]
-            value_at = i
         elif token == "-target" and i + 1 < len(tokens):
             value = tokens[i + 1]
             i += 1
-            value_at = i
         elif not cl_style and token == "--target" and i + 1 < len(tokens):
             value = tokens[i + 1]
             i += 1
-            value_at = i
         i += 1
-    if value is not None and any(
-        t.startswith("@") and len(t) > 1 for t in tokens[value_at + 1 :]
-    ):
-        return None
     return value
 
 

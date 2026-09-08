@@ -222,12 +222,19 @@ def test_probe_failure_with_a_response_file_does_not_guess_sys_platform(
     assert parser._target_triple is None
 
 
-def test_probe_failure_with_a_response_file_still_recovers_explicit_target(
+def test_probe_failure_with_a_response_file_alongside_a_target_does_not_recover_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The response-file gate only ever suppresses the `sys.platform`
-    GUESS -- an explicit ``--target=`` forwarded ALONGSIDE the response
-    file is still real evidence and is recovered regardless."""
+    """CodeRabbit review, fresh evidence, correcting this test's own prior
+    claim: real Clang determines its CL-vs-GNU driver mode from an early
+    scan of the *entire* argument list, response files included, before
+    parsing proceeds -- so a forwarded ``@response.rsp`` could itself flip
+    that mode (or, per the earlier Codex finding, carry a later
+    ``-target``/``--target=`` of its own) regardless of where it sits
+    relative to a visible ``--target=``. With no way to see inside the
+    file, any forwarded response file voids recovery of an explicit target,
+    even one that appears alongside it on the visible command line -- this
+    case is no longer "still recovered", it is unknown like any other."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
@@ -253,7 +260,7 @@ def test_probe_failure_with_a_response_file_still_recovers_explicit_target(
     )
 
     assert isinstance(parser, _ClangAstParser)
-    assert parser._target_triple == "x86_64-unknown-linux-gnu"
+    assert parser._target_triple is None
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="needs a real clang on PATH")

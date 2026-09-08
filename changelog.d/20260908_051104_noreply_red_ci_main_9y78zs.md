@@ -77,12 +77,18 @@ it should read in CHANGELOG.md. Delete the other sections.
   reading and re-tokenizing the file, so its mere presence is treated as
   "unknown evidence" rather than "nothing else was requested".
   `explicit_target_triple` itself applies the same reasoning one level
-  deeper: a recovered target is voided back to `None` when a response
-  file token comes *after* it in the forwarded options (a real compiler
-  processes arguments left to right, so the file's own invisible
-  contents could still override the visible target), but not when the
-  response file precedes it (nothing follows the recognized token to
-  override it).
+  deeper: a recovered target is voided back to `None` whenever ANY
+  response file is forwarded, regardless of its position relative to the
+  visible target. A response file after the target can carry a later,
+  overriding target of its own (a real compiler processes arguments left
+  to right, later wins); a response file *before* the target is not safe
+  either, since real Clang determines its CL-vs-GNU driver mode from an
+  early scan of the *entire* argument list, response files included,
+  before parsing proceeds — so a preceding file could retroactively flip
+  the mode the caller's own `cl_style` was computed under, changing which
+  spellings are even honored for the visible token that follows. With no
+  way to see inside the file, any forwarded response file makes the
+  answer "unknown", not "trust whatever is visible".
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in
