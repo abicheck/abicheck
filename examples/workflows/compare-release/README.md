@@ -6,8 +6,8 @@ This is the first Phase 5 slice of the examples/catalog split (retired
 plan record, `docs/contribute/plans/index.md`) — a small, curated,
 task-oriented example independent of the 197-case calibration catalog under
 `examples/case*/` (which exists to calibrate detectors, not to teach the
-CLI). See that plan's "Known gaps" table for the rest of this curated set,
-not yet built.
+CLI). See `../../CLAUDE.md` for the rest of this curated set (Phase 5 is
+complete, 7 of 7).
 
 ## The project
 

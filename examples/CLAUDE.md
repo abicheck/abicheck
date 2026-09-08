@@ -14,7 +14,7 @@ Read `README.md` in this directory first — it points at the curated
 workflows below and at the calibration catalog's own
 [`catalog/README.md`](../catalog/README.md).
 
-## `workflows/` — curated user-facing examples (Phase 5, in progress)
+## `workflows/` — curated user-facing examples (Phase 5, complete)
 
 `examples/workflows/` is a **separate tree from the `caseNN_*` calibration
 catalog** under `catalog/cases/` — Phase 5 of the examples/catalog split
@@ -55,8 +55,9 @@ the output) — not calibration fixtures a gate scores. Consequently:
   this", not "how does this work" (that's the docs' job, see
   `docs/AGENTS.md`'s ownership split).
 
-See the plan doc's Phase 5 row for the target set (compare one library
-[done], audit a release [done], multi-library project [done], evidence
-depth (including build/source evidence) [done], Python API [done],
-suppressions [done], GitHub Actions [done]) — Phase 5 is now complete,
-7 of 7.
+Phase 5's target set is complete, 7 of 7: compare one library
+(`compare-release`), audit a release (`audit-release`), multi-library
+project (`compare-project`), evidence depth including build/source
+evidence (`evidence-depth`), Python API (`python-api`), suppressions
+(`suppressions`), and GitHub Actions (`github-actions`) — see each
+directory's own `README.md`/`workflow.yaml`.

@@ -389,5 +389,5 @@ argument-count-dependent semantics this work is meant to eliminate.
   retirement map, flag inventory, migration sequence, acceptance tests
 - [`plans/vision-api-abi-evolution.md`](../plans/vision-api-abi-evolution.md)
   — the result-semantics workstreams this is subordinate to
-- `plans/cli-cleanup-phase-two.md` —
-  the interface-hygiene predecessor
+- `plans/index.md` — cli-cleanup-phase-two, the interface-hygiene
+  predecessor, is retired there

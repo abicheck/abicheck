@@ -98,30 +98,31 @@ hundreds more generic C++ change kinds.
 
 ## Highest-priority improvements
 
-### 0. Finish the existing wheel foundations
+### 0. The existing wheel foundations (G9, G10, G16 — done; G4 — planned)
 
-Before expanding scope, three existing gaps should be closed because they
-directly affect trustworthy scientific-Python scans.
+These three gaps have since been closed, because they directly affect
+trustworthy scientific-Python scans; G4 remains open, as the separate,
+XL-effort item described above.
 
-- **Vendored-library matching — G9.**
+- **Vendored-library matching — G9 (done).**
   `auditwheel` and `delocate` rename bundled libraries with content hashes.
-  abicheck currently may interpret every rebuilt dependency as removed and
-  re-added, losing the actual dependency delta. The project's own analysis
-  found that this can conceal a real vendored SONAME break.
-- **Platform-floor verification — G10.**
-  Comparing required `GLIBC_*` versions with the manylinux tag is already
-  planned. It should then be generalized to musllinux, macOS deployment
-  targets, Windows API/UCRT requirements, `GLIBCXX`/`CXXABI`, and CPU
-  instruction-set floors.
-- **Header frontend robustness — G16 /
-  [G4](plans/g4-header-ast-extractor.md).** Real-world scanning found 21
-  repeated cases in which header-scoped analysis aborted in host system
-  headers, preventing public-versus-private surface classification. Moving
-  toward a robust libclang frontend is important for projects that provide
-  native public headers.
-
-These are less novel than the features below, but they determine whether
-users trust the result.
+  Filename- and embedded-SONAME/install-name normalization (`strip_vendor_hash`)
+  now pairs a rebuilt dependency across the hash rename instead of reporting
+  it as removed-and-re-added, so a real vendored SONAME break stays visible
+  through the noise.
+- **Platform-floor verification — G10 (done).**
+  The manylinux glibc floor check (`platform_baseline_floor_raised`,
+  declared via `--env-matrix`'s `runtime_floors`) is implemented; musllinux,
+  macOS deployment targets, Windows API/UCRT requirements, `GLIBCXX`/`CXXABI`,
+  and CPU instruction-set floors are covered by later work (see §3 below).
+- **Header frontend robustness — G16 (done) /
+  [G4](plans/g4-header-ast-extractor.md) (still planned).** Real-world
+  scanning found 21 repeated cases in which header-scoped analysis aborted
+  in host system headers, preventing public-versus-private surface
+  classification; `HeaderToolchainError` and header-scope toolchain
+  diagnostics now surface that failure instead of silently mis-scoping.
+  Moving toward a robust libclang frontend (G4) for projects that provide
+  native public headers remains a separate, larger undertaking.
 
 ### 1. A first-class Cython API/ABI frontend
 

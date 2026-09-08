@@ -120,10 +120,12 @@ deliberately not added, since neither `compare` nor `scan --against` itself
 exposes them as CLI flags (only the directory/package release fan-out does,
 and only `.abicheck.yml` for the other two, which a typed caller has no
 equivalent of); adding them would have been new surface beyond CLI parity,
-not parity itself. See
-cli-cleanup-phase-two.md's "PR 4" section, own 2026-09-03 update, for
-the full account, including the new `abicheck/workflows/scan_gate_options.py`
-leaf module and the `api_types.py` debt-baseline move this needed.
+not parity itself. See cli-cleanup-phase-two.md's "PR 4" section, own
+2026-09-03 update, for the full account (that plan record is retired —
+see `docs/contribute/plans/index.md` — this ADR's own text is the
+surviving summary), including the new
+`abicheck/workflows/scan_gate_options.py` leaf module and the
+`api_types.py` debt-baseline move this needed.
 **Update (2026-09-03, fourth round — the single-binary `--format text` gap
 closed for good):** a fourth Codex review round on the same PR found the
 marker-file design (round 2/3) unsound at its root, not merely
@@ -163,9 +165,8 @@ cleanly with no new signal needed:
 7)` for a set member's abort the same way the single-binary path does, and
 `action/run.sh`'s existing `case $ABICHECK_EXIT in ... 7) ...` arm now
 prints a set-aware message. See `docs/reference/exit-codes.md`'s
-`scan --artifact-set` callout and
-cli-cleanup-phase-two.md's own
-2026-09-04 update for the full account.
+`scan --artifact-set` callout and cli-cleanup-phase-two.md's own
+2026-09-04 update (retired plan record) for the full account.
 
 **Stage 2 itself — the `--exit-code-scheme` removal — also landed
 (2026-09-04),** per ADR-064's own design below: `--exit-code-scheme`,
@@ -179,15 +180,14 @@ exit_code_scheme`, `GateOptions.exit_code_scheme`, the JSON report's
 and the unrelated, still-live `scoped_exit_code_scheme` result field) keeps
 its name and shape everywhere it already existed as an output — only its
 *settability* was removed, exactly this section's "Deleting the selector...
-Decision" below describes. See
-cli-cleanup-phase-two.md's "PR 4/PR G2"
-section for the file-by-file account.
+Decision" below describes. See cli-cleanup-phase-two.md's "PR 4/PR G2"
+section (retired plan record) for the file-by-file account.
 
 Still open: a typed request's own `gate.*` pack field (`--pack` stays a
 CLI-only selector, ADR-049 D8) — unrelated to either item above, and not
-attempted here. See
-cli-cleanup-phase-two.md's "PR 4 — one
-gate algorithm" section, which this ADR formalizes rather than restates.
+attempted here. See cli-cleanup-phase-two.md's "PR 4 — one gate
+algorithm" section (retired plan record), which this ADR formalizes
+rather than restates.
 **Decision maker:** Nikolay Petrov
 
 ## Context
@@ -200,7 +200,7 @@ the `NO_CHANGE`/`COMPATIBLE`/`RISK` vs. `API_BREAK` vs. `BREAKING` verdict,
 and a severity-based one, deriving `0/1/2/4` from which severity category
 (addition/quality, potential-breaking, ABI-breaking) actually carries an
 error-level finding under the configured policy (see
-cli-cleanup-phase-two.md's "PR 4" table
+cli-cleanup-phase-two.md's "PR 4" table, retired plan record,
 for the full side-by-side). A compatible addition can block CI under one
 severity policy can demote a real ABI break to `0`. `auto` already picks
 severity-based whenever a severity policy is actually configured and falls
@@ -1069,8 +1069,8 @@ lands in two stages rather than one atomic change:
       `_compute_release_severity_exit_code`, and
       `_fold_release_global_severity`, each re-deriving the identical
       `SeverityConfig` from the same strings -- exactly the shape PR B's
-      own "finalized" note (see `cli-cleanup-phase-two.md`'s "PR 4"
-      section) flagged as unsafe to fix reactively, ahead of this ADR's
+      own "finalized" note (`cli-cleanup-phase-two.md`'s "PR 4" section,
+      retired plan record) flagged as unsafe to fix reactively, ahead of this ADR's
       settled design. `resolve_release_gate_options` now performs that
       resolution exactly once (folding a selected `kind: gate` pack via
       the pre-existing `apply_release_gate_pack`, then applying the same
@@ -1241,9 +1241,10 @@ alongside the flag deletion itself.
 
 ## Cross-references
 
-- cli-cleanup-phase-two.md — "PR 4 —
-  one gate algorithm (`--exit-code-scheme` removal)" is this ADR's source
-  material; the plan's "Ordering" table tracks PR G1 (done, #789) and PR G2
+- cli-cleanup-phase-two.md (retired plan record; see
+  `docs/contribute/plans/index.md`) — "PR 4 —
+  one gate algorithm (`--exit-code-scheme` removal)" was this ADR's source
+  material; the plan's "Ordering" table tracked PR G1 (done, #789) and PR G2
   (this ADR — stage 1a landed, stage 1b partially landed per this ADR's own
   status header above, stage 2 not yet implemented) as a pair.
 - [ADR-049](049-contract-relevance-and-compatibility-configuration.md) —

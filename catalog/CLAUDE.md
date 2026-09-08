@@ -167,7 +167,7 @@ the registry these were unvalidated free-text strings that
 `docs/contribute/catalog-coverage.md` counted as distinct compatibility
 rules, so a typo or a synonym silently became one more "rule". See the
 examples/catalog split's retired plan record (`docs/contribute/plans/index.md`)
-for the full rationale and remaining phases.
+for the full rationale — the split itself is complete, no phases remain.
 
 **A restatement of the same rule under a genuinely different condition is a
 *variant*; the same demonstration restated with no distinguishing condition
