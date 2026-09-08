@@ -179,6 +179,23 @@ it should read in CHANGELOG.md. Delete the other sections.
   parse_functions`, `dumper_clang.parse_variables`) now pass it through
   to short-circuit stripping whenever it is set.
 
+- **A target-prefixed CL-style compiler (e.g. `aarch64-apple-darwin-
+  clang-cl`) now recovers its own target on a probe failure, instead of
+  leaving it unknown.** `dumper._run_clang`'s probe-failure fallback
+  already tried a second, option-free re-probe of the resolved
+  `clang_bin` under GNU mode when no explicit `--target=` was honored,
+  but confined that bare re-probe to the GNU branch — under CL mode, a
+  failed option-bearing probe plus no honored explicit-target spelling
+  fell straight through to `None`. A real `clang-cl -print-target-triple`
+  honors the bare probe exactly like GNU clang does, so a target-prefixed
+  CL-style symlink reports its own prefixed default from it (empirically
+  verified against a real Clang 18 install) — leaving that target
+  unrecovered meant a genuinely Darwin-decorated name went unstripped.
+  The bare re-probe (preserving any effective `--driver-mode=` override,
+  same as the GNU branch) is now tried under CL mode too, before giving
+  up; the `sys.platform` guess itself remains GNU-mode-only, since a
+  CL-style driver's target has no reliable relationship to the host OS.
+
 - **`--write markdown=...`'s written report is always readable as UTF-8.**
   `tests/test_presentation_analysis_separation.py` read a `compare
   --write markdown=...` report file with the platform-default text

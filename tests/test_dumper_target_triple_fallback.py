@@ -754,6 +754,60 @@ def test_probe_failure_under_a_cl_style_driver_ignores_unhonored_spellings(
     assert parser._target_triple is None
 
 
+def test_probe_failure_under_a_cl_style_driver_recovers_via_bare_reprobe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install: a target-prefixed CL-style driver name (e.g.
+    ``aarch64-apple-darwin-clang-cl``) reports its own prefixed target from
+    a BARE ``-print-target-triple`` re-probe -- ``clang-cl`` documents that
+    flag the same way plain clang does. When the option-bearing probe
+    fails and no explicit ``--target=``/``-target``/``/clang:``-forwarded
+    spelling is honored, the CL branch must still try the same bare
+    re-probe the GNU branch already gets, rather than giving up at
+    ``None`` and leaving a genuinely Darwin-decorated name unstripped."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+
+    def _fake_configured_target_triple(
+        gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+    ) -> str | None:
+        # The real (option-bearing) probe fails; a bare re-probe of the
+        # identical binary succeeds and reveals its true prefixed default.
+        if gcc_options is None and gcc_option_tokens == ():
+            return "aarch64-apple-darwin"
+        return None
+
+    monkeypatch.setattr(
+        dumper, "_configured_target_triple", _fake_configured_target_triple
+    )
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "aarch64-apple-darwin-clang-cl"
+    )
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="aarch64-apple-darwin-clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "aarch64-apple-darwin"
+
+
 def test_successful_probe_still_honored_for_a_cl_style_driver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

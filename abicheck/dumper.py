@@ -624,32 +624,29 @@ def _header_ast_parser(
             pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
-        # Probe-failure fallback (Codex/CodeRabbit review, fresh evidence):
-        # explicit `--target=`; a bare GNU-mode re-probe plus its own
-        # `--driver-mode=`; else `sys.platform`, gated on real identity AND
-        # not explicit `--compiler` provenance (a wrapper can share the
-        # default's basename). No fallback while `@response-file`/`--config[-*-dir]=` may hide the real target.
+        # Probe-failure fallback (Codex/CodeRabbit review, fresh evidence): explicit `--target=`; a bare
+        # re-probe (both driver modes, since a CL-style ``-print-target-triple`` is honored too) plus its
+        # own `--driver-mode=`; else `sys.platform` under GNU mode only, gated on real identity AND not
+        # explicit `--compiler` provenance (a wrapper can share the default's basename). No fallback
+        # while `@response-file`/`--config[-*-dir]=` may hide the real target.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
+        _bare_reprobe = (
+            _configured_target_triple(None, _bare_reprobe_args, clang_bin) if _target_known else None
+        )
         _guess_ok = (
             _target_known
             and _is_default_clang_bin(clang_bin, compiler)
             and not _clang_bin_is_explicitly_configured(gcc_path, gcc_prefix)
         )
-        target_triple = _configured_target_triple(
-            gcc_options, gcc_option_tokens, clang_bin
-        ) or (
-            _explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True)
+        target_triple = _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin) or (
+            (_explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True) or _bare_reprobe)
             if is_cl_mode
             else _explicit_target_triple(gcc_options, gcc_option_tokens)
-            or (
-                _configured_target_triple(None, _bare_reprobe_args, clang_bin)
-                if _target_known
-                else None
-            )
+            or _bare_reprobe
             or (sys.platform if _guess_ok else None)
         )
         parser = _ClangAstParser(
