@@ -25,6 +25,11 @@ edit, which is why they get their own module rather than sitting above
 AGENTS.md "Files that are large" — move responsibility out, never trim the
 file to fit).
 
+Named for what it holds rather than the bare `schema.py` it started as:
+the repo has no other `schema.*`, and a generically-named one in a test
+package reads to path-risk tooling as a wire/report schema — a high-risk
+review path — which this test-support module is not.
+
 `manifest.py` re-exports both names, so
 `from tests.regressions.manifest import BugClass` still resolves and no
 call site changes.

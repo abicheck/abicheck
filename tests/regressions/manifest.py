@@ -46,7 +46,7 @@ already apply to `ChangeKind`.
 
 from __future__ import annotations
 
-from .schema import BugClass, KnownGap
+from .bug_class_schema import BugClass, KnownGap
 
 __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 
