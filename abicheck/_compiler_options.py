@@ -380,6 +380,55 @@ def explicit_language_standard(
     return value
 
 
+def explicit_target_triple(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> str | None:
+    """Return the last explicitly forwarded Clang ``-target``/``--target=``
+    triple, or ``None`` if forwarded options request none.
+
+    Exists so a caller can recover *what was actually asked for* when a
+    live ``clang -print-target-triple`` probe of the configured compiler
+    fails (a compiler resolution mismatch, a sandboxed/restricted CI
+    runner, a compiler build that doesn't support the flag): a probe
+    failure on its own carries no information about whether the caller
+    requested a specific (possibly non-native) target at all, and
+    ``extract.headers.clang.context.is_darwin_target``'s own
+    ``sys.platform`` fallback for a probe failure is only safe when NO
+    explicit ``--target=`` was requested — an explicit, non-Darwin
+    cross-target (e.g. ``--target=x86_64-unknown-linux-gnu`` run on a
+    macOS host) must never be silently reinterpreted as Darwin just
+    because the probe that would have confirmed it happened to fail
+    (Codex review, fresh evidence).
+
+    Same last-wins/tokenizing convention as :func:`explicit_language_standard`
+    (``gcc_options`` split and placed before ``gcc_option_tokens``, matching
+    the real frontend command lines) — only the recognized flag spelling
+    differs: Clang accepts both ``-target <value>`` (a following, separate
+    argument) and ``--target=<value>``/``-target=<value>`` (attached).
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            # Same rule as explicit_language_standard's identical guard
+            # above: malformed --gcc-options must not abort the dump.
+            pass
+    tokens.extend(gcc_option_tokens)
+    value: str | None = None
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        normalized = token[1:] if token.startswith("--target=") else token
+        if normalized.startswith("-target="):
+            value = normalized.partition("=")[2]
+        elif normalized in ("-target", "--target") and i + 1 < len(tokens):
+            value = tokens[i + 1]
+            i += 1
+        i += 1
+    return value
+
+
 def language_standard_field(
     lang: str | None,
     gcc_options: str | None,

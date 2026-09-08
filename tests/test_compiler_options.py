@@ -7,6 +7,7 @@ from abicheck import _compiler_options
 from abicheck._compiler_options import (
     _split_gcc_options_windows,
     explicit_language_standard,
+    explicit_target_triple,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
@@ -388,4 +389,64 @@ class TestLanguageStandardField:
         assert (
             language_standard_field(None, "-std=gnu11", (), resolved_standard=None)
             == "gnu11"
+        )
+
+
+class TestExplicitTargetTriple:
+    """dumper_toolchain._configured_target_triple's own probe-failure
+    fallback (Codex review, fresh evidence): when a live ``clang
+    -print-target-triple`` probe fails, it must recover an explicitly
+    requested ``-target``/``--target=`` value rather than losing it --
+    extract.headers.clang.context.is_darwin_target's own sys.platform
+    fallback for a bare None is only safe when NO explicit target was
+    requested at all."""
+
+    def test_none_when_nothing_forwarded(self) -> None:
+        assert explicit_target_triple(None, ()) is None
+        assert explicit_target_triple("-O2", ("-Wall",)) is None
+
+    def test_extracts_attached_long_spelling_from_gcc_options_string(self) -> None:
+        assert (
+            explicit_target_triple("-O2 --target=x86_64-unknown-linux-gnu", ())
+            == "x86_64-unknown-linux-gnu"
+        )
+
+    def test_extracts_attached_short_spelling_from_gcc_option_tokens(self) -> None:
+        assert (
+            explicit_target_triple(None, ("-target=aarch64-apple-macos11",))
+            == "aarch64-apple-macos11"
+        )
+
+    def test_extracts_separate_argument_spelling(self) -> None:
+        # Clang also accepts "-target <value>" as two separate argv entries,
+        # unlike -std=/--std= which is always attached.
+        assert (
+            explicit_target_triple(None, ("-target", "x86_64-pc-windows-msvc"))
+            == "x86_64-pc-windows-msvc"
+        )
+        assert (
+            explicit_target_triple(None, ("--target", "x86_64-pc-windows-msvc"))
+            == "x86_64-pc-windows-msvc"
+        )
+
+    def test_dangling_target_flag_with_no_following_value_is_ignored(self) -> None:
+        # A malformed/truncated command line must not raise or return a
+        # bogus value pulled from thin air.
+        assert explicit_target_triple(None, ("-target",)) is None
+
+    def test_last_occurrence_wins_across_both_sources(self) -> None:
+        assert (
+            explicit_target_triple(
+                "-target=x86_64-unknown-linux-gnu", ("-target=aarch64-apple-macos11",)
+            )
+            == "aarch64-apple-macos11"
+        )
+
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        assert explicit_target_triple('-DFOO="unterminated', ()) is None
+        assert (
+            explicit_target_triple(
+                '-DFOO="unterminated', ("--target=x86_64-unknown-linux-gnu",)
+            )
+            == "x86_64-unknown-linux-gnu"
         )

@@ -1205,21 +1205,22 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             '(`__Z...` -> `_Z...`, unconditional) and a genuine extern "C"'
             "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). "
             "Both are gated on `is_darwin_target(target_triple)`, which "
-            "must fall back to `sys.platform` (never overriding an "
-            "explicit non-Darwin triple) whenever the `-print-target-"
-            "triple` subprocess probe behind `target_triple` is "
-            "unavailable, rather than silently reading a failed probe as "
-            "non-Darwin. The shape check itself is the one canonical "
-            "`model.mangled_name.strip_macho_itanium_decoration`, reused "
-            "by `extract.headers.clang.context.strip_darwin_itanium_"
-            "decoration`, `model.mangled_name._itanium_strip_prefix`, and "
-            "`dumper_hybrid._macho_normalize_mangled` alike."
+            "falls back to `sys.platform` on a probe failure -- but never "
+            "for an EXPLICIT non-Darwin `--target=` whose probe failed: "
+            "`_compiler_options.explicit_target_triple` (wired into "
+            "`dumper._run_clang`) recovers that request instead. The "
+            "shape check is the one canonical `model.mangled_name."
+            "strip_macho_itanium_decoration` -- NOT applied to castxml, "
+            "whose `mangled` never carries this decoration to begin with."
         ),
-        fixed_by=(1138,),
+        fixed_by=(1138, 1156),
         seed_tests=(
             "tests/test_dumper_clang_extern_c_identity.py",
             "tests/test_dumper_hybrid_macho_idempotence.py",
             "tests/test_mangled_name_macho_decoration.py",
+            "tests/test_compiler_options.py",
+            "tests/test_dumper_target_triple_fallback.py",
+            "tests/test_castxml_literal_double_underscore_mangled.py",
         ),
         public_surfaces=(),
         axes={
@@ -1235,20 +1236,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- verified via code "
-                    "inspection + synthetic unit tests only. Recurred "
-                    "THREE times on macOS CI, each prior fix leaving one "
-                    "narrower residual (Itanium shape, then plain-C bare-"
-                    "name shape, then `is_darwin_target` reading False "
-                    "purely from a failed probe); the `sys.platform` "
-                    "fallback is verified only by monkeypatching"
+                    "No Mach-O toolchain here -- code inspection + "
+                    "synthetic unit tests only. Recurred FOUR times: "
+                    "Itanium shape, plain-C bare-name shape, "
+                    "`is_darwin_target` reading False on a failed probe "
+                    "(PR #1138 follow-ups), then a fourth time in THAT "
+                    "fix itself (PR #1149) -- its guess lived INSIDE "
+                    "`is_darwin_target` (misclassifying an explicit "
+                    "non-Darwin `--target=`), plus an unconditional "
+                    'castxml-side strip corrupting a literal `asm("__Zfake'
+                    '")` label -- caught post-merge by Codex, fixed by '
+                    "PR #1156."
                 ),
-                reference=(
-                    "PR #1138 follow-up: macos-latest integration-tests "
-                    "reported this exact mismatch three times -- Itanium "
-                    "shape, extern-C shape, then this session's identical "
-                    "'__Z10plain_funci' != '_Z10plain_funci' symptom"
-                ),
+                reference="PR #1138/#1149 follow-ups, fixed by PR #1156",
             ),
         ),
     ),

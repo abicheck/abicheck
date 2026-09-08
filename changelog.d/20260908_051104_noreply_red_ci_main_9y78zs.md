@@ -24,18 +24,22 @@ it should read in CHANGELOG.md. Delete the other sections.
   reporting a spurious `COMPATIBLE_WITH_RISK` verdict.
   `extract.headers.clang.context.is_darwin_target` now falls back to the
   running interpreter's own `sys.platform` when the probed triple is
-  unavailable, since a header-AST extraction always runs natively on the
-  machine whose compiler produced the AST. The `"__Z..."` -> `"_Z..."`
-  structural check itself is now the single canonical
-  `model.mangled_name.strip_macho_itanium_decoration` helper, reused by
-  `extract.headers.clang.context.strip_darwin_itanium_decoration`,
-  `model.mangled_name._itanium_strip_prefix`, and `dumper_hybrid.
-  _macho_normalize_mangled` (previously three independent copies of the
-  identical check), and applied defensively — at zero behavioral cost for
-  the confirmed-safe case — to the castxml header-AST backend's own
-  mangled-name production too, in case a differently-behaving castxml
-  build ever emits the same Darwin decoration its currently-tested
-  version does not.
+  unavailable *and no explicit `--target=` was requested* — recovered via
+  a new `_compiler_options.explicit_target_triple` helper wired into
+  `dumper._run_clang`'s own probe-failure path — so an explicit,
+  unprobeable cross-target request is never silently reinterpreted as the
+  host platform. The `"__Z..."` -> `"_Z..."` structural check itself is
+  now the single canonical `model.mangled_name.strip_macho_itanium_
+  decoration` helper, reused by `extract.headers.clang.context.
+  strip_darwin_itanium_decoration`, `model.mangled_name.
+  _itanium_strip_prefix`, and `dumper_hybrid._macho_normalize_mangled`
+  (previously three independent copies of the identical check).
+  Deliberately **not** applied to the castxml header-AST backend's own
+  mangled-name production: castxml's `mangled` attribute never carries
+  this decoration to begin with, so stripping it unconditionally there
+  would instead corrupt the one real case that shape can mean for that
+  backend — a literal, explicit `asm("__Zfake")` assembler-label
+  declaration, which castxml reports verbatim regardless of target.
 
 - **`--write markdown=...`'s written report is always readable as UTF-8.**
   `tests/test_presentation_analysis_separation.py` read a `compare
