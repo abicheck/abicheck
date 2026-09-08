@@ -183,19 +183,29 @@ class TestConfigPrecedence:
         # Nothing on the command line → None → config wins downstream.
         assert resolve_dump_debug_format(None) is None
 
-    def test_debug_and_show_redundant_cli_beats_config(self) -> None:
+    def test_debug_resolution_has_no_cli_override_left(self) -> None:
+        """Phase 7 (one-comparison-product.md §4.1, "H" rows): the four
+        hidden debug-resolution flags are deleted outright, not merely
+        hidden -- `resolve_compare_config` no longer accepts a `cli_*`
+        argument for any of them, so config is the only remaining source
+        (ADR-068 D5 guard #2, "no escape hatch")."""
+        import inspect
+
+        params = inspect.signature(resolve_compare_config).parameters
+        for removed in (
+            "cli_debug_format", "cli_dwarf_only", "cli_debuginfod",
+            "cli_debuginfod_url",
+        ):
+            assert removed not in params, (
+                f"resolve_compare_config still accepts {removed!r} -- the "
+                "Phase 7 override was supposed to be deleted, not just hidden"
+            )
         cfg = BuildConfig(
             debug_format="dwarf", debug_dwarf_only=True, scope_show_redundant=True,
         )
-        r = resolve_compare_config(
-            cfg,
-            cli_severity_preset=None, cli_scope_public=None,
-            cli_debug_format="btf",       # CLI override
-            cli_dwarf_only=False,         # CLI override (flag not passed → False here)
-        )
-        assert r.debug_format == "btf"
-        assert r.dwarf_only is False
-        # --show-redundant is gone, so config keeps its value here.
+        r = resolve_compare_config(cfg, cli_severity_preset=None, cli_scope_public=None)
+        assert r.debug_format == "dwarf"
+        assert r.dwarf_only is True
         assert r.show_redundant is True
 
 
@@ -362,19 +372,23 @@ class TestFlagBudget:
                 "pins against."
             )
 
-    def test_debug_resolution_family_stays_hidden(self) -> None:
-        """The debug-resolution knobs are the ones that stayed: unlike the
-        families above they are per-run resolution inputs, not duplicates of a
-        setting a project pins once, so they keep their hidden CLI spelling
-        (ADR-040 Lever 2 Phase D) alongside the ``debug:`` config block."""
+    def test_debug_resolution_flags_deleted_outright(self) -> None:
+        """Phase 7 (one-comparison-product.md §4.1, "H" rows): the four
+        hidden debug-resolution flags are gone from `compare` entirely --
+        neither hidden nor visible -- since this repo runs no deprecation
+        window. `.abicheck.yml`'s `debug:` block is their only surviving
+        spelling. `--debug-root` (a per-run evidence input, ADR-068 D5
+        guard #3) is unaffected and stays visible."""
         cmd = main.commands["compare"]
         hidden = self._option_spellings(cmd, hidden_only=True)
+        visible = self._option_spellings(cmd, hidden_only=False)
         for flag in (
             "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
-            # Two-way, so a one-off run can force false over a config true.
             "--no-debuginfod", "--no-dwarf-only",
         ):
-            assert flag in hidden, f"{flag} should be hidden (demoted to config, D4)"
+            assert flag not in hidden, f"{flag} should be deleted outright, not hidden"
+            assert flag not in visible, f"{flag} should be deleted outright"
+        assert "--debug-root" in visible
 
     def test_coarse_overrides_stay_visible(self) -> None:
         cmd = main.commands["compare"]
@@ -387,12 +401,19 @@ class TestFlagBudget:
         }
         for flag in ("--severity-preset", "--show-filtered", "--depth",
                      "--scope-public-headers",
-                     # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
-                     # the toolchain family (shared with dump/scan) stay visible.
-                     # --gcc-path, the former spelling, is removed outright;
-                     # --compiler is its visible successor.
-                     "--debug-root", "--compiler", "--sysroot"):
+                     # ADR-040 Lever 2 carve-out: the coarse debug-root
+                     # override stays visible.
+                     "--debug-root"):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
+        # Phase 7 (one-comparison-product.md §4.1): the toolchain family
+        # (--compiler/--compiler-prefix/--compiler-option/--sysroot/
+        # --nostdinc/--ast-frontend), unlike --debug-root, is now CONFIG-only
+        # with no CLI spelling at all -- neither hidden nor visible.
+        hidden = self._option_spellings(cmd, hidden_only=True)
+        for flag in ("--compiler", "--sysroot", "--ast-frontend", "--nostdinc"):
+            assert flag not in visible and flag not in hidden, (
+                f"{flag} should be deleted outright (compile.* config only)"
+            )
 
 
 # ── exit-code scheme is fully automatic (CLI cleanup phase two PR G2) ──────────

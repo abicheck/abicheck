@@ -229,24 +229,36 @@ inputs:
     required: false
   gcc-path:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary (maps to the CLI's
-      --compiler). Applies to dump,
-      scan, and compare mode with a single-pair (non-directory, non-package)
-      operand — a directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      Path to GCC/G++ (or clang) cross-compiler binary. On scan, maps to the
+      CLI's --compiler; on dump and single-pair compare, Phase 7 removed
+      that flag from the CLI entirely, so this Action folds it (together
+      with gcc-prefix, gcc-options, sysroot, and nostdinc, when any of
+      those are also set) into a synthesized .abicheck.yml compile: block
+      forwarded via --config instead. Applies to dump, scan, and compare
+      mode with a single-pair (non-directory, non-package) operand — a
+      directory/package compare rejects it with an error (same
+      restriction as ast-frontend above), and combining any of this group
+      with build-config is rejected too (this Action does not merge two
+      config sources — declare them directly in the build-config file
+      instead).
     required: false
   gcc-prefix:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu- (maps to the CLI's
-      --compiler-prefix). Applies to dump,
-      scan, and compare mode with a single-pair (non-directory, non-package)
-      operand — a directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. On scan, maps to the
+      CLI's --compiler-prefix; on dump and single-pair compare, it folds
+      into the same synthesized compile: block gcc-path describes above
+      (a full gcc-path wins if both are set, since the merged compile.compiler
+      config key can only hold one). Applies to dump, scan, and compare mode
+      with a single-pair (non-directory, non-package) operand — a
+      directory/package compare rejects it with an error (same restriction
+      as ast-frontend above).
     required: false
   gcc-options:
     description: >
-      Extra compiler flags passed through to the header frontend (maps to
-      the CLI's --compiler-option). A single-line value is
+      Extra compiler flags passed through to the header frontend. On scan,
+      maps to the CLI's --compiler-option; on dump and single-pair compare,
+      it folds into the same synthesized compile: block gcc-path describes
+      above. A single-line value is
       split on whitespace into separate flags, same as before; a multi-line
       (YAML block scalar) value keeps each line as one flag verbatim,
       spaces included — use that form for a flag whose value contains a
@@ -255,14 +267,15 @@ inputs:
       rejects it with an error (same restriction as ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (scan and deps-tree keep their own direct --sysroot/CLI forwarding). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
     required: false
   nostdinc:
     description: >
-      Do not search standard system include paths. Applies to dump, scan,
-      and compare mode with a single-pair (non-directory, non-package)
-      operand — a directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      Do not search standard system include paths. On dump and single-pair
+      compare this folds into the same synthesized compile: block gcc-path
+      describes above. Applies to dump, scan, and compare mode with a
+      single-pair (non-directory, non-package) operand — a directory/package
+      compare rejects it with an error (same restriction as ast-frontend above).
     required: false
     default: 'false'
 
@@ -959,6 +972,7 @@ runs:
         # (Codex review; found while wiring require-complete-analysis
         # through this same step).
         INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
+        INPUT_LANG: ${{ inputs.lang }}
         INPUT_GCC_PATH: ${{ inputs.gcc-path }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}

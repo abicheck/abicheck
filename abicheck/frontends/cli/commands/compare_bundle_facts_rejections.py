@@ -290,25 +290,17 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "--follow-deps/--search-path/--ld-library-path are not "
             "supported together with a stored-bundle-facts OLD_INPUT."
         )
-    if (
-        kwargs.get("debug_format_opt") is not None
-        or kwargs.get("dwarf_only") is True
-        or kwargs.get("debuginfod") is True
-        or kwargs.get("debuginfod_url") is not None
-        or kwargs.get("debug_roots")
-        or kwargs.get("debug_roots_old")
-        or kwargs.get("debug_roots_new")
-    ):
-        # Codex review: these control which NEW-side ELF/DWARF facts get
-        # extracted (--debug-format/--dwarf-only select the debug-info
-        # source; --debuginfod/--debuginfod-url and --debug-root locate
-        # separate debug files), but compare_release_against_bundle_facts()
-        # calls service.resolve_input() with none of them -- always its own
-        # defaults, regardless of what was requested here. Rejected rather
-        # than silently comparing a different ABI surface than asked for.
+    if kwargs.get("debug_roots") or kwargs.get("debug_roots_old") or kwargs.get("debug_roots_new"):
+        # Codex review: --debug-root locates separate debug files, but
+        # compare_release_against_bundle_facts() calls service.resolve_input()
+        # with none of them -- always its own defaults, regardless of what
+        # was requested here. Rejected rather than silently comparing a
+        # different ABI surface than asked for. (Phase 7: --debug-format/
+        # --dwarf-only/--debuginfod/--debuginfod-url are gone from the CLI
+        # entirely -- debug.* config-key equivalents are checked below,
+        # alongside the other unsupported .abicheck.yml blocks.)
         raise click.UsageError(
-            "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
-            "--debug-root are not supported together with a stored-bundle-facts OLD_INPUT."
+            "--debug-root is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone as a flag (it's
     # unconditional everywhere else on `compare` now) -- nothing left to
@@ -645,21 +637,12 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
     # neither side does any header-frontend extraction, so every one of
     # these was silently accepted and discarded rather than applied or
     # rejected.
-    if (
-        kwargs.get("compiler_path") is not None
-        or kwargs.get("compiler_prefix") is not None
-        or kwargs.get("compiler_option_tokens")
-        or kwargs.get("sysroot") is not None
-        or kwargs.get("nostdinc")
-        or kwargs.get("frontend_context") not in (None, "host")
-    ):
-        raise click.UsageError(
-            "--compiler/--compiler-prefix/--compiler-option/--sysroot/"
-            "--nostdinc/--frontend-context are not supported when both "
-            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
-            "neither side runs any header-frontend extraction for a compile "
-            "context to configure."
-        )
+    # Phase 7 (one-comparison-product.md §4.1): --compiler/--compiler-prefix/
+    # --compiler-option/--sysroot/--nostdinc/--frontend-context are gone from
+    # compare's CLI entirely -- an explicit --config declaring the matching
+    # compile: keys is rejected instead, by
+    # reject_explicit_compile_config_for_stored_pair below (this dispatcher
+    # already calls it for every explicit --config, stored/stored included).
     if kwargs.get("lang_explicit"):
         raise click.UsageError(
             "--lang is not supported when both OLD_INPUT and NEW_INPUT are "
@@ -696,6 +679,18 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
         or bc.compile_defines
         or bc.compile_sysroot is not None
         or bc.compile_nostdinc is not None
+        # Phase 7 (one-comparison-product.md §4.1): the compile-context
+        # fields that used to have a CLI override (--compiler/
+        # --compiler-prefix/--compiler-option/--frontend-context/
+        # --allow-ast-frontend-fallback/--allow-unsupported-castxml) are now
+        # config-only everywhere -- an explicit --config declaring any of
+        # them has exactly the same "no channel to honor it" problem the
+        # fields above already have.
+        or bc.compile_compiler is not None
+        or bc.compile_options
+        or bc.compile_ast_frontend_fallback is not None
+        or bc.compile_allow_unsupported_castxml is not None
+        or bc.compile_frontend_context is not None
     ):
         raise click.UsageError(
             f"{config_path} declares compile: settings, which are not "
@@ -707,35 +702,11 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
         )
 
 
-#: (Click parameter dest, CLI flag) pairs for the expose_value=False
-#: AST-override flags reject_ast_override_flags_for_stored_pair() checks --
-#: shared so the two never drift, since neither name is derivable from the
-#: other mechanically (Click's default dest derivation is one-way).
-_AST_OVERRIDE_FLAGS: tuple[tuple[str, str], ...] = (
-    ("allow_ast_frontend_fallback", "--allow-ast-frontend-fallback"),
-    ("allow_unsupported_castxml", "--allow-unsupported-castxml"),
-)
-
-
-def reject_ast_override_flags_for_stored_pair(ctx: click.Context) -> None:
-    """Raise ``click.UsageError`` for an explicitly-given
-    ``--allow-ast-frontend-fallback``/``--allow-unsupported-castxml`` on a
-    stored/stored comparison (Codex review, PR #1060, round 11).
-
-    Both flags are ``expose_value=False`` (``cli_options.
-    _scoped_env_flag_callback`` sets a scoped env var as a side effect and
-    never adds a ``kwargs`` entry at all), so ``reject_unsupported_
-    options()`` -- which reads only ``kwargs`` -- can never see either flag
-    to reject it: neither side of a stored/stored comparison runs any
-    header-frontend AST extraction for either flag to affect, so both were
-    silently accepted and had no effect. ``ctx.get_parameter_source()``
-    still answers ``COMMANDLINE`` for an ``expose_value=False`` option --
-    Click records the source at parse time regardless of exposure -- so
-    this checks the one place that survives instead of ``kwargs``."""
-    for dest, flag in _AST_OVERRIDE_FLAGS:
-        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE:
-            raise click.UsageError(
-                f"{flag} is not supported when both OLD_INPUT and NEW_INPUT "
-                "are stored BundleFacts documents: neither side runs any "
-                "header-frontend AST extraction for it to affect."
-            )
+# Phase 7 (one-comparison-product.md §4.1): --allow-ast-frontend-fallback/
+# --allow-unsupported-castxml are gone from compare's CLI entirely (CONFIG
+# class -- .abicheck.yml's compile.ast_frontend_fallback/
+# compile.allow_unsupported_castxml are their only source now, with no
+# surviving override). The former `reject_ast_override_flags_for_stored_pair`
+# rejected an explicitly-given CLI flag on a stored/stored comparison; its
+# config-key equivalent is `reject_explicit_compile_config_for_stored_pair`
+# above, which now also checks these two fields.

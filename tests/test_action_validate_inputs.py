@@ -610,11 +610,12 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
             }
         )
         assert result.returncode == 1
-        assert "does not support ast-frontend/gcc-path" in result.stdout
+        assert "does not support lang/ast-frontend/gcc-path" in result.stdout
 
     @pytest.mark.parametrize(
         "var,value",
         [
+            ("INPUT_LANG", "c"),
             ("INPUT_AST_FRONTEND", "clang"),
             ("INPUT_GCC_PATH", "/opt/gcc-14/bin/g++"),
             ("INPUT_GCC_PREFIX", "aarch64-linux-gnu-"),
@@ -637,7 +638,7 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
             }
         )
         assert result.returncode == 1, f"{var}={value} should have been rejected"
-        assert "does not support ast-frontend/gcc-path" in result.stdout
+        assert "does not support lang/ast-frontend/gcc-path" in result.stdout
 
     def test_ast_frontend_auto_is_not_rejected(self, tmp_path: Path) -> None:
         """ "auto" is the documented no-op spelling -- resolves to the same

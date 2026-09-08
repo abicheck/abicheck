@@ -333,14 +333,13 @@ def test_embed_inline_source_forwards_toolchain_and_collects(
     # does not re-resolve / re-discover the tree's config) — Codex review.
     frozen = captured["_resolved_compile_context"]
     assert frozen.gcc_path == "/x/g++" and frozen.sysroot == Path("/sysroot")
-    assert frozen.nostdinc is True and frozen.gcc_option_tokens == ("-DFOO",)
-    assert frozen.frontend == "auto"
+    assert frozen.nostdinc is True and frozen.gcc_option_tokens == ("-DFOO",) and frozen.frontend == "auto"
     # dependency-analysis knobs ride into the inline dump too (Codex review)
     assert captured["follow_deps"] is True and captured["search_paths"] == (Path("/libs"),)
     assert captured["ld_library_path"] == "/x:/y"
-    # native dump selectors (dwarf-only/debug-format/pdb) too (Codex review)
-    assert captured["dwarf_only"] is True and captured["debug_format_opt"] == "dwarf"
-    assert captured["pdb_path"] == Path("/p.pdb")
+    # native dump selectors ride one resolved `DumpDebugConfig` (Phase 7c).
+    rd = captured["_resolved_debug"]
+    assert rd.dwarf_only is True and rd.format == "dwarf" and rd.pdb_path == Path("/p.pdb")
 
 
 def test_embed_inline_source_forwards_lang_explicit(
@@ -414,8 +413,9 @@ def test_embed_inline_source_forwards_debug_roots(tmp_path: Path, monkeypatch) -
     dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
     assert set(captured) <= dump_params, set(captured) - dump_params
     assert captured["debug_roots"] == (droot,)
-    assert captured["debuginfod"] is True
-    assert captured["debuginfod_url"] == "https://example.test"
+    # Phase 7c: debuginfod/debuginfod_url ride the same `_resolved_debug`.
+    rd = captured["_resolved_debug"]
+    assert rd.debuginfod is True and rd.debuginfod_url == "https://example.test"
 
 
 def test_embed_inline_source_merges_tree_config_but_cli_wins(

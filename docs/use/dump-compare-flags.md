@@ -14,11 +14,19 @@ resolving debug info that isn't in the binary itself.
 
 ## Language mode
 
-By default castxml uses C++ mode. For pure C libraries, pass `--lang c`:
+By default castxml uses C++ mode. For pure C libraries, set `compile.lang`
+in `.abicheck.yml` (Phase 7: there is no `--lang` flag on `dump`/`compare`
+any more — `scan` still has one):
+
+```yaml
+# .abicheck.yml
+compile:
+  lang: c
+```
 
 ```bash
-abicheck dump libfoo.so -H foo.h --lang c -o snap.json
-abicheck compare libv1.so libv2.so -H foo.h --lang c
+abicheck dump libfoo.so -H foo.h -o snap.json
+abicheck compare libv1.so libv2.so -H foo.h
 ```
 
 ## Dependency exclusion in `dump`
@@ -50,72 +58,72 @@ via `--include-system-declarations`.
 
 ## Cross-compilation
 
-When analysing libraries built for a different architecture, pass cross-compilation
-flags. The same **compile-context family** is shared verbatim by `dump`, `compare`,
-and `scan` (one decorator, so the three never drift), so it works the same on each:
-
-```bash
-# dump (single artifact)
-abicheck dump libfoo.so -H include/foo.h \
-  --compiler-prefix aarch64-linux-gnu- \
-  --sysroot /opt/sysroots/aarch64 \
-  --compiler-option -march=armv8-a \
-  -o snap.json
-
-# Or specify the cross-compiler binary directly:
-abicheck dump libfoo.so -H include/foo.h \
-  --compiler /usr/bin/aarch64-linux-gnu-g++ \
-  -o snap.json
-
-# compare (two artifacts) — the family applies to BOTH sides
-abicheck compare libv1.so libv2.so -H include/foo.h \
-  --compiler-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
-```
-
-Available compile-context flags (on `dump`, `compare`, and `scan`; the older
-`--gcc-path`/`--gcc-prefix`/`--gcc-option` spellings are removed, not
-aliased — use the `--compiler*` names below):
-- `--compiler` — path to the cross-compiler binary. For the `clang`
-  `--ast-frontend`, this is honored only when the binary is clang-family
-  (basename contains `clang`, or is a known non-`clang`-named clang-based
-  fork — currently Intel's `icx`/`icpx`/`dpcpp`/`dpcpp-cl`); a path to a real
-  GCC binary is ignored here and the frontend falls back to plain `clang` on
-  `PATH` instead (castxml can't take clang-only flags, so this guards against
-  a GCC path being misread as a clang toolchain)
-- `--compiler-prefix` — toolchain prefix (e.g. `aarch64-linux-gnu-`)
-- `--compiler-option` — a single extra compiler flag passed to the header
-  frontend verbatim (repeatable; not whitespace-split — use two for a flag +
-  spaced value)
-- `--sysroot` — alternative system root directory
-- `--nostdinc` / `--no-nostdinc` — do not search standard system include paths
-- `--ast-frontend {auto,castxml,clang,hybrid}` — which C/C++ AST frontend parses
-  the headers; `hybrid` runs both castxml and clang and merges them
-
-On `compare` these apply to **both** old and new sides; the per-side
-`--ast-frontend old=` / `--ast-frontend new=` overrides still win for the frontend
-when one release parses on a different toolchain than the other.
-
-Rather than repeating these flags on every invocation, set them once in the
-project's `.abicheck.yml` `compile:` block — `dump`, `compare`, and `scan` all fold
-it into their L2 header parse (CLI flags override config):
+When analysing libraries built for a different architecture, declare the
+cross-toolchain in `.abicheck.yml`'s `compile:` block. Phase 7
+(one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) moved this whole family
+off `dump`/`compare`'s CLI entirely — a stable project/toolchain property,
+not a per-run choice — so there is **no `--compiler`/`--compiler-prefix`/
+`--compiler-option`/`--sysroot`/`--nostdinc`/`--ast-frontend`/`--lang` flag
+left on those two commands at all (`scan` still has every one of them as a
+CLI flag, unaffected by this change):
 
 ```yaml
 # .abicheck.yml
 compile:
   frontend: castxml          # auto | castxml | clang | hybrid
+  compiler: aarch64-linux-gnu-      # a trailing "-" is a toolchain prefix,
+                                    # anything else a path to the compiler
+                                    # binary (merges the former --compiler/
+                                    # --compiler-prefix pair into one key)
+  options: [-march=armv8-a]  # was the repeatable --compiler-option
   std: c++20                 # synthesizes -std=c++20
   defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG
   include_dirs: [include, third_party/inc]   # appended after -I roots
   sysroot: /opt/sysroots/aarch64
   nostdinc: false
+  lang: c++                  # was --lang; defaults to c++ when unset
 ```
 
+```bash
+# dump (single artifact) -- picks up compile.* above automatically
+abicheck dump libfoo.so -H include/foo.h -o snap.json
+
+# compare (two artifacts) -- applies to BOTH sides
+abicheck compare libv1.so libv2.so -H include/foo.h
+```
+
+The full `compile:` field list (with each field's former CLI spelling on
+`dump`/`compare`, where one existed) is documented under
+[`compile:`](../reference/config-file.md#compile) in the Config File reference; the two
+env-var-toggle fields (`ast_frontend_fallback:`/`allow_unsupported_castxml:`)
+and `frontend_context:` are there too — they replace `--allow-ast-frontend-
+fallback`/`--allow-unsupported-castxml`/`--frontend-context` the same way.
+
+`--compiler`, meaning a path to the cross-compiler binary specifically (not
+a bare prefix): for the `clang` frontend, this is honored only when the
+binary is clang-family (basename contains `clang`, or is a known
+non-`clang`-named clang-based fork — currently Intel's
+`icx`/`icpx`/`dpcpp`/`dpcpp-cl`); a path to a real GCC binary is ignored
+here and the frontend falls back to plain `clang` on `PATH` instead
+(castxml can't take clang-only flags, so this guards against a GCC path
+being misread as a clang toolchain).
+
 `compare` reads the block from `--config` or the nearest `.abicheck.yml` found from
-the current directory upward; `dump`/`scan` from `--config` or the one auto-discovered
-at the `--sources` tree root. It is applied on every header-scoping path — ELF and
+the current directory upward; `dump` from `--config` or the one auto-discovered
+at the `--sources` tree root (a plain `dump SO_PATH` with no `--sources` and no
+`--config` reads no project config for this block at all — name `--config`
+explicitly if you need it there). It is applied on every header-scoping path — ELF and
 the PE/Mach-O header parse alike. A malformed **explicit** `--config` fails loudly
 rather than silently dropping the settings; an auto-discovered one warns and falls
 back.
+
+`scan` keeps the CLI flags this section used to document for `dump`/`compare`
+too (`--compiler`/`--compiler-prefix`/`--compiler-option`/`--sysroot`/
+`--nostdinc`/`--ast-frontend`/`--lang`), still overriding the same `compile:`
+block (`CLI > config`) — the per-side `--ast-frontend old=`/`--ast-frontend
+new=` sided override is a `scan`/legacy-CLI-only concept `compare` never
+regains under Phase 7, since there is no CLI spelling left there to be sided
+at all.
 
 ## Build-context capture (`compile_commands.json`) — evidence layer L3
 
@@ -149,13 +157,18 @@ target triple, sysroot, and ABI-affecting options like `-fvisibility=hidden`.
 also given, the database it resolves to parameterizes the header parse with
 the build's exact flags, and it is the L3 build source either way.
 
-When both `--build-info` and explicit flags (`--compiler-option`,
-`--sysroot`) are specified, explicit flags take precedence.
+When both `--build-info` and `.abicheck.yml`'s `compile:` block (`options:`,
+`sysroot:`, ...) are given, the config values take precedence.
+
+```yaml
+# .abicheck.yml -- override a single flag while inheriting the rest from
+# compile_commands.json
+compile:
+  options: [-DEXTRA_DEFINE=1]
+```
 
 ```bash
-# Override a single flag while inheriting the rest from compile_commands.json
-abicheck dump libfoo.so -H include/ -p build/ \
-    --compiler-option -DEXTRA_DEFINE=1
+abicheck dump libfoo.so -H include/ -p build/ --config .abicheck.yml
 ```
 
 ## Evidence packs — build & source context (L3 / L4)
@@ -257,13 +270,13 @@ automatically searches for debug artifacts across multiple locations:
 7. debuginfod (opt-in network: query by build-id)
 ```
 
-| Flag | Description |
+| Flag / config key | Description |
 |------|-------------|
-| `--debug-root <dir>` | Directory containing separate debug files. Can be repeated. |
+| `--debug-root <dir>` | Directory containing separate debug files. Can be repeated. A per-run evidence input (ADR-068 D5 guard #3) -- stays a CLI flag on `dump`/`compare`. |
 | `--debug-root old=<dir>` | Debug root for old side only (`compare` command). |
 | `--debug-root new=<dir>` | Debug root for new side only (`compare` command). |
-| `--debuginfod` | Enable debuginfod network resolution (opt-in). |
-| `--debuginfod-url <url>` | Override debuginfod server URL. |
+| `.abicheck.yml` `debug.debuginfod` | Enable debuginfod network resolution (opt-in). Phase 7: no `--debuginfod` flag left on `dump`/`compare` (was demoted to this config key, then the override itself removed — `.abicheck.yml` is its only source now). |
+| `.abicheck.yml` `debug.debuginfod_url` | Override debuginfod server URL. Was `--debuginfod-url`, same Phase 7 removal. |
 
 ```bash
 # Locate + report separate debuginfo for stripped .so files
@@ -271,13 +284,20 @@ abicheck compare \
     old/usr/lib64/libfoo.so.1 new/usr/lib64/libfoo.so.1 \
     --debug-root old=old-debug/usr/lib/debug \
     --debug-root new=new-debug/usr/lib/debug
-
-# Fedora/RHEL: debug info located automatically by build-id
-export DEBUGINFOD_URLS="https://debuginfod.fedoraproject.org/"
-abicheck compare old-libfoo.so new-libfoo.so --debuginfod
 ```
 
-!!! note "What `--debug-root`/`--debuginfod` feed into the DWARF parse today"
+```yaml
+# .abicheck.yml -- Fedora/RHEL: debug info located automatically by build-id
+debug:
+  debuginfod: true
+```
+
+```bash
+export DEBUGINFOD_URLS="https://debuginfod.fedoraproject.org/"
+abicheck compare old-libfoo.so new-libfoo.so
+```
+
+!!! note "What `--debug-root`/`debug.debuginfod` feed into the DWARF parse today"
     On `dump` and `compare`, a build-id-tree, path-mirror, or debuginfod-fetched
     `.debug` file — a separate ELF file distinct from the input binary — is
     parsed for DWARF instead of the (stripped) input itself: the commands above

@@ -231,14 +231,52 @@ class BuildConfig:
     compile_defines: list[str] = field(default_factory=list)
     compile_sysroot: str | None = None
     compile_nostdinc: bool | None = None
+    #: Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1): the
+    #: remaining compile-context knobs demoted off ``compare``/``dump``
+    #: entirely (CONFIG class — no surviving CLI override, unlike the
+    #: ``debug:`` knobs below which still keep a CLI escape hatch on
+    #: ``compare``/``dump``... no, see the module docstring: as of Phase 7
+    #: those are gone too). ``compile.compiler`` merges the former
+    #: ``--compiler``/``--compiler-prefix`` pair into one spelling: a value
+    #: ending in ``-`` is a cross-toolchain *prefix* (``gcc_prefix``,
+    #: e.g. ``"aarch64-linux-gnu-"``); anything else is a full path to the
+    #: compiler binary (``gcc_path``). ``compile.options`` is the former
+    #: ``--compiler-option`` — repeatable single compiler flags, each a
+    #: single-atom string like ``compile.std``/``compile.defines`` above.
+    compile_compiler: str | None = None
+    compile_options: list[str] = field(default_factory=list)
+    #: ``compile.ast_frontend_fallback``/``compile.allow_unsupported_castxml``
+    #: are the former ``--allow-ast-frontend-fallback``/
+    #: ``--allow-unsupported-castxml`` flags, which were themselves already
+    #: pure env-var togglers (``ABICHECK_ALLOW_AST_FALLBACK``/
+    #: ``ABICHECK_ALLOW_UNSUPPORTED_CASTXML``) scoped to one invocation —
+    #: a config ``true`` here has the identical effect, applied for the
+    #: whole run.
+    compile_ast_frontend_fallback: bool | None = None
+    compile_allow_unsupported_castxml: bool | None = None
+    #: ``compile.frontend_context`` — the former ``--frontend-context``
+    #: (``"host"``/``"device"``); unset defers to :data:`CompileContext`'s
+    #: own ``"host"`` default.
+    compile_frontend_context: str | None = None
+    #: ``compile.lang`` — the former ``--lang`` (``"c++"``/``"c"``) on
+    #: ``compare``/``dump``. No source/header-content language sniffer
+    #: exists in this codebase to infer it from evidence (investigated;
+    #: none found), so this stays a plain declared property defaulting to
+    #: ``cli_options.LANG_DEFAULT`` ("c++") when unset — the same default
+    #: the removed CLI flag carried, so an unconfigured project's behavior
+    #: is unchanged.
+    compile_lang: str | None = None
     #: ``debug:`` — separate-debug-file resolution (ADR-021a) demoted off the CLI
-    #: (ADR-040 Lever 2). These are stable per-project debug-artifact knobs; the
-    #: coarse per-run ``--debug-root`` stays a visible CLI override, while the
-    #: format/debuginfod/dwarf-only knobs move here. ``None`` = unset.
+    #: (ADR-040 Lever 2, Phase 7). Stable per-project debug-artifact knobs; the
+    #: coarse per-run ``--debug-root`` stays a visible CLI input on both
+    #: ``compare``/``dump``. ``None`` = unset.
     debug_format: str | None = None
     debug_dwarf_only: bool | None = None
     debug_debuginfod: bool | None = None
     debug_debuginfod_url: str | None = None
+    #: ``debug.pdb_path`` — Phase 7 7c: the former ``dump --pdb-path``
+    #: (explicit PE/PDB path override, superseding automatic discovery).
+    debug_pdb_path: str | None = None
     #: ``bundle:`` — release/scan bundle topology (CLI cleanup phase two,
     #: PR J), demoted off the CLI from ``--bundle-system-providers``/
     #: ``--bundle-cohort``: a project's system-provider allow-list extension
@@ -326,9 +364,17 @@ class BuildConfig:
                 "defines",
                 "sysroot",
                 "nostdinc",
+                "compiler",
+                "options",
+                "ast_frontend_fallback",
+                "allow_unsupported_castxml",
+                "frontend_context",
+                "lang",
             }
         ),
-        "debug": frozenset({"format", "dwarf_only", "debuginfod", "debuginfod_url"}),
+        "debug": frozenset(
+            {"format", "dwarf_only", "debuginfod", "debuginfod_url", "pdb_path"}
+        ),
         # Distinct from the plural `bundles:` block (`project_targets.py`,
         # ADR-047 §3 — named release groups of project *targets*, consumed
         # only by the `project` command family). This singular `bundle:`
@@ -503,6 +549,24 @@ class BuildConfig:
             compile_defines=_safe_compile_atoms("defines"),
             compile_sysroot=_opt_str(compile_blk, "sysroot"),
             compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
+            compile_compiler=_opt_str(compile_blk, "compiler"),
+            compile_options=_safe_compile_atoms("options"),
+            compile_ast_frontend_fallback=_opt_bool(
+                compile_blk, "ast_frontend_fallback"
+            ),
+            compile_allow_unsupported_castxml=_opt_bool(
+                compile_blk, "allow_unsupported_castxml"
+            ),
+            compile_frontend_context=_one_of(
+                _lowered(_opt_str(compile_blk, "frontend_context")),
+                ("host", "device"),
+                "compile.frontend_context",
+            ),
+            compile_lang=_one_of(
+                _lowered(_opt_str(compile_blk, "lang")),
+                ("c++", "c"),
+                "compile.lang",
+            ),
             debug_format=_one_of(
                 _lowered(_opt_str(debug, "format")),
                 ("auto", "dwarf", "btf", "ctf"),
@@ -511,6 +575,7 @@ class BuildConfig:
             debug_dwarf_only=_opt_bool(debug, "dwarf_only"),
             debug_debuginfod=_opt_bool(debug, "debuginfod"),
             debug_debuginfod_url=_opt_str(debug, "debuginfod_url"),
+            debug_pdb_path=_opt_str(debug, "pdb_path"),
             # Stripped here, once, at the single choke point every consumer
             # (compare's fan-out, scan --artifact-set, stored-BundleFacts
             # compare) reads through -- compare's own fan-out incidentally
@@ -613,6 +678,20 @@ class BuildConfig:
             compile_blk["sysroot"] = self.compile_sysroot
         if self.compile_nostdinc is not None:
             compile_blk["nostdinc"] = self.compile_nostdinc
+        if self.compile_compiler is not None:
+            compile_blk["compiler"] = self.compile_compiler
+        if self.compile_options:
+            compile_blk["options"] = list(self.compile_options)
+        if self.compile_ast_frontend_fallback is not None:
+            compile_blk["ast_frontend_fallback"] = self.compile_ast_frontend_fallback
+        if self.compile_allow_unsupported_castxml is not None:
+            compile_blk["allow_unsupported_castxml"] = (
+                self.compile_allow_unsupported_castxml
+            )
+        if self.compile_frontend_context is not None:
+            compile_blk["frontend_context"] = self.compile_frontend_context
+        if self.compile_lang is not None:
+            compile_blk["lang"] = self.compile_lang
         return compile_blk
 
     def _debug_block(self) -> dict[str, Any]:
@@ -626,6 +705,8 @@ class BuildConfig:
             debug["debuginfod"] = self.debug_debuginfod
         if self.debug_debuginfod_url is not None:
             debug["debuginfod_url"] = self.debug_debuginfod_url
+        if self.debug_pdb_path is not None:
+            debug["pdb_path"] = self.debug_pdb_path
         return debug
 
     def _bundle_block(self) -> dict[str, Any]:

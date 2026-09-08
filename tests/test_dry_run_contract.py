@@ -362,15 +362,19 @@ class TestDumpDryRun:
         assert compile_db_from_build_info(nested, (header,)) is None
 
     def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
-        # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only
-        # meaningful for ELF; the real run raises BadParameter (exit 64) for
-        # a PE/Mach-O binary. Dry-run previously never checked this either,
-        # and an earlier fix wrongly downgraded it to a blocker (exit 1) --
-        # see the sibling compile-db test above (CodeRabbit review).
+        # debug.format (Phase 7c: --debug-format is gone from dump's CLI --
+        # config-only now, same removal as the legacy --dwarf/--btf/--ctf
+        # flags before it) is only meaningful for ELF; the real run raises
+        # BadParameter (exit 64) for a PE/Mach-O binary. Dry-run previously
+        # never checked this either, and an earlier fix wrongly downgraded it
+        # to a blocker (exit 1) -- see the sibling compile-db test above
+        # (CodeRabbit review).
         pe = tmp_path / "foo.dll"
         pe.write_bytes(b"MZ" + b"\x00" * 60)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  format: dwarf\n", encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["dump", str(pe), "--dry-run", "--debug-format", "dwarf"]
+            main, ["dump", str(pe), "--dry-run", "--config", str(cfg)]
         )
         assert result.exit_code == 64, result.output
         assert "Usage:" in result.output

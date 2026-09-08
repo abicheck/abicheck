@@ -671,15 +671,14 @@ def _cli_help():
 
 
 class TestCLIDwarfFlags:
-    """Test CLI --dwarf-only and --show-data-sources flags exist and are accepted."""
+    """Test CLI --show-data-sources flags exist and are accepted.
 
-    def test_dump_help_shows_dwarf_only(self, _cli_help) -> None:
-        """dump --help-all should mention --dwarf-only.
+    Phase 7 removed `--dwarf-only` from `dump`/`compare` entirely
+    (`debug.dwarf_only` config key only) -- gone even under `--help-all`.
+    """
 
-        --dwarf-only is an advanced/toolchain-tier flag, folded behind
-        --help-all by dump's curated --help (G21.8 M2).
-        """
-        assert "--dwarf-only" in _cli_help("dump", "--help-all")
+    def test_dump_help_omits_dwarf_only(self, _cli_help) -> None:
+        assert "--dwarf-only" not in _cli_help("dump", "--help-all")
 
     def test_dump_help_shows_dry_run(self, _cli_help) -> None:
         """dump --help should mention --dry-run (the --show-data-sources successor)."""
@@ -691,11 +690,9 @@ class TestCLIDwarfFlags:
         norm = " ".join(_cli_help("dump").replace("│", "").split())
         assert "Writes nothing" in norm
 
-    def test_compare_hides_dwarf_only(self, _cli_help) -> None:
-        """compare --dwarf-only is demoted to the debug.dwarf_only config key and
-        hidden (ADR-040 Lever 2) — still a functional override, just off the
-        visible help. It remains visible on `dump`."""
+    def test_compare_omits_dwarf_only(self, _cli_help) -> None:
         assert "--dwarf-only" not in _cli_help("compare")
+        assert "--dwarf-only" not in _cli_help("compare", "--help-all")
 
     @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
     def test_dry_run_shows_data_sources(self, tmp_path: Path) -> None:
@@ -1401,17 +1398,19 @@ class TestCLIInProcess:
         assert "no analysis performed, nothing written" in result.output
 
     def test_dwarf_only_via_runner(self, _debug_lib: Path, tmp_path: Path) -> None:
-        """--dwarf-only via CliRunner for in-process coverage."""
+        """Phase 7: the former `--dwarf-only` flag is `debug.dwarf_only`."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
 
         out = tmp_path / "snap.json"
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  dwarf_only: true\n")
         runner = CliRunner()
         result = runner.invoke(main, [
-            "dump", str(_debug_lib), "--dwarf-only", "-o", str(out),
+            "dump", str(_debug_lib), "--config", str(cfg), "-o", str(out),
         ])
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output
         assert out.exists()
 
     def test_dump_no_headers_dwarf_mode(self, _debug_lib: Path) -> None:
@@ -1426,18 +1425,19 @@ class TestCLIInProcess:
         # Should produce JSON output (not crash)
         assert '"library"' in result.output or '"functions"' in result.output
 
-    def test_compare_dwarf_only(self, _debug_lib: Path) -> None:
-        """compare --dwarf-only should work via CliRunner."""
+    def test_compare_dwarf_only(self, _debug_lib: Path, tmp_path: Path) -> None:
+        """Phase 7: the former `compare --dwarf-only` is `debug.dwarf_only`."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
 
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  dwarf_only: true\n")
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(_debug_lib), str(_debug_lib), "--dwarf-only",
+            "compare", str(_debug_lib), str(_debug_lib), "--config", str(cfg),
         ])
-        # Should succeed (comparing same lib to itself)
-        assert result.exit_code == 0
+        assert result.exit_code == 0, result.output  # comparing same lib to itself
 
 
 # ── _print_data_sources direct call ──────────────────────────────────────────

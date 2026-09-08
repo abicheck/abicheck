@@ -284,6 +284,91 @@ add_single_flag() {
   fi
 }
 
+# Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1): --ast-frontend/
+# --compiler/--compiler-prefix/--compiler-option/--sysroot/--nostdinc/--lang
+# are gone from `compare`/`dump` entirely (CONFIG class, no CLI override --
+# `.abicheck.yml`'s `compile:` block is their only source now). This
+# Action's own cross-compilation inputs (ast-frontend/gcc-path/gcc-prefix/
+# gcc-options/sysroot/nostdinc/lang) still exist, so forwarding them now
+# means synthesizing a `compile:` block into a project config the run reads
+# via --config, instead of passing per-run flags. `scan` is unaffected --
+# it keeps every one of these flags, so its own call site (mode: scan)
+# still uses add_single_flag/add_flag_shlex_split directly, unchanged.
+#
+# When the caller ALSO names their own build-config, this Action does not
+# attempt to merge the two YAML documents (no YAML-merge tool is guaranteed
+# on every runner) -- it fails loud instead of silently shadowing one
+# compile: block with the other, the same "explicit input deserves a loud
+# rejection, not a silent wrong result" precedent the release-operand guard
+# below already sets for this identical flag family.
+_COMPILE_CONTEXT_CONFIG_OVERLAY=""
+add_compile_context_flags() {
+  # $1: "true" to also fold the `lang` input into the synthesized overlay
+  # (dump and single-pair compare take --lang here; scan keeps its own
+  # --lang flag and never calls this function at all).
+  local include_lang="${1:-true}"
+  if [[ -z "${INPUT_AST_FRONTEND:-}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
+        && "${INPUT_NOSTDINC:-false}" != "true" \
+        && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" ) ]]; then
+    return 0
+  fi
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with build-config: those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
+    exit 1
+  fi
+  if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
+    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
+    ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
+    ABICHECK_COMPILE_INCLUDE_LANG="$include_lang" \
+    ABICHECK_COMPILE_FRONTEND="${INPUT_AST_FRONTEND:-}" \
+    ABICHECK_COMPILE_GCC_PATH="${INPUT_GCC_PATH:-}" \
+    ABICHECK_COMPILE_GCC_PREFIX="${INPUT_GCC_PREFIX:-}" \
+    ABICHECK_COMPILE_GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}" \
+    ABICHECK_COMPILE_SYSROOT="${INPUT_SYSROOT:-}" \
+    ABICHECK_COMPILE_NOSTDINC="${INPUT_NOSTDINC:-false}" \
+    python3 - "$_COMPILE_CONTEXT_CONFIG_OVERLAY" <<'PYEOF'
+# Synthesizes a minimal .abicheck.yml `compile:` block (as JSON, a valid
+# YAML subset abicheck's own yaml.safe_load parses identically) from this
+# Action's cross-compilation inputs -- the config-only replacement for the
+# per-run flags Phase 7 removed from compare/dump.
+import json
+import os
+import shlex
+import sys
+
+out_path = sys.argv[1]
+compile_blk: dict[str, object] = {}
+if os.environ.get("ABICHECK_COMPILE_INCLUDE_LANG") == "true":
+    lang = os.environ.get("ABICHECK_COMPILE_LANG", "")
+    if lang:
+        compile_blk["lang"] = lang
+frontend = os.environ.get("ABICHECK_COMPILE_FRONTEND", "")
+if frontend and frontend != "auto":
+    compile_blk["frontend"] = frontend
+gcc_path = os.environ.get("ABICHECK_COMPILE_GCC_PATH", "")
+gcc_prefix = os.environ.get("ABICHECK_COMPILE_GCC_PREFIX", "")
+# compile.compiler merges the former --compiler/--compiler-prefix pair
+# (Phase 7 -- one-comparison-product.md §4.1's "MERGE" disposition for
+# --compiler-prefix): a full compiler path is the more specific of the two,
+# so it wins on the rare workflow that names both.
+compiler = gcc_path or gcc_prefix
+if compiler:
+    compile_blk["compiler"] = compiler
+gcc_options = os.environ.get("ABICHECK_COMPILE_GCC_OPTIONS", "")
+if gcc_options:
+    compile_blk["options"] = shlex.split(gcc_options)
+sysroot = os.environ.get("ABICHECK_COMPILE_SYSROOT", "")
+if sysroot:
+    compile_blk["sysroot"] = sysroot
+if os.environ.get("ABICHECK_COMPILE_NOSTDINC") == "true":
+    compile_blk["nostdinc"] = True
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump({"compile": compile_blk}, f)
+PYEOF
+  fi
+  CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
+}
+
 # A directory, a file whose name matches a recognized package extension, or
 # an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
 # is_package(), including its magic-byte fallback — abicheck/package.py:547-554
@@ -1243,16 +1328,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
-  add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
-
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--nostdinc)
-  fi
+  add_compile_context_flags true
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
@@ -1306,21 +1382,20 @@ elif [[ "$MODE" == "compare" ]]; then
   add_sided_flag "--include" "new" "${INPUT_NEW_INCLUDE:-}"
   add_sided_scalar_flag "--version" "old" "${INPUT_OLD_VERSION:-}"
   add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
-  add_single_flag "--lang" "${INPUT_LANG:-}"
-
-  # The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/
-  # --nostdinc) are rejected outright by the CLI (a UsageError, exit 64)
-  # for directory/package operands — the per-library release fan-out
-  # doesn't thread a CompileContext to each pair's header dump. Gate them
-  # to the single-pair path, same as the release-only flags below are
-  # gated the other way. Fail loud (::error:: + exit 1) rather than warn
-  # and continue, matching the evidence-flags guard just below (Codex
-  # review): a warning alone lets the comparison run to a green verdict
-  # with headers parsed under the wrong macros/sysroot/frontend, which is
-  # exactly the silent-wrong-result failure mode the evidence-flags guard
-  # was already fixed to avoid for the analogous --depth build/source
-  # case — an explicitly-configured compile-context input deserves the
-  # same treatment as an explicitly-configured evidence input.
+  # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc/lang)
+  # have no CLI channel at all for a directory/package operand (Phase 7
+  # removed --ast-frontend etc. from `compare` entirely, and the per-library
+  # release fan-out never threaded a CompileContext to each pair's header
+  # dump even when those were still flags). Gate them to the single-pair
+  # path, same as the release-only flags below are gated the other way.
+  # Fail loud (::error:: + exit 1) rather than warn and continue, matching
+  # the evidence-flags guard just below (Codex review): a warning alone
+  # lets the comparison run to a green verdict with headers parsed under
+  # the wrong macros/sysroot/frontend, which is exactly the silent-wrong-
+  # result failure mode the evidence-flags guard was already fixed to
+  # avoid for the analogous --depth build/source case — an explicitly-
+  # configured compile-context input deserves the same treatment as an
+  # explicitly-configured evidence input.
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     # "auto" is the documented no-op spelling of ast-frontend (resolves to
@@ -1328,23 +1403,16 @@ elif [[ "$MODE" == "compare" ]]; then
     # its description above) -- a workflow that spells it out explicitly
     # requests nothing the release fan-out could actually drop, so it must
     # not trip this guard (Codex review, second round).
-    if [[ (-n "${INPUT_AST_FRONTEND:-}" && "${INPUT_AST_FRONTEND:-}" != "auto") \
+    if [[ -n "${INPUT_LANG:-}" \
+          || (-n "${INPUT_AST_FRONTEND:-}" && "${INPUT_AST_FRONTEND:-}" != "auto") \
           || -n "${INPUT_GCC_PATH:-}" || -n "${INPUT_GCC_PREFIX:-}" \
           || -n "${INPUT_GCC_OPTIONS:-}" || -n "${INPUT_SYSROOT:-}" \
           || "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
+      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       exit 1
     fi
   else
-    add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-    add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
-    add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
-    add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-    add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
-
-    if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-      CMD+=(--nostdinc)
-    fi
+    add_compile_context_flags true
   fi
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.

@@ -46,19 +46,18 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _warn_ignored_flags as _warn_ignored_flags,
 )
 from ....cli_options import (
+    LANG_DEFAULT,
     abi3_option,
     adr027_compare_options,
     app_usage_scope_options,
     apply_compare_profile,
     bundle_facts_manifest_options,
     changed_path_options,
-    compile_context_options,
     contract_options,
     debug_resolution_options,
     env_matrix_option,
     evidence_options,
     include_dependencies_option,
-    lang_option,
     normalize_sided_options,
     output_options,
     pack_option,
@@ -81,6 +80,7 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
     _reject_application_operand as _reject_application_operand,
     _warn_unused_set_flags as _warn_unused_set_flags,
 )
+from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
 from ..options.params import (
     SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
@@ -440,17 +440,21 @@ def _embed_inline_source_side(
         follow_deps=follow_deps,
         search_paths=search_paths,
         ld_library_path=ld_library_path,
-        dwarf_only=dwarf_only,
-        debug_format_opt=debug_format,
-        pdb_path=pdb_path,
+        # Phase 7c: forwards compare's already-resolved debug config, mirroring
+        # `_resolved_compile_context` above (dump_cmd's own flags are gone).
+        _resolved_debug=DumpDebugConfig(
+            format=debug_format,
+            dwarf_only=dwarf_only,
+            debuginfod=debuginfod,
+            debuginfod_url=debuginfod_url,
+            pdb_path=pdb_path,
+        ),
         sources=dump_sources,
         build_info=dump_build_info,
         build_config=build_config,
         _resolved_collect_mode=collect_mode,
         output=out,
         debug_roots=debug_roots,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
         _resolved_include_labels=include_labels,
         # Thread compare's own --include-system-declarations flag through, rather
         # than hardcoding it, so this inline `--old/new-sources` embed path
@@ -517,13 +521,11 @@ def _embed_inline_source_side(
 )
 @bundle_facts_manifest_options  # G38 Phase 17
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
-# Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
-# family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
-# the shared @compile_context_options decorator so compare/dump/scan never drift
-# (ADR-037 D3), with --ast-frontend side-aware here; --lang stays inline.
+# Two-sided header/include/version family (ADR-037 D3). Phase 7 (ADR-037
+# D8.1): --ast-frontend/--compiler*/--sysroot/--nostdinc/--frontend-context/
+# --lang are gone from `compare`'s CLI (compile: config only); `scan` keeps
+# the unreduced `compile_context_options()` decorator unchanged.
 @two_sided_input_options
-@compile_context_options(sided_frontend=True)  # --ast-frontend (side-aware) + cross-toolchain
-@lang_option
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -785,12 +787,11 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             resolve_dispatch_compile_context,
         )
 
-        # Codex review: mirrors run_compare's own explicit-vs-default --lang
-        # detection -- otherwise indistinguishable from Click's own default.
-        _lang_src = ctx.get_parameter_source("lang")
-        kwargs["lang_explicit"] = _lang_src == click.core.ParameterSource.COMMANDLINE
-        _compile_context = resolve_dispatch_compile_context(
-            ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored
+        # Read before resolve_dispatch_compile_context below mutates kwargs["config"] -- see resolve_stored_bundle_lang.
+        _cfg_explicit = ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE
+        _compile_context = resolve_dispatch_compile_context(ctx, kwargs, new_is_stored=_bundle_operands.new_is_stored)
+        kwargs["lang"], kwargs["lang_explicit"] = resolve_stored_bundle_lang(
+            kwargs, config_explicit=_cfg_explicit, new_is_stored=_bundle_operands.new_is_stored, lang_default=LANG_DEFAULT,
         )
         dispatch_bundle_facts(compile_context=_compile_context, new_is_stored=_bundle_operands.new_is_stored, **kwargs)
         return

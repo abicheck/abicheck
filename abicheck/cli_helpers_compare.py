@@ -505,6 +505,10 @@ class ResolvedCompareConfig:
     dwarf_only: bool = False
     debuginfod: bool = False
     debuginfod_url: str | None = None
+    #: Phase 7 (one-comparison-product.md §4.1): ``--lang`` demoted to
+    #: ``compile.lang`` with no surviving CLI override. ``None`` when
+    #: unset -- the caller (``run_compare``) applies ``LANG_DEFAULT``.
+    compile_lang: str | None = None
     #: ADR-040 Lever 2: ``--show-redundant`` demoted to ``scope.show_redundant``.
     show_redundant: bool = False
     #: The CLI-or-config severity values (``None`` when neither set), kept raw so
@@ -561,10 +565,6 @@ def resolve_compare_config(
     *,
     cli_severity_preset: str | None,
     cli_scope_public: bool | None,
-    cli_debug_format: str | None = None,
-    cli_dwarf_only: bool | None = None,
-    cli_debuginfod: bool | None = None,
-    cli_debuginfod_url: str | None = None,
 ) -> ResolvedCompareConfig:
     """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
 
@@ -574,10 +574,11 @@ def resolve_compare_config(
 
     Only the keys that still have a CLI flag take a ``cli_*`` argument. The
     per-category severity levels, the suppression strict/justification pair,
-    the public-symbol overlay, ``collapse_versioned_symbols`` and
-    ``show_redundant`` were hidden CLI duplicates of a config key and have
-    been removed from the CLI, so ``.abicheck.yml`` is now their only source
-    and they are read straight off *cfg*.
+    the public-symbol overlay, ``collapse_versioned_symbols``,
+    ``show_redundant``, and (Phase 7) the four ``debug:`` knobs were hidden
+    CLI duplicates of a config key and have been removed from the CLI
+    entirely (no surviving override, ADR-068 D5 guard #2), so
+    ``.abicheck.yml`` is now their only source, read straight off *cfg*.
     """
     from .workflows.gate import resolve_severity_config
 
@@ -620,17 +621,14 @@ def resolve_compare_config(
 
     source_method = cfg.source_method if cfg else None
 
-    # ADR-040 Lever 2: debug-resolution demotion (CLI > config).
-    debug_format = _pick(cli_debug_format, cfg.debug_format if cfg else None, None)
-    dwarf_only = bool(
-        _pick(cli_dwarf_only, cfg.debug_dwarf_only if cfg else None, False)
-    )
-    debuginfod = bool(
-        _pick(cli_debuginfod, cfg.debug_debuginfod if cfg else None, False)
-    )
-    debuginfod_url = _pick(
-        cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
-    )
+    # Phase 7 (ADR-068 D5): debug-resolution knobs are config-only now -- no
+    # CLI flag survives to override them (ADR-040 Lever 2 demoted them to a
+    # config-key-with-override first; Phase 7 removed the override itself).
+    debug_format = cfg.debug_format if cfg else None
+    dwarf_only = bool(cfg.debug_dwarf_only) if cfg else False
+    debuginfod = bool(cfg.debug_debuginfod) if cfg else False
+    debuginfod_url = cfg.debug_debuginfod_url if cfg else None
+    compile_lang = cfg.compile_lang if cfg else None
     show_redundant = bool(cfg.scope_show_redundant) if cfg else False
     bundle_system_providers = tuple(cfg.bundle_system_providers) if cfg else ()
     bundle_cohorts = tuple(cfg.bundle_cohorts) if cfg else ()
@@ -648,6 +646,7 @@ def resolve_compare_config(
         dwarf_only=dwarf_only,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url if isinstance(debuginfod_url, str) else None,
+        compile_lang=compile_lang,
         show_redundant=show_redundant,
         merged_severity_preset=eff_preset,
         merged_severity_abi_breaking=eff_abi,

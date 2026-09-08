@@ -54,10 +54,10 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
     _warn_ignored_flags as _warn_ignored_flags,
 )
 from ....cli_options import (
+    LANG_DEFAULT,
+    apply_compile_config_env_toggles,
     build_source_dump_options,
-    compile_context_options,
     include_dependencies_option,
-    lang_option,
     snapshot_compression_option,
     verbose_option,
 )
@@ -67,6 +67,11 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ..dump_debug_config import (
+    DumpDebugConfig,
+    resolve_dump_debug_fields,
+    resolve_dump_lang_and_env_toggles,
+)
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
@@ -156,17 +161,11 @@ def _resolve_and_check_dump_debug_format(
 @include_dependencies_option
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
-@lang_option
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 @snapshot_compression_option
-# ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
-# --ast-frontend / --compiler / --compiler-prefix / --compiler-option /
-# --sysroot / --nostdinc are defined once in cli_options.compile_context_options
-# so `dump` and `scan` never drift; applied as a decorator below.
-@click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
-              help="Explicit path to PDB file for Windows PE debug info. "
-                   "Overrides automatic PDB discovery from the PE debug directory.")
+# Phase 7: --lang + L2 compile-context family gone from `dump`'s CLI
+# (compile: config only); `scan` keeps them.
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive DT_NEEDED dependencies and include the full "
                    "dependency graph and symbol binding status in the snapshot. "
@@ -176,18 +175,11 @@ def _resolve_and_check_dump_debug_format(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@click.option("--dwarf-only", is_flag=True, default=False,
-              help="Force DWARF-only mode: use DWARF debug info as the primary "
-                   "data source even when headers are available. Enables type-aware "
-                   "artifact checks without requiring castxml.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, discover "
                    "config, show which evidence depths (binary/headers/build/source) "
                    "are available -- and print a report without producing a snapshot. "
                    "Writes nothing; incompatible with -o/--output.")
-@click.option("--debug-format", "debug_format_opt",
-              type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
-              help="Force the ELF debug format (auto=pick best available).")
 # ── Build context capture (ADR-020a) ──────────────────────────────────────────
 # The L2 compile database comes from --build-info, whose operand is already
 # "a build dir, a compile_commands.json, or a pre-captured pack" -- the same
@@ -196,14 +188,11 @@ def _resolve_and_check_dump_debug_format(
               help="Glob pattern to filter compile_commands.json entries by source file "
                    "(e.g. 'src/libfoo/**'). Useful for large databases.")
 # ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
+# --dwarf-only/--debug-format/--debuginfod/--debuginfod-url/--pdb-path: gone
+# (Phase 7c, debug: config only). --debug-root stays (per-run evidence).
 @click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
               help="Directory containing separate debug files (build-id trees, "
                    "path-mirror debug files, or dSYM bundles). This option can be repeated.")
-@click.option("--debuginfod", is_flag=True, default=False,
-              help="Enable debuginfod network resolution for debug info (opt-in). "
-                   "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
-@click.option("--debuginfod-url", "debuginfod_url", default=None,
-              help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
 # ── Multi-TU manifest (ADR-050 D3) ────────────────────────────────────────────
 @click.option("--dump-manifest", "dump_manifest_path",
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
@@ -221,20 +210,14 @@ def _resolve_and_check_dump_debug_format(
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
-@compile_context_options()  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              include_dependencies: bool,
-             version: str, lang: str, header_backend: str, output: Path | None,
+             version: str, output: Path | None,
              snapshot_compression: str,
-             compiler_path: str | None, compiler_prefix: str | None,
-             compiler_option_tokens: tuple[str, ...],
-             sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
-             dwarf_only: bool, dry_run: bool,
-             debug_format_opt: str | None,
+             dry_run: bool,
              compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
-             debuginfod: bool, debuginfod_url: str | None,
              dump_manifest_path: Path | None,
              verbose: bool,
              git_tag: str | None, build_id: str | None, no_git: bool,
@@ -242,7 +225,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_config: Path | None = None,
              build_targets: tuple[str, ...] = (),
              depth: str | None = None,
-             frontend_context: str = "host",
              # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
              # defaulted-None parameter stays only so the internal composition
              # below (_merge_gcc_options et al.) doesn't need to change --
@@ -252,7 +234,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              _resolved_collect_mode: str | None = None,
              _resolved_include_labels: dict[Path, str] | None = None,
              _resolved_lang_explicit: bool | None = None,
-             _resolved_changed_paths: tuple[str, ...] = ()) -> None:
+             _resolved_changed_paths: tuple[str, ...] = (),
+             # Phase 7: no CLI spelling; compare's inline embed still forwards these.
+             lang: str | None = None,
+             _resolved_debug: DumpDebugConfig | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -285,6 +270,17 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     reject_snapshot_compression_conflict(output, snapshot_compression)
     _setup_verbosity(verbose)
 
+    # Phase 7: compile.lang default + env-var toggles.
+    lang, _config_lang_explicit = resolve_dump_lang_and_env_toggles(
+        click.get_current_context(), build_config=build_config, sources=sources,
+        lang=lang, lang_default=LANG_DEFAULT, apply_env_toggles=apply_compile_config_env_toggles,
+    )
+    # Phase 7c: debug.* config only
+    _debug = resolve_dump_debug_fields(_resolved_debug, build_config=build_config, sources=sources)
+    dwarf_only, debug_format_opt, debuginfod, debuginfod_url, pdb_path = (
+        _debug.dwarf_only, _debug.format, _debug.debuginfod, _debug.debuginfod_url, _debug.pdb_path,
+    )
+
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently discarded
     # ..." known gap): --lang carries a Click default of "c++" (LANG_DEFAULT),
     # so the resolved `lang` string alone can never distinguish a genuinely
@@ -301,16 +297,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # `_embed_inline_source_side`'s nested `ctx.invoke(dump_cmd, ...)` uses to
     # hand in an explicitness already computed against *compare*'s own real
     # ctx -- mirrors `_resolved_compile_context`/`_resolved_collect_mode`/
-    # `_resolved_include_labels` immediately above. Without it, this
-    # ctx.invoke sub-context has no COMMANDLINE parameter source for `lang`
-    # (the same loss those other hooks already exist to work around), so a
-    # `compare --lang c++ --old-sources tree/` side would silently resolve
-    # `lang_explicit=False` here regardless of what the user actually typed.
+    # `_resolved_include_labels` immediately above. Phase 7 removed `--lang`
+    # from `dump`'s CLI entirely, so `resolve_dump_lang_and_env_toggles`
+    # above is now the only source of an explicit request (`compile.lang`);
+    # `_resolved_lang_explicit` still wins when the caller (compare's inline
+    # embed) forwards its own already-resolved value.
     lang_explicit = (
         _resolved_lang_explicit
         if _resolved_lang_explicit is not None
-        else click.get_current_context().get_parameter_source("lang")
-        == click.core.ParameterSource.COMMANDLINE
+        else _config_lang_explicit
     )
 
     # ADR-050 D3: parsed before the collect/compile-context resolution below so
@@ -401,18 +396,21 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # same --ast-frontend knob as the L2 header AST, ADR-037 D8), so a
     # .abicheck.yml `compile.frontend` must reach the source-only path exactly
     # like it already does the binary-dump path, not just this validation check.
+    # Phase 7: every argument below is now a fixed "nothing explicit" input
+    # (compile: config only, no escape hatch, ADR-068 D5 guard #2).
     _cc, includes = resolve_dump_compile_context(
         _resolved_compile_context,
-        gcc_options=gcc_options, sysroot=sysroot, nostdinc=nostdinc,
-        header_backend=header_backend, includes=includes,
+        gcc_options=gcc_options, sysroot=None, nostdinc=False,
+        header_backend="auto", includes=includes,
         build_config=build_config, sources=sources,
-        frontend_context=frontend_context,
-        compiler_path=compiler_path, compiler_prefix=compiler_prefix,
-        compiler_option_tokens=compiler_option_tokens,
+        frontend_context="host",
+        compiler_path=None, compiler_prefix=None,
+        compiler_option_tokens=(),
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
-    _gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
+    _gcc_option_tokens = _cc.gcc_option_tokens  # sysroot/nostdinc read off `_cc` itself
     header_backend = _cc.frontend
+    frontend_context = _cc.frontend_context
 
     # CLI-audit P1: --ast-frontend hybrid dual-runs castxml+clang for the L2
     # header AST, but L4 source-ABI replay has no such dual-backend merge —

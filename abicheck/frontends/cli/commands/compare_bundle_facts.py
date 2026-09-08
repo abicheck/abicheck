@@ -123,14 +123,12 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     invocation run from a project directory with a compile: block (Codex
     review, PR #1060). ``kwargs["config"]`` is still resolved either way,
     since the config-block rejection checks in that same module still
-    apply. An *explicit* ``--config`` with a real ``compile:`` block, and
-    the expose_value=False ``--allow-ast-frontend-fallback``/
-    ``--allow-unsupported-castxml`` flags, are rejected too (that module's
-    ``reject_explicit_compile_config_for_stored_pair``/
-    ``reject_ast_override_flags_for_stored_pair``)."""
+    apply. An *explicit* ``--config`` with a real ``compile:`` block is
+    rejected too (``reject_explicit_compile_config_for_stored_pair``, which
+    since Phase 7 also covers the former ``--allow-ast-frontend-fallback``/
+    ``--allow-unsupported-castxml`` flags' config-key equivalents)."""
     from ....cli_helpers_compare import discover_project_config
     from .compare_bundle_facts_rejections import (
-        reject_ast_override_flags_for_stored_pair,
         reject_explicit_compile_config_for_stored_pair,
     )
 
@@ -142,12 +140,16 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     if new_is_stored:
         if _config_explicit and kwargs["config"] is not None:
             reject_explicit_compile_config_for_stored_pair(kwargs["config"])
-        reject_ast_override_flags_for_stored_pair(ctx)
         return None
 
     from ....cli_options import resolve_compile_context
 
     _headers, _includes = _resolve_new_side_headers_includes(kwargs)
+    # Phase 7: none of these kwargs keys are populated by Click any more
+    # (--ast-frontend/--sysroot/--nostdinc/--compiler* are gone from
+    # compare's CLI) -- every `.get()` below resolves to its "nothing
+    # explicit" default, which `resolve_compile_context` already treats as
+    # "defer to .abicheck.yml's compile: block".
     header_backend = kwargs.get("new_header_backend") or kwargs.get("header_backend") or "auto"
     compile_context, merged_includes = resolve_compile_context(
         ctx,

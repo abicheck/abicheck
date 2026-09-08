@@ -17,19 +17,22 @@
 ``action/run.sh`` (AGENTS.md P0 "fix Action compile-context forwarding
 parity").
 
-The three CLI subcommands all share ``compile_context_options``
-(the ``ast-frontend``/``gcc-path``/``gcc-prefix``/``gcc-options``/
-``--sysroot``/``--nostdinc``, ADR-037 D3) — but ``action/run.sh`` used to
-forward all six only in ``dump`` mode, only ``--ast-frontend`` in ``compare``
-mode (behind a comment incorrectly claiming the rest were "dump-only flags...
-not exposed on the compare CLI"), and none of them in ``scan`` mode. These
-tests extract each mode's compile-context region verbatim from run.sh (the
-same "parse the real file, don't hand-copy it" discipline as
-``test_action_run_sh_legacy_aliases.py``) and assert parity.
+The three CLI subcommands used to share ``compile_context_options`` (the
+``ast-frontend``/``gcc-path``/``gcc-prefix``/``gcc-options``/``--sysroot``/
+``--nostdinc``, ADR-037 D3) as CLI flags. Phase 7
+(one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) removed all of those
+(plus ``--lang``) from ``compare``/``dump`` entirely -- CONFIG class, no
+surviving CLI override -- so ``action/run.sh`` now synthesizes a
+``.abicheck.yml`` ``compile:`` block from its own cross-compilation inputs
+and forwards it via ``--config`` instead
+(:func:`add_compile_context_flags`, extracted verbatim below). ``scan``
+is unaffected: it keeps every one of these flags, so its own region below
+is untouched and still asserts literal flag forwarding.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -48,27 +51,41 @@ _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 _SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
-# dump/scan have no release fan-out, so their regions end at the nostdinc
-# if-block; anchor past its closing "fi" so the extracted fragment is
-# syntactically complete.
+# scan has no release fan-out, so its region ends at the nostdinc if-block;
+# anchor past its closing "fi" so the extracted fragment is syntactically
+# complete.
 _COMPILE_CONTEXT_END = (
     'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n    CMD+=(--nostdinc)\n  fi'
 )
 
-# compare's region is structurally different (Codex review: these flags are
-# gated to the single-pair path there, since the release fan-out rejects
-# them outright) — it starts at the gating comment, not at the first
-# add_single_flag, and its nostdinc if-block is nested one level deeper
-# inside the release-style/single-pair if/else, ending at the *outer* "fi".
+# dump's region (Phase 7) is now the single call to the shared helper.
+_DUMP_COMPILE_CONTEXT_START = "add_compile_context_flags true"
+_DUMP_COMPILE_CONTEXT_END = "add_compile_context_flags true"
+
+# compare's region (Phase 7) starts at the gating comment (these inputs are
+# gated to the single-pair path, since the release fan-out can't thread a
+# CompileContext to each pair's header dump) and ends at the single-pair
+# branch's call to the shared helper.
 _COMPARE_COMPILE_CONTEXT_START = (
-    "# The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/"
+    "# The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc/lang)"
 )
-_COMPARE_COMPILE_CONTEXT_END = (
-    'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n'
-    "      CMD+=(--nostdinc)\n"
-    "    fi\n"
-    "  fi"
-)
+_COMPARE_COMPILE_CONTEXT_END = "else\n    add_compile_context_flags true\n  fi"
+
+# add_compile_context_flags() itself (Phase 7): extracted verbatim, since
+# dump's and compare's regions both call it now instead of forwarding flags
+# directly -- same "parse the real file, don't hand-copy it" discipline as
+# the rest of this module. Its Python heredoc body contains no line
+# matching either boundary marker, so a plain substring search is safe.
+_COMPILE_CONTEXT_FN_START = '_COMPILE_CONTEXT_CONFIG_OVERLAY=""'
+_COMPILE_CONTEXT_FN_END = '\n  CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")\n}\n'
+
+
+def _add_compile_context_flags_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_COMPILE_CONTEXT_FN_START)
+    end = text.index(_COMPILE_CONTEXT_FN_END, start) + len(_COMPILE_CONTEXT_FN_END)
+    return text[start:end]
+
 
 # _is_release_style_operand is defined once, well before any mode branch;
 # compare's extracted region calls it, so the harness needs its real
@@ -155,6 +172,12 @@ def _py_bin_has_abicheck_source() -> str:
     return text[start:end]
 
 
+_END_MARKER_FOR_START: dict[str, str] = {
+    _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
+    _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
+}
+
+
 def _compile_context_region(
     mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
 ) -> str:
@@ -162,11 +185,7 @@ def _compile_context_region(
     text = RUN_SH.read_text(encoding="utf-8")
     mode_start = text.index(mode_marker)
     start = text.index(start_marker, mode_start)
-    end_marker = (
-        _COMPARE_COMPILE_CONTEXT_END
-        if start_marker == _COMPARE_COMPILE_CONTEXT_START
-        else _COMPILE_CONTEXT_END
-    )
+    end_marker = _END_MARKER_FOR_START.get(start_marker, _COMPILE_CONTEXT_END)
     end = text.index(end_marker, start) + len(end_marker)
     return text[start:end]
 
@@ -245,6 +264,14 @@ def _run_bash_script(
         os.unlink(script_path)
 
 
+def _mode_value_for_marker(mode_marker: str) -> str:
+    return {
+        _DUMP_MODE_MARKER: "dump",
+        _COMPARE_MODE_MARKER: "compare",
+        _SCAN_MODE_MARKER: "scan",
+    }[mode_marker]
+
+
 def _run_region(
     mode_marker: str,
     env_extra: dict[str, str],
@@ -255,8 +282,11 @@ def _run_region(
     # not the whole file (keeps the harness self-contained and fast).
     # _is_release_style_operand is extracted from the real file (only
     # compare's region calls it, but defining it unconditionally is
-    # harmless for dump/scan).
+    # harmless for dump/scan). add_compile_context_flags (Phase 7) is
+    # extracted from the real file too -- dump's and compare's regions both
+    # call it now instead of forwarding flags directly.
     harness = (
+        f'MODE="{_mode_value_for_marker(mode_marker)}"\n'
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
         # add_flag_shlex_split() (extracted as part of _add_flag_source())
         # needs _PY_BIN resolved, same as the real script does near its own
@@ -269,6 +299,7 @@ def _run_region(
         + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
+        + _add_compile_context_flags_source()
         + "\nCMD=()\n"
     )
     script = (
@@ -290,6 +321,7 @@ def _run_region_raw(
     result -- for a region that's now expected to ``exit 1``, where
     ``check=True`` would raise before the caller could inspect anything."""
     harness = (
+        f'MODE="{_mode_value_for_marker(mode_marker)}"\n'
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
         # add_flag_shlex_split() (extracted as part of _add_flag_source())
         # needs _PY_BIN resolved, same as the real script does near its own
@@ -302,6 +334,7 @@ def _run_region_raw(
         + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
+        + _add_compile_context_flags_source()
         + "\nCMD=()\n"
     )
     script = (
@@ -313,37 +346,54 @@ def _run_region_raw(
     return _run_bash_script(script, env, check=False)
 
 
+def _read_compile_config_overlay(cmd: list[str]) -> dict[str, Any]:
+    """Read back the synthesized ``compile:`` block a ``--config <path>``
+    entry in *cmd* points at (Phase 7's replacement for individually
+    forwarded flags on dump/compare)."""
+    assert "--config" in cmd, cmd
+    path = cmd[cmd.index("--config") + 1]
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    return doc.get("compile", {})
+
+
 class TestCompileContextForwardingParity:
-    """dump/compare/scan must forward the identical flag set."""
+    """scan forwards the six flags directly; dump/compare (Phase 7) forward
+    the identical settings via a synthesized --config compile: block."""
 
     def test_dump_forwards_all_six_flags(self) -> None:
-        cmd, _ = _run_region(_DUMP_MODE_MARKER, _FULL_ENV)
-        assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
-        assert "--sysroot" in cmd and "/opt/sysroot" in cmd
-        assert "--nostdinc" in cmd
+        cmd, _ = _run_region(_DUMP_MODE_MARKER, _FULL_ENV, _DUMP_COMPILE_CONTEXT_START)
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["frontend"] == "clang"
+        # gcc_path wins over gcc_prefix when both are given (the merged
+        # compile.compiler field can only hold one) -- see
+        # add_compile_context_flags's own docstring/comment.
+        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
+        assert compile_blk["options"] == ["-DFOO=1"]
+        assert compile_blk["sysroot"] == "/opt/sysroot"
+        assert compile_blk["nostdinc"] is True
 
     def test_compare_forwards_all_six_flags(self) -> None:
         """Regression: compare used to forward only --ast-frontend, behind a
         comment incorrectly claiming the rest are dump-only — the CLI's
         `compare` command has shared `compile_context_options` (ADR-037 D3)
-        the whole time. A single-pair (non-directory/package) old/new-library
-        is required here since compare's forwarding is now gated to that
-        path (see the release-style tests below)."""
+        the whole time. Phase 7 then removed all of them from the CLI, so
+        this now asserts the synthesized --config overlay instead. A
+        single-pair (non-directory/package) old/new-library is required
+        here since compare's forwarding is gated to that path (see the
+        release-style tests below)."""
         env = {
             **_FULL_ENV,
             "INPUT_OLD_LIBRARY": "old.so",
             "INPUT_NEW_LIBRARY": "new.so",
         }
         cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
-        assert "--ast-frontend" in cmd and "clang" in cmd
-        assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
-        assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
-        assert "--compiler-option" in cmd and "-DFOO=1" in cmd
-        assert "--sysroot" in cmd and "/opt/sysroot" in cmd
-        assert "--nostdinc" in cmd
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["frontend"] == "clang"
+        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
+        assert compile_blk["options"] == ["-DFOO=1"]
+        assert compile_blk["sysroot"] == "/opt/sysroot"
+        assert compile_blk["nostdinc"] is True
 
     def test_scan_forwards_all_six_flags(self) -> None:
         """Regression: scan forwarded none of these, even though
@@ -647,11 +697,15 @@ class TestCompileContextForwardingParity:
         assert not any("\r" in token for token in cmd)
 
     def test_compare_omits_unset_flags(self) -> None:
+        # Phase 7: with none of the cross-compilation inputs set,
+        # add_compile_context_flags is a no-op -- no --config overlay at
+        # all, not one with an empty compile: block.
         cmd, _ = _run_region(
             _COMPARE_MODE_MARKER,
             {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
             _COMPARE_COMPILE_CONTEXT_START,
         )
+        assert "--config" not in cmd
         assert "--compiler" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd

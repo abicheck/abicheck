@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""ADR-050 D3/D5 (G32 Phase B/D) — the `--frontend-context host|device` flag.
+"""ADR-050 D3/D5 (G32 Phase B/D) — ``frontend_context`` (host|device).
 
 Shared by `dump`/`compare`/`scan` via `cli_options.compile_context_options`
 and resolved through the single `cli_options.resolve_compile_context` choke
@@ -23,6 +23,13 @@ satisfy now fails from the real extraction pipeline
 (`AstContextMissingError`/`AstContextAmbiguousError`, see
 `test_sycl_context.py` and `test_dumper_clang.py`'s DPC++ wiring tests),
 not from a blanket CLI-level reject.
+
+Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1) removed the
+`--frontend-context` CLI flag from `dump`/`compare` entirely -- `scan` keeps
+it as a real flag, while `dump`/`compare` only take it via `.abicheck.yml`'s
+`compile.frontend_context`. Tests below that used to exercise the flag on
+`dump`/`compare` now write a config file instead; `scan`'s own flag-based
+tests are unchanged.
 """
 
 from __future__ import annotations
@@ -47,39 +54,62 @@ def _elf_stub(path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("cmd", ["dump", "compare", "scan"])
-def test_frontend_context_device_no_longer_blanket_rejected(tmp_path, runner, cmd):
+def test_frontend_context_device_no_longer_blanket_rejected_scan(tmp_path, runner):
     """ADR-050 D5 (G32 Phase D): Phase B's blanket "not supported yet"
-    rejection is lifted now that `sycl_context.py`'s selector exists. These
-    ELF stubs have no headers, so the header AST frontend never runs and
+    rejection is lifted now that `sycl_context.py`'s selector exists. This
+    ELF stub has no headers, so the header AST frontend never runs and
     "device" has nothing to select from; whatever failure results (e.g. an
     invalid ELF file) must not be Phase B's old resolution-time reject --
     proving the restriction is actually gone, not just given a new message.
-    """
+    `scan` is the only command that still takes `--frontend-context` as a
+    CLI flag (Phase 7 removed it from `dump`/`compare`)."""
+    so1 = _elf_stub(tmp_path / "a.so")
+    result = runner.invoke(main, ["scan", str(so1), "--frontend-context", "device"])
+    assert "not supported yet" not in result.output
+    assert "--frontend-context" not in result.output
+
+
+@pytest.mark.parametrize("cmd", ["dump", "compare"])
+def test_frontend_context_flag_removed_from_dump_and_compare(tmp_path, runner, cmd):
+    """Phase 7: `--frontend-context` is no longer a CLI spelling on
+    `dump`/`compare` -- config only (`compile.frontend_context`)."""
     so1 = _elf_stub(tmp_path / "a.so")
     args = [cmd, str(so1)]
     if cmd == "compare":
         args.append(str(_elf_stub(tmp_path / "b.so")))
     args += ["--frontend-context", "device"]
     result = runner.invoke(main, args)
-    assert "not supported yet" not in result.output
-    assert "--frontend-context" not in result.output
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()
 
 
 def test_frontend_context_invalid_value_rejected_by_click(tmp_path, runner):
     so = _elf_stub(tmp_path / "a.so")
-    result = runner.invoke(main, ["dump", str(so), "--frontend-context", "bogus"])
+    result = runner.invoke(main, ["scan", str(so), "--frontend-context", "bogus"])
     assert result.exit_code != 0
     assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
+
+
+def test_dump_frontend_context_invalid_config_value_rejected(tmp_path, runner):
+    """`compile.frontend_context` goes through `BuildConfig`'s own
+    `_one_of` validation the same way an explicit `--frontend-context bogus`
+    used to be rejected by click.Choice."""
+    so = _elf_stub(tmp_path / "a.so")
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend_context: bogus\n")
+    result = runner.invoke(main, ["dump", str(so), "--config", str(cfg)])
+    assert result.exit_code != 0
 
 
 def test_compare_frontend_context_device_threaded_for_directory_inputs(
     monkeypatch, tmp_path, runner
 ):
-    """`--frontend-context` is a both-sides L2 compile-context knob (like
-    `--ast-frontend`/`--compiler`), threaded to the release fan-out's
-    resolved `CompileContext` rather than rejected (fix: whole-product-
-    bundle known-gap entry, AGENTS.md)."""
+    """`compile.frontend_context` is a both-sides L2 compile-context knob
+    (like `compile.frontend`/`compile.compiler`), threaded to the release
+    fan-out's resolved `CompileContext` rather than rejected (fix: whole-
+    product-bundle known-gap entry, AGENTS.md). Phase 7 demoted the CLI
+    flag to this config key; the config-file mechanism supersedes the
+    now-removed `--frontend-context device`."""
     # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
     # these lazily now, so a `setattr` there rebinds nothing the caller reads.
     import abicheck.frontends.cli.commands.compare as cli_mod
@@ -88,6 +118,8 @@ def test_compare_frontend_context_device_threaded_for_directory_inputs(
     old_dir.mkdir()
     new_dir = tmp_path / "new"
     new_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend_context: device\n")
 
     dispatched: dict[str, object] = {}
     monkeypatch.setattr(
@@ -95,7 +127,7 @@ def test_compare_frontend_context_device_threaded_for_directory_inputs(
     )
     result = runner.invoke(
         main,
-        ["compare", str(old_dir), str(new_dir), "--frontend-context", "device"],
+        ["compare", str(old_dir), str(new_dir), "--config", str(cfg)],
     )
     assert result.exit_code == 0, result.output
     assert dispatched["compile_context"].frontend_context == "device"
@@ -106,7 +138,7 @@ def test_compare_frontend_context_host_threaded_for_directory_inputs(
 ):
     """Same threading, with the (default-looking) value ``host``, so the
     only thing that could make this fail is cli_resolve.py's set-input
-    guard itself still rejecting an explicit ``--frontend-context``."""
+    guard itself still rejecting an explicit ``compile.frontend_context``."""
     # ADR-061 Phase 4: patch the implementation owner -- `abicheck.cli` resolves
     # these lazily now, so a `setattr` there rebinds nothing the caller reads.
     import abicheck.frontends.cli.commands.compare as cli_mod
@@ -115,6 +147,8 @@ def test_compare_frontend_context_host_threaded_for_directory_inputs(
     old_dir.mkdir()
     new_dir = tmp_path / "new"
     new_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend_context: host\n")
 
     dispatched: dict[str, object] = {}
     monkeypatch.setattr(
@@ -122,7 +156,7 @@ def test_compare_frontend_context_host_threaded_for_directory_inputs(
     )
     result = runner.invoke(
         main,
-        ["compare", str(old_dir), str(new_dir), "--frontend-context", "host"],
+        ["compare", str(old_dir), str(new_dir), "--config", str(cfg)],
     )
     assert result.exit_code == 0, result.output
     assert dispatched["compile_context"].frontend_context == "host"
@@ -201,7 +235,7 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
     """Codex review, PR #636: the native `dump` CLI command's ELF path used
     to call `cli_dump_helpers.perform_elf_dump`, which bypassed
     `service.run_dump` and called `dumper.dump` directly -- omitting
-    `frontend_context` entirely, so `dump --frontend-context device`
+    `frontend_context` entirely, so a device-context request
     silently produced a host-context snapshot instead of forwarding the
     request or failing.
 
@@ -214,6 +248,10 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
     from `abicheck.dumper` at call time inside `service_dump_native._dump_elf`
     (a function-local import), so patching `abicheck.dumper.dump` reaches it,
     same as it already does for `scan`/`compare`.
+
+    Phase 7 removed `--frontend-context`/`--compiler` from `dump`'s CLI; the
+    equivalent request is now `.abicheck.yml`'s `compile.frontend_context`/
+    `compile.compiler`.
     """
     from unittest.mock import patch
 
@@ -222,6 +260,8 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
     so = _elf_stub(tmp_path / "lib.so")
     hdr = tmp_path / "api.h"
     hdr.write_text("void f();\n")
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend_context: device\n  compiler: icpx\n")
     snap = AbiSnapshot(library="lib", version="1.0")
     with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
         result = runner.invoke(
@@ -229,8 +269,7 @@ def test_dump_cli_elf_path_forwards_frontend_context_to_dumper_dump(tmp_path, ru
             [
                 "dump", str(so),
                 "-H", str(hdr),
-                "--frontend-context", "device",
-                "--compiler", "icpx",
+                "--config", str(cfg),
             ],
         )
     assert result.exit_code == 0, result.output

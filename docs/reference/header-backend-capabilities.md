@@ -13,7 +13,16 @@ generated: false
 # Header-Backend Capabilities (CastXML vs. direct-clang vs. hybrid)
 
 abicheck's L2 (header) evidence layer has two interchangeable parsers behind
-one backend selector, plus a merge of the two:
+one backend selector, plus a merge of the two.
+
+> **Phase 7 note:** `--ast-frontend`/`--allow-ast-frontend-fallback` (and the
+> whole compile-context family this page's exception box discusses, including
+> the per-side `--ast-frontend old=`/`new=` overrides) are CLI options on
+> `scan` only now. On `compare`/`dump` the identical selection is made via
+> `.abicheck.yml`'s `compile.frontend`/`compile.ast_frontend_fallback` keys —
+> the resolution semantics below (auto/fallback/device-context rejection) are
+> unchanged, only the spelling moved. See
+> [Dump & Compare Flags](../use/dump-compare-flags.md).
 
 | `--ast-frontend` | What runs | When to pick it |
 |------------------|-----------|-----------------|
