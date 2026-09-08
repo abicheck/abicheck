@@ -12,7 +12,7 @@ scenarios:
       A packager compares two release artifacts (packages or directories of
       shared objects) and gets a per-library verdict plus bundle-level findings.
     flow:
-      - abicheck compare-release old-release/ new-release/ -H include/
+      - abicheck compare old-release/ new-release/ -H include/
     expected:
       exit_code: 4
     validates: UC-WF-bundle
@@ -30,7 +30,7 @@ scenarios:
       A consumer checks whether a library upgrade affects the specific symbols
       their app actually uses, filtering out irrelevant library churn.
     flow:
-      - abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2 -H include/
+      - abicheck compare libfoo.so.1 libfoo.so.2 -H include/ --used-by ./myapp
     expected:
       exit_code: 4
     validates: UC-WF-appcompat
@@ -48,7 +48,7 @@ scenarios:
       An integrator compares a binary's entire resolved dependency stack across
       two sysroots to confirm it still loads and binds before shipping an image.
     flow:
-      - abicheck stack-check usr/bin/myapp --baseline old-root/ --candidate new-root/
+      - abicheck deps compare usr/bin/myapp --old-root old-root/ --new-root new-root/
     expected:
       exit_code: 4
     validates: UC-WF-stack-deps

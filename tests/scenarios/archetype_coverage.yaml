@@ -17,7 +17,7 @@ scenarios:
       against the old BTF are ABI-incompatible. The scanner must compare two BTF
       blobs (module vs vmlinux, or old vs new kernel) and report the layout break.
     flow:
-      - abicheck compare old.btf new.btf --btf
+      - abicheck compare old.btf new.btf
     expected:
       exit_code: 4
       verdict: BREAKING
@@ -41,7 +41,7 @@ scenarios:
       must read the SYCL plugin surface and report the contract change at the
       workflow level, not only via low-level symbol diffing.
     flow:
-      - abicheck compare old.so new.so -H sycl/ --sycl
+      - abicheck compare old.so new.so -H sycl/
     expected:
       exit_code: 4
       verdict: BREAKING
