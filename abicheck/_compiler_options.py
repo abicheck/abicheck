@@ -380,6 +380,254 @@ def explicit_language_standard(
     return value
 
 
+def explicit_target_triple(
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    *,
+    cl_style: bool = False,
+) -> str | None:
+    """Return the last explicitly forwarded Clang ``-target``/``--target=``
+    triple, or ``None`` if forwarded options request none.
+
+    Exists so a caller can recover *what was actually asked for* when a
+    live ``clang -print-target-triple`` probe of the configured compiler
+    fails (a compiler resolution mismatch, a sandboxed/restricted CI
+    runner, a compiler build that doesn't support the flag): a probe
+    failure on its own carries no information about whether the caller
+    requested a specific (possibly non-native) target at all, and
+    ``extract.headers.clang.context.is_darwin_target``'s own
+    ``sys.platform`` fallback for a probe failure is only safe when NO
+    explicit ``--target=`` was requested — an explicit, non-Darwin
+    cross-target (e.g. ``--target=x86_64-unknown-linux-gnu`` run on a
+    macOS host) must never be silently reinterpreted as Darwin just
+    because the probe that would have confirmed it happened to fail
+    (Codex review, fresh evidence).
+
+    Same last-wins/tokenizing convention as :func:`explicit_language_standard`
+    (``gcc_options`` split and placed before ``gcc_option_tokens``, matching
+    the real frontend command lines) — only the recognized flag spelling
+    differs: a generic (GNU-driver) Clang accepts ``-target <value>`` (a
+    following, separate argument) and ``--target=<value>``/``-target=<value>``
+    (attached).
+
+    ``cl_style=True`` narrows recognition to the two spellings a CL/MSVC-
+    compatibility-mode driver (``clang-cl``/``dpcpp-cl``, or a generic
+    ``clang`` given ``--driver-mode=cl``) actually honors: the attached,
+    double-dash ``--target=<value>``, and the separate-argument,
+    single-dash ``-target <value>``. Fresh Codex review evidence (three
+    rounds, the third correcting the second): a real
+    ``clang-cl -target <value> -print-target-triple`` exits successfully
+    and prints back ``<value>``, so that separate short spelling IS
+    honored despite looking like the attached-vs-separate distinction that
+    matters for the other two spellings; only the attached, single-dash
+    ``-target=<value>`` and the separate, double-dash ``--target <value>``
+    complete with an "unknown argument ignored" warning and are *not*
+    applied. Recovering only the two genuinely-honored spellings under CL
+    mode still reflects what the driver actually did, where the
+    unrestricted parse (correct for a GNU-style driver) would recover a
+    value the driver silently dropped.
+
+    Under ``cl_style=True``, a token is also recognized after stripping a
+    leading ``/clang:`` forwarding prefix — ``clang-cl``'s documented
+    mechanism for passing an argument straight through to the underlying
+    Clang driver (``clang-cl /clang:--target=x86_64-apple-darwin`` is
+    confirmed to select that target — Codex review, fresh evidence). This
+    is a general normalization, not a one-off case: it reuses the exact
+    same honored-spelling check above for whatever the stripped token
+    turns out to be, attached or the first half of a separate pair alike.
+
+    ANY ``@response-file``/``--config=<file>`` token forwarded, regardless
+    of its position relative to a visible target, voids recovery back to
+    ``None``: its own invisible contents could carry a further target
+    that overrides an EARLIER visible one (a real compiler processes
+    arguments left to right, later wins — Codex review, fresh evidence:
+    ``clang --target=x86_64-unknown-linux-gnu @darwin.rsp
+    -print-target-triple`` genuinely reports Darwin when the response
+    file itself sets that; a real ``--config=<file>`` invocation confirms
+    the identical shape), but one BEFORE the visible target is not safe
+    either: real Clang determines its CL-vs-GNU driver mode from an early
+    scan of the *entire* argument list, these included, so one preceding
+    the target could just as easily flip the mode a caller's own
+    ``cl_style`` was computed under, changing which spellings are even
+    honored for the visible token that follows (CodeRabbit review, fresh
+    evidence). With no way to see inside the file, the only safe answer
+    once either is forwarded is "unknown" — not "trust whatever is
+    visible". See :func:`_opaque_option_source_tokens`.
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            # Same rule as explicit_language_standard's identical guard
+            # above: malformed --gcc-options must not abort the dump.
+            pass
+    tokens.extend(gcc_option_tokens)
+    if _opaque_option_source_tokens(tokens):
+        return None
+    if cl_style:
+        tokens = [
+            token[len("/clang:") :] if token.startswith("/clang:") else token
+            for token in tokens
+        ]
+    value: str | None = None
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token.startswith("--target="):
+            value = token[len("--target=") :]
+        elif not cl_style and token.startswith("-target="):
+            value = token.partition("=")[2]
+        elif token == "-target" and i + 1 < len(tokens):
+            value = tokens[i + 1]
+            i += 1
+        elif not cl_style and token == "--target" and i + 1 < len(tokens):
+            value = tokens[i + 1]
+            i += 1
+        i += 1
+    return value
+
+
+def _forwarded_driver_mode_override(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> str | None:
+    """The last explicitly-forwarded ``--driver-mode=<value>``, or ``None``
+    if none was forwarded. Shared by :func:`effective_driver_mode_is_cl`
+    and :func:`forwarded_driver_mode_token`.
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            pass
+    tokens.extend(gcc_option_tokens)
+    override: str | None = None
+    for token in tokens:
+        if token.startswith("--driver-mode="):
+            override = token[len("--driver-mode=") :]
+    return override
+
+
+def forwarded_driver_mode_token(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> tuple[str, ...]:
+    """The last explicitly-forwarded ``--driver-mode=<value>`` token, as a
+    single-element tuple ready to splice into a re-probe's own argument
+    list, or ``()`` if none was forwarded.
+
+    Exists so a caller re-probing ``clang_bin`` with a deliberately
+    narrowed argument list (e.g. :func:`dumper._run_clang`'s bare,
+    option-free re-probe of a probe-failure fallback) can still preserve
+    the one option that changes Clang's own *interpretation* of that
+    narrowed probe -- an explicit ``--driver-mode=`` override changes
+    whether the SAME binary parses as a CL-style or GNU-style driver, so
+    dropping it entirely would silently revert to the binary's own
+    name-based default (Codex review, fresh evidence: a real
+    ``clang-cl --driver-mode=g++ -print-target-triple`` reports the host
+    GNU target, while a bare ``clang-cl -print-target-triple`` reports
+    Windows -- two different answers for the identical binary, so a
+    stripped-down re-probe that omits the override would silently record
+    the wrong one for a probe that had it configured)."""
+    override = _forwarded_driver_mode_override(gcc_options, gcc_option_tokens)
+    return () if override is None else (f"--driver-mode={override}",)
+
+
+def effective_driver_mode_is_cl(
+    is_cl_style_name: bool,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
+) -> bool:
+    """The actually-effective driver mode (CL/MSVC-compatibility vs.
+    GNU-style), not just a name-only guess.
+
+    A binary's own basename (``clang-cl``/``dpcpp-cl`` vs. a plain
+    ``clang``/``clang++``) only picks the *default* mode; an explicit,
+    forwarded ``--driver-mode=<value>`` OVERRIDES that default in either
+    direction, and clang applies last-option-wins when more than one is
+    given. Two real, evidenced invocation shapes this must resolve
+    identically:
+
+    - ``clang --driver-mode=cl ...`` (a replayed compile unit's own form --
+      see ``buildsource.header_compile_context``'s "Preserve an explicit
+      --driver-mode=cl" docstring): a GNU-named binary switched INTO CL
+      mode.
+    - ``clang-cl --driver-mode=g++ ...`` (a real ``clang-cl --driver-mode=
+      g++ -print-target-triple`` reports a GNU-shaped target -- Codex
+      review, fresh evidence): a CL-named binary switched OUT of CL mode.
+
+    Earlier revisions of this check OR'd a name-only test with "was
+    --driver-mode=cl forwarded", which answered the first shape but not
+    the second (a name-only `True` was never revocable). Determining the
+    single effective mode -- the last ``--driver-mode=`` override if any,
+    else the name -- covers both by construction instead of accumulating
+    a third one-off case alongside the first two.
+    """
+    override = _forwarded_driver_mode_override(gcc_options, gcc_option_tokens)
+    if override is not None:
+        return override == "cl"
+    return is_cl_style_name
+
+
+def _opaque_option_source_tokens(tokens: list[str]) -> bool:
+    """Whether ``tokens`` forwards an external options source this module
+    cannot see into: a Clang/GCC ``@response-file`` token, an explicit
+    ``--config=<file>``/``--config <file>``, or a ``--config-user-dir=
+    <dir>``/``--config-system-dir=<dir>`` (real Clang, confirmed by
+    invocation: a directory pointing at an implicitly-loaded
+    ``clang.cfg`` is honored by both AST generation and
+    ``-print-target-triple`` with no explicit ``--config=`` at all,
+    exactly like a response file -- Codex review, fresh evidence; only
+    the attached ``=`` spelling is honored for either directory flag, a
+    separate-argument form completes with "unknown argument"). Shared by
+    :func:`explicit_target_triple` and :func:`forwards_response_file`.
+    """
+    for i, token in enumerate(tokens):
+        if token.startswith("@") and len(token) > 1:
+            return True
+        if token.startswith(("--config=", "--config-user-dir=", "--config-system-dir=")):
+            return True
+        if token == "--config" and i + 1 < len(tokens):
+            return True
+    return False
+
+
+def forwards_response_file(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> bool:
+    """Whether forwarded options include an unexpanded ``@response-file``
+    or an explicit ``--config=<file>``, whose contents this module cannot
+    see without actually reading and re-tokenizing that file on disk (a
+    real compile toolchain expands/applies it natively at invocation time;
+    :func:`explicit_target_triple` and :func:`effective_driver_mode_is_cl`
+    only ever see the literal ``@path``/``--config=<file>`` token).
+
+    Exists so a caller with no other explicit-target evidence can tell
+    "genuinely nothing else was requested" from "something may be hidden
+    in an unexpanded response/config file" -- either can carry its own
+    ``-target``/``--driver-mode=`` and is a real, working invocation shape
+    (Codex review, fresh evidence: ``tests/test_dumper_clang.py``'s own
+    ``test_configured_target_triple_honors_clang_response_file`` proves a
+    real compiler process honors a response file; a real Clang invocation
+    with ``--config=<file>`` confirms the same for a config file), so a
+    probe failure there must not fall back to a `sys.platform` guess that
+    could easily be wrong in either direction. Deliberately does not
+    attempt to read/expand either file itself -- response-file quoting is
+    platform-specific (POSIX shell-like vs. Windows) and duplicating a
+    compiler's own expansion logic here would be speculative machinery
+    this narrow uncertainty check doesn't need; conservatively assuming
+    "unknown" is sufficient.
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            pass
+    tokens.extend(gcc_option_tokens)
+    return _opaque_option_source_tokens(tokens)
+
+
 def language_standard_field(
     lang: str | None,
     gcc_options: str | None,

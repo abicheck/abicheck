@@ -126,29 +126,23 @@ def test_is_darwin_target(target_triple: str | None, expected: bool) -> None:
     assert is_darwin_target(target_triple) is expected
 
 
-@pytest.mark.parametrize("running_platform", ["darwin", "linux", "win32"])
-def test_is_darwin_target_falls_back_to_running_platform_when_no_triple(
-    monkeypatch: pytest.MonkeyPatch, running_platform: str
-) -> None:
-    """No *target_triple* at all (``None``/``""``) means the external
-    ``-print-target-triple`` compiler probe behind it either wasn't run or
-    failed -- see ``dumper._configured_target_triple``. Falling back to the
-    CURRENTLY RUNNING interpreter's own ``sys.platform`` is what keeps
-    Darwin decoration-stripping working even when that probe fails on a
-    real Darwin host (the exact class of bug this fallback closes); this
-    directly pins that fallback for both directions, independent of
-    whichever OS actually executes this test suite (Codex review, fresh
-    evidence: the previous, un-parametrized ``(None, False)``/``("",
-    False)`` cases above only happened to hold on a non-Darwin test
-    runner -- they would have silently started failing the moment this
-    exact test module ran on the ``macos-latest`` CI lane, without ever
-    exercising the fallback the fix actually depends on there)."""
-    import abicheck.extract.headers.clang.context as _context
-
-    monkeypatch.setattr(_context.sys, "platform", running_platform)
-    expected = running_platform == "darwin"
-    assert is_darwin_target(None) is expected
-    assert is_darwin_target("") is expected
+def test_is_darwin_target_never_guesses_darwin_from_bare_none() -> None:
+    """A bare ``None``/``""`` *target_triple* means "no evidence" and must
+    always answer ``False`` here, regardless of which OS actually runs
+    this test suite -- including on the real ``macos-latest`` CI lane.
+    This is deliberately NOT a ``sys.platform``-based guess: this same
+    bare-``None`` shape is what a direct, no-pipeline-involved unit-test
+    construction of ``_ClangAstParser`` (see e.g.
+    ``test_parse_functions_leading_underscore_not_extern_c_without_target``
+    below) also produces, and that test's own conservative "no evidence,
+    no guess" contract would silently flip on a Darwin test runner if this
+    function special-cased ``None`` by host platform (Codex review, fresh
+    evidence -- an earlier revision did exactly that and broke it). The
+    real dump pipeline's own probe-failure recovery lives one layer up, in
+    ``dumper._run_clang``, which passes in a real, non-``None`` triple
+    string instead of relying on this function to guess."""
+    assert is_darwin_target(None) is False
+    assert is_darwin_target("") is False
 
 
 def _tu(*inner: dict) -> dict:
@@ -409,6 +403,57 @@ def test_parse_variables_mangled_field_strips_darwin_underscore_for_real_cxx_nam
     assert var.mangled == "_ZN1n1gE"
     assert var.entity_id is not None
     assert var.entity_id.extra == ("mangled", "_ZN1n1gE")
+
+
+def test_parse_functions_explicit_asm_label_unstripped_on_darwin() -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install: a literal ``asm("__Zfake")`` label is exactly as
+    ``"__Z..."``-shaped as a real, compiler-generated decorated Itanium
+    mangling -- the two are indistinguishable from the string alone once
+    a genuine Darwin target is confirmed. Real clang's own AST distinguishes
+    them structurally: an explicit label carries an ``AsmLabelAttr`` child,
+    which castxml's own convention preserves verbatim too (see
+    ``tests/test_castxml_literal_double_underscore_mangled.py``), so the
+    two backends must agree here as well. Without this gate, the fix for
+    the two tests above would corrupt this label into ``"_Zfake"``,
+    disagreeing with both castxml's identical declaration and the
+    binary's own real, undecorated export-table entry."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "__Zfake",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "__Zfake"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "__Zfake")
+
+
+def test_parse_variables_explicit_asm_label_unstripped_on_darwin() -> None:
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "VarDecl",
+            "name": "g",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int"},
+            "mangledName": "__Zfake_g",
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "__Zfake_g"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "__Zfake_g")
 
 
 def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
