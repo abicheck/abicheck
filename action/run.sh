@@ -43,6 +43,38 @@ _is_path_already_qualified() {
   return 1
 }
 
+# `mktemp`/`mktemp -d` return a path relative to `$TMPDIR` when that
+# variable itself holds a relative value -- a real, if unusual, self-hosted
+# runner configuration (confirmed directly: `TMPDIR=relbase mktemp` really
+# does emit a relative path). Every one of this script's `mktemp` results
+# that crosses into a `(cd "$_PY_SAFE_DIR" && ...)`-wrapped Python
+# invocation -- as an argv path Python writes to, or as a base config path
+# read back off disk -- resolves against that *new* CWD instead of the
+# caller's, not the runner's working directory, on such a runner (first
+# found for `$BASELINE_DIR`'s own derived paths; the release/compile-
+# context config overlay paths below hit the identical shape, Codex
+# review). Canonicalize once, at the source, with `$1`'s own subshell `cd`
+# (not string-prefixing with `$PWD`, which would be wrong for a `mktemp`
+# result that -- unusually -- already came out absolute under a relative
+# `$TMPDIR` base plus an absolute override) so every path derived from it
+# afterwards is safe without fixing each call site individually.
+_mktemp_canonical() {
+  local path="$1"
+  if ! path="$(cd "$path" 2>/dev/null && pwd)" 2>/dev/null; then
+    # A plain file (mktemp, not mktemp -d) has no directory to cd into --
+    # canonicalize its parent and reattach the basename instead.
+    local dir base
+    dir="$(dirname -- "$1")"
+    base="$(basename -- "$1")"
+    if ! dir="$(cd "$dir" && pwd)"; then
+      echo "::error::failed to canonicalize the temporary path '$1' -- refusing to continue with an unresolved path." >&2
+      return 1
+    fi
+    path="$dir/$base"
+  fi
+  printf '%s\n' "$path"
+}
+
 # ---------------------------------------------------------------------------
 # Helper: append a flag with value(s) to the command array.
 # Prefer one item per line (a YAML block scalar, e.g. `headers: |`) — that
@@ -707,6 +739,9 @@ json.dump({"compile": compile_blk}, sys.stdout)
 PYEOF
     )
     _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
+    if ! _COMPILE_CONTEXT_CONFIG_OVERLAY=$(_mktemp_canonical "$_COMPILE_CONTEXT_CONFIG_OVERLAY"); then
+      exit 1
+    fi
     if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
       # An explicit build-config input is a deliberate operator action --
       # merge this Action's synthesized compile: overlay into a COPY of
@@ -828,6 +863,9 @@ PYEOF
   )
   local overlay
   overlay=$(mktemp)
+  if ! overlay=$(_mktemp_canonical "$overlay"); then
+    exit 1
+  fi
   if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
     _merge_config_overlay_with_discovered_project_config \
       "$_release_overlay_json" "$overlay" "${INPUT_BUILD_CONFIG}" "explicit"

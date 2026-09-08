@@ -1272,6 +1272,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "tests/test_action_compile_context_parity.py",
+      "baseline_lines": 1207,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: this file was one line under the 1200-line test-file cap until PR #1159's sixth review round required a `_mktemp_canonical_source()` extractor plus its own harness wiring (a relative $TMPDIR base broke add_compile_context_flags's overlay mktemp result once it crossed into the $_PY_SAFE_DIR-scoped merge subprocess, Codex review) -- the sibling `tests/test_action_release_topology_config.py` covers the identical fix's twin call site, staying comfortably under its own cap.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "tests/test_action_coverage_verdict.py",
       "baseline_lines": 1613,
       "target": "tests/unit-or-contract ownership matching production migration",

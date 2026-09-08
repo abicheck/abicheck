@@ -223,6 +223,20 @@ def _path_qualified_helper_source() -> str:
     return text[start:end]
 
 
+# add_compile_context_flags's overlay `mktemp` result is now canonicalized
+# via `_mktemp_canonical` (relative $TMPDIR broke the merge subprocess,
+# Codex review PR #1159 sixth round); mirrors the sibling topology module.
+_MKTEMP_CANONICAL_START = "_mktemp_canonical() {"
+_MKTEMP_CANONICAL_END = "\n}\n"
+
+
+def _mktemp_canonical_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_MKTEMP_CANONICAL_START)
+    end = text.index(_MKTEMP_CANONICAL_END, start) + len(_MKTEMP_CANONICAL_END)
+    return text[start:end]
+
+
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
     _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
@@ -349,6 +363,7 @@ def _run_region(
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
         + _path_qualified_helper_source()
+        + _mktemp_canonical_source()
         + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
@@ -393,6 +408,7 @@ def _run_region_raw(
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
         + _path_qualified_helper_source()
+        + _mktemp_canonical_source()
         + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
@@ -1066,6 +1082,7 @@ def _run_region_with_cwd(
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
         + _path_qualified_helper_source()
+        + _mktemp_canonical_source()
         + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()

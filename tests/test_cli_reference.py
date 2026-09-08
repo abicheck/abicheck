@@ -249,3 +249,31 @@ def test_a_repeatable_boolean_flag_keeps_its_empty_default():
 
     (param,) = _cmd.params
     assert gen._option_row(param).endswith("| no | — | Repeatable flag. |")
+
+
+def test_multi_paragraph_help_stays_inside_one_table_cell():
+    # A ``help=`` string with a blank-line paragraph break (e.g.
+    # --instantiation-manifest's Phase 7d rationale) rendered raw blank
+    # lines inside the Markdown cell, which terminates the GFM table --
+    # every option listed after it then rendered as loose pipe-delimited
+    # text instead of a table row (Codex review on PR #1159).
+    import click
+
+    gen = _load_gen()
+
+    @click.command()
+    @click.option(
+        "--verbose-flag",
+        is_flag=True,
+        help="Short summary.\n\nA second paragraph with more detail that "
+        "must not split this row across blank lines.",
+    )
+    def _cmd() -> None:  # pragma: no cover - never invoked
+        """Doc."""
+
+    (param,) = _cmd.params
+    row = gen._option_row(param)
+    assert "\n" not in row
+    assert row.count("|") == 5, row
+    assert "Short summary." in row
+    assert "A second paragraph" in row

@@ -169,6 +169,24 @@ def _path_qualified_helper_source() -> str:
     return text[start:end]
 
 
+# `add_release_topology_config_flags`'s own overlay `mktemp` result (and
+# `add_compile_context_flags`'s identical one) is now canonicalized via
+# `_mktemp_canonical` before crossing into the `$_PY_SAFE_DIR`-scoped merge
+# subprocess (Codex review, PR #1159, sixth round: a relative `$TMPDIR`
+# base made the merge write to, then read back from, a scratch path that
+# resolved against the wrong CWD) -- so any harness calling either function
+# must also define this helper.
+_MKTEMP_CANONICAL_START = "_mktemp_canonical() {"
+_MKTEMP_CANONICAL_END = "\n}\n"
+
+
+def _mktemp_canonical_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_MKTEMP_CANONICAL_START)
+    end = text.index(_MKTEMP_CANONICAL_END, start) + len(_MKTEMP_CANONICAL_END)
+    return text[start:end]
+
+
 def _bash_executable() -> str:
     if os.name != "nt":
         return "bash"
@@ -259,6 +277,7 @@ _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
+{_mktemp_canonical_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -361,6 +380,7 @@ _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
+{_mktemp_canonical_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -392,6 +412,7 @@ _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
+{_mktemp_canonical_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -920,3 +941,40 @@ class TestReleaseTopologyOverlayGenerationIsIsolated:
         lines = result.stdout.splitlines()
         doc = _read_config_overlay(lines)
         assert doc == {"release": {"dso_only": True}}
+
+
+class TestReleaseTopologyOverlayCanonicalizesRelativeTmpdir:
+    """Codex review, PR #1159 (P2, sixth round): on a runner where
+    ``$TMPDIR`` itself holds a relative value, ``mktemp`` returns a
+    relative ``overlay`` path. The merge helper writes to (and, for
+    discover mode, later reads back from) that path from inside a
+    ``(cd "$_PY_SAFE_DIR" && ...)`` subshell -- a relative path there
+    resolves against the wrong directory, making a valid compile/topology
+    Action request fail with a spurious "does not exist" before abicheck
+    ever runs. ``overlay`` is now canonicalized via ``_mktemp_canonical``
+    immediately after creation, the same fix already applied to
+    ``$BASELINE_DIR`` (``test_action_run_sh_baseline_set_fallback.py``'s
+    own ``test_resolves_with_a_relative_tmpdir``).
+    """
+
+    def test_overlay_generation_succeeds_under_a_relative_tmpdir(
+        self, tmp_path: Path
+    ) -> None:
+        relative_tmpdir = "relative_tmp"
+        (tmp_path / relative_tmpdir).mkdir()
+        result = _run_bash_script(
+            _harness(),
+            {"INPUT_DSO_ONLY": "true", "TMPDIR": relative_tmpdir},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "does not exist" not in result.stderr
+        lines = result.stdout.splitlines()
+        doc = _read_config_overlay(lines)
+        assert doc == {"release": {"dso_only": True}}
+        # The --config entry itself must be an absolute path -- a relative
+        # one here is exactly the bug: it would have resolved correctly
+        # from the CLI's own real invocation directory, but not from
+        # inside the merge helper's `$_PY_SAFE_DIR` subshell.
+        config_idx = lines.index("--config")
+        assert Path(lines[config_idx + 1]).is_absolute(), lines
