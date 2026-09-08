@@ -806,6 +806,53 @@ class TestExtraArgsWriteJsonPath:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsOutputPath:
+    """Direct unit tests for `_extra_args_output_path`, the second Codex
+    review round's own report-location fix: `extra-args`' own `-o`/`--output`
+    (Click's single scalar option, both spellings resolve to the same
+    destination) is appended after this script's own dedicated
+    `-o "$OUTPUT_FILE"`, so it -- not `$OUTPUT_FILE` -- is where `abicheck`
+    really writes whenever present. Mirrors `TestExtraArgsWriteJsonPath`
+    above, including the last-occurrence-wins and value-consumed-as-a-flag
+    cases, but with no `key=` prefix to validate (a bare path).
+    """
+
+    def _value(self, extra_args: str) -> str:
+        return _run_value(f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_output_path")
+
+    def test_absent_extra_args(self) -> None:
+        assert self._value("") == ""
+
+    def test_short_form(self) -> None:
+        assert self._value("-o out.json") == "out.json"
+
+    def test_long_form(self) -> None:
+        assert self._value("--output out.json") == "out.json"
+
+    def test_equals_form(self) -> None:
+        assert self._value("--output=out.json") == "out.json"
+
+    def test_last_occurrence_wins_same_spelling(self) -> None:
+        assert self._value("-o first.json -o second.json") == "second.json"
+
+    def test_last_occurrence_wins_across_spellings(self) -> None:
+        # `-o`/`--output` are the identical Click option -- a later
+        # occurrence of either spelling overrides an earlier one of the
+        # other, exactly as Click's own last-flag-wins resolution would.
+        assert self._value("-o first.json --output second.json") == "second.json"
+        assert self._value("--output first.json -o second.json") == "second.json"
+
+    def test_unrelated_extra_args(self) -> None:
+        assert self._value("--verbose --gate-api-break") == ""
+
+    def test_write_consumed_as_an_output_option_value_is_not_a_flag(self) -> None:
+        # `--write -o` means "write a file literally named -o", not a real
+        # `-o`/`--output` flag -- same tokenizer, same class of bug as the
+        # sibling helpers.
+        assert self._value("--write -o") == ""
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestExtraArgsExpandShortClusters:
     """Direct unit tests for `_extra_args_expand_short_clusters`, the helper
     behind the fifth Codex review round (P1, fresh evidence): a clustered

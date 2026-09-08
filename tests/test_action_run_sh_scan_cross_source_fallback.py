@@ -108,7 +108,7 @@ def _stub_abicheck(
         '  if [[ -z "$mode" && ( "$arg" == "compare" || "$arg" == "scan" ) ]]; then\n'
         '    mode="$arg"\n'
         "  fi\n"
-        '  if [[ "$prev" == "-o" ]]; then\n'
+        '  if [[ "$prev" == "-o" || "$prev" == "--output" ]]; then\n'
         '    outfile="$arg"\n'
         "  fi\n"
         '  prev="$arg"\n'
@@ -420,3 +420,113 @@ class TestFallbackScopedToMigratedScanOnly:
         assert outputs["_exit"] == 0, outputs
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
         assert calls == ["scan"], calls
+
+
+class TestCrossSourceFallbackFindsReportBehindExtraArgsOutputOverride:
+    """Second Codex review round, P1 (fresh evidence): `extra-args` can
+    redirect the actual written report independently of the dedicated
+    `output-file` input (`extra-args: -o redirected.json`/`--output
+    redirected.json`) -- Click keeps only the *last* `-o`/`--output`
+    occurrence, and `extra-args` is appended after this script's own
+    dedicated `-o "$OUTPUT_FILE"`, so the report really lands at the
+    extra-args path while `$OUTPUT_FILE` (what `_json_report_src` used to
+    trust exclusively) still names the dedicated path, which is never
+    written at all. Before the fix, this fallback's own report lookup
+    silently missed the real file, so a cross-source finding went
+    undetected and the migrated run's real, unstripped `API_BREAK` verdict
+    published instead of `scan`'s advisory `COMPATIBLE_WITH_RISK`.
+
+    The bug class is "the real write destination is reachable only through
+    `extra-args`, under any spelling of the option", not just the one
+    `-o redirected.json` example the review named -- parametrized across
+    both `-o`/`--output` spellings, and against a dedicated `output-file`
+    input that is present (redirected away from) as well as one that is
+    entirely absent (nothing else for `_json_report_src` to fall back to).
+    """
+
+    @pytest.mark.parametrize("flag", ["-o", "--output"])
+    def test_finding_behind_redirected_output_still_triggers_fallback(
+        self, tmp_path: Path, flag: str
+    ) -> None:
+        redirected = tmp_path / "redirected.json"
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=_compare_report_with_finding(
+                "persistent", "header_build_context_mismatch"
+            ),
+            compare_exit=2,
+            scan_report=_scan_report_after_stripping(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        # Dedicated output-file names a path the stub never actually
+        # writes to (extra-args' own -o/--output wins Click's last-flag-
+        # wins resolution), reproducing the exact divergence the review
+        # found.
+        env["INPUT_EXTRA_ARGS"] = f"{flag} {redirected}"
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["exit-code"] == "0", outputs
+        assert outputs["_exit"] == 0, outputs
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare", "scan"], calls
+
+    def test_finding_behind_redirected_output_with_no_dedicated_output_file(
+        self, tmp_path: Path
+    ) -> None:
+        # The dedicated `output-file` input is entirely unset -- $OUTPUT_
+        # FILE is empty, so before the fix `_json_report_src` had no
+        # dedicated-input source to even try; the extra-args path is the
+        # ONLY place the report exists.
+        redirected = tmp_path / "redirected.json"
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=_compare_report_with_finding(
+                "introduced", "private_header_leak"
+            ),
+            compare_exit=2,
+            scan_report=_scan_report_after_stripping(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        del env["INPUT_OUTPUT_FILE"]
+        env["INPUT_EXTRA_ARGS"] = f"-o {redirected}"
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
+        assert outputs["_exit"] == 0, outputs
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare", "scan"], calls
+
+    def test_real_break_behind_redirected_output_is_still_published(
+        self, tmp_path: Path
+    ) -> None:
+        # The inverse case: no cross-source finding, so the fallback must
+        # NOT trigger -- proves the fixed lookup doesn't over-fire just
+        # because a report was found behind extra-args' own -o.
+        redirected = tmp_path / "redirected.json"
+        break_report = {
+            "report_schema_version": "2.49",
+            "verdict": "API_BREAK",
+            "changes": [
+                {
+                    "kind": "function_removed",
+                    "symbol": "foo",
+                    "description": "removed",
+                    "severity": "api_break",
+                }
+            ],
+        }
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=break_report,
+            compare_exit=2,
+            scan_report=_scan_report_after_stripping(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_EXTRA_ARGS"] = f"-o {redirected}"
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "API_BREAK", outputs
+        assert outputs["exit-code"] == "2", outputs
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare"], calls

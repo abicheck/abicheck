@@ -588,6 +588,48 @@ _extra_args_write_json_path() {
   printf '%s' "$_found"
 }
 
+# Extract a user-supplied `-o PATH`/`--output PATH`/`--output=PATH` primary
+# output path from extra-args, printing it (and nothing else) when found.
+# Empty output means "no such flag" -- same "cannot tell" convention as every
+# other report-discovery helper here.
+#
+# Why this exists (second Codex review round, P1, fresh evidence): every
+# mode's own command-assembly section appends its own `-o "$OUTPUT_FILE"`
+# (from the dedicated `output-file` Action input) BEFORE `$INPUT_EXTRA_ARGS`
+# is appended (`CMD+=($INPUT_EXTRA_ARGS)`, near the end of this script) --
+# `-o`/`--output` is Click's own single, scalar option (both spellings
+# resolve to the same destination), so a repeated occurrence keeps only the
+# *last* one, exactly like `--write` above. `extra-args: -o redirected.json`
+# (or `--output redirected.json`) therefore makes `abicheck` really write its
+# report to `redirected.json`, silently overriding whatever the dedicated
+# `output-file` input said (including "nothing" -- `$OUTPUT_FILE` then stays
+# empty) -- but every report-location decision in this script (`_json_
+# report_src`'s own `OUTPUT_FILE` branch first among them) had no way to
+# learn about that override at all, so it kept trusting the stale/absent
+# `$OUTPUT_FILE` path instead of the file `abicheck` actually wrote. This
+# recovers the real destination the same way `_extra_args_write_json_path`
+# recovers a `--write json=PATH` override, so `_json_report_src` can read the
+# real file directly instead of silently missing it.
+#
+# Keeps scanning the whole `extra-args` list and only remembers the most
+# recent `-o`/`--output` occurrence (Click's own last-flag-wins semantics,
+# and the two spellings name the identical option) -- mirrors `_effective_
+# format`'s own technique above, not `_extra_args_write_json_path`'s
+# format-gated one, since `-o`/`--output` takes a bare path with no `key=`
+# prefix to validate.
+_extra_args_output_path() {
+  local _name _value _found=""
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      -o | --output)
+        _found="$_value"
+        ;;
+    esac
+  done <<<"$(_extra_args_options)"
+  [[ -n "$_found" ]] || return 1
+  printf '%s' "$_found"
+}
+
 # The real `--format` value `abicheck` runs with, accounting for `extra-args`
 # overriding this script's own `--format "$FORMAT"` flag.
 #
@@ -624,22 +666,38 @@ _effective_format() {
 # renders differently or not at all (Codex review, P2).
 #
 # `--against | --artifact-set | --budget | --build-target | --crosscheck |
-# --manifest | --public-header-dir | --risk-rules` are exactly `scan`'s own
-# option set minus `compare`'s (`python3 -c "from abicheck.cli import main;
-# opts=lambda n:{o for p in main.commands[n].params for o in p.opts if
-# o.startswith('-')}; print(sorted(opts('scan')-opts('compare')))"` --
-# current as of this commit, see this function's own git history for drift)
-# that are also value-taking per `_extra_args_is_value_option` above, i.e.
-# reach here as a `NAME<TAB>VALUE` row at all. Three more names in that same
-# scan-minus-compare set are deliberately NOT listed below: `--max-findings`
-# (no dedicated Action input forwards it on either mode, so there is no
-# pre-existing "dedicated input wins" behavior for extra-args to race
-# against and silently override) and `--pattern-verdicts`/`--show-suppressed`
-# (both scan-only *boolean* flags -- `compare` rejects either outright as an
-# unknown option the same way it would reject any name below, but that
-# failure is a loud, immediate CLI usage error either way, not a silent
-# misbehavior producing a wrong-but-successful result, so there is no
-# distinct correctness gap here for this helper to close).
+# --manifest | --max-findings | --pattern-verdicts | --no-pattern-verdicts |
+# --public-header-dir | --risk-rules | --show-suppressed` are exactly
+# `scan`'s own option set minus `compare`'s, secondary/negation opts
+# included (`python3 -c "from abicheck.cli import main;
+# def full(n):
+#     s=set()
+#     for p in main.commands[n].params:
+#         s.update(getattr(p,'opts',[])); s.update(getattr(p,'secondary_opts',[]))
+#     return s
+# print(sorted(full('scan')-full('compare')))"` -- current as of this commit
+# (minus the positional `artifact` operand, not a flag), see this function's
+# own git history for drift). Every one of these forces the legacy CLI
+# regardless of whether it takes a value, including the three boolean/
+# flag-only ones (`--pattern-verdicts`/its own `--no-pattern-verdicts`
+# negation, `--show-suppressed`) and `--max-findings` -- an earlier revision
+# left those four out on the reasoning that `compare` would reject any of
+# them outright as an unknown option anyway (a loud, immediate CLI usage
+# error, not a silent wrong-but-successful migration), so there was "no
+# distinct correctness gap" for this helper to close. A second Codex review
+# round found that reasoning incomplete: forcing a guaranteed usage error
+# when a working legacy `scan` invocation is one flag away is itself the
+# wrong outcome for a scan-only flag reaching here through `extra-args`, the
+# same as any other scan-only flag in this list -- there is no reason to
+# special-case the ones that happen to fail loudly vs. the ones that happen
+# to fail silently; both are "compare cannot run this invocation as
+# requested," and the fix in every case is staying on the CLI that can.
+# Every value-taking name here still only reaches this function's loop as a
+# `NAME<TAB>VALUE` row when it is also listed in `_extra_args_is_value_option`
+# above; every boolean/flag-only name reaches it as a bare `NAME<TAB>` row
+# via that tokenizer's own unconditional fallthrough (see
+# `_extra_args_options`'s own trailing `printf` -- no separate handling
+# needed here for the flag-only case).
 #
 # `--depth` mirrors the dedicated `INPUT_DEPTH` condition in the gate below
 # for the identical reason (scan's own auto-strict pinned-depth evidence
@@ -661,7 +719,8 @@ _extra_args_forces_legacy_scan_cli() {
   while IFS=$'\t' read -r _name _value; do
     case "$_name" in
       --against | --artifact-set | --budget | --build-target | --crosscheck | \
-      --manifest | --public-header-dir | --risk-rules | --depth)
+      --manifest | --max-findings | --pattern-verdicts | --no-pattern-verdicts | \
+      --public-header-dir | --risk-rules | --show-suppressed | --depth)
         return 0
         ;;
       --format)
@@ -1793,6 +1852,30 @@ elif [[ "$MODE" == "scan" ]]; then
   #     whichever command this gate selects, so the same gaps this list
   #     already names for a dedicated input apply identically when the same
   #     flag arrives through `extra-args` instead (Codex review, P2).
+  #   - `since`/`changed-path` given (a real diff seed) while `depth` is
+  #     empty/`auto`: `scan`'s own auto resolution
+  #     (`cli_scan.py`'s `_resolve_auto_source_method`) is risk-driven --
+  #     an unpinned depth with a valid `--since`/`--changed-path` seed
+  #     scores the changed paths and can auto-select a real depth (e.g.
+  #     `source`) based on that risk signal, only falling back to the mode
+  #     preset for an unseeded/failed diff. `compare`'s own resolver
+  #     (`cli_compare_helpers.py`'s `_resolve_compare_collect_mode`) has no
+  #     such risk-scoring step at all -- with no explicit `--depth`/
+  #     `source.method`, it infers depth only from whether `--sources`/
+  #     `--build-info` were themselves given, treating `--since`/
+  #     `--changed-path` purely as localization (which files to scope a
+  #     depth already chosen some other way to), never as a depth signal
+  #     of their own. So the identical Action inputs (e.g. `sources: ...`
+  #     plus `changed-path: README.md`, no `depth`) can resolve to a
+  #     different effective depth under each command -- different cost,
+  #     different collected evidence, potentially different findings
+  #     (Codex review, verified against `--sources ... --changed-path
+  #     README.md` resolving to depth `off` under scan's auto-resolution
+  #     but `source` under compare's). Reproducing scan's risk-scoring
+  #     auto-resolution on the `compare` path is real future work, not
+  #     attempted here; staying on the already-correct legacy CLI is the
+  #     safe fix for this PR, the same principle the pinned-depth condition
+  #     above already applies.
   #
   # Every one of these is a genuine, verified gap in `compare`'s current
   # capability surface, not a shortcut -- see this PR's own report for the
@@ -1812,6 +1895,8 @@ elif [[ "$MODE" == "scan" ]]; then
      || [[ -n "${INPUT_RISK_RULES:-}" ]] \
      || [[ -n "${INPUT_BUILD_TARGET:-}" ]] \
      || { [[ -n "${INPUT_DEPTH:-}" ]] && [[ "${INPUT_DEPTH:-}" != "auto" ]]; } \
+     || { { [[ -z "${INPUT_DEPTH:-}" ]] || [[ "${INPUT_DEPTH:-}" == "auto" ]]; } \
+          && { [[ -n "${INPUT_SINCE:-}" ]] || [[ -n "${INPUT_CHANGED_PATH:-}" ]]; }; } \
      || [[ "$FORCE_AUDIT_ONLY" == "true" ]] \
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
@@ -2421,9 +2506,21 @@ _run_abicheck_invocation() {
   ABICHECK_EXIT=0
   ABICHECK_OUTPUT=""
 
+  # `extra-args`' own `-o`/`--output` (both spellings of Click's single
+  # scalar option) is appended AFTER this invocation's own `-o "$OUTPUT_
+  # FILE"`, so it -- not the dedicated `output-file` input's `$OUTPUT_FILE`
+  # -- is where `abicheck` really writes its report whenever present
+  # (`_extra_args_output_path`'s own docstring). Resolved once, here, into
+  # `_primary_output_path` so every downstream reader (the file-vs-stdout
+  # capture decision right below, and `_json_report_src`'s own first branch)
+  # agrees on the one real destination instead of some trusting the stale/
+  # absent `$OUTPUT_FILE` while `abicheck` actually wrote elsewhere (second
+  # Codex review round, P1, fresh evidence).
+  _extra_output_path="$(_extra_args_output_path || true)"
+  _primary_output_path="${_extra_output_path:-${OUTPUT_FILE:-}}"
   _output_file_pre_fp=""
-  if [[ -n "${OUTPUT_FILE:-}" ]]; then
-    _output_file_pre_fp="$(_file_fingerprint "$OUTPUT_FILE")"
+  if [[ -n "$_primary_output_path" ]]; then
+    _output_file_pre_fp="$(_file_fingerprint "$_primary_output_path")"
   fi
   _extra_write_json_path="$(_extra_args_write_json_path || true)"
   _extra_write_json_pre_fp=""
@@ -2431,7 +2528,7 @@ _run_abicheck_invocation() {
     _extra_write_json_pre_fp="$(_file_fingerprint "$_extra_write_json_path")"
   fi
 
-  if [[ -n "${OUTPUT_FILE:-}" ]]; then
+  if [[ -n "$_primary_output_path" ]]; then
     # Output goes to file; capture stderr separately for error detection
     "${CMD[@]}" 2>"$STDERR_FILE" || ABICHECK_EXIT=$?
     if [[ -s "$STDERR_FILE" ]]; then
@@ -2510,7 +2607,18 @@ _is_cli_error() {
 # substitution. Without that file, every decision below took its "no report"
 # fallback for the one configuration that keeps the report on stdout.
 _json_report_src() {
-  # `OUTPUT_FILE`/the discovered `--write json=PATH` are pure write
+  # The real primary write destination for this invocation: `extra-args`'
+  # own `-o`/`--output` (`_extra_output_path`, resolved once in `_run_
+  # abicheck_invocation` before `${CMD[@]}` ran, since it's appended AFTER
+  # this invocation's own `-o "$OUTPUT_FILE"` and Click keeps only the last
+  # occurrence of a scalar option) takes priority over the dedicated
+  # `output-file` input's `$OUTPUT_FILE` when present -- matching how the
+  # CLI itself resolves the conflict. Falls back to the bare `$OUTPUT_FILE`
+  # global when `_primary_output_path` was never assigned at all (the
+  # isolated-extraction tests below, same fallback shape as the freshness
+  # variables' own `${...+x}` check just below).
+  local _report_output_path="${_primary_output_path:-${OUTPUT_FILE:-}}"
+  # `$_report_output_path`/the discovered `--write json=PATH` are pure write
   # destinations that can pre-exist this invocation (see the fingerprint
   # bookkeeping around the `${CMD[@]}` call above for why) -- trusted only
   # when non-empty AND its (mtime, size) fingerprint changed since just
@@ -2544,10 +2652,10 @@ _json_report_src() {
   # misses an `extra-args --format json` override), while the isolated
   # extraction tests above set only `$FORMAT` and rely on the fallback to
   # keep behaving exactly as before this fix.
-  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] \
+  if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" == "json" && -n "$_report_output_path" && -s "$_report_output_path" ]] \
      && { [[ -z "${_output_file_pre_fp+x}" ]] \
-          || [[ "$(_file_fingerprint "$OUTPUT_FILE")" != "$_output_file_pre_fp" ]]; }; then
-    echo "${OUTPUT_FILE}"
+          || [[ "$(_file_fingerprint "$_report_output_path")" != "$_output_file_pre_fp" ]]; }; then
+    echo "${_report_output_path}"
   elif [[ -n "${PR_JSON:-}" && -s "${PR_JSON:-}" ]]; then
     echo "${PR_JSON}"
   elif [[ -n "${_STDOUT_JSON_FILE:-}" ]]; then

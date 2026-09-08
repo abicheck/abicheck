@@ -324,6 +324,62 @@ class TestScanStaysOnLegacyCliForPinnedDepth:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForUnpinnedDepthWithChangeSeed:
+    """Second Codex review round, P1 (fresh evidence): when `depth` is
+    omitted/`auto` but a real diff seed (`since`/`changed-path`) is given,
+    `scan` and `compare` resolve the *effective* depth differently.
+
+    `cli_scan.py`'s `_resolve_auto_source_method` risk-scores the changed
+    paths and can auto-select a real depth (e.g. `source`) from that risk
+    signal, while `cli_compare_helpers.py`'s `_resolve_compare_collect_mode`
+    only infers depth from whether `--sources`/`--build-info` were given at
+    all -- treating the changed-path seed as pure localization, never as a
+    depth signal. `--sources ... --changed-path README.md` verifiably
+    resolves to depth `off` under scan's own auto-resolution but `source`
+    under compare's, for the identical Action inputs -- different cost,
+    different collected evidence, potentially different findings.
+
+    The bug class is "an unpinned depth with a change seed reachable through
+    either dedicated input this gate already forwards", not just one of the
+    two -- parametrized across both `since` and `changed-path` triggering
+    the fallback independently, plus each combined with an explicit `auto`
+    (spelled out) depth, mirroring `TestScanStaysOnLegacyCliForPinnedDepth`'s
+    own `auto`-is-not-pinned distinction.
+    """
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"INPUT_SINCE": "origin/main"},
+            {"INPUT_CHANGED_PATH": "src/foo.c"},
+            {"INPUT_SINCE": "origin/main", "INPUT_DEPTH": "auto"},
+            {"INPUT_CHANGED_PATH": "src/foo.c", "INPUT_DEPTH": "auto"},
+        ],
+    )
+    def test_unpinned_depth_with_change_seed_stays_on_scan(
+        self, extra: dict[str, str]
+    ) -> None:
+        cmd = _run_cmd(_base_env(**extra))
+        assert cmd[1] == "scan", cmd
+
+    def test_pinned_depth_with_change_seed_still_migrates_to_compare(self) -> None:
+        # A genuinely pinned (non-auto) depth already forces the legacy CLI
+        # for the unrelated pinned-depth reason above -- this proves the new
+        # condition doesn't spuriously widen what "pinned" means; the two
+        # conditions overlap here but neither depends on the other.
+        cmd = _run_cmd(_base_env(INPUT_SINCE="origin/main", INPUT_DEPTH="source"))
+        assert cmd[1] == "scan", cmd
+
+    def test_no_change_seed_with_unpinned_depth_still_migrates_to_compare(
+        self,
+    ) -> None:
+        # No `since`/`changed-path` at all -- the new condition must not
+        # fire just because depth is unpinned.
+        cmd = _run_cmd(_base_env())
+        assert cmd[1] == "compare", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
     """Codex review, P2 (fresh evidence): the `_SCAN_USES_LEGACY_CLI` gate
     only inspected dedicated `INPUT_*` fields, but `extra-args` is
@@ -353,6 +409,14 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
             "--manifest manifest.json",
             "--public-header-dir pub",
             "--depth source",
+            # Second Codex review round: the remaining scan-minus-compare
+            # flags a prior revision deliberately left out of this helper,
+            # both value-taking and boolean/flag-only (see the helper's own
+            # docstring for why a loud CLI usage error isn't an exemption).
+            "--max-findings 5",
+            "--pattern-verdicts",
+            "--no-pattern-verdicts",
+            "--show-suppressed",
         ],
     )
     def test_scan_only_extra_arg_stays_on_scan(self, extra_args: str) -> None:
@@ -383,10 +447,12 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
         cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--severity-preset strict"))
         assert cmd[1] == "compare", cmd
 
-    def test_pattern_verdicts_extra_arg_does_not_force_legacy_cli(self) -> None:
-        # `--pattern-verdicts` is a scan-only *boolean* flag `compare`
-        # rejects as an unknown option -- a loud, immediate CLI usage
-        # error either way, not a silent misbehavior, so this helper
-        # deliberately does not special-case it (see its own docstring).
-        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--pattern-verdicts"))
-        assert cmd[1] == "compare", cmd
+    # `--pattern-verdicts`/`--max-findings`/`--show-suppressed` used to be
+    # exempted here on the reasoning that `compare` would reject them
+    # outright as an unknown option anyway (a loud CLI usage error, not a
+    # silent misbehavior) -- a second Codex review round found that
+    # reasoning incomplete (see `_extra_args_forces_legacy_scan_cli`'s own
+    # docstring): forcing a guaranteed usage error when a working legacy
+    # `scan` invocation is one flag away is itself the wrong outcome, so
+    # these are now covered by the parametrized case above instead of
+    # exempted here.
