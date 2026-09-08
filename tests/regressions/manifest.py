@@ -1199,19 +1199,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, a linker-decorated spelling must be stripped to the "
-            "pure spelling at the POINT OF ORIGIN in every header-AST "
-            "backend's own parse step, for both a real Itanium name "
-            '(`__Z...` -> `_Z...`, unconditional) and a genuine extern "C"'
+            "On Darwin, strip a linker-decorated spelling to the pure "
+            "spelling AT THE POINT OF ORIGIN: a real Itanium name "
+            '(`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
             "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). "
-            "Both are gated on `is_darwin_target(target_triple)`, which "
-            "falls back to `sys.platform` on a probe failure -- but never "
-            "for an EXPLICIT non-Darwin `--target=` whose probe failed: "
-            "`_compiler_options.explicit_target_triple` (wired into "
-            "`dumper._run_clang`) recovers that request instead. The "
-            "shape check is the one canonical `model.mangled_name."
-            "strip_macho_itanium_decoration` -- NOT applied to castxml, "
-            "whose `mangled` never carries this decoration to begin with."
+            "Both gate on `is_darwin_target(target_triple)`, which answers "
+            "`False` for a bare `None`/empty triple always (a no-pipeline "
+            "unit-test construction also produces that shape -- never "
+            "guess Darwin from host OS there). A `sys.platform` guess for "
+            "a REAL probe failure lives one layer up, in "
+            "`dumper._run_clang`, after `_compiler_options."
+            "explicit_target_triple` (skipped for a CL-style driver). "
+            "Shape check: `model.mangled_name."
+            "strip_macho_itanium_decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156),
         seed_tests=(
@@ -1237,18 +1237,18 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "No Mach-O toolchain here -- code inspection + "
-                    "synthetic unit tests only. Recurred FOUR times: "
-                    "Itanium shape, plain-C bare-name shape, "
-                    "`is_darwin_target` reading False on a failed probe "
-                    "(PR #1138 follow-ups), then a fourth time in THAT "
-                    "fix itself (PR #1149) -- its guess lived INSIDE "
-                    "`is_darwin_target` (misclassifying an explicit "
-                    "non-Darwin `--target=`), plus an unconditional "
-                    'castxml-side strip corrupting a literal `asm("__Zfake'
-                    '")` label -- caught post-merge by Codex, fixed by '
-                    "PR #1156."
+                    "synthetic unit tests only. Recurred FIVE times: "
+                    "Itanium/plain-C shapes, `is_darwin_target` reading "
+                    "False on a failed probe (#1138); a fourth time in "
+                    "#1149's own fix (guess INSIDE `is_darwin_target`, "
+                    "plus an unconditional castxml strip corrupting "
+                    '`asm("__Zfake")`) -- fixed by #1156; a fifth within '
+                    "#1156's own first commit (guess put back INSIDE "
+                    "`is_darwin_target` broke its bare-`None` contract, "
+                    "caught by real macos-latest CI) -- fixed by moving "
+                    "it up into `dumper._run_clang`."
                 ),
-                reference="PR #1138/#1149 follow-ups, fixed by PR #1156",
+                reference="#1138/#1149 follow-ups, fixed by #1156",
             ),
         ),
     ),

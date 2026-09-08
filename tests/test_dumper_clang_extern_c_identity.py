@@ -126,29 +126,23 @@ def test_is_darwin_target(target_triple: str | None, expected: bool) -> None:
     assert is_darwin_target(target_triple) is expected
 
 
-@pytest.mark.parametrize("running_platform", ["darwin", "linux", "win32"])
-def test_is_darwin_target_falls_back_to_running_platform_when_no_triple(
-    monkeypatch: pytest.MonkeyPatch, running_platform: str
-) -> None:
-    """No *target_triple* at all (``None``/``""``) means the external
-    ``-print-target-triple`` compiler probe behind it either wasn't run or
-    failed -- see ``dumper._configured_target_triple``. Falling back to the
-    CURRENTLY RUNNING interpreter's own ``sys.platform`` is what keeps
-    Darwin decoration-stripping working even when that probe fails on a
-    real Darwin host (the exact class of bug this fallback closes); this
-    directly pins that fallback for both directions, independent of
-    whichever OS actually executes this test suite (Codex review, fresh
-    evidence: the previous, un-parametrized ``(None, False)``/``("",
-    False)`` cases above only happened to hold on a non-Darwin test
-    runner -- they would have silently started failing the moment this
-    exact test module ran on the ``macos-latest`` CI lane, without ever
-    exercising the fallback the fix actually depends on there)."""
-    import abicheck.extract.headers.clang.context as _context
-
-    monkeypatch.setattr(_context.sys, "platform", running_platform)
-    expected = running_platform == "darwin"
-    assert is_darwin_target(None) is expected
-    assert is_darwin_target("") is expected
+def test_is_darwin_target_never_guesses_darwin_from_bare_none() -> None:
+    """A bare ``None``/``""`` *target_triple* means "no evidence" and must
+    always answer ``False`` here, regardless of which OS actually runs
+    this test suite -- including on the real ``macos-latest`` CI lane.
+    This is deliberately NOT a ``sys.platform``-based guess: this same
+    bare-``None`` shape is what a direct, no-pipeline-involved unit-test
+    construction of ``_ClangAstParser`` (see e.g.
+    ``test_parse_functions_leading_underscore_not_extern_c_without_target``
+    below) also produces, and that test's own conservative "no evidence,
+    no guess" contract would silently flip on a Darwin test runner if this
+    function special-cased ``None`` by host platform (Codex review, fresh
+    evidence -- an earlier revision did exactly that and broke it). The
+    real dump pipeline's own probe-failure recovery lives one layer up, in
+    ``dumper._run_clang``, which passes in a real, non-``None`` triple
+    string instead of relying on this function to guess."""
+    assert is_darwin_target(None) is False
+    assert is_darwin_target("") is False
 
 
 def _tu(*inner: dict) -> dict:

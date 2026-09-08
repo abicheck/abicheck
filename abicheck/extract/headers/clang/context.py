@@ -47,7 +47,6 @@ own default-value evaluator as an explicit parameter for the same reason
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from ....dumper_clang_vtable import build_vtable, is_record_definition
@@ -317,28 +316,22 @@ def is_darwin_target(target_triple: str | None) -> bool:
     an unrelated component that merely happens to CONTAIN one of these
     tokens.
 
-    **Falls back to the running interpreter's own ``sys.platform`` when
-    *target_triple* is unavailable** (Codex review, macOS CI, fresh
-    evidence): *target_triple* here is whatever ``dumper._configured_
-    target_triple`` managed to probe by shelling out to the configured
-    compiler with ``-print-target-triple`` -- a real subprocess call that
-    can fail (a compiler resolution mismatch, a sandboxed/restricted CI
-    runner, a compiler build that doesn't support the flag) independently
-    of what platform this process is actually running on. When that probe
-    comes back empty, the previous behavior silently treated the target as
-    non-Darwin and skipped normalization entirely -- reproducing this
-    exact bug even on a real Darwin host. A header-AST extraction always
-    runs *natively* on the machine whose compiler produced the AST (there
-    is no cross-compilation path through this parser), so when the probe
-    is unavailable, the process's own OS is the next-best and highly
-    reliable signal: it is never wrong about which OS it is actually
-    running on, unlike an external probe that can simply fail. This can
-    only ever make Darwin detection *more* likely to succeed when the
-    process truly is on Darwin -- it never overrides an explicit,
-    successfully-probed non-Darwin triple.
+    A bare ``None``/empty *target_triple* means "no evidence" and always
+    answers ``False`` here -- never guess Darwin from the absence of
+    evidence (a direct unit-test construction of the parser with no
+    ``target_triple`` at all relies on exactly this). A real probe
+    failure inside the actual dump pipeline (``dumper._run_clang``) is a
+    DIFFERENT situation this function cannot see from a bare ``None``
+    alone -- that caller synthesizes its own ``sys.platform``-based
+    fallback *string* (still just an ordinary triple-shaped value from
+    this function's point of view) rather than asking this function to
+    special-case ``None`` (Codex review, macOS CI, fresh evidence: an
+    earlier revision special-cased ``None`` here, which also silently
+    changed this function's answer for every OTHER caller including the
+    direct-construction unit tests above).
     """
     if not target_triple:
-        return sys.platform == "darwin"
+        return False
     components = target_triple.lower().split("-")
     return "apple" in components or any(
         component.startswith(_DARWIN_OS_NAMES) for component in components
@@ -390,14 +383,15 @@ def strip_darwin_itanium_decoration(
     ``is_darwin_target`` has already confirmed the platform.
 
     Both gates lean on the SAME ``is_darwin_target`` check for their
-    platform confirmation, which is what makes that check's own
-    ``sys.platform`` fallback (see its docstring) load-bearing here too: if
-    the external ``-print-target-triple`` compiler probe behind
-    *target_triple* fails or returns something this module's Darwin-triple
-    heuristic doesn't recognize, neither case would strip anything on a
-    real Darwin host without that fallback -- reproducing this exact class
-    of bug even though the underlying evidence (a real compiled Mach-O
-    binary) never changed.
+    platform confirmation, so a *target_triple* that never reaches this
+    point at all (the external ``-print-target-triple`` compiler probe
+    behind it failed) means neither case strips anything -- this is why
+    ``dumper._run_clang``'s own probe-failure path synthesizes a real,
+    ``sys.platform``-based fallback *triple string* to pass in here rather
+    than leaving it bare ``None`` (see that call site's own comment):
+    without it, a probe failure on a real Darwin host reproduces this
+    exact class of bug even though the underlying evidence (a real
+    compiled Mach-O binary) never changed.
 
     The plain-C-linkage case (macOS CI, fresh evidence: a real Darwin
     ``extern "C"`` declaration's decorated ``mangledName`` -- ``"_c_func"``

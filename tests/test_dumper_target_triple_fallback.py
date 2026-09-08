@@ -16,7 +16,8 @@
 """``dumper._header_ast_parser``'s clang-backend call site (Codex review,
 fresh evidence): when a live ``clang -print-target-triple`` probe fails, the
 resulting parser must still carry an explicitly-requested ``--target=``
-triple rather than losing it to a bare ``None``.
+triple, or (failing that) a real ``sys.platform``-based fallback string,
+rather than losing it to a bare ``None``.
 
 Split out of ``test_dumper_clang.py`` (already at its ADR-061 file-size debt
 cap, see ``architecture/debt.yaml``) rather than added there.
@@ -27,6 +28,8 @@ module covers only the one thing that lives in ``dumper.py`` -- that the
 """
 
 from __future__ import annotations
+
+import sys
 
 import pytest
 
@@ -43,10 +46,9 @@ def test_probe_failure_recovers_explicit_target_triple(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A probe failure alone can't distinguish "no target requested" from
-    "an explicit, unprobeable cross-target" -- extract.headers.clang.
-    context.is_darwin_target's own sys.platform fallback for a bare None
-    is only safe for the former, so the explicit request must survive a
-    probe failure intact."""
+    "an explicit, unprobeable cross-target" -- this call site's own
+    sys.platform-based guess (tested below) is only safe for the former,
+    so the explicit request must survive a probe failure intact."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
@@ -77,14 +79,16 @@ def test_probe_failure_recovers_explicit_target_triple(
     assert parser._target_triple == "x86_64-unknown-linux-gnu"
 
 
-def test_probe_failure_with_no_explicit_target_stays_none(
+def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The genuinely-ambiguous case (no explicit --target=, probe failed)
-    must still reach the parser as bare None -- that's exactly the case
-    extract.headers.clang.context.is_darwin_target's own sys.platform
-    fallback exists to resolve, and this call site must not pre-empt it
-    with a wrong guess of its own."""
+    must reach the parser as a real, sys.platform-based triple string --
+    NOT bare None. extract.headers.clang.context.is_darwin_target itself
+    never guesses from a bare None (that shape also serves direct,
+    no-pipeline unit-test construction of the parser, which must stay
+    conservative regardless of host OS); only this real pipeline call
+    site, which knows a probe was genuinely attempted, earns the guess."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
@@ -109,7 +113,7 @@ def test_probe_failure_with_no_explicit_target_stays_none(
     )
 
     assert isinstance(parser, _ClangAstParser)
-    assert parser._target_triple is None
+    assert parser._target_triple == sys.platform
 
 
 def test_successful_probe_is_never_overridden_by_explicit_target(
@@ -154,8 +158,9 @@ def test_probe_failure_under_a_cl_style_driver_does_not_recover_target(
     """A CL-style driver (clang-cl/dpcpp-cl) parses MSVC-shaped flags, so a
     GNU-shaped ``-target=``/``--target=`` in forwarded options may be one it
     silently ignored rather than one it honored -- recovering it as if it
-    were real risks a WRONG platform guess. Stay with bare None (letting
-    is_darwin_target's own sys.platform fallback decide) instead."""
+    were real risks a WRONG platform guess. Falls through to the
+    sys.platform-based guess instead (harmless either way: clang-cl mainly
+    targets Windows, so sys.platform there is never "darwin")."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
@@ -181,4 +186,6 @@ def test_probe_failure_under_a_cl_style_driver_does_not_recover_target(
     )
 
     assert isinstance(parser, _ClangAstParser)
-    assert parser._target_triple is None
+    # Not the ignored explicit target -- proves the CL-style gate fired.
+    assert parser._target_triple != "x86_64-apple-macos11"
+    assert parser._target_triple == sys.platform

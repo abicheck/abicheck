@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import subprocess
+import sys
 import tempfile
 import warnings
 from collections.abc import Callable
@@ -624,18 +625,23 @@ def _header_ast_parser(
             public_dir_paths=public_dir_paths,
             # A probe failure (`_configured_target_triple` returning None)
             # carries no information about whether an explicit,
-            # possibly-non-native `--target=` was requested at all;
-            # `extract.headers.clang.context.is_darwin_target`'s own
-            # `sys.platform` fallback for a bare `None` is only safe for
-            # "no explicit target, probe failed" -- recover the literal
-            # request instead of losing it (Codex review, fresh evidence).
-            # Skipped for a CL-style driver (`clang-cl`/`dpcpp-cl`): it
-            # parses MSVC-shaped flags, so a GNU-shaped `-target=`/
-            # `--target=` in `gcc_options`/`gcc_option_tokens` may be one
-            # it silently ignores rather than one it honored -- recovering
-            # it as if it were real risks a WRONG platform guess instead of
-            # falling through to `is_darwin_target`'s own, safer
-            # `sys.platform` fallback (Codex review, fresh evidence).
+            # possibly-non-native `--target=` was requested at all --
+            # recover the literal request instead of losing it (skipped
+            # for a CL-style driver, `clang-cl`/`dpcpp-cl`: it parses
+            # MSVC-shaped flags, so a GNU-shaped `-target=`/`--target=`
+            # forwarded to one may be one it silently ignored rather than
+            # honored, and recovering it as if real risks a WRONG platform
+            # guess). Only once NEITHER yields anything does this fall
+            # back to a literal `sys.platform`-based triple string --
+            # deliberately synthesized HERE, not inside
+            # `extract.headers.clang.context.is_darwin_target` itself,
+            # because that function's bare-`None` case also serves direct,
+            # no-pipeline-involved unit-test construction of `_ClangAstParser`
+            # (`tests/test_dumper_clang_extern_c_identity.py`'s "no
+            # target_triple at all" cases), which must keep answering
+            # "not Darwin" regardless of which OS actually runs the test
+            # suite -- only a REAL probe attempted by this real pipeline
+            # earns the sys.platform guess (Codex review, fresh evidence).
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
@@ -643,6 +649,7 @@ def _header_ast_parser(
                     if _is_cl_style_driver_name(clang_bin)
                     else _explicit_target_triple(gcc_options, gcc_option_tokens)
                 )
+                or sys.platform
             ),
             no_binary_evidence=no_binary_evidence,
         )

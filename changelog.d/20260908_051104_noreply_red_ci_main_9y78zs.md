@@ -22,13 +22,19 @@ it should read in CHANGELOG.md. Delete the other sections.
   against the binary's own (correctly normalized) export table — the
   exact symptom behind a self-comparison of an unchanged Mach-O library
   reporting a spurious `COMPATIBLE_WITH_RISK` verdict.
-  `extract.headers.clang.context.is_darwin_target` now falls back to the
-  running interpreter's own `sys.platform` when the probed triple is
-  unavailable *and no explicit `--target=` was requested* — recovered via
-  a new `_compiler_options.explicit_target_triple` helper wired into
-  `dumper._run_clang`'s own probe-failure path — so an explicit,
-  unprobeable cross-target request is never silently reinterpreted as the
-  host platform. The `"__Z..."` -> `"_Z..."` structural check itself is
+  `dumper._run_clang`'s own probe-failure path now recovers a literal,
+  explicitly-requested `--target=` via a new `_compiler_options.
+  explicit_target_triple` helper, and — only when no explicit target was
+  requested either (and the resolved compiler isn't a CL-style driver
+  like `clang-cl`, whose flag syntax differs) — falls back to a triple
+  string derived from the running interpreter's own `sys.platform`.
+  `extract.headers.clang.context.is_darwin_target` itself is unchanged
+  and still answers `False` for a bare `None`/empty triple unconditionally
+  — the `sys.platform` guess is deliberately synthesized one layer up, in
+  the real dump pipeline only, so a direct unit-test construction of the
+  parser (which also passes no target triple) keeps its existing,
+  conservative "no evidence, no guess" behavior regardless of which OS
+  runs the test suite. The `"__Z..."` -> `"_Z..."` structural check itself is
   now the single canonical `model.mangled_name.strip_macho_itanium_
   decoration` helper, reused by `extract.headers.clang.context.
   strip_darwin_itanium_decoration`, `model.mangled_name.
