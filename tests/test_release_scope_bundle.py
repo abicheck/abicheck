@@ -931,7 +931,7 @@ class TestExplicitNullMarkerIsRejected:
 
 
 class TestNoticeAttributesTheFailureToTheRightPolicy:
-    """`comparison_scope_notice` names `--on-incomplete-scope block` only
+    """`comparison_scope_notice` names `scope.on_incomplete: block` only
     when the D6 policy is what fails the run. A zero-comparison run (D7)
     fails under either policy through its own contribution, so it is never
     attributed to `block`, which the user may not have selected (Codex
@@ -979,7 +979,7 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
         assert notice is not None
         assert notice.startswith("No comparison completed")
         assert "never a clean pass" in notice and "D7" in notice
-        assert "(--on-incomplete-scope block)" not in notice
+        assert "(scope.on_incomplete: block)" not in notice
         assert "accepted as a warning" not in notice
 
     @pytest.mark.parametrize("policy", ["warn", "block"])
@@ -997,9 +997,9 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
         assert notice.startswith("Comparison scope incompletely checked")
         assert "never a clean pass" not in notice
         if policy == "block":
-            assert notice.endswith("fails the run (--on-incomplete-scope block)")
+            assert notice.endswith("fails the run (scope.on_incomplete: block)")
         else:
-            assert notice.endswith("accepted as a warning (--on-incomplete-scope warn)")
+            assert notice.endswith("accepted as a warning (scope.on_incomplete: warn)")
 
 
 class TestScopeMarkdownEscapesUncontrolledValues:

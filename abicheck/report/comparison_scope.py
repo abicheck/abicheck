@@ -82,7 +82,7 @@ class ComparisonScopeTerms:
 
     @property
     def policy(self) -> str:
-        """The effective ``--on-incomplete-scope`` policy the decision applied."""
+        """The effective ``scope.on_incomplete`` policy the decision applied."""
         return self.decision.policy
 
     @property
@@ -204,15 +204,15 @@ def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:
             lead += f"; unchecked: {names}"
         return (
             lead
-            + " -- never a clean pass, under either --on-incomplete-scope policy (ADR-065 D7)"
+            + " -- never a clean pass, under either scope.on_incomplete setting (ADR-065 D7)"
         )
     lead = f"Comparison scope incompletely checked; unchecked: {names}"
     blocking = int(section.get("incomplete_scope_exit_contribution") or 0)
     policy = section.get("policy", "warn")
     tail = (
-        " -- fails the run (--on-incomplete-scope block)"
+        " -- fails the run (scope.on_incomplete: block)"
         if blocking
-        else f" -- accepted as a warning (--on-incomplete-scope {policy})"
+        else f" -- accepted as a warning (scope.on_incomplete: {policy})"
     )
     return lead + tail
 
@@ -242,7 +242,7 @@ def render_comparison_scope_markdown(section: Mapping[str, Any]) -> list[str]:
         f"| **Selection** | {_md_cell(section.get('selection_reason') or section.get('selection'))} |"
     )
     lines.append(
-        f"| **Policy** | `--on-incomplete-scope {section.get('policy', 'warn')}` "
+        f"| **Policy** | `scope.on_incomplete: {section.get('policy', 'warn')}` "
         f"(contributes {section.get('incomplete_scope_exit_contribution', 0)} to the exit code) |"
     )
     old_inv = section.get("old_inventory") or {}

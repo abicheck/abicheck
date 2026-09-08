@@ -84,7 +84,7 @@ def append_scope_suite(
             skipped.set(
                 "message",
                 f"comparison scope: {m.get('name')} was not compared ({text}); "
-                f"accepted by --on-incomplete-scope {section.get('policy', 'warn')}",
+                f"accepted under scope.on_incomplete: {section.get('policy', 'warn')}",
             )
     if no_comparison:
         case = ET.SubElement(suite, "testcase")

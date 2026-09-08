@@ -301,6 +301,98 @@ add_single_flag() {
 # compile: block with the other, the same "explicit input deserves a loud
 # rejection, not a silent wrong result" precedent the release-operand guard
 # below already sets for this identical flag family.
+#
+# When build-config is NOT given, this Action's own synthesized overlay is
+# not the whole config picture: `_resolve_compare_config` only ever reads
+# ONE `--config` document (`config if config is not None else
+# discover_project_config()`, `cli_compare_helpers.py`) -- an explicit
+# `--config` fully replaces auto-discovery, it never augments it. Writing
+# only the topology/compile keys to `--config` would therefore silently
+# DROP the repository's own auto-discovered `.abicheck.yml` (severity/
+# suppress/scope/bundle/... blocks) the moment any of these forwarding
+# inputs is used, turning on e.g. `dso-only` into an accidental reset of
+# every other project setting (Codex review, PR #1159). So this Action
+# does the discovery itself, from the real project directory (`$PWD`,
+# captured before any inline-Python invocation's own `cd "$_PY_SAFE_DIR"`)
+# and merges the synthesized keys into a COPY of whatever
+# `discover_project_config()` would have found -- Action inputs winning on
+# a key conflict, exactly the same precedence an explicit build-config
+# input already takes over auto-discovery. No project config found is the
+# base case: the overlay alone is written, unchanged from before.
+_merge_config_overlay_with_discovered_project_config() {
+  # $1: overlay JSON object (already built by the caller, e.g.
+  #     '{"compile": {...}}' or '{"release": {...}, "gate": {...}}').
+  # $2: output path to write the merged document to.
+  # $3: project directory to discover a `.abicheck.yml` from (walking up to
+  #     the filesystem root, same as `discover_project_config()`).
+  local overlay_json="$1"
+  local out_path="$2"
+  local project_start="$3"
+  if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    # Same "fail loud rather than silently produce a wrong compile/release
+    # context" precedent as add_flag_shlex_split's own missing-interpreter
+    # guard above: silently falling back to "just the overlay" here would
+    # reintroduce the exact config-dropping bug this function exists to fix,
+    # on precisely the runners least able to detect it.
+    echo "::error::mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
+    exit 1
+  fi
+  (cd "$_PY_SAFE_DIR" \
+   && ABICHECK_PROJECT_CONFIG_START="$project_start" \
+      ABICHECK_OVERLAY_JSON="$overlay_json" \
+      PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
+# Discovers the real project .abicheck.yml (if any) the same way
+# discover_project_config() does -- config_paths.find_config_in_dir(),
+# walking from the project start directory up to the filesystem root, first
+# match wins -- and merges the overlay JSON (read from an env var, not
+# stdin -- stdin here is already this script's own source, fed by the
+# caller's heredoc) into a shallow copy of it, one top-level key at a time
+# (overlay wins on conflict within a shared top-level key; every other key
+# the project config carries is passed through untouched). Writes the
+# merged result as JSON, a valid YAML subset abicheck's own yaml.safe_load
+# parses identically.
+import json
+import os
+import sys
+from pathlib import Path
+
+import yaml
+
+from abicheck.config_paths import find_config_in_dir
+
+out_path = sys.argv[1]
+overlay = json.loads(os.environ["ABICHECK_OVERLAY_JSON"])
+
+start = Path(os.environ.get("ABICHECK_PROJECT_CONFIG_START") or ".").resolve()
+candidates = [start, *start.parents]
+
+base: dict[str, object] = {}
+for directory in candidates:
+    found = find_config_in_dir(directory)
+    if found is None:
+        continue
+    try:
+        loaded = yaml.safe_load(found.read_text(encoding="utf-8"))
+    except Exception:
+        loaded = None
+    if isinstance(loaded, dict):
+        base = loaded
+    break
+
+for key, value in overlay.items():
+    if isinstance(value, dict) and isinstance(base.get(key), dict):
+        merged = dict(base[key])
+        merged.update(value)
+        base[key] = merged
+    else:
+        base[key] = value
+
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(base, f)
+PYEOF
+  )
+}
+
 _COMPILE_CONTEXT_CONFIG_OVERLAY=""
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
@@ -321,7 +413,8 @@ add_compile_context_flags() {
     exit 1
   fi
   if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
-    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
+    local _compile_overlay_json
+    _compile_overlay_json=$(
     ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
     ABICHECK_COMPILE_INCLUDE_LANG="$include_lang" \
     ABICHECK_COMPILE_FRONTEND="${INPUT_AST_FRONTEND:-}" \
@@ -330,17 +423,20 @@ add_compile_context_flags() {
     ABICHECK_COMPILE_GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}" \
     ABICHECK_COMPILE_SYSROOT="${INPUT_SYSROOT:-}" \
     ABICHECK_COMPILE_NOSTDINC="${INPUT_NOSTDINC:-false}" \
-    python3 - "$_COMPILE_CONTEXT_CONFIG_OVERLAY" <<'PYEOF'
+    python3 <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `compile:` block (as JSON, a valid
 # YAML subset abicheck's own yaml.safe_load parses identically) from this
 # Action's cross-compilation inputs -- the config-only replacement for the
-# per-run flags Phase 7 removed from compare/dump.
+# per-run flags Phase 7 removed from compare/dump. Printed to stdout (not
+# written directly to the overlay path) so the caller can merge it with the
+# repository's own auto-discovered .abicheck.yml before writing the final
+# file -- see _merge_config_overlay_with_discovered_project_config's own
+# docstring for why an unmerged overlay would silently drop that config.
 import json
 import os
 import shlex
 import sys
 
-out_path = sys.argv[1]
 compile_blk: dict[str, object] = {}
 if os.environ.get("ABICHECK_COMPILE_INCLUDE_LANG") == "true":
     lang = os.environ.get("ABICHECK_COMPILE_LANG", "")
@@ -389,9 +485,12 @@ if sysroot:
     compile_blk["sysroot"] = sysroot
 if os.environ.get("ABICHECK_COMPILE_NOSTDINC") == "true":
     compile_blk["nostdinc"] = True
-with open(out_path, "w", encoding="utf-8") as f:
-    json.dump({"compile": compile_blk}, f)
+json.dump({"compile": compile_blk}, sys.stdout)
 PYEOF
+    )
+    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
+    _merge_config_overlay_with_discovered_project_config \
+      "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD"
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
 }
@@ -422,22 +521,31 @@ add_release_topology_config_flags() {
     echo "::error::mode: compare with a directory/package operand cannot combine dso-only/include-private-dso/fail-on-removed-library with build-config: those settings now live only in .abicheck.yml's release:/gate: blocks (Phase 7d CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
     exit 1
   fi
-  local overlay
-  overlay=$(mktemp)
+  for _existing in "${CMD[@]}"; do
+    if [[ "$_existing" == "--config" ]]; then
+      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line -- this is a bug in run.sh, not a user input problem."
+      exit 1
+    fi
+  done
+  local _release_overlay_json
+  _release_overlay_json=$(
   ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-false}" \
   ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-false}" \
   ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" \
-  python3 - "$overlay" <<'PYEOF'
+  python3 <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
 # this Action's release-topology inputs -- the config-only replacement for
 # the per-run flags Phase 7d removed from compare's directory/package
-# fan-out.
+# fan-out. Printed to stdout (not written directly to the overlay path) so
+# the caller can merge it with the repository's own auto-discovered
+# .abicheck.yml before writing the final file -- see
+# _merge_config_overlay_with_discovered_project_config's own docstring for
+# why an unmerged overlay would silently drop that config.
 import json
 import os
 import sys
 
-out_path = sys.argv[1]
 doc: dict[str, object] = {}
 release_blk: dict[str, object] = {}
 if os.environ.get("ABICHECK_RELEASE_DSO_ONLY") == "true":
@@ -448,15 +556,13 @@ if release_blk:
     doc["release"] = release_blk
 if os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY") == "true":
     doc["gate"] = {"fail_on_removed_library": True}
-with open(out_path, "w", encoding="utf-8") as f:
-    json.dump(doc, f)
+json.dump(doc, sys.stdout)
 PYEOF
-  for _existing in "${CMD[@]}"; do
-    if [[ "$_existing" == "--config" ]]; then
-      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line -- this is a bug in run.sh, not a user input problem."
-      exit 1
-    fi
-  done
+  )
+  local overlay
+  overlay=$(mktemp)
+  _merge_config_overlay_with_discovered_project_config \
+    "$_release_overlay_json" "$overlay" "$PWD"
   CMD+=(--config "$overlay")
 }
 
@@ -3143,7 +3249,7 @@ _scope_accepted_note() {
   local _scope_accepted_where
   _scope_accepted_where=$(_report_query "$(_json_report_src)" scope_where 2>/dev/null || true)
   echo ">"
-  echo "> ℹ️ The comparison scope was **not fully checked** (ADR-065), accepted by \`--on-incomplete-scope warn\` (the default)${_scope_accepted_where:+: \`$_scope_accepted_where\`}. The compatibility verdict above covers the compared members only — see \`comparison_scope\` in the JSON report."
+  echo "> ℹ️ The comparison scope was **not fully checked** (ADR-065), accepted under \`scope.on_incomplete: warn\` (the default)${_scope_accepted_where:+: \`$_scope_accepted_where\`}. The compatibility verdict above covers the compared members only — see \`comparison_scope\` in the JSON report."
 }
 
 _blocking_gate_note() {
@@ -3187,7 +3293,7 @@ _blocking_gate_note() {
   # identical reason: orthogonal, so it is reported on its own terms.
   if _scope_gated && [[ "$GATE_TIER" != "SCOPE_INCOMPLETE" ]]; then
     echo ">"
-    echo "> ⚠️ The comparison scope also contributed to this run's exit (ADR-065: an unchecked selected member under --on-incomplete-scope block, or no comparison completed). Orthogonal to the compatibility verdict and to the severity policy — see \`comparison_scope\` in the JSON report."
+    echo "> ⚠️ The comparison scope also contributed to this run's exit (ADR-065: an unchecked selected member under scope.on_incomplete: block, or no comparison completed). Orthogonal to the compatibility verdict and to the severity policy — see \`comparison_scope\` in the JSON report."
   else
     _scope_accepted_note
   fi
@@ -3204,7 +3310,7 @@ _blocking_gate_note() {
   elif [[ "$GATE_TIER" == "SCOPE_INCOMPLETE" ]]; then
     # ADR-065's completeness axis, same orthogonal-axis shape as the two
     # branches around it.
-    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal completeness axis (ADR-065: an unchecked selected member under --on-incomplete-scope block, or no comparison completed). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal completeness axis (ADR-065: an unchecked selected member under scope.on_incomplete: block, or no comparison completed). That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
   elif [[ "$GATE_TIER" == "ANALYSIS_INCOMPLETE" ]]; then
     # P0.4's assurance axis, mirroring the COVERAGE_INCOMPLETE branch
     # immediately above -- same orthogonal-axis shape, different evidence
@@ -3488,7 +3594,7 @@ else
               # Same "not a break, not a severity-policy failure" shape as
               # the coverage branch above.
               VERDICT="SCOPE_INCOMPLETE"
-              echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under --on-incomplete-scope block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
+              echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under scope.on_incomplete: block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
               if _assurance_gated; then
                 echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
               fi
@@ -3719,7 +3825,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         _json_src=$(_json_report_src)
         _scope_where=$(_report_query "$_json_src" scope_where)
         if [[ -n "$_scope_where" ]]; then
-          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked: \`$_scope_where\` (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. Supply the missing members, or accept an incompletely checked scope with \`--on-incomplete-scope warn\` (the default; a run that completed no comparison at all still fails)."
+          echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked: \`$_scope_where\` (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. Supply the missing members, or accept an incompletely checked scope with \`scope.on_incomplete: warn\` (the default; a run that completed no comparison at all still fails)."
         else
           echo "> **Verdict: SCOPE_INCOMPLETE** ⚠️ — The comparison scope was not fully checked (ADR-065). This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict covers the compared members only. See \`comparison_scope\` in the JSON report."
         fi
@@ -4339,7 +4445,7 @@ else
   # user's own choice, and a run that completed no comparison is never a
   # pass under any setting (D7).
   if _scope_gated; then
-    echo "::error::abicheck's comparison scope was not fully checked (an unchecked selected member under --on-incomplete-scope block, or no comparison completed at all); see comparison_scope in the JSON report."
+    echo "::error::abicheck's comparison scope was not fully checked (an unchecked selected member under scope.on_incomplete: block, or no comparison completed at all); see comparison_scope in the JSON report."
     FINAL_EXIT=1
   fi
 fi

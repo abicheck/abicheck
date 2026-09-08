@@ -28,6 +28,19 @@ and forwards it via ``--config`` instead
 (:func:`add_compile_context_flags`, extracted verbatim below). ``scan``
 is unaffected: it keeps every one of these flags, so its own region below
 is untouched and still asserts literal flag forwarding.
+
+``add_compile_context_flags`` no longer writes its synthesized overlay
+directly (Codex review, PR #1159 P1): an explicit ``--config`` fully
+replaces ``_resolve_compare_config``'s own auto-discovery of the
+repository's ``.abicheck.yml``, so it now routes through the shared
+``_merge_config_overlay_with_discovered_project_config`` helper (also
+extracted below), which discovers and merges in the real project config
+before writing the file ``--config`` points at -- see
+``test_action_release_topology_config.py``'s module docstring for the full
+account (that module carries the dedicated merge-behavior regression
+tests; this one stays focused on flag-forwarding parity, isolating its own
+harness's working directory from any real ``.abicheck.yml`` purely so the
+merge step degrades to its pre-merge no-op base case here).
 """
 
 from __future__ import annotations
@@ -172,6 +185,21 @@ def _py_bin_has_abicheck_source() -> str:
     return text[start:end]
 
 
+# The merge helper add_compile_context_flags now routes its overlay through
+# (module docstring) -- extracted verbatim, same markers
+# test_action_release_topology_config.py's own
+# `_merge_config_overlay_fn_source` uses.
+_MERGE_FN_START = "_merge_config_overlay_with_discovered_project_config() {"
+_MERGE_FN_END = "\n_COMPILE_CONTEXT_CONFIG_OVERLAY="
+
+
+def _merge_config_overlay_fn_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_MERGE_FN_START)
+    end = text.index(_MERGE_FN_END, start)
+    return text[start:end]
+
+
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
     _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
@@ -297,6 +325,7 @@ def _run_region(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + _add_compile_context_flags_source()
@@ -308,7 +337,14 @@ def _run_region(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    out = _run_bash_script(script, env, check=True)
+    # add_compile_context_flags now discovers a project .abicheck.yml from
+    # its caller's own working directory and merges it into the synthesized
+    # overlay (module docstring) -- an isolated, freshly created directory
+    # keeps every parity test here exercising the pre-merge "no project
+    # config found" base case, regardless of what happens to exist above
+    # wherever this test process's own CWD is.
+    with tempfile.TemporaryDirectory() as isolated_cwd:
+        out = _run_bash_script(script, env, check=True, cwd=Path(isolated_cwd))
     return out.stdout.splitlines(), out.stderr
 
 
@@ -332,6 +368,7 @@ def _run_region_raw(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + _add_compile_context_flags_source()
@@ -343,7 +380,9 @@ def _run_region_raw(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    return _run_bash_script(script, env, check=False)
+    # See _run_region's identical isolation comment above.
+    with tempfile.TemporaryDirectory() as isolated_cwd:
+        return _run_bash_script(script, env, check=False, cwd=Path(isolated_cwd))
 
 
 def _read_compile_config_overlay(cmd: list[str]) -> dict[str, Any]:

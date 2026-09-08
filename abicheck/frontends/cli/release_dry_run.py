@@ -131,6 +131,6 @@ def release_dry_run_plan_lines(
     if plan.missing_required:
         lines.append(
             f"{len(plan.missing_required)} required member(s) would not be "
-            "compared -- see --on-incomplete-scope"
+            "compared -- see .abicheck.yml's scope.on_incomplete"
         )
     return lines
