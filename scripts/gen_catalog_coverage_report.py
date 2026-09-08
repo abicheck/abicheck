@@ -260,7 +260,7 @@ def _workflow_coverage() -> str:
         f"**{len(workflows)} workflow example{'' if len(workflows) == 1 else 's'}** "
         f"so far, out of the {len(PHASE5_TARGET_WORKFLOWS)} task-oriented "
         "workflows Phase 5 of the examples/catalog split (retired plan "
-        "record; see `docs/contribute/plans/index.md`) targets: "
+        "record; see [plans/index.md](plans/index.md)) targets: "
         f"{', '.join(PHASE5_TARGET_WORKFLOWS)}."
     )
     rows = [
@@ -297,7 +297,7 @@ def render() -> str:
         "# Catalog coverage by dimension",
         "",
         f"Phase 6 of the examples/catalog split (retired plan record; see "
-        f"`docs/contribute/plans/index.md`): the calibration "
+        f"[plans/index.md](plans/index.md)): the calibration "
         f"catalog under `examples/` is {len(taxonomy)} `caseNN_*` fixtures, "
         f"but not {len(taxonomy)} independent ABI/API concepts -- several "
         "are variants of the same rule, or scenarios composing rules "
