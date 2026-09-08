@@ -1063,6 +1063,12 @@ def _release_findings_for_render(
     still routes through here so the private keys are stripped from *that*
     render too.
 
+    The identical swap applies to the analogous ``impact_table``/
+    ``impact_table_view`` pair (present only under ``--view impact``,
+    Codex review, PR #1154 follow-up: "Reject unsupported impact views
+    instead of silently dropping them") -- same private-key contract, same
+    full-vs-filtered rule.
+
     Returns a new list of shallow-copied dicts; *library_results* itself
     (and the dicts inside it) is never mutated, so the same shared list can
     feed a filtered primary render and a full secondary render in either
@@ -1086,6 +1092,13 @@ def _release_findings_for_render(
                 projected["findings_truncated"] = True
             else:
                 projected.pop("findings_truncated", None)
+        has_impact_view = "impact_table_view" in projected
+        impact_view = projected.pop("impact_table_view", None)
+        if show_only is not None and has_impact_view:
+            if impact_view:
+                projected["impact_table"] = impact_view
+            else:
+                projected.pop("impact_table", None)
         result.append(projected)
     return result
 

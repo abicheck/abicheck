@@ -874,10 +874,18 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
     lines: list[str] = []
     for lib in library_results:
         findings = lib.get("findings")
-        if not findings:
+        impact_table = lib.get("impact_table")
+        impact_root_entries = (
+            impact_table.get("root_entries") if isinstance(impact_table, dict) else None
+        ) or []
+        impact_direct_removals = (
+            impact_table.get("direct_removals", 0) if isinstance(impact_table, dict) else 0
+        )
+        has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
+        if not findings and not has_impact:
             continue
         lines += ["", f"### `{lib['library']}` Findings", ""]
-        for f in cast(list[dict[str, object]], findings):
+        for f in cast(list[dict[str, object]], findings or []):
             symbol = f.get("symbol")
             lines.append(
                 f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
@@ -898,6 +906,23 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
                 "(or compare this library individually) for the complete "
                 "list._"
             )
+        if has_impact:
+            # `--view impact`'s aggregate counterpart (Codex review, PR
+            # #1154 follow-up: "Reject unsupported impact views instead of
+            # silently dropping them") -- same shape
+            # `reporter_markdown.compute_impact_table` produces for a
+            # single-pair `compare` report, rendered per library here since
+            # a release has one impact table per library, not one overall.
+            lines.append("")
+            lines.append(f"**Impact** for `{lib['library']}`:")
+            for entry in impact_root_entries:
+                lines.append(
+                    f"- `{entry.get('symbol')}` ({entry.get('kind')}): "
+                    f"{entry.get('iface_count', 0)} interface(s), "
+                    f"{entry.get('caused', 0)} caused change(s)"
+                )
+            if impact_direct_removals:
+                lines.append(f"- {impact_direct_removals} direct removal(s)")
     return ["", "## Per-Library Findings", *lines] if lines else []
 
 

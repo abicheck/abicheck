@@ -131,11 +131,21 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     # report_mode's "leaf"/"root-cause" restructure a single DiffResult's own
     # root-cause graph -- the release report has no such graph to
     # restructure (the same mismatch --format sarif/html/review hits below),
-    # so those two are rejected; "impact" degrades to a silent "full".
+    # so those two are rejected. "impact" (Codex review, PR #1154 second
+    # follow-up: "Reject unsupported impact views instead of silently
+    # dropping them") is neither implemented as a real aggregate nor
+    # rejected here as a usage error -- it is threaded through as
+    # show_impact, since (unlike leaf/root-cause) an impact summary is
+    # naturally per-library: each library already has its own DiffResult,
+    # so `_strip_diff_results_and_adjust_verdict` computes one impact table
+    # per library from it, the same way it already computes one findings
+    # list per library. See that function's own docstring for the full
+    # account.
     report_mode = kwargs.pop("report_mode", "full")
     kwargs["show_only"] = kwargs.pop("show_only", None)
     kwargs["demangle"] = kwargs.pop("demangle", None)
     kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
+    kwargs["show_impact"] = report_mode == "impact"
     if report_mode == "impact":
         report_mode = "full"
     if report_mode not in ("full",):

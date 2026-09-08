@@ -442,6 +442,18 @@ def compare_release_cmd(
     show_only: str | None = None,
     demangle: bool | None = None,
     explain_patterns: bool = False,
+    # Codex review (PR #1154 follow-up): "Reject unsupported impact views
+    # instead of silently dropping them" -- `compare --view impact`'s
+    # aggregate counterpart. Unlike `report_mode`'s "leaf"/"root-cause"
+    # (rejected outright above `_dispatch_release_compare`), the impact
+    # summary is naturally per-library (each library's own DiffResult
+    # already yields its own table), so it is threaded through rather than
+    # dropped or rejected -- see `_strip_diff_results_and_adjust_verdict`'s
+    # own docstring for how each library's table is computed. `False` (the
+    # default) is a true no-op, matching every pre-existing caller (this
+    # command has no `--view` option of its own; only `compare`'s
+    # directory/package dispatch supplies a non-default value).
+    show_impact: bool = False,
     # CodeRabbit review, PR #1138: a project's `.abicheck.yml`
     # `scope.public_header_dirs` (`workflows.public_header_boundary.
     # project_config_public_header_dirs`), resolved once by the caller
@@ -1112,6 +1124,7 @@ def compare_release_cmd(
                 severity_config,
                 needs_annotations=(fmt == "json" or secondary_fmt == "json"),
                 show_only=show_only,
+                show_impact=show_impact,
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).

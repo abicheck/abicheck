@@ -461,6 +461,54 @@ def _release_gating_buckets(
     ]
 
 
+def _release_display_buckets(
+    diff: DiffResult,
+    severity_config: SeverityConfig | None,
+) -> list[tuple[str, list[Change]]]:
+    """Return every (bucket, changes) group in *diff*, for display purposes.
+
+    Codex review (PR #1154 follow-up, "Filter the complete release finding
+    set"): :func:`_release_gating_buckets` deliberately narrows to only the
+    categories that can gate the release's own exit code -- under the
+    legacy scheme that's breaking/api_break/risk, and under a severity
+    scheme it's further narrowed to whichever categories
+    ``gate_decision_for_result`` says are actually *blocking*. That
+    restriction is correct for computing the exit code, but the release
+    fan-out's own `findings`/`findings_view` display pool used the same
+    restricted buckets -- so a `func_added`/other COMPATIBLE finding could
+    never appear in a directory/package release's own findings list (nor
+    be reachable via `--view show=compatible`/`show=added`), even though
+    the identical single-pair `compare` for that same library displays it.
+    This function is the unrestricted counterpart: every category, always,
+    regardless of what's blocking -- the same "full diff, not the gate's
+    own subset" pool a single-pair `compare` report renders from. Gate
+    bucket restriction stays reserved for :func:`_release_gating_buckets`'s
+    own exit-code-facing callers.
+    """
+    if severity_config is not None:
+        from .workflows.gate import categorize_changes
+
+        kind_sets = diff._effective_kind_sets()
+        categorized = categorize_changes(
+            diff.changes,
+            policy=diff.policy,
+            kind_sets=kind_sets,
+            policy_file=diff.policy_file,
+        )
+        return [
+            ("abi_breaking", categorized.abi_breaking),
+            ("potential_breaking", categorized.potential_breaking),
+            ("quality_issues", categorized.quality_issues),
+            ("addition", categorized.addition),
+        ]
+    return [
+        ("breaking", diff.breaking),
+        ("api_break", diff.source_breaks),
+        ("risk", diff.risk),
+        ("compatible", diff.compatible),
+    ]
+
+
 def _release_finding_dicts(
     diff: DiffResult,
     severity_config: SeverityConfig | None = None,
@@ -471,11 +519,15 @@ def _release_finding_dicts(
     Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
     ``stack_report._stack_finding_dicts``. Counts (not already-built dicts)
     decide the cap so a large diff never builds more dicts than the cap can
-    ever keep. See :func:`_release_gating_buckets` for which findings this
-    walks under a legacy vs. severity-aware exit-code scheme.
+    ever keep. See :func:`_release_display_buckets` for which findings this
+    walks -- the full diff (all categories), not the narrower
+    :func:`_release_gating_buckets` subset that only ever gates the exit
+    code (Codex review, PR #1154 follow-up: "Filter the complete release
+    finding set" -- a compatible addition must be reachable here the same
+    way it is in a single-pair `compare` report).
 
     *show_only* (Codex review, PR #1154 follow-up: `compare --view
-    show=...` on a directory/package input) filters each gating bucket the
+    show=...` on a directory/package input) filters each display bucket the
     same way a single-pair `compare`'s own report filters `result.changes`
     (`reporter_markdown.apply_show_only`, resolved against this library's
     own effective kind sets/policy file so it never disagrees with the
@@ -487,7 +539,7 @@ def _release_finding_dicts(
     from .reporter_markdown import apply_show_only
 
     findings: list[dict[str, object]] = []
-    for bucket_name, bucket_changes in _release_gating_buckets(diff, severity_config):
+    for bucket_name, bucket_changes in _release_display_buckets(diff, severity_config):
         if show_only:
             bucket_changes = apply_show_only(
                 bucket_changes,
@@ -520,6 +572,7 @@ def _strip_diff_results_and_adjust_verdict(
     *,
     needs_annotations: bool = True,
     show_only: str | None = None,
+    show_impact: bool = False,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -566,6 +619,21 @@ def _strip_diff_results_and_adjust_verdict(
     file overrides), which needs the live ``Change`` objects this function
     is the last place to see before they are discarded for memory.
 
+    *show_impact* (Codex review, PR #1154 follow-up: "Reject unsupported
+    impact views instead of silently dropping them" -- ``compare --view
+    impact`` on a directory/package input) computes each library's own
+    impact-summary table (:func:`abicheck.reporter_markdown.
+    compute_impact_table`, the identical helper a single-pair `compare`
+    report's own impact table uses) from the same full display pool
+    :func:`_release_display_buckets` builds, stashed as ``entry[
+    "impact_table"]`` (``None``-valued tables are simply omitted, matching
+    how ``entry["findings"]`` is only set when non-empty). When *show_only*
+    is also active, a second, filtered ``entry["impact_table_view"]`` is
+    computed the same way :func:`_release_finding_dicts`'s ``findings_view``
+    is -- consumed and stripped by
+    :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
+    for whichever renderer is primary, never for a secondary ``--write``.
+
     Returns the (possibly updated) *worst_verdict* string.
     """
     for entry in library_results:
@@ -573,8 +641,8 @@ def _strip_diff_results_and_adjust_verdict(
             continue
         diff = entry.get("_diff_result")
         if isinstance(diff, DiffResult):
-            gating_buckets = _release_gating_buckets(diff, severity_config)
-            total_gating = sum(len(cat_changes) for _, cat_changes in gating_buckets)
+            display_buckets = _release_display_buckets(diff, severity_config)
+            total_gating = sum(len(cat_changes) for _, cat_changes in display_buckets)
             findings = _release_finding_dicts(diff, severity_config, None)
             if findings:
                 entry["findings"] = findings
@@ -595,7 +663,7 @@ def _strip_diff_results_and_adjust_verdict(
                             policy_file=diff.policy_file,
                         )
                     )
-                    for _, cat_changes in gating_buckets
+                    for _, cat_changes in display_buckets
                 )
                 findings_view = _release_finding_dicts(diff, severity_config, show_only)
                 entry["findings_view"] = findings_view
@@ -613,6 +681,41 @@ def _strip_diff_results_and_adjust_verdict(
             # per-library re-run this module used to perform
             # (`_collect_release_extras`, since removed) just to recover the
             # same DiffResult already sitting right here.
+            if show_impact:
+                import dataclasses
+
+                from .reporter_markdown import compute_impact_table
+
+                full_changes = [c for _, cat_changes in display_buckets for c in cat_changes]
+                impact_table = compute_impact_table(diff, full_changes)
+                if impact_table is not None:
+                    entry["impact_table"] = dataclasses.asdict(impact_table)
+                if show_only:
+                    from .reporter_markdown import apply_show_only as _apply_show_only2
+
+                    filtered_changes = [
+                        c
+                        for _, cat_changes in display_buckets
+                        for c in _apply_show_only2(
+                            cat_changes,
+                            show_only,
+                            policy=diff.policy or "strict_abi",
+                            kind_sets=diff._effective_kind_sets(),
+                            policy_file=diff.policy_file,
+                        )
+                    ]
+                    impact_table_view = compute_impact_table(diff, filtered_changes)
+                    # Unlike `entry["impact_table"]` above (only set when
+                    # non-None), this key is *always* set whenever
+                    # `show_only` is active -- even to `None` -- so
+                    # `_release_findings_for_render`'s swap (mirroring
+                    # `findings_view`'s own always-set contract) can tell
+                    # "no view was computed" apart from "the view is empty".
+                    entry["impact_table_view"] = (
+                        dataclasses.asdict(impact_table_view)
+                        if impact_table_view is not None
+                        else None
+                    )
             if needs_annotations:
                 from .annotations import annotation_report_entries
 

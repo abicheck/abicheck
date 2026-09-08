@@ -40,7 +40,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model import AbiSnapshot, Function, Param, RecordType, TypeField, Visibility
 from abicheck.probe_harness import MatrixSnapshot
 from abicheck.serialization import snapshot_to_json
 
@@ -76,6 +76,49 @@ def _write_removed_function_pair(tmp_path: Path) -> tuple[Path, Path]:
     )
     new_snap = AbiSnapshot(
         library="libfoo.so", version="2.0", functions=[], from_headers=True
+    )
+    _write_snap(old_dir / "libfoo.json", old_snap)
+    _write_snap(new_dir / "libfoo.json", new_snap)
+    return old_dir, new_dir
+
+
+def _write_struct_size_change_pair(tmp_path: Path) -> tuple[Path, Path]:
+    """One library whose ``Point`` struct grows a field, with a function
+    taking it by value -- a ``TYPE_SIZE_CHANGED`` root-type change whose
+    ``affected_symbols``/``caused_count`` feed a real impact-summary table
+    (``--view impact``'s aggregate counterpart, Codex review PR #1154
+    follow-up)."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    point_v1 = RecordType(
+        name="Point", kind="struct", size_bits=64,
+        fields=[
+            TypeField(name="x", type="int", offset_bits=0),
+            TypeField(name="y", type="int", offset_bits=32),
+        ],
+    )
+    point_v2 = RecordType(
+        name="Point", kind="struct", size_bits=96,
+        fields=[
+            TypeField(name="x", type="int", offset_bits=0),
+            TypeField(name="y", type="int", offset_bits=32),
+            TypeField(name="z", type="int", offset_bits=64),
+        ],
+    )
+    draw_point = Function(
+        name="draw_point", mangled="_Z10draw_point5Point",
+        return_type="void", params=[Param(name="p", type="Point")],
+        visibility=Visibility.PUBLIC,
+    )
+    old_snap = AbiSnapshot(
+        library="libfoo.so", version="1.0",
+        functions=[draw_point], types=[point_v1], from_headers=True,
+    )
+    new_snap = AbiSnapshot(
+        library="libfoo.so", version="2.0",
+        functions=[draw_point], types=[point_v2], from_headers=True,
     )
     _write_snap(old_dir / "libfoo.json", old_snap)
     _write_snap(new_dir / "libfoo.json", new_snap)
@@ -268,9 +311,10 @@ class TestReleaseViewReportModeRejected:
     def test_full_and_impact_are_accepted_for_a_directory_operand(
         self, tmp_path: Path
     ) -> None:
-        """'full' (the default) and 'impact' (sugar for full + an additive
-        JSON flag with no release-summary equivalent) must not be rejected
-        -- only leaf/root-cause restructure the document shape."""
+        """'full' (the default) and 'impact' (a real per-library aggregate,
+        Codex review PR #1154 second follow-up: "Reject unsupported impact
+        views instead of silently dropping them") must not be rejected --
+        only leaf/root-cause restructure the document shape."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         for token in ("full", "impact"):
@@ -279,6 +323,89 @@ class TestReleaseViewReportModeRejected:
                 "--view", token,
             )
             assert result.exit_code == 4, (token, result.output)
+
+
+class TestReleaseViewImpactAggregate:
+    """``--view impact`` on a directory/package operand (Codex review, PR
+    #1154 second follow-up): unlike ``leaf``/``root-cause`` -- which
+    restructure a single ``DiffResult``'s own root-cause graph, something a
+    multi-library release report has no equivalent of -- an impact summary
+    is naturally per-library (each library already has its own
+    ``DiffResult``), so it is threaded through as a real per-library
+    aggregate rather than silently dropped (the pre-fix behaviour) or
+    rejected as a usage error."""
+
+    def test_json_embeds_a_per_library_impact_table(self, tmp_path: Path) -> None:
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json", "--view", "impact",
+        )
+        assert result.exit_code == 4, result.output
+        data = json.loads(result.output)
+        lib = data["libraries"][0]
+        impact = lib["impact_table"]
+        assert impact["root_entries"], impact
+        entry = impact["root_entries"][0]
+        assert entry["symbol"] == "Point"
+        assert entry["kind"] == "type_size_changed"
+        assert entry["iface_count"] >= 1
+
+    def test_json_omits_impact_table_without_view_impact(self, tmp_path: Path) -> None:
+        """The identical comparison with no ``--view impact`` never adds the
+        key at all -- the flag is opt-in, matching single-pair `compare`'s
+        own ``show_impact`` default."""
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir), "--format", "json",
+        )
+        assert result.exit_code == 4, result.output
+        data = json.loads(result.output)
+        lib = data["libraries"][0]
+        assert "impact_table" not in lib
+
+    def test_markdown_renders_the_impact_section(self, tmp_path: Path) -> None:
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir), "--view", "impact",
+        )
+        assert result.exit_code == 4, result.output
+        assert "**Impact**" in result.output
+        assert "Point" in result.output
+
+    def test_impact_table_respects_show_only_and_write_stays_full(
+        self, tmp_path: Path
+    ) -> None:
+        """Combining ``--view impact`` with ``--view show=...`` filters the
+        primary render's impact table the same way it filters ``findings``,
+        while a secondary ``--write`` stays the full, unfiltered table --
+        mirroring the existing findings/findings_view contract exactly."""
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+        write_path = tmp_path / "full.json"
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json",
+            "--view", "impact",
+            "--view", "show=variables",
+            "--write", f"json={write_path}",
+        )
+        assert result.exit_code == 4, result.output
+        assert result.output.startswith("Report written to")
+        _, _, primary_json_text = result.output.partition("\n")
+        primary = json.loads(primary_json_text)
+        primary_lib = primary["libraries"][0]
+        # "show=variables" matches no variable-element finding (the root
+        # type change is a types-element finding), so the filtered primary
+        # render carries no impact table for this library.
+        assert "impact_table" not in primary_lib
+
+        secondary = json.loads(write_path.read_text(encoding="utf-8"))
+        secondary_lib = secondary["libraries"][0]
+        assert secondary_lib["impact_table"]["root_entries"]
 
 
 class TestReleaseViewShowOnlySecondaryWriteStaysFull:
@@ -312,13 +439,17 @@ class TestReleaseViewShowOnlySecondaryWriteStaysFull:
 
         # Secondary --write is full/unfiltered: the same function finding
         # a `--view show=variables` filter removed from the primary render
-        # must still be present here.
+        # must still be present here. Two findings, not one, since Codex
+        # review (PR #1154 follow-up: "Filter the complete release finding
+        # set") widened the full/unfiltered pool to every category
+        # (including the unconditional surface-metrics compatible finding),
+        # not only the legacy breaking/api_break/risk buckets.
         secondary_doc = json.loads(write_path.read_text(encoding="utf-8"))
         lib_entries = secondary_doc["libraries"]
         assert len(lib_entries) == 1
         findings = lib_entries[0].get("findings", [])
-        assert len(findings) == 1
-        assert findings[0]["kind"] == "func_removed"
+        assert {f["kind"] for f in findings} == {"func_removed", "public_surface_shrank"}
+        assert len(findings) == 2
 
     def test_write_json_is_full_even_when_primary_is_also_json(
         self, tmp_path: Path

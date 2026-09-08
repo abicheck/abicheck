@@ -671,8 +671,17 @@ class TestDirVsDir:
         lib = data["libraries"][0]
         assert data["severity"]["exit_code"] == 1
         assert "findings" in lib
-        assert lib["findings"][0]["symbol"] == "_Z6new_apiv"
-        assert lib["findings"][0]["bucket"] == "addition"
+        # Two findings now, not one: `_release_display_buckets` (Codex
+        # review, PR #1154 follow-up: "Filter the complete release finding
+        # set") walks every category (not only the ones actually blocking),
+        # so the unconditional surface-metrics `public_surface_grew`
+        # quality-issue finding is present alongside the addition that
+        # actually promotes the severity exit code -- matching what a
+        # single-pair `compare` on the identical pair displays.
+        findings_by_kind = {f["kind"]: f for f in lib["findings"]}
+        assert findings_by_kind["func_added"]["symbol"] == "_Z6new_apiv"
+        assert findings_by_kind["func_added"]["bucket"] == "addition"
+        assert findings_by_kind["public_surface_grew"]["bucket"] == "quality_issues"
 
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""
