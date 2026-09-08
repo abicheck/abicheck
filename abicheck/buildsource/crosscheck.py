@@ -821,8 +821,28 @@ def _check_odr_type_variant(
         # identity built from its findings need them (Codex review:
         # ``workflows.cross_source_evolution``'s per-check identity
         # otherwise silently collapses one conflict onto the other).
+        #
+        # `old_type_hash`/`new_type_hash` are assigned by *TU visitation
+        # order* within one side's own replay, not by any OLD/NEW-snapshot
+        # meaning -- the same two conflicting definitions can land as
+        # (A, B) when one snapshot's source replay happens to visit its TUs
+        # in one order and (B, A) when the other snapshot's replay visits
+        # them in a different order, even though nothing about the conflict
+        # itself changed. Carrying the pair positionally would then key the
+        # *same* persistent conflict as two different identities across
+        # sides -- one spurious RESOLVED and one spurious INTRODUCED instead
+        # of one PERSISTENT (Codex review, P2 finding 1 follow-up). Sort the
+        # two hashes before storing them so the identity this check's own
+        # findings key on is order-independent; a three-way conflict still
+        # keys distinctly because each successive conflict pairs a
+        # *different* baseline/divergent hash (see `_route_type`: only the
+        # first-recorded hash is ever compared against, so the two conflicts
+        # from a three-way case share one hash but not the other).
         old_hash = str(conflict.get("old_type_hash", ""))
         new_hash = str(conflict.get("new_type_hash", ""))
+        sorted_hashes = sorted(h for h in (old_hash, new_hash) if h)
+        canonical_old = sorted_hashes[0] if sorted_hashes else None
+        canonical_new = sorted_hashes[1] if len(sorted_hashes) > 1 else None
         findings.append(
             _change(
                 ChangeKind.ODR_TYPE_VARIANT,
@@ -833,8 +853,8 @@ def _check_odr_type_variant(
                 "a consumer compiled against one layout silently reads the other. "
                 "Reconcile the definitions (usually a macro/flag that changes the "
                 "type per TU).",
-                old_value=old_hash or None,
-                new_value=new_hash or name,
+                old_value=canonical_old,
+                new_value=canonical_new or name,
                 confidence=Confidence.MEDIUM,
                 caused_by_type=name,
                 source_location=header or None,
@@ -1333,6 +1353,26 @@ def _check_identity_collision(
         qname = str(collision.get("qualified_name", "")) or identity
         usr_a = str(collision.get("usr_a", ""))
         usr_b = str(collision.get("usr_b", ""))
+        # `identity` (`new_value`) alone is not unique across this check's
+        # own findings: `_route_declaration` records one collision entry per
+        # *additional* colliding declaration, so a three-way collision on
+        # one identity key produces two records sharing both `qname` and
+        # `identity`. `identity_to_usr` is overwritten after every recorded
+        # collision, so the *unordered pair* {usr_a, usr_b} is what tells
+        # successive collisions on the same key apart -- but which USR
+        # lands in `usr_a` vs `usr_b` depends on *entity/TU visitation
+        # order* within one side's own replay (`_route_declaration` calls
+        # whichever USR it saw first "prev"), not on any OLD/NEW-snapshot
+        # meaning. Storing them positionally would key the same persistent
+        # collision as (A, B) on one side and (B, A) on the other -- one
+        # spurious RESOLVED and one spurious INTRODUCED instead of one
+        # PERSISTENT (Codex review, P2 finding 1 follow-up). Sort the pair
+        # before storing it on `old_value` so the identity is
+        # order-independent; a three-way collision still keys distinctly
+        # because each successive collision shares only one USR with the
+        # one before it, not both.
+        usr_pair = sorted(u for u in (usr_a, usr_b) if u)
+        canonical_pair = "|".join(usr_pair) if usr_pair else None
         findings.append(
             _change(
                 ChangeKind.IDENTITY_COLLISION_DETECTED,
@@ -1343,17 +1383,7 @@ def _check_identity_collision(
                 "cross-scope declarations — any L4/L5 finding attributed to this "
                 "identity may actually describe either declaration; treat it as "
                 "ambiguous between the two USRs above.",
-                # `identity` (`new_value`) alone is not unique across this
-                # check's own findings: `_route_declaration` records one
-                # collision entry per *additional* colliding declaration, so
-                # a three-way collision on one identity key produces two
-                # records sharing both `qname` and `identity`.
-                # `identity_to_usr` is overwritten after every recorded
-                # collision, so `usr_a` (this transition's own "previous
-                # USR") is what still tells successive collisions on the
-                # same key apart -- carried on `old_value` for exactly that
-                # reason (Codex review, P2 finding 1).
-                old_value=usr_a or None,
+                old_value=canonical_pair,
                 new_value=identity,
                 confidence=Confidence.MEDIUM,
             )

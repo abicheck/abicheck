@@ -281,6 +281,44 @@ def test_odr_type_variant_three_way_conflict_from_same_header_all_survive() -> N
     assert new_hashes == {"sha256:variant-b", "sha256:variant-c"}
 
 
+def test_odr_type_variant_identity_order_independent_across_sides() -> None:
+    """Codex review, P2 finding 1 follow-up: ``old_type_hash``/
+    ``new_type_hash`` are assigned by TU visitation order within one side's
+    own replay (``source_link._route_type`` calls whichever hash it saw
+    first the stored baseline), not by any OLD/NEW-snapshot meaning. The
+    *same* persistent conflict recorded as (old="X", new="Y") on one side
+    and (old="Y", new="X") on the other must still read as one PERSISTENT
+    finding, not a spurious RESOLVED+INTRODUCED pair."""
+
+    def _snap(old_hash: str, new_hash: str) -> AbiSnapshot:
+        surface = SourceAbiSurface(
+            odr_conflicts=[
+                {
+                    "qualified_name": "Widget",
+                    "header": "widget.h",
+                    "old_type_hash": old_hash,
+                    "new_type_hash": new_hash,
+                }
+            ],
+            reachable_declarations=[
+                SourceEntity(id="d0", kind="function", qualified_name="f")
+            ],
+        )
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            build_source=BuildSourcePack(root="", source_abi=surface),
+        )
+
+    old = _snap("sha256:aaa", "sha256:zzz")
+    new = _snap("sha256:zzz", "sha256:aaa")  # same pair, swapped visitation order
+    changes = compute_cross_source_evolution(old, new)
+    hits = [c for c in changes if c.kind == ChangeKind.ODR_TYPE_VARIANT]
+    assert len(hits) == 1
+    assert hits[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
+
+
 def test_odr_type_variant_authority_unchanged() -> None:
     from abicheck.checker_policy import API_BREAK_KINDS
 
@@ -409,13 +447,14 @@ def test_identity_collision_detected_identity_distinguishes_two_collisions() -> 
     changes = compute_cross_source_evolution(old, new)
     hits = [c for c in changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
     by_evolution = {c.cross_source_evolution: identity(c) for c in hits}
-    # Both fixtures share the same "usr_a" ("c:@F@f#"), so old_value is the
-    # same on both sides here -- the identity is (symbol, new_value,
-    # old_value), all three of which `_IDENTITY_FUNCS[CHECK_IDENTITY_
-    # COLLISION]` now returns.
+    # Both fixtures share the same unordered USR pair
+    # ("c:@F@f#", "c:@N@ns@F@f#"), sorted and joined onto old_value, so
+    # old_value is the same on both sides here -- the identity is (symbol,
+    # new_value, old_value), all three of which `_IDENTITY_FUNCS[CHECK_
+    # IDENTITY_COLLISION]` now returns.
     assert by_evolution == {
-        CrossSourceEvolution.RESOLVED: ("f", "f#sha256:aaa", "c:@F@f#"),
-        CrossSourceEvolution.INTRODUCED: ("f", "f#sha256:bbb", "c:@F@f#"),
+        CrossSourceEvolution.RESOLVED: ("f", "f#sha256:aaa", "c:@F@f#|c:@N@ns@F@f#"),
+        CrossSourceEvolution.INTRODUCED: ("f", "f#sha256:bbb", "c:@F@f#|c:@N@ns@F@f#"),
     }
 
 
@@ -460,13 +499,55 @@ def test_identity_collision_detected_three_way_collision_all_survive() -> None:
     evaluated, by_identity = _run_one_side(snap, CHECK_IDENTITY_COLLISION)
     assert evaluated
     # Both collisions share (symbol="f", new_value="f#sha256:abc") -- only
-    # the transition's own "previous USR" (old_value) tells them apart.
+    # the transition's own unordered USR pair (old_value, sorted and joined)
+    # tells them apart.
     assert len(by_identity) == 2, (
         f"expected both collision records to survive identity-keying, got "
         f"{len(by_identity)}: {sorted(str(k) for k in by_identity)}"
     )
     old_values = {c.old_value for c in by_identity.values()}
-    assert old_values == {"c:@F@f#", "c:@N@ns1@F@f#"}
+    assert old_values == {
+        "c:@F@f#|c:@N@ns1@F@f#",
+        "c:@N@ns1@F@f#|c:@N@ns2@F@f#",
+    }
+
+
+def test_identity_collision_detected_identity_order_independent_across_sides() -> None:
+    """Codex review, P2 finding 1 follow-up: ``usr_a``/``usr_b`` are assigned
+    by entity/TU visitation order within one side's own replay
+    (``source_link._route_declaration`` calls whichever USR it saw first
+    "prev"), not by any OLD/NEW-snapshot meaning. The *same* persistent
+    collision recorded as (usr_a="X", usr_b="Y") on one side and
+    (usr_a="Y", usr_b="X") on the other must still read as one PERSISTENT
+    finding, not a spurious RESOLVED+INTRODUCED pair."""
+
+    def _snap(usr_a: str, usr_b: str) -> AbiSnapshot:
+        surface = SourceAbiSurface(
+            identity_collisions=[
+                {
+                    "identity": "f#sha256:abc",
+                    "qualified_name": "f",
+                    "usr_a": usr_a,
+                    "usr_b": usr_b,
+                }
+            ],
+            reachable_declarations=[
+                SourceEntity(id="d0", kind="function", qualified_name="f")
+            ],
+        )
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            build_source=BuildSourcePack(root="", source_abi=surface),
+        )
+
+    old = _snap("c:@F@f#", "c:@N@ns@F@f#")
+    new = _snap("c:@N@ns@F@f#", "c:@F@f#")  # same pair, swapped order
+    changes = compute_cross_source_evolution(old, new)
+    hits = [c for c in changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
+    assert len(hits) == 1
+    assert hits[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
 
 
 def test_identity_collision_detected_authority_unchanged() -> None:
