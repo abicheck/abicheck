@@ -355,7 +355,12 @@ add_compile_context_flags() {
     # same command always wins the stdin redirection, so the data pipe would
     # never reach the program at all. A real script file leaves stdin free
     # for the data.
-    _COMPILE_CONTEXT_HELPER_PY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context-helper.XXXXXX.py")
+    # No `.py` suffix after the X's: BSD mktemp (macOS's stock, non-GNU
+    # build) requires the replaceable X's to be the template's last
+    # characters, and this script deliberately has no `set -e` -- a rejected
+    # template here would silently continue with an empty helper path rather
+    # than failing loud (Codex review, fresh evidence, PR #1162).
+    _COMPILE_CONTEXT_HELPER_PY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context-helper.XXXXXX")
     cat > "$_COMPILE_CONTEXT_HELPER_PY" <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `compile:` block (as JSON, a valid
 # YAML subset abicheck's own yaml.safe_load parses identically) from this
