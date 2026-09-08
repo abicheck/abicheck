@@ -954,6 +954,14 @@ runs:
       shell: bash
       env:
         INPUT_MODE: ${{ inputs.mode }}
+        # Removed inputs, kept declared as tombstones so a pinned
+        # workflow that still sets one is told rather than silently
+        # ignored (see their own descriptions above). Consumed *only*
+        # here -- validate-inputs.sh rejects them and run.sh never
+        # forwards either, which is why both are in
+        # tests/test_action_run_contract.py's _NON_RUN_SH_INPUTS.
+        INPUT_JOBS: ${{ inputs.jobs }}
+        INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
         INPUT_AGAINST: ${{ inputs.against }}

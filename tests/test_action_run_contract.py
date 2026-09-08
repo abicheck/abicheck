@@ -167,6 +167,20 @@ _NON_RUN_SH_INPUTS = {
     "install-deps",
     "dependency-source",
     "upload-sarif",
+    # Tombstones for removed inputs. Deliberately *not* wired to run.sh --
+    # there is nothing left to forward them to. They stay declared only so
+    # a pinned workflow that still sets one gets told: an input deleted
+    # from action.yml is dropped by GitHub before the composite action
+    # runs, so the caller sees no annotation and the setting silently stops
+    # applying (reported downstream when a `jobs: 1` worker cap went inert
+    # on a version bump with nothing failing). Their one consumer is
+    # action/validate-inputs.sh, which warns on `jobs` and hard-fails on
+    # `bundle-system-providers` -- and the "wired to its own step" half of
+    # that contract is enforced by
+    # `test_every_validate_inputs_var_is_set_by_its_own_step` below, so
+    # exempting them here loses no coverage.
+    "jobs",
+    "bundle-system-providers",
 }
 
 
