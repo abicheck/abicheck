@@ -142,10 +142,19 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
             raw_size = max(n, len(probe))
             while True:
                 f.seek(0)
-                head = f.read(raw_size)
-                # A short read means EOF: `head` is the entire file, so
-                # no larger raw prefix exists and the decode is final.
-                exhausted = len(head) < raw_size
+                # One byte past the window, purely as an EOF probe: a file
+                # whose length is *exactly* `raw_size` is at EOF, but a
+                # plain `read(raw_size)` cannot say so -- it returns a full
+                # buffer either way. Reading one more byte distinguishes
+                # them, and the extra byte is then dropped so the decode
+                # window stays exactly the budget it claims to be. Without
+                # this, a file sitting exactly on the cap reported "not
+                # exhausted" and fell into the past-budget branch, which
+                # answered `None` for a snapshot that was entirely in hand
+                # (Codex review).
+                head = f.read(raw_size + 1)
+                exhausted = len(head) <= raw_size
+                head = head[:raw_size]
                 result = _try_decode_prefix(head, compression, n)
                 # "No exception" is not "decoded everything the file has to
                 # offer": a frame cut at the raw-byte boundary decodes short

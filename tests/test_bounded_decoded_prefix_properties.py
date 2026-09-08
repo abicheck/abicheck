@@ -377,6 +377,63 @@ def test_a_payload_inside_the_raw_cap_still_resolves(tmp_path):
     assert bounded_decoded_prefix(path) == full[:4096]
 
 
+@pytest.mark.parametrize("offset", [-4096, -1, 0])
+def test_a_file_ending_at_or_before_the_cap_is_recognized_as_exhausted(
+    tmp_path, offset
+):
+    """A file whose length lands exactly on the raw cap is at EOF, and must
+    be read as such.
+
+    `read(raw_size)` cannot distinguish "the file is exactly this long" from
+    "there is more past the window" -- it returns a full buffer either way.
+    That made a snapshot sitting exactly on the cap report "not exhausted"
+    and fall into the past-budget branch, which answers `None` for content
+    that was entirely in hand (Codex review, a regression introduced by the
+    past-budget branch itself). `offset=0` is that case; the other two are
+    its neighbours, which never had the bug and must not acquire one.
+    """
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _payload(entries=1, entropy_bits=8, seed=13)
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    core = cctx.compress(data)
+    target = _BOUNDED_PREFIX_MAX_RAW_BYTES + offset
+    blob = core + _skippable_frame(target - len(core) - 8)
+    assert len(blob) == target
+
+    path = tmp_path / f"boundary_{offset}.json.zst"
+    path.write_bytes(blob)
+
+    full = read_snapshot_bytes(path)
+    assert full == data
+    assert bounded_decoded_prefix(path) == full[:4096]
+
+
+def test_a_file_one_byte_past_the_cap_still_answers_none(tmp_path):
+    """The complement, pinning where the boundary actually is: one byte more
+    and the reader genuinely cannot know whether that byte begins another
+    frame, so the documented past-budget answer applies. Without this the
+    EOF fix above could drift into reading unboundedly."""
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _payload(entries=1, entropy_bits=8, seed=14)
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    core = cctx.compress(data)
+    target = _BOUNDED_PREFIX_MAX_RAW_BYTES + 1
+    blob = core + _skippable_frame(target - len(core) - 8)
+    assert len(blob) == target
+
+    path = tmp_path / "boundary_plus_one.json.zst"
+    path.write_bytes(blob)
+
+    assert read_snapshot_bytes(path) == data
+    assert bounded_decoded_prefix(path) is None
+
+
 # ── The reported symptom, through the real public surface ───────────────────
 
 
