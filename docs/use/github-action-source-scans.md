@@ -2,12 +2,12 @@
 
 The main [GitHub Action](github-action.md) page covers installation, inputs,
 outputs, and the everyday compare recipes. This page is the
-**source-intelligence companion**: running `mode: scan` from CI, pinning the
-`depth` dial, single-release audits, cost estimation, cross-check gating, and
-the three ways to feed L3/L4/L5 build/source evidence into a baseline. For
-what the evidence layers *are*, see
-[Evidence & Detectability](../learn/evidence-and-detectability.md); for the
-underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
+**source-intelligence companion**: running `mode: compare` with build/source
+evidence from CI, pinning the `depth` dial, single-release audits, cost
+estimation, cross-check gating, and the three ways to feed L3/L4/L5
+build/source evidence into a baseline. For what the evidence layers *are*,
+see [Evidence & Detectability](../learn/evidence-and-detectability.md); for
+the underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
 
 > **See also.** If this check is one of several a project-wide
 > `.abicheck.yml` `targets:`/`profiles:` block declares (not a standalone
@@ -15,17 +15,27 @@ underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
 > [S7: Source Scan via Compile-DB Replay](../integration/scenarios/source-replay.md)
 > and
 > [S8/S9: Source Facts From the Build Itself](../integration/scenarios/build-integrated-facts.md)
-> for the `check-target`/`evidence-producer` composition this page's
-> `mode: scan` inputs map onto.
+> for the `check-target`/`evidence-producer` composition this page's inputs
+> map onto.
 
-## Source scans (build & source evidence)
+## Source-aware comparisons (build & source evidence)
 
-`mode: scan` is the **one-step entry point** for source intelligence. It
-classifies the PR's changed paths, always runs the compiler-free pattern and
-intra-version cross-source checks, then runs the pinned evidence level
-(L3 build context / L4 source-ABI replay / L5 source graph) and — when
-`against` is given — compares against it. It emits a single
-coverage-annotated report saying, per layer, what ran versus what was skipped.
+`mode: compare` (the default) is the **recommended entry point** for source
+intelligence against a real baseline. It always runs the compiler-free
+pattern pre-scan and the eleven intra-version cross-source checks, and takes
+the identical `depth`/`since`/`changed-path`/`sources`/`build-info` inputs
+`mode: scan` does — running the pinned evidence level (L3 build context / L4
+source-ABI replay / L5 source graph) and comparing against `old-library`. It
+emits a single coverage-annotated report saying, per layer, what ran versus
+what was skipped.
+
+**`mode: scan` remains the one to reach for** when this step also needs: a
+single-release audit with no baseline at all (see [Single-release
+audit](#single-release-audit-no-baseline) below — `mode: compare` has no
+no-baseline input yet), a `budget` wall-clock guard, `crosscheck`'s
+`KEY=error` promotion syntax, `build-target` scoping, or `new-library-set`
+(multi-library audit). None of those inputs are read by `mode: compare`
+today.
 
 > **New to what these layers see?** The concept-track
 > [level-by-level walk-through](../learn/what-each-level-sees.md)
@@ -33,7 +43,7 @@ coverage-annotated report saying, per layer, what ran versus what was skipped.
 > and where each goes blind — the "why" behind the inputs below.
 
 The common case needs four inputs — the built binary, its public headers, the
-source tree, and a baseline to compare `against`:
+source tree, and a baseline (`old-library`) to compare against:
 
 ```yaml
 permissions:
@@ -49,14 +59,13 @@ jobs:
       - name: Build
         run: cmake -B build -S . && cmake --build build
 
-      - name: Source-intelligence scan
+      - name: Source-aware comparison
         uses: abicheck/abicheck@v0.5.0
         with:
-          mode: scan
+          old-library: abi-baseline.json   # committed, or use abi-baseline: latest-release
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          against: abi-baseline.json   # committed, or use abi-baseline: latest-release
           since: origin/${{ github.base_ref }}   # focus on changed files
           fail-on-api-break: true       # gate on source/API breaks too
 ```
@@ -66,22 +75,23 @@ jobs:
 the files the PR touched — pair it with `fetch-depth: 0` in `checkout` so the
 base ref is available.
 
-### Pin the scan depth
+### Pin the depth
 
-`depth` is the single evidence-depth dial. Pin it for reproducible CI, or omit it
-for `auto` (risk-driven, best paired with `since:`):
+`depth` is the single evidence-depth dial, and `mode: compare` reads it
+identically to `mode: scan`. Pin it for reproducible CI — unlike `scan`,
+`compare` has no risk-driven `auto` rung yet (plan §3 row 13); omitting
+`depth` on `compare` defaults deterministically to `headers`, not a
+risk-based choice:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
         with:
-          mode: scan
+          old-library: abi-baseline.json
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          against: abi-baseline.json
           depth: source         # source-ABI replay of changed TUs (deterministic)
           since: origin/main    # scope the L4 replay to the PR's changed TUs
-          budget: 15m           # fail (BUDGET_OVERFLOW) rather than overrun
 ```
 
 | Want… | Set |
@@ -89,7 +99,8 @@ for `auto` (risk-driven, best paired with `since:`):
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
 | Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
-| Risk-driven (dev/local, opt-in) | omit `depth` (→ `auto`) + `since:` |
+| Risk-driven depth selection (`auto`) | `mode: scan` only — omit `depth` there + set `since:` |
+| A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: scan` only — `mode: compare` reads no `budget` input yet |
 
 !!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"
     Earlier releases exposed `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and
@@ -97,15 +108,21 @@ for `auto` (risk-driven, best paired with `since:`):
     As of the ADR-043 pre-1.0 CLI reset all three are removed outright, not
     deprecated — the CLI's `--depth` no longer accepts `full`/`--mode`/
     `--source-method`/`--max` at all (a plain usage error). Use `depth`
-    (omitting `against`/`abi-baseline` for an audit-only run); `full` collapsed into `source`, since the two only
-    ever differed in replay *scope*, and an unseeded `depth: source` already
-    resolves to the whole target. The mapping from the old axes is in the
+    (omitting `old-library`/`abi-baseline` for an audit-only `scan` run);
+    `full` collapsed into `source`, since the two only ever differed in
+    replay *scope*, and an unseeded `depth: source` already resolves to the
+    whole target. The mapping from the old axes is in the
     [Removed scan axes appendix](companion-commands.md#removed-scan-axes-s0s6-mode-source-method-max).
 
 ### Single-release audit (no baseline)
 
 Run the intra-version hygiene checks against one build — no old version needed.
-Useful as a standing lint on the default branch:
+Useful as a standing lint on the default branch. `mode: compare` has no
+no-baseline input at the Action level yet (the CLI's `compare --no-baseline`
+isn't wired to an Action input, and that CLI slice doesn't yet accept
+`sources`/`build-info` either — see [Scenario
+S5](../integration/scenarios/single-build-audit.md)), so this stays
+`mode: scan`:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
@@ -120,14 +137,15 @@ Useful as a standing lint on the default branch:
 
 ### Estimate cost before committing to a depth
 
-`dry-run: 'true'` prints the resolved depth/scope and, in scan mode, the
-projected per-layer cost (TU count, seconds) — without scanning anything,
-always exiting 0. Handy when sizing a budget for a large repo:
+`dry-run: 'true'` prints the resolved depth/scope and the projected
+per-layer cost (TU count, seconds) — without comparing anything, always
+exiting 0. Works the same on `mode: compare` as on `mode: scan`. Handy when
+sizing a budget for a large repo:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
         with:
-          mode: scan
+          old-library: abi-baseline.json
           new-library: build/libfoo.so
           new-header: include/
           sources: .
@@ -139,7 +157,9 @@ always exiting 0. Handy when sizing a budget for a large repo:
 
 Cross-source findings are advisory by default. Promoting one to `error` makes a
 finding for it exit `2` (the API_BREAK tier); add `fail-on-api-break: true` so
-that exit turns the step red:
+that exit turns the step red. `crosscheck`'s `KEY=error` promotion syntax has
+no `compare`-mode equivalent yet (it's the `--crosscheck` CLI flag, still
+`scan`-only), so this stays `mode: scan`:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0

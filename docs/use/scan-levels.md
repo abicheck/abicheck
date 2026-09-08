@@ -10,18 +10,30 @@ lifecycle: active
 generated: false
 ---
 
-# Source-scan depth (`abicheck scan`)
+# Source-scan depth (`--depth`)
 
-`abicheck scan` is the one-shot orchestrator over `dump`/`compare`: it classifies
-the changed paths, runs the always-on compiler-free pattern pre-scan, then runs a
-**pinned evidence depth** and (with `--against`) compares against it.
+`--depth` is one dial, shared by `compare`, `dump`, and `scan` alike: it
+selects how deep the evidence-collection goes (binary → headers → build →
+source). **`abicheck compare OLD NEW` is now the recommended way to run a
+depth-pinned, source-aware comparison against a real baseline** — it runs
+the always-on compiler-free pattern pre-scan and the eleven cross-source
+checks automatically on every invocation, takes the identical `--depth`/
+`--since`/`--changed-path`/`--sources`/`--build-info` inputs `scan` does,
+and needs no separate orchestrator command.
 
-`abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
-**positional** argument (not a flag). `--against OLD` is the previous
-dump/library/directory/package to compare against; **omitting** `--against`
-already means a one-build audit/hygiene/source-consistency scan (there is no
-separate `--audit` flag any more — presence or absence of `--against` is what
-selects the mode).
+`abicheck scan ARTIFACT [OPTIONS]` remains a fully supported command and is
+still the one to reach for in a few specific cases this page calls out as
+they come up: a single-build audit that needs L3/L4 (build/source) evidence
+(`compare --no-baseline` doesn't accept `--sources`/`--build-info` yet — see
+[Scenario S5](../integration/scenarios/single-build-audit.md)), a
+`--budget` wall-clock guard, `--crosscheck KEY=error` promotion syntax, or
+`--build-target` scoping (`compare` has no equivalent flag yet). Where this
+page shows a `scan` command below, that's why. `abicheck scan ARTIFACT
+[OPTIONS]` takes the scanned binary/snapshot as a **positional** argument
+(not a flag); `--against OLD` is the previous dump/library/directory/package
+to compare against, and omitting it means a one-build audit/hygiene/
+source-consistency scan — the same shape `compare --no-baseline NEW` now
+covers for the binary/header-only case.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -38,8 +50,12 @@ selects the mode).
 - **`--depth binary|headers|build|source`** — the single knob (ADR-037 D5 /
   ADR-043 D2). `binary` = L0/L1 exported symbols + binary metadata; `headers` =
   +L2 header AST; `build` = +L3 build context; `source` = +L4 replay & the L5
-  graph. **Omit it for `auto`** — the default: risk-driven when a
-  `--since`/`--changed-path` seed is present, else a sensible preset.
+  graph. On `scan`, **omit it for `auto`** — the default: risk-driven when a
+  `--since`/`--changed-path` seed is present, else a sensible preset. On
+  `compare`, omitting it defaults deterministically to `headers` — the
+  risk-driven `auto` rung is `scan`-only for now (see [Let risk pick the
+  depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
+  below).
 - **`--depth source` always analyses *something* real, never a zero-TU no-op**
   (ADR-043 D3): with a `--since`/`--changed-path` seed it replays the *changed*
   TUs; without one it replays the **whole current library target** (what an
@@ -242,8 +258,8 @@ build:
 ```
 
 ```bash
-abicheck scan new/libfoo.so -H include/ --sources . \
-  --config .abicheck.yml --depth source --against old/libfoo.abi.json
+abicheck compare old/libfoo.abi.json new/libfoo.so -H include/ --sources . \
+  --config .abicheck.yml --depth source
 ```
 
 ## Compile context for header parsing (L2)
@@ -320,41 +336,48 @@ a bare `scan -H include/` finds libstdc++ without extra flags. Disable it with
 ## Worked examples
 
 Each example shows the command, what depth it pins, and what to read in the
-output. Every `scan` ends with a coverage block — always read it before trusting
-the verdict (see [Reading the coverage block](#reading-the-coverage-block)).
+output. Every `compare`/`scan` run ends with a coverage block — always read
+it before trusting the verdict (see [Reading the coverage
+block](#reading-the-coverage-block)).
 
 ### PR gate (the default) — diff-seeded `source`
 
 The common CI case: gate a PR by comparing the just-built library against the
 baseline from `main`, scoping the expensive L4 replay to the files the PR
 touched. The `--since` seed is what keeps this cheaper than an unseeded,
-whole-library `source` scan — without it, `source` replays every TU.
+whole-library `source` compare — without it, `source` replays every TU.
 
 ```bash
-abicheck scan build/libfoo.so \
+abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   -H include/ \
-  --sources . --since origin/main \
-  --against artifacts/libfoo-main.abi.json
+  --sources . --since origin/main --depth source
 ```
 
 - **Depth:** `auto` with a diff seed resolves to `source` (`--depth source`); pin
   it explicitly if you want a fixed rung.
-- **Exit code:** `0` compatible, `2` source/API break, `4` ABI break (from the
-  `--against` compare), `5` `--budget` overflow.
+- **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
+  break. `--budget` overflow (exit `5`) is `scan`-only for now — see
+  [Exit Codes](../reference/exit-codes.md).
 - `--depth source` folds the L5 reachability **edges scoped to the changed TUs**
   for cross-symbol impact in the report. The *whole-library* reachability graph
   is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung.
 
-### Single-build audit — no `--against`
+### Single-build audit — no baseline
 
-Omitting `--against` already runs the intra-version cross-source hygiene checks
-against **one** build — no previous version required (there is no separate
-`--audit` flag any more). With just the binary and headers it catches accidental
-exports, private-header leaks, and unversioned symbols:
+`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) already runs the
+intra-version cross-source hygiene checks against **one** build — no
+previous version required, no separate `--audit` flag. With just the binary
+and headers it catches accidental exports, private-header leaks, and
+unversioned symbols:
 
 ```bash
-abicheck scan libfoo.so -H include/
+abicheck compare --no-baseline libfoo.so -H include/
 ```
+
+**This CLI slice doesn't yet accept `--sources`/`--build-info`** (see
+[Scenario S5](../integration/scenarios/single-build-audit.md) for the exact
+gap), so the two checks below that need L3/L4 evidence still need `scan`
+(no `--against`) instead:
 
 Worked example cases for each audit finding:
 [case143](../reference/examples/case143_audit_accidental_export.md) (`exported_not_public`),
@@ -377,7 +400,7 @@ abicheck scan libfoo.so -H include/ \
   --build-info build/compile_commands.json
 ```
 
-This reports the eight ADR-035 cross-source / single-release findings rather than
+This reports the eleven ADR-035 cross-source / single-release findings rather than
 a two-version diff. The flagship cross-source cases —
 [case148](../reference/examples/case148_xcheck_header_build_mismatch.md)
 (`header_build_context_mismatch`, L2 macros ↔ L3 flags) and
@@ -400,13 +423,13 @@ AST, which needs a header directory via `-H`/`--header` and a C/C++ frontend on
 
 ```bash
 # build-flag drift only, flat ~0.3–0.5s regardless of project size
-# (the compile DB is what supplies L3 — without it the scan is artifact-only)
-abicheck scan new/libfoo.so --against old/libfoo.abi.json \
+# (the compile DB is what supplies L3 — without it the comparison is artifact-only)
+abicheck compare old/libfoo.abi.json new/libfoo.so \
   --build-info build/compile_commands.json --depth build
 
 # exported symbols + always-on lexical scan only (no DWARF walk, no L2 AST,
 # no L3/L4/L5; no compiler needed)
-abicheck scan new/libfoo.so --against old/libfoo.abi.json --depth binary
+abicheck compare old/libfoo.abi.json new/libfoo.so --depth binary
 ```
 
 ### Estimate before you spend — `--dry-run`
@@ -414,53 +437,63 @@ abicheck scan new/libfoo.so --against old/libfoo.abi.json --depth binary
 L4 cost scales with C++ template depth, so on a heavy library project the per-TU
 replay cost first. `--dry-run` resolves and validates the invocation (depth,
 scope, tool availability) and prints the projected per-layer cost for *this*
-project without scanning anything or writing output. Exits 0 for a resolvable
+project without comparing anything or writing output. Exits 0 for a resolvable
 preview; an invalid invocation or an unsatisfiable requested depth still
 exits nonzero, the same as the real run would.
 
 ```bash
-abicheck scan libfoo.so --sources . --depth source --dry-run
+abicheck compare old.abi.json libfoo.so --sources . --depth source --dry-run
 ```
+
+`scan --sources . --depth source --dry-run` (no `--against`) still works too,
+and is the only `--dry-run`-honoring way to preview an *audit-only* run today
+— `compare --no-baseline`'s CLI slice doesn't read `--dry-run` yet (see
+[Scenario S5](../integration/scenarios/single-build-audit.md)).
 
 ### Release baseline — unseeded `source`
 
-The reusable `--against` target that PR scans compare against is a
-**`dump`-produced snapshot**, not a scan report. `scan -o` writes the rendered
-scan report (text or JSON), so it cannot be fed back as `--against`; produce the
-baseline with `abicheck dump` instead. Pass `--sources` to embed all of the
-L3/L4/L5 facts so the later PR compare carries them:
+The reusable target that PR comparisons compare against is a
+**`dump`-produced snapshot**. Pass `--sources` to embed all of the L3/L4/L5
+facts so the later PR compare carries them:
 
 ```bash
 # Produce the reusable baseline snapshot once per release
-# (dump uses -H/--header, same as scan):
+# (dump uses -H/--header, same as compare):
 abicheck dump build/libfoo.so -H include/ \
   --sources . --version 1.0 -o artifacts/libfoo-1.0.abi.json
 
-# PR scans then compare against it:
-abicheck scan build/libfoo.so -H include/ \
-  --sources . --since origin/main --against artifacts/libfoo-1.0.abi.json
+# PR compares then run against it:
+abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
+  --sources . --since origin/main --depth source
 ```
 
-To get a whole-library scan *report* of a release (replays every TU, folds the
-full graph) for human review — as opposed to the reusable baseline above — run
-`scan --depth source` **without** a `--since`/`--changed-path` seed (which
-resolves to the whole current library target, ADR-043 D3 — what a now-removed
-`--depth full` rung used to require explicitly) and send its report to `-o`:
+To get a whole-library comparison *report* of a release (replays every TU,
+folds the full graph) for human review — as opposed to the reusable baseline
+above — run `compare --depth source` **without** a `--since`/`--changed-path`
+seed (which resolves to the whole current library target, ADR-043 D3 — what
+a now-removed `--depth full` rung used to require explicitly) and send its
+report to `-o`:
 
 ```bash
-abicheck scan build/libfoo.so -H include/ \
-  --sources . --depth source -o artifacts/libfoo-1.0-scan.json
+abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
+  --sources . --depth source -o artifacts/libfoo-1.0-report.json
 ```
 
-### Let risk pick the depth — `auto` (local/dev only)
+### Let risk pick the depth — `auto` (local/dev only, `scan` only for now)
 
-Omit `--depth` and, when a diff seed is present, `auto` reads the risk of the
-changed paths and picks a depth. It is the default and **never** overrides a
-pinned depth — keep CI on a fixed `--depth` for reproducibility.
+Omit `--depth` on `scan` and, when a diff seed is present, `auto` reads the
+risk of the changed paths and picks a depth. It is `scan`'s default and
+**never** overrides a pinned depth — keep CI on a fixed `--depth` for
+reproducibility.
 
 ```bash
 abicheck scan new.so -H include/ --since origin/main
 ```
+
+**`compare --depth` has no risk-driven `auto` rung yet** — omitting it
+defaults deterministically to `headers`, not a risk-based choice (plan §3
+row 13, not yet landed). For a fixed, reproducible CI depth, pin it
+explicitly on `compare` the same way you would on `scan`.
 
 ### Reading the coverage block
 
