@@ -106,19 +106,35 @@ class TestDefaultVersionedNames:
         )
         assert default_versioned_names(index) == {"CreateFoo", "DestroyFoo"}
 
-    def test_macho_strips_one_leading_underscore_by_default(self) -> None:
+    def test_macho_names_pass_through_already_normalized(self) -> None:
+        """PR #1140 follow-up, real macOS CI failure: ``macho_metadata``
+        itself already strips the platform's one leading underscore while
+        walking the export trie/symtab, so the names reaching this
+        projection are ALREADY the pure spelling -- ``"foo"`` for a plain-C
+        export, ``"_Z3barv"`` for a real Itanium C++ one (matching
+        ``Function.mangled``'s own, now-correctly-singly-stripped
+        convention). Re-stripping here (the previous, buggy behavior) would
+        corrupt the C++ case by eating its own ``"_Z"`` prefix's leading
+        underscore."""
         index = build_raw_export_index_from_macho(
             MachoMetadata(
-                exports=[MachoExport(name="_foo"), MachoExport(name="__Z3barv")]
+                exports=[MachoExport(name="foo"), MachoExport(name="_Z3barv")]
             )
         )
         assert default_versioned_names(index) == {"foo", "_Z3barv"}
 
-    def test_macho_underscore_strip_is_optional(self) -> None:
+    def test_macho_normalize_flag_is_a_documented_no_op(self) -> None:
+        """``normalize_macho`` no longer changes the result -- kept only for
+        source compatibility with existing callers (e.g.
+        :func:`linked_export_names`'s own historical call site)."""
         index = build_raw_export_index_from_macho(
-            MachoMetadata(exports=[MachoExport(name="_foo")])
+            MachoMetadata(exports=[MachoExport(name="_Z3barv")])
         )
-        assert default_versioned_names(index, normalize_macho=False) == {"_foo"}
+        assert (
+            default_versioned_names(index, normalize_macho=False)
+            == default_versioned_names(index, normalize_macho=True)
+            == {"_Z3barv"}
+        )
 
     def test_empty_names_are_dropped(self) -> None:
         index = build_raw_export_index_from_pe(PeMetadata(exports=[PeExport(name="")]))
@@ -126,15 +142,17 @@ class TestDefaultVersionedNames:
 
 
 class TestLinkedExportNames:
-    def test_macho_keeps_the_once_stripped_spelling(self) -> None:
-        """`macho_metadata` already stripped the platform's own single
-        underscore -- the L4 linker keeps that form, unlike
-        `default_versioned_names`'s dumper-matching double strip."""
+    def test_macho_agrees_with_default_versioned_names(self) -> None:
+        """Both projections are now an identical passthrough over the
+        already-normalized Mach-O spelling (PR #1140 follow-up) -- kept as
+        two distinct, separately-named functions since they answer
+        conceptually different questions, not because they differ in
+        Mach-O's own case any more."""
         index = build_raw_export_index_from_macho(
             MachoMetadata(exports=[MachoExport(name="_ZN1A3fooEv")])
         )
         assert linked_export_names(index) == {"_ZN1A3fooEv"}
-        assert default_versioned_names(index) == {"ZN1A3fooEv"}
+        assert default_versioned_names(index) == {"_ZN1A3fooEv"}
 
     def test_elf_and_pe_identical_to_default_versioned(self) -> None:
         elf_index = build_raw_export_index_from_elf(

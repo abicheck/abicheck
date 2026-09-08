@@ -27,6 +27,20 @@
   existing bare-name-equality heuristic) so it only fires when that
   determination has already concluded the true identity is the bare
   name — a bare `_foo` with no such evidence is still left untouched.
+- **`crosscheck.py`'s own export-table correlation (`model.export_index.
+  default_versioned_names`) no longer double-strips a Mach-O export's
+  leading underscore.** A separate, independent bug from the two above:
+  `macho_metadata` already strips the platform's one leading underscore
+  while parsing the real export trie/symtab, so `default_versioned_names`
+  re-stripping it corrupted every real Itanium C++ export (`_ZN2ns3fooEv`
+  -> `ZN2ns3fooEv`), which then never correlated against the now-correctly
+  singly-stripped declared identity above — a self-comparison of a real
+  compiled Mach-O library still reported the same contradictory
+  `exported_not_public`/`public_not_exported` pair even after both
+  `Function.mangled` fixes landed. This bug predates both of the above and
+  was latent all along, only invisible because `Function.mangled` used to
+  be doubly-stripped too, so both sides of the comparison happened to
+  agree on the same wrong spelling.
 - **The export-evidence C++ language-mode fallback (added in the prior
   fragment above) now correlates the mangled export with an identifier the
   specific header under parse actually declares**, instead of accepting any

@@ -166,10 +166,23 @@ def build_raw_export_index_from_pe(pe_meta: PeMetadata) -> RawExportIndex:
 def build_raw_export_index_from_macho(macho_meta: MachoMetadata) -> RawExportIndex:
     """*macho_meta*'s export list as a :class:`RawExportIndex`.
 
-    Names are exactly as ``macho_metadata`` parsed them — still carrying the
-    platform's own single leading underscore (``_foo``, ``__Z3fooi``) at this
-    layer; stripping it is :func:`default_versioned_names`'s job, not this
-    constructor's.
+    Names are exactly as ``macho_metadata`` parsed them -- which is already
+    ONCE-normalized: ``macho_metadata`` strips the platform's own single
+    leading underscore itself while walking the export trie/symtab (its own
+    "Strip leading underscore" step), so a real Itanium C++ export arrives
+    here as ``"_Z3fooi"`` (the pure spelling, matching castxml's and the
+    now-fixed header-AST parsers' own ``Function.mangled`` convention) and a
+    plain-C export as ``"foo"`` -- NOT still platform-decorated
+    (``"__Z3fooi"``/``"_foo"``) the way this docstring previously, wrongly,
+    documented this layer as leaving them (PR #1140 follow-up, real macOS
+    CI failure, third round on the same underlying symptom: the projections
+    below used to strip AGAIN to compensate for `Function.mangled` itself
+    being *doubly* stripped by a since-fixed bug in the castxml+clang
+    hybrid-merge path -- now that `Function.mangled` is correctly
+    singly-stripped at the point of origin, re-stripping here corrupts
+    every Mach-O C++ export by eating its own ``"_Z"`` prefix's leading
+    underscore, e.g. ``"_Z3fooi"`` -> ``"Z3fooi"``, which then never
+    correlates against the correctly-normalized header-declared identity).
     """
     return RawExportIndex(
         platform="macho",
@@ -203,10 +216,6 @@ def build_raw_export_index(snap: AbiSnapshot) -> RawExportIndex | None:
 # ---------------------------------------------------------------------------
 
 
-def _strip_macho_leading_underscore(name: str) -> str:
-    return name[1:] if name.startswith("_") else name
-
-
 def default_versioned_names(
     index: RawExportIndex, *, normalize_macho: bool = True
 ) -> frozenset[str]:
@@ -217,37 +226,38 @@ def default_versioned_names(
     False``) does not satisfy an unversioned consumer link (which needs
     ``foo@@…``) — including it would mask the exact missing-export case this
     set is meant to catch. Every named PE export counts (PE has no
-    equivalent versioning concept). Mach-O names get the dumper's own
-    normalization applied by default (``_foo`` → ``foo``, ``__Z...`` →
-    ``_Z...``) so the result matches ``Function.mangled``/``Variable.mangled``
-    spelling instead of flagging every C/C++ symbol as missing; pass
-    ``normalize_macho=False`` for a caller that needs the once-stripped,
-    still-platform-native spelling instead (see :func:`linked_export_names`).
+    equivalent versioning concept).
+
+    Mach-O names pass through UNMODIFIED: ``macho_metadata`` already strips
+    the platform's own single leading underscore while walking the export
+    trie/symtab (see :func:`build_raw_export_index_from_macho`'s own
+    docstring), so a real Itanium C++ export already arrives as the pure
+    ``"_Z3fooi"`` spelling matching ``Function.mangled``, and a plain-C one
+    as the bare ``"foo"``. ``normalize_macho`` is now a **no-op**, kept only
+    for source compatibility with existing callers -- it used to strip a
+    SECOND time, to compensate for `Function.mangled` itself once being
+    *doubly*-stripped by a since-fixed bug (PR #1140 follow-up); re-adding
+    that second strip today would corrupt every Mach-O C++ export by eating
+    its own ``"_Z"`` prefix's leading underscore.
 
     Formerly ``policy.depth_projection._exported_symbol_names`` /
     ``buildsource.crosscheck_base._exported_symbol_names``.
     """
     if index.platform == "elf":
         return frozenset(e.name for e in index.entries if e.name and e.is_default)
-    if index.platform == "pe":
-        return frozenset(e.name for e in index.entries if e.name)
-    if normalize_macho:
-        return frozenset(
-            _strip_macho_leading_underscore(e.name) for e in index.entries if e.name
-        )
     return frozenset(e.name for e in index.entries if e.name)
 
 
 def linked_export_names(index: RawExportIndex) -> frozenset[str]:
     """Exported names in the **L4 source-linker's** own keyspace.
 
-    Identical to :func:`default_versioned_names` except Mach-O names are
-    *not* re-normalized: ``macho_metadata`` already strips the platform's
-    one leading underscore, and the L4 linker keeps that once-stripped form
-    (a C++ export is stored as ``_Z…``, and stripping again — as the default
-    projection does, to match the dumper's *doubly*-stripped ``Function.
-    mangled`` — would make a correctly relinked macOS C++ surface intersect
-    nothing). Formerly ``buildsource.crosscheck_base._linked_export_symbols``.
+    Identical to :func:`default_versioned_names` -- both are now a
+    passthrough over the already-normalized Mach-O spelling; kept as a
+    distinct, separately-named function since the two answer conceptually
+    different questions (this repo's own convention: a shared *value* does
+    not mean a shared *concept*), and to preserve
+    ``buildsource.crosscheck_base._linked_export_symbols``'s own historical
+    name and call sites unchanged.
     """
     return default_versioned_names(index, normalize_macho=False)
 

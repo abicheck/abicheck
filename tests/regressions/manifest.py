@@ -1252,6 +1252,49 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.macho_export_index_double_strip",
+        invariant=(
+            "`model.export_index.default_versioned_names`'s Mach-O branch "
+            "must not re-strip a leading underscore: `macho_metadata` "
+            "already strips the platform's own one underscore while "
+            "parsing the real export trie/symtab, so a `MachoExport.name` "
+            "reaching this projection is ALREADY the pure spelling "
+            "(`_ZN2ns3fooEv`, matching `Function.mangled`). Stripping "
+            "again corrupts every Mach-O C++ export by eating its own "
+            '"_Z" prefix, breaking `exported_not_public`/`public_not_'
+            "exported` correlation even though the declared side is "
+            "correctly normalized."
+        ),
+        fixed_by=(1138,),
+        seed_tests=(
+            "tests/test_export_index.py",
+            "tests/test_crosscheck_macho_export_index_normalization.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "declaration_shape": ("plain_c", "namespaced_cxx"),
+            "mangled_shape": ("macho_itanium",),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "No Mach-O toolchain in this dev environment; verified "
+                    "via unit tests over model.export_index/crosscheck "
+                    "directly, constructing a MachoMetadata fixture rather "
+                    "than a real compiled binary."
+                ),
+                reference=(
+                    "PR #1140 follow-up: CI's integration-tests "
+                    "(macos-latest) job reported 3 residual failures after "
+                    "the sibling extraction.macho_mangled_identity_"
+                    "normalization fix landed -- per-declaration identity "
+                    "was already correct, but export-table correlation "
+                    "still disagreed for every Itanium-mangled sibling."
+                ),
+            ),
+        ),
+    ),
 )
 
 
