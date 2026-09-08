@@ -22,10 +22,32 @@ The three CLI subcommands all share ``compile_context_options``
 ``--sysroot``/``--nostdinc``, ADR-037 D3) — but ``action/run.sh`` used to
 forward all six only in ``dump`` mode, only ``--ast-frontend`` in ``compare``
 mode (behind a comment incorrectly claiming the rest were "dump-only flags...
-not exposed on the compare CLI"), and none of them in ``scan`` mode. These
-tests extract each mode's compile-context region verbatim from run.sh (the
-same "parse the real file, don't hand-copy it" discipline as
-``test_action_run_sh_legacy_aliases.py``) and assert parity.
+not exposed on the compare CLI"), and none of them in ``scan`` mode.
+
+**Phase 7b (PR #1153) update**: the CLI's own ``--ast-frontend``/
+``--sysroot``/``--nostdinc`` flags were demoted to ``.abicheck.yml``'s
+``compile:`` block entirely — every one of those flags now exits 64
+(UsageError) on every command. ``action/run.sh`` kept forwarding them
+literally for a while after that (a real regression, since fixed): these
+three inputs are now folded, via ``_resolve_effective_build_config``, into a
+scratch ``.abicheck.yml``'s ``compile:`` block and forwarded through
+``--config`` instead. ``--compiler``/``--compiler-prefix``/
+``--compiler-option`` remain literal flags (Phase 7b didn't touch them) and
+this module's gcc-options tests are otherwise unchanged.
+
+These tests extract each mode's compile-context region verbatim from run.sh
+(the same "parse the real file, don't hand-copy it" discipline as
+``test_action_run_sh_legacy_aliases.py``) and assert parity — including
+running the real ``_resolve_effective_build_config`` merge helper (a real
+Python/PyYAML dependency, present in this dev environment) rather than a
+stub, so a regression in the merge logic itself would fail here too, not
+only in a full-invocation test.
+
+See ``tests/test_action_compile_context_end_to_end.py`` for the companion
+module that runs the *complete, unmodified* ``action/run.sh`` against a real
+compiled library and a real installed ``abicheck`` — proving these inputs
+produce exit 0 (or a real verdict), not exit 64, which this file's own
+extracted-fragment approach cannot by itself demonstrate.
 """
 
 from __future__ import annotations
@@ -38,6 +60,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from abicheck._compiler_options import split_gcc_options
 
@@ -47,28 +70,39 @@ _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 _SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
 
-_COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
-# dump/scan have no release fan-out, so their regions end at the nostdinc
-# if-block; anchor past its closing "fi" so the extracted fragment is
-# syntactically complete.
-_COMPILE_CONTEXT_END = (
-    'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n    CMD+=(--nostdinc)\n  fi'
+# dump mode: --compiler/--compiler-prefix/--compiler-option (unaffected by
+# Phase 7b) through the merged --config forward (the Phase 7b replacement for
+# the removed --ast-frontend/--sysroot/--nostdinc flags) -- one contiguous
+# region.
+_DUMP_CONTEXT_START = 'add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"'
+_DUMP_CONTEXT_END = 'add_single_flag "--config" "$_EFFECTIVE_BUILD_CONFIG"'
+
+# compare's region starts at the gating comment (Codex review: these inputs
+# are gated to the single-pair path, since the release fan-out rejects them
+# outright) and ends at the same merged --config forward, which applies
+# unconditionally to both the release-style and single-pair paths.
+_COMPARE_COMPILE_CONTEXT_START = (
+    "# The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc)"
+)
+_COMPARE_COMPILE_CONTEXT_END = _DUMP_CONTEXT_END
+
+# scan's region is structurally different again: the --config merge happens
+# right after --build-info, well *before* --compiler/--compiler-prefix/
+# --compiler-option (which sit near --lang, after --against) -- Phase 7b's
+# fix folded the merge in at its own pre-existing --config call site rather
+# than relocating it next to the cross-compiler flags. Split into two
+# sub-regions so each can be tested without dragging in unrelated
+# prerequisites ($SCAN_ARTIFACT_SET/$FORCE_AUDIT_ONLY sit between them and
+# aren't needed by either).
+_SCAN_MERGE_START = (
+    'add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"'
+)
+_SCAN_MERGE_END = _DUMP_CONTEXT_END
+_SCAN_GCC_OPTIONS_START = 'add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"'
+_SCAN_GCC_OPTIONS_END = (
+    'add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"'
 )
 
-# compare's region is structurally different (Codex review: these flags are
-# gated to the single-pair path there, since the release fan-out rejects
-# them outright) — it starts at the gating comment, not at the first
-# add_single_flag, and its nostdinc if-block is nested one level deeper
-# inside the release-style/single-pair if/else, ending at the *outer* "fi".
-_COMPARE_COMPILE_CONTEXT_START = (
-    "# The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/"
-)
-_COMPARE_COMPILE_CONTEXT_END = (
-    'if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then\n'
-    "      CMD+=(--nostdinc)\n"
-    "    fi\n"
-    "  fi"
-)
 
 # _is_release_style_operand is defined once, well before any mode branch;
 # compare's extracted region calls it, so the harness needs its real
@@ -77,14 +111,44 @@ _COMPARE_COMPILE_CONTEXT_END = (
 _IS_RELEASE_STYLE_OPERAND_START = "_is_release_style_operand() {"
 _IS_RELEASE_STYLE_OPERAND_END = "\n}\n"
 
+# _is_path_already_qualified is defined near the very top of run.sh, well
+# before $_PY_SAFE_DIR exists -- _resolve_effective_build_config (below)
+# calls it to anchor a relative build-config path to $PWD before its own
+# `cd "$_PY_SAFE_DIR"`, so the harness needs the real definition too.
+_IS_PATH_ALREADY_QUALIFIED_START = "_is_path_already_qualified() {"
+_IS_PATH_ALREADY_QUALIFIED_END = "\n}\n"
+
+# _resolve_effective_build_config -- the Phase 7b merge helper itself. Its
+# own body shells out to the real $_PY_BIN with real PyYAML, so extracting
+# and running it verbatim (rather than stubbing it) actually exercises the
+# merge logic, not just its call sites.
+_RESOLVE_BUILD_CONFIG_START = (
+    '_GENERATED_COMPILE_CONTEXT_CONFIG="$_PY_SAFE_DIR/'
+    'generated-compile-context.abicheck.yml"'
+)
+_RESOLVE_BUILD_CONFIG_END = (
+    "\n  printf '%s' \"$_GENERATED_COMPILE_CONTEXT_CONFIG\"\n}\n"
+)
+
+
+def _extract(start_marker: str, end_marker: str, after: str | None = None) -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    base = text.index(after) if after is not None else 0
+    start = text.index(start_marker, base)
+    end = text.index(end_marker, start) + len(end_marker)
+    return text[start:end]
+
 
 def _is_release_style_operand_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_IS_RELEASE_STYLE_OPERAND_START)
-    end = text.index(_IS_RELEASE_STYLE_OPERAND_END, start) + len(
-        _IS_RELEASE_STYLE_OPERAND_END
-    )
-    return text[start:end]
+    return _extract(_IS_RELEASE_STYLE_OPERAND_START, _IS_RELEASE_STYLE_OPERAND_END)
+
+
+def _is_path_already_qualified_source() -> str:
+    return _extract(_IS_PATH_ALREADY_QUALIFIED_START, _IS_PATH_ALREADY_QUALIFIED_END)
+
+
+def _resolve_effective_build_config_source() -> str:
+    return _extract(_RESOLVE_BUILD_CONFIG_START, _RESOLVE_BUILD_CONFIG_END)
 
 
 # add_flag() (unlike add_single_flag, stubbed inline in each harness below) is
@@ -156,17 +220,14 @@ def _py_bin_has_abicheck_source() -> str:
 
 
 def _compile_context_region(
-    mode_marker: str, start_marker: str = _COMPILE_CONTEXT_START
+    start_marker: str, end_marker: str, mode_marker: str
 ) -> str:
-    """Extract one mode's compile-context flag-forwarding block verbatim."""
+    """Extract one mode's compile-context flag-forwarding region verbatim,
+    anchored to start searching only after *mode_marker* so an identical
+    literal string in another mode's own region isn't matched instead."""
     text = RUN_SH.read_text(encoding="utf-8")
     mode_start = text.index(mode_marker)
     start = text.index(start_marker, mode_start)
-    end_marker = (
-        _COMPARE_COMPILE_CONTEXT_END
-        if start_marker == _COMPARE_COMPILE_CONTEXT_START
-        else _COMPILE_CONTEXT_END
-    )
     end = text.index(end_marker, start) + len(end_marker)
     return text[start:end]
 
@@ -245,87 +306,130 @@ def _run_bash_script(
         os.unlink(script_path)
 
 
-def _run_region(
-    mode_marker: str,
-    env_extra: dict[str, str],
-    start_marker: str = _COMPILE_CONTEXT_START,
-) -> tuple[list[str], str]:
-    # add_single_flag is defined earlier in run.sh; redefine a minimal
-    # equivalent here since only the compile-context region is extracted,
-    # not the whole file (keeps the harness self-contained and fast).
-    # _is_release_style_operand is extracted from the real file (only
-    # compare's region calls it, but defining it unconditionally is
-    # harmless for dump/scan).
-    harness = (
-        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+def _harness(*, needs_merge_helper: bool, needs_release_style: bool) -> str:
+    parts = [
+        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n',
         # add_flag_shlex_split() (extracted as part of _add_flag_source())
         # needs _PY_BIN resolved, same as the real script does near its own
         # top -- otherwise the harness silently falls back to add_flag()'s
         # own naive splitting and a quoting regression would go undetected.
-        # $_PY_SAFE_DIR (extracted verbatim, not redefined -- see its own
-        # extraction function's docstring) is the second such prerequisite.
-        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-        + _py_safe_dir_source()
-        + _py_bin_has_abicheck_source()
-        + _add_flag_source()
-        + _is_release_style_operand_source()
-        + "\nCMD=()\n"
-    )
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n',
+        # Only needed by _is_path_already_qualified's Windows-only branch;
+        # this harness always runs the non-Windows path (parity with every
+        # other run.sh test file, which is exercised for real on the
+        # windows-latest CI lane directly rather than simulated here).
+        "_RUNNING_ON_WINDOWS=false\n",
+        _py_safe_dir_source(),
+        _py_bin_has_abicheck_source(),
+        _add_flag_source(),
+    ]
+    if needs_release_style:
+        parts.append(_is_release_style_operand_source())
+    if needs_merge_helper:
+        parts.append(_is_path_already_qualified_source())
+        parts.append(_resolve_effective_build_config_source())
+    parts.append("\nCMD=()\n")
+    return "".join(parts)
+
+
+_CONFIG_CONTENT_MARKER = "===GENERATED_CONFIG_CONTENT==="
+
+
+def _run_region(
+    mode_marker: str,
+    env_extra: dict[str, str],
+    start_marker: str,
+    end_marker: str,
+    *,
+    needs_merge_helper: bool = True,
+    needs_release_style: bool = False,
+    cwd: Path | None = None,
+) -> tuple[list[str], str, str]:
     script = (
-        harness
-        + _compile_context_region(mode_marker, start_marker)
+        _harness(
+            needs_merge_helper=needs_merge_helper,
+            needs_release_style=needs_release_style,
+        )
+        + _compile_context_region(start_marker, end_marker, mode_marker)
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+        # $_PY_SAFE_DIR (which the merged scratch config lives under) is
+        # removed by this script's own EXIT trap the moment the process
+        # exits -- before a caller reading the file from outside this
+        # subprocess could ever see it. Emit its content here, still inside
+        # the process, so _find_config_yaml can parse it from captured
+        # stdout instead of re-opening a path that no longer exists by the
+        # time subprocess.run() returns.
+        + f"echo '{_CONFIG_CONTENT_MARKER}'\n"
+        # `|| true`: a failed/false `[[ ]] && cat ...` as the script's own
+        # last command would otherwise make bash exit non-zero even on the
+        # ordinary "no config generated" case, which is not itself a
+        # failure -- callers of this harness only care whether *bash itself*
+        # ran cleanly, not whether a config happened to exist.
+        + '[[ -n "${_EFFECTIVE_BUILD_CONFIG:-}" && -f "${_EFFECTIVE_BUILD_CONFIG:-}" ]] '
+        '&& cat "$_EFFECTIVE_BUILD_CONFIG"\n' + "true\n"
     )
     env = {**os.environ, **env_extra}
-    out = _run_bash_script(script, env, check=True)
-    return out.stdout.splitlines(), out.stderr
+    out = _run_bash_script(script, env, check=True, cwd=cwd)
+    cmd_part, _, config_part = out.stdout.partition(_CONFIG_CONTENT_MARKER + "\n")
+    return cmd_part.splitlines(), out.stderr, config_part
 
 
 def _run_region_raw(
     mode_marker: str,
     env_extra: dict[str, str],
-    start_marker: str = _COMPILE_CONTEXT_START,
+    start_marker: str,
+    end_marker: str,
+    *,
+    needs_merge_helper: bool = True,
+    needs_release_style: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Like :func:`_run_region`, but ``check=False`` and returns the raw
     result -- for a region that's now expected to ``exit 1``, where
     ``check=True`` would raise before the caller could inspect anything."""
-    harness = (
-        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
-        # add_flag_shlex_split() (extracted as part of _add_flag_source())
-        # needs _PY_BIN resolved, same as the real script does near its own
-        # top -- otherwise the harness silently falls back to add_flag()'s
-        # own naive splitting and a quoting regression would go undetected.
-        # $_PY_SAFE_DIR (extracted verbatim, not redefined -- see its own
-        # extraction function's docstring) is the second such prerequisite.
-        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-        + _py_safe_dir_source()
-        + _py_bin_has_abicheck_source()
-        + _add_flag_source()
-        + _is_release_style_operand_source()
-        + "\nCMD=()\n"
-    )
     script = (
-        harness
-        + _compile_context_region(mode_marker, start_marker)
+        _harness(
+            needs_merge_helper=needs_merge_helper,
+            needs_release_style=needs_release_style,
+        )
+        + _compile_context_region(start_marker, end_marker, mode_marker)
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
     return _run_bash_script(script, env, check=False)
 
 
-class TestCompileContextForwardingParity:
-    """dump/compare/scan must forward the identical flag set."""
+def _find_config_yaml(config_yaml: str) -> dict[str, Any]:
+    """Parse the merged ``.abicheck.yml`` content ``_run_region`` captured
+    (see its own docstring for why this can't just re-open the ``--config``
+    path after the subprocess exits)."""
+    return yaml.safe_load(config_yaml) or {}
 
-    def test_dump_forwards_all_six_flags(self) -> None:
-        cmd, _ = _run_region(_DUMP_MODE_MARKER, _FULL_ENV)
-        assert "--ast-frontend" in cmd and "clang" in cmd
+
+class TestCompileContextForwardingParity:
+    """dump/compare/scan must fold ast-frontend/sysroot/nostdinc into the
+    same merged compile: block, and forward the unaffected cross-compiler
+    flags identically."""
+
+    def test_dump_forwards_compiler_flags_and_merges_the_rest(self) -> None:
+        cmd, _, _config_yaml = _run_region(
+            _DUMP_MODE_MARKER, _FULL_ENV, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END
+        )
         assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
-        assert "--sysroot" in cmd and "/opt/sysroot" in cmd
-        assert "--nostdinc" in cmd
+        # The removed flags never appear literally -- Phase 7b's whole point.
+        assert "--ast-frontend" not in cmd
+        assert "--sysroot" not in cmd
+        assert "--nostdinc" not in cmd
+        assert "--config" in cmd
+        merged = _find_config_yaml(_config_yaml)
+        assert merged["compile"]["frontend"] == "clang"
+        assert merged["compile"]["sysroot"] == "/opt/sysroot"
+        assert merged["compile"]["nostdinc"] is True
 
-    def test_compare_forwards_all_six_flags(self) -> None:
+    def test_compare_single_pair_forwards_compiler_flags_and_merges_the_rest(
+        self,
+    ) -> None:
         """Regression: compare used to forward only --ast-frontend, behind a
         comment incorrectly claiming the rest are dump-only — the CLI's
         `compare` command has shared `compile_context_options` (ADR-037 D3)
@@ -337,35 +441,62 @@ class TestCompileContextForwardingParity:
             "INPUT_OLD_LIBRARY": "old.so",
             "INPUT_NEW_LIBRARY": "new.so",
         }
-        cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
-        assert "--ast-frontend" in cmd and "clang" in cmd
+        cmd, _, _config_yaml = _run_region(
+            _COMPARE_MODE_MARKER,
+            env,
+            _COMPARE_COMPILE_CONTEXT_START,
+            _COMPARE_COMPILE_CONTEXT_END,
+            needs_release_style=True,
+        )
         assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
-        assert "--sysroot" in cmd and "/opt/sysroot" in cmd
-        assert "--nostdinc" in cmd
+        assert "--ast-frontend" not in cmd
+        assert "--sysroot" not in cmd
+        assert "--nostdinc" not in cmd
+        assert "--config" in cmd
+        merged = _find_config_yaml(_config_yaml)
+        assert merged["compile"]["frontend"] == "clang"
+        assert merged["compile"]["sysroot"] == "/opt/sysroot"
+        assert merged["compile"]["nostdinc"] is True
 
-    def test_scan_forwards_all_six_flags(self) -> None:
+    def test_scan_merges_ast_frontend_sysroot_nostdinc(self) -> None:
         """Regression: scan forwarded none of these, even though
         `cli_scan.py` shares the identical `compile_context_options`
         decorator with dump (ADR-037 D3 / ADR-035 amendment)."""
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV)
-        assert "--ast-frontend" in cmd and "clang" in cmd
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER, _FULL_ENV, _SCAN_MERGE_START, _SCAN_MERGE_END
+        )
+        assert "--ast-frontend" not in cmd
+        assert "--sysroot" not in cmd
+        assert "--nostdinc" not in cmd
+        assert "--config" in cmd
+        merged = _find_config_yaml(_config_yaml)
+        assert merged["compile"]["frontend"] == "clang"
+        assert merged["compile"]["sysroot"] == "/opt/sysroot"
+        assert merged["compile"]["nostdinc"] is True
+
+    def test_scan_forwards_compiler_flags_once_each(self) -> None:
+        """Regression (Codex review, PR #757): scan's cross-compiler block
+        used to appear twice in run.sh -- harmless duplication for the old
+        scalar --gcc-options (last-of-two-identical-values wins), but
+        --compiler-option is `multiple=True` and genuinely accumulates every
+        occurrence, so the duplicate silently doubled each forwarded token
+        once the mechanical --gcc-options -> --compiler-option migration
+        landed."""
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER,
+            _FULL_ENV,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert "--compiler" in cmd and "/opt/gcc-14/bin/g++" in cmd
         assert "--compiler-prefix" in cmd and "aarch64-linux-gnu-" in cmd
         assert "--compiler-option" in cmd and "-DFOO=1" in cmd
-        assert "--sysroot" in cmd and "/opt/sysroot" in cmd
-        assert "--nostdinc" in cmd
-        # Regression (Codex review, PR #757): scan's cross-compiler block used
-        # to appear twice in run.sh -- harmless duplication for the old
-        # scalar --gcc-options (last-of-two-identical-values wins), but
-        # --compiler-option is `multiple=True` and genuinely accumulates every
-        # occurrence, so the duplicate silently doubled every forwarded
-        # --compiler/--compiler-prefix/--compiler-option/--sysroot token.
         assert cmd.count("--compiler") == 1
         assert cmd.count("--compiler-prefix") == 1
         assert cmd.count("--compiler-option") == 1
-        assert cmd.count("--sysroot") == 1
 
     def test_gcc_options_quoted_value_stays_one_token(self) -> None:
         """Regression (Codex review, PR #757): routing gcc-options through
@@ -376,7 +507,13 @@ class TestCompileContextForwardingParity:
         --gcc-options flag. add_flag_shlex_split() must reproduce that
         shlex-aware splitting, not add_flag()'s own naive one."""
         env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1'}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert cmd.count("--compiler-option") == 2
         assert "-DMSG=hello world" in cmd
         assert "-DOK=1" in cmd
@@ -394,7 +531,13 @@ class TestCompileContextForwardingParity:
         Mirrors abicheck._compiler_options.split_gcc_options's own
         regression test for the identical Python-side fix."""
         env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-I/build/#generated -DOK=1"}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert cmd.count("--compiler-option") == 2
         assert "-I/build/#generated" in cmd
         assert "-DOK=1" in cmd
@@ -415,7 +558,13 @@ class TestCompileContextForwardingParity:
         value = r"-DMSG=hello\ world"
         expected_tokens = split_gcc_options(value)
         env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert cmd.count("--compiler-option") == len(expected_tokens)
         for token in expected_tokens:
             assert token in cmd
@@ -441,7 +590,13 @@ class TestCompileContextForwardingParity:
         value = r"-IC:\mypath\include -DFOO=bar"
         expected_tokens = split_gcc_options(value)
         env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": value}
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert cmd.count("--compiler-option") == len(expected_tokens)
         for token in expected_tokens:
             assert token in cmd
@@ -472,7 +627,13 @@ class TestCompileContextForwardingParity:
             **self._env_with_unusable_python(tmp_path),
             "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1',
         }
-        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        result = _run_region_raw(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert result.returncode == 1
         assert "::error::" in result.stdout
         assert "quoting/escaping" in result.stdout
@@ -489,7 +650,13 @@ class TestCompileContextForwardingParity:
             **self._env_with_unusable_python(tmp_path),
             "INPUT_GCC_OPTIONS": "-DFOO=1 -DBAR=2",
         }
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, env)
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert cmd.count("--compiler-option") == 2
         assert "-DFOO=1" in cmd
         assert "-DBAR=2" in cmd
@@ -520,7 +687,13 @@ class TestCompileContextForwardingParity:
             **self._env_with_unusable_python(tmp_path),
             "INPUT_GCC_OPTIONS": "-DPATTERN=*",
         }
-        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        result = _run_region_raw(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert result.returncode == 1
         assert "::error::" in result.stdout
         assert "glob metacharacters" in result.stdout
@@ -563,7 +736,13 @@ class TestCompileContextForwardingParity:
         with an empty $split, dropping every requested compiler option
         instead of failing on the invalid input."""
         env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="unterminated'}
-        result = _run_region_raw(_SCAN_MODE_MARKER, env)
+        result = _run_region_raw(
+            _SCAN_MODE_MARKER,
+            env,
+            _SCAN_GCC_OPTIONS_START,
+            _SCAN_GCC_OPTIONS_END,
+            needs_merge_helper=False,
+        )
         assert result.returncode == 1
         assert "::error::" in result.stdout
         assert "could not be parsed" in result.stdout
@@ -619,18 +798,11 @@ class TestCompileContextForwardingParity:
             f'#!/bin/bash\nexec "{real_python3}" "$@" | sed $\'s/$/\\r/\'\n'
         )
         fake_python3.chmod(0o755)
-        harness = (
-            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
-            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
-            + _py_safe_dir_source()
-            + _py_bin_has_abicheck_source()
-            + _add_flag_source()
-            + _is_release_style_operand_source()
-            + "\nCMD=()\n"
-        )
         script = (
-            harness
-            + _compile_context_region(_SCAN_MODE_MARKER)
+            _harness(needs_merge_helper=False, needs_release_style=False)
+            + _compile_context_region(
+                _SCAN_GCC_OPTIONS_START, _SCAN_GCC_OPTIONS_END, _SCAN_MODE_MARKER
+            )
             + "\nprintf '%s\\0' \"${CMD[@]}\"\n"
         )
         env = {
@@ -647,20 +819,29 @@ class TestCompileContextForwardingParity:
         assert not any("\r" in token for token in cmd)
 
     def test_compare_omits_unset_flags(self) -> None:
-        cmd, _ = _run_region(
+        cmd, _, _config_yaml = _run_region(
             _COMPARE_MODE_MARKER,
             {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
             _COMPARE_COMPILE_CONTEXT_START,
+            _COMPARE_COMPILE_CONTEXT_END,
+            needs_release_style=True,
         )
         assert "--compiler" not in cmd
+        assert "--ast-frontend" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
+        # No build-config and no compile-context inputs set at all: no merge
+        # needed, so --config is entirely absent (not even an empty value).
+        assert "--config" not in cmd
 
     def test_scan_omits_unset_flags(self) -> None:
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, {})
-        assert "--compiler" not in cmd
+        cmd, _, _config_yaml = _run_region(
+            _SCAN_MODE_MARKER, {}, _SCAN_MERGE_START, _SCAN_MERGE_END
+        )
+        assert "--ast-frontend" not in cmd
         assert "--sysroot" not in cmd
         assert "--nostdinc" not in cmd
+        assert "--config" not in cmd
 
     def test_compare_fails_loud_for_compile_context_against_release_style_operand(
         self,
@@ -681,7 +862,11 @@ class TestCompileContextForwardingParity:
             "INPUT_NEW_LIBRARY": "new.so",
         }
         result = _run_region_raw(
-            _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
+            _COMPARE_MODE_MARKER,
+            env,
+            _COMPARE_COMPILE_CONTEXT_START,
+            _COMPARE_COMPILE_CONTEXT_END,
+            needs_release_style=True,
         )
         assert result.returncode != 0
         assert "not support" in result.stdout
@@ -690,13 +875,15 @@ class TestCompileContextForwardingParity:
         """Companion: a plain directory/package compare with no compile-
         context inputs configured must still succeed (only fails when a
         flag was actually configured and would be dropped)."""
-        cmd, stderr = _run_region(
+        cmd, stderr, _config_yaml = _run_region(
             _COMPARE_MODE_MARKER,
             {
                 "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
                 "INPUT_NEW_LIBRARY": "new.so",
             },
             _COMPARE_COMPILE_CONTEXT_START,
+            _COMPARE_COMPILE_CONTEXT_END,
+            needs_release_style=True,
         )
         assert "not support" not in stderr
 
@@ -708,7 +895,7 @@ class TestCompileContextForwardingParity:
         spells it out explicitly requests nothing the release fan-out
         could actually drop. Must not trip the fail-loud guard, unlike a
         real frontend choice such as "clang"."""
-        cmd, stderr = _run_region(
+        cmd, stderr, _config_yaml = _run_region(
             _COMPARE_MODE_MARKER,
             {
                 "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
@@ -716,6 +903,8 @@ class TestCompileContextForwardingParity:
                 "INPUT_AST_FRONTEND": "auto",
             },
             _COMPARE_COMPILE_CONTEXT_START,
+            _COMPARE_COMPILE_CONTEXT_END,
+            needs_release_style=True,
         )
         assert "not support" not in stderr
         assert "--ast-frontend" not in cmd
@@ -731,6 +920,99 @@ class TestCompileContextForwardingParity:
                 "INPUT_AST_FRONTEND": "clang",
             },
             _COMPARE_COMPILE_CONTEXT_START,
+            _COMPARE_COMPILE_CONTEXT_END,
+            needs_release_style=True,
         )
         assert result.returncode != 0
         assert "not support" in result.stdout
+
+    def test_ast_frontend_input_wins_over_a_conflicting_build_config_value(
+        self, tmp_path: Path
+    ) -> None:
+        """Precedence rule this fix must reproduce (see
+        _resolve_effective_build_config's own docstring in run.sh): an
+        Action input wins over a same-key value already in the caller's own
+        build-config -- mirroring cli_options.py's pre-Phase-7b "CLI flag >
+        config" rule, and ADR-049 D7's explicit_cli/api_request > ...  >
+        project_config precedence."""
+        build_config = tmp_path / "conflict.abicheck.yml"
+        build_config.write_text(
+            "compile:\n  frontend: castxml\n  sysroot: /old/sysroot\n"
+            "  std: c++17\nseverity:\n  preset: strict\n",
+            encoding="utf-8",
+        )
+        env = {
+            **_FULL_ENV,
+            "INPUT_BUILD_CONFIG": str(build_config),
+        }
+        cmd, _, _config_yaml = _run_region(
+            _DUMP_MODE_MARKER, env, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END
+        )
+        merged = _find_config_yaml(_config_yaml)
+        assert merged["compile"]["frontend"] == "clang"
+        assert merged["compile"]["sysroot"] == "/opt/sysroot"
+        assert merged["compile"]["nostdinc"] is True
+        # Untouched blocks/keys survive the merge.
+        assert merged["compile"]["std"] == "c++17"
+        assert merged["severity"]["preset"] == "strict"
+        # The caller's own file on disk is never mutated in place.
+        assert "castxml" in build_config.read_text(encoding="utf-8")
+
+    def test_no_merge_needed_passes_the_build_config_through_unchanged(self) -> None:
+        """When none of ast-frontend/sysroot/nostdinc are set, --config
+        forwards the caller's own build-config path verbatim -- no scratch
+        file, no Python merge step, same as before this fix existed."""
+        env = {"INPUT_BUILD_CONFIG": "my.abicheck.yml"}
+        cmd, _, _config_yaml = _run_region(
+            _DUMP_MODE_MARKER, env, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END
+        )
+        idx = cmd.index("--config")
+        assert cmd[idx + 1] == "my.abicheck.yml"
+
+    def test_relative_build_config_is_anchored_before_the_python_cd(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression pin: _resolve_effective_build_config's Python merge
+        step runs from inside $_PY_SAFE_DIR (a *different* CWD, for
+        import-shadowing safety) -- a relative build-config path must be
+        anchored to the caller's own $PWD first, or the merge can't find a
+        file that genuinely exists there."""
+        (tmp_path / "relative.abicheck.yml").write_text(
+            "severity:\n  preset: strict\n", encoding="utf-8"
+        )
+        env = {**_FULL_ENV, "INPUT_BUILD_CONFIG": "relative.abicheck.yml"}
+        _cmd, _, config_yaml = _run_region(
+            _DUMP_MODE_MARKER, env, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END, cwd=tmp_path
+        )
+        merged = _find_config_yaml(config_yaml)
+        assert merged["severity"]["preset"] == "strict"
+        assert merged["compile"]["frontend"] == "clang"
+
+    def test_missing_build_config_fails_loud(self, tmp_path: Path) -> None:
+        env = {
+            **_FULL_ENV,
+            "INPUT_BUILD_CONFIG": str(tmp_path / "does-not-exist.abicheck.yml"),
+        }
+        result = _run_region_raw(
+            _DUMP_MODE_MARKER, env, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END
+        )
+        assert result.returncode == 1
+        # _resolve_effective_build_config's own errors go to stderr, not
+        # stdout -- its callers capture stdout via `$(...)` as the merged
+        # config *path*, so an unredirected echo would be silently
+        # swallowed into that variable instead of ever surfacing.
+        assert "::error::" in result.stderr
+        assert "does not exist" in result.stderr
+
+    def test_merge_needs_python_with_abicheck_importable(self, tmp_path: Path) -> None:
+        """Without a working Python that can import abicheck, the merge
+        cannot run -- must fail loud (not silently drop ast-frontend/
+        sysroot/nostdinc, which would revert to the wrong compile context
+        with no signal)."""
+        env = {**_FULL_ENV, **self._env_with_unusable_python(tmp_path)}
+        result = _run_region_raw(
+            _DUMP_MODE_MARKER, env, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END
+        )
+        assert result.returncode == 1
+        assert "::error::" in result.stderr
+        assert "no working Python interpreter" in result.stderr

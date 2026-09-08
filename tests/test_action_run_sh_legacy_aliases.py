@@ -41,7 +41,7 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _ALIAS_START_MARKER = 'MODE="${INPUT_MODE:-compare}"'
 _ALIAS_END_MARKER = 'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"'
 _SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
-_AGAINST_START_MARKER = 'add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"'
+_AGAINST_START_MARKER = 'add_single_flag "--config" "$_EFFECTIVE_BUILD_CONFIG"'
 _AGAINST_END_MARKER = 'add_single_flag "--lang" "${INPUT_LANG:-}"'
 
 

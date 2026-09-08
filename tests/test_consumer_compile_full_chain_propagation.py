@@ -104,7 +104,13 @@ from copy import deepcopy
 from typing import Any
 
 from _gha_expr import eval_gha_expression
-from test_action_compile_context_parity import _DUMP_MODE_MARKER, _run_region
+from test_action_compile_context_parity import (
+    _DUMP_CONTEXT_END,
+    _DUMP_CONTEXT_START,
+    _DUMP_MODE_MARKER,
+    _find_config_yaml,
+    _run_region,
+)
 from test_action_run_contract import ACTION_YML, _step_env_mapping
 from test_reusable_workflows_project_evidence import (
     CHECK_PROJECT,
@@ -822,7 +828,9 @@ def _assert_reaches_real_dump_cli_invocation(
     test_action_compile_context_parity.py harness -- no new execution
     machinery, but its own `RUN_SH` edge is asserted first via
     `_assert_run_abicheck_step_invokes_run_sh`), producing the real
-    --ast-frontend/--compiler/--compiler-option CLI flags."""
+    --compiler/--compiler-option CLI flags and a merged --config whose
+    compile.frontend carries the resolved ast-frontend value (Phase 7b,
+    PR #1153 demoted --ast-frontend off the CLI entirely)."""
     _assert_run_abicheck_step_invokes_run_sh()
     env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
     for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
@@ -839,9 +847,16 @@ def _assert_reaches_real_dump_cli_invocation(
         env_by_input["sysroot"]: "",
         "INPUT_NOSTDINC": "false",
     }
-    cmd, _ = _run_region(_DUMP_MODE_MARKER, env)
-    assert "--ast-frontend" in cmd
-    assert cmd[cmd.index("--ast-frontend") + 1] == ast_frontend
+    cmd, _, config_yaml = _run_region(
+        _DUMP_MODE_MARKER, env, _DUMP_CONTEXT_START, _DUMP_CONTEXT_END
+    )
+    # --ast-frontend is no longer a literal CLI flag (Phase 7b, PR #1153) --
+    # run.sh folds it into a scratch .abicheck.yml's compile.frontend and
+    # forwards that via --config instead (_resolve_effective_build_config).
+    assert "--ast-frontend" not in cmd
+    assert "--config" in cmd
+    merged = _find_config_yaml(config_yaml)
+    assert merged["compile"]["frontend"] == ast_frontend
     assert "--compiler" in cmd
     assert cmd[cmd.index("--compiler") + 1] == gcc_path
     assert "--compiler-option" in cmd

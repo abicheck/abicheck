@@ -343,7 +343,7 @@ _is_release_style_operand() {
 # unnoticed.
 _extra_args_is_value_option() {
   case "$1" in
-    --abi3 | --against | --artifact-set | --ast-frontend | --budget | \
+    --abi3 | --against | --artifact-set | --budget | \
     --build-info | --build-target | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
     --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
     --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
@@ -747,6 +747,138 @@ if [[ -n "$_PY_BIN" ]] \
 elif [[ -n "$_PY_BIN" ]]; then
   echo "::warning::resolved Python interpreter '$_PY_BIN' cannot import abicheck (a self-hosted runner may expose a different python3 on PATH than the one abicheck was installed into) -- --gcc-options/--compiler-option requiring quoting/escaping will fail rather than risk a wrong compile context."
 fi
+
+# ---------------------------------------------------------------------------
+# Compile-context inputs (ast-frontend/sysroot/nostdinc).
+#
+# Phase 7b (PR #1153, docs/contribute/plans/one-comparison-product.md)
+# demoted the CLI's own --ast-frontend/--sysroot/--nostdinc/--no-nostdinc
+# flags to .abicheck.yml's compile: block (compile.frontend/compile.sysroot/
+# compile.nostdinc) -- every one of those flags now exits 64 (UsageError) on
+# dump/compare/scan alike. This Action's own ast-frontend/sysroot/nostdinc
+# inputs used to be forwarded as those literal flags (three call sites: dump
+# mode, compare mode's single-pair path, and scan mode); they must instead be
+# folded into a scratch .abicheck.yml's compile: block and forwarded via
+# --config, merged with whatever build-config the caller already supplied
+# (action.yml's build-config input) rather than dropped.
+#
+# Precedence on a conflict (an Action input AND the caller's own build-config
+# already setting the same compile.* key): the Action input wins. This
+# reproduces the CLI's own pre-Phase-7b "CLI flag > config" rule verbatim
+# (abicheck/cli_options.py's resolve_compile_context(): "CLI > config: an
+# explicit --ast-frontend wins even when it is 'auto'"; the identical rule
+# for --nostdinc/--no-nostdinc) -- before Phase 7b this Action forwarded
+# both the literal flag AND --config together, and the CLI's own resolver is
+# what made the flag win. It also matches the repository-wide ADR-049 D7
+# field-precedence order (explicit_cli/api_request > ... > project_config):
+# this Action's own compile-context inputs are the explicit-request
+# equivalent that removed flag used to be, not project configuration.
+#
+# The generated file lives inside $_PY_SAFE_DIR -- already the private,
+# per-run-empty scratch directory every other inline-Python invocation in
+# this file runs from (`cd "$_PY_SAFE_DIR" && ...`), specifically so an
+# untrusted checkout can't shadow the real `abicheck` package with one of
+# its own. Reusing it here avoids minting (and having to separately clean
+# up) a second temp directory -- the existing EXIT trap that removes
+# $_PY_SAFE_DIR already covers this file too.
+_GENERATED_COMPILE_CONTEXT_CONFIG="$_PY_SAFE_DIR/generated-compile-context.abicheck.yml"
+
+# Prints (to stdout) the --config path this run should use: the caller's own
+# build-config verbatim when NONE of ast-frontend/sysroot/nostdinc are set
+# (the common case -- no merge needed, no Python required either), or the
+# merged scratch file above otherwise. Returns 1 with its own ::error:: on
+# failure (no usable Python/abicheck import, a nonexistent build-config
+# path, or the merge itself failing -- e.g. a malformed existing
+# build-config) -- callers must check the exit status, not just emptiness,
+# since an empty build-config is also the ordinary "none configured" case.
+_resolve_effective_build_config() {
+  local ast_frontend="$1" sysroot="$2" nostdinc="$3" build_config="$4"
+
+  if [[ -z "$ast_frontend" && -z "$sysroot" && "$nostdinc" != "true" ]]; then
+    printf '%s' "$build_config"
+    return 0
+  fi
+
+  # Every ::error:: below is deliberately printed to stderr (>&2), unlike
+  # most of this file's other ::error:: sites -- every caller of this
+  # function assigns its stdout via `$(...)` (the merged config *path* is
+  # this function's real return value), so an unredirected echo would be
+  # silently captured into that variable instead of ever reaching the
+  # workflow log, leaving a bare "exit 1" with no explanation at all.
+  if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    echo "::error::ast-frontend/sysroot/nostdinc need abicheck's own YAML writer to fold them into a compile: block (--ast-frontend/--sysroot/--nostdinc are no longer literal CLI flags as of Phase 7b), but no working Python interpreter with abicheck importable was found on this runner (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Set compile.frontend/compile.sysroot/compile.nostdinc directly in a build-config file instead." >&2
+    return 1
+  fi
+
+  if [[ -n "$build_config" && ! -f "$build_config" ]]; then
+    echo "::error::build-config '$build_config' does not exist -- cannot merge ast-frontend/sysroot/nostdinc into its compile: block." >&2
+    return 1
+  fi
+
+  # A relative build-config path must be anchored to $PWD *before* the
+  # Python invocation below `cd`s into $_PY_SAFE_DIR -- otherwise the merge
+  # would resolve it against the wrong directory and fail to find a file
+  # that genuinely exists (same reasoning, and the same `_is_path_already_
+  # qualified` check, $_PY_BIN's own canonicalization above already uses).
+  if [[ -n "$build_config" ]] && ! _is_path_already_qualified "$build_config"; then
+    build_config="$PWD/$build_config"
+  fi
+
+  # Values passed on stdin (four lines, one per field), never as argv --
+  # sysroot/build-config are filesystem paths, and (mirroring
+  # add_flag_shlex_split's own documented reasoning above) Git Bash/MSYS's
+  # automatic argv path-conversion on windows-latest would otherwise
+  # silently rewrite a POSIX-style path before this script ever saw it.
+  # `printf '%s'` (not an unquoted heredoc) so nothing in these values is
+  # ever re-interpreted by the shell -- an unquoted heredoc still performs
+  # command/parameter substitution on its body, which would be a real
+  # command-injection path for an untrusted ast-frontend/sysroot value
+  # containing "$(...)"/backticks.
+  local merge_output py_exit
+  merge_output=$(printf '%s\n%s\n%s\n%s\n' "$build_config" "$ast_frontend" "$sysroot" "$nostdinc" \
+    | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+
+import yaml
+
+lines = sys.stdin.read().split("\n")
+while len(lines) < 4:
+    lines.append("")
+build_config, ast_frontend, sysroot, nostdinc = lines[:4]
+
+existing = {}
+if build_config:
+    loaded = yaml.safe_load(Path(build_config).read_text(encoding="utf-8"))
+    if isinstance(loaded, dict):
+        existing = loaded
+
+# Action input wins on conflict -- see this block'\''s own comment above
+# for why (mirrors resolve_compile_context()'\''s pre-Phase-7b "CLI flag >
+# config" rule).
+compile_blk = dict(existing.get("compile") or {})
+if ast_frontend:
+    compile_blk["frontend"] = ast_frontend
+if sysroot:
+    compile_blk["sysroot"] = sysroot
+if nostdinc == "true":
+    compile_blk["nostdinc"] = True
+
+merged = dict(existing)
+merged["compile"] = compile_blk
+
+Path("generated-compile-context.abicheck.yml").write_text(
+    yaml.safe_dump(merged, sort_keys=False), encoding="utf-8"
+)
+') 2>&1)
+  py_exit=$?
+  if [[ $py_exit -ne 0 ]]; then
+    echo "::error::failed to merge ast-frontend/sysroot/nostdinc into a scratch .abicheck.yml (existing build-config '${build_config:-<none>}' may be malformed, or not valid YAML): $merge_output" >&2
+    return 1
+  fi
+
+  printf '%s' "$_GENERATED_COMPILE_CONTEXT_CONFIG"
+}
 
 # ---------------------------------------------------------------------------
 # Back-compat aliases: `estimate`/`audit` (pre-dry-run/scan-reshape inputs,
@@ -1244,15 +1376,13 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+  # --ast-frontend/--sysroot/--nostdinc were demoted off the CLI entirely
+  # (Phase 7b) -- folded into the --config below's compile: block instead,
+  # via _resolve_effective_build_config (see its own definition above for
+  # the merge/precedence rules).
   add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
   add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
-
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--nostdinc)
-  fi
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
@@ -1267,7 +1397,10 @@ if [[ "$MODE" == "dump" ]]; then
   # compile_commands.json. (See action input `build-info`.)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  _EFFECTIVE_BUILD_CONFIG=$(_resolve_effective_build_config \
+    "${INPUT_AST_FRONTEND:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" "${INPUT_BUILD_CONFIG:-}") \
+    || exit 1
+  add_single_flag "--config" "$_EFFECTIVE_BUILD_CONFIG"
   add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
@@ -1308,19 +1441,27 @@ elif [[ "$MODE" == "compare" ]]; then
   add_sided_scalar_flag "--version" "new" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
 
-  # The L2 compile-context flags (--ast-frontend/--gcc-*/--sysroot/
-  # --nostdinc) are rejected outright by the CLI (a UsageError, exit 64)
-  # for directory/package operands — the per-library release fan-out
-  # doesn't thread a CompileContext to each pair's header dump. Gate them
-  # to the single-pair path, same as the release-only flags below are
-  # gated the other way. Fail loud (::error:: + exit 1) rather than warn
-  # and continue, matching the evidence-flags guard just below (Codex
-  # review): a warning alone lets the comparison run to a green verdict
-  # with headers parsed under the wrong macros/sysroot/frontend, which is
-  # exactly the silent-wrong-result failure mode the evidence-flags guard
-  # was already fixed to avoid for the analogous --depth build/source
-  # case — an explicitly-configured compile-context input deserves the
-  # same treatment as an explicitly-configured evidence input.
+  # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc) are
+  # rejected outright by the CLI (a UsageError, exit 64) for directory/
+  # package operands — the per-library release fan-out doesn't thread a
+  # CompileContext to each pair's header dump. Gate them to the single-pair
+  # path, same as the release-only flags below are gated the other way.
+  # Fail loud (::error:: + exit 1) rather than warn and continue, matching
+  # the evidence-flags guard just below (Codex review): a warning alone
+  # lets the comparison run to a green verdict with headers parsed under
+  # the wrong macros/sysroot/frontend, which is exactly the
+  # silent-wrong-result failure mode the evidence-flags guard was already
+  # fixed to avoid for the analogous --depth build/source case — an
+  # explicitly-configured compile-context input deserves the same treatment
+  # as an explicitly-configured evidence input.
+  #
+  # --ast-frontend/--sysroot/--nostdinc are no longer literal CLI flags
+  # (Phase 7b) — folded into --config's compile: block below via
+  # _resolve_effective_build_config instead, for the single-pair path only;
+  # a release/bundle (directory/package) operand keeps forwarding its own
+  # build-config unmodified ($_EFFECTIVE_BUILD_CONFIG stays the raw input),
+  # matching this guard's own "these inputs simply don't apply there" rule.
+  _EFFECTIVE_BUILD_CONFIG="${INPUT_BUILD_CONFIG:-}"
   if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
      || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
     # "auto" is the documented no-op spelling of ast-frontend (resolves to
@@ -1336,15 +1477,13 @@ elif [[ "$MODE" == "compare" ]]; then
       exit 1
     fi
   else
-    add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
     add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
     add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
     add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-    add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
 
-    if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-      CMD+=(--nostdinc)
-    fi
+    _EFFECTIVE_BUILD_CONFIG=$(_resolve_effective_build_config \
+      "${INPUT_AST_FRONTEND:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" "${INPUT_BUILD_CONFIG:-}") \
+      || exit 1
   fi
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.
@@ -1373,8 +1512,11 @@ elif [[ "$MODE" == "compare" ]]; then
   # (_resolve_compare_config runs before the directory/package dispatch), so
   # it stays unconditional; an earlier fix lumped it in with the three
   # rejected flags and silently dropped a bundle caller's build-config
-  # (Codex review, second round).
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # (Codex review, second round). $_EFFECTIVE_BUILD_CONFIG (set just above)
+  # is the raw build-config input for a release/bundle operand, or the
+  # ast-frontend/sysroot/nostdinc-merged scratch config for a single-pair
+  # one — either way it's the right value to forward here.
+  add_single_flag "--config" "$_EFFECTIVE_BUILD_CONFIG"
   # CLI cleanup phase two, PR J: --bundle-system-providers/--bundle-cohort
   # removed from the CLI (and this Action input retired with them) -- the
   # cross-library bundle-analysis layer's system-provider allow-list
@@ -1861,7 +2003,13 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # --ast-frontend/--sysroot/--nostdinc were demoted off the CLI entirely
+  # (Phase 7b) -- folded into this compile: block instead, via
+  # _resolve_effective_build_config (see its own definition above).
+  _EFFECTIVE_BUILD_CONFIG=$(_resolve_effective_build_config \
+    "${INPUT_AST_FRONTEND:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" "${INPUT_BUILD_CONFIG:-}") \
+    || exit 1
+  add_single_flag "--config" "$_EFFECTIVE_BUILD_CONFIG"
   # --build-target (P0.2, lab report follow-up): scan now supports the same
   # root-target scoping dump does (scan_engine.run_scan_core), so forward it
   # identically -- an unscoped scan of a multi-package workspace previously
@@ -1879,15 +2027,9 @@ elif [[ "$MODE" == "scan" ]]; then
     add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
-  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
   add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
   add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
   add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
-
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--nostdinc)
-  fi
 
   # Level selection — the modern --depth dial (omit for 'auto'). The deprecated
   # --mode/--source-method passthrough was removed; use depth.

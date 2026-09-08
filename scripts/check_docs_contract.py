@@ -1619,6 +1619,19 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "--ast-frontend/--nostdinc/--no-nostdinc (compare/dump/scan flags"
+        " demoted to compile.frontend/compile.nostdinc by Phase 7b, PR #1153;"
+        " the Action's own ast-frontend/nostdinc inputs, sans dashes, are"
+        " unaffected. Excludes --sysroot: `deps tree --sysroot` is a live,"
+        " unrelated flag with the identical spelling -- confirmed false"
+        " positives in docs/start/{choose-your-workflow,getting-started}.md."
+        " Registered wide and un-triaged (~30 docs pages + ~40 case READMEs"
+        " still show it as live) -- tracking the gap per AGENTS.md, not"
+        " fixing it here)",
+        ("--ast-frontend", "--no-nostdinc", "--nostdinc"),
+        frozenset({"contribute/known-gaps.md"}),
+    ),
 )
 
 
@@ -1677,9 +1690,7 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     ]
     usecase_registry = DOCS / "contribute" / "usecase-registry.yaml"
     if usecase_registry.is_file():
-        targets.append(
-            (usecase_registry, "docs/contribute/usecase-registry.yaml")
-        )
+        targets.append((usecase_registry, "docs/contribute/usecase-registry.yaml"))
     ground_truth = CATALOG / "ground_truth.json"
     if ground_truth.is_file():
         targets.append((ground_truth, "catalog/ground_truth.json"))
@@ -1813,7 +1824,9 @@ _STALE_PROCESS_LANGUAGE_PATTERNS = tuple(
 #: A ``key.subkey:`` token -- what a `.abicheck.yml` block's setting looks
 #: like when it is written inline. Anchored to a whitespace/quote boundary so
 #: it cannot match inside a URL, a Python attribute access, or a flag value.
-_CONFIG_KEY_OPERAND_RE = re.compile(r"(?:^|[\s'\"])([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*):(?=\s|$)")
+_CONFIG_KEY_OPERAND_RE = re.compile(
+    r"(?:^|[\s'\"])([a-z][a-z0-9_]*\.[a-z][a-z0-9_]*):(?=\s|$)"
+)
 
 #: A shell line invoking the tool, including a backslash-continued one. The
 #: subcommand list is deliberately explicit: `abicheck` alone also appears in

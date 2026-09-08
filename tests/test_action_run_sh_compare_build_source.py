@@ -33,8 +33,41 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+
+
+# The merged --config's scratch file lives under $_PY_SAFE_DIR, which
+# run.sh's own EXIT trap deletes the moment the process exits -- long before
+# a caller reading it from outside that subprocess could ever see it
+# (confirmed empirically: the file is already gone by the time
+# subprocess.run() returns). So the stub `abicheck` itself -- which runs
+# *inside* run.sh, well before that trap fires -- captures the config
+# file's content to a side-path while it still exists, instead of a caller
+# trying to re-open the (by-then-deleted) --config path.
+def _stub_captures_config(captured_config: Path) -> str:
+    return (
+        'prev=""\n'
+        'for arg in "$@"; do\n'
+        '  if [[ "$prev" == "--config" ]]; then\n'
+        f'    cat "$arg" > "{captured_config}" 2>/dev/null || true\n'
+        "  fi\n"
+        '  prev="$arg"\n'
+        "done\n"
+    )
+
+
+def _merged_compile_config(captured_config: Path) -> dict[str, Any]:
+    """The merged ``.abicheck.yml`` content the stub ``abicheck`` captured
+    (see ``_stub_captures_config`` above) -- ``--ast-frontend``/
+    ``--sysroot``/``--nostdinc`` are no longer literal CLI flags (Phase 7b);
+    they're folded into this scratch config and forwarded via ``--config``
+    instead (``action/run.sh``'s ``_resolve_effective_build_config``)."""
+    assert captured_config.is_file(), "abicheck stub never saw a --config flag"
+    return yaml.safe_load(captured_config.read_text(encoding="utf-8")) or {}
 
 
 def _bash_executable() -> str:
@@ -60,11 +93,13 @@ def _run_compare_raw(
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
+    captured_config = tmp_path / "captured_config.yml"
     abicheck_stub = fake_bin / "abicheck"
     abicheck_stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
-        'echo \'{"verdict":"COMPATIBLE"}\'\n'
+        + _stub_captures_config(captured_config)
+        + 'echo \'{"verdict":"COMPATIBLE"}\'\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -157,11 +192,13 @@ def _run_scan(env_extra: dict[str, str], tmp_path: Path) -> str:
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
+    captured_config = tmp_path / "captured_config.yml"
     abicheck_stub = fake_bin / "abicheck"
     abicheck_stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
-        'echo \'{"scan_schema_version":"1.2","verdict":"COMPATIBLE","exit_code":0}\'\n'
+        + _stub_captures_config(captured_config)
+        + 'echo \'{"scan_schema_version":"1.2","verdict":"COMPATIBLE","exit_code":0}\'\n'
         "exit 0\n",
         encoding="utf-8",
     )
@@ -216,7 +253,12 @@ class TestScanModeForwardsCrossCompilerFlags:
         assert "--compiler /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
         assert "--compiler-prefix aarch64-linux-gnu-" in cmd
         assert "--compiler-option -D__ARM_NEON" in cmd
-        assert "--sysroot /opt/sysroots/aarch64" in cmd
+        # --sysroot is no longer a literal CLI flag (Phase 7b) -- folded
+        # into the merged --config's compile: block instead.
+        assert "--sysroot" not in cmd
+        assert "--config" in cmd
+        merged = _merged_compile_config(tmp_path / "captured_config.yml")
+        assert merged["compile"]["sysroot"] == "/opt/sysroots/aarch64"
 
 
 class TestCompareModeForwardsCrossCompilerFlags:
@@ -240,7 +282,12 @@ class TestCompareModeForwardsCrossCompilerFlags:
         assert "--compiler /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
         assert "--compiler-prefix aarch64-linux-gnu-" in cmd
         assert "--compiler-option -D__ARM_NEON" in cmd
-        assert "--sysroot /opt/sysroots/aarch64" in cmd
+        # --sysroot is no longer a literal CLI flag (Phase 7b) -- folded
+        # into the merged --config's compile: block instead.
+        assert "--sysroot" not in cmd
+        assert "--config" in cmd
+        merged = _merged_compile_config(tmp_path / "captured_config.yml")
+        assert merged["compile"]["sysroot"] == "/opt/sysroots/aarch64"
 
     def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
         cmd = _run_compare({}, tmp_path)

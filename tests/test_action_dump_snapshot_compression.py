@@ -37,6 +37,25 @@ _DUMP_MODE_END = 'elif [[ "$MODE" == "compare" ]]; then'
 _IS_RELEASE_STYLE_OPERAND_START = "_is_release_style_operand() {"
 _IS_RELEASE_STYLE_OPERAND_END = "\n}\n"
 
+# dump mode's --config forward now runs through _resolve_effective_build_config
+# (Phase 7b, PR #1153's ast-frontend/sysroot/nostdinc-to-compile: migration) --
+# extracted verbatim, same "parse the real file" discipline, since the
+# extracted dump-mode region below calls it directly and would otherwise
+# invoke an undefined function under this harness.
+_IS_PATH_ALREADY_QUALIFIED_START = "_is_path_already_qualified() {"
+_IS_PATH_ALREADY_QUALIFIED_END = "\n}\n"
+_PY_SAFE_DIR_START = 'if ! _PY_SAFE_DIR="$(mktemp -d)"; then'
+_PY_SAFE_DIR_END = "\ntrap 'rm -rf \"$_PY_SAFE_DIR\"' EXIT\n"
+_PY_BIN_HAS_ABICHECK_START = '_PY_BIN_HAS_ABICHECK="false"'
+_PY_BIN_HAS_ABICHECK_END = "\nfi\n"
+_RESOLVE_BUILD_CONFIG_START = (
+    '_GENERATED_COMPILE_CONTEXT_CONFIG="$_PY_SAFE_DIR/'
+    'generated-compile-context.abicheck.yml"'
+)
+_RESOLVE_BUILD_CONFIG_END = (
+    "\n  printf '%s' \"$_GENERATED_COMPILE_CONTEXT_CONFIG\"\n}\n"
+)
+
 
 def _is_release_style_operand_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
@@ -45,6 +64,26 @@ def _is_release_style_operand_source() -> str:
         _IS_RELEASE_STYLE_OPERAND_END
     )
     return text[start:end]
+
+
+def _resolve_effective_build_config_prereqs_source() -> str:
+    """``_is_path_already_qualified``/``$_PY_SAFE_DIR``/``$_PY_BIN_HAS_ABICHECK``/
+    ``_resolve_effective_build_config`` itself, extracted verbatim -- all four
+    are referenced (not redefined) inside the extracted dump-mode region's own
+    ``--config`` forward."""
+    text = RUN_SH.read_text(encoding="utf-8")
+
+    def _extract(start: str, end: str) -> str:
+        s = text.index(start)
+        e = text.index(end, s) + len(end)
+        return text[s:e]
+
+    return (
+        _extract(_IS_PATH_ALREADY_QUALIFIED_START, _IS_PATH_ALREADY_QUALIFIED_END)
+        + _extract(_PY_SAFE_DIR_START, _PY_SAFE_DIR_END)
+        + _extract(_PY_BIN_HAS_ABICHECK_START, _PY_BIN_HAS_ABICHECK_END)
+        + _extract(_RESOLVE_BUILD_CONFIG_START, _RESOLVE_BUILD_CONFIG_END)
+    )
 
 
 def _dump_mode_region() -> str:
@@ -84,6 +123,8 @@ def _run_dump_region(env_extra: dict[str, str]) -> list[str]:
     harness = (
         'add_flag() { local f="$1" v="$2"; [[ -n "$v" ]] && CMD+=("$f" "$v"); }\n'
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _resolve_effective_build_config_prereqs_source()
         + _is_release_style_operand_source()
         + "\nCMD=()\n"
     )
