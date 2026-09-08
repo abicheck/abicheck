@@ -89,8 +89,9 @@ work is the live C++ validation campaign tracked under §C/§E.
   castxml drives clang C++-ish). The eval reproduced it on `zlib.h`: the "header
   appears to contain C++ syntax" hint **aborts** instead of degrading.
 - **Pointers.** `abicheck/cli.py:644` / `:1506` (`--lang` option); the hint emit
-  in the castxml driver (`abicheck/dumper_castxml.py`); plan
-  `docs/contribute/plans/g16-header-scope-toolchain-robustness.md`.
+  in the castxml driver (`abicheck/dumper_castxml.py`); G16's implementation
+  plan is retired (shipped, see `docs/contribute/plans/index.md`'s
+  completed-plans table).
 - **Approach.** Demote the heuristic to a warning + auto-retry under the other
   language mode; never hard-fail a correct `extern "C"` header.
 - **Acceptance.** `dump zlib.h --lang c` succeeds (or warns + falls back), no abort.

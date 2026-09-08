@@ -17,18 +17,25 @@ scenarios:
       against the old BTF are ABI-incompatible. The scanner must compare two BTF
       blobs (module vs vmlinux, or old vs new kernel) and report the layout break.
     flow:
-      - abicheck compare old.btf new.btf --btf
+      - abicheck compare old.btf new.btf
     expected:
       exit_code: 4
       verdict: BREAKING
     validates: UC-ARCH-kernel-btf
     automated: false
     status: planned
-    plan: docs/contribute/plans/g6-kernel-btf-and-accelerator.md
     note: >
-      BTF/CTF parsing is unit-tested (tests/test_btf_metadata.py). Full
-      automation needs real BTF blob fixtures and a documented "module vs
-      vmlinux BTF" workflow so the compare runs end-to-end.
+      G6 is Done (BTF/CTF and SYCL PI/UR workflows) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
+      BTF/CTF parsing is unit-tested (tests/test_btf_metadata.py). Real
+      committed BTF blobs already exist (catalog/cases/
+      case121_kernel_btf_struct_field_added/{v1,v2}.btf) and are driven
+      through parse_btf_from_bytes -> compare in
+      tests/test_workflow_kernel_accel.py, and the module-vs-vmlinux
+      workflow is documented (docs/use/kernel-btf.md). What's actually
+      missing is only a public-CLI/CliRunner test exercising this scenario
+      end-to-end, not new fixtures or documentation.
 
   - id: SC-SYCL-PLUGIN-SURFACE
     title: SYCL / accelerator plugin interface (PI/UR) surface change is caught
@@ -39,15 +46,17 @@ scenarios:
       must read the SYCL plugin surface and report the contract change at the
       workflow level, not only via low-level symbol diffing.
     flow:
-      - abicheck compare old.so new.so -H sycl/ --sycl
+      - abicheck compare old.so new.so -H sycl/
     expected:
       exit_code: 4
       verdict: BREAKING
     validates: UC-ARCH-sycl
     automated: false
     status: planned
-    plan: docs/contribute/plans/g6-kernel-btf-and-accelerator.md
     note: >
+      G6 is Done (BTF/CTF and SYCL PI/UR workflows) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
       SYCL metadata + diff is unit-tested (tests/test_diff_sycl.py) and there is
       a change-type example (catalog/cases/case82_sycl_overload_set_removed). Full
       automation needs a SYCL plugin fixture wired into a workflow-level run;

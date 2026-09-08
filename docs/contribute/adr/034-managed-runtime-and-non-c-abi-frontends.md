@@ -7,7 +7,7 @@ framing below predates a narrower, already-shipped exception: CPython
 extension modules get a purpose-built Python-level API frontend
 (`abicheck/python_api.py`, `diff_python_api.py`; gap G23, see
 [goals.md § Non-goals](../goals.md) and
-[plans/g23-python-level-api-diff.md](../plans/g23-python-level-api-diff.md)).
+plans/g23-python-level-api-diff.md).
 That work recovers the `.pyi`/signature surface a native extension exposes to
 `import` — a native-ABI-adjacent contract check, not the general Rust/Go/Java
 source-analysis frontends this ADR proposes. It is useful precedent for "a

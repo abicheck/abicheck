@@ -1,6 +1,6 @@
 # `catalog/` — the calibration catalog
 
-This is the calibration and compatibility-knowledge tree (Phase 4 of the [examples/catalog split](../docs/contribute/plans/examples-catalog-split.md)) -- not the curated, task-oriented tree. See [`../examples/README.md`](../examples/README.md) for that.
+This is the calibration and compatibility-knowledge tree (Phase 4 of the examples/catalog split) -- not the curated, task-oriented tree. See [`../examples/README.md`](../examples/README.md) for that.
 
 Everything below is calibration material: one case per compatibility
 mechanism, driving the FP-rate, tier-accuracy, mutation, and full-catalog

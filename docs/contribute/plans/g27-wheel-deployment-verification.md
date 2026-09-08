@@ -3,9 +3,9 @@
 **Registry:** `UC-TC-wheel-deployment-claims` (`partial`)
 **Effort:** L · **Risk:** low
 **Origin:** [SciPy / Scientific-Python Roadmap](../scipy-scientific-python-roadmap.md) §3.
-Generalizes [G10](g10-glibc-floor-check.md) (Linux glibc floor only) across
-platforms and claim types; reuses [G13](g13-arch-mismatch-guard.md)'s
-architecture-guard machinery and [G12](g12-security-hardening.md)'s
+Generalizes G10 (Linux glibc floor only) across
+platforms and claim types; reuses G13's
+architecture-guard machinery and G12's
 hardening-flag capture.
 
 **Status note (delivered scope):** the Linux `GLIBCXX`/`CXXABI` floor
