@@ -384,6 +384,97 @@ def test_probe_failure_with_a_resolved_cross_compiler_still_recovers_explicit_ta
     assert parser._target_triple == "x86_64-unknown-linux-gnu"
 
 
+def test_probe_failure_with_a_custom_renamed_compiler_recovers_via_bare_reprobe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: `_is_default_clang_bin`'s exact-
+    basename comparison alone wrongly treated ANY custom rename of the
+    native compiler (e.g. a company-specific wrapper symlink such as
+    ``company-clang``) as if it were a cross-compiler, silently
+    suppressing the host-platform fallback for it even though real Clang
+    reports its own native default for that name (empirically verified
+    against a real Clang 18 install: only a recognized ``<triple>-clang``
+    prefix like ``aarch64-apple-darwin-clang`` changes the reported
+    default; an arbitrary rename does not). A second, option-free probe of
+    the SAME resolved ``clang_bin`` recovers this as real evidence instead
+    of guessing from the name."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+
+    def _fake_configured_target_triple(
+        gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+    ) -> str | None:
+        # The real (option-bearing) probe fails; a bare re-probe of the
+        # identical binary succeeds and reveals its true native default.
+        if gcc_options is None and gcc_option_tokens == ():
+            return "x86_64-pc-linux-gnu"
+        return None
+
+    monkeypatch.setattr(
+        dumper, "_configured_target_triple", _fake_configured_target_triple
+    )
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "company-clang")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-pc-linux-gnu"
+
+
+def test_probe_failure_with_a_custom_renamed_compiler_falls_back_when_bare_reprobe_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control for the test above: when even the bare re-probe
+    fails (the binary cannot be invoked at all), the caller falls back to
+    `_is_default_clang_bin`'s exact-name comparison for the final,
+    narrowest `sys.platform` guess -- which stays conservative (``None``)
+    for a name it cannot positively identify as the plain default."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "company-clang")
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None
+
+
 def test_probe_failure_with_a_gcc_path_resolve_ignores_still_guesses_sys_platform(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

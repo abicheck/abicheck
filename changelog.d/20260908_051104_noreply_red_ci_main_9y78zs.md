@@ -89,6 +89,23 @@ it should read in CHANGELOG.md. Delete the other sections.
   spellings are even honored for the visible token that follows. With no
   way to see inside the file, any forwarded response file makes the
   answer "unknown", not "trust whatever is visible".
+  Under GNU mode, before consulting `_is_default_clang_bin`'s basename
+  comparison at all, a second, option-free probe of the identical
+  resolved `clang_bin` (`dumper._configured_target_triple(None, (),
+  clang_bin)`) is now tried first: the earlier, option-bearing probe may
+  have failed for a reason unrelated to the binary's own identity (an
+  unsupported flag, a sandboxed runner), and real Clang's own
+  `argv[0]`-driven default is real evidence, not a name-shape guess.
+  This closes a real gap in the basename check itself: an arbitrary
+  custom rename of the native compiler (e.g. a company-specific wrapper
+  symlink) was previously indistinguishable from a genuine
+  `<target-triple>-clang`-shaped cross-toolchain name, so it was always
+  treated as "not the default," permanently disabling the fallback for
+  it even though real Clang reports its own native default for any name
+  that isn't a recognized target-triple prefix (empirically verified
+  against a real Clang 18 install). `_is_default_clang_bin`'s exact-name
+  comparison now gates only the final, narrowest `sys.platform` guess,
+  reached only when even the bare re-probe fails.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

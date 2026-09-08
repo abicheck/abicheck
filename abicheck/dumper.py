@@ -619,45 +619,46 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
-            pruning_header_roots=pruning_header_roots
-            if pruning_header_roots is not None
-            else tuple(public_header_paths + public_dir_paths),
+            pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
-        # An explicit `--driver-mode=` override (either direction) wins.
+        # Probe-failure fallback chain (Codex/CodeRabbit review, fresh
+        # evidence): explicit `--target=` (CL-style spellings only under CL
+        # mode, no further guess); else, under GNU mode, a bare re-probe of
+        # `clang_bin` (real evidence -- the earlier failure may be an
+        # unrelated option, and Clang's own argv[0]-driven default beats a
+        # static name-shape guess like the former exact-basename check,
+        # which wrongly flagged any custom rename as a cross-compiler);
+        # else `_is_default_clang_bin`-gated `sys.platform`. No fallback
+        # while `@response-file` may hide the real target.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
-        _no_hidden_gnu_target = _is_default_clang_bin(
-            clang_bin, compiler
-        ) and not _forwards_response_file(gcc_options, gcc_option_tokens)
+        _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
+        target_triple = _configured_target_triple(
+            gcc_options, gcc_option_tokens, clang_bin
+        ) or (
+            _explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True)
+            if is_cl_mode
+            else _explicit_target_triple(gcc_options, gcc_option_tokens)
+            or (
+                _configured_target_triple(None, (), clang_bin)
+                if _target_known
+                else None
+            )
+            or (
+                sys.platform
+                if _target_known and _is_default_clang_bin(clang_bin, compiler)
+                else None
+            )
+        )
         parser = _ClangAstParser(
             ast_root,
             exported_dynamic,
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
-            # On a probe failure, recover an explicit `--target=`. Under
-            # CL mode, only spellings the CL driver actually honors are
-            # recovered (`cl_style=True`, `/clang:`-forwarded included),
-            # no `sys.platform` guess (mostly Windows regardless of host
-            # OS). No guess either under GNU mode unless `clang_bin` IS
-            # the plain host default (by basename -- Codex review) and no
-            # `@response-file` may hide its own target (Codex review, see
-            # `_no_hidden_gnu_target`). Lives HERE, not `is_darwin_target`.
-            target_triple=(
-                _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
-                or (
-                    _explicit_target_triple(
-                        gcc_options, gcc_option_tokens, cl_style=True
-                    )
-                    if is_cl_mode
-                    else (
-                        _explicit_target_triple(gcc_options, gcc_option_tokens)
-                        or (sys.platform if _no_hidden_gnu_target else None)
-                    )
-                )
-            ),
+            target_triple=target_triple,
             no_binary_evidence=no_binary_evidence,
         )
         stamped = cast(
