@@ -192,38 +192,42 @@ def _fold_evolution(
 ) -> dict[str, str]:
     """Fold one primitive's OLD/NEW identity sets into an evolution map.
 
-    Identical per-identity logic to ``cross_source_evolution.
-    compute_cross_source_evolution``'s own fold (ADR-068 D3's four states):
-    evaluated on both sides decides ``PERSISTENT``/``INTRODUCED``/
-    ``RESOLVED``; a hit on a side whose sibling was **not** evaluated is
-    always ``NOT_EVALUATED``, regardless of which side is missing evidence
-    -- the correctness crux that keeps a pre-existing construct from
-    reading as newly introduced merely because one side (e.g. a snapshot
-    with no embedded build evidence) lacked the evidence to confirm or
-    deny it. An identity absent on both sides never appears in the result.
+    Per-identity logic (ADR-068 D3's four states): evaluated on both sides
+    decides ``PERSISTENT``/``INTRODUCED``/``RESOLVED``; whenever *either*
+    side is incomplete, every identity either side flagged folds to
+    ``NOT_EVALUATED`` -- the correctness crux that keeps a pre-existing
+    construct from reading as newly introduced (or resolved) merely
+    because one side (e.g. a snapshot with no embedded build evidence)
+    lacked the evidence to confirm or deny it.
+
+    CodeRabbit review, fresh evidence: an earlier revision folded
+    ``NOT_EVALUATED`` only when the *hit itself* was on the evaluated
+    side (``new_hit and not old_evaluated`` / ``old_hit and not
+    new_evaluated``) -- the reverse orientation (a hit only on the
+    *incomplete* side, with the evaluated side silent) fell through to a
+    bare ``continue`` and the identity vanished from the result entirely,
+    silently discarding evidence instead of reporting the honest
+    "can't tell" state. Since incompleteness on either side already
+    means neither PERSISTENT/INTRODUCED/RESOLVED can be trusted for any
+    identity in the union, this is now unconditional: every key in
+    ``old_keys | new_keys`` folds to ``NOT_EVALUATED`` whenever the two
+    sides aren't both fully evaluated, regardless of which side (or
+    both) actually flagged it. An identity absent on both sides never
+    appears in the result at all, since it never enters the union.
     """
     result: dict[str, str] = {}
     for key in sorted(old_keys | new_keys):
-        old_hit = key in old_keys
-        new_hit = key in new_keys
         if old_evaluated and new_evaluated:
+            old_hit = key in old_keys
+            new_hit = key in new_keys
             if old_hit and new_hit:
                 evolution = CrossSourceEvolution.PERSISTENT
             elif new_hit:
                 evolution = CrossSourceEvolution.INTRODUCED
             else:
                 evolution = CrossSourceEvolution.RESOLVED
-        elif new_hit and not old_evaluated:
-            evolution = CrossSourceEvolution.NOT_EVALUATED
-        elif old_hit and not new_evaluated:
-            evolution = CrossSourceEvolution.NOT_EVALUATED
         else:
-            # Neither evaluated side flagged this identity -- unreachable in
-            # practice (an identity only enters the union when some
-            # evaluated side flagged it), kept as a defensive no-op rather
-            # than an assertion, mirroring cross_source_evolution.py's own
-            # identical fallback.
-            continue
+            evolution = CrossSourceEvolution.NOT_EVALUATED
         result[key] = evolution.value
     return result
 

@@ -37,6 +37,7 @@ from abicheck.buildsource.pattern_scan import (
 from abicheck.buildsource.preprocessor_scan import PreprocessorScanResult
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.pattern_preprocessor_scan import (
+    _fold_evolution,
     _pattern_scan_fully_covered,
     _preprocessor_scan_fully_covered,
     compute_pattern_preprocessor_scan,
@@ -89,6 +90,56 @@ class TestPreprocessorScanFullyCovered:
             ran=True, attempted=3, succeeded=3, probes_truncated=1
         )
         assert _preprocessor_scan_fully_covered(result) is False
+
+
+class TestFoldEvolutionIncompleteSideReverseOrientation:
+    """CodeRabbit review, fresh evidence: an earlier revision only folded
+    ``not_evaluated`` when the *hit itself* was on the evaluated side
+    (``new_hit and not old_evaluated`` / its symmetric case) -- the reverse
+    orientation, a hit only on the *incomplete* side with the evaluated
+    side silent, fell through to a bare ``continue`` and the identity
+    vanished from the result entirely instead of reading ``not_evaluated``.
+    Incompleteness on either side means neither PERSISTENT/INTRODUCED/
+    RESOLVED can be trusted for *any* identity in the union, regardless of
+    which side actually flagged it -- these cases exercise exactly the
+    orientation the earlier revision dropped."""
+
+    def test_hit_only_on_incomplete_old_side_is_not_evaluated(self) -> None:
+        """OLD is incomplete and flags `k`; NEW is fully evaluated and does
+        NOT flag it. The naive fold reads this as neither `new_hit` (false)
+        nor `old_hit and not new_evaluated` (new_evaluated is True) --
+        falling through to `continue` and silently dropping `k` instead of
+        reporting `not_evaluated`."""
+        result = _fold_evolution(
+            old_evaluated=False,
+            new_evaluated=True,
+            old_keys={"k"},
+            new_keys=set(),
+        )
+        assert result == {"k": "not_evaluated"}
+
+    def test_hit_only_on_incomplete_new_side_is_not_evaluated(self) -> None:
+        """Symmetric case: NEW is incomplete and flags `k`; OLD is fully
+        evaluated and does not."""
+        result = _fold_evolution(
+            old_evaluated=True,
+            new_evaluated=False,
+            old_keys=set(),
+            new_keys={"k"},
+        )
+        assert result == {"k": "not_evaluated"}
+
+    def test_hit_on_both_sides_one_incomplete_is_not_evaluated(self) -> None:
+        """Even when both sides flag `k`, an incomplete side still means
+        the comparison can't be trusted -- this must not read as
+        `persistent`."""
+        result = _fold_evolution(
+            old_evaluated=False,
+            new_evaluated=True,
+            old_keys={"k"},
+            new_keys={"k"},
+        )
+        assert result == {"k": "not_evaluated"}
 
 
 def _empty_snapshot(library: str, version: str) -> AbiSnapshot:
@@ -187,3 +238,55 @@ class TestComputePatternPreprocessorScanCoverageFold:
         # A naive "ran and not all_failed" fold would report "resolved"
         # here; full coverage requires succeeded == attempted on NEW.
         assert result.macro_divergence_evolution.get("FOO_VERSION") == "not_evaluated"
+
+    def test_hit_only_on_incomplete_side_folds_not_evaluated_not_dropped(
+        self,
+    ) -> None:
+        """CodeRabbit review, fresh evidence: the reverse orientation of
+        the two cases above -- the hit is on the INCOMPLETE side (NEW
+        skips a file and, in the portion it did scan, finds the
+        construct), while the fully-covered OLD side finds nothing. The
+        pre-fix `_fold_evolution` fell through to a bare `continue` for
+        this orientation, silently dropping the identity from the report
+        instead of stating the honest `not_evaluated`."""
+        old = _empty_snapshot("libfoo.so", "1.0")
+        new = _empty_snapshot("libfoo.so", "2.0")
+
+        old_pattern = PatternScanResult(files_scanned=1, files_skipped=0)
+        new_pattern = PatternScanResult(
+            facts=[
+                PatternFact(
+                    kind=PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION,
+                    category=PatternCategory.TEMPLATE,
+                    path="new.hpp",
+                    line=1,
+                    snippet="template class Widget<int>;",
+                    escalates=True,
+                    detail="explicit template instantiation",
+                )
+            ],
+            files_scanned=1,
+            files_skipped=1,  # partial: one unreadable file alongside it
+        )
+
+        with (
+            patch(
+                "abicheck.workflows.pattern_preprocessor_scan._run_pattern_scan",
+                side_effect=[old_pattern, new_pattern],
+            ),
+            patch(
+                "abicheck.workflows.pattern_preprocessor_scan._run_preprocessor_scan_for",
+                return_value=PreprocessorScanResult(),
+            ),
+        ):
+            result = compute_pattern_preprocessor_scan(old, new)
+
+        # Before the fix, this key was silently absent from the map at all
+        # (dropped by the bare `continue`) rather than reading
+        # "not_evaluated" -- `.get(...)` would return `None` either way a
+        # naive read might miss, so assert key presence explicitly too.
+        assert "explicit_template_instantiation" in result.pattern_escalation_evolution
+        assert (
+            result.pattern_escalation_evolution["explicit_template_instantiation"]
+            == "not_evaluated"
+        )
