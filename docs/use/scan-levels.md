@@ -258,7 +258,7 @@ build:
 ```
 
 ```bash
-abicheck compare old/libfoo.abi.json new/libfoo.so -H include/ --sources . \
+abicheck compare old/libfoo.abi.json new/libfoo.so -H include/ --sources new=. \
   --config .abicheck.yml --depth source
 ```
 
@@ -350,7 +350,7 @@ whole-library `source` compare — without it, `source` replays every TU.
 ```bash
 abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   -H include/ \
-  --sources . --since origin/main --depth source
+  --sources new=. --since origin/main --depth source
 ```
 
 - **Depth:** `auto` with a diff seed resolves to `source` (`--depth source`); pin
@@ -442,7 +442,7 @@ preview; an invalid invocation or an unsatisfiable requested depth still
 exits nonzero, the same as the real run would.
 
 ```bash
-abicheck compare old.abi.json libfoo.so --sources . --depth source --dry-run
+abicheck compare old.abi.json libfoo.so --sources new=. --depth source --dry-run
 ```
 
 `scan --sources . --depth source --dry-run` (no `--against`) still works too,
@@ -464,7 +464,7 @@ abicheck dump build/libfoo.so -H include/ \
 
 # PR compares then run against it:
 abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
-  --sources . --since origin/main --depth source
+  --sources new=. --since origin/main --depth source
 ```
 
 To get a whole-library comparison *report* of a release (replays every TU,
@@ -476,7 +476,7 @@ report to `-o`:
 
 ```bash
 abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
-  --sources . --depth source -o artifacts/libfoo-1.0-report.json
+  --sources new=. --depth source -o artifacts/libfoo-1.0-report.json
 ```
 
 ### Let risk pick the depth — `auto` (local/dev only, `scan` only for now)

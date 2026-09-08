@@ -567,6 +567,28 @@ _extra_args_has_dry_run_flag() {
   return 1
 }
 
+# Same shape again, for the scan->compare internal-routing decision below
+# (Codex review, P2, PR #1160): `_SCAN_NEEDS_LEGACY_CLI` already checks the
+# dedicated `INPUT_BUDGET`/`INPUT_RISK_RULES`/`INPUT_CROSSCHECK`/
+# `INPUT_BUILD_TARGET` Action inputs, but a workflow can request the same
+# scan-only capabilities through the general `extra-args` passthrough
+# instead (e.g. `extra-args: --crosscheck foo=error`) -- `compare --help`
+# has no such flags at all, so routing that run onto `compare` would fail
+# it with an unknown-option usage error instead of running the scan it
+# asked for. Checked the same way `_extra_args_has_write_flag`/
+# `_extra_args_has_dry_run_flag` already are.
+_extra_args_has_scan_only_flag() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+    --crosscheck | --risk-rules | --budget | --build-target | --artifact-set)
+      return 0
+      ;;
+    esac
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
 # Extract a user-supplied `--write json=PATH`/`--write=json=PATH` path from
 # extra-args, printing it (and nothing else) when found. Empty output means
 # "no such flag" -- callers treat that as "cannot tell", same as every other
@@ -1264,7 +1286,19 @@ fi
 # (plan §3 #14, "Phase 7"), `--crosscheck`'s KEY=error promotion syntax
 # (plan §3 #23, "MERGE into policy"), and `--build-target` (no `compare`
 # equivalent at all yet, baseline or not -- `tests/test_action_run_
-# contract.py::test_action_flags_are_real_cli_options` pins this).
+# contract.py::test_action_flags_are_real_cli_options` pins this). All four
+# of the latter are also checked when requested through the general
+# `extra-args` passthrough instead of their dedicated Action input
+# (`_extra_args_has_scan_only_flag`, Codex review P2, PR #1160), since
+# `compare --help` has none of them either.
+#
+# A baseline scan with no explicit `--depth` also stays on the legacy CLI
+# (Codex review P1, PR #1160): omitting it is `scan`'s own risk-driven
+# `auto` selection (binary/headers/build/source scored off the diff), which
+# `compare --depth` has no equivalent for yet (plan §3, "risk-driven auto
+# depth" -- omitting `--depth` on `compare` deterministically defaults to
+# `headers`, never deeper). Routing that case onto `compare` would silently
+# cap a high-risk change that should have reached source replay at L2.
 #
 # `_CLI_MODE` (this section's own output) is the actual underlying CLI verb
 # this run dispatches -- "scan" or "compare" -- and is what every
@@ -1280,7 +1314,9 @@ if [[ "$MODE" == "scan" ]]; then
   if [[ "$_SCAN_HAS_BASELINE" != "true" ]] \
      || [[ -n "${INPUT_NEW_LIBRARY_SET:-}" || -n "${INPUT_BUDGET:-}" \
            || -n "${INPUT_RISK_RULES:-}" || -n "${INPUT_CROSSCHECK:-}" \
-           || -n "${INPUT_BUILD_TARGET:-}" ]]; then
+           || -n "${INPUT_BUILD_TARGET:-}" ]] \
+     || [[ -z "${INPUT_DEPTH:-}" ]] \
+     || _extra_args_has_scan_only_flag; then
     _SCAN_NEEDS_LEGACY_CLI=true
   fi
 fi

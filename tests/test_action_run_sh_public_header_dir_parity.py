@@ -132,6 +132,16 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_NEW_LIBRARY": "lib.so",
                 "INPUT_AGAINST": "baseline.json",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
+                # An explicit --depth is required to route through `compare`
+                # here (Codex review, PR #1160, P1): omitting --depth on a
+                # baseline scan is scan's own risk-driven `auto` selection,
+                # which `compare --depth` has no equivalent for, so an
+                # unpinned depth now stays on the legacy `scan` CLI instead
+                # (see the routing comment above `_SCAN_NEEDS_LEGACY_CLI` in
+                # run.sh). Pinning it here keeps this test's real subject --
+                # public-header-dir's fold into -H under `compare` -- actually
+                # exercised.
+                "INPUT_DEPTH": "headers",
             }
         )
         assert "compare" in cmd
