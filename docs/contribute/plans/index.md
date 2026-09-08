@@ -69,7 +69,7 @@ Completed or decided plans are retained for implementation history:
 | **G1** | Done — native PE/Mach-O compare validation and non-blocking MSVC+PDB lane | plan retired (`g1-cross-platform-e2e.md`, removed after completion) |
 | **G2** | Done — build matrix folds into `compare`/`compare-release`; bundle soname-skew is wired | plan retired (`g2-build-config-and-bundle.md`, removed after completion) |
 | **G3** | Done — workflow scenarios and Markdown/HTML coverage | plan retired (`g3-workflow-examples-and-reporting.md`, removed after completion) |
-| **G5** | Done — `plugin-check` CLI and host↔plugin API | plan retired (`g5-plugin-bidirectional-contract.md`, removed after completion) |
+| **G5** | Done — host↔plugin bidirectional API check, `compare --required-symbol` (folds the retired standalone `plugin-check` command) | plan retired (`g5-plugin-bidirectional-contract.md`, removed after completion) |
 | **G6** | Done — BTF/CTF and SYCL PI/UR workflows | plan retired (`g6-kernel-btf-and-accelerator.md`, removed after completion) |
 | **G7** | Done — release recommendation | `abicheck/semver.py` |
 | **G9** | Done — auditwheel/delocate vendored-library pairing, filename and embedded DT_SONAME/install-name both normalized via `strip_vendor_hash` | plan retired (`g9-wheel-vendored-matching.md`, removed after completion) |

@@ -94,7 +94,8 @@ scenarios:
     automated: false
     status: planned
     note: >
-      G5 is Done (plugin-check CLI and host<->plugin API) — the plan record was
+      G5 is Done (host<->plugin bidirectional API check, compare --required-symbol,
+      folding the retired standalone plugin-check command) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
       The plugin_abi policy and consumer-scoped appcompat are unit-tested
