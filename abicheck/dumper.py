@@ -37,7 +37,10 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache, qualified_name_segments
-from ._compiler_options import explicit_target_triple as _explicit_target_triple
+from ._compiler_options import (
+    explicit_target_triple as _explicit_target_triple,
+    forwards_driver_mode_cl as _forwards_driver_mode_cl,
+)
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -626,15 +629,22 @@ def _header_ast_parser(
             # On a probe failure, recover an explicit `--target=`, else
             # (non-CL-style driver only) guess from `sys.platform` -- a
             # CL-style driver mostly targets Windows regardless of host
-            # OS, so it gets neither fallback (stays bare `None`). The
+            # OS, so it gets neither fallback (stays bare `None`). CL
+            # style is selected either by the binary's own NAME
+            # (`clang-cl`) or by a `--driver-mode=cl` flag on an
+            # otherwise-generic `clang` (a replayed compile unit's own
+            # form -- Codex review, fresh evidence); check both. The
             # guess lives HERE, not in `is_darwin_target`, so a bare-
             # `None` unit-test construction of `_ClangAstParser` is
-            # unaffected (Codex review, fresh evidence).
+            # unaffected.
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
                     None
-                    if _is_cl_style_driver_name(clang_bin)
+                    if (
+                        _is_cl_style_driver_name(clang_bin)
+                        or _forwards_driver_mode_cl(gcc_options, gcc_option_tokens)
+                    )
                     else (
                         _explicit_target_triple(gcc_options, gcc_option_tokens)
                         or sys.platform

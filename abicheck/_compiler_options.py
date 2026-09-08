@@ -429,6 +429,30 @@ def explicit_target_triple(
     return value
 
 
+def forwards_driver_mode_cl(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> bool:
+    """Whether forwarded options select clang's CL/MSVC-compatibility mode
+    via an explicit ``--driver-mode=cl``, on an otherwise generically-named
+    ``clang`` binary (``clang --driver-mode=cl /std:c++20 /c t.cpp`` --
+    see ``buildsource.header_compile_context``'s own "Preserve an explicit
+    --driver-mode=cl" docstring for why a replayed compile unit selects CL
+    mode this way rather than via a ``clang-cl``-shaped binary name).
+    Callers deciding whether a driver is CL-style must check this ALONGSIDE
+    a name-only check like ``dumper_clang._is_cl_style_driver_name``, not
+    instead of it -- neither alone covers both real invocation shapes
+    (Codex review, fresh evidence).
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            pass
+    tokens.extend(gcc_option_tokens)
+    return "--driver-mode=cl" in tokens
+
+
 def language_standard_field(
     lang: str | None,
     gcc_options: str | None,

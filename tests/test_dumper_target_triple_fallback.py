@@ -228,3 +228,42 @@ def test_successful_probe_still_honored_for_a_cl_style_driver(
 
     assert isinstance(parser, _ClangAstParser)
     assert parser._target_triple == "x86_64-pc-windows-msvc"
+
+
+def test_probe_failure_with_option_selected_cl_mode_recovers_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CL mode is also selected via an explicit ``--driver-mode=cl`` on an
+    otherwise generically-named ``clang`` binary (a replayed compile
+    unit's own form -- see buildsource.header_compile_context's "Preserve
+    an explicit --driver-mode=cl" docstring), not only via a
+    ``clang-cl``-shaped binary name. This must be gated identically to the
+    name-based case: no explicit-target recovery, no sys.platform guess
+    (Codex review, fresh evidence)."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="--driver-mode=cl --target=x86_64-apple-macos11",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None

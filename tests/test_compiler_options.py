@@ -8,6 +8,7 @@ from abicheck._compiler_options import (
     _split_gcc_options_windows,
     explicit_language_standard,
     explicit_target_triple,
+    forwards_driver_mode_cl,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
@@ -449,4 +450,37 @@ class TestExplicitTargetTriple:
                 '-DFOO="unterminated', ("--target=x86_64-unknown-linux-gnu",)
             )
             == "x86_64-unknown-linux-gnu"
+        )
+
+
+class TestForwardsDriverModeCl:
+    """A compile unit can select clang's CL/MSVC-compatibility mode via an
+    explicit ``--driver-mode=cl`` on an otherwise generically-named
+    ``clang`` binary (``buildsource.header_compile_context``'s own
+    "Preserve an explicit --driver-mode=cl" docstring) -- a name-only CL
+    check like ``dumper_clang._is_cl_style_driver_name`` misses this shape
+    entirely (Codex review, fresh evidence)."""
+
+    def test_none_when_absent(self) -> None:
+        assert forwards_driver_mode_cl(None, ()) is False
+        assert forwards_driver_mode_cl("-O2", ("-Wall",)) is False
+
+    def test_detects_it_in_gcc_options_string(self) -> None:
+        assert forwards_driver_mode_cl("--driver-mode=cl /std:c++20", ()) is True
+
+    def test_detects_it_in_gcc_option_tokens(self) -> None:
+        assert forwards_driver_mode_cl(None, ("--driver-mode=cl",)) is True
+
+    def test_a_similar_but_different_value_does_not_match(self) -> None:
+        # Exact-token match only -- "--driver-mode=cl++" or a bare
+        # "--driver-mode" with a separate "cl" argument are not the same
+        # flag and must not be conflated with the real one.
+        assert forwards_driver_mode_cl(None, ("--driver-mode=g++",)) is False
+        assert forwards_driver_mode_cl(None, ("--driver-mode", "cl")) is False
+
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        assert forwards_driver_mode_cl('-DFOO="unterminated', ()) is False
+        assert (
+            forwards_driver_mode_cl('-DFOO="unterminated', ("--driver-mode=cl",))
+            is True
         )
