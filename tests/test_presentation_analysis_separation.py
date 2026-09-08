@@ -249,7 +249,7 @@ class TestF19OutputFormatInvariance:
         assert result.exit_code == 4, result.output
         assert _canonical_facts(json.loads(result.stdout)) == baseline_facts
         assert out_md.exists() and out_sarif.exists()
-        assert "libfoo.so.1" in out_md.read_text()
+        assert "libfoo.so.1" in out_md.read_text(encoding="utf-8")
 
 
 class TestF20ExplainPatternsNeverChangesAnalysis:
