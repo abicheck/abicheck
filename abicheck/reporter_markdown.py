@@ -454,6 +454,26 @@ def parse_show_only_groups(show_only: str) -> tuple[ShowOnlyFilter, ...]:
     )
 
 
+def render_show_only_cli_hint(show_only: str) -> str:
+    """Render *show_only* back as a literally re-runnable ``--view show=...``
+    invocation.
+
+    Codex review (PR #1154 second follow-up: "Render repeated show groups
+    as repeated view options"): the raw *show_only* string stores repeated
+    ``--view show=...`` occurrences joined by :data:`SHOW_ONLY_GROUP_SEP`
+    (``";"``), an internal transport separator -- ``ShowOnlyFilter.parse``
+    rejects it as a single value, and an unquoted shell treats a bare ``;``
+    as a command separator. Every "how to reproduce this filter" hint
+    (Markdown/HTML "Filtered by" notes) must render one ``--view show=...``
+    token per group instead of echoing the internal separator verbatim.
+    A *show_only* with no ``;`` (the common case, and every pre-existing
+    single-group caller) round-trips to exactly one ``--view show=...``
+    token, unchanged from before this function existed.
+    """
+    groups = show_only.split(SHOW_ONLY_GROUP_SEP)
+    return " ".join(f"--view show={group}" for group in groups)
+
+
 def show_only_matches(
     show_only: str,
     change: Change,

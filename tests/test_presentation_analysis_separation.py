@@ -530,6 +530,74 @@ class TestViewGrammar:
         assert narrow_payload["changes"][0]["kind"] == "func_removed"
 
 
+class TestShowOnlyCliHintIsReRunnable:
+    """Codex review (PR #1154 second follow-up: "Render repeated show
+    groups as repeated view options"): the rendered "Filtered by" hint
+    used to embed the internal ``;``-separated transport form directly
+    (``--view show=breaking;functions``) -- not a real invocation
+    (``ShowOnlyFilter.parse`` rejects the raw value as one malformed
+    token, and an unquoted shell treats ``;`` as a command separator).
+    This proves the fix: with two different-dimension ``--view show=...``
+    groups active, the rendered hint is a *literally* re-runnable
+    ``--view`` invocation that reproduces the identical filtered result.
+    """
+
+    def test_markdown_hint_round_trips_through_the_real_view_parser(
+        self, tmp_path: Path
+    ) -> None:
+        import re
+
+        from abicheck.frontends.cli.options.view import parse_view_tokens
+
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--format", "markdown",
+                "--view", "show=breaking", "--view", "show=added",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        hint_line = next(
+            line for line in result.output.splitlines() if line.startswith("> Filtered by:")
+        )
+        # No internal transport separator ever reaches rendered text.
+        assert ";" not in hint_line
+        tokens = tuple(re.findall(r"--view (\S+?)(?=[`\s]|$)", hint_line))
+        assert tokens.count("show=breaking") == 1
+        assert tokens.count("show=added") == 1
+        parsed = parse_view_tokens(tokens)
+        # Re-running with exactly the rendered tokens reproduces the same
+        # filtered display the original combined invocation produced.
+        rerun = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--format", "markdown",
+                *[f"--view={t}" for t in tokens],
+            ],
+        )
+        assert rerun.exit_code == result.exit_code
+        assert parsed["show_only"] == "breaking;added"
+        assert "api_removed" in rerun.output
+        assert "api_added" in rerun.output
+
+    def test_html_hint_has_no_internal_separator(self, tmp_path: Path) -> None:
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--format", "html",
+                "--view", "show=breaking", "--view", "show=added",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "Filtered by" in result.output
+        filter_section = result.output[result.output.index("Filtered by") :]
+        filter_section = filter_section[: filter_section.index("</div>")]
+        assert ";" not in filter_section
+        assert filter_section.count("--view show=") == 2
+
+
 class TestSurfaceMetricsFlagIsVestigial:
     """ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
     now (§4.1's AUTO classification) -- the flag itself no longer gates
