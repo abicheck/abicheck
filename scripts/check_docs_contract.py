@@ -1619,6 +1619,31 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "compare --on-incomplete-scope/--fail-on-removed-library/"
+        "--no-fail-on-removed-library/--dso-only/--include-private-dso"
+        " (Phase 7d, ADR-068 D5: demoted to CONFIG-only -- scope."
+        "on_incomplete/gate.fail_on_removed_library/release.dso_only/"
+        "release.include_private_dso in .abicheck.yml, no CLI override)",
+        (
+            "--on-incomplete-scope",
+            "--fail-on-removed-library",
+            "--no-fail-on-removed-library",
+            "--dso-only",
+            "--include-private-dso",
+        ),
+        frozenset(
+            {
+                "AGENTS.md",
+                # Each config-key section names "the former `compare ...`"
+                # flag it replaces, in its own historical-record capacity.
+                "reference/config-file.md",
+                # Historical migration note, line-pinned so a later, live
+                # mention added elsewhere in this file still gets flagged.
+                "reference/exit-codes.md#L99",
+            }
+        ),
+    ),
 )
 
 

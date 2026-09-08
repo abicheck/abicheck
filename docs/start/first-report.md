@@ -41,8 +41,8 @@ severity-aware exit-code scheme instead — see
 [Severity Configuration](../use/severity.md) for the full mapping and policy
 recipes. Other commands add their own codes on top of this space — `scan` can
 exit `5` (a `--budget` time guard tripped) and a multi-library release
-compare can exit `8` (a library was removed with
-`--fail-on-removed-library`). The full per-command matrix, including
+compare can exit `8` (a library was removed with `.abicheck.yml`'s
+`gate.fail_on_removed_library: true`). The full per-command matrix, including
 `compat` mode, is the [Exit Codes reference](../reference/exit-codes.md).
 
 Suppressions/policies/baselines all interact with the same pipeline before
