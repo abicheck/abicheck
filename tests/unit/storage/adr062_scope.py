@@ -59,8 +59,16 @@ import pathlib
 #: filename/alias key contract `bundle_facts_store.py`'s writer stamps, plus
 #: `abicheck.bundle`'s own reader), not one of the original Phase 0
 #: identity/availability/versioning/package primitives this scope tracks.
+#: `bounded_read`/`snapshot_prefix` are a sixth: `snapshot_io.py`'s own
+#: storage-*envelope* helpers, the same class as `zstd_frame_guard` above
+#: (which that module likewise imports directly). One owns "read until n
+#: bytes or true EOF" for any reader, the other the bounded decoded-prefix
+#: classification built on it -- neither touches the v2 document surface
+#: this scope tracks, so neither belongs in the plan's module table.
 NON_ADR062_MODULES = frozenset(
     {
+        "bounded_read",
+        "snapshot_prefix",
         "bundle_archive",
         "bundle_archive_cd_guard",
         "bundle_archive_json_guard",
