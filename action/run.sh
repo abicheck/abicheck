@@ -321,7 +321,19 @@ add_compile_context_flags() {
     exit 1
   fi
   if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
-    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
+    # Template-based mktemp under $RUNNER_TEMP (Codex review, fresh evidence:
+    # windows-latest CI failure, tests/test_action_compile_context_parity.py
+    # only) -- a bare `mktemp` on windows-latest's Git Bash resolves under
+    # its own MSYS-internal /tmp mount, which only Git Bash processes can
+    # translate back to a real filesystem path. This file is later opened
+    # directly by a native (non-MSYS) Python process (the test harness's own
+    # `_read_compile_config_overlay`, and any consumer downstream of the
+    # synthesized --config path), which cannot resolve that MSYS-only
+    # spelling and fails with FileNotFoundError. $RUNNER_TEMP is a real,
+    # native-resolvable path on every runner OS, matching the same fix
+    # already applied to every other mktemp call in this file (see
+    # PR_JSON/PR_BODY above).
+    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
     ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
     ABICHECK_COMPILE_INCLUDE_LANG="$include_lang" \
     ABICHECK_COMPILE_FRONTEND="${INPUT_AST_FRONTEND:-}" \
