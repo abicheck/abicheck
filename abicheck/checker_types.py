@@ -793,6 +793,36 @@ class DiffResult(ReportSideFacts):
     # same as `Change.evolution`. Appended at the true end, same convention
     # as `evidence_contract_error`/`budget_overflow` above.
     resolved_findings: list[Change] = field(default_factory=list, kw_only=True)
+    # one-comparison-product.md Phase 2b (ADR-068 D3/D5, plan §3 #6): each
+    # side's compiler-free lexical ABI-risk pre-scan result
+    # (``buildsource.pattern_scan.scan_files``'s ``PatternScanResult.
+    # to_dict()``), always computed automatically -- no CLI/API/Action
+    # opt-in flag, mirroring ``scan``'s own "always-on tier" (ADR-035 D2).
+    # ``{"old": {...}, "new": {...}}``; each side's dict is present even
+    # when nothing was scanned (``files_scanned == 0``, coverage status
+    # ``NOT_COLLECTED``) -- coverage honesty over silent omission, same
+    # rule ``layer_coverage`` above already follows. Deliberately **not**
+    # folded through ``extra_changes``/a ``ChangeKind``/the
+    # ``CrossSourceEvolution`` axis those eleven checks use: a lexical
+    # construct is advisory evidence about code that exists, never a
+    # diffed two-sided finding the way a ``Change`` is (ADR-028 D3/ADR-035
+    # D1 authority rule) -- see ``workflows/lexical_prescan.py``'s module
+    # docstring for the full design-decision rationale. `None` only for a
+    # `DiffResult` built by a caller that never runs the fold (e.g. a
+    # direct `checker.compare()` unit test) -- every documented front end
+    # populates it.
+    pattern_prescan: dict[str, object] | None = field(default=None, kw_only=True)
+    # one-comparison-product.md Phase 2b (ADR-068 D3/D5, plan §3 #8): each
+    # side's S2 preprocessor pre-scan result (``buildsource.
+    # preprocessor_scan.run_preprocessor_scan``'s ``PreprocessorScanResult.
+    # to_dict()``) -- ABI-macro-value divergence + private/generated-header
+    # leaks detected via macro expansion, gated on L3 build evidence + a
+    # working preprocessor being present on that side (an absent one reads
+    # as an honest ``ran: false``/``skipped_reason`` row, never silently
+    # clean). Same ``{"old": {...}, "new": {...}}`` shape, same "advisory
+    # fact, not a diffed Change" rationale, and appended at the true end,
+    # as ``pattern_prescan`` immediately above.
+    preprocessor_prescan: dict[str, object] | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,

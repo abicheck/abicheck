@@ -45,6 +45,19 @@ so every crosscheck-backed gap entry this registry used to carry is gone.
 Only the raw structural claim this module checks -- "nothing but
 scan_engine.py calls the primitive at all" -- needed updating to admit the
 one caller these slices deliberately add.
+
+**Second documented partial exception (Phase 2b, plan §3 rows 6/8):**
+``abicheck/workflows/lexical_prescan.py`` is now a second, legitimate caller
+of both ``scan_files`` and ``run_preprocessor_scan`` -- the one shared fold
+point ``compare()``'s two front ends (the native CLI and the typed API) both
+route through (mirroring ``abi3_audit.fold``'s "one rule, two callers"
+shape). Both pre-scans run automatically, per side, with no opt-in flag
+(ADR-068 D4/D5), so both ``pattern_scan``/``preprocessor_scan`` gap keys are
+gone from ``tests/parity/gaps.py`` -- see that module's own docstring and
+``workflows/lexical_prescan.py``'s module docstring for the full
+design-decision writeup (why these two migrated capabilities attach to the
+report as evidence/coverage rather than folding through the same
+``CrossSourceEvolution`` axis ``run_crosschecks`` uses).
 """
 
 from __future__ import annotations
@@ -61,12 +74,12 @@ _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 #: function name -> (defining module, expected caller module(s), gap key).
 #: `expected_callers` is usually a single module; `run_crosschecks` also
 #: allows `workflows/cross_source_evolution.py`, the documented ADR-068 D3
-#: partial-migration exception above. `gap_key` is `None` once every check a
-#: primitive backs has migrated (as `run_crosschecks` now has, all eleven
-#: crosscheck entries closed) — there is no longer a still-open
-#: `tests/parity/gaps.py` row to reference for the "landing this closes a
-#: gap" error-message hint below, unlike `scan_files`/`run_preprocessor_scan`
-#: (still real, open gaps).
+#: partial-migration exception above, and `scan_files`/`run_preprocessor_scan`
+#: now likewise allow `workflows/lexical_prescan.py` (Phase 2b). `gap_key` is
+#: `None` once every check a primitive backs has migrated -- there is no
+#: longer a still-open `tests/parity/gaps.py` row to reference for the
+#: "landing this closes a gap" error-message hint below. All three
+#: primitives here are fully migrated now.
 _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "run_crosschecks": (
         "buildsource/crosscheck.py",
@@ -75,13 +88,13 @@ _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     ),
     "scan_files": (
         "buildsource/pattern_scan.py",
-        ("scan_engine.py",),
-        "pattern_scan",
+        ("scan_engine.py", "workflows/lexical_prescan.py"),
+        None,  # Phase 2b landed; no gap key remains
     ),
     "run_preprocessor_scan": (
         "buildsource/preprocessor_scan.py",
-        ("scan_engine.py",),
-        "preprocessor_scan",
+        ("scan_engine.py", "workflows/lexical_prescan.py"),
+        None,  # Phase 2b landed; no gap key remains
     ),
 }
 

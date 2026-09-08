@@ -839,7 +839,19 @@ from typing import Any
 #:       nothing else changes -- no existing invocation's disposition,
 #:       verdict, or exit code moves (both are opt-in via
 #:       ``checker.compare(acknowledgments=...)``).
-REPORT_SCHEMA_VERSION = "3.11"  #: 3.11 -- ADR-068 D6's always-0 ``exit.loadability_contribution`` (deps-only); renumbered from a 3.10 clash with ADR-067 D5/D6 above.
+#: 3.12 -- ``docs/contribute/plans/one-comparison-product.md`` §3 rows 6/8,
+#:       §6 Phase 2b (ADR-068 D3/D4/D5): two new, always-present top-level
+#:       objects, ``pattern_prescan`` and ``preprocessor_prescan`` -- both
+#:       sides' compiler-free lexical (ADR-035 D2) and S2 preprocessor
+#:       pre-scan results, computed automatically on every invocation (no
+#:       opt-in flag). Deliberately **not** a ``Change``/``ChangeKind`` or a
+#:       ``cross_source_evolution`` entry -- see
+#:       ``workflows/lexical_prescan.py``'s module docstring for why these
+#:       two migrated capabilities are evidence/coverage attachments rather
+#:       than diffed findings. Every pre-existing report gains two additive
+#:       keys and nothing else changes -- neither block is folded into
+#:       ``changes``/the verdict/the exit code.
+REPORT_SCHEMA_VERSION = "3.12"  #: 3.12 -- see the block comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

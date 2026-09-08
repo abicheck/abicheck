@@ -1947,6 +1947,20 @@ def run_compare(
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
     _enrichment.report_abi3_evidence_contract_error(result, _abi3_failure)  # ADR-068 exit-7 axis
+    # plan §3 rows 6/8, §6 Phase 2b: pattern/preprocessor pre-scan enrichment.
+    _enrichment.fold_lexical_prescan_into_result(
+        result,
+        old_headers=old_h,
+        new_headers=new_h,
+        old_sources=old_sources,
+        new_sources=new_sources,
+        old_snapshot=old,
+        new_snapshot=new,
+        depth=depth,
+        changed_paths=_enrich.changed_paths,
+        old_compile_context=compile_context,
+        new_compile_context=compile_context,
+    )
     _report_compare_result(
         ctx, result, old, new,
         old_input=old_input, new_input=new_input,
