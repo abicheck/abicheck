@@ -1332,9 +1332,14 @@ class TestCompareDispatch:
         result = CliRunner().invoke(
             main, ["compare", str(old_f), str(new_f), "--config", str(cfg)]
         )
-        # The flag is ignored (single-file path), with a warning on stderr.
+        # The setting is ignored (single-file path), with a warning on
+        # stderr naming the config key -- not the removed --dso-only flag,
+        # which would be a stale, uncopyable diagnostic (Codex review).
         assert result.exit_code == 4
-        assert "only apply to directory/package" in (result.stderr or "")
+        stderr = result.stderr or ""
+        assert "only apply to directory/package" in stderr
+        assert "release.dso_only" in stderr
+        assert "--dso-only" not in stderr
 
 
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────
