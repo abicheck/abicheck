@@ -1723,6 +1723,13 @@ def run_compare(
     # temporary .abi.json snapshot — Codex review).
     used_by_old_input, used_by_new_input = old_input, new_input
 
+    # Same preservation, for the pattern pre-scan fold below: --old/new-sources
+    # is consumed and overwritten to None by _embed_inline_source_sides once it
+    # has dumped that tree, so the fold must capture the *raw* value here or it
+    # silently sees no source tree at all for exactly the runs (a real
+    # --old-sources/--new-sources compare) it exists to scan (Codex review).
+    _raw_old_sources, _raw_new_sources = old_sources, new_sources
+
     # Inline source-tree collection (deep-compare folded into compare): when a
     # side's --old/new-sources points at a raw checkout, or --old/new-build-info
     # at a raw build dir / compile_commands.json (not a `collect` pack), dump that
@@ -1948,16 +1955,21 @@ def run_compare(
         sys.exit(_EXIT_NOT_COMPARABLE)
     _enrichment.report_abi3_evidence_contract_error(result, _abi3_failure)  # ADR-068 exit-7 axis
     # plan §3 rows 6/8, §6 Phase 2b: pattern/preprocessor pre-scan enrichment.
+    # old_sources/new_sources were already consumed (and reset to None) by
+    # _embed_inline_source_sides above if a raw tree was given -- the fold
+    # needs the *original* --old/new-sources value, saved as
+    # _raw_old_sources/_raw_new_sources before that happened (Codex review).
     _enrichment.fold_lexical_prescan_into_result(
         result,
         old_headers=old_h,
         new_headers=new_h,
-        old_sources=old_sources,
-        new_sources=new_sources,
+        old_sources=_raw_old_sources,
+        new_sources=_raw_new_sources,
         old_snapshot=old,
         new_snapshot=new,
         depth=depth,
         changed_paths=_enrich.changed_paths,
+        seeded=_enrich.seeded,
         old_compile_context=compile_context,
         new_compile_context=compile_context,
     )

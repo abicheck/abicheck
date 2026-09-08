@@ -94,6 +94,71 @@ def render_preprocessor_prescan_json(
     return {"old": dict(summary.old), "new": dict(summary.new)}
 
 
+def _pattern_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
+    coverage = side.get("coverage") or {}
+    if coverage.get("status") == "not_collected" or not side.get("files_scanned"):
+        return f"- **{label}**: not evaluated (no headers/`--sources` in scope)"
+    facts = side.get("facts") or []
+    triggers = side.get("escalation_triggers") or []
+    return (
+        f"- **{label}**: {side.get('files_scanned', 0)} file(s) scanned, "
+        f"{len(facts)} construct(s) found, {len(triggers)} escalation "
+        "trigger(s)"
+    )
+
+
+def render_pattern_prescan_markdown(
+    summary: PatternPrescanSummary | None,
+) -> list[str]:
+    """``scan``'s own text output surfaced this pre-scan's coverage status
+    (``pr_comment_scan._scan_coverage_lines``'s ```pattern_scan`: present```
+    line); this is ``compare``'s Markdown counterpart -- a short, per-side
+    status line, not a full one-line-per-fact dump (``scan`` never rendered
+    one either; see :mod:`abicheck.workflows.lexical_prescan`'s own
+    docstring for why the full advisory detail stays JSON-only). ``[]`` when
+    the fold never ran, matching every other optional section's own
+    "``None``-shaped ``compute_*`` renders nothing" convention.
+    """
+    if summary is None:
+        return []
+    return [
+        "",
+        "### Pattern Pre-Scan (lexical ABI-risk constructs)",
+        "",
+        _pattern_side_markdown_line("OLD", summary.old),
+        _pattern_side_markdown_line("NEW", summary.new),
+    ]
+
+
+def _preprocessor_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
+    coverage = side.get("coverage") or {}
+    if not side.get("ran") or coverage.get("status") == "not_collected":
+        reason = side.get("skipped_reason") or coverage.get("detail") or "not evaluated"
+        return f"- **{label}**: skipped -- {reason}"
+    divergences = side.get("divergences") or []
+    leaks = side.get("leaks") or []
+    return (
+        f"- **{label}**: {len(divergences)} macro divergence(s), "
+        f"{len(leaks)} header leak(s)"
+    )
+
+
+def render_preprocessor_prescan_markdown(
+    summary: PreprocessorPrescanSummary | None,
+) -> list[str]:
+    """Markdown counterpart to :func:`render_pattern_prescan_markdown`, same
+    scope rationale."""
+    if summary is None:
+        return []
+    return [
+        "",
+        "### Preprocessor Pre-Scan (macro divergence / header leaks)",
+        "",
+        _preprocessor_side_markdown_line("OLD", summary.old),
+        _preprocessor_side_markdown_line("NEW", summary.new),
+    ]
+
+
 __all__ = [
     "PatternPrescanSummary",
     "PreprocessorPrescanSummary",
@@ -101,4 +166,6 @@ __all__ = [
     "compute_preprocessor_prescan_summary",
     "render_pattern_prescan_json",
     "render_preprocessor_prescan_json",
+    "render_pattern_prescan_markdown",
+    "render_preprocessor_prescan_markdown",
 ]

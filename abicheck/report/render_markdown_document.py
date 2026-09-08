@@ -105,6 +105,12 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .lexical_prescan import (
+    compute_pattern_prescan_summary,
+    compute_preprocessor_prescan_summary,
+    render_pattern_prescan_markdown,
+    render_preprocessor_prescan_markdown,
+)
 from .render_markdown import (
     ConfidenceSection,
     EnvironmentDriftEntry,
@@ -562,6 +568,13 @@ def build_markdown_document(
         # as additions/removals/modifications so a compatible run still
         # itemizes what it added.
         "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
+        # plan §3 rows 6/8, §6 Phase 2b: already-plain JSON-safe dicts (no
+        # asdict()/from_dict() round trip needed, unlike disposition_audit/
+        # surface_changes above -- workflows.lexical_prescan.
+        # fold_lexical_prescan already produced the exact shape this
+        # renders).
+        "pattern_prescan": getattr(result, "pattern_prescan", None),
+        "preprocessor_prescan": getattr(result, "preprocessor_prescan", None),
         "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
         "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
@@ -686,6 +699,12 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append(d["empty_message"])
     lines += _render_disposition_audit_from_mapping(d.get("disposition_audit"))
     lines += _render_surface_changes_from_mapping(d.get("surface_changes"))
+    lines += render_pattern_prescan_markdown(
+        compute_pattern_prescan_summary(d.get("pattern_prescan"))
+    )
+    lines += render_preprocessor_prescan_markdown(
+        compute_preprocessor_prescan_summary(d.get("preprocessor_prescan"))
+    )
     lines += render_redundancy_note(
         None if d["redundancy_note"] is None else RedundancyNote(**d["redundancy_note"])
     )

@@ -55,6 +55,14 @@ class CompareEnrichmentInputs:
     changed_paths: tuple[str, ...] = ()
     #: Human-readable provenance of the seed, for ``-v`` diagnostics.
     changed_source: str = "none (no diff seed; broad scope)"
+    #: Whether a changed-path scope was actually attempted
+    #: (``ChangedPathSeed.seeded``) -- distinct from ``bool(changed_paths)``:
+    #: a successfully-resolved but *empty* ``--since``/``--changed-path``
+    #: diff is seeded with zero paths, which must scan/replay nothing, not
+    #: fall back to the unseeded broad scope (Codex review). Consumers that
+    #: need "was a real, possibly-empty scope given" (the pattern pre-scan
+    #: fold) must read this, not ``bool(self.changed_paths)``.
+    seeded: bool = False
     #: The candidate-side stable-ABI audit floor, ``None`` when off.
     abi3_floor: tuple[int, int] | None = None
 
@@ -95,7 +103,7 @@ def resolve_compare_enrichment_inputs(
     if floor is None:
         # D5: the project's declared floor, when the run did not state one.
         floor = parse_abi3_floor(getattr(project_cfg, "python_abi3_floor", None))
-    return CompareEnrichmentInputs(seed.paths, seed.source, floor)
+    return CompareEnrichmentInputs(seed.paths, seed.source, seed.seeded, floor)
 
 
 def fold_abi3_into_extra_changes(
@@ -128,6 +136,7 @@ def fold_lexical_prescan_into_result(
     new_snapshot: Any,
     depth: str | None,
     changed_paths: tuple[str, ...],
+    seeded: bool = False,
     old_compile_context: Any = None,
     new_compile_context: Any = None,
 ) -> None:
@@ -135,6 +144,9 @@ def fold_lexical_prescan_into_result(
     (the shared rule both front ends call) to the CLI's own already-resolved
     values -- plan §3 rows 6/8, §6 Phase 2b. Mirrors
     :func:`fold_abi3_into_extra_changes` above.
+
+    *seeded* must be ``CompareEnrichmentInputs.seeded``, not
+    ``bool(changed_paths)`` -- see that field's own docstring.
     """
     from ...workflows.lexical_prescan import fold_lexical_prescan
 
@@ -148,6 +160,7 @@ def fold_lexical_prescan_into_result(
         new_snapshot=new_snapshot,
         depth=depth,
         changed_paths=changed_paths,
+        seeded=seeded,
         old_compile_context=old_compile_context,
         new_compile_context=new_compile_context,
     )
