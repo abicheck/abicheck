@@ -185,7 +185,13 @@ case "$MODE" in
     # directory/package operand rather than rejected.
     if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
        || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
-      if [[ -n "$LANG_INPUT" || (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
+      # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is
+      # the *default*, not a user override, so (mirroring the identical
+      # "auto" carve-out for ast-frontend just above) it must not by itself
+      # trip this guard (CodeRabbit review, PR #1146, finding #6; run.sh's
+      # own release-operand predicate carries the same fix).
+      if [[ (-n "$LANG_INPUT" && "$LANG_INPUT" != "c++") \
+            || (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
             || -n "$GCC_PATH" || -n "$GCC_PREFIX" || -n "$GCC_OPTIONS" \
             || -n "$SYSROOT" || "$NOSTDINC" == "true" ]]; then
         _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."

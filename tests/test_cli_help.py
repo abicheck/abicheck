@@ -180,6 +180,14 @@ class TestCompareHelpAllDisclosure:
         ):
             assert common_flag in out, f"{common_flag} missing from curated --help"
 
+    def test_dump_curated_help_keeps_debug_root(self) -> None:
+        """CodeRabbit review, PR #1146, finding #4: `dump` binds --debug-root
+        to the plural `debug_roots` parameter, but DUMP_COMMON_OPTION_NAMES
+        omitted that name -- so plain `dump --help` never showed a real,
+        still-supported flag."""
+        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        assert "--debug-root" in out
+
     def test_curated_help_reports_hidden_count_and_points_to_help_all(self) -> None:
         result = CliRunner().invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
@@ -285,8 +293,11 @@ _HELP_ALL_COMMANDS: list[
         # Phase 7c (one-comparison-product.md §4.2): --sysroot/--ast-frontend/
         # --pdb-path are gone from dump's CLI entirely (compile:/debug:
         # config only), so they no longer belong in this "still renders
-        # somewhere" list.
-        ("--follow-deps", "--debug-root"),
+        # somewhere" list. --debug-root moved to the common list below
+        # (CodeRabbit review, PR #1146, finding #4): it is a real,
+        # still-supported flag that plain `dump --help` must show, not one
+        # that only appears via --help-all.
+        ("--follow-deps",),
         (
             "--header",
             "--include",
@@ -295,6 +306,7 @@ _HELP_ALL_COMMANDS: list[
             "--build-info",
             "--output",
             "--verbose",
+            "--debug-root",
         ),
     ),
     (

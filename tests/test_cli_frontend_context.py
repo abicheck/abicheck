@@ -99,6 +99,11 @@ def test_dump_frontend_context_invalid_config_value_rejected(tmp_path, runner):
     cfg.write_text("compile:\n  frontend_context: bogus\n")
     result = runner.invoke(main, ["dump", str(so), "--config", str(cfg)])
     assert result.exit_code != 0
+    # CodeRabbit review, PR #1146, finding #10: the exit-code check alone
+    # would also pass if the bogus config value were silently accepted and
+    # the process failed later for an unrelated reason (a fake/malformed
+    # ELF, etc.) -- assert the real config-validation error text fired.
+    assert "compile.frontend_context" in result.output
 
 
 def test_compare_frontend_context_device_threaded_for_directory_inputs(

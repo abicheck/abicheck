@@ -129,6 +129,7 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
     ``--allow-unsupported-castxml`` flags' config-key equivalents)."""
     from ....cli_helpers_compare import discover_project_config
     from .compare_bundle_facts_rejections import (
+        apply_env_toggles_for_stored_pair,
         reject_explicit_compile_config_for_stored_pair,
     )
 
@@ -142,7 +143,10 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
             reject_explicit_compile_config_for_stored_pair(kwargs["config"])
         return None
 
-    from ....cli_options import resolve_compile_context
+    from ....cli_options import (
+        apply_compile_config_env_toggles,
+        resolve_compile_context,
+    )
 
     _headers, _includes = _resolve_new_side_headers_includes(kwargs)
     # Phase 7: none of these kwargs keys are populated by Click any more
@@ -163,6 +167,7 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
         compiler_prefix=kwargs.get("compiler_prefix"),
         compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
     )
+    apply_env_toggles_for_stored_pair(ctx, kwargs["config"], apply_compile_config_env_toggles)
     # Forward the *merged* include list (Codex review), not the raw kwargs
     # resolve_compile_context was given -- .abicheck.yml's compile.
     # include_dirs would otherwise be dropped by dispatch()'s own

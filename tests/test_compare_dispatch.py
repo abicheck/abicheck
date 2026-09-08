@@ -642,15 +642,17 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
 def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Codex review: dump_cmd rejects --depth source + --ast-frontend hybrid
-    for a raw --sources tree, but the ctx.invoke(dump_cmd, ...) this function
-    makes never passes depth= -- so without an equivalent check here, the
-    identical `compare --depth source --sources <raw tree> --ast-frontend
-    hybrid` invocation silently reached the nested dump_cmd with depth=None,
-    skipping the rejection dump --sources <tree> --depth source --ast-frontend
-    hybrid would give for the same tree. This must raise the same
-    UsageError, without ever calling ctx.invoke (which would run a real,
-    silently-degraded L4 replay)."""
+    """Codex review: dump_cmd rejects --depth source + compile.frontend:
+    hybrid for a raw --sources tree, but the ctx.invoke(dump_cmd, ...) this
+    function makes never passes depth= -- so without an equivalent check
+    here, the identical `compare --depth source --sources <raw tree>` (with
+    compile.frontend: hybrid) invocation silently reached the nested
+    dump_cmd with depth=None, skipping the rejection `dump --sources <tree>
+    --depth source` (same config) would give for the same tree. This must
+    raise the same UsageError, without ever calling ctx.invoke (which would
+    run a real, silently-degraded L4 replay). Match string updated to the
+    `compile.frontend:` config spelling (CodeRabbit review, PR #1146,
+    finding #11) since `--ast-frontend` is gone from dump/compare's CLI."""
     import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
 
@@ -663,7 +665,7 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
             called["n"] += 1
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
-    with pytest.raises(climod.click.UsageError, match="--ast-frontend hybrid"):
+    with pytest.raises(climod.click.UsageError, match="compile.frontend: hybrid"):
         climod._embed_inline_source_side(
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
@@ -687,6 +689,10 @@ def test_the_hybrid_rejection_names_only_live_flags(
     ``--old-sources`` tree. All three spellings are gone -- ``--ast-frontend``
     and ``--sources`` are side-aware now -- so following the instruction
     produced a second, unrelated unknown-option error (Codex review).
+
+    Updated (CodeRabbit review, PR #1146, finding #11): Phase 7 later removed
+    ``--ast-frontend`` entirely, making the old "real way out" a second
+    instance of this test's own mistake; it now names ``compile.frontend:``.
     """
     import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
@@ -711,10 +717,10 @@ def test_the_hybrid_rejection_names_only_live_flags(
             label="old", depth="source",
         )
     msg = str(excinfo.value)
-    for dead in ("--old-ast-frontend", "--new-ast-frontend", "--old-sources"):
+    for dead in ("--old-ast-frontend", "--new-ast-frontend", "--old-sources", "--ast-frontend"):
         assert dead not in msg, msg
     # ...and it still names a real way out, so the fix is not just deletion.
-    assert "--ast-frontend old=castxml" in msg, msg
+    assert "compile.frontend: castxml" in msg, msg
     assert "--sources old=" in msg, msg
 
 

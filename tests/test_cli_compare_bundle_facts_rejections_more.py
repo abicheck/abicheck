@@ -461,3 +461,30 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64, out
+
+
+class TestConfigDebugPdbPathRejected:
+    def test_config_debug_pdb_path_is_rejected(self, tmp_path: Path) -> None:
+        """CodeRabbit review, PR #1146, finding #3: debug.pdb_path must be
+        rejected alongside the other debug.* config keys -- the stored/stored
+        and stored/live BundleFacts paths never consume a PDB path, so
+        silently accepting it would look like it did something."""
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  pdb_path: C:/symbols/foo.pdb\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "debug:" in out

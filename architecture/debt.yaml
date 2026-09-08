@@ -873,12 +873,12 @@
     },
     {
       "path": "abicheck/frontends/cli/commands/compare_bundle_facts.py",
-      "baseline_lines": 811,
+      "baseline_lines": 816,
       "target": "frontends (already home; split its stored/stored PR I branch or its PR J bundle: config read into a sibling module if it grows further)",
       "rule": "no_growth",
       "category": "adr062_new_capability_growth",
       "owner": "abicheck maintainers",
-      "rationale": "Not legacy debt: two independent tracks landed in parallel and collided at merge -- PR I's stored/stored compare_stored_bundle_facts_pair() dispatch branch (#1062) and PR J's .abicheck.yml bundle: config read replacing the removed --bundle-system-providers/--bundle-cohort CLI flags (this PR) -- pushing the file from main's own 800-line cap to 811 once merged. The merge also fixed a real bug the collision would otherwise have reintroduced: the stored/live compare_release_against_bundle_facts() call site's cohorts= argument still read the now-dead kwargs.get('bundle_cohorts') instead of the resolved bundle: config value.",
+      "rationale": "Not legacy debt: two independent tracks landed in parallel and collided at merge -- PR I's stored/stored compare_stored_bundle_facts_pair() dispatch branch (#1062) and PR J's .abicheck.yml bundle: config read replacing the removed --bundle-system-providers/--bundle-cohort CLI flags (this PR) -- pushing the file from main's own 800-line cap to 811 once merged. The merge also fixed a real bug the collision would otherwise have reintroduced: the stored/live compare_release_against_bundle_facts() call site's cohorts= argument still read the now-dead kwargs.get('bundle_cohorts') instead of the resolved bundle: config value. Raised 811 -> 816 (CodeRabbit review, PR #1146, finding #5): resolve_dispatch_compile_context() now applies compile.ast_frontend_fallback/compile.allow_unsupported_castxml before the header-AST extraction this dispatch path triggers (compare_bundle_facts_rejections.apply_env_toggles_for_stored_pair, both toggles were previously silently ignored on this path even though they work on the main compare/dump paths). The toggle logic itself (~15 lines) moved to that sibling compare_bundle_facts_rejections.py module rather than growing inline; that sibling module takes cli_options.apply_compile_config_env_toggles as a parameter rather than importing cli_options itself, since (unlike this file) it is not already a member of the pre-existing, allowlisted CLI-registration import cycle -- importing cli_options there directly grew that cycle by one node (test_no_unapproved_import_cycle_growth caught it), which AGENTS.md says never to do reactively. The handful of lines that remain here are the irreducible import + call-site glue this file (already a cycle member) absorbs instead.",
       "review_by": "2026-11-30"
     },
     {

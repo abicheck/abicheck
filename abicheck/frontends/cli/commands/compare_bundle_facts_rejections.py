@@ -439,13 +439,17 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
                 "debug_dwarf_only",
                 "debug_debuginfod",
                 "debug_debuginfod_url",
+                "debug_pdb_path",
             )
         ):
             # Same root cause as the --debug-format/--dwarf-only/
             # --debuginfod CLI-flag rejection above: CompileContext (what
             # this driver actually threads through to service.resolve_input)
-            # has no debug-format/dwarf-only/debuginfod fields at all, CLI
-            # flag or config alike.
+            # has no debug-format/dwarf-only/debuginfod/pdb-path fields at
+            # all, CLI flag or config alike -- debug.pdb_path included
+            # (CodeRabbit review, PR #1146, finding #3): the stored/stored
+            # and stored/live BundleFacts paths never consume a PDB path, so
+            # silently accepting it would look like it did something.
             _unsupported_config_blocks.append("debug:")
         if _bc.source_method is not None:
             # Codex review: source.method (s1-s6) drives run_compare's own
@@ -710,3 +714,37 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
 # rejected an explicitly-given CLI flag on a stored/stored comparison; its
 # config-key equivalent is `reject_explicit_compile_config_for_stored_pair`
 # above, which now also checks these two fields.
+
+
+def apply_env_toggles_for_stored_pair(
+    ctx: click.Context,
+    config_path: Path | None,
+    apply_env_toggles: Any,
+) -> None:
+    """Apply ``compile.ast_frontend_fallback``/``compile.allow_unsupported_
+    castxml`` for the stored-OLD_FACTS + live-NEW_INPUT ``compare`` path.
+
+    CodeRabbit review, PR #1146, finding #5: this dispatch path
+    (``compare_bundle_facts.resolve_dispatch_compile_context``) does real
+    header-AST extraction later (``dispatch()``'s own
+    ``compare_release_against_bundle_facts`` call), but never applied these
+    two toggles the way ``run_compare``/``dump`` do -- call this after
+    ``resolve_compile_context`` has already validated *config_path* (fail-
+    loud for an explicit ``--config``, best-effort for an auto-discovered
+    one) and before extraction runs. Split out here (rather than left
+    inline in ``compare_bundle_facts.py``) purely to keep that module under
+    its own architecture line-count cap, matching why this whole sibling
+    module exists. *apply_env_toggles* is the caller's own already-imported
+    ``cli_options.apply_compile_config_env_toggles`` -- taken as a
+    parameter rather than imported here so this validation-only module
+    doesn't gain a fresh ``cli_options`` edge (this module is not already a
+    member of the pre-existing, allowlisted CLI-registration import cycle
+    the way ``compare_bundle_facts.py`` itself already is; importing
+    ``cli_options`` directly here would grow that cycle by one node, which
+    AGENTS.md says never to do reactively).
+    """
+    if config_path is None:
+        return
+    from ....workflows.extraction import load_build_config_with_digest
+
+    apply_env_toggles(ctx, load_build_config_with_digest(config_path)[0])

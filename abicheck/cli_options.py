@@ -888,7 +888,10 @@ def merge_compile_config(
     the project's ``compile:`` block for L2 the same way ``embed_build_source``
     honors its other non-executable settings for L3-L5 (Codex review). Only the
     non-executable ``compile:`` block is read here; ``build.query`` still requires
-    an explicit trusted ``--config`` (ADR-032 D5).
+    an explicit trusted ``--config`` (ADR-032 D5). ``compile.compiler`` gets the
+    identical trust gate for the identical reason: it names an executable to
+    invoke, so an auto-discovered config never selects one (CodeRabbit review,
+    PR #1146; see the ``compile.compiler`` handling below).
 
     A parse error is fail-loud for an **explicit** ``--config`` (``ClickException``)
     — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
@@ -984,10 +987,27 @@ def merge_compile_config(
     # gave neither (still possible on `scan`, which keeps both flags). A
     # value ending in "-" is a cross-toolchain prefix; anything else is a
     # full compiler path.
+    #
+    # Security (CodeRabbit review, PR #1146): this selects the executable
+    # invoked for header extraction, the same "arbitrary command from a
+    # config the operator didn't choose" shape ADR-032 D5 already gates for
+    # `build.query` — an auto-discovered `.abicheck.yml` (found by directory
+    # search, e.g. inside a fork PR's own branch content in CI) is never
+    # trusted to name it; only a config the operator explicitly passed via
+    # `--config` may. Ignored-not-silently-dropped: a clear diagnostic
+    # explains the skip, mirroring `build.query`'s own
+    # "ignored from auto-discovered .abicheck.yml" message.
     gcc_path = cli_ctx.gcc_path
     gcc_prefix = cli_ctx.gcc_prefix
     if gcc_path is None and gcc_prefix is None and bc.compile_compiler:
-        if bc.compile_compiler.endswith("-"):
+        if not explicit_config:
+            click.echo(
+                "warning: compile.compiler ignored from auto-discovered "
+                f"{cfg}; pass a trusted config with --config to permit "
+                "selecting a compiler executable.",
+                err=True,
+            )
+        elif bc.compile_compiler.endswith("-"):
             gcc_prefix = bc.compile_compiler
         else:
             gcc_path = bc.compile_compiler

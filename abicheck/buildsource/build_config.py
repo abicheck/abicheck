@@ -55,6 +55,9 @@ from .build_config_schema import (
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
 )
+from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf module)
+    reject_plugin_loading_options as _reject_plugin_loading_options,
+)
 
 #: Valid per-category severity levels (ADR-037 D4 ``severity:`` block).
 _SEVERITY_LEVELS = ("error", "warning", "info")
@@ -133,6 +136,8 @@ def _safe_compile_atom(key: str, value: str) -> str:
             f"compile.{key} must be a single compiler option atom, got {value!r}"
         )
     return value
+
+
 
 
 @dataclass
@@ -497,7 +502,10 @@ class BuildConfig:
         python_blk = _block(top, "python")
 
         def _safe_compile_atoms(key: str) -> list[str]:
-            return [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
+            atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
+            if key == "options":
+                _reject_plugin_loading_options(atoms)
+            return atoms
 
         def _level(key: str) -> str | None:
             return _one_of(_opt_str(severity, key), _SEVERITY_LEVELS, f"severity.{key}")

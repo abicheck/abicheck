@@ -395,6 +395,57 @@ class TestCompileContextForwardingParity:
         assert compile_blk["sysroot"] == "/opt/sysroot"
         assert compile_blk["nostdinc"] is True
 
+    def test_dump_gcc_options_multiline_is_one_token_per_line(self) -> None:
+        """CodeRabbit review, PR #1146, finding #7: a multi-line gcc-options
+        value must become one ``compile.options`` list entry per nonempty
+        line, matching how scan's own equivalent flag path
+        (``add_flag_shlex_split``) treats a multi-line value -- one line is
+        already one complete, space-safe token, never shlex-split further.
+        Unconditional ``shlex.split()`` previously re-tokenized on every
+        whitespace character regardless of line breaks."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-march=armv8-a\n-DFOO=1\n"}
+        cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["options"] == ["-march=armv8-a", "-DFOO=1"]
+
+    def test_dump_gcc_options_multiline_preserves_a_spaced_line_verbatim(
+        self,
+    ) -> None:
+        """A multi-line value carrying a deliberately-spaced line is passed
+        through as one (whitespace-bearing) atom, exactly as scan's own
+        multi-line handling would forward it as one ``--compiler-option``
+        occurrence -- consistently rejected downstream by
+        ``BuildConfig.from_dict()``'s per-atom whitespace rule (a clear
+        error at abicheck invocation time), rather than silently accepted
+        by a `shlex.split()` that would have torn it into multiple tokens
+        and diverged from scan's own token boundaries for the identical
+        input."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": "-Xclang -load\n./evil.so\n"}
+        cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["options"] == ["-Xclang -load", "./evil.so"]
+
+    def test_compare_gcc_options_multiline_is_one_token_per_line(self) -> None:
+        """Same fix, compare's own synthesis call site."""
+        env = {
+            **_FULL_ENV,
+            "INPUT_OLD_LIBRARY": "old.so",
+            "INPUT_NEW_LIBRARY": "new.so",
+            "INPUT_GCC_OPTIONS": "-march=armv8-a\n-DFOO=1\n",
+        }
+        cmd, _ = _run_region(_COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START)
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["options"] == ["-march=armv8-a", "-DFOO=1"]
+
+    def test_dump_gcc_options_single_line_still_shlex_splits(self) -> None:
+        """Single-line gcc-options keeps its existing shell-quoting-aware
+        splitting (the direct config-key replacement for the old scalar
+        --gcc-options flag) -- only the multi-line handling changed."""
+        env = {**_FULL_ENV, "INPUT_GCC_OPTIONS": '-DMSG="hello world" -DOK=1'}
+        cmd, _ = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["options"] == ["-DMSG=hello world", "-DOK=1"]
+
     def test_scan_forwards_all_six_flags(self) -> None:
         """Regression: scan forwarded none of these, even though
         `cli_scan.py` shares the identical `compile_context_options`
@@ -783,6 +834,65 @@ class TestCompileContextForwardingParity:
                 "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
                 "INPUT_NEW_LIBRARY": "new.so",
                 "INPUT_AST_FRONTEND": "clang",
+            },
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        assert result.returncode != 0
+        assert "not support" in result.stdout
+
+    def test_dump_default_lang_does_not_synthesize_an_overlay(self) -> None:
+        """CodeRabbit review, PR #1146, finding #6: action.yml maps an
+        omitted `lang` Action input to INPUT_LANG=c++ -- that is the
+        *default*, not a user override. A prior predicate treated any
+        non-empty INPUT_LANG (including this default) as "lang was
+        explicitly requested," so a dump/compare run configuring nothing
+        at all still synthesized a --config overlay just to carry
+        compile.lang: c++ (a no-op value, but a needless overlay/config
+        interaction all the same)."""
+        cmd, _ = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_LANG": "c++"},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        assert "--config" not in cmd
+
+    def test_dump_non_default_lang_still_synthesizes_an_overlay(self) -> None:
+        """Companion: an actual, non-default lang choice still triggers the
+        overlay -- only the documented default value is exempt."""
+        cmd, _ = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_LANG": "c"},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["lang"] == "c"
+
+    def test_compare_release_style_succeeds_with_default_lang(self) -> None:
+        """Companion to test_compare_release_style_succeeds_with_ast_frontend_
+        auto above, for the release-operand rejection predicate: the
+        default INPUT_LANG=c++ must not by itself reject a directory/
+        package compare -- only an actual override (a non-"c++" value)
+        should."""
+        cmd, stderr = _run_region(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_LANG": "c++",
+            },
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        assert "not support" not in stderr
+
+    def test_compare_release_style_fails_with_non_default_lang(self) -> None:
+        """Companion: an actual, non-default lang choice still trips the
+        release-operand guard."""
+        result = _run_region_raw(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_LANG": "c",
             },
             _COMPARE_COMPILE_CONTEXT_START,
         )

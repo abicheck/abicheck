@@ -564,6 +564,14 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "dump_manifest_path",
         # Project config
         "build_config",
+        # Debug info -- the coarse per-run override stays visible on `dump`
+        # too, same as on `compare` above (whose own dest is the singular
+        # `debug_root`, split into sided paths by `cli_options.py`; `dump`
+        # binds this flag straight to the plural `debug_roots` multiple=True
+        # parameter -- CodeRabbit review, PR #1146, finding #4: this name
+        # was missing here, so plain `dump --help` never showed a real,
+        # still-supported flag).
+        "debug_roots",
         # Output
         "output",
         "snapshot_compression",

@@ -436,10 +436,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         and _dump_will_attempt_hybrid_l4_extraction(sources)
     ):
         raise click.UsageError(
-            "--depth source is incompatible with --ast-frontend hybrid: L4 "
-            "source-ABI replay has no dual-backend hybrid extractor (unlike "
-            "the L2 header-AST snapshot). Pass --ast-frontend castxml or "
-            "--ast-frontend clang for a --depth source dump."
+            "--depth source is incompatible with compile.frontend: hybrid: "
+            "L4 source-ABI replay has no dual-backend hybrid extractor "
+            "(unlike the L2 header-AST snapshot). Set compile.frontend: "
+            "castxml or compile.frontend: clang in .abicheck.yml for a "
+            "--depth source dump."
         )
 
     # A source-only dump (no SO_PATH) has no binary at all, so --depth binary

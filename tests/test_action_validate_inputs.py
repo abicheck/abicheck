@@ -640,6 +640,23 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
         assert result.returncode == 1, f"{var}={value} should have been rejected"
         assert "does not support lang/ast-frontend/gcc-path" in result.stdout
 
+    def test_default_lang_is_not_rejected(self, tmp_path: Path) -> None:
+        """action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that
+        is the *default*, not a user override, so it must not by itself
+        trip this guard (CodeRabbit review, PR #1146, finding #6), mirroring
+        the "auto" carve-out for ast-frontend just below."""
+        lib_dir = tmp_path / "lib"
+        lib_dir.mkdir()
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": str(lib_dir),
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_LANG": "c++",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def test_ast_frontend_auto_is_not_rejected(self, tmp_path: Path) -> None:
         """ "auto" is the documented no-op spelling -- resolves to the same
         default castxml selection as leaving the input unset -- and must

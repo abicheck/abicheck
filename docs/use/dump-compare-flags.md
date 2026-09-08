@@ -25,8 +25,8 @@ compile:
 ```
 
 ```bash
-abicheck dump libfoo.so -H foo.h -o snap.json
-abicheck compare libv1.so libv2.so -H foo.h
+abicheck dump libfoo.so -H foo.h -o snap.json --config .abicheck.yml
+abicheck compare libv1.so libv2.so -H foo.h --config .abicheck.yml
 ```
 
 ## Dependency exclusion in `dump`
@@ -85,11 +85,13 @@ compile:
 ```
 
 ```bash
-# dump (single artifact) -- picks up compile.* above automatically
-abicheck dump libfoo.so -H include/foo.h -o snap.json
+# dump (single artifact) -- --config loads the compile: block above; without
+# it (or a --sources tree that auto-discovers .abicheck.yml), none of these
+# cross-toolchain settings would actually be used.
+abicheck dump libfoo.so -H include/foo.h -o snap.json --config .abicheck.yml
 
 # compare (two artifacts) -- applies to BOTH sides
-abicheck compare libv1.so libv2.so -H include/foo.h
+abicheck compare libv1.so libv2.so -H include/foo.h --config .abicheck.yml
 ```
 
 The full `compile:` field list (with each field's former CLI spelling on

@@ -307,9 +307,13 @@ add_compile_context_flags() {
   # (dump and single-pair compare take --lang here; scan keeps its own
   # --lang flag and never calls this function at all).
   local include_lang="${1:-true}"
+  # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is the
+  # *default*, not a user override, so it must not by itself count as "lang
+  # was explicitly requested" (CodeRabbit review, PR #1146, finding #6): a
+  # non-empty INPUT_LANG only counts when it differs from that default.
   if [[ -z "${INPUT_AST_FRONTEND:-}${INPUT_GCC_PATH:-}${INPUT_GCC_PREFIX:-}${INPUT_GCC_OPTIONS:-}${INPUT_SYSROOT:-}" \
         && "${INPUT_NOSTDINC:-false}" != "true" \
-        && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" ) ]]; then
+        && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
   fi
   if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
@@ -356,7 +360,30 @@ if compiler:
     compile_blk["compiler"] = compiler
 gcc_options = os.environ.get("ABICHECK_COMPILE_GCC_OPTIONS", "")
 if gcc_options:
-    compile_blk["options"] = shlex.split(gcc_options)
+    # CodeRabbit review, PR #1146, finding #7: BuildConfig.from_dict()
+    # (abicheck/buildsource/build_config.py) rejects any compile.options
+    # list item containing whitespace -- each entry must already be one
+    # complete argv atom, the same contract `scan`'s own equivalent
+    # gcc-options-forwarding path (add_flag_shlex_split, above) already
+    # honors for a multi-line (YAML block scalar) value: one line is one
+    # complete, space-safe token, never shlex-split further. Unconditional
+    # `shlex.split()` here previously ignored that line-per-token
+    # convention and instead re-tokenized the whole multi-line value on
+    # every whitespace character regardless of line breaks -- for an
+    # ordinary multi-line value that diverged from scan's own token
+    # boundaries, and for a deliberately-spaced line (e.g. one meant as a
+    # single, later-rejected whitespace-bearing atom) it silently
+    # *accepted* the split instead of surfacing BuildConfig's own
+    # whitespace-rejection error, which is the outcome scan's own
+    # unsplit-multiline handling produces for the identical input shape.
+    # A single-line value keeps `shlex.split()`: that spelling is the
+    # direct config-key replacement for the old scalar `--gcc-options`
+    # flag, which was always shell-quoting-aware.
+    compile_blk["options"] = (
+        [line for line in gcc_options.splitlines() if line]
+        if "\n" in gcc_options
+        else shlex.split(gcc_options)
+    )
 sysroot = os.environ.get("ABICHECK_COMPILE_SYSROOT", "")
 if sysroot:
     compile_blk["sysroot"] = sysroot
@@ -1403,7 +1430,12 @@ elif [[ "$MODE" == "compare" ]]; then
     # its description above) -- a workflow that spells it out explicitly
     # requests nothing the release fan-out could actually drop, so it must
     # not trip this guard (Codex review, second round).
-    if [[ -n "${INPUT_LANG:-}" \
+    # Same "c++" is the default, not an override" carve-out as
+    # add_compile_context_flags above (CodeRabbit review, PR #1146, finding
+    # #6): action.yml's INPUT_LANG default means a plain non-empty check
+    # here rejected every directory/package compare, even one that
+    # configured nothing at all.
+    if [[ (-n "${INPUT_LANG:-}" && "${INPUT_LANG:-}" != "c++") \
           || (-n "${INPUT_AST_FRONTEND:-}" && "${INPUT_AST_FRONTEND:-}" != "auto") \
           || -n "${INPUT_GCC_PATH:-}" || -n "${INPUT_GCC_PREFIX:-}" \
           || -n "${INPUT_GCC_OPTIONS:-}" || -n "${INPUT_SYSROOT:-}" \

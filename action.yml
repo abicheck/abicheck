@@ -257,14 +257,21 @@ inputs:
     description: >
       Extra compiler flags passed through to the header frontend. On scan,
       maps to the CLI's --compiler-option; on dump and single-pair compare,
-      it folds into the same synthesized compile: block gcc-path describes
-      above. A single-line value is
-      split on whitespace into separate flags, same as before; a multi-line
-      (YAML block scalar) value keeps each line as one flag verbatim,
-      spaces included — use that form for a flag whose value contains a
-      space. Applies to dump, scan, and compare mode with a single-pair
-      (non-directory, non-package) operand — a directory/package compare
-      rejects it with an error (same restriction as ast-frontend above).
+      it folds into a synthesized compile.options list in the same
+      synthesized compile: block gcc-path describes above. A single-line
+      value is shell-quoting-aware split on whitespace into separate flags
+      (a quoted segment such as -DMSG="hello world" stays one flag); a
+      multi-line (YAML block scalar) value treats each line as one already-
+      complete flag, not split further. On scan, that per-line flag is
+      forwarded verbatim as one --compiler-option occurrence even if it
+      contains a space; on dump and single-pair compare, each synthesized
+      compile.options entry must be a single whitespace-free flag, so a
+      line containing a space is rejected with a clear error rather than
+      silently accepted — put each word needing its own flag on its own
+      line instead. Applies to dump, scan, and compare mode with a
+      single-pair (non-directory, non-package) operand — a directory/
+      package compare rejects it with an error (same restriction as
+      ast-frontend above).
     required: false
   sysroot:
     description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (scan and deps-tree keep their own direct --sysroot/CLI forwarding). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'

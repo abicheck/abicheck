@@ -535,7 +535,7 @@ def test_dump_depth_source_with_hybrid_frontend_rejected(tmp_path) -> None:  # t
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
-    assert "--ast-frontend hybrid" in out
+    assert "compile.frontend: hybrid" in out
     assert "--depth source" in out
     assert not (tmp_path / "out3.json").exists()
 
@@ -567,8 +567,8 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_without_sources_or_build
         ],
     )
     out = _all_output(res)
-    assert "--ast-frontend hybrid" not in out
-    assert "castxml or --ast-frontend clang" not in out
+    assert "compile.frontend: hybrid" not in out
+    assert "castxml or compile.frontend: clang" not in out
 
 
 def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -597,7 +597,7 @@ def test_dump_depth_source_with_config_hybrid_frontend_rejected(tmp_path) -> Non
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
-    assert "--ast-frontend hybrid" in out
+    assert "compile.frontend: hybrid" in out
     assert "--depth source" in out
 
 
@@ -619,7 +619,7 @@ def test_dump_source_only_depth_source_with_config_hybrid_frontend_rejected(tmp_
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
-    assert "--ast-frontend hybrid" in out
+    assert "compile.frontend: hybrid" in out
     assert "--depth source" in out
 
 
@@ -628,7 +628,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
     directory only loads and filters its existing L4/L5 facts
     (cli_buildsource.embed_build_source's is_pack_dir branch forces
     collect_inline_pack's raw_build_info to None) -- no L4 extractor ever
-    runs, so --ast-frontend hybrid has no effect and must not be rejected
+    runs, so compile.frontend: hybrid has no effect and must not be rejected
     for this input shape, unlike a raw source tree.
 
     CodeRabbit review: the pack carries real L4 facts (not an empty
@@ -660,7 +660,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_prebuilt_pack(tmp_pa
         ],
     )
     assert res.exit_code == 0, _all_output(res)
-    assert "--ast-frontend hybrid" not in _all_output(res)
+    assert "compile.frontend: hybrid" not in _all_output(res)
 
 
 def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -690,7 +690,7 @@ def test_dump_depth_source_hybrid_frontend_rejected_for_mixed_raw_and_pack(tmp_p
     )
     assert res.exit_code != 0, _all_output(res)
     out = _all_output(res)
-    assert "--ast-frontend hybrid" in out
+    assert "compile.frontend: hybrid" in out
     assert "--depth source" in out
 
 
@@ -733,7 +733,7 @@ def test_dump_depth_source_hybrid_frontend_not_rejected_for_pack_sources_raw_bui
         ],
     )
     assert res.exit_code == 0, _all_output(res)
-    assert "--ast-frontend hybrid" not in _all_output(res)
+    assert "compile.frontend: hybrid" not in _all_output(res)
 
 
 def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -754,4 +754,4 @@ def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:
         ["dump", "--sources", str(src), "--depth", "headers",
          "--config", str(cfg), "-o", str(tmp_path / "out4.json")],
     )
-    assert "--ast-frontend hybrid" not in _all_output(res)
+    assert "compile.frontend: hybrid" not in _all_output(res)

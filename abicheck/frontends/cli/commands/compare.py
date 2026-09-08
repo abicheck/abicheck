@@ -400,12 +400,11 @@ def _embed_inline_source_side(
         and _dump_will_attempt_hybrid_l4_extraction(dump_sources)
     ):
         raise click.UsageError(
-            f"--depth source is incompatible with --ast-frontend hybrid for "
-            f"the --sources {label}= tree: L4 source-ABI replay has no "
+            f"--depth source is incompatible with compile.frontend: hybrid "
+            f"for the --sources {label}= tree: L4 source-ABI replay has no "
             "dual-backend hybrid extractor (unlike the L2 header-AST "
-            f"snapshot). Pass --ast-frontend {label}=castxml or "
-            f"--ast-frontend {label}=clang (or an unsided --ast-frontend) "
-            "for a --depth source compare."
+            "snapshot). Set compile.frontend: castxml or compile.frontend: "
+            "clang in .abicheck.yml for a --depth source compare."
         )
     # CLI-audit P2 ("business logic depends on Click-to-Click orchestration"):
     # this ctx.invoke was investigated for removal alongside the
