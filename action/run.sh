@@ -53,26 +53,30 @@ _is_path_already_qualified() {
 # caller's, not the runner's working directory, on such a runner (first
 # found for `$BASELINE_DIR`'s own derived paths; the release/compile-
 # context config overlay paths below hit the identical shape, Codex
-# review). Canonicalize once, at the source, with `$1`'s own subshell `cd`
-# (not string-prefixing with `$PWD`, which would be wrong for a `mktemp`
-# result that -- unusually -- already came out absolute under a relative
-# `$TMPDIR` base plus an absolute override) so every path derived from it
-# afterwards is safe without fixing each call site individually.
+# review).
+#
+# Prefixes with `$PWD` only when `$1` is not already qualified -- the exact
+# `_is_path_already_qualified` string check `base_source`'s own
+# absolutization uses just above, not a `cd "$1" && pwd` subshell
+# round-trip. That round-trip broke Windows/Git-Bash real CI runs (Codex
+# review, fresh evidence): a bare `mktemp`-returned path there can be an
+# MSYS-internal alias (e.g. `/tmp/...`) rather than the drive-mounted form
+# (`/c/Users/.../Temp/...`) MSYS's own argv-to-native-path auto-translation
+# recognizes -- `cd`/`pwd` never re-resolves that alias to the recognized
+# form (no symlink is actually involved to dereference), so the once-good,
+# translatable path was replaced with an untranslatable one, silently
+# corrupted into a garbage native path (`\tmp\tmp.XXXX`, no drive) the
+# moment it crossed into the Python subprocess. Plain string-prefixing
+# leaves an already-qualified path (whichever alias form it is) exactly as
+# `mktemp` produced it -- the same form every pre-existing, working
+# invocation already relied on -- and only ever touches the genuinely
+# relative case this helper exists to fix.
 _mktemp_canonical() {
-  local path="$1"
-  if ! path="$(cd "$path" 2>/dev/null && pwd)" 2>/dev/null; then
-    # A plain file (mktemp, not mktemp -d) has no directory to cd into --
-    # canonicalize its parent and reattach the basename instead.
-    local dir base
-    dir="$(dirname -- "$1")"
-    base="$(basename -- "$1")"
-    if ! dir="$(cd "$dir" && pwd)"; then
-      echo "::error::failed to canonicalize the temporary path '$1' -- refusing to continue with an unresolved path." >&2
-      return 1
-    fi
-    path="$dir/$base"
+  if ! _is_path_already_qualified "$1"; then
+    printf '%s\n' "$PWD/$1"
+  else
+    printf '%s\n' "$1"
   fi
-  printf '%s\n' "$path"
 }
 
 # ---------------------------------------------------------------------------

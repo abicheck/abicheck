@@ -1634,7 +1634,6 @@ _RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset(
             {
-                "AGENTS.md",
                 # Each config-key section names "the former `compare ...`"
                 # flag it replaces, in its own historical-record capacity.
                 "reference/config-file.md",
@@ -1687,15 +1686,14 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     spelling, invisible to this sweep the same way (Codex review, fresh
     evidence).
 
-    The root `README.md` is here too: the first page a user reads, entirely
-    outside `docs/`, with its own exit-code table naming real flags --
-    invisible above until it kept advertising one after removal (Codex
-    review, fresh evidence).
+    The root `README.md`/`AGENTS.md` are here too: both entirely outside
+    `docs/`, each kept advertising a retired flag after removal, invisible
+    above (Codex review, fresh evidence -- twice, one file each).
 
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
-    `catalog/ground_truth.json`, `README.md`), which cannot collide with a
-    docs-relative key, so an allowlist entry stays unambiguous.
+    `catalog/ground_truth.json`, `README.md`, `AGENTS.md`), which cannot
+    collide with a docs-relative key, so an allowlist entry stays unambiguous.
     """
     targets = [(p, p.relative_to(DOCS).as_posix()) for p in sorted(DOCS.rglob("*.md"))]
     targets += [
@@ -1713,8 +1711,9 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     ground_truth = CATALOG / "ground_truth.json"
     if ground_truth.is_file():
         targets.append((ground_truth, "catalog/ground_truth.json"))
-    if (ROOT / "README.md").is_file():
-        targets.append((ROOT / "README.md", "README.md"))
+    for name in ("README.md", "AGENTS.md"):
+        if (ROOT / name).is_file():
+            targets.append((ROOT / name, name))
     return targets
 
 
