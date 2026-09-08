@@ -99,7 +99,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(new_dir / "libfoo.json", new_foo)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "no-demangle",
         )
         assert code == 4, out

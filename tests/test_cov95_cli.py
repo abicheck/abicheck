@@ -1876,8 +1876,18 @@ class TestUsedByScoping:
         # reports the same thing it would for an unscoped run: the removed
         # symbol was detected but is not one of this ADR-067 disposition
         # ledger's "gating" findings for the supplied consumer.
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
-        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
+        #
+        # PR #1154 merge follow-up: `--surface-metrics` is now unconditional
+        # (ADR-068 D4/Phase 5), so this fixture's own public-symbol-count
+        # shrink (1 public func old -> 0 new) now also emits a
+        # `public_surface_shrank` COMPATIBLE finding alongside the real
+        # `func_removed` -- asserting the new, correct finding set rather
+        # than weakening the assertion, matching this same PR's own fix
+        # pattern for the other surface-metrics-affected tests in this file.
+        assert result.stdout.strip().startswith(
+            "BREAKING: 1 breaking, 1 compatible (2 total)"
+        )
+        assert "2 detected, 0 gating, 2 non_gating" in result.stdout
 
     def test_oneline_format_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch

@@ -97,7 +97,7 @@ class TestReleaseViewShowOnly:
         # exit code) is unaffected -- policy/view changes never alter what
         # was actually observed (AGENTS.md "Record before disposing").
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "show=variables",
         )
         assert result.exit_code == 4, result.output
@@ -111,7 +111,7 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "show=functions",
         )
         assert result.exit_code == 4, result.output
@@ -122,7 +122,7 @@ class TestReleaseViewShowOnly:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--format", "json", "--view", "show=variables",
         )
         assert result.exit_code == 4, result.output
@@ -142,9 +142,9 @@ class TestReleaseViewShowOnly:
         break into a clean exit."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        baseline = _invoke("compare", str(old_dir), str(new_dir), "--jobs", "1")
+        baseline = _invoke("compare", str(old_dir), str(new_dir))
         filtered = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "show=variables",
         )
         assert baseline.exit_code == filtered.exit_code == 4
@@ -156,7 +156,7 @@ class TestReleaseViewDemangle:
     def test_demangled_by_default_in_release_markdown(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        result = _invoke("compare", str(old_dir), str(new_dir), "--jobs", "1")
+        result = _invoke("compare", str(old_dir), str(new_dir))
         assert result.exit_code == 4, result.output
         assert _DEMANGLED in result.output
         assert _MANGLED not in result.output
@@ -167,7 +167,7 @@ class TestReleaseViewDemangle:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "no-demangle",
         )
         assert result.exit_code == 4, result.output
@@ -180,7 +180,7 @@ class TestReleaseViewDemangle:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--format", "json", "--view", "demangle",
         )
         assert result.exit_code == 4, result.output
@@ -196,9 +196,9 @@ class TestReleaseViewPatterns:
     ) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        baseline = _invoke("compare", str(old_dir), str(new_dir), "--jobs", "1")
+        baseline = _invoke("compare", str(old_dir), str(new_dir))
         with_patterns = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "patterns",
         )
         assert with_patterns.exit_code == baseline.exit_code == 4
@@ -224,7 +224,7 @@ class TestReleaseViewReportModeRejected:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "leaf",
         )
         assert result.exit_code == 64, result.output
@@ -237,7 +237,7 @@ class TestReleaseViewReportModeRejected:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1",
+            "compare", str(old_dir), str(new_dir),
             "--view", "root-cause",
         )
         assert result.exit_code == 64, result.output
@@ -253,7 +253,7 @@ class TestReleaseViewReportModeRejected:
 
         for token in ("full", "impact"):
             result = _invoke(
-                "compare", str(old_dir), str(new_dir), "--jobs", "1",
+                "compare", str(old_dir), str(new_dir),
                 "--view", token,
             )
             assert result.exit_code == 4, (token, result.output)
