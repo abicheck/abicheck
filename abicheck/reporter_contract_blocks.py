@@ -502,6 +502,12 @@ def build_report_document_with_side_facts(
         compute_cross_source_evolution_summary,
         render_cross_source_evolution_json,
     )
+    from .report.lexical_prescan import (
+        compute_pattern_prescan_summary,
+        compute_preprocessor_prescan_summary,
+        render_pattern_prescan_json,
+        render_preprocessor_prescan_json,
+    )
     from .report.run_outcome import run_outcome_dict_for_diff_result
     from .report.scoped_gate import apply_scoped_gate
 
@@ -514,6 +520,22 @@ def build_report_document_with_side_facts(
     if evolution_summary is not None:
         d["cross_source_evolution"] = render_cross_source_evolution_json(
             evolution_summary
+        )
+    # plan §3 rows 6/8, §6 Phase 2b (schema 3.12) -- same one-shared-fold-
+    # point shape as cross_source_evolution above, for the two per-side
+    # lexical/preprocessor pre-scan attachments (never a diffed Change/
+    # evolution axis; see workflows/lexical_prescan.py's own docstring).
+    pattern_summary = compute_pattern_prescan_summary(
+        getattr(result, "pattern_prescan", None)
+    )
+    if pattern_summary is not None:
+        d["pattern_prescan"] = render_pattern_prescan_json(pattern_summary)
+    preprocessor_summary = compute_preprocessor_prescan_summary(
+        getattr(result, "preprocessor_prescan", None)
+    )
+    if preprocessor_summary is not None:
+        d["preprocessor_prescan"] = render_preprocessor_prescan_json(
+            preprocessor_summary
         )
     apply_scoped_gate(
         d,

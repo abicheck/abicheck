@@ -117,6 +117,42 @@ def fold_abi3_into_extra_changes(
     return abi3_audit.fold(extra_changes, candidate, abi3_floor, candidate_name=name)
 
 
+def fold_lexical_prescan_into_result(
+    result: Any,
+    *,
+    old_headers: list[Path],
+    new_headers: list[Path],
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_snapshot: Any,
+    new_snapshot: Any,
+    depth: str | None,
+    changed_paths: tuple[str, ...],
+    old_compile_context: Any = None,
+    new_compile_context: Any = None,
+) -> None:
+    """Thin bind of :func:`abicheck.workflows.lexical_prescan.fold_lexical_prescan`
+    (the shared rule both front ends call) to the CLI's own already-resolved
+    values -- plan §3 rows 6/8, §6 Phase 2b. Mirrors
+    :func:`fold_abi3_into_extra_changes` above.
+    """
+    from ...workflows.lexical_prescan import fold_lexical_prescan
+
+    fold_lexical_prescan(
+        result,
+        old_headers=old_headers,
+        new_headers=new_headers,
+        old_sources=old_sources,
+        new_sources=new_sources,
+        old_snapshot=old_snapshot,
+        new_snapshot=new_snapshot,
+        depth=depth,
+        changed_paths=changed_paths,
+        old_compile_context=old_compile_context,
+        new_compile_context=new_compile_context,
+    )
+
+
 def report_abi3_evidence_contract_error(result: Any, failure: str | None) -> None:
     """Stamp ADR-064's exit-7 axis for a failed ``--abi3`` precondition and
     say so on stderr (so the message survives ``--format json`` on stdout)."""

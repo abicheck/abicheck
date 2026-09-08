@@ -646,6 +646,26 @@
         }
       }
     },
+    "pattern_prescan": {
+      "type": "object",
+      "description": "Schema 3.12 (plan §3 row 6, §6 Phase 2b): both sides' compiler-free lexical ABI-risk pre-scan result (buildsource.pattern_scan, ADR-035 D2), always present -- computed automatically on every invocation, no opt-in flag. Advisory only: never a diffed Change/ChangeKind and never authoritative for a verdict. Each side's object is PatternScanResult.to_dict() verbatim (files_scanned/files_skipped/facts/escalation_triggers/counts_by_kind); an all-zero side means nothing was in scope to scan (no headers, no --old/new-sources reaching source evidence), not a failure.",
+      "required": ["old", "new"],
+      "additionalProperties": true,
+      "properties": {
+        "old": {"type": "object", "additionalProperties": true},
+        "new": {"type": "object", "additionalProperties": true}
+      }
+    },
+    "preprocessor_prescan": {
+      "type": "object",
+      "description": "Schema 3.12 (plan §3 row 8, §6 Phase 2b): both sides' S2 preprocessor pre-scan result (buildsource.preprocessor_scan, ADR-035 D2) -- per-TU ABI-macro-value divergence and public-header-leaks-private/generated-header detection via macro expansion. Always present; gated per side on L3 build evidence plus a working preprocessor -- a side lacking either reads `ran: false` with a `skipped_reason`, never a silently clean scan. Advisory only, same authority rule as pattern_prescan above. Each side's object is PreprocessorScanResult.to_dict() verbatim.",
+      "required": ["old", "new"],
+      "additionalProperties": true,
+      "properties": {
+        "old": {"type": "object", "additionalProperties": true},
+        "new": {"type": "object", "additionalProperties": true}
+      }
+    },
     "surface_changes": {
       "type": "object",
       "description": "Workstream G slice S1 (schema 3.9): the \"what changed / review actions\" grouping over every already-detected, currently-visible finding (report.finding.report_findings_for -- no new detection, no new policy decision). `additions` is `policy.severity.IssueCategory.ADDITION`, the same category every other view resolves; `removals` is any change kind following the model layer's `*_removed` naming convention; everything else is a `modification`. Unconditional, like disposition_audit -- the executable form of \"compatible additions are visible changes\": a fully-compatible run still carries a non-empty `additions` list here.",

@@ -542,6 +542,24 @@ def classify_compare_pair(
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
+    # plan §3 rows 6/8, §6 Phase 2b: the pattern/preprocessor pre-scan
+    # enrichment, folded the same one-place-both-callers way abi3_audit.fold
+    # is above -- see workflows/lexical_prescan.py's own docstring.
+    from .workflows.lexical_prescan import fold_lexical_prescan
+
+    fold_lexical_prescan(
+        result,
+        old_headers=list(request.old.headers),
+        new_headers=list(request.new.headers),
+        old_sources=request.old.sources,
+        new_sources=request.new.sources,
+        old_snapshot=old,
+        new_snapshot=new,
+        depth=request.depth,
+        changed_paths=request.changed_paths,
+        old_compile_context=pair.old_evidence.compile,
+        new_compile_context=pair.new_evidence.compile,
+    )
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.

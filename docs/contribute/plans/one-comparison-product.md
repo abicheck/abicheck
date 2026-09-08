@@ -190,9 +190,9 @@ identity; **DELETE** — leaves the product.
 | 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). None remain scan-only |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | **Landed.** Public/internal boundary from `-H` provenance + `.abicheck.yml` `scope.public_header_dirs` (#22, now solved for both sources) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | **Landed.** As #4 |
-| 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | Phase 2 |
+| 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b). `workflows/lexical_prescan.py`'s `fold_lexical_prescan` runs the identical `scan_files()` on both sides automatically (no flag), attaching each side's result as an evidence/coverage block (`DiffResult.pattern_prescan`, report schema 3.12) -- deliberately **not** a `Change`/`ChangeKind`/`CrossSourceEvolution` entry the way the eleven checks in row 3 are; see that module's own docstring for the two options weighed and why this one is correct (short version: neither pre-scan ever produced a finding, `scan` itself never ran either on a baseline, and the real signal these lexical hints approximate is already covered more precisely by the detectors that run whenever richer evidence exists) |
 | 7 | Pattern verdict modulation | `compare --pattern-verdicts` (already on `compare`) | `compare`, always-on where evidence exists | AUTOMATIC | Decouple `--explain-patterns` (ADR-068 D4) |
-| 8 | Preprocessor checks | `buildsource/preprocessor_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | Phase 2 |
+| 8 | Preprocessor checks | `buildsource/preprocessor_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b), same PR and same mechanism as row 6 -- `fold_lexical_prescan` also runs `run_preprocessor_scan()` on both sides automatically, gated per side on L3 build evidence + a working preprocessor (an absent one reads as an honest `ran: false`/`skipped_reason`, never silently clean), attaching the result as `DiffResult.preprocessor_prescan` |
 | 9 | Build-context analysis / reconciliation | `scan` L3 collection; `compare --reconcile-build-context` | `compare --depth build`, reconciliation always-on when build context is present | AUTOMATIC + MERGE | ADR-039 reconciliation already shipped |
 | 10 | Source-ABI replay (L4) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | Parity on POI scoping (#11) |
 | 11 | Source-graph analysis (L5) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | ADR-037 D6 keeps L5 internal |
@@ -530,7 +530,34 @@ One PR per capability group, each landing with parity tests going green:
   checks' `tests/parity/gaps.py` rows are deleted — the scan-vs-compare
   parity harness confirms `compare` finds every one of them under its
   ordinary, default invocation. No cross-source check remains scan-only;
-- **2b** pattern + preprocessor scans (#6, #8);
+- **2b** pattern + preprocessor scans (#6, #8) -- **landed**: both migrated
+  onto `compare` in one PR, via `workflows/lexical_prescan.py`'s
+  `fold_lexical_prescan` (the one shared fold point both the native
+  `compare` CLI and the typed API call, mirroring `abi3_audit.fold`'s "one
+  rule, two callers" shape). **The design decision this PR had to make**
+  (stated in full in that module's own docstring, summarized here): these
+  two pre-scans are structurally unlike the eleven cross-source checks Phase
+  2a migrated -- neither has ever produced a `ChangeKind`/`Change`, both
+  emit only advisory facts (`PatternFact`/`EscalationTrigger`/
+  `MacroDivergence`/`HeaderLeak`, ADR-028 D3/ADR-035 D1's authority rule),
+  and `scan` itself never computed either pre-scan against a baseline, only
+  ever against the candidate. Two options were weighed: (1) synthesize
+  `Change`-like records per fact so the existing `CrossSourceEvolution`
+  axis's `PERSISTENT`/`INTRODUCED`/`RESOLVED`/`NOT_EVALUATED` bookkeeping
+  still applies, or (2) attach each side's result to the report as
+  evidence/coverage, with no per-fact identity and no evolution axis, the
+  same shape L3/L4/L5 evidence already gets. **Option 2 was chosen**: option
+  1 would require inventing a `ChangeKind` whose only evidence is a lexical
+  regex match purely so it could ride the evolution axis -- exactly what the
+  authority rule these two pre-scans have always respected exists to
+  prevent -- and it would claim scan-preserving parity for a two-sided
+  comparison `scan` itself never performed. `DiffResult.pattern_prescan`/
+  `.preprocessor_prescan` (report schema 3.12) carry each side's result
+  verbatim, always computed (no opt-in flag, ADR-068 D4/D5), never folding
+  into `changes`/the verdict/the exit code. Both `pattern_scan`/
+  `preprocessor_scan` gap entries are gone from `tests/parity/gaps.py`,
+  which is now empty -- the whole fifteen-item scan-only list from ADR-068
+  §1 is closed;
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
   scoping parity for `--depth source` (#10, #11) — **landed**: the seed and
   ADR-043 D7's scoping rule now have one owner (`workflows/changed_paths.py`)
