@@ -321,7 +321,13 @@ add_compile_context_flags() {
     exit 1
   fi
   if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
-    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
+    # Codex review, PR #1154 follow-up: bare `mktemp` under Git Bash on
+    # windows-latest returns an MSYS-only `/tmp/...` spelling a native
+    # (non-MSYS) python3 consumer can't reliably resolve, causing explicit
+    # compile-context inputs to fail with FileNotFoundError -- anchor it
+    # under $RUNNER_TEMP with a portable template, matching every other
+    # mktemp call in this file (e.g. PR_JSON/PR_BODY/_STDOUT_JSON_FILE below).
+    _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
     ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
     ABICHECK_COMPILE_INCLUDE_LANG="$include_lang" \
     ABICHECK_COMPILE_FRONTEND="${INPUT_AST_FRONTEND:-}" \

@@ -78,3 +78,16 @@ def reject_plugin_loading_options(tokens: list[str]) -> None:
                     "compiler is not a supported use case for header-ABI "
                     "extraction)"
                 )
+        elif token.startswith("-Xclang="):
+            # Clang documents `-Xclang=<arg>` (`--help-hidden`) as an alias
+            # for the separate `-Xclang <arg>` form above -- the two-token
+            # check alone leaves this joined spelling free to smuggle the
+            # identical plugin-loading argument straight past it.
+            joined = token[len("-Xclang=") :]
+            if joined in _PLUGIN_LOADING_BARE_OPTIONS or joined.startswith(_PLUGIN_LOADING_PREFIXES):
+                raise ValueError(
+                    f"compile.options: plugin-loading flag {joined!r} (via "
+                    "-Xclang=) is not permitted (loading arbitrary native "
+                    "code into the compiler is not a supported use case for "
+                    "header-ABI extraction)"
+                )

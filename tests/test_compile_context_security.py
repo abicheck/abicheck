@@ -114,17 +114,21 @@ def test_merge_compile_config_compiler_cli_still_wins_over_autodiscovered(
         "compile:\n  options:\n    - -fplugin=./evil.so\n",
         "compile:\n  options:\n    - -Xclang\n    - -add-plugin\n    - evilpass\n",
         "compile:\n  options:\n    - -load\n",
+        "compile:\n  options:\n    - -Xclang=-load\n    - -Xclang=./evil.so\n",
+        "compile:\n  options:\n    - -Xclang=-add-plugin\n    - -Xclang=evilpass\n",
     ],
 )
 def test_compile_options_rejects_plugin_loading_sequences(
     tmp_path, options_yaml
 ) -> None:
     """``compile.options`` may not smuggle a compiler-plugin-loading flag,
-    whether as a single ``-fplugin=`` token or the ``-Xclang``-prefixed
-    two-token form -- reassembled from otherwise individually
-    whitespace-free YAML list items, this loads attacker-controlled native
-    code into the compiler process (CodeRabbit review, PR #1146, finding
-    #2). Rejected unconditionally, regardless of config trust tier: no
+    whether as a single ``-fplugin=`` token, the ``-Xclang``-prefixed
+    two-token form, or Clang's own documented ``-Xclang=<arg>`` joined
+    alias for it (``--help-hidden``) -- reassembled from otherwise
+    individually whitespace-free YAML list items, this loads
+    attacker-controlled native code into the compiler process (CodeRabbit
+    review, PR #1146, finding #2; the joined-alias gap, PR #1154 follow-up).
+    Rejected unconditionally, regardless of config trust tier: no
     header-ABI-extraction use case needs it."""
     from abicheck.buildsource.build_config import BuildConfig
 
