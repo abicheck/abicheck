@@ -100,8 +100,6 @@ class TestDepthBinaryAcceptedForReleaseCompare:
             str(new_dir),
             "--depth",
             "binary",
-            "--jobs",
-            "1",
             "--format",
             "json",
         )
@@ -134,8 +132,6 @@ class TestDepthBinaryAcceptedForReleaseCompare:
             str(new_dir),
             "--depth",
             "binary",
-            "--jobs",
-            "1",
             "--format",
             "json",
         )
@@ -150,8 +146,6 @@ class TestDepthBinaryAcceptedForReleaseCompare:
             str(new_dir),
             "--depth",
             "binary",
-            "--jobs",
-            "1",
             "--format",
             "json",
         )

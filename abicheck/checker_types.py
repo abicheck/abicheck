@@ -793,6 +793,29 @@ class DiffResult(ReportSideFacts):
     # same as `Change.evolution`. Appended at the true end, same convention
     # as `evidence_contract_error`/`budget_overflow` above.
     resolved_findings: list[Change] = field(default_factory=list, kw_only=True)
+    # Phase 2b (one-comparison-product.md plan §3 #6/#8, ADR-068 D3/D4/D5):
+    # the folded, per-side lexical pattern pre-scan + preprocessor pre-scan
+    # result (``workflows.pattern_preprocessor_scan.
+    # PatternPreprocessorScanResult``) -- the same "run independently on OLD
+    # and NEW, fold via ``CrossSourceEvolution``" shape ``cross_source_
+    # evolution.py`` already established for the cross-source checks, reused
+    # here for the two other scan-only primitives ADR-068 §1 named
+    # (``buildsource.pattern_scan.scan_files`` /
+    # ``buildsource.preprocessor_scan.run_preprocessor_scan``). Always
+    # populated by `checker.compare()` (`pattern_preprocessor_scan` defaults
+    # to `True`, no front end exposes a way to disable it -- D5 rejects "a
+    # flag that merely enables useful analysis"). Typed ``object`` for the
+    # same circular-import reason as ``contract_context``/
+    # ``analysis_assurance`` above: the workflow module that builds one
+    # imports ``AbiSnapshot`` from ``model``, not this module, so the
+    # annotation itself is not what forces this, but keeping the same
+    # convention as every other late-appended block here avoids a special
+    # case. Advisory only -- pattern/preprocessor facts are never a verdict
+    # on their own (``pattern_scan.py``/``preprocessor_scan.py``'s own
+    # docstrings), so this field never reaches the verdict, severity, or
+    # exit code. Appended at the true end, same positional-field-safety
+    # convention as every other block above.
+    pattern_preprocessor_scan: object | None = field(default=None, kw_only=True)
 
     def _effective_kind_sets(
         self,

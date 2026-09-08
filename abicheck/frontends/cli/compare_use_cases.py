@@ -41,15 +41,14 @@ def reject_use_cases_without_carrying_output(
 
     A manifest resolved and then dropped is the same failure --use-cases is
     rejected for set inputs to avoid -- sarif/junit/html never read
-    ``DiffResult.use_case_impact``, and the internal one-line format
-    (``--profile quick``) has no room for it either. Asked across *every*
-    rendered output, primary or any ``--write`` (repeatable per ADR-068
-    D4/Phase 5 -- "one output carrying it" is satisfied by the primary
-    render OR any secondary write); only when none does is the manifest
-    genuinely resolved for nothing (Codex review).
+    ``DiffResult.use_case_impact``, and the one-line format (``--format
+    oneline``) has no room for it either. Asked across *every* rendered
+    output, primary or any ``--write`` (repeatable per ADR-068 D4/Phase 5 --
+    "one output carrying it" is satisfied by the primary render OR any
+    secondary write); only when none does is the manifest genuinely resolved
+    for nothing (Codex review).
     """
     from ...cli_compare_fold import format_carries_use_case_impact
-    from ...service_render import ONELINE_FORMAT
 
     if use_cases_manifest is None or (
         format_carries_use_case_impact(fmt)
@@ -57,29 +56,12 @@ def reject_use_cases_without_carrying_output(
     ):
         return
     writes_desc = "".join(f" --write {f}=..." for f in secondary_fmts)
-    if fmt == ONELINE_FORMAT:
-        # `fmt` here is the internal-only "oneline" value (reachable only via
-        # --profile quick's injected default) -- never a spelling the user
-        # typed as --format, so the generic `rendered = f"--format {fmt}"`
-        # branch below would name a flag value that doesn't exist on the
-        # command line. Name --profile quick instead, and still mention
-        # every secondary write when they are ALSO ledgerless (Codex
-        # review, fresh evidence).
-        also = f" The{writes_desc} output(s) do not carry it either." if secondary_fmts else ""
-        detail = (
-            "--profile quick emits only a one-line summary, which the "
-            "attribution block would not fit. Use a different profile "
-            "or --format to get the use-case section, add --write "
-            "json=PATH to carry it alongside the summary, or drop "
-            "--use-cases." + also
-        )
-    else:
-        rendered = f"--format {fmt}" + (f" and{writes_desc}" if secondary_fmts else "")
-        detail = (
-            f"no output this run renders ({rendered}) carries use-case "
-            "attribution, so the manifest would be resolved and its result "
-            "dropped. Use --format json/markdown/review, or add --write "
-            "json=PATH to get one output that carries it alongside the "
-            f"{fmt} report."
-        )
+    rendered = f"--format {fmt}" + (f" and{writes_desc}" if secondary_fmts else "")
+    detail = (
+        f"no output this run renders ({rendered}) carries use-case "
+        "attribution, so the manifest would be resolved and its result "
+        "dropped. Use --format json/markdown/review, or add --write "
+        "json=PATH to get one output that carries it alongside the "
+        f"{fmt} report."
+    )
     raise click.UsageError(f"--use-cases is not supported here: {detail}")

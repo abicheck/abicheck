@@ -150,7 +150,6 @@ class TestCompareHelpAllDisclosure:
         for advanced_flag in (
             "--compiler",
             "--ast-frontend",
-            "--jobs",
             "--write",
             "--report-mode",
             "--pdb-path",
@@ -233,11 +232,11 @@ class TestCompareHelpAllDisclosure:
 
     def test_help_all_shows_everything_curated_hides(self) -> None:
         # Phase 7 (one-comparison-product.md §4.1): --sysroot/--ast-frontend
-        # are gone from compare's CLI entirely (compile.* config only), so
-        # they no longer belong in this "still renders somewhere" list.
+        # are gone from compare's CLI entirely (compile.* config only), and
+        # CLI flag consolidation 5-7 removed -j/--jobs too, so none of the
+        # three belong in this "still renders somewhere" list any more.
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--jobs",
             "--write",
             "--report-mode",
             "--pdb-path",
@@ -271,8 +270,10 @@ class TestCompareHelpAllDisclosure:
         snap_json = snapshot_to_json(AbiSnapshot(library="x", version="1"))
         old.write_text(snap_json, encoding="utf-8")
         new.write_text(snap_json, encoding="utf-8")
+        # CLI flag consolidation 5-7 removed -j/--jobs from compare entirely;
+        # --pdb-path is a still-real advanced/hidden flag to prove this with.
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--jobs", "1"]
+            main, ["compare", str(old), str(new), "--pdb-path", "x.pdb"]
         )
         assert result.exit_code == 0, result.output
 

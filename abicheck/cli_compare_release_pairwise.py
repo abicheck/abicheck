@@ -121,6 +121,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     "CompileContext | None",
     "str | None",
+    "list[Path] | None",
 ]
 
 
@@ -153,6 +154,7 @@ def _run_compare_pair(
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -198,6 +200,13 @@ def _run_compare_pair(
     actually honour end to end -- ``"binary"`` -- forwarded unchanged to
     ``service.run_compare`` so this pair clears header/build/source evidence
     the same way a single-pair ``compare --depth binary`` would.
+
+    *public_header_dirs* (CodeRabbit review, PR #1138): a project's
+    ``.abicheck.yml`` ``scope.public_header_dirs``, resolved once for the
+    whole release the same way *pack_application*/*compile_context* are --
+    forwarded unchanged to ``service.run_compare``'s own identically-named
+    parameter, closing the gap where this fan-out never threaded the config
+    key a single-pair ``compare`` already honors.
     """
     from . import service
 
@@ -234,6 +243,7 @@ def _run_compare_pair(
         ),
         compile_context=compile_context,
         depth=depth,
+        public_header_dirs=public_header_dirs,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -269,6 +279,7 @@ def _compare_one_library(
     need_full_snapshots: bool = False,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -313,6 +324,7 @@ def _compare_one_library(
             pack_application=pack_application,
             compile_context=compile_context,
             depth=depth,
+            public_header_dirs=public_header_dirs,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -541,6 +553,7 @@ def _compare_release_libraries(
     pack_application: PackApplication | None = None,
     compile_context: CompileContext | None = None,
     depth: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -558,12 +571,15 @@ def _compare_release_libraries(
     to available RAM via :func:`_release_jobs_mem_cap` -- see that
     function's own docstring for why a bare ``os.cpu_count()`` default can
     wildly oversubscribe memory on a very-high-core-count host or a
-    cpu-count-vs-memory-mismatched container. An *explicit* ``--jobs N``
-    is never clamped -- that is a deliberate user choice, unlike the
-    ``ABICHECK_L4_JOBS`` env-var override this pattern is mirrored from
-    (:mod:`abicheck.buildsource.source_replay`), which clamps even an
-    explicit override since it has no equivalent "the user typed this on
-    the command line" signal to respect.
+    cpu-count-vs-memory-mismatched container. A positive *jobs* is never
+    clamped -- unlike the ``ABICHECK_L4_JOBS`` env-var override this
+    pattern is mirrored from (:mod:`abicheck.buildsource.source_replay`),
+    which clamps even an explicit override since it has no equivalent "the
+    caller deliberately chose this" signal to respect. There is no CLI flag
+    for *jobs* any more (ADR-068 D5 / plan Phase 7h removed ``-j``/``--jobs``
+    outright -- always auto-detect and memory-clamp); the CLI's own call
+    site always passes ``jobs=0``, and *jobs* stays a Tier-2 parameter for
+    direct callers only.
     """
     import os as _os
 
@@ -575,8 +591,7 @@ def _compare_release_libraries(
                 f"Note: parallel release workers reduced {effective_jobs} -> "
                 f"{mem_cap} to fit available memory (~{_release_job_mem_budget_gib():.1f} "
                 "GiB/worker budget, each holding up to two full snapshots resident); "
-                "pass --jobs to override, or set ABICHECK_RELEASE_JOB_MEM_GIB to "
-                "tune the per-worker budget.",
+                "set ABICHECK_RELEASE_JOB_MEM_GIB to tune the per-worker budget.",
                 err=True,
             )
             effective_jobs = mem_cap
@@ -611,6 +626,7 @@ def _compare_release_libraries(
         need_full_snapshots,
         compile_context,
         depth,
+        public_header_dirs,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -698,7 +714,8 @@ def _compare_release_parallel(
 
     Results are collected by key and returned in *matched_keys* order so the
     report is deterministic regardless of completion timing (parallel is now the
-    default via ``-j 0``); CI snapshots and downstream diffs depend on this.
+    default via ``jobs=0``, auto-detect); CI snapshots and downstream diffs
+    depend on this.
 
     Uses a :class:`ThreadPoolExecutor` (real OS threads sharing this
     process's memory), *not* a ``ProcessPoolExecutor`` -- a stale claim in
@@ -709,7 +726,7 @@ def _compare_release_parallel(
     spawns -- each worker thread starts with the `ContextVar`'s default value
     -- so submitting bare `_compare_one_library` calls would silently escape
     the caller's dedup scope and warn once per library even under the
-    default (`--jobs 0`, auto-detected CPU count > 1) parallel path. Fixed by
+    default (`jobs=0`, auto-detected CPU count > 1) parallel path. Fixed by
     explicitly propagating a copy of the calling thread's
     `contextvars.Context` into each submitted call via ``Context.run``.
 

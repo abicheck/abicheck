@@ -37,7 +37,6 @@ directories, and translation units were in view.
 | `--sysroot`, `--include` / `-I`, `--nostdinc` | header search context |
 | `--ast-frontend` | which header-AST backend parses the headers |
 | `--env-matrix` | compare across several environments in one run |
-| `--profile ci-gate\|release-cut\|quick` | a named run profile |
 
 Project-level defaults belong in `.abicheck.yml` rather than repeated on the
 command line; the exhaustive key reference is

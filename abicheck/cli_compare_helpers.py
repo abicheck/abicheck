@@ -50,7 +50,6 @@ from .cli_compare_options import (
     _reject_set_input_flags,
     _resolve_debug_roots,
     _resolve_demangle,
-    _resolve_profile_severity_preset,
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
@@ -124,7 +123,6 @@ def _resolve_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
-    severity_preset_from_profile: bool = False,
     scope_public_headers: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
@@ -137,7 +135,15 @@ def _resolve_compare_config(
     (``None`` when there is no config), captured by the same read so an
     ADR-049 receipt can prove *which revision* of the file supplied a value
     rather than only naming its path (Codex review, fresh evidence).
-    *severity_preset_from_profile*: see :func:`_resolve_profile_severity_preset`.
+
+    ADR-068 D5 / Phase 7a: ``compare`` no longer has ``--debug-format``/
+    ``--debuginfod``/``--debuginfod-url``/``--dwarf-only`` CLI flags (they
+    were hidden, already fully config-backed duplicates of ``debug.format``/
+    ``debug.debuginfod``/``debug.debuginfod_url``/``debug.dwarf_only``), so
+    ``resolve_compare_config`` below is called with no ``cli_debug_format``/
+    ``cli_dwarf_only``/``cli_debuginfod``/``cli_debuginfod_url`` override --
+    its defaults (``None``/``None``/``None``/``None``) mean the config value
+    (or the built-in default) always wins.
     """
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
     from .workflows.extraction import load_build_config_with_digest
@@ -151,9 +157,6 @@ def _resolve_compare_config(
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
-    severity_preset = _resolve_profile_severity_preset(
-        severity_preset, from_profile=severity_preset_from_profile, project_cfg=project_cfg
-    )
     resolved_cfg = resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
@@ -364,6 +367,20 @@ def _render_compare_dry_run(
         if collect_mode in ("source-target", "source-changed", "graph-full")
         else None,
     )
+    from .frontends.cli.compare_dry_run import add_compare_cost_preview_section
+    from .workflows.compare_cost_preview import estimate_compare_dry_run_cost
+
+    add_compare_cost_preview_section(
+        result,
+        *estimate_compare_dry_run_cost(
+            old_input=old_input, new_input=new_input,
+            depth=depth, source_method=source_method,
+            headers=headers, includes=includes,
+            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+            old_sources=old_sources, new_sources=new_sources,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+        ),
+    )
     all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
     result.add(
         "Headers and compile context",
@@ -571,7 +588,7 @@ def _preflight_manifests_and_audit(
 def _resolve_required_symbol_policy(
     ctx: click.Context, policy: str, required_symbols: tuple[str, ...],
     required_symbols_from_file: tuple[str, ...],
-    required_symbols_file: Path | None, required_symbols_sha: str | None,
+    required_symbols_path: str | None, required_symbols_sha: str | None,
 ) -> tuple[str, str | None, Path | None, str | None]:
     """Pick ``policy`` for a ``--required-symbol`` contract, and say what picked it.
 
@@ -584,13 +601,12 @@ def _resolve_required_symbol_policy(
     that used ``plugin_abi``).
 
     Which spelling actually *contributed* decides what the receipt names -- not
-    merely which was passed. A ``--required-symbols FILE`` run never passed
-    ``--required-symbol``, so naming the inline flag fabricates a selector; but a
-    file that parsed to nothing selected nothing either, so naming it for a
-    ``--required-symbol api_b --required-symbols empty.txt`` run omits the option
-    that really made the contract non-empty (Codex review, two rounds). The file
-    form wins when it contributed, since it is then both true and the one
-    carrying a path and digest to audit.
+    merely which was passed. ADR-068 D5 / plan Phase 7h folded the old, separate
+    ``--required-symbols FILE`` flag into ``--required-symbol @FILE``, so both
+    forms now share one option name for the receipt -- but a file that parsed
+    to nothing still selected nothing (Codex review, two rounds, generalized):
+    the ``@FILE`` form wins the receipt's path/digest only when it actually
+    contributed a symbol.
 
     Returns ``(policy, selected_by, selected_path, selected_sha)``.
     """
@@ -600,8 +616,9 @@ def _resolve_required_symbol_policy(
         return policy, None, None, None
     if required_symbols_from_file:
         return (
-            "plugin_abi", "--required-symbols",
-            required_symbols_file, required_symbols_sha,
+            "plugin_abi", "--required-symbol",
+            Path(required_symbols_path) if required_symbols_path else None,
+            required_symbols_sha,
         )
     return "plugin_abi", "--required-symbol", None, None
 
@@ -835,7 +852,6 @@ def _resolve_evaluation_config(
     # overwritten with above -- the resolver merges them itself, and a
     # pre-merged value would look CLI-stated.
     from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
-    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
     from .compatibility_evaluation_resolver import (
         FieldResolutionError,
         PackConflictError,
@@ -868,7 +884,6 @@ def _resolve_evaluation_config(
             policy_file=pf,
             suppression=suppression,
             suppress_path=suppress,
-            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
             policy_option=policy_selected_by,
             policy_path=policy_selected_path,
             policy_sha256=policy_selected_sha,
@@ -1274,7 +1289,7 @@ def run_compare(
     ctx: click.Context,
     *,
     old_input: Path, new_input: Path,
-    jobs: int, dso_only: bool, output_dir: Path | None,
+    dso_only: bool, output_dir: Path | None,
     fail_on_removed: bool, on_incomplete_scope: str = "warn",
     support_promise: str = "off",
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
@@ -1347,7 +1362,6 @@ def run_compare(
     used_by_apps: tuple[ConsumerAppInput, ...] = (),
     used_by_manifests: tuple[Path, ...] = (),
     required_symbols_opt: tuple[str, ...] = (),
-    required_symbols_file: Path | None = None,
     diagnostic_comparison: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
@@ -1412,30 +1426,27 @@ def run_compare(
         )
         used_by_apps = (*used_by_apps, *manifest_specs)
 
-    required_symbols, required_symbols_from_file, required_symbols_sha = (
-        load_required_symbols(required_symbols_opt, required_symbols_file)
+    required_symbols, required_symbols_from_file, required_symbols_sha, required_symbols_path = (
+        load_required_symbols(required_symbols_opt)
     )
     if used_by_apps and required_symbols:
         raise click.UsageError(
-            "--used-by and --required-symbol/--required-symbols are mutually "
+            "--used-by and --required-symbol are mutually "
             "exclusive: scope the comparison to either application imports or "
             "an explicit required-symbol contract, not both."
         )
     policy, policy_selected_by, policy_selected_path, policy_selected_sha = (
         _resolve_required_symbol_policy(
             ctx, policy, required_symbols,
-            required_symbols_from_file, required_symbols_file, required_symbols_sha,
+            required_symbols_from_file, required_symbols_path, required_symbols_sha,
         )
     )
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
-    _injected = (ctx.meta.get(_RUN_PROFILE_META_KEY) or {}).get("injected", {})
     cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
-        severity_preset_from_profile="severity_preset" in _injected,
         scope_public_headers=scope_public_headers,
     )
     sev_config = resolved_cfg.severity
@@ -1443,10 +1454,11 @@ def run_compare(
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
-    # Phase 7 (ADR-068 D5): the debug-resolution knobs have no CLI flag left
-    # at all -- these locals are populated straight from the resolved
-    # config, the config-only knobs above (collapse/strict/justification/
-    # show_redundant) already were.
+    # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
+    # --debug-format are gone as CLI flags (hidden, already config-backed
+    # duplicates) -- config-only now, read straight off the resolved config
+    # with no raw CLI local to overwrite, same as collapse/strict/
+    # justification/show_redundant above.
     debug_format_opt = resolved_cfg.debug_format
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod
@@ -1518,7 +1530,6 @@ def run_compare(
         )
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
-            from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
 
             release_pack_application = resolve_release_pack_application_from_ctx(
                 ctx,
@@ -1530,7 +1541,6 @@ def run_compare(
                 project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
                 policy_option=policy_selected_by, policy_path=policy_selected_path,
                 policy_sha256=policy_selected_sha,
-                run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
             )
 
     # Parsed here, in the preflight, not only at the post-comparison
@@ -1544,9 +1554,8 @@ def run_compare(
     #
     # After the flag-combination rejections above, for the reason the
     # --dump-manifest parse below states for itself: when --use-cases was
-    # never going to work here at all, "not supported here" (the one-line
-    # --profile quick case) is the useful message, not "your manifest is
-    # malformed".
+    # never going to work here at all, "not supported here" is the useful
+    # message, not "your manifest is malformed".
     #
     # The *other* --use-cases exit a dry run still cannot predict is "neither
     # side carries a source graph", and deliberately so: that is a property
@@ -1627,7 +1636,7 @@ def run_compare(
             suppress=suppress, strict_suppressions=strict_suppressions,
             require_justification=require_justification,
             policy=policy, policy_file_path=policy_file_path,
-            dso_only=dso_only, jobs=jobs,
+            dso_only=dso_only,
             fail_on_removed=fail_on_removed, on_incomplete_scope=on_incomplete_scope,
             support_promise=support_promise,
             select=select, select_required=select_required,
@@ -1652,14 +1661,13 @@ def run_compare(
             secondary_writes=secondary_writes,
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
-            depth=release_depth,
+            depth=release_depth, public_header_dirs=project_config_public_header_dirs(project_cfg),
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
     _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
-    jobs_explicit = ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
     _warn_unused_set_flags(
-        jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir,
+        dso_only=dso_only, output_dir=output_dir,
         select=select, select_required=select_required,
     )
 

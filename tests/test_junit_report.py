@@ -1424,46 +1424,6 @@ class TestJUnitCLICompare:
         assert len(failures) == 1
         assert "BREAKING" in failures[0].get("type")
 
-    def test_compare_quick_profile_with_explicit_junit_produces_xml(
-        self, tmp_path: Path
-    ) -> None:
-        """``--profile quick --format junit`` should still produce JUnit XML.
-
-        CLI cleanup phase two, PR 1: this used to be ``--stat --format
-        junit`` ("stat ignored" for junit specifically). Now the one-line
-        output is `--profile quick`'s own injected ``fmt``, and an explicit
-        ``--format`` on the command line outranks a profile's injected value
-        (the usual "explicit flag > profile" precedence,
-        ``apply_compare_profile``) -- so ``--format junit`` wins over the
-        profile's one-line default and JUnit XML is produced normally,
-        preserving the same "stat/quick doesn't override an explicit
-        machine format" property under its new name.
-        """
-        from abicheck.cli import main
-
-        funcs = [Function(name="foo", mangled="_Z3foov", return_type="int")]
-        old = self._snap("1.0", funcs)
-        new = self._snap("2.0", funcs)
-        _write_snapshot(tmp_path / "old.json", old)
-        _write_snapshot(tmp_path / "new.json", new)
-
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            [
-                "compare",
-                str(tmp_path / "old.json"),
-                str(tmp_path / "new.json"),
-                "--format",
-                "junit",
-                "--profile",
-                "quick",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        root = xml_fromstring(result.stdout)  # stderr carries the depth=binary scope warning
-        assert root.tag == "testsuites"
-
     def test_format_junit_accepted_by_cli(self) -> None:
         """--format junit is recognized without error (even if inputs are bad)."""
         from abicheck.cli import main

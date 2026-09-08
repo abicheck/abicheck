@@ -249,7 +249,7 @@ opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 | Knob | Current default | Why it surprises | Suggested |
 |------|-----------------|------------------|-----------|
 | `compare --scope-public-headers` | **ON** | Findings are silently filtered out of the report | Keep ON, but always print the filtered count (it does on resolve-fail only) |
-| `compare-release -j/--jobs` | ~~1 (serial)~~ → **0 (auto)** | Was serial by default, making multi-library releases slow | ✅ Implemented: defaults to `0` (auto-detect CPUs); parallel output is deterministic (matched-key order) |
+| `compare-release -j/--jobs` | ~~1 (serial)~~ → **0 (auto)** | Was serial by default, making multi-library releases slow | ✅ Implemented: defaulted to `0` (auto-detect CPUs); parallel output is deterministic (matched-key order). **Later removed outright** (ADR-068 D5 / plan Phase 7h) -- the auto-detect-and-memory-clamp behavior always applies now, with no manual override |
 | `compare --demangle` | ~~OFF~~ → **ON** (`markdown`/`review`/`html`) | Was OFF, so human-readable output showed mangled `_ZN…` names by default | ✅ Implemented: default ON for `markdown`/`review`/`html`; `json`/`sarif` keep mangled. HTML demangles structurally (`<abbr title="mangled">demangled</abbr>`, both sides `html.escape`d), never by string substitution, so it's safe |
 | `--lang` | **`c++`** | C libraries parsed as C++ can mis-parse | Reasonable default; add autodetect note |
 | `compat -report-format` | **`html`** | A CLI invocation writes an HTML file by default | ABICC parity — keep, but document |
@@ -324,7 +324,13 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    had been the documented replacement long enough that the hidden spellings
    were pure dead weight rather than a live deprecation window. `--dwarf-only`
    was **not** renamed (a rename breaks documented command lines; left as-is).
-   (§3.4)
+   (§3.4) `--debug-format`/`--dwarf-only`/`--debuginfod`/`--debuginfod-url`
+   were later demoted from visible to *hidden* `compare` flags (ADR-040 Lever
+   2 Phase D, config-backed via `debug.*`), and finally removed outright from
+   `compare` (ADR-068 D5, one-comparison-product.md Phase 7a) — a
+   hidden-but-accepted option is still public surface, so `debug.*` in
+   `.abicheck.yml` is now their only remaining spelling on `compare`. They
+   remain real, visible flags on `dump`.
 4. ✅ **Done, and since completed.** `--report-mode` first gained `impact`
    as sugar for `full` + the standalone flag; that flag has since been
    removed, so `--report-mode impact` is now the only way to ask for the

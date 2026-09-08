@@ -100,7 +100,7 @@ def fold_gate_pack_severity(
 
     A pack level can only ever reach a category no more-explicit source
     stated: the resolver exempts ``gate.severity.*`` from pack assignment
-    whenever the CLI, a ``--profile``, or ``.abicheck.yml`` stated it (or
+    whenever the CLI or ``.abicheck.yml`` stated it (or
     stated a preset that owns it), so ``levels`` never carries a value D7
     precedence ruled out. This function does not re-check that -- re-deriving
     precedence here is exactly what ``pack_application``'s "read, don't

@@ -52,15 +52,6 @@ not this leaf module's:
 multiple candidates at the same precedence tier with the *same* value do
 not conflict.
 
-D7 also scopes ``RUN_PROFILE`` precedence to "execution fields only"
-(depth, format, budget, workflow) -- it does not apply to semantic fields
-like ``contract.mode`` or ``policy.base``. Since this module resolves one
-field at a time with no built-in notion of which fields are execution
-fields, the caller declares that per call via ``allow_run_profile``
-(default ``False``): a ``RUN_PROFILE`` candidate for a field that doesn't
-opt in is a caller bug, not a legitimate input, so it raises loudly rather
-than silently taking part in precedence.
-
 :func:`detect_pack_conflicts` implements ADR-049 D8's separate pack-level
 usage error: "Two selected packs that assign incompatible values to the
 same field or ChangeKind are a usage error until an explicit final override
@@ -91,7 +82,6 @@ _PRECEDENCE_TIERS: tuple[frozenset[SelectorLayer], ...] = (
     frozenset({SelectorLayer.EXPLICIT_CLI, SelectorLayer.API_REQUEST}),
     frozenset({SelectorLayer.LEGACY_ALIAS}),
     frozenset({SelectorLayer.RUN_RECIPE}),
-    frozenset({SelectorLayer.RUN_PROFILE}),
     frozenset({SelectorLayer.PROJECT_CONFIG}),
     frozenset({SelectorLayer.BUILT_IN_DEFAULT}),
 )
@@ -249,7 +239,6 @@ def resolve_field(
     *,
     default: FieldCandidate,
     require_legacy_alias_agreement: bool = True,
-    allow_run_profile: bool = False,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field's effective value and provenance.
 
@@ -259,11 +248,6 @@ def resolve_field(
     first one in ``candidates`` order is the provenance of record -- an
     arbitrary but deterministic choice among genuinely equivalent inputs
     (D7 "equivalent duplicates... report the winning selected-by chain").
-
-    ``allow_run_profile`` must be ``True`` for execution fields (depth,
-    format, budget, workflow) -- D7 scopes ``RUN_PROFILE`` precedence to
-    those only. It defaults to ``False``; a ``RUN_PROFILE`` candidate
-    supplied for a field that hasn't opted in raises a plain ``ValueError``.
 
     Raises :class:`ConflictingFieldValuesError` if two candidates *at the
     same precedence tier* disagree -- checked for every populated tier, not
@@ -289,9 +273,7 @@ def resolve_field(
         )
 
     all_candidates = (*candidates, default)
-    _reject_unresolvable_candidates(
-        field_name, all_candidates, allow_run_profile=allow_run_profile
-    )
+    _reject_unresolvable_candidates(field_name, all_candidates)
     shadowed_legacy = _shadowed_legacy_candidate(
         field_name,
         all_candidates,
@@ -309,15 +291,12 @@ def resolve_field(
 def _reject_unresolvable_candidates(
     field_name: str,
     all_candidates: Sequence[FieldCandidate],
-    *,
-    allow_run_profile: bool,
 ) -> None:
     """Reject a candidate this resolver cannot place, before any tier runs.
 
-    Two distinct failures, both plain ``ValueError`` rather than a D7 usage
-    error: a layer no ``_PRECEDENCE_TIERS`` entry covers (a resolver/enum
-    mismatch that would otherwise silently drop the candidate), and a
-    ``RUN_PROFILE`` candidate for a field that did not opt in.
+    A layer no ``_PRECEDENCE_TIERS`` entry covers is a resolver/enum
+    mismatch that would otherwise silently drop the candidate -- a plain
+    ``ValueError`` rather than a D7 usage error.
     """
     for candidate in all_candidates:
         if candidate.layer not in _KNOWN_LAYERS:
@@ -338,13 +317,6 @@ def _reject_unresolvable_candidates(
                 "compatibility_evaluation_resolver.py must be updated when "
                 "SelectorLayer gains a new member, or this candidate would "
                 "be silently dropped from resolution"
-            )
-        if candidate.layer is SelectorLayer.RUN_PROFILE and not allow_run_profile:
-            raise ValueError(
-                f"{field_name}: RUN_PROFILE candidates are only valid for "
-                "execution fields -- ADR-049 D7 scopes run-profile precedence "
-                "to 'execution fields only' (depth, format, budget, workflow); "
-                "pass allow_run_profile=True when resolving one of those"
             )
 
 

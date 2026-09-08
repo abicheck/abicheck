@@ -76,7 +76,6 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_INCLUDE_PRIVATE_DSO",
     "INPUT_KEEP_EXTRACTED",
     "INPUT_FAIL_ON_REMOVED_LIBRARY",
-    "INPUT_JOBS",
     "INPUT_ABI_BASELINE",
     "INPUT_ESTIMATE",
     "INPUT_AUDIT",
@@ -557,7 +556,7 @@ class TestCompareFormatAllowlistMatchesCli:
 
     def test_single_pair_allowlist_matches_cli(self) -> None:
         validator_formats = self._extract_allowlist(
-            "only 'json', 'markdown', 'sarif', 'html', 'junit', and 'review'"
+            "only 'json', 'markdown', 'sarif', 'html', 'junit', 'review', and 'oneline'"
         )
         from abicheck.cli import main as abicheck_main
 
@@ -910,43 +909,6 @@ class TestModeScopedInputWarnings:
     )
     def test_bool_input_silent_when_false_default(self, env_name: str) -> None:
         result = _run_validate({"INPUT_MODE": "dump", env_name: "false"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-    def test_jobs_warns_on_scan_mode(self) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_JOBS": "8"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "jobs" in result.stdout
-
-    def test_jobs_warns_on_compare_single_pair(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": "old.so",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_JOBS": "8",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-
-    def test_jobs_default_value_never_warns(self) -> None:
-        result = _run_validate({"INPUT_MODE": "scan"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
-
-    def test_jobs_silent_on_compare_directory_operand(self, tmp_path: Path) -> None:
-        lib_dir = tmp_path / "release"
-        lib_dir.mkdir()
-        result = _run_validate(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_OLD_LIBRARY": str(lib_dir),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_JOBS": "8",
-            }
-        )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 

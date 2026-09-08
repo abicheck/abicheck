@@ -148,6 +148,12 @@ def test_parse_functions_extern_c_via_macho_leading_underscore() -> None:
     assert fn.is_extern_c is True
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("extern_c",)
+    # Real macOS CI review, fresh evidence: once `is_extern_c` is
+    # confirmed True, the raw Darwin-decorated `mangled` field itself
+    # must also normalize to the bare name -- disagreeing with the
+    # binary's own already-stripped export table otherwise (see
+    # `context.strip_darwin_itanium_decoration`'s docstring).
+    assert fn.mangled == "c_api"
 
 
 def test_parse_variables_extern_c_via_macho_leading_underscore() -> None:
@@ -166,6 +172,7 @@ def test_parse_variables_extern_c_via_macho_leading_underscore() -> None:
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("extern_c",)
+    assert var.mangled == "g_count"
 
 
 def test_parse_functions_leading_underscore_not_extern_c_off_darwin() -> None:
@@ -192,6 +199,7 @@ def test_parse_functions_leading_underscore_not_extern_c_off_darwin() -> None:
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_c_api")
+    assert fn.mangled == "_c_api"
 
 
 def test_parse_variables_leading_underscore_not_extern_c_off_darwin() -> None:
@@ -210,6 +218,7 @@ def test_parse_variables_leading_underscore_not_extern_c_off_darwin() -> None:
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("mangled", "_g_count")
+    assert var.mangled == "_g_count"
 
 
 def test_parse_functions_leading_underscore_not_extern_c_without_target() -> None:
@@ -230,6 +239,7 @@ def test_parse_functions_leading_underscore_not_extern_c_without_target() -> Non
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_c_api")
+    assert fn.mangled == "_c_api"
 
 
 def test_parse_functions_leading_underscore_not_extern_c_when_namespaced() -> None:
@@ -264,6 +274,7 @@ def test_parse_functions_leading_underscore_not_extern_c_when_namespaced() -> No
     assert fn.is_extern_c is False
     assert fn.entity_id is not None
     assert fn.entity_id.extra == ("mangled", "_foo")
+    assert fn.mangled == "_foo"
 
 
 def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> None:
@@ -289,3 +300,287 @@ def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> No
     ).parse_variables()
     assert var.entity_id is not None
     assert var.entity_id.extra == ("mangled", "_g_count")
+    assert var.mangled == "_g_count"
+
+
+# ── Function.mangled/Variable.mangled field normalization (macOS CI review,
+# fresh evidence): the extern-"C" identity tests above cover the bare-name
+# case (raw_mangled == "_" + name), where the fix's job is entirely about
+# WHICH IDENTITY a declaration gets tagged with. This section covers the
+# separate, previously-unfixed case -- a genuine, non-extern-"C" C++
+# function/variable's own STORED `mangled` field value, which on Darwin
+# clang's `mangledName` reports WITH the platform's extra leading
+# underscore baked in on top of the real Itanium mangling (`"__ZN..."`),
+# while castxml's own convention (and every documented "already
+# normalized" contract this field has elsewhere -- macho_metadata.py,
+# crosscheck_base._exported_symbol_names) never carries it. Verified here
+# via synthetic AST nodes (this environment has no real macOS/clang-Darwin
+# toolchain to compile against) -- see
+# tests/test_crosscheck_language_mode_export_evidence.py for the real-
+# compiler, real-binary Linux/ELF-Itanium coverage of the sibling
+# language-mode-detection bug this same review round also fixed.
+
+
+def test_parse_functions_mangled_field_strips_darwin_underscore_for_real_cxx_name() -> (
+    None
+):
+    """A genuine (non-extern-"C") namespaced C++ function's own ``mangled``
+    field must carry the pure Itanium spelling on Darwin, not clang's own
+    Darwin-linker-decorated one -- otherwise it disagrees with castxml's
+    identical declaration (breaking cross-backend/hybrid reconciliation)
+    and with the binary's own already-normalized export table (breaking
+    ``crosscheck.py``'s ``exported_not_public``/``public_not_exported``
+    symbol correlation, the originally reported macOS CI failure)."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "foo",
+                    "loc": {"line": 2},
+                    "mangledName": "__ZN1n3fooEv",  # Darwin-decorated real Itanium
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.is_extern_c is False
+    assert fn.mangled == "_ZN1n3fooEv"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "_ZN1n3fooEv")
+
+
+def test_parse_variables_mangled_field_strips_darwin_underscore_for_real_cxx_name() -> (
+    None
+):
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "g",
+                    "loc": {"line": 2},
+                    "type": {"qualType": "int"},
+                    "mangledName": "__ZN1n1gE",  # Darwin-decorated real Itanium
+                },
+            ],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "_ZN1n1gE"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "_ZN1n1gE")
+
+
+def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
+    """Control for the two tests above: the SAME doubly-underscored input
+    is never stripped off Darwin -- there is no such linker convention to
+    correct for there, so a literal ``"__ZN...``-shaped mangled name (an
+    unusual but syntactically legal spelling on a non-Darwin target) must
+    be preserved exactly as clang reported it."""
+    root = _tu(
+        {
+            "kind": "NamespaceDecl",
+            "name": "n",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "foo",
+                    "loc": {"line": 2},
+                    "mangledName": "__ZN1n3fooEv",
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_LINUX_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "__ZN1n3fooEv"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "__ZN1n3fooEv")
+
+
+def test_parse_functions_mangled_field_unaffected_when_no_mangled_name_at_all() -> (
+    None
+):
+    """The strip is gated on ``raw_mangled is not None`` -- a declaration
+    that fell back to its bare source ``name`` (e.g. an uninstantiated
+    function template, which carries no ``mangledName`` key at all) must
+    never have a leading underscore stripped from ITS OWN identifier, even
+    on Darwin: that underscore, if present, is part of the real source
+    spelling, not linker decoration clang ever reported."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "_leading_underscore_name",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "void ()"},
+            # Deliberately no "mangledName" key at all -- clang omits it
+            # for e.g. an uninstantiated function template's own
+            # FunctionDecl (see this file's module docstring); a plain
+            # FunctionDecl missing the key exercises the identical
+            # raw_mangled-is-None fallback path.
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "_leading_underscore_name"
+
+
+def test_parse_functions_extern_c_block_mangled_field_strips_darwin_underscore() -> (
+    None
+):
+    """Regression (macOS CI, fresh evidence, second CodeRabbit round on
+    this same PR): a REAL, explicit ``extern "C"`` block's decorated
+    Darwin ``mangledName`` (``"_c_func"`` for source-level ``c_func``) was
+    left unstripped in the stored ``Function.mangled`` field even though
+    ``is_extern_c`` was already correctly ``True`` via ``entry.extern_c`` --
+    unlike the plain-C bare-declaration case above (whose ``mangled`` field
+    was already covered by the earlier ``__Z``-only fix's sibling
+    ``symbol_candidates`` fallback, but never actually normalized in
+    ``mangled`` itself, only in ``is_extern_c`` detection). This is the
+    exact shape a real compiled Mach-O self-comparison hit: castxml emits
+    the pure ``"c_func"``, clang's real linker-decorated ``mangledName``
+    was left as ``"_c_func"``, so the two backends' stored identity
+    disagreed even though both correctly recognized it as extern "C"."""
+    root = _tu(
+        {
+            "kind": "LinkageSpecDecl",
+            "language": "C",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "c_func",
+                    "loc": {"file": "include/foo.h", "line": 1},
+                    "mangledName": "_c_func",
+                    "type": {"qualType": "int (int)"},
+                    "inner": [
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "x",
+                            "type": {"qualType": "int"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "c_func"
+    assert fn.is_extern_c is True
+
+
+def test_parse_variables_extern_c_block_mangled_field_strips_darwin_underscore() -> (
+    None
+):
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "LinkageSpecDecl",
+            "language": "C",
+            "inner": [
+                {
+                    "kind": "VarDecl",
+                    "name": "c_var",
+                    "loc": {"file": "include/foo.h", "line": 1},
+                    "type": {"qualType": "int"},
+                    "mangledName": "_c_var",
+                }
+            ],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "c_var"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("extern_c",)
+
+
+def test_parse_functions_bare_c_mangled_field_strips_darwin_underscore_too() -> None:
+    """Companion to ``test_parse_functions_extern_c_via_macho_leading_
+    underscore`` (which only checked ``is_extern_c``/``entity_id``, not
+    ``mangled`` itself): a plain-C bare declaration's stored ``mangled``
+    field must ALSO be normalized to the pure spelling, matching castxml,
+    the real Mach-O export table, and now the explicit-``extern "C"``-
+    block case above -- not just the identity tag."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "c_api",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "_c_api",
+            "type": {"qualType": "void ()"},
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "c_api"
+
+
+def test_extern_c_and_cxx_siblings_both_normalize_consistently_on_darwin() -> None:
+    """Both declaration shapes in ONE translation unit, together: a real
+    ``extern "C"`` function and a plain C++ function must both resolve to
+    their platform-independent, undecorated identity on Darwin at once --
+    not just individually in isolation (coordinator review: the two fixes
+    landed as separate commits, so this proves they compose)."""
+    root = _tu(
+        {
+            "kind": "LinkageSpecDecl",
+            "language": "C",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "c_func",
+                    "loc": {"file": "include/foo.h", "line": 1},
+                    "mangledName": "_c_func",
+                    "type": {"qualType": "int (int)"},
+                    "inner": [
+                        {
+                            "kind": "ParmVarDecl",
+                            "name": "x",
+                            "type": {"qualType": "int"},
+                        }
+                    ],
+                }
+            ],
+        },
+        {
+            "kind": "FunctionDecl",
+            "name": "plain_func",
+            "loc": {"file": "include/foo.h", "line": 2},
+            "mangledName": "__Z10plain_funci",
+            "type": {"qualType": "int (int)"},
+            "inner": [
+                {"kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"}}
+            ],
+        },
+    )
+    funcs = {
+        f.name: f
+        for f in _ClangAstParser(
+            root, set(), set(), target_triple=_DARWIN_TRIPLE
+        ).parse_functions()
+    }
+    assert funcs["c_func"].mangled == "c_func"
+    assert funcs["c_func"].is_extern_c is True
+    assert funcs["plain_func"].mangled == "_Z10plain_funci"
+    assert funcs["plain_func"].is_extern_c is False

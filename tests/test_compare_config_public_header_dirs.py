@@ -19,6 +19,20 @@ resolves", end to end through the real CLI, without needing a real
 castxml/gcc toolchain (both sides are pre-built, stored JSON snapshots, so
 no header parsing actually runs -- only the request construction is
 observed).
+
+``TestDirectoryReleaseCompareReachesConfigDirs`` and
+``TestStrandedLibraryInlineInputSpecReachesConfigDirs`` below close the two
+gaps CodeRabbit's PR #1138 review found in the original wiring: the
+directory/package fan-out (``cli_compare_helpers.run_compare``'s
+``_dispatch_release_compare`` dispatch, then
+``cli_compare_release_pairwise._run_compare_pair`` ->
+``service.run_compare``'s own ``public_header_dirs`` keyword) and the
+release fan-out's own "stranded library" fallback (``compare_release_cmd``'s
+``_resolve_stranded_library`` closure, which builds a ``DumpRequest``/
+``InputSpec`` directly rather than going through
+``cli_resolve._resolve_compare_snapshots``) both silently dropped a
+project's declared ``scope.public_header_dirs`` even though the identical
+library compared alone (a two-file ``compare``) already honoured it.
 """
 
 from __future__ import annotations
@@ -222,3 +236,115 @@ class TestDumpManifestSideNeverGetsConfigDirs:
         # ...but the manifest-less sibling side still does (additive, not
         # an all-or-nothing suppression of the whole config value).
         assert request.new.public_header_dirs == (Path("include"),)
+
+
+class TestDirectoryReleaseCompareReachesConfigDirs:
+    """CodeRabbit review, PR #1138, finding 1: a directory/package
+    ``compare`` (the multi-library release fan-out) must honour
+    ``scope.public_header_dirs`` for every matched pair, the same as a
+    bare two-file ``compare`` of the identical library already does.
+    Exercised through the real CLI, with a directory of pre-built JSON
+    snapshots so no header parsing actually runs -- only the assembled
+    :class:`~abicheck.api_types.CompareRequest` reaching
+    ``resolve_compare_request`` is observed.
+    """
+
+    def test_config_public_header_dirs_reaches_the_matched_pair(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.service_compare_pipeline as pipeline_mod
+
+        seen_requests: list[CompareRequest] = []
+        real = pipeline_mod.resolve_compare_request
+
+        def _spy(request: CompareRequest, **kwargs: object) -> object:
+            seen_requests.append(request)
+            return real(request, **kwargs)
+
+        monkeypatch.setattr(pipeline_mod, "resolve_compare_request", _spy)
+
+        (tmp_path / ".abicheck.yml").write_text(
+            yaml.safe_dump({"scope": {"public_header_dirs": ["include/public"]}}),
+            encoding="utf-8",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snapshot(old_dir / "libfoo.json")
+        _write_snapshot(new_dir / "libfoo.json")
+        monkeypatch.chdir(tmp_path)
+
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output
+        assert len(seen_requests) == 1
+        request = seen_requests[0]
+        assert request.old.public_header_dirs == (Path("include/public"),)
+        assert request.new.public_header_dirs == (Path("include/public"),)
+
+
+class TestStrandedLibraryInlineInputSpecReachesConfigDirs:
+    """CodeRabbit review, PR #1138, finding 1 (second omission site): the
+    release fan-out's own "stranded library" fallback
+    (``compare_release_cmd``'s ``_resolve_stranded_library`` closure,
+    invoked only by ``--bundle-facts-out`` for a library present on one
+    side and absent on the other) builds its own ``DumpRequest``/
+    ``InputSpec`` directly rather than going through
+    ``cli_resolve._resolve_compare_snapshots`` -- so it needed its own,
+    separate fix to see ``scope.public_header_dirs`` at all. Mirrors
+    ``tests/test_cli_compare_release_stranded_depth.py``'s own capture
+    pattern for this same closure.
+    """
+
+    def test_stranded_library_input_spec_carries_config_dirs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            yaml.safe_dump({"scope": {"public_header_dirs": ["include/public"]}}),
+            encoding="utf-8",
+        )
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snapshot(old_dir / "libfoo.json")
+        _write_snapshot(new_dir / "libfoo.json")
+        # Present only on OLD -- write_bundle_facts_out's
+        # resolve_stranded_library callback is what resolves this one.
+        stranded = old_dir / "libbroken.so"
+        stranded.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        monkeypatch.chdir(tmp_path)
+
+        captured: dict[str, object] = {}
+        from abicheck.service_dump_pipeline import (
+            resolve_dump_request as _real_resolve_dump_request,
+        )
+
+        def _fake_resolve_dump_request(request: object) -> object:
+            if request.input.path == stranded:  # type: ignore[attr-defined]
+                captured["public_header_dirs"] = list(
+                    request.input.public_header_dirs  # type: ignore[attr-defined]
+                )
+            return _real_resolve_dump_request(request)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(
+            "abicheck.service_dump_pipeline.resolve_dump_request",
+            _fake_resolve_dump_request,
+        )
+
+        out_path = tmp_path / "old.bundlefacts.json"
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--bundle-facts-out",
+                str(out_path),
+            ],
+        )
+        assert result.exit_code in (0, 8), result.output
+        assert captured.get("public_header_dirs") == [Path("include/public")]

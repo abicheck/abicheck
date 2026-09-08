@@ -39,14 +39,16 @@ if TYPE_CHECKING:
     # "the one place a frontend gets its process response").
     from .workflows.gate import SeverityConfig
 
-#: Internal-only ``fmt`` value for :func:`render_output` — a one-line human
-#: summary, not exposed as a public ``--format`` choice (CLI cleanup phase
-#: two, PR 1: ``--stat`` was removed as a public flag/boolean threaded through
-#: every renderer; this is its sole surviving use, reached only via the
-#: built-in ``quick`` --profile injecting ``fmt="oneline"`` — see
-#: ``cli_profiles.COMPARE_PROFILES["quick"]``). Kept as a plain ``fmt`` value
-#: rather than a revived boolean so it flows through the one existing
-#: dispatch this function already has, instead of re-introducing a second,
+#: ``fmt`` value for :func:`render_output` — a one-line human summary.
+#: A public ``--format oneline`` choice on ``compare`` (CLI cleanup phase
+#: two, PR 1 removed the old ``--stat`` boolean threaded through every
+#: renderer; this is its sole surviving replacement. It was reachable only
+#: via the built-in ``quick`` ``--profile`` injecting ``fmt="oneline"``
+#: until `one-comparison-product.md` Phase 7e removed ``--profile``
+#: outright and promoted this value to a first-class ``--format`` choice
+#: instead of losing the capability). Kept as a plain ``fmt`` value rather
+#: than a revived boolean so it flows through the one existing dispatch
+#: this function already has, instead of re-introducing a second,
 #: orthogonal axis every caller down the stack has to thread separately.
 ONELINE_FORMAT = "oneline"
 
@@ -71,8 +73,8 @@ def render_output(
     """Render comparison result in the requested output format.
 
     Supported formats: ``'json'``, ``'markdown'``, ``'sarif'``, ``'html'``,
-    ``'junit'``, ``'review'``. Plus :data:`ONELINE_FORMAT`, an internal-only
-    value not exposed on the public ``--format`` CLI choice.
+    ``'junit'``, ``'review'``, and :data:`ONELINE_FORMAT` (``'oneline'``),
+    a public ``--format`` choice on ``compare``.
 
     ``demangle`` only affects human-facing formats (markdown, review, html);
     machine formats (json/sarif/junit) always keep raw mangled symbols so

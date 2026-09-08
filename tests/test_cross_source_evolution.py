@@ -1,19 +1,25 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for ADR-068 D3 / plan P2's ``CrossSourceEvolution`` state and the
-six cross-source checks migrated onto it so far: ``unversioned_exported_
+"""Tests for ADR-068 D3 / plan P2's ``CrossSourceEvolution`` state and six of
+the eleven cross-source checks migrated onto it: ``unversioned_exported_
 symbol`` and ``private_header_leak`` (landed first), plus
 ``exported_not_public``, ``public_not_exported``, ``rtti_for_internal_type``,
-and ``public_to_internal_dependency`` (this PR, plan §3 rows 3-5).
+and ``public_to_internal_dependency`` (a second slice, plan §3 rows 3-5). The
+remaining five (``header_build_context_mismatch``, ``odr_type_variant``,
+``identity_collision_detected``, ``compile_context_conflict``, and
+``source_surface_dso_mismatch``, closing out plan §3 #3) have their own
+tests in the sibling module ``test_cross_source_evolution_more_checks.py``
+-- split out purely to keep this file under the architecture gate's
+test-file line cap, not because the two slices differ in kind.
 
 The crux (plan §7 F-8/F-9): a pre-existing problem must never read as
 ``introduced`` merely because one side's evidence couldn't confirm it. This
 is exercised as a property over several evidence combinations
 (``TestNotEvaluatedCrux`` for ``unversioned_exported_symbol``,
 ``TestFourChecksNotEvaluatedCrux`` generalizing the same property across the
-four checks this PR adds, and each check's own 3x3 evidence/finding matrix
-test), not a single fixed fixture — see root ``AGENTS.md``'s bug-class
+four checks the second slice adds, and each check's own 3x3 evidence/finding
+matrix test), not a single fixed fixture — see root ``AGENTS.md``'s bug-class
 regression-testing guidance. The ``private_header_leak``,
 ``rtti_for_internal_type``, and ``public_to_internal_dependency`` tests
 additionally exercise the per-check identity generalization
@@ -950,3 +956,5 @@ class TestFourChecksNotEvaluatedCrux:
             CrossSourceEvolution.INTRODUCED,
             CrossSourceEvolution.RESOLVED,
         )
+
+

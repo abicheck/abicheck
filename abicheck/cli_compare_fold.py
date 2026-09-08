@@ -156,13 +156,13 @@ def _fold_scoped_compat_into_text(
     )
     if fmt in ("markdown", "text", "review"):
         return fold.into_text(text, fmt)
-    # ONELINE_FORMAT (the built-in `quick` --profile's output) falls through
-    # unchanged (workstream D-S1): the incoming `text` already states the
-    # full-library verdict/counts the process actually exits on, and a
-    # supplied consumer's own result no longer needs to replace it -- the
-    # one-line contract --profile quick guarantees has no room for an
-    # appended consumer breakdown either, so it is left to the fuller
-    # markdown/text/review/JSON reports.
+    # ONELINE_FORMAT (`--format oneline`) falls through unchanged (workstream
+    # D-S1): the incoming `text` already states the full-library
+    # verdict/counts the process actually exits on, and a supplied
+    # consumer's own result no longer needs to replace it -- the one-line
+    # contract `oneline` guarantees has no room for an appended consumer
+    # breakdown either, so it is left to the fuller markdown/text/review/JSON
+    # reports.
     return text
 
 
@@ -202,8 +202,8 @@ class _ScopedFold:
         )
 
     # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
-    # prebuilt-consumer lifecycle"): `service_render.ONELINE_FORMAT` (the
-    # built-in `quick` --profile's output) is no longer replaced outright by
+    # prebuilt-consumer lifecycle"): `service_render.ONELINE_FORMAT`
+    # (`--format oneline`) is no longer replaced outright by
     # a scoped one-liner -- the process's own exit code and verdict always
     # come from the full-library result, so the plain one-liner
     # `_fold_scoped_compat_into_text` was handed already states it correctly.

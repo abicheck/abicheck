@@ -50,7 +50,6 @@ from ....cli_options import (
     abi3_option,
     adr027_compare_options,
     app_usage_scope_options,
-    apply_compare_profile,
     bundle_facts_manifest_options,
     changed_path_options,
     contract_options,
@@ -62,7 +61,6 @@ from ....cli_options import (
     output_options,
     pack_option,
     policy_options,
-    profile_option,
     reject_bundle_facts_manifest_without_old_bundle_facts,
     release_options,
     scope_options,
@@ -491,7 +489,7 @@ def _embed_inline_source_side(
     "audit-only mode (no --against): reports candidate-side facts only -- "
     "never an addition, a removal, or a compatibility verdict.",
 )
-# Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite
+# Set-input fan-out (ADR-037 D7): --dso-only, --output-dir only bite
 # when the operands are directories/packages; a no-op-with-warning otherwise.
 @set_input_options
 # ── Release (directory/package) comparison knobs (ADR-037 D7) ────────────────
@@ -527,10 +525,11 @@ def _embed_inline_source_side(
 @two_sided_input_options
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
-    ["json", "markdown", "sarif", "html", "junit", "review"],
+    ["json", "markdown", "sarif", "html", "junit", "review", "oneline"],
     format_help="Output format. 'review' emits a compact GitHub-facing digest "
                 "(verdict + counts + release recommendation + manual-review banner) "
-                "suitable for a job summary or PR comment.",
+                "suitable for a job summary or PR comment. 'oneline' emits a single "
+                "human-readable summary line -- the 'just tell me' flow.",
 )
 @secondary_output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -563,8 +562,8 @@ def _embed_inline_source_side(
 # ── Project config (ADR-037 D4) ────────────────────────────────────────────
 # No manual --exit-code-scheme selector any more (CLI cleanup phase two PR
 # G2, ADR-064): the one automatic gate algorithm is fully determined by
-# whether a severity setting is in effect anywhere (--severity-preset, a
-# --profile, .abicheck.yml's severity: block, or a kind: gate pack's
+# whether a severity setting is in effect anywhere (--severity-preset,
+# .abicheck.yml's severity: block, or a kind: gate pack's
 # gate.severity.<category>) -- no gate/severity policy configured means the
 # compatibility verdict decides 0/2/4; one in effect means the resolved
 # GateDecision decides 0/1/2/4.
@@ -620,15 +619,15 @@ def _embed_inline_source_side(
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
-# --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format: the
-# shared local-ELF debug-resolution family.
+# --debug-root{,1,2}: the shared local-ELF debug-resolution family. The
+# dwarf-only/debuginfod[-url]/debug-format hidden flags are gone (ADR-068 D5,
+# Phase 7a) -- debug.* .abicheck.yml keys are their only spelling now.
 @debug_resolution_options
 @evidence_options  # --depth, --sources, --build-info
 @changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
 @abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
 @adr027_compare_options  # ADR-027: --explain-patterns (rendering only, modulation is automatic, ADR-068 D4) / --surface-metrics (still opt-in)
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
-@profile_option  # ADR-040 Lever 3: --profile (workflow-default bundles)
 @click.option("--reconcile-build-context", is_flag=True, default=False,
               help="Clear context-free header-parse false positives using the build's "
                    "active preprocessor defines (ADR-039): a conditional field's phantom "
@@ -755,10 +754,6 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.
     normalize_sided_options(kwargs)
-    # ADR-040 Lever 3: fold the selected --profile's workflow defaults into the
-    # forwarded options (explicit flags always win) and drop the CLI-only
-    # ``profile`` key before delegating to the typed run_compare signature.
-    apply_compare_profile(ctx, kwargs)
 
     # ADR-068 D2 / plan §6 Phase 2e: `--no-baseline` is an explicit
     # declaration, never inferred from arity -- branch before the two-sided

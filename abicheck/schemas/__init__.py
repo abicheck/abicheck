@@ -839,7 +839,17 @@ from typing import Any
 #:       nothing else changes -- no existing invocation's disposition,
 #:       verdict, or exit code moves (both are opt-in via
 #:       ``checker.compare(acknowledgments=...)``).
-REPORT_SCHEMA_VERSION = "3.11"  #: 3.11 -- ADR-068 D6's always-0 ``exit.loadability_contribution`` (deps-only); renumbered from a 3.10 clash with ADR-067 D5/D6 above.
+#: 3.12 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2b
+#:       (ADR-068 D3/D4/D5, plan §3 #6/#8): an additive, always-present
+#:       top-level ``pattern_preprocessor_scan`` object -- the folded,
+#:       per-side lexical pattern pre-scan + preprocessor pre-scan result
+#:       (``workflows.pattern_preprocessor_scan``), mirroring
+#:       ``cross_source_evolution``'s own "run independently on OLD and
+#:       NEW, fold via the same four-state evolution axis" shape for the
+#:       two other scan-only primitives ADR-068 §1 named. On by default,
+#:       automatic, no front end flag (D4/D5); never a verdict on its own,
+#:       so no existing finding, verdict, or exit code moves.
+REPORT_SCHEMA_VERSION = "3.12"  #: 3.12 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

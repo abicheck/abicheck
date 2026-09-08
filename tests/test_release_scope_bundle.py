@@ -148,7 +148,7 @@ class TestBundleAnalysisScope:
         new = tmp_path / "new_pkg"
         _write_stored_package(old, libs)
         _write_stored_package(new, {"libalgo.so": libs["libalgo.so"]})
-        code, doc = _invoke_json("compare", str(old), str(new), "-j", "1")
+        code, doc = _invoke_json("compare", str(old), str(new))
         removed = doc["comparison_scope"]["proven_removed"]
         assert [n.split("-")[0] for n in removed] == ["libcore.so"]
         assert doc["comparison_scope"]["completeness"] == "complete"
@@ -663,7 +663,7 @@ class TestStoredPackageDegradedMember:
             _write_stored_package(old, healthy)
             _write_stored_package(new, degraded, degraded=marker)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "-j", "1", "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--on-incomplete-scope", policy
         )
         by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
         assert by_name["libfoo.so"]["verdict"] == "failed"
@@ -699,7 +699,7 @@ class TestStoredPackageDegradedMember:
         _write_stored_package(new, healthy)
         out = tmp_path / "recaptured.bundlefacts.json"
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "-j", "1", "--bundle-facts-out", str(out)
+            "compare", str(old), str(new), "--bundle-facts-out", str(out)
         )
         assert code == 0
         facts = load_bundle_facts(out)

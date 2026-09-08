@@ -350,6 +350,14 @@ class TestFlagBudget:
         "--strict-suppressions", "--require-justification",
         "--collapse-versioned-symbols", "--public-symbol",
         "--public-symbols-list", "--show-redundant", "--no-show-redundant",
+        # ADR-068 D5 / Phase 7a (one-comparison-product.md §6 Phase 7 item
+        # 7a): the debug-resolution knobs joined this list too -- previously
+        # the one family D5 exempted (hidden-but-kept, see the now-removed
+        # test_debug_resolution_family_stays_hidden), but "hidden but
+        # accepted still counts as public surface" (ADR-068 D5) applies to
+        # them exactly the same as every other entry above.
+        "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
+        "--no-debuginfod", "--no-dwarf-only",
     )
 
     @staticmethod
@@ -389,6 +397,33 @@ class TestFlagBudget:
             assert flag not in hidden, f"{flag} should be deleted outright, not hidden"
             assert flag not in visible, f"{flag} should be deleted outright"
         assert "--debug-root" in visible
+
+    @pytest.mark.parametrize(
+        "flag",
+        ["--dwarf-only", "--no-dwarf-only", "--debuginfod", "--no-debuginfod",
+         "--debuginfod-url", "--debug-format"],
+    )
+    def test_removed_debug_flags_exit_usage_error_on_compare(
+        self, tmp_path: Path, flag: str
+    ) -> None:
+        """ADR-068 D5 / Phase 7a: each removed hidden flag exits 64 with
+        Click's standard 'No such option' on `compare` -- the old spelling
+        must not silently resolve to anything, hidden or otherwise."""
+        old = tmp_path / "old.so"
+        new = tmp_path / "new.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        new.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        # A value-taking flag (--debuginfod-url/--debug-format) needs an
+        # operand or Click's own "no such option" would be pre-empted by
+        # missing-argument handling for the *next* token; the boolean flags
+        # take none.
+        extra = ["x"] if flag in ("--debuginfod-url", "--debug-format") else []
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), flag, *extra],
+        )
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
+        assert flag in result.output
 
     def test_coarse_overrides_stay_visible(self) -> None:
         cmd = main.commands["compare"]

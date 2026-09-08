@@ -115,9 +115,10 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
         {
             "name": "Debug info",
-            # The format/debuginfod/dwarf-only knobs are demoted to the `debug:`
-            # config block (ADR-040 L2) and hidden; only the coarse per-run
-            # --debug-root override stays a visible flag.
+            # The format/debuginfod/dwarf-only knobs are config-only now (the
+            # `debug:` config block, ADR-040 L2) -- their hidden CLI spellings
+            # were removed outright in ADR-068 D5 / Phase 7a; only the coarse
+            # per-run --debug-root override stays a visible flag.
             "options": ["--debug-root"],
         },
         {
@@ -150,7 +151,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Release (directory/package inputs)",
             "options": [
-                "--jobs",
                 "--dso-only",
                 "--output-dir",
                 "--fail-on-removed-library",
@@ -392,7 +392,6 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "used_by_apps",
         "used_by_manifests",
         "required_symbols_opt",
-        "required_symbols_file",
         # Build & source evidence
         "depth",
         "sources",
@@ -404,8 +403,9 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # for a contract decision at all (cli_options.resolve_contract_evaluation).
         "contract_mode",
         # Debug info -- only the coarse per-run override stays visible; the
-        # format/debuginfod/dwarf-only knobs are demoted to the `debug:`
-        # config block (ADR-040 L2) and already hidden regardless of tier.
+        # format/debuginfod/dwarf-only knobs are config-only now (the `debug:`
+        # config block, ADR-040 L2) -- their hidden CLI spellings were removed
+        # outright in ADR-068 D5 / Phase 7a.
         "debug_root",
         # Per-side overrides -- version labelling is routine for bare .so
         # inputs; --pdb-path stays in the advanced tier.

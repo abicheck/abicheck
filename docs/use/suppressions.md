@@ -367,7 +367,7 @@ see [The Disposition Audit](disposition-audit.md) for the model and the full
 set of dispositions:
 
 ```console
-$ abicheck compare old.so new.so --suppress suppressions.yaml --profile quick
+$ abicheck compare old.so new.so --suppress suppressions.yaml --format oneline
 NO_CHANGE: no changes (0 total) [audit: 100 detected, 0 gating, 100 suppressed]
 ```
 

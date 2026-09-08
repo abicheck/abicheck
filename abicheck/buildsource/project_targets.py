@@ -1532,7 +1532,7 @@ def _no_baseline_channel_issues(target: TargetSpec) -> list[str]:
     ``actions/check-target/validate-inputs.sh`` rejects ``baseline-channel:
     none`` for any target kind other than library -- a no-baseline audit routes
     to ``scan`` (a one-build check), which has no ``--used-by``/
-    ``--required-symbols`` equivalent to scope an app-consumer/plugin-contract
+    ``--required-symbol`` equivalent to scope an app-consumer/plugin-contract
     check against. Rejected at generation time rather than letting a
     validated-looking config produce a run-plan cell that check-target refuses
     with no per-cell report for aggregate to read.
@@ -1543,7 +1543,7 @@ def _no_baseline_channel_issues(target: TargetSpec) -> list[str]:
         f"target {target.id!r}.checks[{i}]: channel: "
         f"{NO_BASELINE_CHANNEL!r} is not supported for kind: "
         f"{target.kind!r} -- a no-baseline audit check has no "
-        "--used-by/--required-symbols equivalent to scope an "
+        "--used-by/--required-symbol equivalent to scope an "
         "app-consumer/plugin-contract check against "
         "(actions/check-target/validate-inputs.sh). Use kind: "
         "library for a no-baseline audit, or set a real channel."

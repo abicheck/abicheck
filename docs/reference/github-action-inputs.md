@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (83)
+## Inputs (82)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -81,7 +81,6 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `fail-on-api-break` | no | false | Fail the step when a source-level API break is detected (exit code 2). |
 | `severity-preset` | no | — | Severity preset: 'default', 'strict', or 'info-only'. Controls exit codes and report labels. Only applies to compare mode. |
 | `require-complete-analysis` | no | false | Fail the step (P0.4's orthogonal ANALYSIS_INCOMPLETE axis) when analysis_assurance.status is not 'complete', independent of the compatibility verdict. Mirrors `compare`/`scan --against`'s own --require-complete-analysis flag. Applies to single-pair compare (old-library/new-library are individual files, not a directory or package) and scan (--against) modes only -- rejected outright (step fails) for a directory/package compare's per-library release fan-out, which has no single analysis_assurance result to gate on. Has no effect for an audit-only scan (new-library with no against/abi-baseline): the CLI itself rejects this flag without a baseline, so run.sh never forwards it in that shape. A dedicated input rather than routing through extra-args, so this Action's own detection of whether the flag was requested is never ambiguous with a value some other option in extra-args happens to spell the same way. |
-| `jobs` | no | 0 | Number of parallel library comparisons for compare mode when old-library/new-library are directories or packages. 0 = auto-detect (CPU count). Default: 0. |
 | `annotate` | no | false | Emit GitHub Actions workflow command annotations (inline PR-diff comments) for ABI/API findings, in compare mode (single-pair and directory/package release operands alike). Rendered by this Action itself from the run's own persisted JSON report (schema 2.43+), not by passing --annotate to the abicheck CLI -- no second comparison is ever run to collect them, for either operand shape. Has no effect on scan mode as of this Action version. A dedicated input rather than routing through extra-args, for the same reason require-complete-analysis is: this Action's own detection of whether annotations were requested is never ambiguous with some other extra-args value. |
 | `annotate-additions` | no | false | Include additions and other compatible-but-notable changes as ::notice annotations. Off by default (only errors/warnings, plus the one notice kind that is always shown regardless of this input -- a --contract finding compatibility policy did not evaluate). Has no effect unless annotate is also true. |
 | `extra-args` | no | — | Additional CLI arguments passed directly to the abicheck command. |

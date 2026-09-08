@@ -64,13 +64,14 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     ),
     # Local-ELF debug-resolution family: registered but *not* required either — it
     # resolves local ELF debug artifacts the package/snapshot-oriented commands
-    # do not take.
-    # Phase 7 (one-comparison-product.md §4.1, "H" rows): the four hidden
-    # --dwarf-only/--debuginfod/--debuginfod-url/--debug-format flags are
-    # deleted outright (already fully demoted to the debug: config block
-    # with no surviving override) -- only the per-run --debug-root
-    # (evidence input, ADR-068 D5 guard #3) remains.
-    "debug_resolution": frozenset({"--debug-root"}),
+    # do not take. ``--dwarf-only``/``--debuginfod``/``--debuginfod-url``/
+    # ``--debug-format`` were hidden, config-backed duplicates removed outright
+    # in ADR-068 D5 / Phase 7a; only the coarse ``--debug-root`` remains.
+    "debug_resolution": frozenset(
+        {
+            "--debug-root",
+        }
+    ),
 }
 
 #: Family name → the decorator callable that supplies it (used by the gate's
@@ -199,12 +200,6 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "verdicts. The matrix varies per deployment target checked, so it is a "
         "per-run input, not a stable project setting."
     ),
-    "--profile": (
-        "ADR-040 Lever 3: a single per-run bundle of workflow defaults "
-        "(ci-gate/release/quick) that explicit flags always override. One visible "
-        "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
-        "1-2 lower BASE to bring the net well below today."
-    ),
     "--write": (
         "Emits a second output format from the same comparison run to its own "
         "file (e.g. --write json=abi.json alongside a --format markdown "
@@ -234,10 +229,6 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "ADR-043: folds the removed `plugin-check` command into compare -- an "
         "explicit required-entrypoint contract for a plugin-host pairing. Varies "
         "per run (which symbols a given host resolves), not a project setting."
-    ),
-    "--required-symbols": (
-        "ADR-043: file form of --required-symbol (one symbol per line). Same "
-        "per-run rationale."
     ),
     "--diagnostic-comparison": (
         "ADR-050 D2: downgrades a comparability-gate hard failure (mismatched "

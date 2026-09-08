@@ -61,30 +61,17 @@ class TestPrecedenceOrder:
         assert value is ContractMode.PUBLIC
         assert prov.layer is SelectorLayer.PROJECT_CONFIG
 
-    def test_run_profile_beats_project_config(self):
-        # ADR-049 D7 scopes RUN_PROFILE precedence to execution fields
-        # (depth, format, budget, workflow) -- "scan.depth" stands in for one
-        # here, with allow_run_profile=True opting the field in. See
-        # TestRunProfileFieldScoping for the semantic-field rejection case.
+    def test_run_recipe_beats_project_config(self):
+        # ADR-049 D7 (amended 2026-09-07): the RUN_PROFILE tier is gone --
+        # its only producer, --profile, was removed outright (ADR-068 D5 /
+        # plan Phase 7e) -- so RUN_RECIPE now sits directly above
+        # PROJECT_CONFIG.
         candidates = [
             _candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.PUBLIC),
-            _candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS),
+            _candidate(SelectorLayer.RUN_RECIPE, ContractMode.EXPORTS),
         ]
-        value, prov = resolve_field(
-            "scan.depth", candidates, default=_default(), allow_run_profile=True
-        )
+        value, prov = resolve_field("contract.mode", candidates, default=_default())
         assert value is ContractMode.EXPORTS
-        assert prov.layer is SelectorLayer.RUN_PROFILE
-
-    def test_run_recipe_beats_run_profile(self):
-        candidates = [
-            _candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS),
-            _candidate(SelectorLayer.RUN_RECIPE, ContractMode.PUBLIC),
-        ]
-        value, prov = resolve_field(
-            "scan.depth", candidates, default=_default(), allow_run_profile=True
-        )
-        assert value is ContractMode.PUBLIC
         assert prov.layer is SelectorLayer.RUN_RECIPE
 
     def test_legacy_alias_beats_run_recipe(self):
@@ -321,44 +308,6 @@ class TestFieldCandidateLayerProperty:
                 provenance=ValueProvenance(layer=SelectorLayer.EXPLICIT_CLI),
                 value=([],),  # type: ignore[arg-type]
             )
-
-
-class TestRunProfileFieldScoping:
-    # ADR-049 D7 scopes RUN_PROFILE precedence to "execution fields only"
-    # (depth, format, budget, workflow) -- semantic fields like
-    # contract.mode/policy.base don't participate. allow_run_profile
-    # defaults to False, so a RUN_PROFILE candidate for a field that hasn't
-    # opted in is a caller bug, not a legitimate input.
-    def test_run_profile_candidate_rejected_by_default(self):
-        candidates = [_candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS)]
-        with pytest.raises(ValueError, match="execution fields"):
-            resolve_field("contract.mode", candidates, default=_default())
-
-    def test_run_profile_candidate_rejected_even_when_shadowed(self):
-        # The check runs on every candidate up front, not just the winner --
-        # a shadowed RUN_PROFILE candidate is still a caller bug.
-        candidates = [
-            _candidate(SelectorLayer.EXPLICIT_CLI, ContractMode.PUBLIC),
-            _candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS),
-        ]
-        with pytest.raises(ValueError, match="execution fields"):
-            resolve_field("contract.mode", candidates, default=_default())
-
-    def test_run_profile_candidate_allowed_with_opt_in(self):
-        candidates = [_candidate(SelectorLayer.RUN_PROFILE, ContractMode.EXPORTS)]
-        value, prov = resolve_field(
-            "scan.depth", candidates, default=_default(), allow_run_profile=True
-        )
-        assert value is ContractMode.EXPORTS
-        assert prov.layer is SelectorLayer.RUN_PROFILE
-
-    def test_fields_without_run_profile_candidates_are_unaffected_by_default(self):
-        # allow_run_profile's default only matters when a RUN_PROFILE
-        # candidate is actually present -- everything else resolves as before.
-        candidates = [_candidate(SelectorLayer.PROJECT_CONFIG, ContractMode.PUBLIC)]
-        value, prov = resolve_field("contract.mode", candidates, default=_default())
-        assert value is ContractMode.PUBLIC
-        assert prov.layer is SelectorLayer.PROJECT_CONFIG
 
 
 class TestUnknownSelectorLayer:

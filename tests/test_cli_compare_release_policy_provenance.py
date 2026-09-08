@@ -113,8 +113,6 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_dir),
             "--policy",
             str(policy_path),
-            "--jobs",
-            "1",
             "--format",
             "json",
         )
@@ -146,8 +144,6 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--jobs",
-            "1",
             "--format",
             "json",
         )
@@ -191,8 +187,6 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_dir),
             "--policy",
             str(policy_path),
-            "--jobs",
-            "1",
             "--format",
             "json",
         )
@@ -245,8 +239,6 @@ class TestReleaseEffectiveConfigCarriesRealPolicy:
             str(new_dir),
             "--policy",
             str(policy_path),
-            "--jobs",
-            "1",
             "--format",
             "json",
         )
@@ -290,8 +282,6 @@ class TestReleasePolicyOverrideWarningFiresOnce:
                 str(new_dir),
                 "--policy",
                 str(policy_path),
-                "--jobs",
-                "1",
                 "--format",
                 "json",
             ],

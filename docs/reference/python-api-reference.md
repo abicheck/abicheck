@@ -501,6 +501,7 @@ Compare two ABI inputs and return the classified diff result.
 | `depth` | `str \| None` | `None` |
 | *(keyword-only below)* | | |
 | `severity_preset` | `str \| None` | `None` |
+| `public_header_dirs` | `list[Path] \| None` | `None` |
 
 **Returns:** `CompareResult`
 

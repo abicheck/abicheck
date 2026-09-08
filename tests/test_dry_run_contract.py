@@ -554,6 +554,47 @@ class TestCompareDryRun:
         assert "effective depth: source" in result.output
         assert "inferred" in result.output
 
+    def test_dry_run_shows_cost_preview_comparable_to_scan_dry_run(
+        self, tmp_path: Path, source_tree_with_compile_db: Path
+    ) -> None:
+        # Phase 2f (one-comparison-product.md #35): `compare --dry-run` must
+        # project L0-L5 evidence-collection cost the same way `scan --dry-run`
+        # already does -- reusing `estimate_scan`/`estimate_compare_cost`
+        # rather than a second cost model. Not asserting identical numbers
+        # (the two commands probe different operand shapes, and compare sums
+        # both sides) -- only that both previews are populated, on a
+        # comparable build/source-depth scenario.
+        old = tmp_path / "old.abi.json"
+        new = tmp_path / "new.abi.json"
+        _write_snapshot(old, "1.0")
+        _write_snapshot(new, "2.0")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new), "--dry-run",
+                "--sources", "old=" + str(source_tree_with_compile_db),
+                "--sources", "new=" + str(source_tree_with_compile_db),
+                "--depth", "source",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Cost preview:" in result.output
+        assert "L0_binary" in result.output
+        assert "projected total" in result.output
+
+        scan_binary = tmp_path / "libfoo.so"
+        scan_binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        scan_result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(scan_binary), "--dry-run",
+                "--sources", str(source_tree_with_compile_db),
+                "--depth", "source",
+            ],
+        )
+        assert scan_result.exit_code in (0, 1), scan_result.output
+        assert "projected total" in scan_result.output
+
 
 class TestDepsTreeDryRun:
     def test_writes_nothing_and_rejects_output(self, tmp_path: Path) -> None:

@@ -16,7 +16,7 @@
 """Memory-aware worker-count sizing for the ``compare-release`` fan-out (R3,
 CLI-audit).
 
-The release fan-out's auto ``--jobs 0`` default sized purely off
+The release fan-out's auto (``jobs=0``) default sized purely off
 ``os.cpu_count()``, which a very-high-core-count host (a real 224-core CI
 runner measured 56.5 GB RSS) or a cpu-count-vs-memory-mismatched container
 can push far past available RAM -- ``os.cpu_count()`` in a container

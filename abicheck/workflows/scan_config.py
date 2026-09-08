@@ -226,8 +226,9 @@ def resolve_scan_config(
         # -- the function that actually scores a scan's gate -- both read the
         # identical six fields off the identical `project_cfg`/`cfg` object
         # with the identical `explicit CLI > project config > built-in
-        # default` precedence, and `scan` has no `--profile` option (unlike
-        # `compare`) to introduce a tier the other resolver doesn't know
+        # default` precedence, and neither `scan` nor `compare` has a
+        # `--profile` option any more (ADR-068 D5 / plan Phase 7e removed it
+        # outright) to introduce a tier the other resolver doesn't know
         # about. So, for `scan` specifically, these two resolutions cannot
         # disagree on a project-config-sourced severity/exit-code-scheme the
         # way blanking here was written to guard against -- and leaving them

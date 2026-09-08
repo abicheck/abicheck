@@ -690,7 +690,8 @@ class TestCLIDwarfFlags:
         norm = " ".join(_cli_help("dump").replace("│", "").split())
         assert "Writes nothing" in norm
 
-    def test_compare_omits_dwarf_only(self, _cli_help) -> None:
+    def test_compare_has_no_dwarf_only_flag(self, _cli_help) -> None:
+        # Demoted to debug.dwarf_only (config), then removed (ADR-068 D5).
         assert "--dwarf-only" not in _cli_help("compare")
         assert "--dwarf-only" not in _cli_help("compare", "--help-all")
 
@@ -1426,7 +1427,7 @@ class TestCLIInProcess:
         assert '"library"' in result.output or '"functions"' in result.output
 
     def test_compare_dwarf_only(self, _debug_lib: Path, tmp_path: Path) -> None:
-        """Phase 7: the former `compare --dwarf-only` is `debug.dwarf_only`."""
+        """Phase 7 / ADR-068 D5: the former `compare --dwarf-only` is `debug.dwarf_only`."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
