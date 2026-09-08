@@ -1673,12 +1673,12 @@
     },
     {
       "path": "tests/test_cov95_cli.py",
-      "baseline_lines": 3132,
+      "baseline_lines": 3142,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 3018 -> 3132 (workstream D-S1, vision-api-abi-evolution.md \"D. Optional prebuilt-consumer lifecycle\"): new/rewritten regression tests asserting a --used-by/--required-symbol(s) consumer's own result enriches rather than replaces the full-library verdict/exit code (the gate-replacement design this reverts).",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 3018 -> 3132 (workstream D-S1, vision-api-abi-evolution.md \"D. Optional prebuilt-consumer lifecycle\"): new/rewritten regression tests asserting a --used-by/--required-symbol(s) consumer's own result enriches rather than replaces the full-library verdict/exit code (the gate-replacement design this reverts). Raised 3132 -> 3142 (PR #1154 merge follow-up, main-merge fallout): TestUsedByScoping::test_oneline_format_always_states_the_full_library_verdict's fixture (added by main/PR #1146) shrinks the public-function count from 1 to 0, which this PR's own --surface-metrics-unconditional change now also flags as a public_surface_shrank COMPATIBLE finding -- the assertion update plus its explanatory comment is the whole diff, not extractable further.",
       "review_by": "2026-11-30"
     },
     {
