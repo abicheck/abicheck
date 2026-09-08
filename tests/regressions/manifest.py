@@ -1232,21 +1232,21 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-second items below). "
-                    "Recurred TWENTY-TWO times within #1138/#1149/#1156: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an "
-                    'unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
+                    "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-third items below). "
+                    'Recurred TWENTY-THREE times within #1138/#1149/#1156: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
                     "explicit target recovered under a CL-style driver; the `sys.platform` guess leaking outside that gate; `--driver-mode=cl` on a plain `clang` name evading the "
                     "name-only CL check; that gate recovering NO spelling when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named binary reverted to GNU mode "
-                    "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly "
-                    "suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-"
-                    "executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
+                    "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly suppressed for a "
+                    "`gcc_path` `_resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
                     "driver name (`clang-18`) failing the basename check; a visible target trusted despite a later response file that could override it; that same fix wrongly trusting a "
                     "preceding one too, since Clang's own driver-mode scan reads the whole arg list up front regardless of position; an exact-basename comparison alone wrongly "
                     "treating ANY custom rename of the native compiler (e.g. `company-clang`) as a cross-compiler, closed by trying a bare re-probe of the identical binary first; an "
-                    "explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare "
-                    "re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,"
-                    "system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; and an explicitly-"
-                    "configured `--compiler` wrapper sharing the plain default's basename while not being it, still getting the guess purely on basename evidence."
+                    "explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,"
+                    "system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; an explicitly-"
+                    "configured `--compiler` wrapper sharing the plain default's basename while not being it, still getting the guess purely on basename evidence; and, once a "
+                    'genuine Darwin target IS confirmed, a literal `asm("__Zfake")` label being indistinguishable by shape alone from a real compiler-generated decorated Itanium '
+                    "mangling (both are equally `__Z...`-shaped), closed by `has_explicit_asm_label` detecting clang's own distinct `AsmLabelAttr` child node under the declaration's "
+                    '`"inner"` list (verified against a real Clang 18 install) and short-circuiting both stripping branches whenever it is present.'
                 ),
                 reference="#1138/#1149 follow-ups, fixed by #1156",
             ),

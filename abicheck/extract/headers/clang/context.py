@@ -338,6 +338,25 @@ def is_darwin_target(target_triple: str | None) -> bool:
     )
 
 
+def has_explicit_asm_label(node: dict[str, Any]) -> bool:
+    """Whether *node* (a clang ``FunctionDecl``/``VarDecl``) carries an
+    explicit ``asm("...")`` label -- clang emits a distinct ``AsmLabelAttr``
+    child under the declaration's own ``"inner"`` list (verified against a
+    real Clang 18 install: ``void f() asm("__Zfake");`` compiled with
+    ``--target=x86_64-apple-darwin`` reports both a literal, unmangled
+    ``mangledName`` of ``"__Zfake"`` AND this attribute, distinguishing it
+    structurally from an ordinary function's compiler-computed, genuinely
+    decorated ``mangledName`` -- unlike ``DeprecatedAttr``
+    (:func:`clang_deprecated_message`), which carries an optional message
+    key, this attribute carries no useful payload; its mere presence is
+    the whole signal.
+    """
+    return any(
+        isinstance(child, dict) and child.get("kind") == "AsmLabelAttr"
+        for child in node.get("inner", []) or []
+    )
+
+
 def strip_darwin_itanium_decoration(
     raw_mangled: str | None,
     mangled: str,
@@ -345,6 +364,7 @@ def strip_darwin_itanium_decoration(
     *,
     name: str = "",
     is_extern_c: bool = False,
+    has_asm_label: bool = False,
 ) -> str:
     """Strip a still-present Darwin linker-decoration underscore, for
     either a real Itanium mangled name (``"__Z..."`` -> ``"_Z..."``) or a
@@ -409,8 +429,21 @@ def strip_darwin_itanium_decoration(
     requires *mangled* to be EXACTLY ``"_" + name`` (not merely
     underscore-prefixed) so a real, distinct asm-label spelling that
     happens to differ from the bare name is never touched.
+
+    *has_asm_label* (:func:`has_explicit_asm_label`) closes the residual
+    gap the shape-only Itanium gate above still had ON Darwin: a literal
+    ``asm("__Zfake")`` label is exactly as ``"__Z..."``-shaped as a real,
+    compiler-generated decorated mangling, so the two are indistinguishable
+    from the string alone once a genuine Darwin target is confirmed
+    (Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install: both castxml's and clang's own actual Darwin-target
+    AST report the literal label verbatim, undecorated). When set, this
+    skips BOTH stripping branches unconditionally -- an explicit label is
+    never linker decoration, in either shape.
     """
     if raw_mangled is None or not is_darwin_target(target_triple):
+        return mangled
+    if has_asm_label:
         return mangled
     stripped = strip_macho_itanium_decoration(mangled)
     if stripped != mangled:

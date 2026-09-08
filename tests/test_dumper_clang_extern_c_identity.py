@@ -405,6 +405,57 @@ def test_parse_variables_mangled_field_strips_darwin_underscore_for_real_cxx_nam
     assert var.entity_id.extra == ("mangled", "_ZN1n1gE")
 
 
+def test_parse_functions_explicit_asm_label_unstripped_on_darwin() -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install: a literal ``asm("__Zfake")`` label is exactly as
+    ``"__Z..."``-shaped as a real, compiler-generated decorated Itanium
+    mangling -- the two are indistinguishable from the string alone once
+    a genuine Darwin target is confirmed. Real clang's own AST distinguishes
+    them structurally: an explicit label carries an ``AsmLabelAttr`` child,
+    which castxml's own convention preserves verbatim too (see
+    ``tests/test_castxml_literal_double_underscore_mangled.py``), so the
+    two backends must agree here as well. Without this gate, the fix for
+    the two tests above would corrupt this label into ``"_Zfake"``,
+    disagreeing with both castxml's identical declaration and the
+    binary's own real, undecorated export-table entry."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "__Zfake",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "__Zfake"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "__Zfake")
+
+
+def test_parse_variables_explicit_asm_label_unstripped_on_darwin() -> None:
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "VarDecl",
+            "name": "g",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int"},
+            "mangledName": "__Zfake_g",
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "__Zfake_g"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "__Zfake_g")
+
+
 def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
     """Control for the two tests above: the SAME doubly-underscored input
     is never stripped off Darwin -- there is no such linker convention to

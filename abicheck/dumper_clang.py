@@ -1312,6 +1312,7 @@ class _ClangAstParser:
                 self._target_triple,
                 name=name,
                 is_extern_c=is_extern_c,
+                has_asm_label=_clang_context.has_explicit_asm_label(node),
             )
             if not mangled:
                 continue

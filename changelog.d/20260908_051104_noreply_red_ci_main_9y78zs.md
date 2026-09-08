@@ -163,6 +163,22 @@ it should read in CHANGELOG.md. Delete the other sections.
   backend — a literal, explicit `asm("__Zfake")` assembler-label
   declaration, which castxml reports verbatim regardless of target.
 
+- **A literal Darwin `asm("__Zfake")` label on the `--ast-frontend clang`
+  backend no longer gets its own explicit spelling stripped as if it
+  were compiler-generated Itanium decoration.** Once a genuine Darwin
+  target is confirmed, `strip_darwin_itanium_decoration`'s shape check
+  (`"__Z..." -> "_Z..."`) cannot by itself distinguish a real,
+  compiler-generated decorated mangled name from an explicit `asm(...)`
+  label that merely happens to share the same `"__Z..."` shape — both
+  are indistinguishable strings. A new `has_explicit_asm_label` helper
+  (`extract.headers.clang.context`) detects clang's own distinct
+  `AsmLabelAttr` child node, always present alongside a `mangledName`
+  that is a literal label rather than a computed mangling (empirically
+  verified against a real Clang 18 install), and both the function- and
+  variable-parsing call sites (`extract.headers.clang.functions.
+  parse_functions`, `dumper_clang.parse_variables`) now pass it through
+  to short-circuit stripping whenever it is set.
+
 - **`--write markdown=...`'s written report is always readable as UTF-8.**
   `tests/test_presentation_analysis_separation.py` read a `compare
   --write markdown=...` report file with the platform-default text
