@@ -357,13 +357,35 @@ if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
   _warn "new-library-set is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
 fi
 
-# bundle-system-providers was a scalar Action input mirroring the CLI's own
-# --bundle-system-providers; CLI cleanup phase two, PR J removed both -- the
-# cross-library bundle-analysis layer's system-provider allow-list
-# extension is sourced only from build-config's own .abicheck.yml
-# `bundle.system_providers:` now, which has no per-mode "inert" state left
-# to warn about (build-config is unconditionally forwarded for every mode
-# that can reach it).
+# Removed inputs, kept registered in action.yml as tombstones and rejected
+# here.
+#
+# Deleting an input from action.yml does not make a workflow that still sets
+# it fail: GitHub drops the undeclared key before the composite action runs,
+# leaving only an "Unexpected input(s)" line in the setup log and no
+# annotation at the step. A pinned caller therefore keeps a setting in its
+# workflow that has silently stopped doing anything -- reported by a real
+# downstream integration (oneDAL) whose `jobs: 1` worker cap became inert on
+# an abicheck bump with nothing failing. Re-declaring the input is what puts
+# the removal in front of the caller; this block is what says so.
+#
+# Severity follows what the setting used to control:
+#   - jobs was a tuning knob (worker count). Its removal changes resource
+#     use, never a verdict, so warn rather than break a bump.
+#   - bundle-system-providers configured which providers count as system
+#     ones, i.e. real analysis semantics. Silently dropping that would
+#     change findings, so it is a hard error with the migration named.
+#
+# bundle-system-providers' replacement is build-config's own .abicheck.yml
+# `bundle.system_providers:` block (CLI cleanup phase two, PR J), which has
+# no per-mode "inert" state left to warn about (build-config is
+# unconditionally forwarded for every mode that can reach it).
+if [[ -n "${INPUT_JOBS:-}" ]]; then
+  _warn "jobs ('${INPUT_JOBS}') was removed (ADR-068 D5) and has no effect: abicheck's release fan-out auto-detects its worker count and clamps it to available memory, and the -j/--jobs flag it forwarded no longer exists. Remove jobs from your workflow. Expect higher wall time and peak RSS than a manually capped run."
+fi
+if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
+  _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
+fi
 
 # estimate, audit: deprecated scan-mode-only aliases.
 if [[ "${INPUT_ESTIMATE:-false}" == "true" && "$MODE" != "scan" ]]; then

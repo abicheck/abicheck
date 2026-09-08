@@ -241,7 +241,9 @@ def _read_past_leading_skippable_frames(f: Any, prefix: bytes) -> bytes:
     )
 
 
-def _classify_with_skippable_fallback(prefix: bytes, saw_skippable_magic: bool) -> SnapshotCompression:
+def _classify_with_skippable_fallback(
+    prefix: bytes, saw_skippable_magic: bool
+) -> SnapshotCompression:
     """`detect_compression_from_bytes(prefix)`, except a leading skippable-
     frame magic that outlasts the bounded escalation (`_BOUNDED_PREFIX_
     MAX_RAW_BYTES`) still classifies as `ZSTD` -- the magic alone already
@@ -509,7 +511,9 @@ def read_snapshot_bytes(
         saw_skippable_magic = starts_with_skippable_frame_magic(prefix)
         if saw_skippable_magic:
             prefix = _read_past_leading_skippable_frames(f, prefix)
-        compression_hint = _classify_with_skippable_fallback(prefix, saw_skippable_magic)
+        compression_hint = _classify_with_skippable_fallback(
+            prefix, saw_skippable_magic
+        )
         # Codex review: `max(limit, _max_stored_bytes())` let a raised
         # `max_decoded_bytes` (a caller's tolerance for large *decoded*
         # content) silently expand the *stored*-size ceiling too -- an
@@ -600,7 +604,17 @@ def _try_decode_prefix(
     head: bytes, compression: SnapshotCompression, n: int
 ) -> bytes | None:
     """One decode attempt of a raw prefix; ``None`` means "try a larger raw
-    prefix" (truncated mid-frame) rather than "this is not a snapshot"."""
+    prefix" (truncated mid-frame) rather than "this is not a snapshot".
+
+    A returned value of *fewer than* ``n`` bytes is **not** by itself a
+    success signal either: a decoder handed a frame cut at an arbitrary raw
+    byte boundary may return a short result -- including ``b""`` -- without
+    raising at all (``zstandard``'s ``stream_reader.read()`` does exactly
+    that when the first compressed block is still incomplete, and gzip's
+    reader can do the same). Only the caller knows whether a larger raw
+    prefix exists, so this function reports what it decoded and
+    :func:`bounded_decoded_prefix` owns the "short means truncated" rule.
+    """
     try:
         if compression is SnapshotCompression.GZIP:
             with gzip.GzipFile(fileobj=io.BytesIO(head), mode="rb") as gz:
@@ -655,14 +669,29 @@ def bounded_decoded_prefix(path: str | Path, n: int = _SNIFF_BYTES) -> bytes | N
             while True:
                 f.seek(0)
                 head = f.read(raw_size)
+                # A short read means EOF: `head` is the entire file, so no
+                # larger raw prefix exists and whatever the decoder
+                # produced is final.
+                exhausted = len(head) < raw_size
                 result = _try_decode_prefix(head, compression, n)
-                if result is not None:
+                # "No exception" is not the same as "decoded everything the
+                # file has to offer". A frame cut at the raw-byte boundary
+                # decodes to *fewer* than `n` bytes -- commonly zero, when
+                # the first compressed block is still incomplete -- with no
+                # error raised, so a short result is a truncation signal and
+                # must escalate exactly like a raised exception does.
+                # Accepting one is what made a real, less-compressible
+                # `.json.zst` snapshot classify as `b""` and surface as
+                # "Cannot detect format".
+                if result is not None and (len(result) >= n or exhausted):
                     return result
-                if len(head) < raw_size or raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
+                if exhausted or raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
                     # Either the whole file was already read (genuinely
                     # corrupt/incompatible, not just truncated-at-the-
-                    # boundary) or the escalation cap was reached.
-                    return None
+                    # boundary) or the escalation cap was reached; return
+                    # the best-effort short decode rather than discarding
+                    # real decoded content.
+                    return result
                 raw_size = min(raw_size * 4, _BOUNDED_PREFIX_MAX_RAW_BYTES)
     except OSError:
         return None

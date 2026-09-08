@@ -510,6 +510,43 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="storage.short_decode_mistaken_for_complete_decode",
+        invariant=(
+            "A bounded read over a compressed/streamed source must never "
+            'treat "the decoder returned without raising" as "the '
+            'decode is complete": a stream cut at an arbitrary raw-byte '
+            "boundary yields a *short* result -- commonly zero bytes -- "
+            "with no exception at all, so a result shorter than the "
+            "requested length is a truncation signal that must escalate "
+            "the raw read exactly as a raised exception does, unless the "
+            "underlying source is already exhausted. Concretely: "
+            "bounded_decoded_prefix(p, n) == read_snapshot_bytes(p)[:n] "
+            "for every valid storage envelope, at every compression ratio."
+        ),
+        fixed_by=(1164,),
+        seed_tests=("tests/test_bounded_decoded_prefix_properties.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "algorithm": ("zstd", "gzip"),
+            "compression_ratio": ("low", "high"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    'The same "short read is not EOF" shape exists in '
+                    "every other bounded/streamed reader in the tree "
+                    "(`workflows/bundle_compare_operand.py`'s own larger-"
+                    "window probe, `snapshot_cache.py`'s archive reader, "
+                    "the DWARF/PE section readers). Only the snapshot "
+                    "storage envelope's prefix primitive has a "
+                    "generalized suite; the siblings are untested against "
+                    "this invariant."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="trust_boundary.shell_workflow_injection",
         invariant=(
             "Every scalar input to a shell script or composite-Action "

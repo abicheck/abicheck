@@ -409,6 +409,30 @@ inputs:
       --artifact-set audit has no old/new release pair to detect a skew
       between, so the setting has no effect there.
     required: false
+  jobs:
+    description: >
+      Removed and ignored (ADR-068 D5). This input used to forward
+      `-j/--jobs` to `compare`, capping the directory/package release
+      fan-out's worker count. Both the flag and the input are gone: the
+      release engine auto-detects the CPU count and clamps it to available
+      memory, and there is no manual override any more. Kept registered as
+      a tombstone — deleting the input outright made GitHub drop it before
+      the Action ever ran, so a pinned workflow that still sets it got no
+      error and no annotation, and its worker cap silently stopped
+      applying. Setting it now emits an explicit warning telling you it has
+      no effect. Remove it from your workflow.
+    required: false
+  bundle-system-providers:
+    description: >
+      Removed (CLI cleanup phase two, PR J). The cross-library
+      bundle-analysis layer's system-provider allow-list extension moved to
+      `.abicheck.yml`'s `bundle.system_providers:` block, reachable through
+      the `build-config` input. Kept registered as a tombstone for the same
+      reason as `jobs` above — an undeclared input is dropped silently,
+      which here would drop a real analysis setting. Setting it is a hard
+      error: move the list into `.abicheck.yml` and point `build-config` at
+      it.
+    required: false
   allow-build-query:
     description: >
       Deprecated and ignored. The `--allow-build-query` dump flag it used to
