@@ -323,115 +323,6 @@ def _classify_and_reject_operands(
     return old_kind, new_kind
 
 
-def _render_compare_dry_run(
-    *,
-    old_input: Path, new_input: Path,
-    old_kind: str, new_kind: str,
-    depth: str | None,
-    source_method: str | None = None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
-    cfg_path: Path | None,
-    fmt: str,
-    exit_code_scheme: str | None,
-    header_backend: str,
-    used_by_apps: tuple[ConsumerAppInput, ...] = (),
-    required_symbols: tuple[str, ...] = (),
-    select: tuple[str, ...] = (),
-    select_required: tuple[str, ...] = (),
-) -> Any:
-    """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff."""
-    from .dry_run import DryRunResult, tool_status
-
-    result = DryRunResult(command="compare")
-    result.add(
-        "Inputs",
-        f"old: {old_input} ({old_kind})",
-        f"new: {new_input} ({new_kind})",
-    )
-    # Effective depth (P1 fix): a dry run must report what the real run will
-    # actually do, not just echo the raw --depth string back — the same
-    # inference _normalize_compare_options applies (--depth > source.method >
-    # inferred from --sources/--build-info > off) drives this.
-    collect_mode, effective_depth_label = _resolve_compare_collect_mode(
-        depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
-    )
-    result.add(
-        "Resolved depth and source scope",
-        f"requested depth: {depth or '(not given)'}",
-        f"effective depth: {effective_depth_label}",
-        f"effective collect mode: {collect_mode}",
-        "source scope: target on each side (compare has no PR change seed)"
-        if collect_mode in ("source-target", "source-changed", "graph-full")
-        else None,
-    )
-    from .frontends.cli.compare_dry_run import add_compare_cost_preview_section
-    from .workflows.compare_cost_preview import estimate_compare_dry_run_cost
-
-    add_compare_cost_preview_section(
-        result,
-        *estimate_compare_dry_run_cost(
-            old_input=old_input, new_input=new_input,
-            depth=depth, source_method=source_method,
-            headers=headers, includes=includes,
-            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-            old_sources=old_sources, new_sources=new_sources,
-            old_build_info=old_build_info, new_build_info=new_build_info,
-        ),
-    )
-    all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
-    result.add(
-        "Headers and compile context",
-        f"ast-frontend: {header_backend}",
-        f"headers: {', '.join(str(h) for h in all_headers)}" if all_headers else None,
-    )
-    result.add(
-        "Build/source inputs",
-        f"old sources/build-info: {old_sources or old_build_info or '(embedded)'}",
-        f"new sources/build-info: {new_sources or new_build_info or '(embedded)'}",
-    )
-    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
-    result.add(
-        "Configuration and value origins",
-        f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
-    )
-    result.add(
-        "Output and exit-code behavior",
-        f"format: {fmt}",
-        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}; contract coverage adds an orthogonal 1 under --contract",
-    )
-    if {old_kind, new_kind} & {"directory", "package"}:
-        result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
-        from .frontends.cli.release_dry_run import add_comparison_plan_section
-
-        add_comparison_plan_section(
-            result, old_input, new_input, old_kind, new_kind, select, select_required
-        )
-    if used_by_apps:
-        from .appcompat import parse_app_requirements
-        from .model.consumer_spec import as_consumer_spec
-
-        for app in used_by_apps:
-            app_label = as_consumer_spec(app).path
-            try:
-                reqs = parse_app_requirements(app, old_input.stem)
-                result.add(
-                    "Consumer/contract scoping",
-                    f"--used-by {app_label}: {len(reqs.undefined_symbols)} required "
-                    f"symbol(s), {len(reqs.required_versions)} required version(s)",
-                )
-            except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
-                result.warn(f"--used-by {app_label}: could not parse requirements: {exc}")
-    if required_symbols:
-        result.add(
-            "Consumer/contract scoping",
-            f"--required-symbol(s): {len(required_symbols)} entrypoint(s) required",
-        )
-    return result
-
-
 def _report_not_comparable(
     exc: ProfileMismatchError | ScopeMismatchError,
     old: AbiSnapshot,
@@ -1602,11 +1493,25 @@ def run_compare(
 
     if dry_run:
         from .dry_run import emit_dry_run
+        from .frontends.cli.compare_dry_run import build_compare_dry_run_result
 
-        emit_dry_run(_render_compare_dry_run(
+        # ADR-043 D4's dry-run report must reflect the *effective* depth, not
+        # just echo `--depth` back -- the same resolution `_render_compare_
+        # dry_run` used to compute internally before it moved to
+        # `frontends/cli/compare_dry_run.py` (see that module's own
+        # docstring for why it now takes the resolved pair as parameters
+        # instead of resolving them itself).
+        collect_mode_dr, effective_depth_label_dr = _resolve_compare_collect_mode(
+            depth, resolved_cfg.source_method,
+            old_sources, new_sources, old_build_info, new_build_info,
+        )
+        emit_dry_run(build_compare_dry_run_result(
             old_input=old_input, new_input=new_input,
             old_kind=old_kind, new_kind=new_kind,
-            depth=depth, source_method=resolved_cfg.source_method,
+            depth=depth,
+            collect_mode=collect_mode_dr,
+            effective_depth_label=effective_depth_label_dr,
+            source_method=resolved_cfg.source_method,
             headers=headers, includes=includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_sources=old_sources, new_sources=new_sources,
