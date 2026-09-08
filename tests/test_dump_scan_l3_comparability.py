@@ -390,6 +390,8 @@ def test_dump_folds_real_l3_evidence_into_ast_compile_context(
         pytest.skip(f"needs a real g++ and {ast_frontend} toolchain")
     so_path, header, compile_db = _build_library(tmp_path)
     baseline = tmp_path / "baseline.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(f"compile:\n  frontend: {ast_frontend}\n", encoding="utf-8")
 
     result = CliRunner().invoke(
         main,
@@ -404,8 +406,8 @@ def test_dump_folds_real_l3_evidence_into_ast_compile_context(
             str(compile_db),
             "--depth",
             "source",
-            "--ast-frontend",
-            ast_frontend,
+            "--config",
+            str(cfg),
             "-o",
             str(baseline),
         ],
@@ -433,6 +435,8 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
         pytest.skip(f"needs a real g++ and {ast_frontend} toolchain")
     so_path, header, compile_db = _build_library(tmp_path)
     baseline = tmp_path / "baseline.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(f"compile:\n  frontend: {ast_frontend}\n", encoding="utf-8")
 
     dump_result = CliRunner().invoke(
         main,
@@ -447,8 +451,8 @@ def test_scan_against_real_dump_baseline_is_comparable_on_unchanged_source(
             str(compile_db),
             "--depth",
             "source",
-            "--ast-frontend",
-            ast_frontend,
+            "--config",
+            str(cfg),
             "-o",
             str(baseline),
         ],
@@ -509,6 +513,8 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
         pytest.skip(f"needs a real g++ and {ast_frontend} toolchain")
     so_path, header, compile_db = _build_library(tmp_path, extra_include_dir="dep")
     baseline = tmp_path / "baseline.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(f"compile:\n  frontend: {ast_frontend}\n", encoding="utf-8")
 
     dump_result = CliRunner().invoke(
         main,
@@ -523,8 +529,8 @@ def test_scan_against_real_dump_baseline_matches_reported_cli_invocation(
             str(compile_db),
             "--depth",
             "source",
-            "--ast-frontend",
-            ast_frontend,
+            "--config",
+            str(cfg),
             "-o",
             str(baseline),
         ],

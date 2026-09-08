@@ -1593,12 +1593,12 @@
     },
     {
       "path": "tests/test_compile_db_filter_scope.py",
-      "baseline_lines": 1228,
+      "baseline_lines": 1237,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1228 -> 1237 (PR #1146 CI-failure fix): Phase 7 removed compare/dump's `--ast-frontend` CLI flag in favor of `.abicheck.yml`'s `compile.frontend`, so this file's three `dump`-CLI-invoking tests now each write a small temp config file and pass `--config` instead of the retired flag pair -- the minimum call-site update for each, no new logic to move elsewhere.",
       "review_by": "2026-11-30"
     },
     {
@@ -1783,12 +1783,12 @@
     },
     {
       "path": "tests/test_dumper_manifest.py",
-      "baseline_lines": 1771,
+      "baseline_lines": 1772,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 6 for ADR-063 Phase 2's closing slice: the stub header-AST parser gained the two entity-id sidecar methods the real parsers now expose.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 6 for ADR-063 Phase 2's closing slice: the stub header-AST parser gained the two entity-id sidecar methods the real parsers now expose. Raised 1771 -> 1772 (PR #1146 CI-failure fix): test_run_tu_fragments_preserves_declared_order_despite_completion_order was the one multi-worker test in this file missing the `mem_cap` clamp override every sibling multi-worker test here already applies, so its genuine-concurrency assertion flaked on a host whose available memory sits below the per-worker budget (unrelated to this PR's own compare/dump flag-demotion changes). The one added line matches the file's own established convention exactly; there is no new logic to move elsewhere.",
       "review_by": "2026-11-30"
     },
     {
