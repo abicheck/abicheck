@@ -1122,6 +1122,35 @@ _extra_args_has_write_flag() {
   return 1
 }
 
+# Same shape again, for a third defect (Codex review, P1, fresh evidence):
+# `extra-args --config ci.yml` is a documented, general passthrough escape
+# hatch that predates this PR's own Phase 7d work -- but `add_release_
+# topology_config_flags`/`add_compile_context_flags` now *also* append
+# their own synthesized `--config $overlay` to `$CMD` whenever a dso-only/
+# fail-on-removed-library/compile-context input is set, appended earlier
+# than `extra-args` (line ~2620 below). Click keeps the *last* repeated
+# `--config`, so the user's own passthrough one -- appended after -- would
+# silently win over, and drop, every setting this Action just synthesized
+# and carefully merged (a removed-library gate can become a false green).
+# Before this PR, these inputs were plain independent CLI flags (`--dso-
+# only`, etc.) with no `--config` of their own, so the identical `extra-
+# args --config` workflow never collided -- a real regression Phase 7d's
+# flag-to-config demotion introduced, not a pre-existing edge case.
+# Checked once, right before `extra-args` is appended, the same call-site
+# shape `_extra_args_has_write_flag`/`_extra_args_has_dry_run_flag` already
+# use; fails loud with an actionable message (use `build-config:` instead)
+# rather than silently doing the wrong thing -- merging a *third*,
+# argv-quoting-fragile config source into the overlay was judged a
+# materially larger, riskier change than refusing an ambiguous combination
+# that has no established meaning to preserve.
+_extra_args_has_config_flag() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--config" ]] && return 0
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
 # Same shape as `_extra_args_has_write_flag` above, for the sibling defect
 # (Codex review, P2, fresh evidence): `INPUT_DRY_RUN` is a dedicated Action
 # input, but an *effective* dry run reached only through `extra-args
@@ -2621,6 +2650,16 @@ fi
 # ---------------------------------------------------------------------------
 # Append extra-args (pass-through CLI arguments)
 if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
+  # A synthesized --config (from dso-only/fail-on-removed-library/compile-
+  # context inputs) already in $CMD, colliding with the user's own
+  # extra-args --config, would silently lose to Click's last-repeated-flag
+  # rule -- see _extra_args_has_config_flag's own docstring for the full
+  # account. Caught here, once, right before the append that would create
+  # the collision.
+  if _cmd_has_config_flag && _extra_args_has_config_flag; then
+    echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
+    exit 1
+  fi
   # shellcheck disable=SC2206
   CMD+=($INPUT_EXTRA_ARGS)
 fi
