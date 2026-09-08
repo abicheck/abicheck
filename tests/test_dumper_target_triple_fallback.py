@@ -35,11 +35,26 @@ import pytest
 
 from abicheck import dumper
 from abicheck.dumper import _header_ast_parser
-from abicheck.dumper_clang import _ClangAstParser
+from abicheck.dumper_clang import _ClangAstParser, _default_clang_bin_name
 
 
 def _tu(*inner: dict) -> dict:
     return {"kind": "TranslationUnitDecl", "inner": list(inner)}
+
+
+class TestDefaultClangBinName:
+    """The plain, unconfigured host binary name a resolved ``clang_bin``
+    is compared against to tell "genuinely explicit/cross compiler" from
+    "the plain host default was used regardless of what was requested"
+    (Codex review, ninth round, fresh evidence)."""
+
+    def test_cpp_style_compiler_selects_clangxx(self) -> None:
+        for compiler in ("c++", "g++", "clang++"):
+            assert _default_clang_bin_name(compiler) == "clang++"
+
+    def test_other_compiler_selects_clang(self) -> None:
+        for compiler in ("cc", "gcc", "clang", "icpx"):
+            assert _default_clang_bin_name(compiler) == "clang"
 
 
 def test_probe_failure_recovers_explicit_target_triple(
@@ -116,30 +131,26 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
     assert parser._target_triple == sys.platform
 
 
-@pytest.mark.parametrize(
-    "gcc_path,gcc_prefix",
-    [
-        ("aarch64-apple-darwin-clang", None),
-        (None, "aarch64-apple-darwin-"),
-    ],
-)
-def test_probe_failure_with_an_explicit_cross_compiler_does_not_guess_sys_platform(
-    monkeypatch: pytest.MonkeyPatch, gcc_path: str | None, gcc_prefix: str | None
+def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platform(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An explicit ``--compiler``/``--compiler-prefix`` cross-toolchain (a
-    documented input) carries no relationship to the HOST OS at all -- an
-    Apple-targeting compiler run on Linux, or vice versa (Codex review,
-    fresh evidence). Guessing `sys.platform` there risks the same
-    misclassification in either direction the CL-mode guess already
-    guards against, just from a different evidence source. Stays bare
-    None -- the same conservative default ``is_darwin_target(None)``
-    already answers False for."""
+    """An explicit ``--compiler``/``--compiler-prefix`` cross-toolchain that
+    ``_resolve_clang_bin`` actually adopts (its own resolved ``clang_bin``
+    differs from the plain host default) carries no relationship to the
+    HOST OS at all -- an Apple-targeting compiler run on Linux, or vice
+    versa. Guessing `sys.platform` there risks the same misclassification
+    in either direction the CL-mode guess already guards against, just
+    from a different evidence source. Stays bare None -- the same
+    conservative default ``is_darwin_target(None)`` already answers False
+    for."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "aarch64-apple-darwin-clang++"
+    )
     monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
@@ -147,8 +158,8 @@ def test_probe_failure_with_an_explicit_cross_compiler_does_not_guess_sys_platfo
         [],
         backend="clang",
         compiler="c++",
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
+        gcc_path=None,
+        gcc_prefix="aarch64-apple-darwin-",
         gcc_options="-O2",
         sysroot=None,
         nostdinc=False,
@@ -163,7 +174,7 @@ def test_probe_failure_with_an_explicit_cross_compiler_does_not_guess_sys_platfo
     assert parser._target_triple is None
 
 
-def test_probe_failure_with_an_explicit_cross_compiler_still_recovers_explicit_target(
+def test_probe_failure_with_a_resolved_cross_compiler_still_recovers_explicit_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The cross-compiler gate only ever suppresses the `sys.platform`
@@ -174,15 +185,17 @@ def test_probe_failure_with_an_explicit_cross_compiler_still_recovers_explicit_t
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
-    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: "aarch64-apple-darwin-clang++"
+    )
 
     parser = _header_ast_parser(
         [],
         [],
         backend="clang",
         compiler="c++",
-        gcc_path="aarch64-apple-darwin-clang",
-        gcc_prefix=None,
+        gcc_path=None,
+        gcc_prefix="aarch64-apple-darwin-",
         gcc_options="--target=x86_64-unknown-linux-gnu",
         sysroot=None,
         nostdinc=False,
@@ -195,6 +208,47 @@ def test_probe_failure_with_an_explicit_cross_compiler_still_recovers_explicit_t
 
     assert isinstance(parser, _ClangAstParser)
     assert parser._target_triple == "x86_64-unknown-linux-gnu"
+
+
+def test_probe_failure_with_a_gcc_path_resolve_ignores_still_guesses_sys_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``gcc_path`` naming a non-clang-family binary (e.g. a plain GCC
+    path) is silently ignored by ``_resolve_clang_bin``, which falls back
+    to the plain host default regardless (Codex review, fresh evidence,
+    ninth round): the RESOLVED `clang_bin` is what determines whether the
+    guess applies, not whether `gcc_path`/`gcc_prefix` was merely passed
+    -- the binary that actually produced the AST here IS the plain host
+    compiler, so its target genuinely is approximated by `sys.platform`."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    # Simulates _resolve_clang_bin ignoring a non-clang-family gcc_path and
+    # falling back to the plain default, exactly as the real function does.
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path="/usr/bin/gcc",
+        gcc_prefix=None,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "darwin"
 
 
 def test_successful_probe_is_never_overridden_by_explicit_target(

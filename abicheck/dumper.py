@@ -67,6 +67,7 @@ from .dumper_castxml_probe import (
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
+    _default_clang_bin_name as _default_clang_bin_name,
     _is_cl_style_driver_name as _is_cl_style_driver_name,
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
     _needs_sycl_host_only as _needs_sycl_host_only,
@@ -622,8 +623,7 @@ def _header_ast_parser(
             else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
-        # An explicit `--driver-mode=<value>` override (either direction)
-        # wins over the binary's own name for the EFFECTIVE driver mode.
+        # An explicit `--driver-mode=` override (either direction) wins.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
@@ -635,13 +635,12 @@ def _header_ast_parser(
             public_dir_paths=public_dir_paths,
             # On a probe failure, recover an explicit `--target=`. Under
             # CL mode, only spellings the CL driver actually honors are
-            # recovered (`cl_style=True`, `/clang:`-forwarded included).
-            # No `sys.platform` guess under CL mode (mostly Windows
-            # regardless of host OS) or under an explicit `--compiler`/
-            # `--compiler-prefix` cross-toolchain (no relation to host OS
-            # either -- Codex review, fresh evidence, both cases). Lives
-            # HERE, not in `is_darwin_target`, so a bare-`None` unit-test
-            # construction of `_ClangAstParser` is unaffected.
+            # recovered (`cl_style=True`, `/clang:`-forwarded included),
+            # no `sys.platform` guess (mostly Windows regardless of host
+            # OS). No guess either when the RESOLVED `clang_bin` isn't
+            # the plain host default -- an ignored `gcc_path`/`gcc_prefix`
+            # (Codex review) must not suppress it for a binary that IS
+            # the plain host compiler. Lives HERE, not `is_darwin_target`.
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
@@ -653,7 +652,7 @@ def _header_ast_parser(
                         _explicit_target_triple(gcc_options, gcc_option_tokens)
                         or (
                             sys.platform
-                            if gcc_path is None and gcc_prefix is None
+                            if clang_bin == _default_clang_bin_name(compiler)
                             else None
                         )
                     )

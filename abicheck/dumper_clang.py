@@ -442,6 +442,23 @@ def resolve_source_frontend_clang_bin(
     return fallback
 
 
+def _default_clang_bin_name(compiler: str) -> str:
+    """The plain, unconfigured host binary name :func:`_resolve_clang_bin`
+    falls back to when neither ``gcc_path`` nor ``gcc_prefix`` resolves to
+    something more specific (including when ``gcc_path`` names a non-
+    clang-family binary ``_resolve_clang_bin`` ignores outright).
+
+    Exists as its own function so a caller can compare a resolved
+    ``clang_bin`` against this to tell "genuinely explicit/cross compiler"
+    from "the plain host default was used regardless of what was
+    requested" -- e.g. ``dumper._run_clang``'s `sys.platform` guess, which
+    is only safe for the latter (Codex review, fresh evidence: a `gcc_path`
+    naming a non-clang binary is silently ignored by `_resolve_clang_bin`,
+    so its mere presence does not mean a cross-compiler actually ran).
+    """
+    return "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,
@@ -463,7 +480,7 @@ def _resolve_clang_bin(
             else f"{gcc_prefix}clang"
         )
     if not clang_bin:
-        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+        clang_bin = _default_clang_bin_name(compiler)
     if not _clang_available(clang_bin):
         raise SnapshotError(
             f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "

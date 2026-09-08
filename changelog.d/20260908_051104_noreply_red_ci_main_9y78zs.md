@@ -49,11 +49,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   with an "unknown argument ignored" warning and are never applied;
   recovering one of those as if it were real would risk applying the
   wrong platform normalization. Under GNU mode the `sys.platform` guess
-  also only applies to a plain, unconfigured compiler: an explicit
-  `--compiler`/`--compiler-prefix` cross-toolchain (a documented input,
-  e.g. an Apple-targeting compiler run on Linux) carries no relationship
-  to the host OS at all, so a probe failure there leaves the target
-  unknown rather than substituting the host's own platform.
+  also only applies when the RESOLVED compiler binary is the plain host
+  default (a new `dumper_clang._default_clang_bin_name` helper): an
+  explicit `--compiler`/`--compiler-prefix` cross-toolchain that
+  `_resolve_clang_bin` actually adopts (a documented input, e.g. an
+  Apple-targeting compiler run on Linux) carries no relationship to the
+  host OS at all, so a probe failure there leaves the target unknown
+  rather than substituting the host's own platform — but a `--compiler`
+  naming a non-clang-family binary, which `_resolve_clang_bin` silently
+  ignores in favor of the plain host default anyway, must not suppress
+  the guess for what is genuinely still the plain host compiler.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in
