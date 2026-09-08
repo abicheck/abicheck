@@ -334,35 +334,68 @@ add_compile_context_flags() {
     # already applied to every other mktemp call in this file (see
     # PR_JSON/PR_BODY above).
     _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
-    ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
-    ABICHECK_COMPILE_INCLUDE_LANG="$include_lang" \
-    ABICHECK_COMPILE_FRONTEND="${INPUT_AST_FRONTEND:-}" \
-    ABICHECK_COMPILE_GCC_PATH="${INPUT_GCC_PATH:-}" \
-    ABICHECK_COMPILE_GCC_PREFIX="${INPUT_GCC_PREFIX:-}" \
-    ABICHECK_COMPILE_GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}" \
-    ABICHECK_COMPILE_SYSROOT="${INPUT_SYSROOT:-}" \
-    ABICHECK_COMPILE_NOSTDINC="${INPUT_NOSTDINC:-false}" \
-    python3 - "$_COMPILE_CONTEXT_CONFIG_OVERLAY" <<'PYEOF'
+    # The eight raw input values are passed on stdin, NUL-separated, not as
+    # env vars or argv (Codex review, fresh evidence: windows-latest CI
+    # failure, this function only). A value shaped like a POSIX absolute
+    # path (e.g. `gcc-path: /opt/gcc-14/bin/g++`, a real, common
+    # cross-compilation input) triggered Git Bash/MSYS's automatic path
+    # conversion when forwarded as an env var to this native, non-MSYS
+    # python.exe -- silently rewriting it into a Windows path (inserting
+    # "Program Files" and its embedded space) before this script ever saw
+    # it, e.g. `/opt/gcc-14/bin/g++` -> `C:/Program Files/Git/opt/gcc-14/
+    # bin/g++`. Only actual argv/envp entries are subject to that
+    # conversion -- stdin content never is (the same fix already applied to
+    # add_flag_shlex_split()'s single-value case above) -- so this sidesteps
+    # the whole class regardless of which of the eight fields triggers it.
+    #
+    # The script itself is written to its own $RUNNER_TEMP-anchored file
+    # rather than fed to `python3 -` via a second heredoc: `python3 -` reads
+    # its *program* from stdin, which would collide with (and silently
+    # discard) the piped data payload above -- a heredoc attached to the
+    # same command always wins the stdin redirection, so the data pipe would
+    # never reach the program at all. A real script file leaves stdin free
+    # for the data.
+    # No `.py` suffix after the X's: BSD mktemp (macOS's stock, non-GNU
+    # build) requires the replaceable X's to be the template's last
+    # characters, and this script deliberately has no `set -e` -- a rejected
+    # template here would silently continue with an empty helper path rather
+    # than failing loud (Codex review, fresh evidence, PR #1162).
+    _COMPILE_CONTEXT_HELPER_PY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context-helper.XXXXXX")
+    cat > "$_COMPILE_CONTEXT_HELPER_PY" <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `compile:` block (as JSON, a valid
 # YAML subset abicheck's own yaml.safe_load parses identically) from this
 # Action's cross-compilation inputs -- the config-only replacement for the
 # per-run flags Phase 7 removed from compare/dump.
 import json
-import os
 import shlex
 import sys
 
 out_path = sys.argv[1]
+(
+    include_lang,
+    lang,
+    frontend,
+    gcc_path,
+    gcc_prefix,
+    gcc_options,
+    sysroot,
+    nostdinc,
+) = sys.stdin.buffer.read().split(b"\0")[:8]
+include_lang = include_lang.decode("utf-8")
+lang = lang.decode("utf-8")
+frontend = frontend.decode("utf-8")
+gcc_path = gcc_path.decode("utf-8")
+gcc_prefix = gcc_prefix.decode("utf-8")
+gcc_options = gcc_options.decode("utf-8")
+sysroot = sysroot.decode("utf-8")
+nostdinc = nostdinc.decode("utf-8")
+
 compile_blk: dict[str, object] = {}
-if os.environ.get("ABICHECK_COMPILE_INCLUDE_LANG") == "true":
-    lang = os.environ.get("ABICHECK_COMPILE_LANG", "")
+if include_lang == "true":
     if lang:
         compile_blk["lang"] = lang
-frontend = os.environ.get("ABICHECK_COMPILE_FRONTEND", "")
 if frontend and frontend != "auto":
     compile_blk["frontend"] = frontend
-gcc_path = os.environ.get("ABICHECK_COMPILE_GCC_PATH", "")
-gcc_prefix = os.environ.get("ABICHECK_COMPILE_GCC_PREFIX", "")
 # compile.compiler merges the former --compiler/--compiler-prefix pair
 # (Phase 7 -- one-comparison-product.md §4.1's "MERGE" disposition for
 # --compiler-prefix): a full compiler path is the more specific of the two,
@@ -370,7 +403,6 @@ gcc_prefix = os.environ.get("ABICHECK_COMPILE_GCC_PREFIX", "")
 compiler = gcc_path or gcc_prefix
 if compiler:
     compile_blk["compiler"] = compiler
-gcc_options = os.environ.get("ABICHECK_COMPILE_GCC_OPTIONS", "")
 if gcc_options:
     # CodeRabbit review, PR #1146, finding #7: BuildConfig.from_dict()
     # (abicheck/buildsource/build_config.py) rejects any compile.options
@@ -396,14 +428,18 @@ if gcc_options:
         if "\n" in gcc_options
         else shlex.split(gcc_options)
     )
-sysroot = os.environ.get("ABICHECK_COMPILE_SYSROOT", "")
 if sysroot:
     compile_blk["sysroot"] = sysroot
-if os.environ.get("ABICHECK_COMPILE_NOSTDINC") == "true":
+if nostdinc == "true":
     compile_blk["nostdinc"] = True
 with open(out_path, "w", encoding="utf-8") as f:
     json.dump({"compile": compile_blk}, f)
 PYEOF
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
+      "$include_lang" "${INPUT_LANG:-}" "${INPUT_AST_FRONTEND:-}" "${INPUT_GCC_PATH:-}" \
+      "${INPUT_GCC_PREFIX:-}" "${INPUT_GCC_OPTIONS:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" |
+    python3 "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"
+    rm -f "$_COMPILE_CONTEXT_HELPER_PY"
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
 }
