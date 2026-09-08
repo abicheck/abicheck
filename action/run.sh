@@ -276,6 +276,19 @@ add_sided_scalar_flag() {
   CMD+=("$flag" "${side}=${value}")
 }
 
+# Whether CMD already carries a literal "--config" token -- used by callers
+# that may have already emitted their own `--config` (e.g.
+# add_compile_context_flags's explicit-build-config merge, below) to skip a
+# later unconditional `add_single_flag "--config" ...` that would otherwise
+# add a conflicting second one.
+_cmd_has_config_flag() {
+  local _c
+  for _c in "${CMD[@]}"; do
+    [[ "$_c" == "--config" ]] && return 0
+  done
+  return 1
+}
+
 add_single_flag() {
   local flag="$1"
   local value="$2"
@@ -295,12 +308,16 @@ add_single_flag() {
 # it keeps every one of these flags, so its own call site (mode: scan)
 # still uses add_single_flag/add_flag_shlex_split directly, unchanged.
 #
-# When the caller ALSO names their own build-config, this Action does not
-# attempt to merge the two YAML documents (no YAML-merge tool is guaranteed
-# on every runner) -- it fails loud instead of silently shadowing one
-# compile: block with the other, the same "explicit input deserves a loud
-# rejection, not a silent wrong result" precedent the release-operand guard
-# below already sets for this identical flag family.
+# When the caller ALSO names their own build-config, this Action merges the
+# two: the synthesized compile: overlay is folded into a COPY of the named
+# build-config file (Action input wins on a key conflict), read and merged
+# through the same `_merge_config_overlay_with_discovered_project_config`
+# helper's "explicit" mode -- see that function's own docstring for why an
+# explicit build-config is fully trusted (no key stripping), unlike the
+# auto-discovered case below. An earlier revision rejected this combination
+# outright as "mutually exclusive"; that was itself a real regression, since
+# a workflow could legitimately combine both before Phase 7 demoted these
+# flags to config (Codex review, PR #1159, second round).
 #
 # When build-config is NOT given, this Action's own synthesized overlay is
 # not the whole config picture: `_resolve_compare_config` only ever reads
@@ -319,15 +336,43 @@ add_single_flag() {
 # a key conflict, exactly the same precedence an explicit build-config
 # input already takes over auto-discovery. No project config found is the
 # base case: the overlay alone is written, unchanged from before.
+#
+# When build-config IS given, callers pass `merge_mode="explicit"` (below)
+# instead of running discovery at all: the base document is read directly
+# from the named build-config file rather than found by walking up from a
+# directory (Codex review, PR #1159, second round -- combining an explicit
+# build-config with a topology/compile-context Action input used to be a
+# hard rejection here, which was itself a real regression, since a
+# workflow could combine both before Phase 7/7d demoted the corresponding
+# flags to config). The two modes deliberately differ on trust, not just on
+# how the base document is found: an auto-discovered `.abicheck.yml` is
+# untrusted, repository-controlled content -- exactly what
+# `cli_options.py`'s `compile.compiler` gate and ADR-032 D5's `build.query`
+# gate exist to withhold "explicit --config, operator authorized this to
+# run" status from -- so discover mode strips both keys before merging. An
+# *explicit* build-config input is itself a deliberate operator action (the
+# user told this Action to use this exact file), which is already the
+# trusted case those same gates exist to allow -- `cli_options.py`'s own
+# `explicit_config = build_config is not None` check draws the identical
+# line. So explicit mode does NOT strip either key: a project that
+# genuinely wants `build.query`/`compile.compiler` to run already opted in
+# by naming this file, and stripping it here would silently discard
+# behavior the user explicitly authorized.
 _merge_config_overlay_with_discovered_project_config() {
   # $1: overlay JSON object (already built by the caller, e.g.
   #     '{"compile": {...}}' or '{"release": {...}, "gate": {...}}').
   # $2: output path to write the merged document to.
-  # $3: project directory to discover a `.abicheck.yml` from (walking up to
-  #     the filesystem root, same as `discover_project_config()`).
+  # $3: "discover" mode (default, $4 omitted) -- a project directory to
+  #     discover a `.abicheck.yml` from (walking up to the filesystem root,
+  #     same as `discover_project_config()`). "explicit" mode ($4 ==
+  #     "explicit") -- the path to the explicit build-config file to use as
+  #     the base document directly, no discovery/walk.
+  # $4: optional; "explicit" selects explicit-build-config mode described
+  #     above. Omitted (or any other value) is the default discovery mode.
   local overlay_json="$1"
   local out_path="$2"
-  local project_start="$3"
+  local base_source="$3"
+  local merge_mode="${4:-discover}"
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
     # Same "fail loud rather than silently produce a wrong compile/release
     # context" precedent as add_flag_shlex_split's own missing-interpreter
@@ -338,7 +383,8 @@ _merge_config_overlay_with_discovered_project_config() {
     exit 1
   fi
   (cd "$_PY_SAFE_DIR" \
-   && ABICHECK_PROJECT_CONFIG_START="$project_start" \
+   && ABICHECK_MERGE_MODE="$merge_mode" \
+      ABICHECK_BASE_CONFIG_SOURCE="$base_source" \
       ABICHECK_OVERLAY_JSON="$overlay_json" \
       PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
 # Discovers the real project .abicheck.yml (if any) the same way
@@ -390,62 +436,100 @@ from abicheck.config_paths import find_config_in_dir, project_root_for_config
 
 out_path = sys.argv[1]
 overlay = json.loads(os.environ["ABICHECK_OVERLAY_JSON"])
-
-start = Path(os.environ.get("ABICHECK_PROJECT_CONFIG_START") or ".").resolve()
-candidates = [start, *start.parents]
+merge_mode = os.environ.get("ABICHECK_MERGE_MODE", "discover")
+base_source = os.environ["ABICHECK_BASE_CONFIG_SOURCE"]
 
 base: dict[str, object] = {}
 found_path: Path | None = None
-for directory in candidates:
-    found = find_config_in_dir(directory)
-    if found is None:
-        continue
-    found_path = found
-    try:
-        loaded = yaml.safe_load(found.read_text(encoding="utf-8"))
-    except Exception as exc:
-        # Matching the ordinary CLI's own discover_project_config() path
-        # (cli_helpers_compare.py): a malformed *discovered* config is a
-        # real usage error there, not a silent "proceed as if unconfigured"
-        # -- so this Action must not quietly drop every one of the
-        # project's own settings (severity/suppress/scope/bundle/...)
-        # just because a synthesized topology/compile-context input was
-        # also set (Codex review, PR #1159).
+
+if merge_mode == "explicit":
+    # The user named this exact file via the Action's own build-config
+    # input -- a deliberate operator action, not a directory walk. Read it
+    # directly as the base document; no discovery, no fallback to "no
+    # config found" (a missing/unreadable explicit build-config is a usage
+    # error, matching the ordinary CLI's own explicit ``--config`` failure
+    # mode).
+    found_path = Path(base_source).resolve()
+    if not found_path.is_file():
         print(
-            f"::error::failed to parse the discovered project config {found}: "
-            f"{exc}. Refusing to silently proceed as if no project config "
-            "existed -- fix the file or remove it.",
+            f"::error::the explicit build-config {found_path} does not "
+            "exist or is not a file. Refusing to silently proceed as if "
+            "it were unconfigured.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        loaded = yaml.safe_load(found_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(
+            f"::error::failed to parse the explicit build-config "
+            f"{found_path}: {exc}. Refusing to silently proceed as if it "
+            "were unconfigured.",
             file=sys.stderr,
         )
         sys.exit(1)
     if isinstance(loaded, dict):
         base = loaded
-    break
+else:
+    start = Path(base_source or ".").resolve()
+    candidates = [start, *start.parents]
+    for directory in candidates:
+        found = find_config_in_dir(directory)
+        if found is None:
+            continue
+        found_path = found
+        try:
+            loaded = yaml.safe_load(found.read_text(encoding="utf-8"))
+        except Exception as exc:
+            # Matching the ordinary CLI's own discover_project_config() path
+            # (cli_helpers_compare.py): a malformed *discovered* config is a
+            # real usage error there, not a silent "proceed as if unconfigured"
+            # -- so this Action must not quietly drop every one of the
+            # project's own settings (severity/suppress/scope/bundle/...)
+            # just because a synthesized topology/compile-context input was
+            # also set (Codex review, PR #1159).
+            print(
+                f"::error::failed to parse the discovered project config {found}: "
+                f"{exc}. Refusing to silently proceed as if no project config "
+                "existed -- fix the file or remove it.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if isinstance(loaded, dict):
+            base = loaded
+        break
 
-if isinstance(base.get("build"), dict) and "query" in base["build"]:
-    stripped_build = dict(base["build"])
-    del stripped_build["query"]
-    base["build"] = stripped_build
-    print(
-        "::warning::the discovered .abicheck.yml's build.query was dropped "
-        "from this Action's synthesized --config overlay -- an "
-        "auto-discovered config is never trusted to run a build-system "
-        "query; set build-config explicitly (naming a config you reviewed) "
-        "to opt in.",
-        file=sys.stderr,
-    )
-if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
-    stripped_compile = dict(base["compile"])
-    del stripped_compile["compiler"]
-    base["compile"] = stripped_compile
-    print(
-        "::warning::the discovered .abicheck.yml's compile.compiler was "
-        "dropped from this Action's synthesized --config overlay -- an "
-        "auto-discovered config is never trusted to select a compiler "
-        "executable; set build-config explicitly (naming a config you "
-        "reviewed) to opt in.",
-        file=sys.stderr,
-    )
+# Discover mode's own base document is untrusted, repository-controlled
+# content: strip the two executable-authorizing keys before merging (see
+# this function's own docstring for the trust reasoning). Explicit mode's
+# base document is exactly what the operator named via build-config --
+# already the trusted case cli_options.py's own `explicit_config` check
+# grants, so nothing here is stripped from it.
+if merge_mode != "explicit":
+    if isinstance(base.get("build"), dict) and "query" in base["build"]:
+        stripped_build = dict(base["build"])
+        del stripped_build["query"]
+        base["build"] = stripped_build
+        print(
+            "::warning::the discovered .abicheck.yml's build.query was dropped "
+            "from this Action's synthesized --config overlay -- an "
+            "auto-discovered config is never trusted to run a build-system "
+            "query; set build-config explicitly (naming a config you reviewed) "
+            "to opt in.",
+            file=sys.stderr,
+        )
+    if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
+        stripped_compile = dict(base["compile"])
+        del stripped_compile["compiler"]
+        base["compile"] = stripped_compile
+        print(
+            "::warning::the discovered .abicheck.yml's compile.compiler was "
+            "dropped from this Action's synthesized --config overlay -- an "
+            "auto-discovered config is never trusted to select a compiler "
+            "executable; set build-config explicitly (naming a config you "
+            "reviewed) to opt in.",
+            file=sys.stderr,
+        )
 
 if found_path is not None and isinstance(base.get("compile"), dict):
     include_dirs = base["compile"].get("include_dirs")
@@ -484,7 +568,11 @@ PYEOF
   # swallowed, since that would leave the caller writing a possibly-partial
   # or missing overlay file and proceeding as if the merge had succeeded.
   if [[ $_merge_status -ne 0 ]]; then
-    echo "::error::failed to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (see the error above). Refusing to silently proceed."
+    if [[ "$merge_mode" == "explicit" ]]; then
+      echo "::error::failed to merge this Action's synthesized config overlay with the explicit build-config ${base_source} (see the error above). Refusing to silently proceed."
+    else
+      echo "::error::failed to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (see the error above). Refusing to silently proceed."
+    fi
     exit 1
   fi
 }
@@ -503,10 +591,6 @@ add_compile_context_flags() {
         && "${INPUT_NOSTDINC:-false}" != "true" \
         && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
     return 0
-  fi
-  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
-    echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with build-config: those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
-    exit 1
   fi
   if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
     local _compile_overlay_json
@@ -585,8 +669,23 @@ json.dump({"compile": compile_blk}, sys.stdout)
 PYEOF
     )
     _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp)
-    _merge_config_overlay_with_discovered_project_config \
-      "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD"
+    if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+      # An explicit build-config input is a deliberate operator action --
+      # merge this Action's synthesized compile: overlay into a COPY of
+      # that file (Action input wins on a key conflict), fully trusted (no
+      # stripping of compile.compiler -- see
+      # _merge_config_overlay_with_discovered_project_config's own
+      # docstring for the trust distinction), instead of the previous hard
+      # rejection of this combination (Codex review, PR #1159, second
+      # round: a real regression for any workflow that combined both
+      # before Phase 7 demoted these flags to config).
+      _merge_config_overlay_with_discovered_project_config \
+        "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" \
+        "${INPUT_BUILD_CONFIG}" "explicit"
+    else
+      _merge_config_overlay_with_discovered_project_config \
+        "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD"
+    fi
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
 }
@@ -599,30 +698,49 @@ PYEOF
 # so forwarding them now means synthesizing a small config overlay the run
 # reads via --config, the same "--config is NOT one of the flags the
 # release fan-out rejects" precedent add_compile_context_flags already
-# established for the compile: block above -- mutually exclusive with an
-# explicit build-config for the identical reason (no YAML-merge tool
-# guaranteed on every runner). Called from the release-style-operand branch
-# in `mode: compare`, AFTER that branch's own unconditional
-# `add_single_flag "--config" "$INPUT_BUILD_CONFIG"` has already run -- so
-# unlike add_compile_context_flags (which runs first and lets the later,
-# now-empty INPUT_BUILD_CONFIG forward turn into a no-op), this function
-# checks whether --config is already in CMD and refuses to add a second one.
+# established for the compile: block above. Called from the
+# release-style-operand branch in `mode: compare`, AFTER that branch's own
+# unconditional `add_single_flag "--config" "$INPUT_BUILD_CONFIG"` has
+# already run -- so when build-config is given, CMD already carries a raw,
+# un-merged "--config $INPUT_BUILD_CONFIG" pair by the time this function
+# runs. Rather than rejecting that combination outright (an earlier
+# revision did, as "mutually exclusive" -- a real regression, since a
+# workflow could legitimately combine both before Phase 7d demoted these
+# flags to config, Codex review, PR #1159, second round), this function
+# finds and removes that already-added pair and replaces it with the merged
+# overlay: the topology keys folded into a COPY of the user's own explicit
+# build-config (Action input wins on a key conflict), through
+# `_merge_config_overlay_with_discovered_project_config`'s "explicit" mode
+# -- fully trusted, no key stripping, since naming build-config is itself a
+# deliberate operator action (see that function's own docstring). Any OTHER
+# "--config" already in CMD at this point (one that doesn't match
+# INPUT_BUILD_CONFIG, or with no build-config input given at all) is a real
+# caller bug, not a user input to accommodate -- that case still fails
+# loud rather than silently producing a two---config command line.
 add_release_topology_config_flags() {
   if [[ "${INPUT_DSO_ONLY:-false}" != "true" \
         && "${INPUT_INCLUDE_PRIVATE_DSO:-false}" != "true" \
         && "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" != "true" ]]; then
     return 0
   fi
-  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
-    echo "::error::mode: compare with a directory/package operand cannot combine dso-only/include-private-dso/fail-on-removed-library with build-config: those settings now live only in .abicheck.yml's release:/gate: blocks (Phase 7d CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
-    exit 1
-  fi
-  for _existing in "${CMD[@]}"; do
-    if [[ "$_existing" == "--config" ]]; then
-      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line -- this is a bug in run.sh, not a user input problem."
-      exit 1
+  local _config_idx=-1 _i
+  for ((_i = 0; _i < ${#CMD[@]}; _i++)); do
+    if [[ "${CMD[_i]}" == "--config" ]]; then
+      _config_idx=$_i
+      break
     fi
   done
+  if [[ $_config_idx -ge 0 ]]; then
+    if [[ -z "${INPUT_BUILD_CONFIG:-}" || "${CMD[$((_config_idx + 1))]:-}" != "${INPUT_BUILD_CONFIG}" ]]; then
+      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line for a reason other than build-config -- this is a bug in run.sh, not a user input problem."
+      exit 1
+    fi
+    # Remove the raw "--config $INPUT_BUILD_CONFIG" pair the release-style
+    # branch's own unconditional add_single_flag already added -- it is
+    # replaced below by the merged overlay.
+    unset "CMD[$_config_idx]" "CMD[$((_config_idx + 1))]"
+    CMD=("${CMD[@]}")
+  fi
   local _release_overlay_json
   _release_overlay_json=$(
   ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-false}" \
@@ -657,8 +775,13 @@ PYEOF
   )
   local overlay
   overlay=$(mktemp)
-  _merge_config_overlay_with_discovered_project_config \
-    "$_release_overlay_json" "$overlay" "$PWD"
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    _merge_config_overlay_with_discovered_project_config \
+      "$_release_overlay_json" "$overlay" "${INPUT_BUILD_CONFIG}" "explicit"
+  else
+    _merge_config_overlay_with_discovered_project_config \
+      "$_release_overlay_json" "$overlay" "$PWD"
+  fi
   CMD+=(--config "$overlay")
 }
 
@@ -1636,7 +1759,13 @@ if [[ "$MODE" == "dump" ]]; then
   # compile_commands.json. (See action input `build-info`.)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # Skipped when add_compile_context_flags above already merged build-config
+  # into a synthesized compile: overlay and added --config itself (the
+  # explicit-build-config-plus-compile-context case) -- adding it again here
+  # would emit a conflicting second --config for the CLI to reject.
+  if ! _cmd_has_config_flag; then
+    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  fi
   add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
@@ -1739,8 +1868,15 @@ elif [[ "$MODE" == "compare" ]]; then
   # (_resolve_compare_config runs before the directory/package dispatch), so
   # it stays unconditional; an earlier fix lumped it in with the three
   # rejected flags and silently dropped a bundle caller's build-config
-  # (Codex review, second round).
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # (Codex review, second round). Skipped only when add_compile_context_flags
+  # above already merged build-config into a synthesized compile: overlay and
+  # added --config itself (single-pair operand, explicit-build-config-plus-
+  # compile-context case) -- a directory/package operand never reaches that
+  # merge (compile-context inputs are hard-rejected for that shape instead),
+  # so this stays unconditional there, exactly as before.
+  if ! _cmd_has_config_flag; then
+    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  fi
   # CLI cleanup phase two, PR J: --bundle-system-providers/--bundle-cohort
   # removed from the CLI (and this Action input retired with them) -- the
   # cross-library bundle-analysis layer's system-provider allow-list

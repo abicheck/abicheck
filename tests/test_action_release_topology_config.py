@@ -290,18 +290,6 @@ class TestReleaseTopologyOverlay:
         # Exactly one --config flag -- not one per synthesized block.
         assert result.stdout.count("--config") == 1
 
-    def test_build_config_together_with_dso_only_fails_loud(
-        self, tmp_path: Path
-    ) -> None:
-        result = _run_bash_script(
-            _harness(),
-            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": "/repo/.abicheck.yml"},
-            cwd=tmp_path,
-        )
-        assert result.returncode == 1
-        assert "cannot combine" in result.stdout
-        assert "release:/gate:" in result.stdout
-
     def test_build_config_alone_is_fine(self, tmp_path: Path) -> None:
         """The mutual-exclusivity guard only fires when a release-topology
         input is also set -- build-config alone (no dso-only/
@@ -336,6 +324,124 @@ printf '%s\\n' "${{CMD[@]}}"
         result = _run_bash_script(script, {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
         assert result.returncode == 1
         assert "already added to the command line" in result.stdout
+
+
+def _release_topology_script_with_preexisting_config_flag(build_config_path: str) -> str:
+    """A harness mirroring the REAL script's own call order: the
+    release-style-operand branch in ``mode: compare`` always calls
+    ``add_single_flag "--config" "$INPUT_BUILD_CONFIG"`` unconditionally
+    *before* ``add_release_topology_config_flags`` -- so when build-config is
+    given, CMD already carries a raw ``--config <path>`` pair by the time
+    this function runs. ``_harness()`` above doesn't model that (its CMD
+    starts as just ``(compare)``), so tests needing the real combined-input
+    behavior build their own script here, the same way
+    ``test_double_config_bug_guard_fires_loud_not_silent`` already does for
+    the caller-bug case.
+    """
+    fn_source = _add_release_topology_config_flags_source()
+    merge_fn_source = _merge_config_overlay_fn_source()
+    return f"""#!/usr/bin/env bash
+set -uo pipefail
+CMD=(compare --config {build_config_path})
+_PY_BIN="{sys.executable}"
+{_py_safe_dir_source()}
+{_py_bin_has_abicheck_source()}
+{merge_fn_source}
+{fn_source}
+add_release_topology_config_flags
+printf '%s\\n' "${{CMD[@]}}"
+"""
+
+
+class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
+    """Codex review, PR #1159 (P1, second round): combining an explicit
+    ``build-config`` input with a topology input (``dso-only``/
+    ``include-private-dso``/``fail-on-removed-library``) used to be a hard
+    rejection ("mutually exclusive") -- a real regression, since a workflow
+    could legitimately combine both before Phase 7d demoted these flags to
+    config (Click accepted ``--config <path>`` alongside the old
+    ``--dso-only``-shaped flags). The fix merges the synthesized topology
+    overlay into a COPY of the user's own explicit build-config instead,
+    Action input winning on a genuine conflict -- and, since an explicit
+    build-config is a deliberate operator action (not passively discovered,
+    untrusted content), the merge must NOT strip ``build.query``/
+    ``compile.compiler`` from it the way the discovered-config merge does.
+    """
+
+    def test_explicit_build_config_settings_survive_alongside_topology_input(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "severity:\n  abi_breaking: error\nscope:\n  on_incomplete: block\n",
+            encoding="utf-8",
+        )
+        script = _release_topology_script_with_preexisting_config_flag(str(build_config))
+        result = _run_bash_script(
+            script,
+            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": str(build_config)},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.splitlines()
+        # Exactly one --config in the final command line -- the raw
+        # build-config pair was replaced, not duplicated alongside a second
+        # merged one.
+        assert lines.count("--config") == 1
+        doc = _read_config_overlay(lines)
+        # The user's own explicit settings are intact...
+        assert doc["severity"] == {"abi_breaking": "error"}
+        assert doc["scope"] == {"on_incomplete": "block"}
+        # ...alongside the synthesized topology key, not instead of it.
+        assert doc["release"] == {"dso_only": True}
+
+    def test_topology_input_wins_on_a_genuine_conflict(self, tmp_path: Path) -> None:
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "release:\n  dso_only: false\n  include_private_dso: true\n",
+            encoding="utf-8",
+        )
+        script = _release_topology_script_with_preexisting_config_flag(str(build_config))
+        result = _run_bash_script(
+            script,
+            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": str(build_config)},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        # dso_only: the Action input (true) wins over the explicit false.
+        # include_private_dso: not named by any input, so the user's own
+        # explicit value passes through untouched.
+        assert doc["release"] == {"dso_only": True, "include_private_dso": True}
+
+    def test_explicit_build_config_query_and_compiler_are_not_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        """Unlike the discovered-config merge, an explicit build-config is a
+        deliberate operator action -- the same trust an explicit ``--config``
+        already carries for ``cli_options.py``'s own ``compile.compiler``/
+        ``build.query`` gates -- so neither key is stripped here."""
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "build:\n  query: 'cmake --build .'\n  system: cmake\n"
+            "compile:\n  compiler: /opt/toolchain/bin/g++\n  std: c++20\n",
+            encoding="utf-8",
+        )
+        script = _release_topology_script_with_preexisting_config_flag(str(build_config))
+        result = _run_bash_script(
+            script,
+            {"INPUT_FAIL_ON_REMOVED_LIBRARY": "true", "INPUT_BUILD_CONFIG": str(build_config)},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
+        assert doc["compile"] == {"compiler": "/opt/toolchain/bin/g++", "std": "c++20"}
+        assert doc["gate"] == {"fail_on_removed_library": True}
+        # No stripping warning should have been emitted for the trusted,
+        # explicit case.
+        assert "build.query" not in result.stderr
+        assert "compile.compiler" not in result.stderr
 
 
 class TestReleaseTopologyOverlayMergesWithDiscoveredProjectConfig:

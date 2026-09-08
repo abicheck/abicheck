@@ -937,3 +937,87 @@ class TestCompileContextForwardingParity:
         )
         assert result.returncode != 0
         assert "not support" in result.stdout
+
+
+class TestCompileContextMergesWithExplicitBuildConfig:
+    """Codex review, PR #1159 (P1, second round): combining an explicit
+    ``build-config`` input with a compile-context input (``ast-frontend``/
+    ``gcc-path``/``gcc-prefix``/``gcc-options``/``sysroot``/``nostdinc``/
+    ``lang``) used to be a hard rejection ("cannot combine ... with
+    build-config") -- the identical regression
+    ``test_action_release_topology_config.py`` found and fixed for
+    ``add_release_topology_config_flags``, confirmed present here too since
+    the two functions have shared every bug found this session. The fix
+    merges the synthesized ``compile:`` overlay into a COPY of the user's
+    own explicit build-config instead, Action input winning on a genuine
+    conflict -- and, since an explicit build-config is a deliberate operator
+    action (not passively discovered, untrusted content), the merge must
+    NOT strip ``build.query``/``compile.compiler`` from it."""
+
+    def test_explicit_build_config_settings_survive_alongside_compile_context(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "severity:\n  abi_breaking: error\ncompile:\n  std: c++17\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_BUILD_CONFIG": str(build_config)},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        # Exactly one --config -- no leftover unmerged build-config entry.
+        assert cmd.count("--config") == 1
+        path = cmd[cmd.index("--config") + 1]
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert doc["severity"] == {"abi_breaking": "error"}
+        # The user's own compile.std passes through, alongside the
+        # synthesized compile.compiler -- not replaced by it.
+        assert doc["compile"]["std"] == "c++17"
+        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
+
+    def test_compile_context_input_wins_on_a_genuine_conflict(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "compile:\n  sysroot: /old/sysroot\n  std: c++17\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_SYSROOT": "/opt/sysroot", "INPUT_BUILD_CONFIG": str(build_config)},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # sysroot: the Action input wins over the explicit build-config's own.
+        assert doc["compile"]["sysroot"] == "/opt/sysroot"
+        # std: not named by any compile-context input, so it passes through.
+        assert doc["compile"]["std"] == "c++17"
+
+    def test_explicit_build_config_query_and_compiler_are_not_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        """Unlike the discovered-config merge, an explicit build-config is a
+        deliberate operator action -- the same trust an explicit
+        ``--config`` already carries for ``cli_options.py``'s own
+        ``compile.compiler``/``build.query`` gates -- so neither key is
+        stripped here."""
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "build:\n  query: 'cmake --build .'\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        cmd, stderr = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_SYSROOT": "/opt/sysroot", "INPUT_BUILD_CONFIG": str(build_config)},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
+        assert "build.query" not in stderr
