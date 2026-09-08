@@ -6,9 +6,9 @@ import pytest
 from abicheck import _compiler_options
 from abicheck._compiler_options import (
     _split_gcc_options_windows,
+    effective_driver_mode_is_cl,
     explicit_language_standard,
     explicit_target_triple,
-    forwards_driver_mode_cl,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
@@ -518,35 +518,85 @@ class TestExplicitTargetTripleClStyle:
     def test_none_when_nothing_forwarded(self) -> None:
         assert explicit_target_triple(None, (), cl_style=True) is None
 
+    def test_clang_forwarding_prefix_is_stripped_for_an_attached_spelling(
+        self,
+    ) -> None:
+        # clang-cl's documented `/clang:<arg>` mechanism passes <arg>
+        # straight through to the underlying Clang driver -- a real
+        # `clang-cl /clang:--target=x86_64-apple-darwin` is confirmed to
+        # select that target (Codex review, fresh evidence).
+        assert (
+            explicit_target_triple(
+                "/clang:--target=x86_64-apple-darwin", (), cl_style=True
+            )
+            == "x86_64-apple-darwin"
+        )
 
-class TestForwardsDriverModeCl:
+    def test_clang_forwarding_prefix_only_applies_under_cl_style(self) -> None:
+        # A GNU-style driver has no `/clang:` forwarding syntax at all --
+        # the literal token is not a recognized spelling there.
+        assert explicit_target_triple("/clang:--target=x86_64-apple-darwin", ()) is None
+
+
+class TestEffectiveDriverModeIsCl:
     """A compile unit can select clang's CL/MSVC-compatibility mode via an
     explicit ``--driver-mode=cl`` on an otherwise generically-named
     ``clang`` binary (``buildsource.header_compile_context``'s own
     "Preserve an explicit --driver-mode=cl" docstring) -- a name-only CL
     check like ``dumper_clang._is_cl_style_driver_name`` misses this shape
-    entirely (Codex review, fresh evidence)."""
+    entirely. Conversely, an explicit ``--driver-mode=g++`` on a
+    ``clang-cl``-named binary genuinely switches OUT of CL mode (a real
+    ``clang-cl --driver-mode=g++ -print-target-triple`` reports a
+    GNU-shaped target) -- a name-only check alone can't be revoked either
+    (Codex review, both directions, fresh evidence each time)."""
 
-    def test_none_when_absent(self) -> None:
-        assert forwards_driver_mode_cl(None, ()) is False
-        assert forwards_driver_mode_cl("-O2", ("-Wall",)) is False
+    def test_name_only_when_no_override_forwarded(self) -> None:
+        assert effective_driver_mode_is_cl(False, None, ()) is False
+        assert effective_driver_mode_is_cl(True, None, ()) is True
+        assert effective_driver_mode_is_cl(False, "-O2", ("-Wall",)) is False
 
-    def test_detects_it_in_gcc_options_string(self) -> None:
-        assert forwards_driver_mode_cl("--driver-mode=cl /std:c++20", ()) is True
+    def test_explicit_cl_override_wins_over_a_gnu_name(self) -> None:
+        assert (
+            effective_driver_mode_is_cl(False, "--driver-mode=cl /std:c++20", ())
+            is True
+        )
+        assert effective_driver_mode_is_cl(False, None, ("--driver-mode=cl",)) is True
 
-    def test_detects_it_in_gcc_option_tokens(self) -> None:
-        assert forwards_driver_mode_cl(None, ("--driver-mode=cl",)) is True
+    def test_explicit_non_cl_override_wins_over_a_cl_style_name(self) -> None:
+        # The direction the OR-based predecessor of this function got
+        # wrong: a CL-named binary explicitly told to act as g++ is not
+        # CL mode any more.
+        assert effective_driver_mode_is_cl(True, None, ("--driver-mode=g++",)) is False
+        assert effective_driver_mode_is_cl(True, "--driver-mode=gcc", ()) is False
 
-    def test_a_similar_but_different_value_does_not_match(self) -> None:
-        # Exact-token match only -- "--driver-mode=cl++" or a bare
-        # "--driver-mode" with a separate "cl" argument are not the same
-        # flag and must not be conflated with the real one.
-        assert forwards_driver_mode_cl(None, ("--driver-mode=g++",)) is False
-        assert forwards_driver_mode_cl(None, ("--driver-mode", "cl")) is False
+    def test_last_override_wins(self) -> None:
+        assert (
+            effective_driver_mode_is_cl(
+                False, None, ("--driver-mode=cl", "--driver-mode=g++")
+            )
+            is False
+        )
+        assert (
+            effective_driver_mode_is_cl(
+                True, None, ("--driver-mode=g++", "--driver-mode=cl")
+            )
+            is True
+        )
+
+    def test_separate_argument_spelling_is_not_an_override(self) -> None:
+        # "--driver-mode=<value>" is documented as attached-only; a bare
+        # "--driver-mode" with a separate "cl" argument is not the same
+        # flag and must not be treated as an override either way.
+        assert (
+            effective_driver_mode_is_cl(False, None, ("--driver-mode", "cl")) is False
+        )
+        assert effective_driver_mode_is_cl(True, None, ("--driver-mode", "g++")) is True
 
     def test_malformed_gcc_options_does_not_raise(self) -> None:
-        assert forwards_driver_mode_cl('-DFOO="unterminated', ()) is False
+        assert effective_driver_mode_is_cl(False, '-DFOO="unterminated', ()) is False
         assert (
-            forwards_driver_mode_cl('-DFOO="unterminated', ("--driver-mode=cl",))
+            effective_driver_mode_is_cl(
+                False, '-DFOO="unterminated', ("--driver-mode=cl",)
+            )
             is True
         )

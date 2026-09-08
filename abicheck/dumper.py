@@ -38,8 +38,8 @@ from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache, qualified_name_segments
 from ._compiler_options import (
+    effective_driver_mode_is_cl as _effective_driver_mode_is_cl,
     explicit_target_triple as _explicit_target_triple,
-    forwards_driver_mode_cl as _forwards_driver_mode_cl,
 )
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
@@ -617,8 +617,17 @@ def _header_ast_parser(
             lang=lang,
             extra_hash_dirs=extra_hash_dirs,
             frontend_context=frontend_context,
-            pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
+            pruning_header_roots=pruning_header_roots
+            if pruning_header_roots is not None
+            else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
+        )
+        # The EFFECTIVE driver mode -- an explicit `--driver-mode=<value>`
+        # override (either direction) wins over the binary's own name
+        # (Codex review, fresh evidence: `clang-cl --driver-mode=g++`
+        # is genuinely GNU-mode despite the CL-shaped binary name).
+        is_cl_mode = _effective_driver_mode_is_cl(
+            _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
         parser = _ClangAstParser(
             ast_root,
@@ -626,30 +635,21 @@ def _header_ast_parser(
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
-            # On a probe failure, recover an explicit `--target=`. A
-            # CL-style driver (name `clang-cl`/`dpcpp-cl`, or a generic
-            # `clang` given `--driver-mode=cl` -- a replayed compile
-            # unit's own form; check both) only ever honors the one
-            # attached, double-dash `--target=<value>` spelling (a
-            # separate-argument or single-dash-attached spelling is
-            # silently ignored -- Codex review, fresh evidence), so its
-            # recovery is narrowed to that spelling (`cl_style=True`); it
-            # also gets no `sys.platform` guess (it mostly targets
-            # Windows regardless of host OS). The guess lives HERE, not
-            # in `is_darwin_target`, so a bare-`None` unit-test
-            # construction of `_ClangAstParser` is unaffected.
+            # On a probe failure, recover an explicit `--target=`. Under
+            # CL mode, only the spellings the CL driver actually honors
+            # are recovered (`cl_style=True`, including `/clang:`-
+            # forwarded ones -- Codex review, fresh evidence), and there
+            # is no `sys.platform` guess (it mostly targets Windows
+            # regardless of host OS). The guess lives HERE, not in
+            # `is_darwin_target`, so a bare-`None` unit-test construction
+            # of `_ClangAstParser` is unaffected.
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
-                    (
-                        _explicit_target_triple(
-                            gcc_options, gcc_option_tokens, cl_style=True
-                        )
+                    _explicit_target_triple(
+                        gcc_options, gcc_option_tokens, cl_style=True
                     )
-                    if (
-                        _is_cl_style_driver_name(clang_bin)
-                        or _forwards_driver_mode_cl(gcc_options, gcc_option_tokens)
-                    )
+                    if is_cl_mode
                     else (
                         _explicit_target_triple(gcc_options, gcc_option_tokens)
                         or sys.platform

@@ -1199,19 +1199,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE "
-            "POINT OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), "
-            'a genuine extern "C"/plain-C bare name (`_foo` -> `foo`, gated on '
-            "`is_extern_c`). Both gate on `is_darwin_target(target_triple)`, always "
-            "False for a bare `None`/empty triple (never guess Darwin from host OS "
-            "there). A `sys.platform` guess for a REAL probe failure lives one layer "
-            "up, in `dumper._run_clang`, after `_compiler_options."
-            "explicit_target_triple`; a CL-style driver (`clang-cl`/`--driver-mode="
-            "cl`) gets no `sys.platform` guess, and its recovery (`cl_style=True`) "
-            "is narrowed to the two spellings it actually honors (attached "
-            "`--target=<value>`, separate `-target <value>`), never one it silently "
-            "ignores. Shape check: `model.mangled_name.strip_macho_itanium_"
-            "decoration`, NOT applied to castxml."
+            "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE POINT "
+            'OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
+            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). Both gate on "
+            "`is_darwin_target(target_triple)`, always False for a bare `None`/empty triple (never "
+            "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
+            "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
+            "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) "
+            "is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a "
+            "plain OR of the two, which can never be revoked back to GNU mode. Under CL mode there is "
+            "no `sys.platform` guess, and recovery (`cl_style=True`) is narrowed to the spellings "
+            "actually honored (attached `--target=<value>`, separate `-target <value>`, either "
+            "`/clang:`-forwarded), never one silently ignored. Shape check: `model.mangled_name."
+            "strip_macho_itanium_decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156),
         seed_tests=(
@@ -1236,17 +1236,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- code inspection + synthetic unit "
-                    "tests only. Recurred SEVEN times within #1138/#1149/#1156: "
-                    "Itanium/plain-C shapes reading False on a failed probe; a guess "
-                    "INSIDE `is_darwin_target` plus an unconditional castxml strip "
-                    'corrupting `asm("__Zfake")`; that guess moved back inside '
-                    "`is_darwin_target` (caught by real macos-latest CI); a "
-                    "possibly-ignored explicit target recovered under a CL-style "
-                    "driver; the `sys.platform` guess leaking outside that gate; "
-                    "`--driver-mode=cl` on a plain `clang` name evading the "
-                    "name-only CL check; and that gate recovering NO spelling at "
-                    "all, when two are genuinely honored -- all but one via Codex."
+                    "No Mach-O toolchain here -- code inspection + synthetic unit tests only. "
+                    "Recurred NINE times within #1138/#1149/#1156, each via Codex but one: "
+                    "Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE "
+                    '`is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; '
+                    "that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); "
+                    "a possibly-ignored explicit target recovered under a CL-style driver; the "
+                    "`sys.platform` guess leaking outside that gate; `--driver-mode=cl` on a plain "
+                    "`clang` name evading the name-only CL check; that gate recovering NO spelling "
+                    "when two are honored; a `/clang:`-forwarded spelling still missed; and a "
+                    "CL-named binary explicitly reverted to GNU mode still treated as CL."
                 ),
                 reference="#1138/#1149 follow-ups, fixed by #1156",
             ),

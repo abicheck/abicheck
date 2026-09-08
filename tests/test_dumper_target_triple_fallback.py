@@ -316,6 +316,80 @@ def test_successful_probe_still_honored_for_a_cl_style_driver(
     assert parser._target_triple == "x86_64-pc-windows-msvc"
 
 
+def test_probe_failure_under_a_cl_style_driver_recovers_clang_forwarded_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``clang-cl``'s documented ``/clang:<arg>`` mechanism forwards <arg>
+    straight through to the underlying Clang driver -- a real
+    ``clang-cl /clang:--target=x86_64-apple-darwin`` genuinely selects that
+    target (Codex review, fourth round, fresh evidence). So a probe
+    failure recovers it too, same as the two spellings above."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="/clang:--target=x86_64-apple-macos11",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-apple-macos11"
+
+
+def test_a_cl_style_name_explicitly_overridden_to_gnu_mode_is_not_cl_style(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ``--driver-mode=g++`` genuinely switches a CL-named
+    binary OUT of CL mode (a real ``clang-cl --driver-mode=g++
+    -print-target-triple`` reports a GNU-shaped target -- Codex review,
+    fifth round, fresh evidence). So on a probe failure it gets the
+    GNU-style recovery (every spelling, plus the sys.platform guess), not
+    the narrowed CL-style one -- the reverse of the name-only default."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="--driver-mode=g++ -target=x86_64-unknown-linux-gnu",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-unknown-linux-gnu"
+
+
 def test_probe_failure_with_option_selected_cl_mode_recovers_the_honored_spelling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

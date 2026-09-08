@@ -426,6 +426,15 @@ def explicit_target_triple(
     mode still reflects what the driver actually did, where the
     unrestricted parse (correct for a GNU-style driver) would recover a
     value the driver silently dropped.
+
+    Under ``cl_style=True``, a token is also recognized after stripping a
+    leading ``/clang:`` forwarding prefix — ``clang-cl``'s documented
+    mechanism for passing an argument straight through to the underlying
+    Clang driver (``clang-cl /clang:--target=x86_64-apple-darwin`` is
+    confirmed to select that target — Codex review, fresh evidence). This
+    is a general normalization, not a one-off case: it reuses the exact
+    same honored-spelling check above for whatever the stripped token
+    turns out to be, attached or the first half of a separate pair alike.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -436,6 +445,11 @@ def explicit_target_triple(
             # above: malformed --gcc-options must not abort the dump.
             pass
     tokens.extend(gcc_option_tokens)
+    if cl_style:
+        tokens = [
+            token[len("/clang:") :] if token.startswith("/clang:") else token
+            for token in tokens
+        ]
     value: str | None = None
     i = 0
     while i < len(tokens):
@@ -454,19 +468,35 @@ def explicit_target_triple(
     return value
 
 
-def forwards_driver_mode_cl(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+def effective_driver_mode_is_cl(
+    is_cl_style_name: bool,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
 ) -> bool:
-    """Whether forwarded options select clang's CL/MSVC-compatibility mode
-    via an explicit ``--driver-mode=cl``, on an otherwise generically-named
-    ``clang`` binary (``clang --driver-mode=cl /std:c++20 /c t.cpp`` --
-    see ``buildsource.header_compile_context``'s own "Preserve an explicit
-    --driver-mode=cl" docstring for why a replayed compile unit selects CL
-    mode this way rather than via a ``clang-cl``-shaped binary name).
-    Callers deciding whether a driver is CL-style must check this ALONGSIDE
-    a name-only check like ``dumper_clang._is_cl_style_driver_name``, not
-    instead of it -- neither alone covers both real invocation shapes
-    (Codex review, fresh evidence).
+    """The actually-effective driver mode (CL/MSVC-compatibility vs.
+    GNU-style), not just a name-only guess.
+
+    A binary's own basename (``clang-cl``/``dpcpp-cl`` vs. a plain
+    ``clang``/``clang++``) only picks the *default* mode; an explicit,
+    forwarded ``--driver-mode=<value>`` OVERRIDES that default in either
+    direction, and clang applies last-option-wins when more than one is
+    given. Two real, evidenced invocation shapes this must resolve
+    identically:
+
+    - ``clang --driver-mode=cl ...`` (a replayed compile unit's own form --
+      see ``buildsource.header_compile_context``'s "Preserve an explicit
+      --driver-mode=cl" docstring): a GNU-named binary switched INTO CL
+      mode.
+    - ``clang-cl --driver-mode=g++ ...`` (a real ``clang-cl --driver-mode=
+      g++ -print-target-triple`` reports a GNU-shaped target -- Codex
+      review, fresh evidence): a CL-named binary switched OUT of CL mode.
+
+    Earlier revisions of this check OR'd a name-only test with "was
+    --driver-mode=cl forwarded", which answered the first shape but not
+    the second (a name-only `True` was never revocable). Determining the
+    single effective mode -- the last ``--driver-mode=`` override if any,
+    else the name -- covers both by construction instead of accumulating
+    a third one-off case alongside the first two.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -475,7 +505,13 @@ def forwards_driver_mode_cl(
         except ValueError:
             pass
     tokens.extend(gcc_option_tokens)
-    return "--driver-mode=cl" in tokens
+    override: str | None = None
+    for token in tokens:
+        if token.startswith("--driver-mode="):
+            override = token[len("--driver-mode=") :]
+    if override is not None:
+        return override == "cl"
+    return is_cl_style_name
 
 
 def language_standard_field(

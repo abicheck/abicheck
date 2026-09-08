@@ -27,21 +27,28 @@ it should read in CHANGELOG.md. Delete the other sections.
   explicit_target_triple` helper, and — only when no explicit target was
   requested either — falls back to a triple string derived from the
   running interpreter's own `sys.platform`. The `sys.platform` guess is
-  skipped entirely for CL/MSVC-compatibility mode, selected either by a
-  CL-style binary name (`clang-cl`/`dpcpp-cl`) or by an explicit
-  `--driver-mode=cl` on an otherwise generically-named `clang` (a new
-  `_compiler_options.forwards_driver_mode_cl` helper): it mostly targets
-  Windows regardless of host OS (a real `clang-cl -print-target-triple`
-  reports a Windows triple even cross-compiled from macOS), so guessing
-  `sys.platform` there would misclassify a Windows AST as Darwin on a
-  macOS host. The explicit-`--target=` recovery itself stays active under
-  CL mode too, but narrowed (`explicit_target_triple(..., cl_style=True)`)
-  to the two spellings a CL-style driver actually honors — attached,
-  double-dash `--target=<value>` and separate-argument, single-dash
-  `-target <value>` — since the other two spellings (attached single-dash,
-  separate double-dash) complete with an "unknown argument ignored"
-  warning and are never applied; recovering one of those as if it were
-  real would risk applying the wrong platform normalization.
+  skipped entirely for CL/MSVC-compatibility mode. Whether CL mode is
+  *effectively* in force is resolved by a new `_compiler_options.
+  effective_driver_mode_is_cl` helper: the last explicitly-forwarded
+  `--driver-mode=<value>` override, in either direction, wins over the
+  binary's own name (`clang-cl`/`dpcpp-cl` default to CL mode, a plain
+  `clang`/`clang++` defaults to GNU mode) — so `clang --driver-mode=cl`
+  genuinely enters CL mode and `clang-cl --driver-mode=g++` genuinely
+  leaves it, rather than a name-only guess that could never be revoked.
+  It mostly targets Windows regardless of host OS (a real
+  `clang-cl -print-target-triple` reports a Windows triple even
+  cross-compiled from macOS), so guessing `sys.platform` there would
+  misclassify a Windows AST as Darwin on a macOS host. The explicit-
+  `--target=` recovery itself stays active under CL mode too, but
+  narrowed (`explicit_target_triple(..., cl_style=True)`) to the
+  spellings a CL-style driver actually honors — attached, double-dash
+  `--target=<value>`; separate-argument, single-dash `-target <value>`;
+  and either of those forwarded through clang-cl's documented
+  `/clang:<arg>` passthrough (e.g. `/clang:--target=<value>`) — since the
+  other spellings (attached single-dash, separate double-dash) complete
+  with an "unknown argument ignored" warning and are never applied;
+  recovering one of those as if it were real would risk applying the
+  wrong platform normalization.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in
