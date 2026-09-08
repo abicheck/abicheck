@@ -79,17 +79,26 @@ _is_release_style_operand() {
 # Collapsing CR/LF in the one place every annotation is emitted covers each
 # interpolation site in this file at once, including the ones that predate
 # this helper, rather than asking every future message to remember.
+#
+# `printf`, never `echo`: with `xpg_echo` on -- a build-time default on some
+# bash builds, and settable through `BASHOPTS`/`BASH_ENV` -- `echo` expands
+# backslash escapes in its argument, so a value carrying the *literal* five
+# characters `\n::error::` passes the CR/LF collapse above (it holds no real
+# newline to collapse) and is then turned into one by the emitter itself.
+# Reproducible against this script with `bash -O xpg_echo` (Codex review).
+# `printf '%s\n'` treats the value as data under every shell option, which
+# is why the format string is fixed and the message is an argument.
 _sanitize_annotation() {
   printf '%s' "$1" | tr '\r\n' '  '
 }
 
 _fail() {
-  echo "::error::$(_sanitize_annotation "$1")"
+  printf '%s\n' "::error::$(_sanitize_annotation "$1")"
   exit 1
 }
 
 _warn() {
-  echo "::warning::$(_sanitize_annotation "$1")"
+  printf '%s\n' "::warning::$(_sanitize_annotation "$1")"
 }
 
 case "$MODE" in

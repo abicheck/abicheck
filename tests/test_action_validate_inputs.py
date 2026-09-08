@@ -97,7 +97,13 @@ _VALIDATOR_INPUT_VARS = (
 )
 
 
-def _run_validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _run_validate(
+    env_extra: dict[str, str], bash_options: list[str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the real validator. ``bash_options`` are passed to the interpreter
+    itself (e.g. ``["-O", "xpg_echo"]``), so a test can exercise the script
+    under a shell configured the way a real runner's might be -- see
+    ``test_action_validate_inputs_injection.py``."""
     # Strip any of validate-inputs.sh's own INPUT_* vars the *test process*
     # inherited (e.g. if pytest itself ran inside a composite-action step)
     # before layering env_extra back on top -- otherwise a test that
@@ -108,7 +114,7 @@ def _run_validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]
         env.pop(name, None)
     env.update(env_extra)
     return subprocess.run(
-        [_bash_executable(), str(VALIDATE_SH)],
+        [_bash_executable(), *(bash_options or []), str(VALIDATE_SH)],
         capture_output=True,
         text=True,
         env=env,

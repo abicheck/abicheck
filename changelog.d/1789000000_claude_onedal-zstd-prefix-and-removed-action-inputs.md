@@ -47,7 +47,12 @@
   `build-info: "x\n::error::spoofed"` emitted a spoofed error (and
   `::set-output`/`::add-mask` were reachable the same way). CR/LF is now
   collapsed in the shared `_warn`/`_fail` emitters, covering every
-  interpolation site in the file at once. `action/run.sh` builds its
+  interpolation site in the file at once, and those emitters now use
+  `printf '%s\n'` rather than `echo`: under a shell with `xpg_echo` enabled
+  (a build-time default on some bash builds, and reachable through
+  `BASHOPTS`/`BASH_ENV`) `echo` expands backslash escapes, so a value
+  carrying the *literal* characters `\n::error::` held no real newline for
+  the collapse to remove and was turned into one by the emitter itself. `action/run.sh` builds its
   annotations with inline `echo` calls rather than a shared helper and is not
   covered by this fix; that pass is recorded as a known gap on the
   `trust_boundary.shell_workflow_injection` bug class.

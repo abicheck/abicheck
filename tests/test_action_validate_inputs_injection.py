@@ -41,8 +41,20 @@ whole reason this bug class exists: #705 shipped a text-asserted defense and
 from __future__ import annotations
 
 import pytest
-
 from test_action_validate_inputs import VALIDATE_SH, _run_validate
+
+#: Escape sequences spelled with *literal* backslashes -- no real newline
+#: anywhere, so the CR/LF collapse has nothing to remove. These are inert
+#: under a plain `echo` and become real lines under one with `xpg_echo`
+#: enabled, which is a build-time default on some bash builds and reachable
+#: through `BASHOPTS`/`BASH_ENV`. `printf '%s\\n'` is what makes them data
+#: under every shell option (Codex review, PR #1165).
+_ESCAPE_PAYLOADS = (
+    r"1\n::error::PWNED",
+    r"1\r\n::error::PWNED",
+    r"1\n::set-output name=pwned::yes",
+    r"1\x0a::error::PWNED",
+)
 
 _INJECTION_PAYLOADS = (
     "1\n::error::PWNED",
@@ -98,3 +110,36 @@ class TestAnnotationInjection:
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": "1\n2"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "jobs ('1 2')" in result.stdout
+
+    @pytest.mark.parametrize("payload", _ESCAPE_PAYLOADS)
+    @pytest.mark.parametrize("xpg_echo", [False, True])
+    def test_a_literal_escape_sequence_cannot_become_a_new_line(
+        self, payload: str, xpg_echo: bool
+    ) -> None:
+        """A value holding the *literal* characters ``\\n::error::`` must stay
+        one line under a shell whose ``echo`` expands backslash escapes.
+
+        The CR/LF collapse cannot defend this on its own -- there is no real
+        newline in the value for it to remove; the emitter would create one.
+        Running the real script under ``bash -O xpg_echo`` reproduced exactly
+        that before the emitters moved from ``echo`` to ``printf '%s\\n'``,
+        which is why this is parametrized over both shell modes rather than
+        asserting only the default one: the default-mode case alone passed
+        before the fix too.
+        """
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_JOBS": payload},
+            bash_options=["-O", "xpg_echo"] if xpg_echo else [],
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
+        assert len(emitted) == 1, (
+            f"payload {payload!r} produced {len(emitted)} annotation lines "
+            f"under xpg_echo={xpg_echo}:\n{result.stdout}"
+        )
+        for line in result.stdout.splitlines():
+            assert not line.startswith(("::error::", "::set-output")), (
+                f"payload {payload!r} forged a workflow command under "
+                f"xpg_echo={xpg_echo}:\n{result.stdout}"
+            )
