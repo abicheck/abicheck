@@ -983,7 +983,23 @@ def test_dump_malformed_pack_dir_errors(tmp_path):
 
 
 def _make_snap(tmp_path, name, version):
-    snap = AbiSnapshot(library="libfoo.so", version=version, from_headers=True)
+    # ADR-068 §3 row 3 (five-check slice): ``parsed_with_build_context=True``
+    # -- every caller here pairs this snapshot with real ``--build-info``
+    # evidence, and `compare()`'s now-automatic `header_build_context_
+    # mismatch` cross-source check would otherwise fire a real, unrelated
+    # PERSISTENT API_BREAK finding purely from this fixture's own
+    # (previously inert) default, since these snapshots' build evidence
+    # commonly carries an ABI-relevant flag (e.g. `-std=`). These tests are
+    # about evidence-policy/metrics classification, not header/build context
+    # coherence, so the fixture should honestly represent headers dumped
+    # consistent with the paired build, matching every other test file's
+    # `--build-info`-paired snapshot shape.
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version=version,
+        from_headers=True,
+        parsed_with_build_context=True,
+    )
     p = tmp_path / name
     save_snapshot(snap, p)
     return p

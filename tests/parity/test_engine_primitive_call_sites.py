@@ -28,21 +28,23 @@ compare's real, user-facing entry point*.
 
 **Documented partial exception (ADR-068 D3/D4/D5 / plan P2):**
 ``abicheck/workflows/cross_source_evolution.py`` is a second, legitimate
-caller of ``run_crosschecks`` -- the migration's slices so far fold six
+caller of ``run_crosschecks`` -- the migration now folds **all eleven**
 checks (``unversioned_exported_symbol``, ``private_header_leak``,
 ``exported_not_public``, ``public_not_exported``, ``rtti_for_internal_type``,
-``public_to_internal_dependency``) into evolution-stated findings via
-``compare()``'s own ``cross_source_checks`` keyword. That keyword defaults
-to ``True`` and is reached automatically by every real front end (CLI,
-typed API, Action) with no opt-in flag of any kind (D5 rejects "a flag that
-merely enables useful analysis") -- which is exactly why none of the six
-checks is registered in ``tests/parity/gaps.py`` any more; see
-``test_crosscheck_parity.py``'s own positive coverage for all six. The
-other five checks this primitive backs remain scan-only, so every *other*
-crosscheck-backed gap entry stays exactly as red as before. Only the raw
-structural claim this module checks -- "nothing but scan_engine.py calls
-the primitive at all" -- needed updating to admit the one caller these
-slices deliberately add.
+``public_to_internal_dependency``, ``header_build_context_mismatch``,
+``odr_type_variant``, ``identity_collision_detected``,
+``compile_context_conflict``, ``source_surface_dso_mismatch``) into
+evolution-stated findings via ``compare()``'s own ``cross_source_checks``
+keyword. That keyword defaults to ``True`` and is reached automatically by
+every real front end (CLI, typed API, Action) with no opt-in flag of any
+kind (D5 rejects "a flag that merely enables useful analysis") -- which is
+exactly why none of the eleven checks is registered in
+``tests/parity/gaps.py`` any more; see ``test_crosscheck_parity.py``'s own
+positive coverage for all eleven. No cross-source check remains scan-only,
+so every crosscheck-backed gap entry this registry used to carry is gone.
+Only the raw structural claim this module checks -- "nothing but
+scan_engine.py calls the primitive at all" -- needed updating to admit the
+one caller these slices deliberately add.
 """
 
 from __future__ import annotations
@@ -59,12 +61,17 @@ _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 #: function name -> (defining module, expected caller module(s), gap key).
 #: `expected_callers` is usually a single module; `run_crosschecks` also
 #: allows `workflows/cross_source_evolution.py`, the documented ADR-068 D3
-#: partial-migration exception above.
-_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str]] = {
+#: partial-migration exception above. `gap_key` is `None` once every check a
+#: primitive backs has migrated (as `run_crosschecks` now has, all eleven
+#: crosscheck entries closed) — there is no longer a still-open
+#: `tests/parity/gaps.py` row to reference for the "landing this closes a
+#: gap" error-message hint below, unlike `scan_files`/`run_preprocessor_scan`
+#: (still real, open gaps).
+_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "run_crosschecks": (
         "buildsource/crosscheck.py",
         ("scan_engine.py", "workflows/cross_source_evolution.py"),
-        "odr_type_variant",  # any still-scan-only crosscheck gap key will do
+        None,  # all eleven crosscheck checks are migrated; no gap key remains
     ),
     "scan_files": (
         "buildsource/pattern_scan.py",
@@ -183,7 +190,8 @@ def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
 @pytest.mark.parametrize("function_name", sorted(_ENGINE_PRIMITIVES))
 def test_only_scan_engine_calls_it(function_name: str) -> None:
     defining_module, expected_callers, gap_key = _ENGINE_PRIMITIVES[function_name]
-    assert gap_key in EXPECTED_GAPS, f"{gap_key!r} must be a registered parity gap"
+    if gap_key is not None:
+        assert gap_key in EXPECTED_GAPS, f"{gap_key!r} must be a registered parity gap"
     expected = {f"abicheck/{m}" for m in expected_callers}
 
     sites = _call_sites(function_name, defining_module)
@@ -193,12 +201,21 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
 
     callers = {_posix(p) for p in sites}
     if callers - expected:
+        if gap_key is not None:
+            hint = (
+                f"If this is Phase 2a/2b landing ({EXPECTED_GAPS[gap_key].plan_phase}), "
+                f"delete the {gap_key!r} entry from tests/parity/gaps.py in the "
+                "same PR instead of leaving this assertion to rot."
+            )
+        else:
+            hint = (
+                "Every crosscheck gap this primitive backed is already closed "
+                "(no gaps.py row left to delete) -- if this is a real new "
+                "caller, add it to expected_callers above with a rationale."
+            )
         raise AssertionError(
             f"{function_name}() gained a caller outside {sorted(expected)}: "
-            f"{sorted(callers)}. If this is Phase 2a/2b landing "
-            f"({EXPECTED_GAPS[gap_key].plan_phase}), delete the "
-            f"{gap_key!r} entry from tests/parity/gaps.py in the same PR "
-            "instead of leaving this assertion to rot."
+            f"{sorted(callers)}. {hint}"
         )
     assert callers == expected, (
         f"{function_name}() has no production caller at all under abicheck/ "

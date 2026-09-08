@@ -1357,9 +1357,57 @@ def _header_context_mismatch_snap(tmp_path: Path, name: str) -> Path:
     return _write_snapshot(tmp_path / name, snap)
 
 
+def _unversioned_export_snap(tmp_path: Path, name: str) -> Path:
+    # A RISK-severity crosscheck (unversioned_exported_symbol), unlike
+    # header_build_context_mismatch/odr_type_variant (API_BREAK-severity --
+    # see the note on test_baseline_compare_keeps_crosschecks_advisory_by_
+    # default below for why those two can no longer demonstrate this
+    # fixture's scenario). A RISK-severity crosscheck finding reaching
+    # compare()'s own automatic pipeline (ADR-068 §3 row 3) does not shift
+    # the baseline's legacy exit code/verdict on its own -- COMPATIBLE_WITH_
+    # RISK never contributes to exit 2/4 -- so this fixture still
+    # demonstrates scan's own separate advisory-by-default/`--crosscheck
+    # KEY=error` promotion semantics.
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=False,
+        elf=ElfMetadata(
+            symbols=[
+                ElfSymbol(name="_Z3okv", version="FOO_1.0", visibility="default"),
+                ElfSymbol(name="_Z6secretv", version="", visibility="default"),
+            ],
+            versions_defined=["FOO_1.0"],
+        ),
+    )
+    return _write_snapshot(tmp_path / name, snap)
+
+
 def test_baseline_compare_keeps_crosschecks_advisory_by_default(runner, tmp_path):
-    old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
-    new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
+    """A RISK-severity crosscheck (``unversioned_exported_symbol``) stays
+    advisory (exit 0) absent an explicit ``--crosscheck KEY=error`` promotion
+    -- scan's own crosscheck-severity layer, independent of compare()'s own
+    ChangeKind default verdict.
+
+    This test used to use the shared ``_header_context_mismatch_snap``
+    fixture (``header_build_context_mismatch``), but that check migrated
+    onto ``compare()``'s own automatic pipeline in the PR that closed out
+    ADR-068 §3 row 3 ("11 of 11" cross-source checks) -- its ChangeKind
+    default verdict is API_BREAK, which now gates the baseline diff
+    unconditionally through compare()'s own pipeline, the same way it would
+    for a direct ``compare`` invocation, regardless of scan's own
+    crosscheck-promotion config. That is the intended migration outcome
+    (see ``test_baseline_compare_promoted_crosscheck_still_gates`` below,
+    which still passes: promoting an already-gating check just ties, never
+    conflicts with, the same exit code) -- not a regression, but it does
+    mean that fixture can no longer demonstrate an *unpromoted*, advisory
+    crosscheck the way this test needs. A RISK-severity check (this
+    fixture) is unaffected: COMPATIBLE_WITH_RISK never contributes to the
+    legacy exit-code scheme's 2/4 outcomes on its own, migrated onto
+    compare() or not.
+    """
+    old = _unversioned_export_snap(tmp_path, "old.abi.json")
+    new = _unversioned_export_snap(tmp_path, "new.abi.json")
     res = runner.invoke(
         main,
         [
@@ -1376,7 +1424,7 @@ def test_baseline_compare_keeps_crosschecks_advisory_by_default(runner, tmp_path
     assert payload["verdict"] != "API_BREAK"
     assert payload["diff"]["api_break"] == 0
     assert (
-        payload["crosscheck"]["counts_by_check"]["header_build_context_mismatch"] == 1
+        payload["crosscheck"]["counts_by_check"]["unversioned_exported_symbol"] == 1
     )
 
 
@@ -1532,7 +1580,17 @@ def test_a_promoted_crosscheck_updates_the_persisted_exit_block(runner, tmp_path
     assert res.exit_code == 2, res.output
     exit_block = _payload(res)["diff"]["exit"]
     assert exit_block["code"] == 2, exit_block
-    assert exit_block["reasons"] == ["promoted_crosscheck"], exit_block
+    # `header_build_context_mismatch` migrated onto `compare()`'s own
+    # automatic pipeline (ADR-068 §3 row 3, five-check slice): the baseline
+    # diff's own compatibility gate now *also* contributes exit 2 for this
+    # fixture (its ChangeKind default verdict is API_BREAK), independent of
+    # scan's own crosscheck-promotion mechanism -- so both reasons are now
+    # genuinely present, not just `promoted_crosscheck` on its own. This is
+    # the intended migration outcome (the two mechanisms now agree rather
+    # than one silently masking the other), not a regression.
+    assert exit_block["reasons"] == ["compatibility_gate", "promoted_crosscheck"], (
+        exit_block
+    )
     # The invariant Codex flagged on an earlier revision: `code` must equal
     # `max()` over every contribution field, not just the two this function
     # used to hand-patch.
