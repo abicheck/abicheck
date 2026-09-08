@@ -642,13 +642,13 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(
 def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Codex review: dump_cmd rejects --depth source + --ast-frontend hybrid
+    """Codex review: dump_cmd rejects --depth source + compile.frontend: hybrid
     for a raw --sources tree, but the ctx.invoke(dump_cmd, ...) this function
     makes never passes depth= -- so without an equivalent check here, the
-    identical `compare --depth source --sources <raw tree> --ast-frontend
-    hybrid` invocation silently reached the nested dump_cmd with depth=None,
-    skipping the rejection dump --sources <tree> --depth source --ast-frontend
-    hybrid would give for the same tree. This must raise the same
+    identical `compare --depth source --sources <raw tree>` invocation (with
+    compile.frontend: hybrid selected) silently reached the nested dump_cmd
+    with depth=None, skipping the rejection `dump --sources <tree> --depth
+    source` would give for the same tree. This must raise the same
     UsageError, without ever calling ctx.invoke (which would run a real,
     silently-degraded L4 replay)."""
     import abicheck.frontends.cli.commands.compare as climod
@@ -663,7 +663,7 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
             called["n"] += 1
 
     monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
-    with pytest.raises(climod.click.UsageError, match="--ast-frontend hybrid"):
+    with pytest.raises(climod.click.UsageError, match="compile.frontend: hybrid"):
         climod._embed_inline_source_side(
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
@@ -680,13 +680,14 @@ def test_embed_inline_source_rejects_hybrid_frontend_at_depth_source(
 def test_the_hybrid_rejection_names_only_live_flags(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A recovery hint that names a removed flag is worse than none.
+    """A recovery hint that names a removed flag/option is worse than none.
 
-    The message told the user to pass ``--old-ast-frontend castxml`` /
-    ``--new-ast-frontend clang`` and described the operand as an
-    ``--old-sources`` tree. All three spellings are gone -- ``--ast-frontend``
-    and ``--sources`` are side-aware now -- so following the instruction
-    produced a second, unrelated unknown-option error (Codex review).
+    The message used to tell the user to pass ``--old-ast-frontend castxml``/
+    ``--new-ast-frontend clang``, then (post-ADR-040-Lever-1) ``--ast-frontend
+    old=castxml``/``--ast-frontend new=clang``. Phase 7b demoted the whole
+    ``--ast-frontend`` flag -- side-aware spelling included -- to
+    ``compile.frontend``, so the hint must name that config key instead of
+    any CLI flag at all (Codex review, extended for the Phase 7b demotion).
     """
     import abicheck.frontends.cli.commands.compare as climod
     from abicheck.service_scan import CompileContext
@@ -711,10 +712,15 @@ def test_the_hybrid_rejection_names_only_live_flags(
             label="old", depth="source",
         )
     msg = str(excinfo.value)
-    for dead in ("--old-ast-frontend", "--new-ast-frontend", "--old-sources"):
+    for dead in (
+        "--old-ast-frontend",
+        "--new-ast-frontend",
+        "--old-sources",
+        "--ast-frontend",
+    ):
         assert dead not in msg, msg
     # ...and it still names a real way out, so the fix is not just deletion.
-    assert "--ast-frontend old=castxml" in msg, msg
+    assert "compile.frontend" in msg, msg
     assert "--sources old=" in msg, msg
 
 

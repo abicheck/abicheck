@@ -34,8 +34,8 @@ directories, and translation units were in view.
 | `--lang c\|c++` | language of the surface |
 | `--compiler`, `--compiler-prefix` | select the compiler driver used for header extraction |
 | `--compiler-option` (repeatable) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
-| `--sysroot`, `--include` / `-I`, `--nostdinc` | header search context |
-| `--ast-frontend` | which header-AST backend parses the headers |
+| `--include` / `-I` | header search context |
+| `.abicheck.yml`'s `compile:` block (`frontend`/`sysroot`/`nostdinc` keys) | which header-AST backend parses the headers, and its sysroot/system-include search context |
 | `--env-matrix` | compare across several environments in one run |
 
 Project-level defaults belong in `.abicheck.yml` rather than repeated on the
