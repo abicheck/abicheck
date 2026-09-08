@@ -89,8 +89,27 @@ def _valid_flags(subcommand: str) -> set[str]:
     # truncation, and an ellipsis-truncated flag can never match a real one
     # (a false "action/run.sh passes an option scan doesn't accept" failure,
     # reproduced deterministically at COLUMNS=80/unset).
+    #
+    # PYTHONPATH is dropped rather than inherited (`{**os.environ}` would
+    # otherwise pass it straight through): this test's whole point is asking
+    # the real, pip-installed `abicheck` what its own CLI accepts, and
+    # `action/run.sh` itself documents (see its own `PYTHONPATH=` clearing
+    # before every `abicheck`-importing invocation, e.g. around line 773)
+    # that an inherited `PYTHONPATH` can make `import abicheck` resolve a
+    # same-named module/package elsewhere on that path instead of the real
+    # one — silently shrinking (or otherwise changing) the CLI surface this
+    # subprocess reports. Reproduced directly under a full `pytest -n auto`
+    # run: this test, scheduled last on its worker, intermittently saw
+    # `compare` missing exactly `compile_context_options`'s flag group
+    # (`--ast-frontend`/`--compiler`/`--compiler-prefix`/`--lang`/
+    # `--nostdinc`/`--sysroot`) — never reproduced in isolation, consistent
+    # with some earlier test in the same xdist worker leaving a stale
+    # `PYTHONPATH` in `os.environ` for the remainder of that worker's
+    # session. `sys.executable`'s own resolution and every other ambient
+    # variable (`PATH` included) stay inherited — only `PYTHONPATH` is a
+    # known, previously-documented shadowing vector in this codebase.
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",
         "COLUMNS": "300",
