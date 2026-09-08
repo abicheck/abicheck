@@ -226,8 +226,8 @@ class TestCompareHelpAllDisclosure:
     def test_help_all_shows_everything_curated_hides(self) -> None:
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--sysroot",
-            "--ast-frontend",
+            "--compiler-prefix",
+            "--frontend-context",
             "--write",
             "--report-mode",
             "--pdb-path",
@@ -280,7 +280,13 @@ _HELP_ALL_COMMANDS: list[
     (
         "dump",
         cli_help.DUMP_COMMON_OPTION_NAMES,
-        ("--sysroot", "--ast-frontend", "--follow-deps", "--debug-root", "--pdb-path"),
+        (
+            "--compiler-prefix",
+            "--frontend-context",
+            "--follow-deps",
+            "--debug-root",
+            "--pdb-path",
+        ),
         (
             "--header",
             "--include",
@@ -299,8 +305,8 @@ _HELP_ALL_COMMANDS: list[
         # severity"/"Public-surface scoping" panel membership (cli_help.py),
         # so they stay valid examples here.
         (
-            "--sysroot",
-            "--ast-frontend",
+            "--compiler-prefix",
+            "--frontend-context",
             "--write",
             "--pattern-verdicts",
             "--risk-rules",

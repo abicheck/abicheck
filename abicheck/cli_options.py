@@ -25,7 +25,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from typing import TYPE_CHECKING, TypeVar, overload
 
 import click
 
@@ -38,7 +38,6 @@ from .frontends.cli.options.params import (
     SIDED_INCLUDE_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_STR_PARAM,
-    SidedChoiceParam,
 )
 
 if TYPE_CHECKING:
@@ -163,34 +162,17 @@ def _split_sided_version(
     return old, new
 
 
-def _split_sided_frontend(
-    pairs: Sequence[tuple[str, str]],
-) -> tuple[str, str | None, str | None]:
-    """Resolve ``--ast-frontend``'s ``(side, frontend)`` pairs.
-
-    The "base + per-side override" model :func:`_split_sided_base` implements
-    for paths, for a string with a default: a bare/``both=`` value is the
-    frontend both sides use, ``old=``/``new=`` override one side (``None`` =
-    inherit the base), and an unset base is ``"auto"``. Last value wins per
-    bucket.
-    """
-    base = "auto"
-    old: str | None = None
-    new: str | None = None
-    for side, frontend in pairs:
-        if side == "both":
-            base = frontend
-        elif side == "old":
-            old = frontend
-        else:
-            new = frontend
-    return base, old, new
-
-
 def normalize_sided_options(kwargs: dict[str, object]) -> None:
     """Translate the sided ``header``/``include``/``sources``/``build_info``/
-    ``debug_root``/``pdb``/``probe_matrix``/``version``/``ast-frontend`` dests
-    into the per-side kwargs the command bodies consume, in place (ADR-040 L1).
+    ``debug_root``/``pdb``/``probe_matrix``/``version`` dests into the
+    per-side kwargs the command bodies consume, in place (ADR-040 L1).
+
+    ``--ast-frontend`` used to be one of these (a sided ``(side, frontend)``
+    pair list, split via a now-removed ``_split_sided_frontend``) until Phase
+    7b demoted it to ``compile.frontend``-only; ``header_backend``/
+    ``old_header_backend``/``new_header_backend`` stay real kwargs downstream
+    (via each command's own Python-level default) but are never populated
+    from a Click option any more.
 
     Absent keys are left untouched, so this is safe to call on any command that
     composes only a subset of the sided families.
@@ -246,13 +228,6 @@ def normalize_sided_options(kwargs: dict[str, object]) -> None:
         old_v, new_v = _split_sided_version(kwargs.pop("version"))  # type: ignore[arg-type]
         kwargs["old_version"] = old_v
         kwargs["new_version"] = new_v
-    if isinstance(kwargs.get("header_backend"), tuple):
-        base_f, old_f, new_f = _split_sided_frontend(
-            kwargs["header_backend"]  # type: ignore[arg-type]
-        )
-        kwargs["header_backend"] = base_f
-        kwargs["old_header_backend"] = old_f
-        kwargs["new_header_backend"] = new_f
 
 
 # ── ADR-037 D3: shared option families ───────────────────────────────────────
@@ -659,37 +634,47 @@ _enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
 )
 
 
-#: The AST frontends ``--ast-frontend`` accepts, in one place so the sided and
-#: single-valued spellings of the option cannot drift apart.
+#: The AST frontends the header backend accepts. ``--ast-frontend`` itself was
+#: demoted off the CLI (Phase 7b, ``compile.frontend`` config key only); this
+#: set stays as the shared validation vocabulary for that config value and for
+#: :data:`~abicheck.api_types.HEADER_AST_FRONTENDS`.
 AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
 
 
-def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]:
-    """L2 header-AST compile context — the cross-toolchain + frontend family.
+def compile_context_options() -> Callable[[F], F]:
+    """L2 header-AST compile context — the cross-toolchain family.
 
-    A factory (``@compile_context_options()``) because ``--ast-frontend`` is
-    side-aware on ``compare`` and single-valued on ``dump``/``scan``: with
-    *sided_frontend*, it becomes a repeatable ``[old=|new=]FRONTEND`` option
-    (ADR-040 Lever 1's convention, the same one ``--header``/``--include``/
-    ``--version`` follow) and :func:`normalize_sided_options` splits it back
-    into the ``header_backend`` / ``old_header_backend`` /
-    ``new_header_backend`` triple the compare flow already threads. That
-    replaces the separate ``--old-ast-frontend``/``--new-ast-frontend`` pair,
-    which were a third and fourth spelling of one setting on the one command
-    that has two sides.
+    Phase 7b (``docs/contribute/plans/one-comparison-product.md`` §4.1/§4.2)
+    demoted ``--ast-frontend``, ``--sysroot``, and ``--nostdinc``/
+    ``--no-nostdinc`` off the CLI entirely: the header frontend and the
+    system-include behavior are now read only from ``.abicheck.yml``'s
+    ``compile:`` block (``compile.frontend``/``compile.sysroot``/
+    ``compile.nostdinc``, all already wired by :func:`merge_compile_config`).
+    A command composing this decorator receives a Python-level default for
+    ``header_backend``/``sysroot``/``nostdinc`` (never a Click option), so
+    :func:`resolve_compile_context` always resolves them from config with no
+    CLI value able to win (``frontend_explicit``/``nostdinc_explicit`` are
+    unconditionally false once there is no ``COMMANDLINE`` parameter source
+    for either name — see :func:`_shared_frontend_explicit`).
+    ``--allow-ast-frontend-fallback``/``--allow-unsupported-castxml``/
+    ``--compiler``/``--compiler-prefix``/``--compiler-option``/
+    ``--frontend-context`` stay real CLI flags: none of them has a working
+    ``compile:`` config-parsing path today (only ``frontend``/``std``/
+    ``include_dirs``/``defines``/``sysroot``/``nostdinc`` exist on
+    :class:`~abicheck.buildsource.build_config.BuildConfig`), and
+    ``--compiler``/``--compiler-prefix``/``--compiler-option`` are
+    specifically documented (``build_config.py``'s own ``compile:`` docstring)
+    as "per-invocation cross-compile flags [that] stay CLI overrides" — an
+    ADR-037 D4 design decision already made, not a demotion this PR reverses
+    without its own ADR.
 
-    The single source of truth for the flags that tell the header frontend how to
-    parse the public headers: ``--ast-frontend`` (which frontend), the cross
-    compiler (``--compiler``/``--compiler-prefix``, plus the deprecated-but-still
-    -functional ``--compiler``/``--compiler-prefix`` aliases), pass-through compiler
-    flags (``--gcc-options``/``--compiler-option``, the latter superseding the
-    deprecated ``--compiler-option``), an alternate ``--sysroot``, and ``--nostdinc``.
-    Shared verbatim by ``dump``, ``scan``, **and** ``compare`` so the three never
-    drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
-    real L2). Decorators apply bottom-up, so the options are listed in reverse of
-    their displayed order. Dest names match the ``dumper.dump`` /
-    :class:`~abicheck.service_scan.CompileContext` kwargs exactly, except for the
-    ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
+    Still the single source of truth for the flags it retains, shared
+    verbatim by ``dump``, ``scan``, and ``compare`` so the three never drift
+    (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
+    real L2). Decorators apply bottom-up, so the options are listed in
+    reverse of their displayed order. Dest names match the ``dumper.dump`` /
+    :class:`~abicheck.service_scan.CompileContext` kwargs exactly, except for
+    the ``--compiler``/``--compiler-prefix``/``--compiler-option`` trio, which
     :func:`resolve_compile_context` maps onto the same ``gcc_*`` fields.
     """
 
@@ -707,22 +692,10 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
             "Matches a manifest's own frontend_context field for the legacy, "
             "non-manifest path.",
         )(func)
-        func = click.option(
-            "--nostdinc/--no-nostdinc",
-            "nostdinc",
-            default=False,
-            help="Do not search the standard system include paths (suppresses the "
-            "castxml/clang system-include auto-detection too). Paired form so an "
-            "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
-            "true` for a one-off run (CLI > config).",
-        )(func)
-        func = click.option(
-            "--sysroot",
-            "sysroot",
-            type=click.Path(path_type=Path),
-            default=None,
-            help="Alternative system root directory for header resolution.",
-        )(func)
+        # --nostdinc/--no-nostdinc and --sysroot were demoted to
+        # compile.nostdinc/compile.sysroot (Phase 7b); resolve_compile_context's
+        # callers supply Python-level defaults (nostdinc=False, sysroot=None) so
+        # merge_compile_config always resolves them from config now.
         # ── --compiler/--compiler-prefix/--compiler-option ──────────────────────
         # The one spelling for the cross-toolchain family. The former
         # --gcc-path/--gcc-prefix/--gcc-option names were always misleading (each
@@ -783,43 +756,13 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
             "concept to fall back from; a castxml- or hybrid-pinned auto (hybrid "
             "has no device concept either) still rejects it.",
         )(func)
-        frontend_kwargs: dict[str, Any] = (
-            {"multiple": True, "type": SidedChoiceParam(AST_FRONTENDS)}
-            if sided_frontend
-            else {
-                "default": "auto",
-                "show_default": True,
-                "type": click.Choice(AST_FRONTENDS, case_sensitive=False),
-            }
-        )
-        func = click.option(
-            "--ast-frontend",
-            "header_backend",
-            **frontend_kwargs,
-            help=(
-                "Scope to one side with an 'old='/'new=' prefix, repeating the "
-                "flag per side (e.g. --ast-frontend old=castxml --ast-frontend "
-                "new=clang) when the old release parses on one frontend and the new "
-                "one needs the other; a bare value applies to both (default: auto). "
-                if sided_frontend
-                else ""
-            )
-            + "C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
-            "or clang (-ast-dump=json; for hosts where castxml is absent or its "
-            "bundled frontend chokes). hybrid (G28 Phase 3) runs BOTH and merges "
-            "them (dumper_hybrid.merge_snapshots) — needs both tools installed and "
-            "costs roughly 2x a single-backend dump; never selected by auto. auto "
-            "resolves to castxml (or the ABICHECK_AST_FRONTEND pin) and never "
-            "changes producer unless --allow-ast-frontend-fallback (or "
-            "ABICHECK_ALLOW_AST_FALLBACK=1) is explicitly set — except a non-host "
-            "--frontend-context (SYCL/DPC++), which an auto resolving to plain "
-            "castxml (no pin) routes to clang since castxml can't satisfy it at "
-            "all (a castxml- or hybrid-pinned auto still rejects it, since "
-            "hybrid has no device concept either; an explicit clang, or auto "
-            "pinned to clang via ABICHECK_AST_FRONTEND=clang, satisfies it "
-            "directly). "
-            "Env: ABICHECK_AST_FRONTEND.",
-        )(func)
+        # --ast-frontend was demoted to compile.frontend (Phase 7b); the sided
+        # old=/new= per-side override it used to support (SidedChoiceParam)
+        # goes with it -- a command composing this decorator gets
+        # header_backend="auto" as a Python-level default (never a Click
+        # option), so _shared_frontend_explicit/sided_frontend_explicit see no
+        # COMMANDLINE parameter source and merge_compile_config always
+        # resolves the frontend from compile.frontend (or "auto" if unset).
         return func
 
     return _apply
@@ -1119,11 +1062,14 @@ def resolve_compile_context(
 
     The single entry point the ``@compile_context_options`` family resolves to
     (ADR-037 D3): construct a :class:`~abicheck.service_scan.CompileContext` from
-    the decorator's flags, then delegate to :func:`merge_compile_config` with the
-    ``--ast-frontend`` / ``--nostdinc`` explicitness read from the Click parameter
-    source (so an explicitly-typed value — even a default-looking ``auto`` — beats
-    a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
-    L2 compile context cannot drift.
+    the decorator's flags, then delegate to :func:`merge_compile_config`.
+    ``frontend_explicit``/``nostdinc_explicit`` are read from the Click
+    parameter source for ``header_backend``/``nostdinc`` (so a caller that
+    still exposed either as a real CLI option could win over a pinned config
+    value); since Phase 7b no caller does any more, so the config value from
+    ``compile.frontend``/``compile.nostdinc`` always applies.
+    ``compare`` / ``dump`` / ``scan`` all call this so their L2 compile
+    context cannot drift.
 
     ``compiler_path``/``compiler_prefix``/``compiler_option_tokens`` are the
     ``--compiler``/``--compiler-prefix``/``--compiler-option`` values; they map

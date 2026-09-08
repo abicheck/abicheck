@@ -46,14 +46,17 @@ from abicheck.service_scan import CompileContext, ScanRequest
 #: --compiler/--compiler-prefix/--compiler-option superseded them. The internal
 #: CompileContext.gcc_* fields survive, but no Click option registers those
 #: dests anymore, so they are not *CLI-exposed* dests to check here.
+#: ``header_backend``/``sysroot``/``nostdinc`` are likewise deliberately absent
+#: since Phase 7b (``one-comparison-product.md`` §4.1/§4.2): ``--ast-frontend``/
+#: ``--sysroot``/``--nostdinc`` were demoted to ``compile.frontend``/
+#: ``compile.sysroot``/``compile.nostdinc`` with no CLI override at all, so no
+#: command's ``.params`` carries those three dests any more — they survive only
+#: as a Python-level default each command's function signature supplies.
 _COMPILE_CONTEXT_DESTS = frozenset(
     {
-        "header_backend",
         "compiler_path",
         "compiler_prefix",
         "compiler_option_tokens",
-        "sysroot",
-        "nostdinc",
     }
 )
 
@@ -83,6 +86,14 @@ def test_compare_dump_scan_compile_context_does_not_drift() -> None:
     dump_ctx = _param_dests(dump_cmd) & _COMPILE_CONTEXT_DESTS
     scan_ctx = _param_dests(scan_cmd) & _COMPILE_CONTEXT_DESTS
     assert compare_ctx == dump_ctx == scan_ctx == _COMPILE_CONTEXT_DESTS
+
+
+@pytest.mark.parametrize("cmd", [compare_cmd, dump_cmd, scan_cmd])
+def test_demoted_frontend_sysroot_nostdinc_are_not_click_params(cmd: object) -> None:
+    """Phase 7b: none of ``compare``/``dump``/``scan`` exposes ``header_backend``/
+    ``sysroot``/``nostdinc`` as a real Click option any more -- all three now
+    resolve exclusively from ``.abicheck.yml``'s ``compile:`` block."""
+    assert not ({"header_backend", "sysroot", "nostdinc"} & _param_dests(cmd))
 
 
 def test_compile_context_default_is_empty() -> None:
@@ -1094,22 +1105,27 @@ def _compare_capturing_dump(
 def test_compare_threads_compile_context_to_both_sides(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """--compiler* / --sysroot / --nostdinc reach *both* sides' dumper.dump (ADR-037 D3)."""
+    """--compiler* reaches *both* sides' dumper.dump (ADR-037 D3); compile.sysroot/
+    compile.nostdinc (Phase 7b: no CLI override for either any more) reach both
+    sides via the project .abicheck.yml instead."""
     sysroot = tmp_path / "sr"
     sysroot.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        f"compile:\n  sysroot: {sysroot}\n  nostdinc: true\n", encoding="utf-8"
+    )
     calls = _compare_capturing_dump(
         monkeypatch,
         tmp_path,
         [
+            "--config",
+            str(cfg),
             "--compiler",
             "/opt/g++",
             "--compiler-prefix",
             "aarch64-linux-gnu-",
             "--compiler-option",
             "-DFOO=1",
-            "--sysroot",
-            str(sysroot),
-            "--nostdinc",
         ],
     )
     for c in calls:  # both old and new
@@ -1120,86 +1136,18 @@ def test_compare_threads_compile_context_to_both_sides(
         assert c["nostdinc"] is True
 
 
-def test_compare_gcc_context_applies_with_per_side_frontend(
+def test_configured_frontend_applies_to_both_sides(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The both-sides gcc context applies to both sides even when the frontend
-    differs per side — the neutralized compile.frontend must not clobber the
-    per-side header_backend (regression guard for the run_dump eff_backend rule)."""
-    calls = _compare_capturing_dump(
-        monkeypatch,
-        tmp_path,
-        [
-            "--compiler-option",
-            "-DBAR=2",
-            "--ast-frontend",
-            "castxml",
-            "--ast-frontend",
-            "new=clang",
-        ],
-    )
-    # gcc context on both sides...
-    assert all(c["gcc_option_tokens"] == ("-DBAR=2",) for c in calls)
-    # ...while the per-side frontend override still wins.
-    assert calls[0]["header_backend"] == "castxml"
-    assert calls[1]["header_backend"] == "clang"
-
-
-def test_a_one_sided_frontend_keeps_the_configured_frontend_for_the_other_side(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A side-qualified ``--ast-frontend`` must not discard ``compile.frontend``.
-
-    Click reports one parameter source for the whole ``--ast-frontend``
-    parameter, so ``new=castxml`` alone marks it COMMANDLINE while the shared
-    value is the synthesized ``"auto"`` nobody typed. Reading the parameter
-    source alone handed that default to ``merge_compile_config`` as an explicit
-    override, so the old side -- which the user never mentioned -- was parsed
-    with ``auto`` instead of the project's configured ``clang`` (Codex review).
-    """
+    """Phase 7b: with no CLI ``--ast-frontend`` left at all, ``compile.frontend``
+    is the only channel and it applies uniformly to both sides -- there is no
+    more per-side old=/new= override to keep separate from it."""
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     calls = _compare_capturing_dump(
-        monkeypatch,
-        tmp_path,
-        ["--config", str(cfg), "--ast-frontend", "new=castxml"],
+        monkeypatch, tmp_path, ["--config", str(cfg)]
     )
-    # The unqualified side inherits the config; the named side overrides it.
-    assert calls[0]["header_backend"] == "clang"
-    assert calls[1]["header_backend"] == "castxml"
-
-
-def test_a_shared_frontend_still_beats_the_configured_one(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The other direction of the same rule, so the fix above cannot be
-    satisfied by simply never treating ``--ast-frontend`` as explicit: a
-    stated shared value must still win over ``compile.frontend``."""
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
-    calls = _compare_capturing_dump(
-        monkeypatch,
-        tmp_path,
-        ["--config", str(cfg), "--ast-frontend", "castxml"],
-    )
-    assert all(c["header_backend"] == "castxml" for c in calls)
-
-
-def test_an_explicit_auto_still_beats_the_configured_frontend(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """`resolve_compile_context`'s own documented contract: "an
-    explicitly-typed value -- even a default-looking ``auto`` -- beats a
-    pinned config one". The fix must keep that true for a value the user
-    really did type, and only stop claiming it for the synthesized one."""
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
-    calls = _compare_capturing_dump(
-        monkeypatch,
-        tmp_path,
-        ["--config", str(cfg), "--ast-frontend", "auto"],
-    )
-    assert all(c["header_backend"] == "auto" for c in calls)
+    assert all(c["header_backend"] == "clang" for c in calls)
 
 
 def test_compare_reads_compile_block_from_config(
@@ -1312,28 +1260,6 @@ def test_compare_threads_compiler_aliases_for_set_inputs(
     assert result.exit_code == 0, result.output
     compile_context = dispatched["compile_context"]
     assert getattr(compile_context, attr) == expected
-
-
-@pytest.mark.parametrize(
-    "flag",
-    ["--ast-frontend"],
-)
-def test_compare_rejects_sided_ast_frontend_for_set_inputs(
-    tmp_path: Path, flag: str
-) -> None:
-    """A *sided* --ast-frontend old=/new= override still has no
-    per-library-pair-within-a-release meaning, so it stays rejected."""
-    old_dir = tmp_path / "old"
-    new_dir = tmp_path / "new"
-    old_dir.mkdir()
-    new_dir.mkdir()
-    result = CliRunner().invoke(
-        main,
-        ["compare", str(old_dir), str(new_dir), flag, "old=clang"],
-    )
-    assert result.exit_code != 0
-    assert "--ast-frontend old=" in result.output
-    assert "directory/package" in result.output
 
 
 class _FakeCtx:
@@ -1638,11 +1564,15 @@ def _compile_context_probe():
     @compile_context_options()
     @click.pass_context
     def probe(ctx: click.Context, **kwargs: object) -> None:
+        # sysroot/nostdinc/header_backend are no longer Click-supplied
+        # (Phase 7b demoted them to compile.sysroot/compile.nostdinc/
+        # compile.frontend) -- this probe never registers them, so they take
+        # their config-only unset defaults here, matching every real command.
         cc, _includes = resolve_compile_context(
             ctx,
-            sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
-            nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]
-            header_backend=kwargs["header_backend"],  # type: ignore[arg-type]
+            sysroot=None,
+            nostdinc=False,
+            header_backend="auto",
             includes=(),
             build_config=None,
             compiler_path=kwargs["compiler_path"],  # type: ignore[arg-type]
@@ -1696,24 +1626,13 @@ def test_neither_compiler_flag_given_no_crash(_compile_context_probe) -> None:
     assert "path=None prefix=None tokens=()" in result.output
 
 
-def test_a_one_sided_frontend_keeps_the_source_trees_configured_frontend(
+def test_inline_source_sides_read_their_own_tree_config_frontend(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The same rule on the *inline source-tree* path, which had its own copy.
-
-    ``resolve_compile_context`` was fixed to read the shared ``--ast-frontend``
-    value's own explicitness, but ``_embed_inline_source_sides`` still asked
-    Click for the whole parameter's source -- so ``--ast-frontend new=castxml``
-    marked it COMMANDLINE, the synthesized shared ``"auto"`` reached the *old*
-    side as an explicit override, and an ``--old-sources`` tree's own
-    ``.abicheck.yml`` ``compile.frontend`` was suppressed and frozen at
-    ``auto``: a materially different snapshot for the side the user never
-    mentioned (Codex review).
-
-    Asserted at the boundary the bug lives on -- what each side is *told* about
-    explicitness -- rather than through a full inline dump, so the test states
-    the contract rather than one downstream consequence of it.
-    """
+    """Phase 7b: with no CLI ``--ast-frontend`` (shared or per-side) left at
+    all, ``_embed_inline_source_side`` is never told an explicit frontend by
+    the CLI -- an ``--old-sources``/``--new-sources`` tree's own
+    ``.abicheck.yml`` ``compile.frontend`` always applies, on both sides."""
     import abicheck.frontends.cli.commands.compare as helpers
 
     old_so, new_so, header = _two_elf(tmp_path)
@@ -1737,43 +1656,9 @@ def test_a_one_sided_frontend_keeps_the_source_trees_configured_frontend(
         [
             "compare", str(old_so), str(new_so), "-H", str(header),
             "--sources", f"old={src}",
-            "--ast-frontend", "new=castxml",
         ],
     )
     assert len(seen) == 2, seen
-    old_side, new_side = seen
-    # The side nobody named must not be told the frontend was stated: that is
-    # what lets its own source-tree config still apply.
-    assert old_side["frontend_explicit"] is False, old_side
-    # ...while the named side keeps its genuine per-side override.
-    assert new_side["frontend_explicit"] is True, new_side
-
-
-def test_a_shared_frontend_is_explicit_for_both_inline_source_sides(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # The other direction, so the fix above cannot be satisfied by simply
-    # never reporting the inline path's shared frontend as explicit.
-    import abicheck.frontends.cli.commands.compare as helpers
-
-    old_so, new_so, header = _two_elf(tmp_path)
-    src = tmp_path / "srctree2"
-    src.mkdir()
-
-    seen: list[dict[str, object]] = []
-
-    def _spy(*args: object, **kwargs: object) -> object:
-        seen.append(dict(kwargs))
-        return (kwargs["input_path"], kwargs["sources"], kwargs["build_info"])
-
-    monkeypatch.setattr(helpers, "_embed_inline_source_side", _spy)
-    res = CliRunner().invoke(
-        main,
-        [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--sources", f"old={src}",
-            "--ast-frontend", "castxml",
-        ],
-    )
-    assert len(seen) == 2, res.output
-    assert all(s["frontend_explicit"] is True for s in seen), seen
+    # Neither side is ever told the CLI stated a frontend any more, so each
+    # side's own source-tree config is free to apply.
+    assert all(s["frontend_explicit"] is False for s in seen), seen

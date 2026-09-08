@@ -160,10 +160,8 @@ def _resolve_and_check_dump_debug_format(
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 @snapshot_compression_option
-# ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
-# --ast-frontend / --compiler / --compiler-prefix / --compiler-option /
-# --sysroot / --nostdinc are defined once in cli_options.compile_context_options
-# so `dump` and `scan` never drift; applied as a decorator below.
+# ── L2 compile context (shared with `scan`, ADR-037 D3; --ast-frontend/
+# --sysroot/--nostdinc are config-only since Phase 7b) ───────────────────────
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
               help="Explicit path to PDB file for Windows PE debug info. "
                    "Overrides automatic PDB discovery from the PE debug directory.")
@@ -221,14 +219,14 @@ def _resolve_and_check_dump_debug_format(
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
-@compile_context_options()  # --ast-frontend + cross-toolchain (shared with `scan`)
+@compile_context_options()  # cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              include_dependencies: bool,
-             version: str, lang: str, header_backend: str, output: Path | None,
+             version: str, lang: str, output: Path | None,
              snapshot_compression: str,
              compiler_path: str | None, compiler_prefix: str | None,
              compiler_option_tokens: tuple[str, ...],
-             sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
+             pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, dry_run: bool,
              debug_format_opt: str | None,
@@ -242,6 +240,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_config: Path | None = None,
              build_targets: tuple[str, ...] = (),
              depth: str | None = None,
+             header_backend: str = "auto",  # Phase 7b: compile.frontend only
+             sysroot: Path | None = None, nostdinc: bool = False,
              frontend_context: str = "host",
              # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
              # defaulted-None parameter stays only so the internal composition
@@ -438,10 +438,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         and _dump_will_attempt_hybrid_l4_extraction(sources)
     ):
         raise click.UsageError(
-            "--depth source is incompatible with --ast-frontend hybrid: L4 "
+            "--depth source is incompatible with compile.frontend: hybrid: L4 "
             "source-ABI replay has no dual-backend hybrid extractor (unlike "
-            "the L2 header-AST snapshot). Pass --ast-frontend castxml or "
-            "--ast-frontend clang for a --depth source dump."
+            "the L2 header-AST snapshot). Set compile.frontend to castxml or "
+            "clang for a --depth source dump."
         )
 
     # A source-only dump (no SO_PATH) has no binary at all, so --depth binary

@@ -180,9 +180,13 @@ class TestPerSideHeaderBackend:
         header.write_text("int foo();\n", encoding="utf-8")
         return old_so, new_so, header
 
-    def test_per_side_backend_routed_independently(self, tmp_path, monkeypatch):
-        """--ast-frontend old=castxml + new=clang reach each side."""
+    def test_config_frontend_reaches_both_sides(self, tmp_path, monkeypatch):
+        """Phase 7b: with ``--ast-frontend`` gone entirely (shared and
+        per-side alike), ``compile.frontend`` is the only channel left and it
+        applies to both sides uniformly."""
         old_so, new_so, header = self._two_elf(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         calls = []
 
         def fake_dump(**kwargs):
@@ -192,56 +196,12 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "old=castxml", "--ast-frontend", "new=clang",
+            "--config", str(cfg),
         ])
         assert result.exit_code == 0
-        # The L0 hard-removal fold-in (case97 fix) would add two more calls,
-        # but only when the resolved snapshot has a real source_path to
-        # re-probe — the fake snapshot here has none, so it no-ops.
-        assert len(calls) == 2
-        # _resolve_compare_snapshots dumps old first, then new.
-        assert calls[0].get("header_backend") == "castxml"
-        assert calls[1].get("header_backend") == "clang"
-
-    def test_per_side_inherits_global_default(self, tmp_path, monkeypatch):
-        """Without per-side flags, both sides inherit --ast-frontend."""
-        old_so, new_so, header = self._two_elf(tmp_path)
-        calls = []
-
-        def fake_dump(**kwargs):
-            calls.append(kwargs)
-            return AbiSnapshot(library="libfoo.so", version="1.0")
-
-        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "clang",
-        ])
-        assert result.exit_code == 0
-        # A header-scoped compare also fires the L0 hard-removal fold-in
-        # (case97 fix), which re-resolves both sides symbols-only (no
-        # header_backend of interest) — restrict to the real per-side calls.
         header_calls = [c for c in calls if c.get("headers")]
         assert len(header_calls) == 2
         assert all(c.get("header_backend") == "clang" for c in header_calls)
-
-    def test_one_side_override_other_inherits(self, tmp_path, monkeypatch):
-        """A single per-side flag overrides only that side; the other inherits."""
-        old_so, new_so, header = self._two_elf(tmp_path)
-        calls = []
-
-        def fake_dump(**kwargs):
-            calls.append(kwargs)
-            return AbiSnapshot(library="libfoo.so", version="1.0")
-
-        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "castxml", "--ast-frontend", "new=clang",
-        ])
-        assert result.exit_code == 0
-        assert calls[0].get("header_backend") == "castxml"
-        assert calls[1].get("header_backend") == "clang"
 
     def test_resolve_compare_snapshots_routes_backend_per_side(self, monkeypatch):
         """Direct unit: ``_resolve_compare_snapshots`` gives each side its own
@@ -529,12 +489,15 @@ class TestDumpCrossCompilation:
         assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)
 
     def test_sysroot_forwarded(self, tmp_path, monkeypatch):
+        """--sysroot demoted to compile.sysroot (Phase 7b)."""
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(f"compile:\n  sysroot: {sysroot_dir}\n", encoding="utf-8")
 
         captured = {}
         def fake_dump(**kwargs):
@@ -546,16 +509,19 @@ class TestDumpCrossCompilation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
-            "--sysroot", str(sysroot_dir),
+            "--config", str(cfg),
         ])
         assert result.exit_code == 0
         assert captured.get("sysroot") == sysroot_dir
 
     def test_nostdinc_forwarded(self, tmp_path, monkeypatch):
+        """--nostdinc demoted to compile.nostdinc (Phase 7b)."""
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  nostdinc: true\n", encoding="utf-8")
 
         captured = {}
         def fake_dump(**kwargs):
@@ -566,7 +532,7 @@ class TestDumpCrossCompilation:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "--nostdinc",
+            "dump", str(so_path), "-H", str(header), "--config", str(cfg),
         ])
         assert result.exit_code == 0
         assert captured.get("nostdinc") is True
@@ -576,6 +542,8 @@ class TestDumpCrossCompilation:
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  nostdinc: true\n", encoding="utf-8")
 
         captured = {}
         def fake_dump(**kwargs):
@@ -587,9 +555,9 @@ class TestDumpCrossCompilation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header),
+            "--config", str(cfg),
             "--compiler-prefix", "aarch64-linux-gnu-",
             "--compiler-option", "-march=armv8-a",
-            "--nostdinc",
         ])
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"

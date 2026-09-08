@@ -93,14 +93,14 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
+            # --ast-frontend/--sysroot/--nostdinc demoted to compile.frontend/
+            # compile.sysroot/compile.nostdinc (Phase 7b) -- no CLI spelling
+            # left to list here.
             "name": "Toolchain (header parsing)",
             "options": [
-                "--ast-frontend",
                 "--compiler",
                 "--compiler-prefix",
                 "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
             ],
         },
         {
@@ -180,14 +180,14 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
         {"name": "Output", "options": ["--output", "--dry-run", "--verbose"]},
         {
+            # --ast-frontend/--sysroot/--nostdinc demoted to compile.frontend/
+            # compile.sysroot/compile.nostdinc (Phase 7b) -- no CLI spelling
+            # left to list here.
             "name": "Toolchain",
             "options": [
-                "--ast-frontend",
                 "--compiler",
                 "--compiler-prefix",
                 "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
             ],
         },
         {
@@ -247,15 +247,15 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--crosscheck", "--risk-rules"],
         },
         {
+            # --ast-frontend/--sysroot/--nostdinc demoted to compile.frontend/
+            # compile.sysroot/compile.nostdinc (Phase 7b) -- no CLI spelling
+            # left to list here.
             "name": "Toolchain (header parsing)",
             "options": [
                 "--lang",
-                "--ast-frontend",
                 "--compiler",
                 "--compiler-prefix",
                 "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
             ],
         },
         {

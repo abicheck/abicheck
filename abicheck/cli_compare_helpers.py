@@ -1295,15 +1295,20 @@ def run_compare(
     manifest_path: Path | None,  # bundle_system_providers/cohorts: PR J, see resolved_cfg
     no_bundle_analysis: bool, bundle_facts_out: Path | None,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
-    header_backend: str,
-    sysroot: Path | None, nostdinc: bool,
+    # --ast-frontend/--sysroot/--nostdinc were demoted to
+    # compile.frontend/compile.sysroot/compile.nostdinc (Phase 7b): no Click
+    # option supplies these any more (nor the old=/new= per-side override),
+    # so they carry plain Python defaults and resolve_compile_context()
+    # always reads them from .abicheck.yml's compile: block instead.
+    header_backend: str = "auto",
+    sysroot: Path | None = None, nostdinc: bool = False,
+    old_header_backend: str | None = None, new_header_backend: str | None = None,
     # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
     # internal-only, defaulted-None parameter -- see cli.py's dump_cmd for
     # why (never populated from the CLI anymore, only ever None here).
     gcc_options: str | None = None,
     compiler_path: str | None = None, compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
-    old_header_backend: str | None, new_header_backend: str | None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,

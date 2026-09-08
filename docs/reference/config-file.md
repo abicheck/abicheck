@@ -220,8 +220,15 @@ The stable half of the L2 header compile context (ADR-037 D4): AST
 `frontend:` (`auto`/`castxml`/`clang`/`hybrid`, case-insensitive — `hybrid`
 runs castxml and clang together and merges them), `std:` (C/C++ standard,
 e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
-`nostdinc:` (boolean). Per-invocation cross-compile flags stay CLI overrides
-(`CLI > config`).
+`nostdinc:` (boolean). `frontend:`/`sysroot:`/`nostdinc:` demoted off the CLI
+entirely (one-comparison-product.md Phase 7b): `compare`/`dump`/`scan` no
+longer accept `--ast-frontend`/`--sysroot`/`--nostdinc`/`--no-nostdinc` at
+all, so this is now the *only* way to set them — shared verbatim by all
+three commands (ADR-037 D8.1: one compile context, no drift). The
+cross-compile trio `--compiler`/`--compiler-prefix`/`--compiler-option`
+stays a real, visible CLI-only override with no `compile:` key of its own —
+`build_config.py`'s own `compile:` docstring documents them as
+per-invocation flags, an ADR-037 D4 decision Phase 7b did not reverse.
 
 > Values in `compile.std`/`compile.defines` must be a single whitespace-free
 > compiler-option atom (a config scalar cannot expand into multiple compiler

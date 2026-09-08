@@ -175,18 +175,22 @@ Notes:
   `new=` (rare): `--header both=old=weird.h`.
 - The **version** flag defaults per side stay `old` / `new` — pass `--version`
   only when your `.so` files need explicit labels.
-- The `--ast-frontend` per-side overrides (`--ast-frontend old=` /
-  `--ast-frontend new=`) are **unchanged**: the base `--ast-frontend` is shared
-  with `dump` and `scan`, so that family was deliberately left alone.
+- The per-side `--ast-frontend old=`/`--ast-frontend new=` override is
+  **gone** along with the base `--ast-frontend` flag itself -- see "Config
+  demotion" below (Phase 7b demoted the whole flag, per-side spelling
+  included, to `compile.frontend`).
 
 ### Config demotion
 
 These flags no longer exist on `compare` at all -- `debug.format`/
-`debug.dwarf_only`/`debug.debuginfod`/`debug.debuginfod_url` in
-`.abicheck.yml` are their only remaining spelling (ADR-068 D5 / Phase 7a: a
+`debug.dwarf_only`/`debug.debuginfod`/`debug.debuginfod_url` and
+`compile.frontend`/`compile.sysroot`/`compile.nostdinc` in `.abicheck.yml`
+are their only remaining spelling (ADR-068 D5 / Phase 7a for the `debug.*`
+trio, `one-comparison-product.md` Phase 7b for the `compile.*` trio: a
 hidden-but-accepted flag still counts as public surface, so once a setting
 is fully config-backed the CLI spelling is removed outright rather than
-left hidden). See the [config-file reference](../reference/config-file.md#debug).
+left hidden). See the [config-file reference](../reference/config-file.md#debug)
+and its [`compile:`](../reference/config-file.md#compile) section.
 
 | Was a flag | Now a config key only (block → key) |
 |------------|-------------------------------|
@@ -195,6 +199,9 @@ left hidden). See the [config-file reference](../reference/config-file.md#debug)
 | `--debuginfod` | `debug.debuginfod: true` |
 | `--debuginfod-url URL` | `debug.debuginfod_url: URL` |
 | `scope.show_redundant: true` | `scope.show_redundant: true` |
+| `--ast-frontend clang` (base or `old=`/`new=`) | `compile.frontend: clang` |
+| `--sysroot PATH` | `compile.sysroot: PATH` |
+| `--nostdinc` / `--no-nostdinc` | `compile.nostdinc: true` / `false` |
 
 Example `.abicheck.yml`:
 
@@ -202,21 +209,29 @@ Example `.abicheck.yml`:
 debug:
   format: auto
   dwarf_only: false
+compile:
+  frontend: clang
+  sysroot: /opt/sysroot
+  nostdinc: false
 scope:
   show_redundant: false
 ```
 
 A script that still passes `--dwarf-only`/`--debug-format`/`--debuginfod`/
-`--debuginfod-url` now exits `64` (`No such option`) -- rewrite it to set
-the equivalent `debug.*` key in `.abicheck.yml` instead. `--show-redundant`
-was retired the same way earlier and has no CLI spelling left either.
+`--debuginfod-url`/`--ast-frontend`/`--sysroot`/`--nostdinc`/`--no-nostdinc`
+now exits `64` (`No such option`) -- rewrite it to set the equivalent
+`debug.*`/`compile.*` key in `.abicheck.yml` instead. `--show-redundant` was
+retired the same way earlier and has no CLI spelling left either.
 
 **Not demoted (still visible flags):** `--debug-root` (the coarse per-run
-debug-tree override, now side-aware, see the table above); the toolchain
-family (`--compiler` / `--compiler-prefix` / `--compiler-option` /
-`--sysroot` / `--nostdinc`, shared with `dump`/`scan`); and
-`--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
-switch for public-surface scoping).
+debug-tree override, now side-aware, see the table above);
+`--compiler`/`--compiler-prefix`/`--compiler-option`/`--frontend-context`/
+`--allow-ast-frontend-fallback`/`--allow-unsupported-castxml` (the rest of
+the cross-toolchain family, shared with `dump`/`scan` -- none has a working
+`compile:` config-parsing path today, and the cross-compile trio is
+documented as CLI-only per ADR-037 D4, a decision Phase 7b did not revisit);
+and `--scope-public-headers` / `--no-scope-public-headers` (the everyday
+on/off switch for public-surface scoping).
 
 ### Run profiles: added, then removed
 

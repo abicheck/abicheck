@@ -953,44 +953,52 @@ def test_gate_tables_mirror_cli_options() -> None:
     )
 
 
-# ── D8: --ast-frontend (legacy --header-backend aliases removed) ─────────────
+# ── Phase 7b: --ast-frontend/--sysroot/--nostdinc demoted to compile.* ───────
 
 
 @pytest.mark.parametrize("cmd_name", ["compare", "dump"])
-def test_ast_frontend_is_the_only_frontend_spelling(cmd_name: str) -> None:
-    """``--ast-frontend`` is the frontend flag; the removed ``--header-backend``
-    alias is gone (clean removal, ADR-037 D7/D8)."""
+def test_ast_frontend_is_not_a_registered_flag(cmd_name: str) -> None:
+    """``--ast-frontend`` (and the legacy ``--header-backend`` alias) is gone
+    from the CLI entirely -- demoted to ``compile.frontend`` (Phase 7b,
+    ``one-comparison-product.md`` §4.1/§4.2). ``header_backend`` survives only
+    as an internal Python-level default, never a Click dest."""
     cmd = _registered_commands()[cmd_name]
-    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
-    param = by_dest["header_backend"]
-    assert "--ast-frontend" in param.opts
-    assert "--header-backend" not in param.opts
+    flags = _command_flags(cmd)
+    assert "--ast-frontend" not in flags
+    assert "--header-backend" not in flags
 
 
-def test_per_side_ast_frontend_is_spelled_on_ast_frontend_itself() -> None:
-    """The per-side frontend override is ``--ast-frontend old=``/``new=``.
-
-    ADR-040 Lever 1's side-prefix convention, not a third and fourth flag:
-    the separate ``--ast-frontend old=``/``--ast-frontend new=`` pair (and the
-    ``--*-header-backend`` aliases before it) are gone, and ``compare``'s
-    ``--ast-frontend`` is repeatable so each side can name its own.
-    """
+@pytest.mark.parametrize(
+    ("cmd_name", "flag", "value"),
+    [
+        ("compare", "--ast-frontend", "clang"),
+        ("compare", "--sysroot", "/tmp"),
+        ("compare", "--nostdinc", None),
+        ("compare", "--no-nostdinc", None),
+        ("dump", "--ast-frontend", "clang"),
+        ("dump", "--sysroot", "/tmp"),
+        ("dump", "--nostdinc", None),
+        ("dump", "--no-nostdinc", None),
+    ],
+)
+def test_demoted_compile_flags_exit_64(
+    cmd_name: str, flag: str, value: str | None, tmp_path: Path
+) -> None:
+    """The demoted spellings are a hard usage error (exit 64), no hidden
+    alias -- same merge criterion ``--profile``'s removal follows below."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    cmd = _registered_commands()["compare"]
-    dests = {p.name for p in cmd.params}  # type: ignore[attr-defined]
-    assert "old_header_backend" not in dests
-    assert "new_header_backend" not in dests
-
-    param = {p.name: p for p in cmd.params}["header_backend"]  # type: ignore[attr-defined]
-    assert param.multiple
-    assert param.opts == ["--ast-frontend"]
-
-    out = CliRunner().invoke(main, ["compare", "--help-all"]).output
-    assert "--ast-frontend old=" not in out
-    assert "--ast-frontend new=" not in out
+    old_p = _make_snap_file(tmp_path, "libdn", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libdn", "2.0", [_func("a")])
+    args = [cmd_name]
+    if cmd_name == "compare":
+        args += [str(old_p), str(new_p)]
+    args += [flag] if value is None else [flag, value]
+    res = CliRunner().invoke(main, args)
+    assert res.exit_code == 64
+    assert "no such option" in res.output.lower()
 
 
 def test_legacy_header_backend_flag_is_rejected(

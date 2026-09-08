@@ -265,8 +265,7 @@ class TestArtifactSetCliValidation:
 class TestArtifactSetCompileContextForwarding:
     """P1 regression (Codex review): --compiler/--sysroot/etc. must reach
     ScanRequest.compile for --artifact-set, not silently fall back to the
-    host toolchain the way an un-forwarded CompileContext() default would.
-    """
+    host toolchain the way an un-forwarded CompileContext() default would."""
 
     def test_forwards_compile_context_options(
         self, runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -280,6 +279,8 @@ class TestArtifactSetCompileContextForwarding:
         _write_elf_shared_object_stub(p2)
         sysroot_dir = tmp_path / "sysroot"
         sysroot_dir.mkdir()
+        cfg = tmp_path / ".abicheck.yml"  # Phase 7b: sysroot/nostdinc config-only
+        cfg.write_text(f"compile:\n  sysroot: {sysroot_dir}\n  nostdinc: true\n")
 
         captured: dict[str, object] = {}
 
@@ -294,9 +295,8 @@ class TestArtifactSetCompileContextForwarding:
             [
                 "scan",
                 "--artifact-set", str(p1), "--artifact-set", str(p2),
+                "--config", str(cfg),
                 "--compiler", "/usr/bin/my-cross-gcc",
-                "--sysroot", str(sysroot_dir),
-                "--nostdinc",
             ],
         )
         assert result.exit_code == 0, result.output

@@ -348,6 +348,13 @@ class TestFlagBudget:
         # them exactly the same as every other entry above.
         "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
         "--no-debuginfod", "--no-dwarf-only",
+        # one-comparison-product.md Phase 7b: --ast-frontend/--sysroot/
+        # --nostdinc duplicated compile.frontend/compile.sysroot/
+        # compile.nostdinc (already CLI > config-merged by
+        # cli_options.merge_compile_config) and are removed outright, the
+        # same "hidden is not the bar, duplication is" rule as the debug
+        # family above -- these three simply were not hidden to begin with.
+        "--ast-frontend", "--sysroot", "--nostdinc", "--no-nostdinc",
     )
 
     @staticmethod
@@ -373,23 +380,28 @@ class TestFlagBudget:
     @pytest.mark.parametrize(
         "flag",
         ["--dwarf-only", "--no-dwarf-only", "--debuginfod", "--no-debuginfod",
-         "--debuginfod-url", "--debug-format"],
+         "--debuginfod-url", "--debug-format",
+         "--ast-frontend", "--sysroot", "--nostdinc", "--no-nostdinc"],
     )
     def test_removed_debug_flags_exit_usage_error_on_compare(
         self, tmp_path: Path, flag: str
     ) -> None:
-        """ADR-068 D5 / Phase 7a: each removed hidden flag exits 64 with
-        Click's standard 'No such option' on `compare` -- the old spelling
-        must not silently resolve to anything, hidden or otherwise."""
+        """ADR-068 D5 / Phase 7a, plus Phase 7b's compile.* trio: each removed
+        flag exits 64 with Click's standard 'No such option' on `compare` --
+        the old spelling must not silently resolve to anything, hidden or
+        otherwise."""
         old = tmp_path / "old.so"
         new = tmp_path / "new.so"
         old.write_bytes(b"\x7fELF" + b"\x00" * 100)
         new.write_bytes(b"\x7fELF" + b"\x00" * 100)
-        # A value-taking flag (--debuginfod-url/--debug-format) needs an
-        # operand or Click's own "no such option" would be pre-empted by
-        # missing-argument handling for the *next* token; the boolean flags
-        # take none.
-        extra = ["x"] if flag in ("--debuginfod-url", "--debug-format") else []
+        # A value-taking flag needs an operand or Click's own "no such
+        # option" would be pre-empted by missing-argument handling for the
+        # *next* token; the boolean flags take none.
+        extra = (
+            ["x"]
+            if flag in ("--debuginfod-url", "--debug-format", "--ast-frontend", "--sysroot")
+            else []
+        )
         result = CliRunner().invoke(
             main, ["compare", str(old), str(new), flag, *extra],
         )
@@ -409,10 +421,14 @@ class TestFlagBudget:
         for flag in ("--severity-preset", "--show-filtered", "--depth",
                      "--scope-public-headers",
                      # ADR-040 Lever 2 carve-outs: the coarse debug-root override and
-                     # the toolchain family (shared with dump/scan) stay visible.
-                     # --gcc-path, the former spelling, is removed outright;
-                     # --compiler is its visible successor.
-                     "--debug-root", "--compiler", "--sysroot"):
+                     # the cross-toolchain family (shared with dump/scan) stay
+                     # visible. --gcc-path, the former spelling, is removed outright;
+                     # --compiler is its visible successor. --sysroot/--nostdinc/
+                     # --ast-frontend, once part of this carve-out, were demoted
+                     # to compile.sysroot/compile.nostdinc/compile.frontend
+                     # instead (Phase 7b) -- see REMOVED_CONFIG_DUPLICATES
+                     # below for their own coverage.
+                     "--debug-root", "--compiler"):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
 
 

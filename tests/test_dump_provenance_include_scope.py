@@ -214,6 +214,8 @@ def test_compiler_option_include_dir_promotes_transitively_reached_header(
     from abicheck.cli import main
 
     out = tmp_path / "out.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     runner = CliRunner()
     result = runner.invoke(
         main,
@@ -222,8 +224,8 @@ def test_compiler_option_include_dir_promotes_transitively_reached_header(
             str(so),
             "-H",
             str(include_dir / "api.h"),
-            "--ast-frontend",
-            "clang",
+            "--config",
+            str(cfg),
             # No plain -I at all -- the only include search path is given
             # via --compiler-option, which must still count as explicit.
             "--compiler-option",

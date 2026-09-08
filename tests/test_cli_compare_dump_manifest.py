@@ -211,13 +211,15 @@ class TestCompareDumpManifestEndToEnd:
         new_so, manifest = self._build_two_tu_lib(tmp_path)
 
         out = tmp_path / "result.json"
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         result = runner.invoke(
             main,
             [
                 "compare", str(old_so), str(new_so),
                 "-H", "old=" + str(old_h),
                 "--dump-manifest", "new=" + str(manifest),
-                "--ast-frontend", "clang", "--lang", "c",
+                "--config", str(cfg), "--lang", "c",
                 "--diagnostic-comparison",
                 "--format", "json", "-o", str(out),
             ],
@@ -252,13 +254,15 @@ class TestCompareDumpManifestEndToEnd:
         new_so, manifest = self._build_two_tu_lib(tmp_path)
 
         out = tmp_path / "result.json"
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         result = runner.invoke(
             main,
             [
                 "compare", str(old_so), str(new_so),
                 "-H", "old=" + str(old_h),
                 "--dump-manifest", "new=" + str(manifest),
-                "--ast-frontend", "clang", "--lang", "c",
+                "--config", str(cfg), "--lang", "c",
                 "--diagnostic-comparison",
                 "--format", "json", "-o", str(out),
             ],
@@ -298,13 +302,15 @@ class TestCompareDumpManifestEndToEnd:
         new_so, new_manifest = self._build_two_tu_lib(new_dir)
 
         out = tmp_path / "result.json"
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         result = runner.invoke(
             main,
             [
                 "compare", str(old_so), str(new_so),
                 "--dump-manifest", "old=" + str(old_manifest),
                 "--dump-manifest", "new=" + str(new_manifest),
-                "--ast-frontend", "clang", "--lang", "c",
+                "--config", str(cfg), "--lang", "c",
                 "--diagnostic-comparison",
                 "--format", "json", "-o", str(out),
             ],

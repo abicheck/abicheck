@@ -371,12 +371,16 @@ def _embed_inline_source_side(
     out = out_dir / f"{label}.abi.json"
     # Merge the side's source-root .abicheck.yml `compile:` block into compare's
     # resolved context — exactly what `dump --sources` / the old deep-compare did —
-    # but compute the CLI-over-config explicitness HERE (compare's real ctx, where
-    # --ast-frontend/--nostdinc are genuine COMMANDLINE params) and freeze the
+    # but compute the explicitness HERE (compare's real ctx) and freeze the
     # result, handing it to dump via the private _resolved_compile_context hook so
     # dump does not re-resolve under ctx.invoke (which would lose that explicitness).
-    # This honors the tree's include_dirs/sysroot/frontend while keeping explicit
-    # CLI overrides winning (Codex review).
+    # Since Phase 7b demoted --ast-frontend/--sysroot/--nostdinc off the CLI
+    # entirely, frontend_explicit/nostdinc_explicit are now unconditionally
+    # False here (no COMMANDLINE parameter source exists for either name any
+    # more) -- this honors the tree's own include_dirs/sysroot/frontend
+    # unconditionally, which is the whole point of the demotion (Codex review,
+    # pre-Phase-7b, for the CLI-overrides-config precedence this comment used
+    # to describe).
     from ....cli_options import merge_compile_config
 
     side_cli = dataclasses.replace(compile_context, frontend=header_backend)  # type: ignore[type-var]
@@ -398,12 +402,11 @@ def _embed_inline_source_side(
         and _dump_will_attempt_hybrid_l4_extraction(dump_sources)
     ):
         raise click.UsageError(
-            f"--depth source is incompatible with --ast-frontend hybrid for "
-            f"the --sources {label}= tree: L4 source-ABI replay has no "
+            f"--depth source is incompatible with compile.frontend: hybrid "
+            f"for the --sources {label}= tree: L4 source-ABI replay has no "
             "dual-backend hybrid extractor (unlike the L2 header-AST "
-            f"snapshot). Pass --ast-frontend {label}=castxml or "
-            f"--ast-frontend {label}=clang (or an unsided --ast-frontend) "
-            "for a --depth source compare."
+            "snapshot). Set compile.frontend to castxml or clang in "
+            "the tree's own .abicheck.yml for a --depth source compare."
         )
     # CLI-audit P2 ("business logic depends on Click-to-Click orchestration"):
     # this ctx.invoke was investigated for removal alongside the
@@ -516,11 +519,13 @@ def _embed_inline_source_side(
 @bundle_facts_manifest_options  # G38 Phase 17
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
 # Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
-# family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
-# the shared @compile_context_options decorator so compare/dump/scan never drift
-# (ADR-037 D3), with --ast-frontend side-aware here; --lang stays inline.
+# family (cross-toolchain --compiler*/--frontend-context/--allow-*) comes from
+# the shared @compile_context_options decorator so compare/dump/scan never
+# drift (ADR-037 D3); --ast-frontend/--sysroot/--nostdinc were demoted to
+# compile.frontend/compile.sysroot/compile.nostdinc (Phase 7b) and no longer
+# have a per-side old=/new= CLI spelling here. --lang stays inline.
 @two_sided_input_options
-@compile_context_options(sided_frontend=True)  # --ast-frontend (side-aware) + cross-toolchain
+@compile_context_options()  # cross-toolchain (--compiler*/--frontend-context/--allow-*)
 @lang_option
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(

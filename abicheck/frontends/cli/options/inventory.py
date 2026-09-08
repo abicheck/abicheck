@@ -164,7 +164,28 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: no CLI override at all (like ``--show-redundant`` above) — a stable,
 #: reviewed-in-a-PR release-topology property, not a per-run input, per this
 #: plan's own "belongs somewhere else" test.
-COMPARE_FLAG_BUDGET_BASE = 55
+#: Lowered 55→52 by ``one-comparison-product.md`` Phase 7b: ``--ast-frontend``/
+#: ``--sysroot``/``--nostdinc``/``--no-nostdinc`` demoted to
+#: ``compile.frontend``/``compile.sysroot``/``compile.nostdinc`` with no CLI
+#: override at all (like the debug-resolution/bundle-topology demotions
+#: above) — a stable, per-project toolchain property, not a per-run input.
+#: The rest of the ``compile.*`` family (``--allow-ast-frontend-fallback``/
+#: ``--allow-unsupported-castxml``/``--compiler``/``--compiler-prefix``/
+#: ``--compiler-option``/``--frontend-context``) and ``--lang`` were reviewed
+#: for the same Phase 7b demotion and deliberately kept visible: none of
+#: ``compiler``/``compiler_prefix``/``compiler_option``/``frontend_context``/
+#: ``allow_ast_frontend_fallback``/``allow_unsupported_castxml`` has a working
+#: ``compile:`` config-parsing path today (``BuildConfig`` only parses
+#: ``frontend``/``std``/``include_dirs``/``defines``/``sysroot``/``nostdinc``),
+#: and ``build_config.py``'s own ``compile:`` docstring already documents the
+#: cross-compile trio as "per-invocation flags [that] stay CLI overrides"
+#: (ADR-037 D4) — reversing that needs its own ADR, not a mechanical flag
+#: move. ``--lang``'s inference-vs-explicit distinction is a known,
+#: currently-fragile gap (see ``dump_cmd``'s "G31 Phase C follow-up" comment
+#: and this repo's `dump --lang c++ is silently discarded` known-gap entry),
+#: so demoting it now would regress correctness rather than just relocate a
+#: setting; it stays visible.
+COMPARE_FLAG_BUDGET_BASE = 52
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable

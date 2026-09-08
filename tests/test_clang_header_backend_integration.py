@@ -1263,15 +1263,12 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
     CLI (not ``dumper.dump()`` directly -- the bug lived in ``cli.py``/
     ``cli_dump_helpers.py``'s own ``--lang`` handling, one layer above
     ``dumper.dump()``, so a unit-level call bypassing the CLI cannot
-    reproduce it).
-
-    A plain POD struct (``struct Widget { int x; int y; };``) is valid
+    reproduce it). A plain POD struct (``struct Widget { int x; int y; };``) is valid
     syntax under both C and C++, so plain auto-detection lands on C mode --
     which leaves ``is_standard_layout``/``is_trivially_copyable`` (C++-only
     facts) unpopulated (``None``). An explicit ``--lang c++`` must force C++
-    mode regardless, populating both fields with a real boolean; the default
-    invocation (no ``--lang``) must keep auto-detecting C.
-    """
+    mode regardless, populating both with a real boolean; the default
+    invocation (no ``--lang``) must keep auto-detecting C."""
     if not (_have("clang") and _have("gcc")):
         pytest.skip(
             "clang and gcc are required for the clang L2 backend integration test"
@@ -1292,6 +1289,8 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
     )
 
     runner = CliRunner()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
 
     def _dump(*extra_args: str) -> dict:
         out = tmp_path / f"out{len(extra_args)}.json"
@@ -1299,7 +1298,7 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
             main,
             [
                 "dump", str(so), "-H", str(header),
-                "--ast-frontend", "clang", "-o", str(out),
+                "--config", str(cfg), "-o", str(out),
                 *extra_args,
             ],
         )
