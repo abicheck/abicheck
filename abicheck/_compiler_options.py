@@ -514,6 +514,40 @@ def effective_driver_mode_is_cl(
     return is_cl_style_name
 
 
+def forwards_response_file(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> bool:
+    """Whether forwarded options include a Clang/GCC ``@response-file``
+    token, whose contents this module cannot see without actually reading
+    and re-tokenizing that file on disk (a real compile toolchain expands
+    it natively at invocation time; :func:`explicit_target_triple` and
+    :func:`effective_driver_mode_is_cl` only ever see the literal ``@path``
+    token).
+
+    Exists so a caller with no other explicit-target evidence can tell
+    "genuinely nothing else was requested" from "something may be hidden
+    in an unexpanded response file" -- a response file containing its own
+    ``-target``/``--driver-mode=`` is a real, working invocation shape
+    (Codex review, fresh evidence: ``tests/test_dumper_clang.py``'s own
+    ``test_configured_target_triple_honors_clang_response_file`` proves a
+    real compiler process honors one), so a probe failure there must not
+    fall back to a `sys.platform` guess that could easily be wrong in
+    either direction. Deliberately does not attempt to read/expand the
+    file itself -- response-file quoting is platform-specific (POSIX
+    shell-like vs. Windows) and duplicating a compiler's own expansion
+    logic here would be speculative machinery this narrow uncertainty
+    check doesn't need; conservatively assuming "unknown" is sufficient.
+    """
+    tokens: list[str] = []
+    if gcc_options:
+        try:
+            tokens = split_gcc_options(gcc_options)
+        except ValueError:
+            pass
+    tokens.extend(gcc_option_tokens)
+    return any(token.startswith("@") and len(token) > 1 for token in tokens)
+
+
 def language_standard_field(
     lang: str | None,
     gcc_options: str | None,

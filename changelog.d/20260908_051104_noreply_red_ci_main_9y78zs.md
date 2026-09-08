@@ -50,19 +50,28 @@ it should read in CHANGELOG.md. Delete the other sections.
   recovering one of those as if it were real would risk applying the
   wrong platform normalization. Under GNU mode the `sys.platform` guess
   also only applies when the RESOLVED compiler binary IS the plain host
-  default by real executable identity (a new
-  `dumper_clang._is_default_clang_bin` helper, resolved through `PATH`/
-  symlinks rather than raw spelling): an explicit `--compiler`/
-  `--compiler-prefix` cross-toolchain that `_resolve_clang_bin` actually
-  adopts (a documented input, e.g. an Apple-targeting compiler run on
-  Linux) carries no relationship to the host OS at all, so a probe
-  failure there leaves the target unknown rather than substituting the
-  host's own platform — but a `--compiler` naming a non-clang-family
-  binary, which `_resolve_clang_bin` silently ignores in favor of the
-  plain host default anyway, or an absolute-path spelling of that exact
-  same native binary (e.g. `/usr/bin/clang` when `clang` on `PATH` is
-  that same file), must not suppress the guess for what is genuinely
-  still the plain host compiler.
+  default by invocation BASENAME (a new `dumper_clang._is_default_clang_bin`
+  helper): real Clang derives its own default target from `argv[0]`, so
+  basename — not real executable identity, not raw path spelling — is
+  what determines its behavior. An explicit `--compiler`/`--compiler-
+  prefix` cross-toolchain that `_resolve_clang_bin` actually adopts (a
+  documented input, e.g. an Apple-targeting compiler run on Linux)
+  carries no relationship to the host OS at all, so a probe failure there
+  leaves the target unknown rather than substituting the host's own
+  platform, and this now correctly includes a target-prefixed symlink to
+  the exact same binary as plain `clang` (a real cross-toolchain wrapper
+  shape whose basename alone changes the reported target). Conversely, a
+  `--compiler` naming a non-clang-family binary, which `_resolve_clang_bin`
+  silently ignores in favor of the plain host default anyway, or an
+  absolute-path spelling of that exact same native binary (e.g.
+  `/usr/bin/clang`), must not suppress the guess for what is genuinely
+  still the plain host compiler. Separately, the guess is also suppressed
+  whenever forwarded options include an unexpanded `@response-file` token
+  (`_compiler_options.forwards_response_file`): its contents — potentially
+  a `-target`/`--driver-mode=` of their own, which a real compiler process
+  honors — aren't visible to this module without reading and re-tokenizing
+  the file, so its mere presence is treated as "unknown evidence" rather
+  than "nothing else was requested".
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

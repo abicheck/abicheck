@@ -461,30 +461,25 @@ def _default_clang_bin_name(compiler: str) -> str:
 
 def _is_default_clang_bin(clang_bin: str, compiler: str) -> bool:
     """Whether ``clang_bin`` (an already-resolved compiler executable) IS
-    the plain, unconfigured host default -- by real executable identity,
-    not raw spelling.
+    the plain, unconfigured host default -- by invocation BASENAME, which
+    is what actually determines Clang's behavior, not real executable
+    identity and not raw path spelling.
 
-    A resolved `clang_bin` naming the exact same executable as the plain
-    default under a different spelling (an absolute path, e.g.
-    ``/usr/bin/clang``, or a symlink) is still the plain host default: an
-    earlier revision of this check compared `clang_bin` against
-    :func:`_default_clang_bin_name` with plain string equality, which a
-    `--compiler` given by absolute path always failed even when it
-    resolved to the identical binary (Codex review, fresh evidence).
-    Resolves both sides through `PATH`/symlinks (`shutil.which` +
-    `Path.resolve()`) and falls back to the original string comparison
-    only when either side can't be resolved on disk (unresolvable in a
-    unit test's synthetic `clang_bin`, or a broken `PATH` -- conservative:
-    an unresolvable identity is not evidence they're the same executable).
+    Real Clang derives its own default target from ``argv[0]``: a
+    target-prefixed symlink to the exact same binary as plain ``clang``
+    (e.g. ``aarch64-apple-darwin-clang``, a real, documented cross-
+    toolchain wrapper shape) reports that PREFIXED target from
+    ``-print-target-triple``, not the host's -- so an earlier revision of
+    this check, which resolved both sides through `PATH`/symlinks and
+    compared real executable IDENTITY, wrongly treated that symlink as
+    "the plain default" merely because it happened to point at the same
+    file (Codex review, fresh evidence, correcting that revision). An
+    absolute path to the plain binary (``/usr/bin/clang``) is still
+    correctly recognized here, since its basename is unaffected by the
+    directory portion of the path -- only a genuinely different
+    invocation NAME changes Clang's own target-selection behavior.
     """
-    default_name = _default_clang_bin_name(compiler)
-    if clang_bin == default_name:
-        return True
-    default_which = shutil.which(default_name)
-    clang_bin_which = shutil.which(clang_bin)
-    if default_which is None or clang_bin_which is None:
-        return False
-    return Path(default_which).resolve() == Path(clang_bin_which).resolve()
+    return Path(clang_bin).name == _default_clang_bin_name(compiler)
 
 
 def _resolve_clang_bin(

@@ -1207,7 +1207,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
             "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. "
             "Under CL mode there is no `sys.platform` guess, and recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
-            "Under GNU mode the guess ALSO only applies when the RESOLVED `clang_bin` IS the plain host default by real executable identity (`dumper_clang._is_default_clang_bin`, resolved through `PATH`/symlinks, not raw spelling) -- a `gcc_path`/`gcc_prefix` `_resolve_clang_bin` ignores, or an absolute-path spelling of the identical native binary, must not suppress it; one it genuinely adopts (a real cross-toolchain) must suppress it, since that carries no relation to host OS either. Shape check: `model.mangled_name.strip_macho_itanium_"
+            "Under GNU mode the guess ALSO only applies when the RESOLVED `clang_bin` IS the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`; real Clang derives its own default target from argv[0], so basename -- not real executable identity, not raw spelling -- is what matters: an absolute path to the plain binary still matches, a target-prefixed symlink to that same binary correctly does not), and only when no `@response-file` token is forwarded (`_compiler_options.forwards_response_file`, since its contents may hide their own target this module cannot see without expanding it). Shape check: `model.mangled_name.strip_macho_itanium_"
             "decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156),
@@ -1234,7 +1234,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "No Mach-O toolchain here -- code inspection + synthetic unit tests only. "
-                    "Recurred TWELVE times within #1138/#1149/#1156, each via Codex but one: "
+                    "Recurred FOURTEEN times within #1138/#1149/#1156, each via Codex but one: "
                     "Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE "
                     '`is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; '
                     "that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); "
@@ -1244,8 +1244,9 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named "
                     "binary reverted to GNU mode still treated as CL; the `sys.platform` guess "
                     "applying to an explicit cross-compiler unrelated to host OS; that same guess "
-                    "wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; and "
-                    "an absolute-path spelling of the identical native binary failing string equality."
+                    "wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an "
+                    "absolute-path spelling of the identical native binary failing string equality; "
+                    "a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; and a `@response-file`'s own hidden target being ignored."
                 ),
                 reference="#1138/#1149 follow-ups, fixed by #1156",
             ),

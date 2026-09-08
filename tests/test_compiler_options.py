@@ -9,6 +9,7 @@ from abicheck._compiler_options import (
     effective_driver_mode_is_cl,
     explicit_language_standard,
     explicit_target_triple,
+    forwards_response_file,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
@@ -600,3 +601,30 @@ class TestEffectiveDriverModeIsCl:
             )
             is True
         )
+
+
+class TestForwardsResponseFile:
+    """A ``@response-file`` token's contents are invisible to this module
+    without expanding it, so its mere presence must be treated as
+    "unknown evidence", not "no target requested" (Codex review,
+    eleventh round, fresh evidence: a response file can genuinely carry
+    its own ``-target``/``--driver-mode=``, and a real compiler process
+    honors it)."""
+
+    def test_none_when_absent(self) -> None:
+        assert forwards_response_file(None, ()) is False
+        assert forwards_response_file("-O2 -Wall", ("-std=c++20",)) is False
+
+    def test_detects_it_in_gcc_options_string(self) -> None:
+        assert forwards_response_file("@response.rsp", ()) is True
+
+    def test_detects_it_in_gcc_option_tokens(self) -> None:
+        assert forwards_response_file(None, ("@response.rsp",)) is True
+
+    def test_a_bare_at_sign_alone_does_not_match(self) -> None:
+        # Not a real response-file token -- nothing follows the "@".
+        assert forwards_response_file(None, ("@",)) is False
+
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        assert forwards_response_file('-DFOO="unterminated', ()) is False
+        assert forwards_response_file('-DFOO="unterminated', ("@response.rsp",)) is True

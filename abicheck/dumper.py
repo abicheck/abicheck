@@ -40,6 +40,7 @@ from . import deadline, dumper_cache, qualified_name_segments
 from ._compiler_options import (
     effective_driver_mode_is_cl as _effective_driver_mode_is_cl,
     explicit_target_triple as _explicit_target_triple,
+    forwards_response_file as _forwards_response_file,
 )
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
@@ -627,6 +628,9 @@ def _header_ast_parser(
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
+        _no_hidden_gnu_target = _is_default_clang_bin(
+            clang_bin, compiler
+        ) and not _forwards_response_file(gcc_options, gcc_option_tokens)
         parser = _ClangAstParser(
             ast_root,
             exported_dynamic,
@@ -637,10 +641,10 @@ def _header_ast_parser(
             # CL mode, only spellings the CL driver actually honors are
             # recovered (`cl_style=True`, `/clang:`-forwarded included),
             # no `sys.platform` guess (mostly Windows regardless of host
-            # OS). No guess either when the RESOLVED `clang_bin` isn't
-            # the plain host default -- an ignored `gcc_path`/`gcc_prefix`
-            # (Codex review) must not suppress it for a binary that IS
-            # the plain host compiler. Lives HERE, not `is_darwin_target`.
+            # OS). No guess either under GNU mode unless `clang_bin` IS
+            # the plain host default (by basename -- Codex review) and no
+            # `@response-file` may hide its own target (Codex review, see
+            # `_no_hidden_gnu_target`). Lives HERE, not `is_darwin_target`.
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
@@ -650,11 +654,7 @@ def _header_ast_parser(
                     if is_cl_mode
                     else (
                         _explicit_target_triple(gcc_options, gcc_option_tokens)
-                        or (
-                            sys.platform
-                            if _is_default_clang_bin(clang_bin, compiler)
-                            else None
-                        )
+                        or (sys.platform if _no_hidden_gnu_target else None)
                     )
                 )
             ),

@@ -62,32 +62,38 @@ class TestDefaultClangBinName:
             assert _default_clang_bin_name(compiler) == "clang"
 
 
-@pytest.mark.skipif(shutil.which("clang") is None, reason="needs a real clang on PATH")
 class TestIsDefaultClangBin:
-    """Real executable identity, not raw spelling (Codex review, tenth
-    round, fresh evidence): an absolute path to the exact same binary the
-    plain default name resolves to on ``PATH`` (e.g. ``--compiler
-    /usr/bin/clang`` when ``clang`` on `PATH` IS `/usr/bin/clang`) is
-    still the plain host default, just spelled differently -- a prior
-    revision of this check compared `clang_bin` against
-    `_default_clang_bin_name` with plain string equality, which an
-    absolute-path spelling of the identical binary always failed."""
+    """Invocation BASENAME, not real executable identity or raw path
+    spelling (Codex review, eleventh round, fresh evidence correcting the
+    tenth): real Clang derives its own default target from ``argv[0]``,
+    so a target-prefixed symlink to the exact same binary as plain
+    ``clang`` (e.g. ``aarch64-apple-darwin-clang``, a real, documented
+    cross-toolchain wrapper shape) is genuinely NOT the plain default --
+    a prior revision of this check resolved both sides through `PATH`/
+    symlinks and compared real executable IDENTITY, which wrongly
+    equated that symlink with plain `clang` merely because they point at
+    the same file. An absolute path to the plain binary
+    (``/usr/bin/clang``) is still correctly recognized, since only the
+    basename -- not the directory portion -- affects Clang's own
+    behavior."""
 
     def test_bare_default_name_matches(self) -> None:
         assert _is_default_clang_bin("clang", "cc") is True
 
-    def test_absolute_path_to_the_same_binary_matches(self) -> None:
-        resolved = shutil.which("clang")
-        assert resolved is not None
-        assert _is_default_clang_bin(resolved, "cc") is True
+    def test_absolute_path_to_the_plain_binary_matches(self) -> None:
+        assert _is_default_clang_bin("/usr/bin/clang", "cc") is True
+        assert _is_default_clang_bin("/opt/llvm/bin/clang++", "c++") is True
 
-    def test_a_genuinely_different_binary_does_not_match(self) -> None:
+    def test_a_target_prefixed_symlink_does_not_match(self) -> None:
+        # Real evidence: a Clang 20 symlink named this way resolves to
+        # the identical binary as plain `clang` but reports a DIFFERENT
+        # -print-target-triple, driven entirely by this basename.
         assert _is_default_clang_bin("aarch64-apple-darwin-clang", "cc") is False
 
-    def test_unresolvable_clang_bin_does_not_match(self) -> None:
-        # Falls back to string comparison when clang_bin can't be resolved
-        # on disk -- an unresolvable identity is not evidence of sameness.
-        assert _is_default_clang_bin("/definitely/not/a/real/path/clang", "cc") is False
+    def test_a_target_prefixed_symlink_by_absolute_path_does_not_match(self) -> None:
+        assert (
+            _is_default_clang_bin("/usr/bin/aarch64-apple-darwin-clang", "cc") is False
+        )
 
 
 def test_probe_failure_recovers_explicit_target_triple(
@@ -162,6 +168,77 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
 
     assert isinstance(parser, _ClangAstParser)
     assert parser._target_triple == sys.platform
+
+
+def test_probe_failure_with_a_response_file_does_not_guess_sys_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A forwarded ``@response-file`` token may hide its own
+    ``-target``/``--driver-mode=`` this module cannot see without
+    expanding it -- a real compiler process honors one, so a probe
+    failure must not fall back to a `sys.platform` guess that could
+    easily be wrong (Codex review, eleventh round, fresh evidence)."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="@response.rsp",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None
+
+
+def test_probe_failure_with_a_response_file_still_recovers_explicit_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The response-file gate only ever suppresses the `sys.platform`
+    GUESS -- an explicit ``--target=`` forwarded ALONGSIDE the response
+    file is still real evidence and is recovered regardless."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang++")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c++",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="@response.rsp --target=x86_64-unknown-linux-gnu",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-unknown-linux-gnu"
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="needs a real clang on PATH")
