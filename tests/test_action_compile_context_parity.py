@@ -389,6 +389,54 @@ class TestCompileContextOverlayMktempIsRunnerTempAnchored:
         ), line
 
 
+class TestCompileContextInputsTravelViaStdinNotEnvVars:
+    """Regression: ``add_compile_context_flags()`` used to forward its eight
+    raw input values (lang/frontend/gcc-path/gcc-prefix/gcc-options/sysroot/
+    nostdinc) as environment variables (``ABICHECK_COMPILE_GCC_PATH=...``)
+    prefixed onto a ``python3`` invocation on windows-latest. A value shaped
+    like a POSIX absolute path -- a normal cross-compilation ``gcc-path``,
+    e.g. ``/opt/gcc-14/bin/g++`` -- triggers Git Bash/MSYS's automatic path
+    conversion when forwarded that way to a native, non-MSYS ``python3.exe``,
+    silently rewriting it into a Windows path (inserting ``Program Files``
+    and its embedded space) before the script ever saw it -- confirmed as
+    the windows-latest unit-tests CI job's failure once the mktemp fix let
+    these tests reach their real assertions for the first time.
+
+    Only actual argv/envp entries are subject to that conversion; stdin
+    content never is (the same fix already applied to
+    ``add_flag_shlex_split()``'s single-value case, above). Like the mktemp
+    regression above, a platform-specific end-to-end reproduction only fails
+    on windows-latest, so this asserts the *source pattern* directly: no
+    ``ABICHECK_COMPILE_*`` env-var assignment remains anywhere in the
+    function, and the helper script is invoked with its data piped in via
+    stdin rather than baked into its environment."""
+
+    def _function_source(self) -> str:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index(_COMPILE_CONTEXT_FN_START)
+        end = text.index(_COMPILE_CONTEXT_FN_END, start) + len(_COMPILE_CONTEXT_FN_END)
+        return text[start:end]
+
+    def test_no_abicheck_compile_env_var_assignment_remains(self) -> None:
+        source = self._function_source()
+        assert "ABICHECK_COMPILE_" not in source, source
+
+    def test_helper_invocation_pipes_data_via_stdin(self) -> None:
+        source = self._function_source()
+        assert (
+            'python3 "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"'
+            in source
+        ), source
+        # The invocation is fed by a `printf ... | python3 ...` pipe, not a
+        # bare call -- confirms the eight values really travel on stdin.
+        idx = source.index(
+            'python3 "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"'
+        )
+        preceding = source[:idx]
+        assert preceding.rstrip().endswith("|"), preceding[-200:]
+        assert "printf " in preceding, preceding
+
+
 class TestCompileContextForwardingParity:
     """scan forwards the six flags directly; dump/compare (Phase 7) forward
     the identical settings via a synthesized --config compile: block."""
