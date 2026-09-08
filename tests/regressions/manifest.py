@@ -431,7 +431,11 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "the raw read exactly as a raised exception does, unless the "
             "underlying source is already exhausted. Concretely: "
             "bounded_decoded_prefix(p, n) == read_snapshot_bytes(p)[:n] "
-            "for every valid storage envelope, at every compression ratio."
+            "for every valid storage envelope whose first n decoded bytes "
+            "are reachable within the reader's own raw-input budget, at "
+            "every compression ratio; past that budget the answer is None "
+            '("no prefix within budget"), never a short value that would '
+            "read as the real prefix."
         ),
         fixed_by=(1164,),
         seed_tests=("tests/test_bounded_decoded_prefix_properties.py",),
@@ -450,7 +454,15 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "the DWARF/PE section readers). Only the snapshot "
                     "storage envelope's prefix primitive has a "
                     "generalized suite; the siblings are untested against "
-                    "this invariant."
+                    "this invariant. Separately, the bounded reader's own "
+                    "guarantee stops at its raw-input cap: an envelope can "
+                    "place arbitrarily much stored input before its n-th "
+                    "decoded byte (a tiny data frame, a megabyte skippable "
+                    "frame, then the payload), and reading far enough to "
+                    "decode it is the whole-file decompression the bounded "
+                    "reader exists to avoid. That case answers None by "
+                    "design and is pinned by a test, but it is a real "
+                    "narrowing of the invariant above, not a closed case."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
             ),

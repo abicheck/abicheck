@@ -93,11 +93,24 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
     data, or a very small file whose compressor overhead dominates), a
     frame truncated at the raw-byte boundary can legitimately fail to
     decode at all (CodeRabbit review, fresh evidence). Escalating the raw
-    read (doubling up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`) before giving up
-    still keeps this bounded and cheap for the common case (typically
+    read (quadrupling up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`) before giving
+    up still keeps this bounded and cheap for the common case (typically
     succeeds on the first, smallest attempt for real ABI snapshot JSON,
     which compresses well) while no longer misclassifying a valid but
     less-compressible compressed snapshot as unreadable.
+
+    **The escalation cap bounds the guarantee.** This returns
+    ``read_snapshot_bytes(path)[:n]`` for every envelope whose first *n*
+    decoded bytes are reachable within ``_BOUNDED_PREFIX_MAX_RAW_BYTES`` of
+    stored input -- which every snapshot abicheck itself writes is, by a
+    wide margin, at any compression ratio, single- or multi-frame. It is
+    not an unconditional promise, and cannot be: an envelope can place
+    arbitrarily much stored data before its *n*-th decoded byte (a tiny
+    leading data frame, then a megabyte-sized *skippable* frame, then the
+    payload -- Codex review, reproduced), and reading far enough to decode
+    that is the whole-file decompression this function exists to avoid.
+    Such an envelope answers ``None`` ("no prefix within budget"), never a
+    short result that would read as the file's real first *n* bytes.
     """
     from ..snapshot_io import (
         _BOUNDED_PREFIX_MAX_RAW_BYTES,
@@ -142,12 +155,24 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
                 # and surface as "Cannot detect format".
                 if result is not None and (len(result) >= n or exhausted):
                     return result
-                if exhausted or raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
-                    # Whole file already read (genuinely corrupt, not just
-                    # truncated at the boundary), or the cap was reached:
-                    # return the best-effort short decode rather than
-                    # discarding real decoded content.
+                if exhausted:
+                    # The whole file was read: `result` is everything this
+                    # envelope decodes to, so a short value is the honest
+                    # answer rather than a truncation artifact. (`None`
+                    # here means genuinely corrupt/undecodable.)
                     return result
+                if raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
+                    # The cap was reached with more stored input left and
+                    # fewer than `n` decoded bytes in hand. Unlike the
+                    # exhausted case we do *not* know this is all the file
+                    # decodes to -- more raw input might yield more -- so
+                    # returning the short value would present a budget
+                    # limit as the file's real prefix. That is exactly how
+                    # a valid envelope (tiny first frame, then a megabyte
+                    # skippable frame, then the payload) classified off its
+                    # 1-byte first frame. `None` says "no prefix within
+                    # budget", which is what actually happened.
+                    return None
                 raw_size = min(raw_size * 4, _BOUNDED_PREFIX_MAX_RAW_BYTES)
     except OSError:
         return None

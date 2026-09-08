@@ -56,6 +56,21 @@ _ESCAPE_PAYLOADS = (
     r"1\x0a::error::PWNED",
 )
 
+#: Percent-encoded line breaks. The runner *decodes* a workflow command's
+#: message data, so these hold no CR/LF for the collapse to find and no
+#: backslash escape for `echo` to expand -- the runner itself supplies the
+#: line break, after this script is done. Escaping `%` to `%25` is what
+#: makes the decode round-trip back to a literal `%` (CodeRabbit review,
+#: CWE-117). A third independent path into the same defense, after real
+#: newlines and `xpg_echo` backslash escapes.
+_PERCENT_PAYLOADS = (
+    "1%0A::error::PWNED",
+    "1%0D%0A::error::PWNED",
+    "1%0a::set-output name=pwned::yes",
+    "1%0A::add-mask::secret",
+    "1%25%30A::error::PWNED",
+)
+
 _INJECTION_PAYLOADS = (
     "1\n::error::PWNED",
     "1\r\n::error::PWNED",
@@ -143,3 +158,42 @@ class TestAnnotationInjection:
                 f"payload {payload!r} forged a workflow command under "
                 f"xpg_echo={xpg_echo}:\n{result.stdout}"
             )
+
+    @pytest.mark.parametrize("payload", _PERCENT_PAYLOADS)
+    def test_a_percent_encoded_line_break_cannot_become_a_new_line(
+        self, payload: str
+    ) -> None:
+        """A percent-encoded CR/LF must not survive into the annotation.
+
+        The runner decodes `%0A`/`%0D` in a workflow command's message, so
+        the line break is created *after* this script finishes -- neither
+        the CR/LF collapse nor `printf` can see it. Escaping `%` to `%25`
+        first is what defeats it, and it must happen before the collapse so
+        an escape introduced here is not itself re-escaped
+        (`actions/toolkit`'s own `escapeData` order).
+        """
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": payload})
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
+        assert len(emitted) == 1, result.stdout
+        # No raw `%0A`/`%0D` may reach the runner: every `%` is escaped, so
+        # the only percent sequence present is the escape itself.
+        body = emitted[0]
+        assert "%0A" not in body.upper().replace("%250A", ""), body
+        assert "%0D" not in body.upper().replace("%250D", ""), body
+        assert "%25" in body, f"the `%` escape did not fire at all:\n{body}"
+
+    def test_the_percent_escape_precedes_the_newline_collapse(self) -> None:
+        """Order is load-bearing, so pin it rather than trusting the code
+        reads that way: a real newline *and* a literal `%` in one value must
+        both be neutralized, with the collapse's replacement never carrying
+        a `%` the escape has already passed over."""
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_JOBS": "a%b\nc"}
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
+        assert len(emitted) == 1, result.stdout
+        assert "a%25b" in emitted[0], emitted[0]

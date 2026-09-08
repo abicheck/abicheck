@@ -80,6 +80,15 @@ _is_release_style_operand() {
 # interpolation site in this file at once, including the ones that predate
 # this helper, rather than asking every future message to remember.
 #
+# `%` is escaped first, because the runner *percent-decodes* a workflow
+# command's message data: a value carrying the literal five characters
+# `%0A::error::` holds no CR/LF for the collapse below to find, and the
+# runner turns it into a real line break after this script has finished
+# with it. Escaping to `%25` makes the decode round-trip back to a literal
+# `%` for the reader instead. This is `actions/toolkit`'s own `escapeData`
+# order (`%` then CR/LF), followed exactly so an escape introduced here is
+# never itself re-escaped (CodeRabbit review, CWE-117).
+#
 # `printf`, never `echo`: with `xpg_echo` on -- a build-time default on some
 # bash builds, and settable through `BASHOPTS`/`BASH_ENV` -- `echo` expands
 # backslash escapes in its argument, so a value carrying the *literal* five
@@ -89,7 +98,7 @@ _is_release_style_operand() {
 # `printf '%s\n'` treats the value as data under every shell option, which
 # is why the format string is fixed and the message is an argument.
 _sanitize_annotation() {
-  printf '%s' "$1" | tr '\r\n' '  '
+  printf '%s' "${1//%/%25}" | tr '\r\n' '  '
 }
 
 _fail() {

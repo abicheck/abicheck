@@ -62,6 +62,7 @@ from __future__ import annotations
 import io
 import json
 import random
+import struct
 
 import pytest
 
@@ -304,6 +305,76 @@ def test_a_tiny_leading_frame_would_regress_without_the_fix(tmp_path):
 
     # The module's own decode crosses the boundary anyway.
     assert _try_decode_prefix(blob, SnapshotCompression.ZSTD, 4096) == data[:4096]
+
+
+# ── The escalation cap: where the guarantee stops, stated explicitly ────────
+
+
+def _skippable_frame(size: int) -> bytes:
+    """A valid zstd *skippable* frame of `size` payload bytes.
+
+    A decoder must accept and ignore one anywhere in a stream, so it is
+    stored input that contributes no decoded output at all -- the cheapest
+    way to push a payload arbitrarily far past any raw-byte budget.
+    """
+    return struct.pack("<II", 0x184D2A50, size) + b"\0" * size
+
+
+def test_a_payload_past_the_raw_cap_answers_none_not_a_short_prefix(tmp_path):
+    """The bounded guarantee stops at `_BOUNDED_PREFIX_MAX_RAW_BYTES`, and
+    where it stops the answer must be ``None``, never a short value that
+    would read as the file's real first `n` decoded bytes.
+
+    Codex review found this envelope: a 1-byte first data frame, a
+    megabyte-sized skippable frame, then the payload. It decodes fully
+    through `read_snapshot_bytes` -- it is *valid*, not corrupt -- but its
+    4096th decoded byte sits past the raw budget this function exists to
+    stay inside. Returning the 1-byte first frame presented a budget limit
+    as the file's prefix, and `CompressedAbiJsonClassifier` rejected a real
+    snapshot on it.
+
+    Reading far enough to answer correctly is the whole-file decompression
+    this function avoids by construction, so the honest fix is the honest
+    answer: "no prefix within budget". This test pins that, so the
+    narrowing stays a recorded decision rather than drifting back into a
+    silent short read.
+    """
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _payload(entries=200, entropy_bits=32, seed=5)
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    blob = (
+        cctx.compress(data[:1])
+        + _skippable_frame(_BOUNDED_PREFIX_MAX_RAW_BYTES)
+        + cctx.compress(data[1:])
+    )
+    path = tmp_path / "past_cap.json.zst"
+    path.write_bytes(blob)
+
+    # The envelope really is valid: the whole-file path reads it losslessly.
+    assert read_snapshot_bytes(path) == data
+
+    assert bounded_decoded_prefix(path) is None
+
+
+def test_a_payload_inside_the_raw_cap_still_resolves(tmp_path):
+    """The complement, so the narrowing above cannot quietly widen into
+    "any multi-frame envelope with a skippable frame answers None": the
+    same shape with the payload *inside* the budget must still honor the
+    invariant."""
+    zstandard = pytest.importorskip("zstandard")
+
+    data = _payload(entries=200, entropy_bits=32, seed=6)
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    blob = cctx.compress(data[:1]) + _skippable_frame(4096) + cctx.compress(data[1:])
+    path = tmp_path / "within_cap.json.zst"
+    path.write_bytes(blob)
+
+    full = read_snapshot_bytes(path)
+    assert full == data
+    assert bounded_decoded_prefix(path) == full[:4096]
 
 
 # ── The reported symptom, through the real public surface ───────────────────

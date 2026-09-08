@@ -1,9 +1,10 @@
 ### Fixed
 
 - **A compressed `.json.zst` snapshot with a realistic compression ratio is no
-  longer misclassified as `Cannot detect format`.** `snapshot_io.
-  bounded_decoded_prefix` treated "the decoder returned without raising" as a
-  successful decode, but a zstd frame cut at the 4096-byte raw-probe boundary
+  longer misclassified as `Cannot detect format`.**
+  `snapshot_io.bounded_decoded_prefix` treated "the decoder returned without
+  raising" as a successful decode, but a zstd frame cut at the 4096-byte
+  raw-probe boundary
   returns a *short* result — commonly `b""`, whenever the first compressed
   block is still incomplete — with no exception at all. The empty prefix was
   accepted and returned, so `classify.CompressedAbiJsonClassifier` and
