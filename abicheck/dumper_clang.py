@@ -361,6 +361,20 @@ def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     return sycl_enabled
 
 
+def _strip_trailing_version_suffix(stem: str) -> str:
+    """Strip a trailing numeric version suffix (``clang-cl-20`` ->
+    ``clang-cl``, ``clang-18`` -> ``clang``) from an already-lowercased
+    binary stem.
+
+    LLVM/Debian packaging commonly ships a versioned executable alongside
+    (or instead of) the unversioned name -- shared by every name-only
+    driver-identity heuristic in this module (:func:`_is_cl_style_driver_name`,
+    :func:`_is_default_clang_bin`) so a packaged ``clang-18``/``clang-cl-20``
+    is recognized the same way its unversioned name would be.
+    """
+    return re.sub(r"-\d+(?:\.\d+)*$", "", stem)
+
+
 def _is_cl_style_driver_name(path: str) -> bool:
     """True for a CL-compatible driver name (``clang-cl``, Intel's ``dpcpp-cl``).
 
@@ -374,16 +388,14 @@ def _is_cl_style_driver_name(path: str) -> bool:
     equally name-only :func:`_is_clang_family_binary` this complements.
 
     Strips a trailing numeric version suffix first (``clang-cl-20`` ->
-    ``clang-cl``) -- LLVM/Debian packaging commonly ships a versioned
-    executable alongside (or instead of) the unversioned name; without
-    stripping it a packaged ``--compiler clang-cl-20`` would not be
-    recognized as CL-style and would wrongly reach the GNU-only S2
+    ``clang-cl``) -- without it a packaged ``--compiler clang-cl-20`` would
+    not be recognized as CL-style and would wrongly reach the GNU-only S2
     pre-scan, which silently ignores its unknown ``-dM``/``-M`` flags
     (Codex review) instead of being excluded and falling back to plain
     ``clang++``.
     """
     stem = Path(path).stem.lower()
-    return re.sub(r"-\d+(?:\.\d+)*$", "", stem).endswith("-cl")
+    return _strip_trailing_version_suffix(stem).endswith("-cl")
 
 
 def resolve_source_frontend_clang_bin(
@@ -442,6 +454,56 @@ def resolve_source_frontend_clang_bin(
     return fallback
 
 
+def _default_clang_bin_name(compiler: str) -> str:
+    """The plain, unconfigured host binary name :func:`_resolve_clang_bin`
+    falls back to when neither ``gcc_path`` nor ``gcc_prefix`` resolves to
+    something more specific (including when ``gcc_path`` names a non-
+    clang-family binary ``_resolve_clang_bin`` ignores outright).
+
+    Exists as its own function so a caller can compare a resolved
+    ``clang_bin`` against this to tell "genuinely explicit/cross compiler"
+    from "the plain host default was used regardless of what was
+    requested" -- e.g. ``dumper._run_clang``'s `sys.platform` guess, which
+    is only safe for the latter (Codex review, fresh evidence: a `gcc_path`
+    naming a non-clang binary is silently ignored by `_resolve_clang_bin`,
+    so its mere presence does not mean a cross-compiler actually ran).
+    """
+    return "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+
+
+def _is_default_clang_bin(clang_bin: str, compiler: str) -> bool:
+    """Whether ``clang_bin`` (an already-resolved compiler executable) IS
+    the plain, unconfigured host default -- by invocation BASENAME, which
+    is what actually determines Clang's behavior, not real executable
+    identity and not raw path spelling.
+
+    Real Clang derives its own default target from ``argv[0]``: a
+    target-prefixed symlink to the exact same binary as plain ``clang``
+    (e.g. ``aarch64-apple-darwin-clang``, a real, documented cross-
+    toolchain wrapper shape) reports that PREFIXED target from
+    ``-print-target-triple``, not the host's -- so an earlier revision of
+    this check, which resolved both sides through `PATH`/symlinks and
+    compared real executable IDENTITY, wrongly treated that symlink as
+    "the plain default" merely because it happened to point at the same
+    file (Codex review, fresh evidence, correcting that revision). An
+    absolute path to the plain binary (``/usr/bin/clang``) is still
+    correctly recognized here, since its basename is unaffected by the
+    directory portion of the path -- only a genuinely different
+    invocation NAME changes Clang's own target-selection behavior.
+
+    Also strips a trailing numeric version suffix (:func:`
+    _strip_trailing_version_suffix`, ``clang-18`` -> ``clang``) before
+    comparing -- a native, versioned Clang driver `_resolve_clang_bin`
+    genuinely runs (LLVM/Debian packaging commonly ships one) is still
+    the plain host default in every way that matters here (Codex review,
+    fresh evidence): its own basename dispatch behaves identically to the
+    unversioned name once the version suffix -- which carries no target
+    information -- is set aside.
+    """
+    stem = _strip_trailing_version_suffix(Path(clang_bin).stem.lower())
+    return stem == _default_clang_bin_name(compiler)
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,
@@ -463,7 +525,7 @@ def _resolve_clang_bin(
             else f"{gcc_prefix}clang"
         )
     if not clang_bin:
-        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+        clang_bin = _default_clang_bin_name(compiler)
     if not _clang_available(clang_bin):
         raise SnapshotError(
             f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
@@ -471,6 +533,32 @@ def _resolve_clang_bin(
             "clang). Or use the castxml frontend (--ast-frontend castxml)."
         )
     return clang_bin
+
+
+def clang_bin_is_explicitly_configured(
+    gcc_path: str | None, gcc_prefix: str | None
+) -> bool:
+    """Whether :func:`_resolve_clang_bin` took an explicit ``--compiler``/
+    ``--compiler-prefix`` branch for these inputs, rather than falling
+    through to the plain, unconfigured host default.
+
+    Mirrors that function's own adoption condition instead of re-deriving
+    one from the resolved `clang_bin` string, since a resolved binary's
+    BASENAME can coincide with the plain default name even when it was
+    genuinely explicitly configured -- a ``--compiler`` wrapper installed
+    at a path whose basename happens to be plain ``clang``/``clang++``
+    (Codex review, fresh evidence: such a wrapper can produce a real AST
+    while not implementing ``-print-target-triple`` at all, failing both
+    the option-bearing probe and the bare re-probe; treating it as the
+    native host default purely because its basename matches would then
+    let :func:`dumper._run_clang`'s last-resort ``sys.platform`` guess
+    substitute the wrong platform for an explicitly cross-targeting
+    wrapper). Callers gate that guess on this being ``False`` in addition
+    to :func:`_is_default_clang_bin`'s own basename check -- the two
+    answer different questions (real identity vs. explicit provenance)
+    and neither alone is sufficient.
+    """
+    return bool(gcc_path and _is_clang_family_binary(gcc_path)) or bool(gcc_prefix)
 
 
 #: Clang AST node kinds for the function-like declarations we emit. Includes the
@@ -1224,6 +1312,7 @@ class _ClangAstParser:
                 self._target_triple,
                 name=name,
                 is_extern_c=is_extern_c,
+                has_asm_label=_clang_context.has_explicit_asm_label(node),
             )
             if not mangled:
                 continue

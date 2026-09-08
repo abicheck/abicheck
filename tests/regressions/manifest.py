@@ -1199,27 +1199,24 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, a linker-decorated spelling must be stripped to the "
-            "pure spelling at the POINT OF ORIGIN in every header-AST "
-            "backend's own parse step, for both a real Itanium name "
-            '(`__Z...` -> `_Z...`, unconditional) and a genuine extern "C"'
-            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). "
-            "Both are gated on `is_darwin_target(target_triple)`, which "
-            "must fall back to `sys.platform` (never overriding an "
-            "explicit non-Darwin triple) whenever the `-print-target-"
-            "triple` subprocess probe behind `target_triple` is "
-            "unavailable, rather than silently reading a failed probe as "
-            "non-Darwin. The shape check itself is the one canonical "
-            "`model.mangled_name.strip_macho_itanium_decoration`, reused "
-            "by `extract.headers.clang.context.strip_darwin_itanium_"
-            "decoration`, `model.mangled_name._itanium_strip_prefix`, and "
-            "`dumper_hybrid._macho_normalize_mangled` alike."
+            "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE POINT "
+            'OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
+            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). Both gate on "
+            "`is_darwin_target(target_triple)`, always False for a bare `None`/empty triple (never "
+            "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
+            "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
+            "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. Under CL mode there is no `sys.platform` guess, and explicit-target recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
+            "A bare re-probe of the SAME resolved `clang_bin` (keeping only its effective `--driver-mode=<value>` if any, `dumper._forwarded_driver_mode_token`) is tried under BOTH driver modes when the explicit-target recovery finds nothing -- a CL-style `-print-target-triple` is honored exactly like GNU's, so a target-prefixed CL-style name (e.g. `aarch64-apple-darwin-clang-cl`) reports its own prefixed default from the bare probe too, not just under GNU mode. Dropping the driver-mode token would silently revert a `clang-cl --driver-mode=g++` re-probe to CL mode, since the identical binary reports a different target bare vs. with that override: real evidence beats a static name-shape heuristic, since the earlier, option-bearing probe may have failed for a reason unrelated to `clang_bin`'s own identity. Only when that bare probe ALSO fails (GNU mode only) does `sys.platform` apply, gated on BOTH the RESOLVED `clang_bin` being the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`, version-suffix-stripped -- real Clang derives its own default target from argv[0], so basename -- not real identity, not raw spelling, and NOT merely differing from the plain name -- is what matters: an absolute path or a native version suffix still matches, a target-prefixed symlink correctly does not, and an arbitrary custom rename is answered by the bare re-probe, never by guessing it must be a cross-compiler) AND NOT `dumper_clang.clang_bin_is_explicitly_configured` (a `--compiler`/`--compiler-prefix` wrapper can coincidentally share the plain default's basename while genuinely not being it -- once BOTH probes fail for an explicitly-configured binary, that failure is itself evidence of an anomaly, not confirmation of a real native clang; this now ALSO suppresses the guess for a genuine absolute-path `--compiler` naming the real native clang, superseding this bug class's own earlier claim to the contrary). No fallback at all when no `@response-file`/`--config=<file>`/`--config-{user,system}-dir=<dir>` is forwarded AT ALL (`forwards_response_file`/`explicit_target_triple`'s shared `_opaque_option_source_tokens` void-back-to-None -- a config-*-dir points at a directory whose `clang.cfg` is loaded IMPLICITLY, no explicit `--config=` needed; real Clang scans the WHOLE arg list, response/config files included, before parsing even starts, so one could carry a later target OR retroactively flip CL-vs-GNU mode regardless of its position relative to a visible target). Shape check: `model.mangled_name.strip_macho_itanium_"
+            "decoration`, NOT applied to castxml."
         ),
-        fixed_by=(1138,),
+        fixed_by=(1138, 1156),
         seed_tests=(
             "tests/test_dumper_clang_extern_c_identity.py",
             "tests/test_dumper_hybrid_macho_idempotence.py",
             "tests/test_mangled_name_macho_decoration.py",
+            "tests/test_compiler_options.py",
+            "tests/test_dumper_target_triple_fallback.py",
+            "tests/test_castxml_literal_double_underscore_mangled.py",
         ),
         public_surfaces=(),
         axes={
@@ -1235,20 +1232,23 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- verified via code "
-                    "inspection + synthetic unit tests only. Recurred "
-                    "THREE times on macOS CI, each prior fix leaving one "
-                    "narrower residual (Itanium shape, then plain-C bare-"
-                    "name shape, then `is_darwin_target` reading False "
-                    "purely from a failed probe); the `sys.platform` "
-                    "fallback is verified only by monkeypatching"
+                    "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-fourth items below). "
+                    'Recurred TWENTY-FOUR times within #1138/#1149/#1156: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
+                    "explicit target recovered under a CL-style driver; the `sys.platform` guess leaking outside that gate; `--driver-mode=cl` on a plain `clang` name evading the "
+                    "name-only CL check; that gate recovering NO spelling when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named binary reverted to GNU mode "
+                    "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
+                    "driver name (`clang-18`) failing the basename check; a visible target trusted despite a later response file that could override it; that same fix wrongly trusting a preceding one too, since Clang's own driver-mode scan reads the whole arg list up front regardless of position; an exact-basename comparison alone wrongly "
+                    "treating ANY custom rename of the native compiler (e.g. `company-clang`) as a cross-compiler, closed by trying a bare re-probe of the identical binary first; an "
+                    "explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; an explicitly-"
+                    "configured `--compiler` wrapper sharing the plain default's basename while not being it, still getting the guess purely on basename evidence; and, once a "
+                    'genuine Darwin target IS confirmed, a literal `asm("__Zfake")` label being indistinguishable by shape alone from a real compiler-generated decorated Itanium '
+                    "mangling (both are equally `__Z...`-shaped), closed by `has_explicit_asm_label` detecting clang's own distinct `AsmLabelAttr` child node under the declaration's "
+                    '`"inner"` list (verified against a real Clang 18 install) and short-circuiting both stripping branches whenever it is present; and the fifteenth item\'s bare '
+                    "re-probe being confined to the GNU branch only, leaving a target-prefixed CL-style driver (e.g. `aarch64-apple-darwin-clang-cl`) with no fallback once its own "
+                    "explicit-target recovery found nothing, even though a real `clang-cl -print-target-triple` reports that same prefixed default (verified against a real Clang 18 "
+                    "install), closed by trying the identical bare re-probe under CL mode too."
                 ),
-                reference=(
-                    "PR #1138 follow-up: macos-latest integration-tests "
-                    "reported this exact mismatch three times -- Itanium "
-                    "shape, extern-C shape, then this session's identical "
-                    "'__Z10plain_funci' != '_Z10plain_funci' symptom"
-                ),
+                reference="#1138/#1149 follow-ups, fixed by #1156",
             ),
         ),
     ),
