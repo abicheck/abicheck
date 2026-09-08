@@ -538,6 +538,62 @@ def test_identity_collision_detected_identity_order_independent_across_sides() -
     assert hits[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
 
 
+def test_identity_collision_detected_symbol_order_independent_across_sides() -> None:
+    """Codex review, third follow-up: when colliding declarations carry
+    *different* qualified names, ``_route_declaration`` records the
+    qualified name of whichever declaration was visited second for each
+    transition -- so which name survives as ``qualified_name`` on a given
+    record depends on visitation order too, not just which USRs pair up.
+    Retaining "whichever record is first in the list" (a `setdefault`) for
+    the group's `symbol` would be exactly as order-dependent as the USR
+    pair was before the previous fix: the same persistent collision could
+    be reported as `Change.symbol="f"` on one side and `Change.symbol="g"`
+    on the other, and since `_IDENTITY_FUNCS` keys this check by
+    `(symbol, new_value)`, that alone would produce a spurious
+    RESOLVED+INTRODUCED pair instead of one PERSISTENT finding -- even
+    though the swapped-USR fix above already made the USR pair agree.
+    `_check_identity_collision` now derives the canonical symbol as
+    ``min()`` over the *set* of qualified names seen for the group, which
+    is a deterministic function of that set, not of arrival order."""
+
+    def _snap(first_qname: str, second_qname: str) -> AbiSnapshot:
+        # Two transitions on one identity key, differing only in which
+        # qualified name is recorded first vs. second.
+        surface = SourceAbiSurface(
+            identity_collisions=[
+                {
+                    "identity": "shared#sha256:abc",
+                    "qualified_name": first_qname,
+                    "usr_a": "c:@F@f#",
+                    "usr_b": "c:@N@ns1@F@f#",
+                },
+                {
+                    "identity": "shared#sha256:abc",
+                    "qualified_name": second_qname,
+                    "usr_a": "c:@N@ns1@F@f#",
+                    "usr_b": "c:@N@ns2@F@f#",
+                },
+            ],
+            reachable_declarations=[
+                SourceEntity(id="d0", kind="function", qualified_name="f")
+            ],
+        )
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            build_source=BuildSourcePack(root="", source_abi=surface),
+        )
+
+    old = _snap("f", "g")
+    new = _snap("g", "f")  # same two names, swapped which record carries which
+    changes = compute_cross_source_evolution(old, new)
+    hits = [c for c in changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
+    assert len(hits) == 1
+    assert hits[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
+    assert hits[0].symbol == "f"  # min("f", "g"), deterministic either way
+
+
 def test_identity_collision_detected_authority_unchanged() -> None:
     from abicheck.checker_policy import RISK_KINDS
 

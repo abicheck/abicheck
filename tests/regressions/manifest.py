@@ -403,6 +403,15 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # `(symbol, source_location)`/`(symbol, new_value)` unique again
             # on their own, so the widened, positional identity functions
             # from rounds 1-2 were reverted back to that un-widened shape.
+            # Round 4 found grouping alone still left one order-dependent
+            # seam in `identity_collision_detected`: when colliding
+            # declarations carry *different* qualified names, retaining
+            # "whichever record's qualified name is first in the group" for
+            # the group's own `symbol` is exactly as order-dependent as the
+            # USR pair was before round 2 -- fixed by deriving the group's
+            # canonical `symbol` as `min()` over the *set* of qualified
+            # names seen for that group, a deterministic function of the
+            # set rather than of arrival order.
             "tests/test_cross_source_evolution.py",
             "tests/test_cross_source_evolution_build_source.py",
         ),

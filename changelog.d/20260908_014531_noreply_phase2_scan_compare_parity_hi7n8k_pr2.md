@@ -47,7 +47,15 @@
   per-pair records by the same key `source_link._route_type`/
   `_route_declaration` themselves group by (`(qualified_name, header)`;
   `identity`) and union each group's evidence into one order-independent
-  `Change` per group, rather than one `Change` per pairwise record.
+  `Change` per group, rather than one `Change` per pairwise record. Third
+  follow-up round: grouping alone still left `identity_collision_detected`'s
+  own `symbol` order-dependent when colliding declarations carry different
+  qualified names — retaining whichever record's name arrived first in the
+  group was exactly as order-dependent as the USR pair was before the
+  second round. Fixed by deriving the group's canonical `symbol` as `min()`
+  over the group's qualified-name set (a deterministic function of the set,
+  not of arrival order). `odr_type_variant` has no equivalent seam since its
+  group key already includes `qualified_name` itself.
 - **`odr_type_variant` findings on a public type could be wrongly demoted
   as "not-exported."** `abicheck/surface.py`'s public-surface scoping
   classifies a finding as symbol-level or type-level before deciding

@@ -301,7 +301,16 @@ def _default_identity(change: Change) -> Hashable:
 #:   ``usr_a``/``usr_b`` into the complete, order-independent participant
 #:   set, emitting exactly one ``Change`` per group. That grouping is what
 #:   makes ``(symbol, new_value)`` unique again: there is now at most one
-#:   finding per ``identity`` key by construction.
+#:   finding per ``identity`` key by construction. A third Codex round found
+#:   grouping alone was not quite enough: when colliding declarations carry
+#:   *different* qualified names, retaining "whichever record's qualified
+#:   name is first in the group" is exactly as order-dependent as the USR
+#:   pair was before this fix, and would make ``symbol`` itself vary between
+#:   OLD/NEW even after the USR-pair fix already made ``new_value`` and the
+#:   participant set agree. ``_check_identity_collision`` now derives the
+#:   group's canonical ``symbol`` as ``min()`` over the *set* of qualified
+#:   names seen for that group -- a deterministic function of the set, not
+#:   of arrival order.
 #: - ``compile_context_conflict`` -- ``symbol`` is the build *target*
 #:   label (``target_id`` or the literal ``"(unscoped compile units)"``
 #:   fallback), and one target's compile units can violate more than one

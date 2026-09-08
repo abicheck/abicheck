@@ -1366,18 +1366,29 @@ def _check_identity_collision(
     # the union is the same set no matter which edges of that chain got
     # recorded. One `Change` per group, keyed by `identity` alone, is then
     # naturally unique within a single side's own findings.
-    groups: dict[str, tuple[str, set[str]]] = {}
+    # `qname` is collected as a *set* per group, not retained from whichever
+    # record happens to be first in `surface.identity_collisions` -- when
+    # colliding declarations have different qualified names, `setdefault`
+    # would otherwise keep whichever name `_route_declaration` happened to
+    # record second (the qname of the *newly arriving* declaration in each
+    # transition), which is exactly as order-dependent as the USR pair
+    # itself. `min(qnames)` is a deterministic function of the group's
+    # *set* of names, so it is stable regardless of visitation order (Codex
+    # review, third follow-up).
+    groups: dict[str, tuple[set[str], set[str]]] = {}
     for collision in surface.identity_collisions:
         identity = str(collision.get("identity", "")) or "<unknown>"
         qname = str(collision.get("qualified_name", "")) or identity
-        _, usrs = groups.setdefault(identity, (qname, set()))
+        qnames, usrs = groups.setdefault(identity, (set(), set()))
+        qnames.add(qname)
         for usr_field in ("usr_a", "usr_b"):
             value = str(collision.get(usr_field, ""))
             if value:
                 usrs.add(value)
 
     findings: list[Change] = []
-    for identity, (qname, usrs) in groups.items():
+    for identity, (qnames, usrs) in groups.items():
+        qname = min(qnames)
         sorted_usrs = sorted(usrs)
         usr_list = ", ".join(repr(u) for u in sorted_usrs)
         findings.append(
