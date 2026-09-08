@@ -341,7 +341,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "TestBatchShapedChangeIgnoresTheSample), and order-invariance "
             "for unordered inputs."
         ),
-        fixed_by=(753, 759, 879, 905, 1125),
+        fixed_by=(753, 759, 879, 905, 1125, 1148),
         seed_tests=(
             "tests/test_cross_tier_dedup_unhashable_value.py",
             "tests/test_finding_identity_properties.py",
@@ -359,14 +359,33 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # The same generalized primitive (`_IDENTITY_FUNCS`) was reused,
             # not reinvented, for three more checks migrated in the PR that
             # closed out all eleven cross-source checks (plan §3 row 3):
-            # `odr_type_variant` (two ODR conflicts can share a qualified
-            # name -- `(symbol, source_location)`), `identity_collision_
-            # detected` (a three-way L4 identity collision produces two
-            # findings sharing one qualified name -- `(symbol, new_value)`),
-            # and `compile_context_conflict` (one build target can violate
-            # more than one ABI flag family/define at once -- `(symbol,
-            # old_value)`) -- see that sibling test module for their own
-            # identity-generalization tests.
+            # `odr_type_variant`, `identity_collision_detected`, and
+            # `compile_context_conflict` (`(symbol, old_value)`, unaffected
+            # by the follow-up below). The first two's initial identities --
+            # `(symbol, source_location)` and `(symbol, new_value)`
+            # respectively -- were themselves found non-injective against
+            # each check's *own* findings on a single side (Codex review,
+            # PR #1147 finding 1): `_route_type` never updates an ODR
+            # conflict's stored baseline hash once first recorded, so a
+            # *third* divergent per-TU definition of the same type in the
+            # same header compares against that same baseline and appends
+            # another conflict sharing `(symbol, source_location)` with the
+            # one before it; `_route_declaration` records one collision
+            # entry per *additional* colliding declaration, so a three-way
+            # collision on one L4 identity key produces two records sharing
+            # `(symbol, new_value)` too (found post-merge; fixed by #1148).
+            # Both checks were silently building
+            # `Change` objects with no field left to distinguish the
+            # genuinely distinct records, so the caller-side dict
+            # comprehension (keyed by identity) dropped all but the last
+            # one. Fixed by stamping the distinguishing evidence each check
+            # already computes (the ODR conflict's own per-TU layout hashes;
+            # the identity collision's own transition USR) onto
+            # `Change.old_value`/`new_value`, and widening both identity
+            # functions to read the extra field(s): `odr_type_variant` is
+            # now `(symbol, source_location, old_value, new_value)`,
+            # `identity_collision_detected` is now `(symbol, new_value,
+            # old_value)`.
             "tests/test_cross_source_evolution.py",
             "tests/test_cross_source_evolution_build_source.py",
         ),
