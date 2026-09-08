@@ -431,37 +431,23 @@ plugins:
         development/goals.md: contribute/goals.md
         development/libabigail-parity.md: contribute/libabigail-parity.md
         development/performance.md: contribute/performance.md
-        development/plans/g1-cross-platform-e2e.md: contribute/plans/g1-cross-platform-e2e.md
-        development/plans/g10-glibc-floor-check.md: contribute/plans/g10-glibc-floor-check.md
         development/plans/g11-single-binary-audit.md: contribute/plans/g11-single-binary-audit.md
-        development/plans/g12-security-hardening.md: contribute/plans/g12-security-hardening.md
-        development/plans/g13-arch-mismatch-guard.md: contribute/plans/g13-arch-mismatch-guard.md
-        development/plans/g14-stable-abi-subset.md: contribute/plans/g14-stable-abi-subset.md
         development/plans/g15-inline-namespace-version.md: contribute/plans/g15-inline-namespace-version.md
-        development/plans/g16-header-scope-toolchain-robustness.md: contribute/plans/g16-header-scope-toolchain-robustness.md
         development/plans/g17-real-world-corpus.md: contribute/plans/g17-real-world-corpus.md
         development/plans/g18-bazel-build-evidence.md: contribute/plans/g18-bazel-build-evidence.md
         development/plans/g19-pr-source-intelligence.md: contribute/plans/g19-pr-source-intelligence.md
-        development/plans/g2-build-config-and-bundle.md: contribute/plans/g2-build-config-and-bundle.md
         development/plans/g20-source-scan-example-catalog.md: contribute/plans/g20-source-scan-example-catalog.md
         development/plans/g21-oneshot-deep-compare.md: contribute/plans/g21-oneshot-deep-compare.md
-        development/plans/g22-cli-consolidation.md: contribute/plans/g22-cli-consolidation.md
-        development/plans/g23-python-level-api-diff.md: contribute/plans/g23-python-level-api-diff.md
         development/plans/g24-linux-abi-gap-closure.md: contribute/plans/g24-linux-abi-gap-closure.md
         development/plans/g25-cython-api-abi-frontend.md: contribute/plans/g25-cython-api-abi-frontend.md
         development/plans/g26-numpy-capi-envelope.md: contribute/plans/g26-numpy-capi-envelope.md
         development/plans/g27-wheel-deployment-verification.md: contribute/plans/g27-wheel-deployment-verification.md
         development/plans/g28-castxml-clang-l2-parity-hardening.md: contribute/plans/g28-castxml-clang-l2-parity-hardening.md
         development/plans/g29-impact-analysis-layer.md: contribute/plans/g29-impact-analysis-layer.md
-        development/plans/g3-workflow-examples-and-reporting.md: contribute/plans/g3-workflow-examples-and-reporting.md
         development/plans/g30-github-actions-integration-model.md: contribute/plans/g30-github-actions-integration-model.md
         development/plans/g31-header-graph-default-on-followup.md: contribute/plans/g31-header-graph-default-on-followup.md
-        development/plans/g32-comparability-contract-and-multi-tu-manifest.md: contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md
         development/plans/g4-header-ast-extractor.md: contribute/plans/g4-header-ast-extractor.md
-        development/plans/g5-plugin-bidirectional-contract.md: contribute/plans/g5-plugin-bidirectional-contract.md
-        development/plans/g6-kernel-btf-and-accelerator.md: contribute/plans/g6-kernel-btf-and-accelerator.md
         development/plans/g8-static-libraries.md: contribute/plans/g8-static-libraries.md
-        development/plans/g9-wheel-vendored-matching.md: contribute/plans/g9-wheel-vendored-matching.md
         development/plans/index.md: contribute/plans/index.md
         development/plans/public-contract-default.md: contribute/plans/public-contract-default.md
         development/python-build-ecosystem-positioning.md: contribute/python-build-ecosystem-positioning.md

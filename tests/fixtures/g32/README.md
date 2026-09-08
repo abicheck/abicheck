@@ -1,7 +1,7 @@
 # G32 Phase 0 fixtures
 
 Regression fixtures for [ADR-050](../../../docs/contribute/adr/050-comparability-contract-and-multi-tu-manifest.md)
-/ [G32](../../../docs/contribute/plans/g32-comparability-contract-and-multi-tu-manifest.md)
+/ G32
 Phase 0. These are raw inputs (headers, and one real AST capture) for later
 phases to load — not generated `.abi.json` snapshots, and (per Phase 0's own
 "Out of scope") no production code reads any of this yet. `tests/test_g32_fixtures.py`

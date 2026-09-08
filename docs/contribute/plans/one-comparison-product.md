@@ -85,7 +85,7 @@ wins. This plan owns the **interface and its capability topology**: which
 command owns which analysis, and what a user has to type.
 
 **Supersedes the remaining scope of**
-[`cli-cleanup-phase-two.md`](cli-cleanup-phase-two.md). That file's three open
+`cli-cleanup-phase-two.md`. That file's three open
 items are re-homed here (§6): PR H (`scan --artifact-set` member identity)
 is *cancelled* — the mode is being deleted; PR I (one operand driver) and
 PR J (bundle topology out of CLI flags) become Phase 7 slices. Its closed
@@ -669,7 +669,7 @@ PR J) · 7e `--profile` removal · 7f `dump` provenance merge ·
 7h `--required-symbols`, `-j`, `--keep-extracted`, `--no-bundle-analysis`.
 
 Every PR in this phase meets the merge criteria recorded in
-[`cli-cleanup-phase-two.md`](cli-cleanup-phase-two.md) — old spelling exits
+`cli-cleanup-phase-two.md` — old spelling exits
 `64` with no hidden alias, front-end parity in the same PR, schema bump where
 a machine contract changes, and verdict/gate/exit/coverage/assurance asserted
 separately. That list is carried forward unchanged; it is not restated here.

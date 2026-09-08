@@ -72,13 +72,13 @@ genuinely unimplemented; several of the ecosystem gaps below are narrower.)
   C uniformly as CPython extensions (`abicheck/python_ext.py`): it inspects
   their imported CPython C-API symbols and can audit an explicit
   `--abi3`/Limited-API floor (`abicheck/stable_abi.py`,
-  [G14](plans/g14-stable-abi-subset.md)). That matters because an extension
+  G14). That matters because an extension
   module normally exports little beyond `PyInit_<module>` — an
   exported-symbol diff alone would see almost nothing.
 - **Python API comparison via `.pyi`.** When a type stub sits next to the
   extension, abicheck statically diffs functions, classes, methods,
   parameters, defaults, and annotations
-  (`abicheck/python_api.py`, [G23](plans/g23-python-level-api-diff.md)).
+  (`abicheck/python_api.py`, G23).
   This is the layer that actually describes the Python API a *particular*
   module exposes — the binding framework's own headers describe the
   framework, not the generated API.
@@ -100,7 +100,7 @@ genuinely unimplemented; several of the ecosystem gaps below are narrower.)
 - **Wheel deployment claims.** Linux `GLIBC_*`/`GLIBCXX_*`/`CXXABI_*` floor
   checks, musllinux/glibc contradictions, macOS deployment targets, and
   wheel-tag/architecture mismatches are implemented
-  ([G10](plans/g10-glibc-floor-check.md),
+  (G10,
   [G27](plans/g27-wheel-deployment-verification.md)). Windows runtime
   requirements, CPU-ISA baselines, the full platform-library closure policy,
   and CLI auto-derivation from the compared wheel's own tag remain planned.
@@ -305,13 +305,13 @@ none of those tools share with each other today.
 | Idea above | Closest existing plan/ADR | Relationship |
 |---|---|---|
 | Wheel/conda package comparison | `abicheck/package.py`, [ADR-006](adr/006-package-level-comparison.md) | Already implemented; this doc proposes wiring it into cibuildwheel/rattler-build recipes, not new extraction code. |
-| CPython-extension recognition, abi3 audit | [G14](plans/g14-stable-abi-subset.md) | Already implemented (`python_ext.py`, `stable_abi.py`); already treats Cython/pybind11/nanobind/C uniformly at the "is this a CPython extension" level. |
-| `.pyi` Python API diff | [G23](plans/g23-python-level-api-diff.md) | Already implemented; nanobind's stub generator and a scikit-build-core manifest are both natural new *inputs* to this existing diff, not a new diff engine. |
+| CPython-extension recognition, abi3 audit | G14 | Already implemented (`python_ext.py`, `stable_abi.py`); already treats Cython/pybind11/nanobind/C uniformly at the "is this a CPython extension" level. |
+| `.pyi` Python API diff | G23 | Already implemented; nanobind's stub generator and a scikit-build-core manifest are both natural new *inputs* to this existing diff, not a new diff engine. |
 | Bundle / multi-extension analysis | [ADR-023](adr/023-bundle-aware-multi-binary-analysis.md) | Already implemented; the binding-ABI provider below would add a framework-identity dimension bundle analysis doesn't currently carry. |
 | NumPy C-API evidence | [G26](plans/g26-numpy-capi-envelope.md) | Already partial, per that plan's own status note; unchanged by this doc. |
-| Wheel deployment-claim verification | [G10](plans/g10-glibc-floor-check.md), [G27](plans/g27-wheel-deployment-verification.md) | Already partial; unchanged by this doc. |
+| Wheel deployment-claim verification | G10, [G27](plans/g27-wheel-deployment-verification.md) | Already partial; unchanged by this doc. |
 | pybind11/nanobind `BindingAbiProvider` | [ADR-032](adr/032-evidence-extractor-plugin-interface.md) (plugin interface), [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md) (non-C-ABI frontend scope), SciPy roadmap's `SurfaceProvider` | New provider; no registry entry yet. Should implement the SciPy roadmap's `SurfaceProvider` interface, not a separately-invented one — same interface, sibling to its `CythonApiProvider`/`NumPyCapiProvider`. |
-| Release-matrix / support-set delta | [G2](plans/g2-build-config-and-bundle.md) (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md), SciPy roadmap §4 | Canonical design lives in the SciPy roadmap's §4; this doc's cibuildwheel matrix-aggregation use is the same mechanism, not a second implementation. |
+| Release-matrix / support-set delta | G2 (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md), SciPy roadmap §4 | Canonical design lives in the SciPy roadmap's §4; this doc's cibuildwheel matrix-aggregation use is the same mechanism, not a second implementation. |
 | Automatic previous-artifact resolution | SciPy roadmap §6 | Canonical design lives there (name/platform/arch/CPython-ABI/variant matching, content-hash caching); a resolver built for one should serve both PyPI and conda-forge lookups. |
 | conda `run_exports`/pin verification | none yet | New; would need the same artifact-resolution/caching layer as the item above. |
 | cibuildwheel audit-stage / matrix aggregation | none yet | New CLI/CI surface; the per-wheel half needs no new code (existing `compare`), the matrix-aggregation half does. |

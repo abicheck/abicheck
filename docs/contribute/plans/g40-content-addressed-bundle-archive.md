@@ -50,7 +50,7 @@ Phase 2's own "deliberately NOT attempted" note (the external review's §9
 `bundle-dump-vNext.tar.zst` sketch) — deferred there explicitly as "a real,
 separate storage-architecture project on the scale of
 [ADR-059](../adr/059-compressed-snapshot-storage.md) (snapshot compression)
-or [G32](g32-comparability-contract-and-multi-tu-manifest.md) (multi-TU
+or G32 (multi-TU
 manifest)", not a sub-step of making the bundle layer stored-data-capable.
 This document was originally that separate scope as a design-only proposal.
 Per the "Status" note above, the design has since been implemented and

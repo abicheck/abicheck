@@ -180,7 +180,10 @@ scenarios:
     validates: UC-WF-bundle
     automated: false
     status: planned
-    plan: docs/contribute/plans/g2-build-config-and-bundle.md
+    note: >
+      G2 is Done (build matrix folds into compare/compare-release; bundle soname-skew is wired) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
     note: >
       The scoping rollup (scope.manual_review_required / public_additions /
       filtered_internal_changes) and changed_libraries that this gate keys off
@@ -216,7 +219,10 @@ scenarios:
     validates: UC-WF-bundle
     automated: false
     status: planned
-    plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
+    note: >
+      G3 is Done (workflow scenarios and Markdown/HTML coverage) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
     note: >
       changed_libraries and the scope.public_additions / filtered_internal_changes
       rollup are emitted today and unit-tested in tests/test_compare_release.py.

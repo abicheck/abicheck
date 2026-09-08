@@ -18,7 +18,10 @@ scenarios:
     validates: UC-WF-bundle
     automated: false
     status: planned
-    plan: docs/contribute/plans/g2-build-config-and-bundle.md
+    note: >
+      G2 is Done (build matrix folds into compare/compare-release; bundle soname-skew is wired) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
 
   - id: SC-APP-IMPACT
     title: "Answer: will my application break with the new library?"
@@ -33,7 +36,10 @@ scenarios:
     validates: UC-WF-appcompat
     automated: false
     status: planned
-    plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
+    note: >
+      G3 is Done (workflow scenarios and Markdown/HTML coverage) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
 
   - id: SC-SYSROOT-MIGRATION
     title: Validate a binary still loads after a full-stack sysroot bump
@@ -48,7 +54,10 @@ scenarios:
     validates: UC-WF-stack-deps
     automated: false
     status: planned
-    plan: docs/contribute/plans/g3-workflow-examples-and-reporting.md
+    note: >
+      G3 is Done (workflow scenarios and Markdown/HTML coverage) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
 
   - id: SC-DEPS-LOADCHECK
     title: Confirm a binary's symbols all bind in its dependency stack

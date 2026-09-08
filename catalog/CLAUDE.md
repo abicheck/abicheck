@@ -166,7 +166,7 @@ enforced — a slug with no definition, and a definition no case uses — by
 the registry these were unvalidated free-text strings that
 `docs/contribute/catalog-coverage.md` counted as distinct compatibility
 rules, so a typo or a synonym silently became one more "rule". See
-[`docs/contribute/plans/examples-catalog-split.md`](../docs/contribute/plans/examples-catalog-split.md)
+`docs/contribute/plans/examples-catalog-split.md`
 for the full rationale and remaining phases.
 
 **A restatement of the same rule under a genuinely different condition is a

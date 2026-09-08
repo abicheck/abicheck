@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 **Status:** Accepted — implemented (Phase 0 and Phases A–E; D1–D6). See
-[G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) for the
+G32 for the
 per-phase implementation record, including the post-merge D5/D6 review
 follow-up. One thing remains intentionally unbuilt, not a gap in this ADR's
 model: `service.run_dump` itself accepts `dump_manifest` (public API,
@@ -2498,5 +2498,5 @@ this split, if picked up, would be sequenced.
   [ADR-041](041-compiler-facts-semantic-impact-graph.md) (coverage-honesty
   pattern this ADR's gate follows), [ADR-045](045-identity-based-old-new-entity-matching.md)
   (return-type-out-of-identity precedent for D4)
-- [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) —
+- G32 —
   phased implementation plan
