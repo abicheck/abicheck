@@ -581,7 +581,9 @@ _extra_args_has_scan_only_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
     case "$_name" in
-    --crosscheck | --risk-rules | --budget | --build-target | --artifact-set | --max-findings)
+    --crosscheck | --risk-rules | --budget | --build-target | --artifact-set | \
+      --max-findings | --show-suppressed | --manifest | --public-header-dir | \
+      --against | --pattern-verdicts | --no-pattern-verdicts)
       return 0
       ;;
     esac
@@ -1262,15 +1264,40 @@ fi
 #
 # `mode: scan` stays a fully documented, working Action input -- only its
 # *internal* implementation changes here. A scan invocation with a real
-# baseline (`--against`/`abi-baseline`, and not forced audit-only) is now
-# built and dispatched as a plain two-sided `compare AGAINST ARTIFACT`
-# below, collapsing this Action's own scan/compare branches into one shared
-# path for that case -- `compare`'s single-pair branch already accepts
-# every evidence/cross-toolchain flag scan's own baseline-compare path
-# does (`--sources`/`--build-info`/`--config`/`--depth`/`--since`/
-# `--changed-path`/`--ast-frontend`/`--compiler*`/`--sysroot`/`--nostdinc`/
-# `--policy`/`--suppress`/`--require-complete-analysis`), so this is a
-# faithful translation, not a narrowed one.
+# baseline (`--against`/`abi-baseline`, not forced audit-only, and none of
+# the divergences below) is now built and dispatched as a plain two-sided
+# `compare AGAINST ARTIFACT` below, collapsing this Action's own
+# scan/compare branches into one shared path for that narrower case.
+#
+# This routing is deliberately conservative, not the "faithful, unnarrowed
+# translation" an earlier version of this comment claimed -- three rounds
+# of review (Codex, PR #1160) found real behavioral divergences between
+# `scan`'s baseline-compare path and `compare`'s own pipeline that this
+# routing must stay off of, not just a flag-support gap:
+#
+# - **Cross-source finding severity.** `scan`'s baseline path calls
+#   `_strip_automatic_cross_source_findings()` (`cli_scan_baseline.py`) to
+#   keep single-version hygiene findings (`header_build_context_mismatch`,
+#   `odr_type_variant`, ...) advisory-only -- reported in the crosscheck
+#   block, never folded into the old/new diff or its verdict/exit code.
+#   `compare`'s own automatic cross-source-checks stage has no such
+#   stripping: the identical finding becomes a real API break there. Since
+#   both checks are gated on L3/L4 evidence, any baseline scan that
+#   supplies `--sources`/`--build-info`/`--compile-db` stays on the legacy
+#   CLI unconditionally -- routing it to `compare` could turn a
+#   `fail-on-api-break: true` pass into a failure on a hygiene finding the
+#   same scan request previously only reported (Codex review P1, PR #1160).
+# - **Per-side header/include roots: additive vs. overriding.** `scan`
+#   documents (`action.yml`) that a shared `header`/`include` root and a
+#   side-specific `new-header`/`old-header`/`new-include`/`old-include`
+#   ADD together. `compare`'s own per-side resolution
+#   (`cli_helpers_compare._resolve_per_side_options`) OVERRIDES the shared
+#   root with the side-specific one instead of unioning them -- a real,
+#   pre-existing, documented `compare` behavior, not a bug this PR
+#   introduced, but routing onto it can silently drop a required common
+#   dependency header for one side. So a baseline scan combining a shared
+#   header/include root with a side-specific one for the same kind also
+#   stays on the legacy CLI (Codex review P1, PR #1160).
 #
 # Audit-only (no baseline) stays on the legacy `scan` CLI unconditionally
 # for this commit, even though `compare --no-baseline` exists (ADR-068 D2,
@@ -1278,21 +1305,28 @@ fi
 # audit-only surface today (no `--sources`/`--build-info`/`--depth`/
 # cross-toolchain flags, no secondary `--write`, and `--dry-run` is not
 # honored there at all -- `compare_no_baseline.py` never reads it, so it
-# would silently run the real audit instead of previewing it), and every
-# one of this Action's own required audit-only combinations (a bare scan,
-# `estimate`/dry-run, `new-library-set`) needs at least one of those. So is
-# `--artifact-set` (plan §3 #16/#17, P5 "not started"), `--budget`
-# (plan §3 #19, P3 "compare does not emit [exit 5] yet"), `--risk-rules`
-# (plan §3 #14, "Phase 7"), `--crosscheck`'s KEY=error promotion syntax
-# (plan §3 #23, "MERGE into policy"), `--build-target` (no `compare`
-# equivalent at all yet, baseline or not -- `tests/test_action_run_
-# contract.py::test_action_flags_are_real_cli_options` pins this), and
-# `--max-findings` (the scan JSON summary's own truncation cap). All five
-# of the latter are also checked when requested through the general
-# `extra-args` passthrough instead of their dedicated Action input
-# (`_extra_args_has_scan_only_flag`, Codex review P2, PR #1160, two rounds
-# -- `--max-findings` was the one omission the first pass missed), since
-# `compare --help` has none of them either.
+# would silently run the real audit instead of previewing it), and it
+# crashes outright (an unhandled `AssertionError` in
+# `workflows/no_baseline_compare.py`) instead of reporting a finding when
+# the candidate genuinely has one of the hygiene problems the audit exists
+# to catch (Codex review P1, PR #1160, verified live against
+# `catalog/cases/case143_audit_accidental_export`). Every one of this
+# Action's own required audit-only combinations (a bare scan,
+# `estimate`/dry-run, `new-library-set`) needs at least one of those
+# unsupported inputs anyway. So is `--artifact-set` (plan §3 #16/#17, P5
+# "not started"), `--budget` (plan §3 #19, P3 "compare does not emit [exit
+# 5] yet"), `--risk-rules` (plan §3 #14, "Phase 7"), `--crosscheck`'s
+# KEY=error promotion syntax (plan §3 #23, "MERGE into policy"),
+# `--build-target` (no `compare` equivalent at all yet, baseline or not --
+# `tests/test_action_run_contract.py::test_action_flags_are_real_cli_options`
+# pins this), `--max-findings` (the scan JSON summary's own truncation
+# cap), `--show-suppressed`, `--public-header-dir` (via `extra-args` --
+# the dedicated Action input is already handled below), and `--manifest`
+# (renamed away on `compare`, CLI cleanup phase two PR J). All of the
+# latter are also checked when requested through the general `extra-args`
+# passthrough instead of their dedicated Action input
+# (`_extra_args_has_scan_only_flag`, Codex review P2, PR #1160, three
+# rounds), since `compare --help-all` has none of them either.
 #
 # A baseline scan with no explicit `--depth` also stays on the legacy CLI
 # (Codex review P1, PR #1160): omitting it is `scan`'s own risk-driven
@@ -1318,6 +1352,9 @@ if [[ "$MODE" == "scan" ]]; then
            || -n "${INPUT_RISK_RULES:-}" || -n "${INPUT_CROSSCHECK:-}" \
            || -n "${INPUT_BUILD_TARGET:-}" ]] \
      || [[ -z "${INPUT_DEPTH:-}" ]] \
+     || [[ -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]] \
+     || [[ ( -n "${INPUT_HEADER:-}" && ( -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_NEW_HEADER:-}" ) ) \
+           || ( -n "${INPUT_INCLUDE:-}" && ( -n "${INPUT_OLD_INCLUDE:-}" || -n "${INPUT_NEW_INCLUDE:-}" ) ) ]] \
      || _extra_args_has_scan_only_flag; then
     _SCAN_NEEDS_LEGACY_CLI=true
   fi

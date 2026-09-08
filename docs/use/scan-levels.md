@@ -430,7 +430,7 @@ AST, which needs a header directory via `-H`/`--header` and a C/C++ frontend on
 # build-flag drift only, flat ~0.3–0.5s regardless of project size
 # (the compile DB is what supplies L3 — without it the comparison is artifact-only)
 abicheck compare old/libfoo.abi.json new/libfoo.so \
-  --build-info build/compile_commands.json --depth build
+  --build-info new=build/compile_commands.json --depth build
 
 # exported symbols + always-on lexical scan only (no DWARF walk, no L2 AST,
 # no L3/L4/L5; no compiler needed)
