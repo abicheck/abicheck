@@ -626,21 +626,26 @@ def _header_ast_parser(
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
-            # On a probe failure, recover an explicit `--target=`, else
-            # (non-CL-style driver only) guess from `sys.platform` -- a
-            # CL-style driver mostly targets Windows regardless of host
-            # OS, so it gets neither fallback (stays bare `None`). CL
-            # style is selected either by the binary's own NAME
-            # (`clang-cl`) or by a `--driver-mode=cl` flag on an
-            # otherwise-generic `clang` (a replayed compile unit's own
-            # form -- Codex review, fresh evidence); check both. The
-            # guess lives HERE, not in `is_darwin_target`, so a bare-
-            # `None` unit-test construction of `_ClangAstParser` is
-            # unaffected.
+            # On a probe failure, recover an explicit `--target=`. A
+            # CL-style driver (name `clang-cl`/`dpcpp-cl`, or a generic
+            # `clang` given `--driver-mode=cl` -- a replayed compile
+            # unit's own form; check both) only ever honors the one
+            # attached, double-dash `--target=<value>` spelling (a
+            # separate-argument or single-dash-attached spelling is
+            # silently ignored -- Codex review, fresh evidence), so its
+            # recovery is narrowed to that spelling (`cl_style=True`); it
+            # also gets no `sys.platform` guess (it mostly targets
+            # Windows regardless of host OS). The guess lives HERE, not
+            # in `is_darwin_target`, so a bare-`None` unit-test
+            # construction of `_ClangAstParser` is unaffected.
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
-                    None
+                    (
+                        _explicit_target_triple(
+                            gcc_options, gcc_option_tokens, cl_style=True
+                        )
+                    )
                     if (
                         _is_cl_style_driver_name(clang_bin)
                         or _forwards_driver_mode_cl(gcc_options, gcc_option_tokens)

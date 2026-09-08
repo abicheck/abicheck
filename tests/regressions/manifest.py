@@ -1199,19 +1199,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, strip a linker-decorated spelling to the pure "
-            "spelling AT THE POINT OF ORIGIN: a real Itanium name "
-            '(`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
-            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). "
-            "Both gate on `is_darwin_target(target_triple)`, which answers "
-            "`False` for a bare `None`/empty triple always (a no-pipeline "
-            "unit-test construction also produces that shape -- never "
-            "guess Darwin from host OS there). A `sys.platform` guess for "
-            "a REAL probe failure lives one layer up, in "
-            "`dumper._run_clang`, after `_compiler_options."
-            "explicit_target_triple` (skipped for a CL-style driver). "
-            "Shape check: `model.mangled_name."
-            "strip_macho_itanium_decoration`, NOT applied to castxml."
+            "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE "
+            "POINT OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), "
+            'a genuine extern "C"/plain-C bare name (`_foo` -> `foo`, gated on '
+            "`is_extern_c`). Both gate on `is_darwin_target(target_triple)`, always "
+            "False for a bare `None`/empty triple (a no-pipeline unit test also "
+            "produces that shape -- never guess Darwin from host OS there). A "
+            "`sys.platform` guess for a REAL probe failure lives one layer up, in "
+            "`dumper._run_clang`, after `_compiler_options.explicit_target_triple`; a "
+            "CL-style driver (`clang-cl`/`--driver-mode=cl`) gets no `sys.platform` "
+            "guess, and its recovery (`cl_style=True`) is narrowed to the one spelling "
+            "it actually honors (attached `--target=<value>`), never one it silently "
+            "ignores. Shape check: `model.mangled_name.strip_macho_itanium_"
+            "decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156),
         seed_tests=(
@@ -1236,17 +1236,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- code inspection + "
-                    "synthetic unit tests only. Recurred FIVE times: "
-                    "Itanium/plain-C shapes, `is_darwin_target` reading "
-                    "False on a failed probe (#1138); a fourth time in "
-                    "#1149's own fix (guess INSIDE `is_darwin_target`, "
-                    "plus an unconditional castxml strip corrupting "
-                    '`asm("__Zfake")`) -- fixed by #1156; a fifth within '
-                    "#1156's own first commit (guess put back INSIDE "
-                    "`is_darwin_target` broke its bare-`None` contract, "
-                    "caught by real macos-latest CI) -- fixed by moving "
-                    "it up into `dumper._run_clang`."
+                    "No Mach-O toolchain here -- code inspection + synthetic unit "
+                    "tests only. Recurred SIX times within #1138/#1149/#1156: "
+                    "Itanium/plain-C shapes reading False on a failed probe; a guess "
+                    "INSIDE `is_darwin_target` plus an unconditional castxml strip "
+                    'corrupting `asm("__Zfake")`; that guess moved back inside '
+                    "`is_darwin_target` (caught by real macos-latest CI); a "
+                    "possibly-ignored explicit target recovered under a CL-style "
+                    "driver; the `sys.platform` guess leaking outside that gate; and "
+                    "`--driver-mode=cl` on a plain `clang` name evading the "
+                    "name-only CL check -- all but one via Codex."
                 ),
                 reference="#1138/#1149 follow-ups, fixed by #1156",
             ),

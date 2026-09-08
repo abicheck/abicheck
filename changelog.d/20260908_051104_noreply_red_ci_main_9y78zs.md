@@ -26,16 +26,21 @@ it should read in CHANGELOG.md. Delete the other sections.
   explicitly-requested `--target=` via a new `_compiler_options.
   explicit_target_triple` helper, and — only when no explicit target was
   requested either — falls back to a triple string derived from the
-  running interpreter's own `sys.platform`. Both fallbacks are skipped
-  entirely for CL/MSVC-compatibility mode, selected either by a CL-style
-  binary name (`clang-cl`/`dpcpp-cl`) or by an explicit `--driver-mode=cl`
-  on an otherwise generically-named `clang` (a new `_compiler_options.
-  forwards_driver_mode_cl` helper): its flag syntax differs (a forwarded
-  `--target=` may be silently ignored rather than honored), and it mostly
-  targets Windows regardless of host OS (a real
-  `clang-cl -print-target-triple` reports a Windows triple even
-  cross-compiled from macOS), so guessing `sys.platform` there would
-  misclassify a Windows AST as Darwin on a macOS host.
+  running interpreter's own `sys.platform`. The `sys.platform` guess is
+  skipped entirely for CL/MSVC-compatibility mode, selected either by a
+  CL-style binary name (`clang-cl`/`dpcpp-cl`) or by an explicit
+  `--driver-mode=cl` on an otherwise generically-named `clang` (a new
+  `_compiler_options.forwards_driver_mode_cl` helper): it mostly targets
+  Windows regardless of host OS (a real `clang-cl -print-target-triple`
+  reports a Windows triple even cross-compiled from macOS), so guessing
+  `sys.platform` there would misclassify a Windows AST as Darwin on a
+  macOS host. The explicit-`--target=` recovery itself stays active under
+  CL mode too, but narrowed (`explicit_target_triple(..., cl_style=True)`)
+  to the one spelling a CL-style driver actually honors — attached,
+  double-dash `--target=<value>` — since a separate-argument or
+  single-dash-attached spelling completes with an "unknown argument
+  ignored" warning and is never applied; recovering one of those as if it
+  were real would risk applying the wrong platform normalization.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

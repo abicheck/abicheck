@@ -381,7 +381,10 @@ def explicit_language_standard(
 
 
 def explicit_target_triple(
-    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    *,
+    cl_style: bool = False,
 ) -> str | None:
     """Return the last explicitly forwarded Clang ``-target``/``--target=``
     triple, or ``None`` if forwarded options request none.
@@ -403,8 +406,22 @@ def explicit_target_triple(
     Same last-wins/tokenizing convention as :func:`explicit_language_standard`
     (``gcc_options`` split and placed before ``gcc_option_tokens``, matching
     the real frontend command lines) — only the recognized flag spelling
-    differs: Clang accepts both ``-target <value>`` (a following, separate
-    argument) and ``--target=<value>``/``-target=<value>`` (attached).
+    differs: a generic (GNU-driver) Clang accepts ``-target <value>`` (a
+    following, separate argument) and ``--target=<value>``/``-target=<value>``
+    (attached).
+
+    ``cl_style=True`` narrows recognition to the one spelling a CL/MSVC-
+    compatibility-mode driver (``clang-cl``/``dpcpp-cl``, or a generic
+    ``clang`` given ``--driver-mode=cl``) actually honors: the attached,
+    double-dash ``--target=<value>``. Fresh Codex review evidence (two
+    rounds): ``clang-cl -target=<value>`` (single-dash attached) and
+    ``clang-cl --target <value>``/``-target <value>`` (either separate-
+    argument spelling) complete with an "unknown argument ignored" warning
+    and are *not* applied, while ``clang-cl --target=<value>`` is
+    documented and does select the target — so recovering only that one
+    spelling under CL mode still reflects what the driver actually did,
+    where the unrestricted parse (correct for a GNU-style driver) would
+    recover a value the driver silently dropped.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -419,12 +436,14 @@ def explicit_target_triple(
     i = 0
     while i < len(tokens):
         token = tokens[i]
-        normalized = token[1:] if token.startswith("--target=") else token
-        if normalized.startswith("-target="):
-            value = normalized.partition("=")[2]
-        elif normalized in ("-target", "--target") and i + 1 < len(tokens):
-            value = tokens[i + 1]
-            i += 1
+        if token.startswith("--target="):
+            value = token[len("--target=") :]
+        elif not cl_style:
+            if token.startswith("-target="):
+                value = token.partition("=")[2]
+            elif token in ("-target", "--target") and i + 1 < len(tokens):
+                value = tokens[i + 1]
+                i += 1
         i += 1
     return value
 

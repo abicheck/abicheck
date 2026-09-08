@@ -152,19 +152,16 @@ def test_successful_probe_is_never_overridden_by_explicit_target(
     assert parser._target_triple == "aarch64-apple-macos11"
 
 
-def test_probe_failure_under_a_cl_style_driver_recovers_nothing(
+def test_probe_failure_under_a_cl_style_driver_recovers_the_honored_spelling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A CL-style driver (clang-cl/dpcpp-cl) parses MSVC-shaped flags, so a
-    GNU-shaped ``-target=``/``--target=`` in forwarded options may be one it
-    silently ignored rather than one it honored -- recovering it as if it
-    were real risks a WRONG platform guess. It also gets no sys.platform
-    guess either (Codex review, fresh evidence): a real
-    ``clang-cl -print-target-triple`` reports a Windows triple regardless
-    of the HOST OS running it (cross-compiled from macOS included), so
-    guessing "darwin" from a macOS host here would misclassify a Windows
-    AST as Darwin. Stays bare None -- the same conservative default
-    ``is_darwin_target(None)`` already answers False for."""
+    """A CL-style driver (clang-cl/dpcpp-cl) documents and honors the one
+    attached, double-dash ``--target=<value>`` spelling -- a real
+    ``clang-cl --target=x86_64-apple-darwin`` genuinely selects that target
+    and produces the corresponding decorated AST names (Codex review,
+    second round, fresh evidence). So a probe failure still recovers that
+    spelling, same as for a GNU-style driver; only the OTHER, silently-
+    ignored spellings (below) and the sys.platform guess stay suppressed."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
@@ -181,6 +178,57 @@ def test_probe_failure_under_a_cl_style_driver_recovers_nothing(
         gcc_path=None,
         gcc_prefix=None,
         gcc_options="--target=x86_64-apple-macos11",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-apple-macos11"
+
+
+@pytest.mark.parametrize(
+    "gcc_options",
+    [
+        "-target=x86_64-apple-macos11",
+        "-target x86_64-apple-macos11",
+        "--target x86_64-apple-macos11",
+    ],
+)
+def test_probe_failure_under_a_cl_style_driver_ignores_unhonored_spellings(
+    monkeypatch: pytest.MonkeyPatch, gcc_options: str
+) -> None:
+    """The three spellings a real CL-style driver does NOT apply (single-
+    dash attached, and either separate-argument form) complete with an
+    "unknown argument ignored" warning rather than selecting the target --
+    recovering one of them as if it were real risks a WRONG platform
+    guess. It also gets no sys.platform guess either (Codex review, fresh
+    evidence): a real ``clang-cl -print-target-triple`` reports a Windows
+    triple regardless of the HOST OS running it (cross-compiled from
+    macOS included), so guessing "darwin" from a macOS host here would
+    misclassify a Windows AST as Darwin. Stays bare None -- the same
+    conservative default ``is_darwin_target(None)`` already answers False
+    for."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=gcc_options,
         sysroot=None,
         nostdinc=False,
         lang=None,
@@ -230,7 +278,7 @@ def test_successful_probe_still_honored_for_a_cl_style_driver(
     assert parser._target_triple == "x86_64-pc-windows-msvc"
 
 
-def test_probe_failure_with_option_selected_cl_mode_recovers_nothing(
+def test_probe_failure_with_option_selected_cl_mode_recovers_the_honored_spelling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """CL mode is also selected via an explicit ``--driver-mode=cl`` on an
@@ -238,8 +286,10 @@ def test_probe_failure_with_option_selected_cl_mode_recovers_nothing(
     unit's own form -- see buildsource.header_compile_context's "Preserve
     an explicit --driver-mode=cl" docstring), not only via a
     ``clang-cl``-shaped binary name. This must be gated identically to the
-    name-based case: no explicit-target recovery, no sys.platform guess
-    (Codex review, fresh evidence)."""
+    name-based case: the one honored spelling (attached ``--target=``) is
+    still recovered on a probe failure; only the sys.platform guess and
+    the other, silently-ignored spellings stay suppressed (Codex review,
+    fresh evidence)."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
@@ -266,4 +316,4 @@ def test_probe_failure_with_option_selected_cl_mode_recovers_nothing(
     )
 
     assert isinstance(parser, _ClangAstParser)
-    assert parser._target_triple is None
+    assert parser._target_triple == "x86_64-apple-macos11"
