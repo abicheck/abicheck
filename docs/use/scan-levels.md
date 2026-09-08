@@ -23,8 +23,10 @@ and needs no separate orchestrator command.
 
 `abicheck scan ARTIFACT [OPTIONS]` remains a fully supported command and is
 still the one to reach for in a few specific cases this page calls out as
-they come up: a single-build audit that needs L3/L4 (build/source) evidence
-(`compare --no-baseline` doesn't accept `--sources`/`--build-info` yet — see
+they come up: a single-build audit (`compare --no-baseline` is not a safe
+replacement for this yet — verified it crashes with an unhandled
+`AssertionError` instead of reporting when the candidate actually has a
+hygiene problem, at any depth including binary/header-only; see
 [Scenario S5](../integration/scenarios/single-build-audit.md)), a
 `--budget` wall-clock guard, `--crosscheck KEY=error` promotion syntax, or
 `--build-target` scoping (`compare` has no equivalent flag yet). Where this
@@ -32,8 +34,8 @@ page shows a `scan` command below, that's why. `abicheck scan ARTIFACT
 [OPTIONS]` takes the scanned binary/snapshot as a **positional** argument
 (not a flag); `--against OLD` is the previous dump/library/directory/package
 to compare against, and omitting it means a one-build audit/hygiene/
-source-consistency scan — the same shape `compare --no-baseline NEW` now
-covers for the binary/header-only case.
+source-consistency scan — `scan` is required for every no-baseline audit
+until that `compare --no-baseline` crash is fixed.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
