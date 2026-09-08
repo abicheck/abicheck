@@ -97,6 +97,27 @@ def _merge_config_overlay_fn_source() -> str:
     return text[start:end]
 
 
+# Just the `base_source` absolutization if-block inside the merge helper
+# (Codex review, PR #1159, fourth round) -- extracted on its own so a test
+# can exercise the "already qualified, leave it alone" vs. "relative, add
+# $PWD/" decision directly, without needing to run the full merge (which
+# would otherwise fail on "does not exist" for a synthetic Windows path
+# that has no real file behind it on this test runner, and would also let
+# Python's own `Path(...).resolve()` re-derive an absolute path from a
+# relative one, masking exactly the distinction this test needs to see).
+_BASE_SOURCE_ABSOLUTIZE_START = 'if ! _is_path_already_qualified "$base_source"; then'
+_BASE_SOURCE_ABSOLUTIZE_END = "\n  fi\n"
+
+
+def _base_source_absolutize_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_BASE_SOURCE_ABSOLUTIZE_START)
+    end = text.index(_BASE_SOURCE_ABSOLUTIZE_END, start) + len(
+        _BASE_SOURCE_ABSOLUTIZE_END
+    )
+    return text[start:end]
+
+
 # $_PY_SAFE_DIR/$_PY_BIN_HAS_ABICHECK: the merge helper's own prerequisites
 # (it imports abicheck.config_paths and yaml, so it needs the same
 # CWD-shadowing mitigation and interpreter-capability gate every other
@@ -123,6 +144,28 @@ def _py_bin_has_abicheck_source() -> str:
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_PY_BIN_HAS_ABICHECK_START)
     end = text.index(_PY_BIN_HAS_ABICHECK_END, start) + len(_PY_BIN_HAS_ABICHECK_END)
+    return text[start:end]
+
+
+# `_merge_config_overlay_with_discovered_project_config`'s own
+# `base_source` absolutization (Codex review, PR #1159, fourth round) now
+# delegates to `_is_path_already_qualified` (a real Windows drive/UNC/
+# root-relative path must not get a `$PWD/` prefix) rather than a
+# POSIX-only `!= /*` test -- so any harness including the merge function
+# must also define this helper (and the `$OSTYPE`-derived
+# `$_RUNNING_ON_WINDOWS` it reads), the same verbatim-extraction discipline
+# `test_action_run_sh_py_safe_path.py`'s own
+# `_path_qualified_helper_source` already established.
+_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
+_PATH_QUALIFIED_HELPER_END = "\n}\n"
+
+
+def _path_qualified_helper_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PATH_QUALIFIED_HELPER_START)
+    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
+        _PATH_QUALIFIED_HELPER_END
+    )
     return text[start:end]
 
 
@@ -215,6 +258,7 @@ mktemp() {{
 _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
+{_path_qualified_helper_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -316,6 +360,7 @@ CMD=(compare --config /already/there.yml)
 _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
+{_path_qualified_helper_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -346,6 +391,7 @@ CMD=(compare --config {build_config_path})
 _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
+{_path_qualified_helper_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -725,3 +771,152 @@ class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["scope"] == {"on_incomplete": "block"}
         assert doc["gate"] == {"fail_on_removed_library": True}
+
+
+class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
+    """Codex review, PR #1159 (P1, fourth round): the merge helper's
+    ``base_source`` absolutization used to test ``[[ "$base_source" != /*
+    ]]`` -- POSIX-only, so a genuine Windows-qualified path (a drive letter
+    like ``C:\\...``, a UNC path ``\\\\server\\share\\...``, or a
+    root-relative ``\\foo``) was misclassified as relative and got a
+    spurious ``$PWD/`` prefix prepended, producing a malformed path that
+    then failed inside the isolated Python subprocess even though the
+    identical path already works fine when passed straight to the native
+    CLI. The fix reuses ``_is_path_already_qualified`` -- the same helper
+    ``$_PY_BIN`` canonicalization and ``_report_query``'s path anchoring
+    already use -- which recognizes these Windows-only forms, but only when
+    ``$OSTYPE`` indicates a Windows host (Git Bash/MSYS reports ``msys``);
+    exercised here by forcing ``$OSTYPE`` rather than relying on whatever
+    platform actually runs this test (mirrors
+    ``test_action_run_sh_severity_summary.py::TestReportPathAnchoring``'s
+    own established pattern for the identical helper).
+
+    These tests exercise just the absolutization if-block in isolation
+    (``_base_source_absolutize_source``), not the full merge -- a
+    synthetic Windows path has no real file behind it on this (Linux) test
+    runner, so running it through the full merge would fail on "does not
+    exist" for either branch and, worse, let Python's own
+    ``Path(...).resolve()`` re-derive an absolute path from a relative one,
+    masking exactly the bash-level distinction this test needs to observe.
+    """
+
+    def _absolutize(self, base_source: str, cwd: Path, *, windows: bool) -> str:
+        script = (
+            "#!/usr/bin/env bash\nset -uo pipefail\n"
+            + _path_qualified_helper_source()
+            + '\nbase_source="$TEST_BASE_SOURCE"\n'
+            + _base_source_absolutize_source()
+            + 'printf "%s" "$base_source"\n'
+        )
+        # `$OSTYPE` is forced explicitly (see class docstring) so both
+        # branches are exercised regardless of the host actually running
+        # this test.
+        result = _run_bash_script(
+            script,
+            {
+                "OSTYPE": "msys" if windows else "linux-gnu",
+                "TEST_BASE_SOURCE": base_source,
+            },
+            cwd=cwd,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    def test_windows_drive_path_is_not_prefixed_with_pwd(self, tmp_path: Path) -> None:
+        windows_path = "C:/Users/runner/work/repo/config.yml"
+        result = self._absolutize(windows_path, tmp_path, windows=True)
+        assert result == windows_path
+
+    def test_windows_unc_path_is_not_prefixed_with_pwd(self, tmp_path: Path) -> None:
+        unc_path = r"\\server\share\config.yml"
+        result = self._absolutize(unc_path, tmp_path, windows=True)
+        assert result == unc_path
+
+    def test_windows_root_relative_path_is_not_prefixed_with_pwd(
+        self, tmp_path: Path
+    ) -> None:
+        root_relative = r"\foo\config.yml"
+        result = self._absolutize(root_relative, tmp_path, windows=True)
+        assert result == root_relative
+
+    def test_same_drive_letter_shaped_path_is_prefixed_on_non_windows(
+        self, tmp_path: Path
+    ) -> None:
+        """The identical text is a genuine POSIX-relative filename on a
+        non-Windows host (e.g. a file literally named ``C:`` is unusual but
+        legal on Linux/macOS) -- ``$OSTYPE`` gating means it still gets the
+        ``$PWD/`` prefix there, unlike the Windows-forced case above."""
+        posix_like = "C:/Users/runner/work/repo/config.yml"
+        result = self._absolutize(posix_like, tmp_path, windows=False)
+        assert result == f"{tmp_path}/{posix_like}"
+
+    def test_ordinary_relative_path_still_gets_pwd_prefix_on_windows(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuinely relative path (no drive/UNC/root-relative form) must
+        still be absolutized even when ``$OSTYPE`` is Windows -- the fix
+        must not accidentally widen "already qualified" beyond the real
+        Windows-qualified forms."""
+        relative = ".abicheck.yml"
+        result = self._absolutize(relative, tmp_path, windows=True)
+        assert result == f"{tmp_path}/{relative}"
+
+
+class TestReleaseTopologyOverlayGenerationIsIsolated:
+    """Codex review, PR #1159 (P1, fourth round): ``add_release_topology_
+    config_flags``'s own overlay-generation step used to launch a bare
+    ``python3`` from the checked-out repository instead of the resolved,
+    isolated ``$_PY_BIN``/``$_PY_SAFE_DIR`` interpreter (with ``PYTHONPATH``
+    cleared) every other inline-Python invocation in this file uses --
+    including the merge helper this same function calls immediately
+    afterward. Two independent, concrete signals distinguish "isolated"
+    from "bare python3 from checkout" in this codebase (mirrors
+    ``test_file_fingerprint_uses_python_startup_isolation`` in
+    ``test_action_run_sh_py_safe_path.py``, the established static-source
+    check for this exact property, plus a dynamic proof the static check
+    alone can't give):
+
+    1. Static: the function's own source text must invoke
+       ``PYTHONPATH= "$_PY_BIN"`` from inside a ``(cd "$_PY_SAFE_DIR" &&
+       ...)`` subshell, and must never invoke a bare ``python3``/``python``.
+    2. Dynamic: a poisoned ``PYTHONPATH`` entry that breaks ``import json``
+       must NOT affect overlay generation -- proving ``PYTHONPATH`` really
+       is cleared for this invocation at runtime, not merely mentioned in
+       the source text.
+    """
+
+    def test_source_uses_isolated_interpreter_not_bare_python3(self) -> None:
+        fn_source = _add_release_topology_config_flags_source()
+        assert '(cd "$_PY_SAFE_DIR"' in fn_source
+        assert 'PYTHONPATH= "$_PY_BIN" -' in fn_source
+        # No bare `python3`/`python` invocation anywhere in this function --
+        # every interpreter launch goes through the resolved `$_PY_BIN`.
+        for line in fn_source.splitlines():
+            stripped = line.strip()
+            assert not stripped.startswith("python3 ") and stripped != "python3"
+            assert not stripped.startswith("python ") and stripped != "python"
+
+    def test_overlay_generation_ignores_a_poisoned_pythonpath(
+        self, tmp_path: Path
+    ) -> None:
+        poison_dir = tmp_path / "poison"
+        poison_dir.mkdir()
+        # A `json.py` shadowing the stdlib module: if this function's own
+        # Python invocation inherited $PYTHONPATH instead of clearing it,
+        # `import json` would pick this up and crash instead of the real
+        # stdlib module the overlay-generation script needs.
+        (poison_dir / "json.py").write_text(
+            "raise ImportError('POISONED: PYTHONPATH leaked into an "
+            "isolated invocation')\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(),
+            {"INPUT_DSO_ONLY": "true", "PYTHONPATH": str(poison_dir)},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "POISONED" not in result.stderr
+        lines = result.stdout.splitlines()
+        doc = _read_config_overlay(lines)
+        assert doc == {"release": {"dso_only": True}}

@@ -390,7 +390,7 @@ _merge_config_overlay_with_discovered_project_config() {
   # into the $_PY_SAFE_DIR-scoped Python subprocess -- not via a Python-side
   # directory trick, which would only fix this one call path and leave the
   # same mistake available to the next relative-path input.
-  if [[ "$base_source" != /* ]]; then
+  if ! _is_path_already_qualified "$base_source"; then
     base_source="$PWD/$base_source"
   fi
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
@@ -613,9 +613,27 @@ add_compile_context_flags() {
     return 0
   fi
   if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
+    if [[ -z "$_PY_BIN" ]]; then
+      # Same "fail loud rather than silently produce a wrong compile
+      # context" precedent as add_flag_shlex_split's and
+      # _merge_config_overlay_with_discovered_project_config's own
+      # missing-interpreter guards -- and the same isolation requirement as
+      # every other inline-Python invocation in this file (Codex review, PR
+      # #1159, fourth round: this generator was launching a bare `python3`
+      # from the checked-out repository instead of the resolved, isolated
+      # `$_PY_BIN`/`$_PY_SAFE_DIR` interpreter every other invocation here
+      # uses -- a missing interpreter on Windows runners exposing only
+      # `python`, and, more seriously, a code-execution risk on a
+      # `pull_request` workflow where a fork-controlled `sitecustomize.py`
+      # committed into the checkout could execute during a bare
+      # same-directory `python3`'s own interpreter startup, before this
+      # script's body runs).
+      echo "::error::mode: ${MODE} needs a working Python interpreter on PATH to synthesize the compile: config overlay from this Action's cross-compilation inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+      exit 1
+    fi
     local _compile_overlay_json
-    _compile_overlay_json=$(
-    ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
+    _compile_overlay_json=$(cd "$_PY_SAFE_DIR" \
+    && ABICHECK_COMPILE_LANG="${INPUT_LANG:-}" \
     ABICHECK_COMPILE_INCLUDE_LANG="$include_lang" \
     ABICHECK_COMPILE_FRONTEND="${INPUT_AST_FRONTEND:-}" \
     ABICHECK_COMPILE_GCC_PATH="${INPUT_GCC_PATH:-}" \
@@ -623,7 +641,7 @@ add_compile_context_flags() {
     ABICHECK_COMPILE_GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}" \
     ABICHECK_COMPILE_SYSROOT="${INPUT_SYSROOT:-}" \
     ABICHECK_COMPILE_NOSTDINC="${INPUT_NOSTDINC:-false}" \
-    python3 <<'PYEOF'
+    PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `compile:` block (as JSON, a valid
 # YAML subset abicheck's own yaml.safe_load parses identically) from this
 # Action's cross-compilation inputs -- the config-only replacement for the
@@ -761,12 +779,27 @@ add_release_topology_config_flags() {
     unset "CMD[$_config_idx]" "CMD[$((_config_idx + 1))]"
     CMD=("${CMD[@]}")
   fi
+  if [[ -z "$_PY_BIN" ]]; then
+    # Same isolation requirement as every other inline-Python invocation in
+    # this file, and the same missing-interpreter fail-loud precedent as
+    # add_compile_context_flags's sibling guard above (Codex review, PR
+    # #1159, fourth round: this generator was launching a bare `python3`
+    # from the checked-out repository instead of the resolved, isolated
+    # `$_PY_BIN`/`$_PY_SAFE_DIR` interpreter -- a missing interpreter on
+    # Windows runners exposing only `python`, and, more seriously, a
+    # code-execution risk on a `pull_request` workflow where a
+    # fork-controlled `sitecustomize.py` committed into the checkout could
+    # execute during a bare same-directory `python3`'s own interpreter
+    # startup, before this script's body runs).
+    echo "::error::mode: ${MODE} needs a working Python interpreter on PATH to synthesize the release:/gate: config overlay from this Action's release-topology inputs (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
+    exit 1
+  fi
   local _release_overlay_json
-  _release_overlay_json=$(
-  ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-false}" \
+  _release_overlay_json=$(cd "$_PY_SAFE_DIR" \
+  && ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-false}" \
   ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-false}" \
   ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" \
-  python3 <<'PYEOF'
+  PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
 # this Action's release-topology inputs -- the config-only replacement for

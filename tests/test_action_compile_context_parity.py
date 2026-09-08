@@ -200,6 +200,29 @@ def _merge_config_overlay_fn_source() -> str:
     return text[start:end]
 
 
+# `_merge_config_overlay_with_discovered_project_config`'s own
+# `base_source` absolutization (Codex review, PR #1159, fourth round) now
+# delegates to `_is_path_already_qualified` (a real Windows drive/UNC/
+# root-relative path must not get a `$PWD/` prefix) rather than a
+# POSIX-only `!= /*` test -- so any harness including the merge function
+# must also define this helper (and the `$OSTYPE`-derived
+# `$_RUNNING_ON_WINDOWS` it reads), the same verbatim-extraction discipline
+# `test_action_run_sh_py_safe_path.py`'s own
+# `_path_qualified_helper_source` already established, and
+# `test_action_release_topology_config.py`'s own sibling copy mirrors.
+_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
+_PATH_QUALIFIED_HELPER_END = "\n}\n"
+
+
+def _path_qualified_helper_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PATH_QUALIFIED_HELPER_START)
+    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
+        _PATH_QUALIFIED_HELPER_END
+    )
+    return text[start:end]
+
+
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
     _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
@@ -325,6 +348,7 @@ def _run_region(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _path_qualified_helper_source()
         + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
@@ -368,6 +392,7 @@ def _run_region_raw(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _path_qualified_helper_source()
         + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
@@ -1040,6 +1065,7 @@ def _run_region_with_cwd(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _path_qualified_helper_source()
         + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
@@ -1121,3 +1147,44 @@ class TestCompileContextMergesWithRelativeBuildConfig:
         )
         assert doc["compile"]["std"] == "c++17"
         assert doc["compile"]["sysroot"] == "/opt/sysroot"
+
+
+class TestCompileContextOverlayGenerationIsIsolated:
+    """Codex review, PR #1159 (P1, fourth round): confirmed
+    ``add_compile_context_flags`` had the identical bare-``python3``
+    isolation gap ``add_release_topology_config_flags`` did (see
+    ``test_action_release_topology_config.py``'s sibling test class of the
+    same name) -- both were fixed the same way, routing through
+    ``$_PY_BIN``/``$_PY_SAFE_DIR`` with ``PYTHONPATH`` cleared instead of a
+    bare same-directory ``python3``."""
+
+    def test_source_uses_isolated_interpreter_not_bare_python3(self) -> None:
+        fn_source = _add_compile_context_flags_source()
+        assert '(cd "$_PY_SAFE_DIR"' in fn_source
+        assert 'PYTHONPATH= "$_PY_BIN" -' in fn_source
+        for line in fn_source.splitlines():
+            stripped = line.strip()
+            assert not stripped.startswith("python3 ") and stripped != "python3"
+            assert not stripped.startswith("python ") and stripped != "python"
+
+    def test_overlay_generation_ignores_a_poisoned_pythonpath(
+        self, tmp_path: Path
+    ) -> None:
+        poison_dir = tmp_path / "poison"
+        poison_dir.mkdir()
+        # A `json.py` shadowing the stdlib module: if this function's own
+        # Python invocation inherited $PYTHONPATH instead of clearing it,
+        # `import json` would pick this up and crash instead of the real
+        # stdlib module the overlay-generation script needs.
+        (poison_dir / "json.py").write_text(
+            "raise ImportError('POISONED: PYTHONPATH leaked into an "
+            "isolated invocation')\n",
+            encoding="utf-8",
+        )
+        env = {**_FULL_ENV, "PYTHONPATH": str(poison_dir)}
+        cmd, stderr = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
+        assert "POISONED" not in stderr
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["frontend"] == "clang"
