@@ -86,7 +86,7 @@ scenarios:
       the entrypoints the host resolves. The scanner must check both directions
       so neither side silently breaks the load contract.
     flow:
-      - abicheck appcompat ./host plugin-v1.so plugin-v2.so --policy plugin_abi -H contract/
+      - abicheck compare plugin-v1.so plugin-v2.so --policy plugin_abi -H contract/ --used-by ./host
     expected:
       exit_code: 4
       verdict: BREAKING
