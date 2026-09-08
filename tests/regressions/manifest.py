@@ -1207,7 +1207,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
             "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. "
             "Under CL mode there is no `sys.platform` guess, and recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
-            "Under GNU mode the guess ALSO only applies when the RESOLVED `clang_bin` is the plain host default (`dumper_clang._default_clang_bin_name`) -- a `gcc_path`/`gcc_prefix` `_resolve_clang_bin` ignores must not suppress it for a binary that IS the plain host compiler, and one it adopts (a genuine cross-toolchain) must suppress it, since that carries no relation to host OS either. Shape check: `model.mangled_name.strip_macho_itanium_"
+            "Under GNU mode the guess ALSO only applies when the RESOLVED `clang_bin` IS the plain host default by real executable identity (`dumper_clang._is_default_clang_bin`, resolved through `PATH`/symlinks, not raw spelling) -- a `gcc_path`/`gcc_prefix` `_resolve_clang_bin` ignores, or an absolute-path spelling of the identical native binary, must not suppress it; one it genuinely adopts (a real cross-toolchain) must suppress it, since that carries no relation to host OS either. Shape check: `model.mangled_name.strip_macho_itanium_"
             "decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156),
@@ -1234,7 +1234,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "No Mach-O toolchain here -- code inspection + synthetic unit tests only. "
-                    "Recurred ELEVEN times within #1138/#1149/#1156, each via Codex but one: "
+                    "Recurred TWELVE times within #1138/#1149/#1156, each via Codex but one: "
                     "Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE "
                     '`is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; '
                     "that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); "
@@ -1243,8 +1243,9 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "`clang` name evading the name-only CL check; that gate recovering NO spelling "
                     "when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named "
                     "binary reverted to GNU mode still treated as CL; the `sys.platform` guess "
-                    "applying to an explicit cross-compiler unrelated to host OS; and that same "
-                    "guess wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores."
+                    "applying to an explicit cross-compiler unrelated to host OS; that same guess "
+                    "wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; and "
+                    "an absolute-path spelling of the identical native binary failing string equality."
                 ),
                 reference="#1138/#1149 follow-ups, fixed by #1156",
             ),

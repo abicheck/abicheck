@@ -67,8 +67,8 @@ from .dumper_castxml_probe import (
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
-    _default_clang_bin_name as _default_clang_bin_name,
     _is_cl_style_driver_name as _is_cl_style_driver_name,
+    _is_default_clang_bin as _is_default_clang_bin,
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
     _needs_sycl_host_only as _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
@@ -652,7 +652,7 @@ def _header_ast_parser(
                         _explicit_target_triple(gcc_options, gcc_option_tokens)
                         or (
                             sys.platform
-                            if clang_bin == _default_clang_bin_name(compiler)
+                            if _is_default_clang_bin(clang_bin, compiler)
                             else None
                         )
                     )

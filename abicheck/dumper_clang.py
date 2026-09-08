@@ -459,6 +459,34 @@ def _default_clang_bin_name(compiler: str) -> str:
     return "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
 
 
+def _is_default_clang_bin(clang_bin: str, compiler: str) -> bool:
+    """Whether ``clang_bin`` (an already-resolved compiler executable) IS
+    the plain, unconfigured host default -- by real executable identity,
+    not raw spelling.
+
+    A resolved `clang_bin` naming the exact same executable as the plain
+    default under a different spelling (an absolute path, e.g.
+    ``/usr/bin/clang``, or a symlink) is still the plain host default: an
+    earlier revision of this check compared `clang_bin` against
+    :func:`_default_clang_bin_name` with plain string equality, which a
+    `--compiler` given by absolute path always failed even when it
+    resolved to the identical binary (Codex review, fresh evidence).
+    Resolves both sides through `PATH`/symlinks (`shutil.which` +
+    `Path.resolve()`) and falls back to the original string comparison
+    only when either side can't be resolved on disk (unresolvable in a
+    unit test's synthetic `clang_bin`, or a broken `PATH` -- conservative:
+    an unresolvable identity is not evidence they're the same executable).
+    """
+    default_name = _default_clang_bin_name(compiler)
+    if clang_bin == default_name:
+        return True
+    default_which = shutil.which(default_name)
+    clang_bin_which = shutil.which(clang_bin)
+    if default_which is None or clang_bin_which is None:
+        return False
+    return Path(default_which).resolve() == Path(clang_bin_which).resolve()
+
+
 def _resolve_clang_bin(
     compiler: str,
     gcc_path: str | None,

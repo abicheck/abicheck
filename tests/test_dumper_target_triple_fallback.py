@@ -29,13 +29,18 @@ module covers only the one thing that lives in ``dumper.py`` -- that the
 
 from __future__ import annotations
 
+import shutil
 import sys
 
 import pytest
 
 from abicheck import dumper
 from abicheck.dumper import _header_ast_parser
-from abicheck.dumper_clang import _ClangAstParser, _default_clang_bin_name
+from abicheck.dumper_clang import (
+    _ClangAstParser,
+    _default_clang_bin_name,
+    _is_default_clang_bin,
+)
 
 
 def _tu(*inner: dict) -> dict:
@@ -55,6 +60,34 @@ class TestDefaultClangBinName:
     def test_other_compiler_selects_clang(self) -> None:
         for compiler in ("cc", "gcc", "clang", "icpx"):
             assert _default_clang_bin_name(compiler) == "clang"
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="needs a real clang on PATH")
+class TestIsDefaultClangBin:
+    """Real executable identity, not raw spelling (Codex review, tenth
+    round, fresh evidence): an absolute path to the exact same binary the
+    plain default name resolves to on ``PATH`` (e.g. ``--compiler
+    /usr/bin/clang`` when ``clang`` on `PATH` IS `/usr/bin/clang`) is
+    still the plain host default, just spelled differently -- a prior
+    revision of this check compared `clang_bin` against
+    `_default_clang_bin_name` with plain string equality, which an
+    absolute-path spelling of the identical binary always failed."""
+
+    def test_bare_default_name_matches(self) -> None:
+        assert _is_default_clang_bin("clang", "cc") is True
+
+    def test_absolute_path_to_the_same_binary_matches(self) -> None:
+        resolved = shutil.which("clang")
+        assert resolved is not None
+        assert _is_default_clang_bin(resolved, "cc") is True
+
+    def test_a_genuinely_different_binary_does_not_match(self) -> None:
+        assert _is_default_clang_bin("aarch64-apple-darwin-clang", "cc") is False
+
+    def test_unresolvable_clang_bin_does_not_match(self) -> None:
+        # Falls back to string comparison when clang_bin can't be resolved
+        # on disk -- an unresolvable identity is not evidence of sameness.
+        assert _is_default_clang_bin("/definitely/not/a/real/path/clang", "cc") is False
 
 
 def test_probe_failure_recovers_explicit_target_triple(
@@ -129,6 +162,48 @@ def test_probe_failure_with_no_explicit_target_falls_back_to_sys_platform(
 
     assert isinstance(parser, _ClangAstParser)
     assert parser._target_triple == sys.platform
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="needs a real clang on PATH")
+def test_probe_failure_with_an_absolute_path_to_the_native_clang_still_guesses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--compiler`` naming the native default Clang by an absolute path
+    (e.g. ``/usr/bin/clang``, resolved here via a real ``shutil.which``)
+    is still the plain host default, just spelled differently -- the AST
+    genuinely came from the native compiler, so the `sys.platform` guess
+    must still apply (Codex review, tenth round, fresh evidence)."""
+    resolved_native_clang = shutil.which("clang")
+    assert resolved_native_clang is not None
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(
+        dumper, "_resolve_clang_bin", lambda *a, **k: resolved_native_clang
+    )
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="cc",
+        gcc_path=resolved_native_clang,
+        gcc_prefix=None,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "darwin"
 
 
 def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platform(
