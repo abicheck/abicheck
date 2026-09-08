@@ -55,7 +55,15 @@
   second round. Fixed by deriving the group's canonical `symbol` as `min()`
   over the group's qualified-name set (a deterministic function of the set,
   not of arrival order). `odr_type_variant` has no equivalent seam since its
-  group key already includes `qualified_name` itself.
+  group key already includes `qualified_name` itself. Fourth follow-up
+  round: the third round's fix was itself incomplete for the *realistic*
+  two-participant collision (the common case) — `source_link._route_declaration`
+  creates exactly one record for it, and that record's own `qualified_name`
+  names only the entity visited second, so the entity owning `usr_a` never
+  contributed a name to the group's qname set at all. Fixed at the producer
+  (`_route_declaration`'s new `qualified_name_a` field, carrying
+  `identity_to_qname`'s pre-overwrite value for the key) plus the consumer's
+  qname-collection loop reading it.
 - **`odr_type_variant` findings on a public type could be wrongly demoted
   as "not-exported."** `abicheck/surface.py`'s public-surface scoping
   classifies a finding as symbol-level or type-level before deciding

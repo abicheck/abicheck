@@ -1375,12 +1375,28 @@ def _check_identity_collision(
     # itself. `min(qnames)` is a deterministic function of the group's
     # *set* of names, so it is stable regardless of visitation order (Codex
     # review, third follow-up).
+    #
+    # Both `qualified_name` (the newly-arriving entity) AND
+    # `qualified_name_a` (whichever entity was already the stored "current"
+    # one, i.e. `usr_a`'s owner) are collected -- a real two-participant
+    # collision (the common case) produces exactly *one* record, whose
+    # `qualified_name` alone only ever names the entity visited second.
+    # Reading `qualified_name` in isolation therefore reproduces the exact
+    # same order-dependence this fix exists to close, just requiring only
+    # two participants (not three) to trigger, since the entity visited
+    # first is never named at all otherwise (Codex review, fourth
+    # follow-up: the third follow-up's own regression test used two
+    # synthetic records to exercise the three-participant chain, which
+    # masked that the realistic *two*-participant, one-record case was
+    # still broken).
     groups: dict[str, tuple[set[str], set[str]]] = {}
     for collision in surface.identity_collisions:
         identity = str(collision.get("identity", "")) or "<unknown>"
-        qname = str(collision.get("qualified_name", "")) or identity
         qnames, usrs = groups.setdefault(identity, (set(), set()))
-        qnames.add(qname)
+        for qname_field in ("qualified_name", "qualified_name_a"):
+            value = str(collision.get(qname_field, ""))
+            if value:
+                qnames.add(value)
         for usr_field in ("usr_a", "usr_b"):
             value = str(collision.get(usr_field, ""))
             if value:
@@ -1388,7 +1404,7 @@ def _check_identity_collision(
 
     findings: list[Change] = []
     for identity, (qnames, usrs) in groups.items():
-        qname = min(qnames)
+        qname = min(qnames) if qnames else identity
         sorted_usrs = sorted(usrs)
         usr_list = ", ".join(repr(u) for u in sorted_usrs)
         findings.append(

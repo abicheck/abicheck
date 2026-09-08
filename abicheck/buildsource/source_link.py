@@ -1638,6 +1638,24 @@ def _route_declaration(
             {
                 "identity": key,
                 "qualified_name": entity.qualified_name,
+                # `qualified_name` above is *this* (newly-arriving) entity's
+                # own name; the entity that owns `usr_a` (whichever was
+                # already the stored "current" USR for this key) never gets
+                # a record of its own -- for the common two-participant
+                # collision there is exactly one record total, and its
+                # `qualified_name` names only the entity visited *second*.
+                # `identity_to_qname` still holds the other participant's
+                # own name at this point (the overwrite below hasn't run
+                # yet), so stamp it here too -- a consumer that needs both
+                # participants' names (crosscheck._check_identity_collision,
+                # to derive an order-independent canonical symbol) would
+                # otherwise only ever see one of the two, and always the
+                # same one a naive "whichever record is first" read would
+                # already get wrong (Codex review, fourth follow-up: the
+                # fresh evidence was that a *real* two-participant collision
+                # emits only one record, not the two synthetic records the
+                # prior fix's own test constructed).
+                "qualified_name_a": state.identity_to_qname.get(key, ""),
                 "usr_a": prev_usr,
                 "usr_b": usr,
             }

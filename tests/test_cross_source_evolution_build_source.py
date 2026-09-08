@@ -594,6 +594,58 @@ def test_identity_collision_detected_symbol_order_independent_across_sides() -> 
     assert hits[0].symbol == "f"  # min("f", "g"), deterministic either way
 
 
+def test_identity_collision_detected_real_two_participant_collision_symbol_stable() -> (
+    None
+):
+    """Codex review, fourth follow-up: the prior fix's own regression test
+    used two *synthetic* transition records to exercise a three-participant
+    chain, which masked that the realistic **two**-participant collision
+    (the common case) is a *single* record -- ``source_link._route_declaration``
+    never creates a record for the first entity it sees at a given identity
+    key (there is no ``prev_usr`` yet to compare against), only for the
+    second, differently-USR'd arrival. That single record's own
+    ``qualified_name`` therefore always names the entity visited *second*;
+    without ``qualified_name_a`` (this fix's own addition, carrying whichever
+    name ``identity_to_qname`` held for the first entity at collision time),
+    the entity visited first would never contribute a name to the group's
+    qname set at all -- reproducing the exact order-dependence the third
+    follow-up's fix was supposed to close, just with two participants
+    instead of three. Fixture shape matches exactly what
+    ``_route_declaration`` actually emits for a two-participant collision:
+    one record, ``qualified_name`` = the second entity's own name,
+    ``qualified_name_a`` = the first entity's own name."""
+
+    def _snap(first_name: str, second_name: str) -> AbiSnapshot:
+        surface = SourceAbiSurface(
+            identity_collisions=[
+                {
+                    "identity": "shared#sha256:abc",
+                    "qualified_name": second_name,
+                    "qualified_name_a": first_name,
+                    "usr_a": "c:@N@a@F@Widget#I#",
+                    "usr_b": "c:@N@b@F@Widget#I#",
+                }
+            ],
+            reachable_declarations=[
+                SourceEntity(id="d0", kind="function", qualified_name="f")
+            ],
+        )
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            build_source=BuildSourcePack(root="", source_abi=surface),
+        )
+
+    old = _snap("Widget_a", "Widget_b")  # entity A visited first, B second
+    new = _snap("Widget_b", "Widget_a")  # same pair, swapped visitation order
+    changes = compute_cross_source_evolution(old, new)
+    hits = [c for c in changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
+    assert len(hits) == 1
+    assert hits[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
+    assert hits[0].symbol == "Widget_a"  # min(), deterministic either way
+
+
 def test_identity_collision_detected_authority_unchanged() -> None:
     from abicheck.checker_policy import RISK_KINDS
 

@@ -411,7 +411,18 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # USR pair was before round 2 -- fixed by deriving the group's
             # canonical `symbol` as `min()` over the *set* of qualified
             # names seen for that group, a deterministic function of the
-            # set rather than of arrival order.
+            # set rather than of arrival order. Round 5 found round 4's own
+            # fix was still incomplete for the *realistic* two-participant
+            # collision (the common case): `_route_declaration` creates
+            # exactly one record for it, and that record's own
+            # `qualified_name` names only the entity visited second -- the
+            # entity owning `usr_a` never contributed a name to the group's
+            # qname set at all, so `min()` over an effectively one-element
+            # set was still positionally determined. Fixed at the producer
+            # (`source_link._route_declaration`, new `qualified_name_a`
+            # field carrying `identity_to_qname`'s pre-overwrite value) plus
+            # reading it in `_check_identity_collision`'s qname-collection
+            # loop.
             "tests/test_cross_source_evolution.py",
             "tests/test_cross_source_evolution_build_source.py",
         ),
