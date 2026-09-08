@@ -57,6 +57,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
+| `collapse_versioned_symbols` | `bool` | `False` |
 
 ## `CompareResult`
 
