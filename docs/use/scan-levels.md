@@ -364,20 +364,25 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
 
 ### Single-build audit — no baseline
 
-`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) already runs the
-intra-version cross-source hygiene checks against **one** build — no
-previous version required, no separate `--audit` flag. With just the binary
-and headers it catches accidental exports, private-header leaks, and
-unversioned symbols:
+`abicheck scan CANDIDATE` (no `--against`) runs the intra-version
+cross-source hygiene checks against **one** build — no previous version
+required. With just the binary and headers it catches accidental exports,
+private-header leaks, and unversioned symbols:
 
 ```bash
-abicheck compare --no-baseline libfoo.so -H include/
+abicheck scan libfoo.so -H include/
 ```
 
-**This CLI slice doesn't yet accept `--sources`/`--build-info`** (see
-[Scenario S5](../integration/scenarios/single-build-audit.md) for the exact
-gap), so the two checks below that need L3/L4 evidence still need `scan`
-(no `--against`) instead:
+`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) is not a safe
+replacement for this yet: it only ever "worked" for an already-clean
+candidate, and crashes with an unhandled `AssertionError` instead of
+reporting a finding when the candidate actually has one of the problems
+this audit exists to catch (verified live against the
+[case143](../reference/examples/case143_audit_accidental_export.md)
+fixture below — see [Scenario S5](../integration/scenarios/single-build-audit.md)
+for the full account). It also doesn't yet accept `--sources`/
+`--build-info`, so the two checks below that need L3/L4 evidence need
+`scan` regardless:
 
 Worked example cases for each audit finding:
 [case143](../reference/examples/case143_audit_accidental_export.md) (`exported_not_public`),

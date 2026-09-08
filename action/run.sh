@@ -581,7 +581,7 @@ _extra_args_has_scan_only_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
     case "$_name" in
-    --crosscheck | --risk-rules | --budget | --build-target | --artifact-set)
+    --crosscheck | --risk-rules | --budget | --build-target | --artifact-set | --max-findings)
       return 0
       ;;
     esac
@@ -1284,12 +1284,14 @@ fi
 # `--artifact-set` (plan §3 #16/#17, P5 "not started"), `--budget`
 # (plan §3 #19, P3 "compare does not emit [exit 5] yet"), `--risk-rules`
 # (plan §3 #14, "Phase 7"), `--crosscheck`'s KEY=error promotion syntax
-# (plan §3 #23, "MERGE into policy"), and `--build-target` (no `compare`
+# (plan §3 #23, "MERGE into policy"), `--build-target` (no `compare`
 # equivalent at all yet, baseline or not -- `tests/test_action_run_
-# contract.py::test_action_flags_are_real_cli_options` pins this). All four
+# contract.py::test_action_flags_are_real_cli_options` pins this), and
+# `--max-findings` (the scan JSON summary's own truncation cap). All five
 # of the latter are also checked when requested through the general
 # `extra-args` passthrough instead of their dedicated Action input
-# (`_extra_args_has_scan_only_flag`, Codex review P2, PR #1160), since
+# (`_extra_args_has_scan_only_flag`, Codex review P2, PR #1160, two rounds
+# -- `--max-findings` was the one omission the first pass missed), since
 # `compare --help` has none of them either.
 #
 # A baseline scan with no explicit `--depth` also stays on the legacy CLI

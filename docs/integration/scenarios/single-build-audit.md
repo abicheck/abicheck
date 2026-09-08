@@ -8,38 +8,38 @@ yet: no prior release, no `accepted-main` history, nothing. This is
 comparison — advisory by default, since there is no baseline-drift verdict
 to gate CI on in the first place.
 
-## The recommended CLI path: `compare --no-baseline`
+## The recommended CLI path: `scan` (no `--against`)
 
-`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) is now the primary
-way to run a single-build audit from the CLI. It takes exactly one operand
-(the candidate build) instead of OLD NEW; the OLD side is recorded with
-[ADR-065](../../contribute/adr/065-comparison-scope-selection-and-completeness.md)'s
-`declared_absent` acquisition state — an explicit declaration that no prior
-surface exists, never inferred from a missing argument. It reports
-candidate-side facts only and **never** emits an addition, a removal, or a
-compatibility verdict:
-
-```bash
-abicheck compare --no-baseline build/libfoo.so -H include/
-```
-
-This runs the same eleven ADR-035 cross-source/single-release checks
-`scan` (no `--against`) has always run — `exported_not_public`,
+`abicheck scan CANDIDATE` with no `--against` is the way to run a
+single-build audit from the CLI today — it runs the same eleven ADR-035
+cross-source/single-release checks (`exported_not_public`,
 `private_header_leak`, `unversioned_exported_symbol`,
 `rtti_for_internal_type`, `public_not_exported`,
-`public_to_internal_dependency`, and five more — because `checker.compare()`
-runs that stage automatically, on every invocation, and `--no-baseline`
-diffs the candidate against itself through that same unmodified pipeline.
+`public_to_internal_dependency`, and five more) and reports whatever it
+finds, cleanly, whether the candidate is clean or not:
 
-**Current gap — no build/source evidence yet.** This CLI slice does not
-yet accept `--sources`/`--build-info`/`--depth`/cross-toolchain flags, a
-secondary `--write`, or `--dry-run` (silently ignored if you pass it — the
-CLI never reads it here), and only `--format json`/`markdown` render an
-audit report (not `sarif`/`html`/`junit`/`review`). So the two checks gated
-on L3/L4 evidence — `header_build_context_mismatch` (needs a compile DB)
-and `odr_type_variant` (needs source replay) — stay `not_evaluated` under
-`--no-baseline` today. **If you need those, use `scan` (below) instead**
-until a later phase closes this gap.
+```bash
+abicheck scan build/libfoo.so -H include/
+```
+
+**`compare --no-baseline` (ADR-068 D2) is not yet a safe replacement for
+this scenario — verified broken, not just incomplete.** It takes one
+operand and records the OLD side with
+[ADR-065](../../contribute/adr/065-comparison-scope-selection-and-completeness.md)'s
+`declared_absent` acquisition state, self-diffing the candidate through the
+same cross-source-check pipeline in principle — but when the candidate
+actually *has* one of the hygiene problems this scenario exists to catch
+(confirmed live against `catalog/cases/case143_audit_accidental_export`'s
+own accidental-export fixture), `workflows/no_baseline_compare.py`'s
+`run_no_baseline_compare()` hits its own internal
+`assert not diff.changes` guard and crashes with an unhandled
+`AssertionError` instead of rendering the finding. It only ever "worked" for
+a clean candidate — i.e. a self-diff that legitimately produces zero
+changes, which never exercises the code path the assertion protects. This
+CLI slice also doesn't yet accept `--sources`/`--build-info`/`--depth`/
+cross-toolchain flags, a secondary `--write`, or `--dry-run`, and only
+`--format json`/`markdown` render at all — but the crash is the reason to
+avoid it here, not those. Use `scan` (above) until this is fixed.
 
 ## The Action: `mode: scan`, no `against`
 

@@ -38,7 +38,11 @@ Ways to obtain a baseline side:
   later `abicheck compare baseline.abi.json new/libfoo.so`
 - the released binary itself: `abicheck compare old/libfoo.so new/libfoo.so`
 - no baseline at all yet — an audit of the candidate build alone (never an
-  addition/removal/verdict): `abicheck compare --no-baseline libfoo.so`
+  addition/removal/verdict): `abicheck scan libfoo.so` (no `--against`).
+  `compare --no-baseline libfoo.so` (ADR-068 D2) exists too, but is not yet
+  safe for this: it crashes instead of reporting when the candidate
+  actually has a hygiene problem, so it only "works" on an already-clean
+  build — see [Scenario S5](../../docs/integration/scenarios/single-build-audit.md).
 
 Baseline storage, refresh cadence, and CI publication are owned by
 [the baseline management page](../../docs/use/baseline-management.md).
