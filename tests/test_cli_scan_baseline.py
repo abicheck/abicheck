@@ -18,6 +18,108 @@ import pytest
 from abicheck import cli_scan_baseline as csb, cli_scan_helpers as csh
 from abicheck.buildsource.risk import RiskRules
 from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
+from abicheck.checker_types import Change
+
+
+class TestStripAutomaticCrossSourceFindings:
+    """``_strip_automatic_cross_source_findings`` (ADR-068 D3/D4/D5 follow-up):
+    ``scan --against`` must undo ``compare_snapshots``'s automatic
+    ``cross_source_checks`` stage so its own, older, dedicated ``crosscheck``
+    advisory mechanism stays the sole source of these findings -- see the
+    function's own docstring and the five-more-crosschecks migration slice's
+    changelog entry for the regression this closes."""
+
+    def test_no_changes_attribute_is_a_no_op(self) -> None:
+        """A test double (or any caller not carrying a real ``DiffResult``)
+        with no ``changes`` list at all -- nothing to strip, nothing raised."""
+        diff = types.SimpleNamespace(verdict=Verdict.NO_CHANGE)
+        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
+        assert diff.verdict == Verdict.NO_CHANGE
+        assert not hasattr(diff, "changes")
+
+    def test_empty_changes_is_a_no_op(self) -> None:
+        diff = types.SimpleNamespace(changes=[], verdict=Verdict.NO_CHANGE)
+        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
+        assert diff.changes == []
+        assert diff.verdict == Verdict.NO_CHANGE
+
+    def test_ordinary_findings_with_no_cross_source_evolution_are_untouched(
+        self,
+    ) -> None:
+        """The common case: a real old/new diff with genuine ABI findings,
+        none of them produced by the automatic cross-source-check stage
+        (``cross_source_evolution`` is ``None`` on every one). Nothing is
+        stripped and the verdict is left exactly as ``compare_snapshots``
+        computed it -- this function must never touch an ordinary finding
+        set just because it happens to be non-empty."""
+        removed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
+        assert removed.cross_source_evolution is None
+        diff = types.SimpleNamespace(changes=[removed], verdict=Verdict.BREAKING)
+        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
+        assert diff.changes == [removed]
+        assert diff.verdict == Verdict.BREAKING
+
+    def test_automatic_cross_source_finding_is_stripped_and_verdict_recomputed(
+        self,
+    ) -> None:
+        """The regression case: an automatic-stage finding (carrying a real
+        ``cross_source_evolution``) is removed, and the verdict drops back to
+        what the remaining (ordinary) findings alone would produce -- here,
+        no ordinary findings at all, so the verdict falls all the way to
+        NO_CHANGE, never staying stuck at the stripped finding's own
+        API_BREAK severity."""
+        auto = Change(
+            kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
+            symbol="",
+            description="x",
+        )
+        auto.cross_source_evolution = CrossSourceEvolution.PERSISTENT
+        diff = types.SimpleNamespace(changes=[auto], verdict=Verdict.API_BREAK)
+        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
+        assert diff.changes == []
+        assert diff.verdict == Verdict.NO_CHANGE
+
+    def test_mixed_findings_keep_only_the_ordinary_one(self) -> None:
+        """A real old/new diff can carry both an ordinary finding and an
+        automatic-stage one at once -- only the latter is stripped, and the
+        verdict is recomputed from the surviving ordinary finding alone."""
+        removed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
+        auto = Change(
+            kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
+            symbol="",
+            description="x",
+        )
+        auto.cross_source_evolution = CrossSourceEvolution.INTRODUCED
+        diff = types.SimpleNamespace(changes=[removed, auto], verdict=Verdict.API_BREAK)
+        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
+        assert diff.changes == [removed]
+        assert diff.verdict == Verdict.BREAKING
+
+    def test_policy_file_recomputes_verdict_when_given(self) -> None:
+        """When a ``PolicyFile`` is in effect, the recompute routes through
+        its own ``compute_verdict`` rather than the bare-policy-name path."""
+
+        class _FakePolicyFile:
+            def __init__(self) -> None:
+                self.calls: list[list[Change]] = []
+
+            def compute_verdict(self, changes: list[Change]) -> Verdict:
+                self.calls.append(list(changes))
+                return Verdict.COMPATIBLE_WITH_RISK
+
+        auto = Change(
+            kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
+            symbol="",
+            description="x",
+        )
+        auto.cross_source_evolution = CrossSourceEvolution.PERSISTENT
+        diff = types.SimpleNamespace(changes=[auto], verdict=Verdict.API_BREAK)
+        policy_file = _FakePolicyFile()
+        csb._strip_automatic_cross_source_findings(diff, "strict_abi", policy_file)
+        assert diff.changes == []
+        assert diff.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert policy_file.calls == [[]]
 
 
 class TestPackCoverage:

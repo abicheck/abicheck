@@ -513,12 +513,12 @@
     },
     {
       "path": "abicheck/cli_scan_baseline.py",
-      "baseline_lines": 1354,
+      "baseline_lines": 1426,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "category": "legacy_workflow_or_frontend_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was. Baseline raised 1349 -> 1354 (ADR-067 D3): the baseline summary's `detectors[]` projection gained `not_evaluated`, the one field of ADR-067's audit that `scan --against` shares with `compare` -- detector provenance is an ADR-049 Phase 5 \u00a76.4 cross-command parity field, so it moves on both sides together or the parity test fails. Five lines, four of them the comment recording that; nothing to move elsewhere, since this projection is this file's own.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Baseline raised 1343 -> 1349, ADR-063 Phase 8 follow-up (PR #1020, Codex review): `_run_baseline_compare` calls `compare_snapshots()` directly, the same as `cli_compare_helpers.run_compare` did before that review found neither call site applied the `--depth` ceiling projection (`project_pair_to_depth`, `abicheck/policy/depth_projection.py`) `classify_compare_pair` already had -- `scan --against --depth binary` leaked the identical header-derived findings the native `compare` CLI did. The added call is a single statement (`old_snap, new_snap = project_pair_to_depth(old_snap, new_snap, requested_depth)`) plus its import and a two-line attribution comment; no smaller diff closes the gap without leaving this call site silently unfixed while its sibling was. Baseline raised 1349 -> 1354 (ADR-067 D3): the baseline summary's `detectors[]` projection gained `not_evaluated`, the one field of ADR-067's audit that `scan --against` shares with `compare` -- detector provenance is an ADR-049 Phase 5 \u00a76.4 cross-command parity field, so it moves on both sides together or the parity test fails. Five lines, four of them the comment recording that; nothing to move elsewhere, since this projection is this file's own. Baseline raised 1354 -> 1426 (docs/contribute/plans/one-comparison-product.md §3 #3, five-more-crosschecks migration slice): with the last five cross-source checks landing on `compare()`'s automatic `cross_source_checks` stage (default `True`, ADR-068 D4/D5), `_run_baseline_compare`'s own pre-existing, documented invariant -- single-version cross-source findings stay advisory for a baseline comparison unless explicitly promoted via `--crosscheck KEY=error`, never folded into the old/new diff by default -- silently broke for the first time an API_BREAK-severity check (`header_build_context_mismatch`) migrated, since a RISK-severity one never raised the legacy exit code even while duplicated. `_strip_automatic_cross_source_findings` (new function, ~30 lines with its docstring) closes that regression generally, for every cross-source check, not just the two newly-API_BREAK ones -- nothing to move elsewhere, since this is this file's own pre-existing invariant losing its enforcement point to a sibling module's own default.",
       "review_by": "2026-11-30"
     },
     {
@@ -1423,12 +1423,12 @@
     },
     {
       "path": "tests/test_build_source_cli.py",
-      "baseline_lines": 4163,
+      "baseline_lines": 4174,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Baseline raised 4163 -> 4174 (five-more-crosschecks migration slice): `_make_snap`'s own docstring now records why it stamps `parsed_with_build_context=True` -- a bare metadata double with no header declarations at all must not misread as a genuine header/build-context mismatch the moment a test attaches a `--build-info` pack, now that `header_build_context_mismatch` is reachable from `compare()`'s own automatic cross-source-check stage (ADR-068 D3/D4/D5). Eleven lines, all comment; nothing to move elsewhere, since the fixture itself is this file's own.",
       "review_by": "2026-11-30"
     },
     {
