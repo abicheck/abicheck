@@ -112,9 +112,9 @@ def contract_options(f: F) -> F:
         default=False,
         help="Audit the --suppress rule file against this run's findings: which "
         "rules matched nothing (stale), matched a BREAKING change (high "
-        "risk), are expired, or expire soon. Requires --suppress. Adds a "
-        "suppression_audit key in --format json, a '## Suppression Audit' "
-        "section in markdown/review. Advisory only.",
+        "risk), are expired, or expire soon. A no-op without --suppress "
+        "(nothing to audit). Adds a suppression_audit key in --format json, "
+        "a '## Suppression Audit' section in markdown/review. Advisory only.",
     )(f)
     f = click.option(
         "--contract",

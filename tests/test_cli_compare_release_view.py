@@ -40,7 +40,14 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.model import AbiSnapshot, Function, Param, RecordType, TypeField, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    TypeField,
+    Visibility,
+)
 from abicheck.probe_harness import MatrixSnapshot
 from abicheck.serialization import snapshot_to_json
 
