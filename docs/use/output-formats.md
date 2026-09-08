@@ -305,6 +305,12 @@ how many interfaces each affects. Available in Markdown and HTML formats.
 abicheck compare old.json new.json --view impact
 ```
 
+On a directory/package comparison, `--view impact` computes one impact
+table per library (JSON's per-library `impact_table` field; a Markdown
+"Impact" section under each library's own findings) instead of the
+single-comparison table above — there is no one aggregate table across
+libraries, since each library's root-cause changes are its own.
+
 ## A second output format from the same run (`--write`)
 
 `compare` computes its comparison once; `--write FORMAT=PATH` renders that
