@@ -58,6 +58,10 @@ from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_libraries_table as _release_md_libraries_table,
     _release_md_matrix_findings as _release_md_matrix_findings,
 )
+from .reporter_markdown import (
+    release_bundle_findings_for_view,
+    release_matrix_changes_for_view,
+)
 from .workflows.contract_conflicts import (
     # E-S3 case 3: does a package's declared contract match its own
     # contained binary. Needs `elf_metadata` (`extract`, forbidden directly
@@ -1037,6 +1041,55 @@ def _exit_compare_release(
         sys.exit(contract_coverage_exit_contribution)
 
 
+def _release_findings_for_render(
+    library_results: list[dict[str, object]], show_only: str | None
+) -> list[dict[str, object]]:
+    """Project *library_results* into the shape one *primary*-format render
+    should see, without mutating the shared list every render call reads.
+
+    Codex review, PR #1154 second follow-up ("Apply release show filters
+    inside each renderer"): ``_strip_diff_results_and_adjust_verdict``
+    stashes two views per library alongside the always-full ``findings``/
+    ``findings_truncated`` pair -- a private ``findings_view``/
+    ``findings_view_truncated`` pair, present only when a ``--view show=``
+    filter was active for this run. This function is the one place that
+    view is ever read: when *show_only* is given (the *primary*
+    ``--format``'s own selection), it swaps ``findings``/
+    ``findings_truncated`` for the filtered view; either way it strips the
+    private ``findings_view``/``findings_view_truncated`` keys so they never
+    leak into a rendered report. A secondary ``--write`` report calls this
+    with ``show_only=None`` (its own contract: always full/unfiltered,
+    mirroring single-pair ``compare``'s own ``--write`` behaviour), which
+    still routes through here so the private keys are stripped from *that*
+    render too.
+
+    Returns a new list of shallow-copied dicts; *library_results* itself
+    (and the dicts inside it) is never mutated, so the same shared list can
+    feed a filtered primary render and a full secondary render in either
+    order.
+    """
+    result: list[dict[str, object]] = []
+    for entry in library_results:
+        if not isinstance(entry, dict):
+            result.append(entry)
+            continue
+        projected = dict(entry)
+        has_view = "findings_view" in projected
+        view = projected.pop("findings_view", None)
+        view_truncated = projected.pop("findings_view_truncated", False)
+        if show_only is not None and has_view:
+            if view:
+                projected["findings"] = view
+            else:
+                projected.pop("findings", None)
+            if view_truncated:
+                projected["findings_truncated"] = True
+            else:
+                projected.pop("findings_truncated", None)
+        result.append(projected)
+    return result
+
+
 def _format_release_summary(
     fmt: str,
     worst_verdict: str,
@@ -1058,6 +1111,7 @@ def _format_release_summary(
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     demangle: bool = False,
+    show_only: str | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
     *scope_terms* (ADR-065 S2): the one resolved scope every format reads.
@@ -1071,11 +1125,22 @@ def _format_release_summary(
     symbol, so *demangle* is a no-op for either, matching that same
     single-pair behaviour (``service_render.render_output``'s own
     docstring: "machine formats ... always keep raw mangled symbols").
+
+    *show_only* (Codex review, PR #1154 second follow-up: "Apply release
+    show filters inside each renderer") is forwarded to whichever format
+    branch below is selected -- each one applies it to its *own* rendered
+    view (per-library findings, and the release-global bundle/matrix
+    findings) rather than to a shared upstream projection, so a caller that
+    reaches this function once for the primary ``--format`` and once more
+    for a secondary ``--write`` (passing ``show_only=None`` for the latter,
+    per that render's own "always full" contract) gets two independently
+    correct renders from the same already-computed ``library_results``/
+    ``bundle_result``/``matrix_result``.
     """
     if fmt == "junit":
         return _format_release_junit(
             diff_pairs, matrix_result, library_results, severity_config=severity_config,
-            scope_terms=scope_terms,
+            scope_terms=scope_terms, show_only=show_only,
         )
     if fmt == "json":
         return _format_release_json(
@@ -1090,12 +1155,14 @@ def _format_release_summary(
             suppress=suppress, pack_application=pack_application,
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
+            show_only=show_only,
         )
     md = _format_release_markdown(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
         old_map, new_map, bundle_result, matrix_result,
         scope_section=scope_terms.section if scope_terms is not None else None,
         severity_config=severity_config,
+        show_only=show_only,
     )
     if demangle:
         from .demangle import demangle_text
@@ -1111,6 +1178,7 @@ def _format_release_junit(
     *,
     severity_config: SeverityConfig | None = None,
     scope_terms: ComparisonScopeTerms | None = None,
+    show_only: str | None = None,
 ) -> str:
     """Render the release summary as a JUnit XML report.
 
@@ -1132,6 +1200,19 @@ def _format_release_junit(
     exactly this library. ``entry["reason"]`` (not the ``"error"`` key
     ``_build_error_testsuite`` defaults to) carries the message for this
     verdict.
+
+    *show_only* (Codex review, PR #1154 second follow-up) is forwarded to
+    :func:`to_junit_xml_multi`, which already knows how to filter each
+    ``<testsuite>`` by it (the identical single-pair ``to_junit_xml``
+    machinery) -- this was previously the one primary format that silently
+    ignored the release's ``--view show=`` selection entirely, since
+    *pairs* here carries the full, un-filtered per-library ``DiffResult``s
+    (and, folded in below, the release-global matrix result) rather than a
+    pre-filtered projection. Forwarding it here is what makes JUnit agree
+    with JSON/Markdown for the same ``--view show=`` selection, matrix
+    findings included (the synthetic testsuite appended below is filtered
+    the same way a real library's is, since it rides through the identical
+    ``(DiffResult, old_snapshot)`` shape).
     """
     from .junit_report import to_junit_xml_multi
 
@@ -1152,6 +1233,7 @@ def _format_release_junit(
     ]
     return to_junit_xml_multi(
         pairs,
+        show_only=show_only,
         severity_config=severity_config,
         error_libraries=error_libs if error_libs else None,
         comparison_scope=scope_terms.section if scope_terms is not None else None,
@@ -1178,11 +1260,24 @@ def _format_release_json(
     suppress: Path | None = None, pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
+    show_only: str | None = None,
 ) -> str:
     """Render the release summary as a JSON document. ``unmatched_old``/
     ``unmatched_new`` name the members with no counterpart, read off the
     acquisition record (ADR-065 D2/S4); *removed_keys*/*added_keys* are the
-    **proven** sets ``exit`` reads."""
+    **proven** sets ``exit`` reads.
+
+    *show_only* (Codex review, PR #1154 second follow-up) is applied here,
+    at render time, to three independent things -- never by mutating
+    *library_results* itself, so this function's own caller can also use it
+    unfiltered (a secondary ``--write`` passes ``show_only=None``): the
+    embedded per-library ``"findings"`` (via
+    :func:`_release_findings_for_render`, which swaps in the already-
+    computed filtered view), and the release-global ``bundle_findings``/
+    ``matrix_findings`` lists below (filtered directly, since those are not
+    per-library and carry no pre-computed view of their own).
+    """
+    display_library_results = _release_findings_for_render(library_results, show_only)
     changed_libraries = [
         str(lib["library"])
         for lib in library_results
@@ -1204,7 +1299,7 @@ def _format_release_json(
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
         "new_dir": str(new_dir),
-        "libraries": library_results,
+        "libraries": display_library_results,
         "changed_libraries": changed_libraries,
         # ADR-065 S4: read off the acquisition record, never a set
         # difference. A driver with no record has nothing that could
@@ -1291,7 +1386,7 @@ def _format_release_json(
                 "new_value": f.new_value,
                 "affected_libraries": list(f.affected_libraries),
             }
-            for f in bundle_result.bundle_findings
+            for f in release_bundle_findings_for_view(bundle_result, show_only)
         ]
         # G38 P0-D: surface a bundle-analysis-step failure structurally
         # instead of only as a stderr `click.echo`, so a JSON-consuming
@@ -1306,7 +1401,12 @@ def _format_release_json(
     if matrix_result is not None:
         # Release-global build-configuration findings (G2: probe matrix).
         # `.changes` is post-suppression, so suppressed findings are
-        # excluded here just as they are from the verdict.
+        # excluded here just as they are from the verdict. Codex review, PR
+        # #1154 second follow-up: this list is also filtered by
+        # `--view show=` (via `release_matrix_changes_for_view`), same as
+        # every per-library findings list above -- `matrix_verdict` itself
+        # stays the real, unfiltered verdict, matching how a per-library
+        # entry's own `verdict` is never display-filtered either.
         summary["matrix_verdict"] = matrix_result.verdict.value
         summary["matrix_findings"] = [
             {
@@ -1316,7 +1416,7 @@ def _format_release_json(
                 "old_value": c.old_value,
                 "new_value": c.new_value,
             }
-            for c in matrix_result.changes
+            for c in release_matrix_changes_for_view(matrix_result, show_only)
         ]
     # CLI cleanup phase two, PR B (Codex review, PR #803): the release-level
     # *summary* JSON is a separate computation from the optional per-library
@@ -1382,6 +1482,7 @@ def _format_release_markdown(
     matrix_result: DiffResult | None,
     scope_section: Mapping[str, object] | None = None,
     severity_config: SeverityConfig | None = None,
+    show_only: str | None = None,
 ) -> str:
     """Render the release summary as a Markdown document.
 
@@ -1393,6 +1494,17 @@ def _format_release_markdown(
     global probe-matrix comparison's own audit contribution to the folded
     ``disposition_audit`` section, the same gate every per-library block was
     already computed under.
+
+    *show_only* (Codex review, PR #1154 second follow-up) is applied here,
+    at render time, the same three ways :func:`_format_release_json` applies
+    it: the per-library findings section (via
+    :func:`_release_findings_for_render`), and the release-global bundle/
+    matrix findings sections (via
+    :func:`abicheck.reporter_markdown.release_bundle_findings_for_view`/
+    :func:`abicheck.reporter_markdown.release_matrix_changes_for_view`) --
+    *library_results* itself is
+    never mutated, so this function's caller can also render an unfiltered
+    (``show_only=None``) secondary ``--write`` from the same data.
     """
     from .cli_compare_receipt import (
         _release_md_library_findings,
@@ -1402,6 +1514,13 @@ def _format_release_markdown(
     from .report.disposition_audit import (
         DispositionAudit,
         render_disposition_audit_section,
+    )
+
+    display_library_results = _release_findings_for_render(library_results, show_only)
+    display_bundle_findings = (
+        release_bundle_findings_for_view(bundle_result, show_only)
+        if bundle_result is not None
+        else []
     )
 
     _VERDICT_EMOJI = {
@@ -1429,7 +1548,7 @@ def _format_release_markdown(
         f"| **New** | `{new_dir}` |",
         f"| **Verdict** | {verdict_cell} |",
     ]
-    bundle_count = len(bundle_result.bundle_findings) if bundle_result else 0
+    bundle_count = len(display_bundle_findings)
     if bundle_result is not None:
         bundle_em = _VERDICT_EMOJI.get(bundle_result.bundle_verdict.value, "?")
         lines.append(
@@ -1438,12 +1557,12 @@ def _format_release_markdown(
         )
     if scope_section is not None:
         lines += render_comparison_scope_markdown(scope_section)
-    lines += _release_md_libraries_table(library_results, _VERDICT_EMOJI)
+    lines += _release_md_libraries_table(display_library_results, _VERDICT_EMOJI)
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
-    lines += _release_md_library_findings(library_results)
-    lines += _release_md_bundle_findings(bundle_result)
-    lines += _release_md_matrix_findings(matrix_result)
+    lines += _release_md_library_findings(display_library_results)
+    lines += _release_md_bundle_findings(bundle_result, show_only)
+    lines += _release_md_matrix_findings(matrix_result, show_only)
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(
             release_disposition_audit_block(

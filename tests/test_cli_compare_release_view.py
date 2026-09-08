@@ -41,6 +41,7 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.probe_harness import MatrixSnapshot
 from abicheck.serialization import snapshot_to_json
 
 # The real Itanium mangling of `api_b()` (matches test_cli_compare_fold_demangle.py's
@@ -83,6 +84,27 @@ def _write_removed_function_pair(tmp_path: Path) -> tuple[Path, Path]:
 
 def _invoke(*args: str):
     return CliRunner().invoke(main, list(args))
+
+
+def _write_matrix_pair(tmp_path: Path, old_std: int, new_std: int) -> tuple[Path, Path]:
+    """A release-global (not per-library) probe-matrix pair whose only
+    finding is a ``CXX_STANDARD_FLOOR_RAISED`` (default verdict API_BREAK,
+    show-only severity label ``api-break``) -- release-global bundle/matrix
+    findings have no per-library home, which is what makes them a distinct
+    axis from the per-library findings the other test classes cover."""
+    old_matrix = MatrixSnapshot(
+        library="libfoo.so", version="1.0", spec_name="std-probe",
+        cxx_stds={"cfg": old_std},
+    )
+    new_matrix = MatrixSnapshot(
+        library="libfoo.so", version="2.0", spec_name="std-probe",
+        cxx_stds={"cfg": new_std},
+    )
+    old_path = tmp_path / "matrix_old.json"
+    new_path = tmp_path / "matrix_new.json"
+    old_path.write_text(old_matrix.to_json(), encoding="utf-8")
+    new_path.write_text(new_matrix.to_json(), encoding="utf-8")
+    return old_path, new_path
 
 
 class TestReleaseViewShowOnly:
@@ -257,3 +279,183 @@ class TestReleaseViewReportModeRejected:
                 "--view", token,
             )
             assert result.exit_code == 4, (token, result.output)
+
+
+class TestReleaseViewShowOnlySecondaryWriteStaysFull:
+    """Codex review, PR #1154 second follow-up ("Apply release show filters
+    inside each renderer"): a secondary ``--write`` report is documented/
+    contracted to always be full and unfiltered -- the *previous* fix
+    filtered the shared ``library_results`` projection once, upstream of
+    both the primary ``--format`` render and a secondary ``--write`` render,
+    so ``--write`` incorrectly inherited the primary's own ``--view show=``
+    selection. This proves ``--write`` stays full even when the primary
+    render is filtered down to nothing."""
+
+    def test_write_json_is_full_while_primary_markdown_is_filtered(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        write_path = tmp_path / "secondary.json"
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--view", "show=variables",
+            "--write", f"json={write_path}",
+        )
+        assert result.exit_code == 4, result.output
+
+        # Primary (markdown, the default format) is filtered: the function
+        # finding is a "functions"-element kind, and `show=variables` keeps
+        # only variable-element kinds.
+        assert "## Per-Library Findings" not in result.output
+        assert "api_b" not in result.output
+
+        # Secondary --write is full/unfiltered: the same function finding
+        # a `--view show=variables` filter removed from the primary render
+        # must still be present here.
+        secondary_doc = json.loads(write_path.read_text(encoding="utf-8"))
+        lib_entries = secondary_doc["libraries"]
+        assert len(lib_entries) == 1
+        findings = lib_entries[0].get("findings", [])
+        assert len(findings) == 1
+        assert findings[0]["kind"] == "func_removed"
+
+    def test_write_json_is_full_even_when_primary_is_also_json(
+        self, tmp_path: Path
+    ) -> None:
+        """The same invariant holds when the *primary* format is JSON too --
+        the private ``findings_view`` transport key the primary render
+        consumes must never leak into either document, and a secondary
+        ``--write`` must never see it either."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        write_path = tmp_path / "secondary.json"
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json",
+            "--view", "show=variables",
+            "--write", f"markdown={write_path}",
+        )
+        assert result.exit_code == 4, result.output
+
+        # A secondary --write to a *file* (unlike stdout) prints a "Report
+        # written to ..." notice ahead of the primary JSON on stdout.
+        primary_json_text = result.output[result.output.index("{") :]
+        primary_doc = json.loads(primary_json_text)
+        assert primary_doc["libraries"][0].get("findings", []) == []
+        assert "findings_view" not in primary_doc["libraries"][0]
+
+        secondary_text = write_path.read_text(encoding="utf-8")
+        assert "api_b" in secondary_text
+        assert "findings_view" not in secondary_text
+
+
+class TestReleaseViewShowOnlyJUnit:
+    """Codex review, PR #1154 second follow-up: JUnit was the one primary
+    format that silently ignored the release's own ``--view show=``
+    selection entirely -- it read the un-filtered per-library ``DiffResult``
+    (``diff_pairs``), never the ``show_only``-filtered projection JSON/
+    Markdown already used."""
+
+    def test_junit_respects_show_only_when_it_filters_out_the_finding(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        baseline = _invoke("compare", str(old_dir), str(new_dir), "--format", "junit")
+        assert baseline.exit_code == 4, baseline.output
+        assert 'failures="1"' in baseline.output
+
+        filtered = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "junit", "--view", "show=variables",
+        )
+        # show_only is presentation-only -- the exit code (computed from the
+        # real, unfiltered DiffResult) is unaffected even though the JUnit
+        # report itself shows no failing testcase.
+        assert filtered.exit_code == 4, filtered.output
+        assert 'failures="0"' in filtered.output
+        assert "api_b" not in filtered.output
+
+    def test_junit_keeps_the_finding_when_show_only_matches(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "junit", "--view", "show=functions",
+        )
+        assert result.exit_code == 4, result.output
+        assert 'failures="1"' in result.output
+
+
+class TestReleaseViewShowOnlyReleaseGlobalFindings:
+    """Codex review, PR #1154 second follow-up: release-global bundle/matrix
+    findings (not tied to any one library) previously bypassed ``--view
+    show=`` entirely in every format. This exercises the matrix axis --
+    ``CXX_STANDARD_FLOOR_RAISED``'s default verdict is API_BREAK, so
+    ``show=api-break`` keeps it and ``show=breaking`` filters it out, in
+    both JSON and Markdown."""
+
+    def test_matrix_finding_kept_when_show_only_matches_its_severity(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--probe-matrix", f"old={matrix_old}",
+            "--probe-matrix", f"new={matrix_new}",
+            "--format", "json", "--view", "show=api-break",
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output)
+        assert len(doc["matrix_findings"]) == 1
+        assert doc["matrix_findings"][0]["kind"] == "cxx_standard_floor_raised"
+        # The real matrix verdict is unaffected by the display filter.
+        assert doc["matrix_verdict"] == "API_BREAK"
+
+    def test_matrix_finding_filtered_in_json_and_markdown_when_show_only_excludes_it(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
+
+        json_result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--probe-matrix", f"old={matrix_old}",
+            "--probe-matrix", f"new={matrix_new}",
+            "--format", "json", "--view", "show=breaking",
+        )
+        assert json_result.exit_code == 4, json_result.output
+        doc = json.loads(json_result.output)
+        assert doc["matrix_findings"] == []
+        # The real matrix verdict (what actually gated the exit code) is
+        # unaffected by the display filter -- "record before disposing".
+        assert doc["matrix_verdict"] == "API_BREAK"
+
+        md_result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--probe-matrix", f"old={matrix_old}",
+            "--probe-matrix", f"new={matrix_new}",
+            "--view", "show=breaking",
+        )
+        assert md_result.exit_code == 4, md_result.output
+        assert "Build-Configuration (Matrix) Findings" not in md_result.output
+        assert "cxx_standard_floor_raised" not in md_result.output
+
+    def test_matrix_finding_unfiltered_by_default(self, tmp_path: Path) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--probe-matrix", f"old={matrix_old}",
+            "--probe-matrix", f"new={matrix_new}",
+            "--format", "json",
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output)
+        assert len(doc["matrix_findings"]) == 1

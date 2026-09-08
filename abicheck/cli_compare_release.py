@@ -1150,6 +1150,14 @@ def compare_release_cmd(
                 # single-pair `compare`'s own --write reuses its one already-
                 # computed DiffResult (see run_compare's own secondary
                 # _write_or_echo call).
+                #
+                # `show_only` is deliberately NOT forwarded here (Codex
+                # review, PR #1154 second follow-up: "Apply release show
+                # filters inside each renderer") -- a secondary `--write`
+                # report is always full/unfiltered, the same contract
+                # single-pair `compare`'s own `--write` already honours; only
+                # the primary `--format` render below (`_finalize_release_
+                # output`) receives the release's `--view show=` selection.
                 assert secondary_fmt is not None  # guaranteed by Click's callback
                 secondary_text = _format_release_summary(
                     secondary_fmt,
@@ -1208,6 +1216,7 @@ def compare_release_cmd(
                 scope_public_headers=scope_public_headers,
                 scope_terms=scope_terms,
                 demangle=_resolve_demangle(fmt, demangle),
+                show_only=show_only,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

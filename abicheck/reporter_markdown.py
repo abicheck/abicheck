@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .bundle_models import BundleDiffResult
     from .severity import KindSets, SeverityConfig
 
 from .checker import (
@@ -517,6 +518,97 @@ def apply_show_only(
             show_only, c, policy=policy, kind_sets=kind_sets, policy_file=policy_file
         )
     ]
+
+
+def filter_release_bundle_findings(
+    findings: Sequence[Any],
+    show_only: str,
+    policy: str = "strict_abi",
+    policy_file: object | None = None,
+) -> list[Any]:
+    """Filter ``compare-release`` bundle (cross-library) findings via --show-only.
+
+    Codex review, PR #1154 second follow-up ("Apply release show filters
+    inside each renderer"): bundle findings are release-global, not tied to
+    one library's own ``DiffResult``, so :func:`apply_show_only` (which
+    expects a real :class:`Change`) cannot be called on them directly.
+    Each finding is lowered through its own ``to_change()`` projection --
+    the identical lowering
+    ``cli_compare_release_helpers._fold_release_global_severity`` already
+    uses to resolve a bundle finding's severity for the release's exit
+    code -- so this display filter can never disagree with what that exit
+    code already computed for the same finding. *kind_sets* is deliberately
+    not accepted: bundle findings carry canonical, already-partitioned
+    ``ChangeKind``s, matching that same existing severity fold's own
+    omission of it.
+
+    *findings* is typed ``Sequence[Any]`` rather than
+    ``Sequence[BundleFinding]`` to avoid this leaf module importing
+    :mod:`abicheck.bundle_models` at runtime for a type-only reference; any
+    object exposing ``to_change() -> Change`` (every real
+    :class:`~abicheck.bundle_models.BundleFinding` does) satisfies it.
+    """
+    return [
+        f
+        for f in findings
+        if show_only_matches(
+            show_only, f.to_change(), policy=policy, policy_file=policy_file
+        )
+    ]
+
+
+def release_bundle_findings_for_view(
+    bundle_result: BundleDiffResult, show_only: str | None
+) -> list[Any]:
+    """Return *bundle_result*'s findings, ``--view show=``-filtered when active.
+
+    Codex review, PR #1154 second follow-up ("Apply release show filters
+    inside each renderer"): shared by the release fan-out's JSON
+    (``cli_compare_release_helpers._format_release_json``) and Markdown
+    (``report.render_release_markdown._release_md_bundle_findings``)
+    bundle sections so the two formats can never disagree about which
+    bundle findings a given ``show_only`` selection keeps. Both are
+    ``report``-layer-reachable call sites (this module and
+    ``report/render_release_markdown.py`` are both classified ``report``;
+    ``cli_compare_release_helpers.py``, a ``frontends`` module, is allowed
+    to import ``report`` -- routing the shared logic through here, rather
+    than through the ``frontends`` module, is what keeps
+    ``report/render_release_markdown.py`` from having to import
+    ``frontends`` code, which ADR-061's dependency-direction rule forbids).
+    A no-op (returns every finding) when *show_only* is falsy.
+    """
+    if not show_only:
+        return list(bundle_result.bundle_findings)
+    return filter_release_bundle_findings(
+        bundle_result.bundle_findings,
+        show_only,
+        policy=bundle_result.policy,
+        policy_file=bundle_result.policy_file,
+    )
+
+
+def release_matrix_changes_for_view(
+    matrix_result: DiffResult, show_only: str | None
+) -> list[Change]:
+    """Return *matrix_result*'s changes, ``--view show=``-filtered when active.
+
+    Shared by the release fan-out's JSON and Markdown release-global matrix
+    (build-configuration) sections, for the identical reason as
+    :func:`release_bundle_findings_for_view`. Unlike a bundle finding, a
+    matrix result is a real :class:`DiffResult`, so it is filtered the
+    identical way a per-library one is (``kind_sets``/``policy_file``
+    included, so the severity dimension resolves consistently). A no-op
+    (returns every change) when *show_only* is falsy.
+    """
+    if not show_only:
+        return list(matrix_result.changes)
+    return apply_show_only(
+        matrix_result.changes,
+        show_only,
+        policy=matrix_result.policy or "strict_abi",
+        kind_sets=matrix_result._effective_kind_sets(),
+        policy_file=matrix_result.policy_file,
+    )
 
 
 # ---------------------------------------------------------------------------

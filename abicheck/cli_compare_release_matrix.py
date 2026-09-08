@@ -202,6 +202,7 @@ def _finalize_release_output(
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     demangle: bool = False,
+    show_only: str | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit.
 
@@ -210,6 +211,12 @@ def _finalize_release_output(
     rendered format, the ``--output-dir`` sidecar, the stderr notice, and
     the real process exit read the same object. *removed_keys*/*added_keys*
     are the **proven** sets (D2) by the time they reach here.
+
+    *show_only* (Codex review, PR #1154 second follow-up): this function is
+    only ever called for the **primary** ``--format`` render (the secondary
+    ``--write`` render is a separate call in ``cli_compare_release.py`` that
+    never passes it), so it is the one caller allowed to forward the
+    release's ``--view show=`` selection into the rendered text.
     """
     text = _format_release_summary(
         fmt,
@@ -237,6 +244,7 @@ def _finalize_release_output(
         scope_public_headers=scope_public_headers,
         scope_terms=scope_terms,
         demangle=demangle,
+        show_only=show_only,
     )
     _write_or_echo(output, text)
 
@@ -538,6 +546,26 @@ def _strip_diff_results_and_adjust_verdict(
     grew peak memory by every library's full finding set even for a
     markdown/JUnit-only render that never reads it.
 
+    *show_only* (Codex review, PR #1154 second follow-up: "Apply release
+    show filters inside each renderer"): this is the **last** point a real
+    :class:`DiffResult` (with its own ``policy``/``policy_file``/
+    ``effective_verdict`` overrides) is available for a library, so it is
+    where a ``show_only``-filtered *view* of the findings is computed --
+    but ``entry["findings"]`` itself always stays the **full**, unfiltered
+    projection, exactly as it would with no ``--view show=`` in effect. The
+    filtered view is stashed under the private ``findings_view``/
+    ``findings_view_truncated`` keys, consumed (and stripped) by
+    :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
+    only for whichever renderer is the *primary* (``--format``) one -- a
+    secondary ``--write`` report is documented/contracted to always be full
+    (mirroring single-pair ``compare``'s own ``--write`` behaviour), so it
+    must never see this filtered view. Computing the view here rather than
+    re-filtering ``entry["findings"]`` downstream is deliberate: the
+    severity dimension of ``--view show=`` resolves through
+    ``effective_verdict_for_change`` (frozen-namespace/reclassify/policy-
+    file overrides), which needs the live ``Change`` objects this function
+    is the last place to see before they are discarded for memory.
+
     Returns the (possibly updated) *worst_verdict* string.
     """
     for entry in library_results:
@@ -545,32 +573,34 @@ def _strip_diff_results_and_adjust_verdict(
             continue
         diff = entry.get("_diff_result")
         if isinstance(diff, DiffResult):
-            # show_only-filtered (Codex review, PR #1154 follow-up): counting
-            # the *raw* gating buckets here while _release_finding_dicts caps
-            # the *filtered* ones would flag `findings_truncated` for a
-            # library whose true (post-filter) finding count never exceeded
-            # the cap at all.
-            from .reporter_markdown import apply_show_only as _apply_show_only
-
-            total_gating = sum(
-                len(
-                    _apply_show_only(
-                        cat_changes,
-                        show_only,
-                        policy=diff.policy or "strict_abi",
-                        kind_sets=diff._effective_kind_sets(),
-                        policy_file=diff.policy_file,
-                    )
-                    if show_only
-                    else cat_changes
-                )
-                for _, cat_changes in _release_gating_buckets(diff, severity_config)
-            )
-            findings = _release_finding_dicts(diff, severity_config, show_only)
+            gating_buckets = _release_gating_buckets(diff, severity_config)
+            total_gating = sum(len(cat_changes) for _, cat_changes in gating_buckets)
+            findings = _release_finding_dicts(diff, severity_config, None)
             if findings:
                 entry["findings"] = findings
                 if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
                     entry["findings_truncated"] = True
+            if show_only:
+                # The filtered *view*, alongside (never instead of) the full
+                # projection above -- see this function's own docstring.
+                from .reporter_markdown import apply_show_only as _apply_show_only
+
+                total_gating_view = sum(
+                    len(
+                        _apply_show_only(
+                            cat_changes,
+                            show_only,
+                            policy=diff.policy or "strict_abi",
+                            kind_sets=diff._effective_kind_sets(),
+                            policy_file=diff.policy_file,
+                        )
+                    )
+                    for _, cat_changes in gating_buckets
+                )
+                findings_view = _release_finding_dicts(diff, severity_config, show_only)
+                entry["findings_view"] = findings_view
+                if total_gating_view > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
+                    entry["findings_view_truncated"] = True
             # CLI cleanup phase two, PR E: the uncapped, always-classified
             # counterpart to the capped `findings` list above -- the exact
             # same shape single-library `compare --format json` persists at

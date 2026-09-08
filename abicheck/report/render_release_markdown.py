@@ -38,6 +38,10 @@ from typing import cast
 from ..bundle import render_bundle_findings_markdown
 from ..bundle_models import BundleDiffResult
 from ..checker_types import DiffResult
+from ..reporter_markdown import (
+    release_bundle_findings_for_view,
+    release_matrix_changes_for_view,
+)
 
 __all__ = [
     "_release_md_bundle_findings",
@@ -99,29 +103,56 @@ def _release_md_changed_libraries(
     return lines
 
 
-def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[str]:
-    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two."""
+def _release_md_bundle_findings(
+    bundle_result: BundleDiffResult | None, show_only: str | None = None
+) -> list[str]:
+    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two.
+
+    *show_only* (Codex review, PR #1154 second follow-up: "Apply release
+    show filters inside each renderer") filters the findings list the same
+    way a per-library section does, via
+    ``reporter_markdown.release_bundle_findings_for_view`` -- that module
+    (also ``report``-classified) is what
+    ``cli_compare_release_helpers._format_release_json`` calls for its own
+    JSON rendering of the same section, so the two formats can never
+    disagree about which bundle findings a given ``show_only`` selection
+    keeps."""
     lines: list[str] = []
     if bundle_result is not None and bundle_result.analysis_errors:
         lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]
         lines += [f"- {msg}" for msg in bundle_result.analysis_errors]
-    if bundle_result is None or not bundle_result.bundle_findings:
+    if bundle_result is None:
+        return lines
+    findings = release_bundle_findings_for_view(bundle_result, show_only)
+    if not findings:
         return lines
     lines += [
         "",
         "## 🔗 Bundle (Cross-Library) Findings",
         "",
-        *render_bundle_findings_markdown(bundle_result.bundle_findings),
+        *render_bundle_findings_markdown(findings),
     ]
     return lines
 
 
-def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:
-    """Markdown section for build-configuration (matrix) findings."""
+def _release_md_matrix_findings(
+    matrix_result: DiffResult | None, show_only: str | None = None
+) -> list[str]:
+    """Markdown section for build-configuration (matrix) findings.
+
+    *show_only* (Codex review, PR #1154 second follow-up) filters
+    *matrix_result*'s changes the same way a per-library section does, via
+    ``reporter_markdown.release_matrix_changes_for_view`` -- see
+    :func:`_release_md_bundle_findings`'s own docstring for why that shared
+    helper lives there.
+    """
     if matrix_result is None or not matrix_result.changes:
         return []
+    changes = release_matrix_changes_for_view(matrix_result, show_only)
+    if not changes:
+        return []
     lines = ["", "## 🛠️ Build-Configuration (Matrix) Findings", ""]
-    for c in matrix_result.changes:
+    for c in changes:
         lines.append(
             f"- **{c.kind.value}**" + (f" — `{c.symbol}`" if c.symbol else ""),
         )
