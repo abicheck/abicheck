@@ -82,21 +82,25 @@ def _write_suppression(tmp_path: Path, yaml_text: str) -> Path:
     return p
 
 
-class TestRequiresSuppress:
-    def test_rejected_without_suppress(self, tmp_path):
+class TestNoOpWithoutSuppress:
+    """ADR-068 D4/Phase 5: `--audit-suppressions` is a rendering-only flag
+    now (matching `--surface-metrics`/`--show-filtered`'s own shape) -- with
+    no `--suppress` file there is genuinely nothing to audit, so the flag is
+    a no-op rather than a usage error."""
+
+    def test_no_op_without_suppress(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--audit-suppressions"]
+            main,
+            ["compare", str(old_p), str(new_p), "--audit-suppressions", "--format", "json"],
         )
-        assert result.exit_code != 0
-        assert "--audit-suppressions requires --suppress" in result.output
+        # A real BREAKING removal in _breaking_pair() -- the flag's absence
+        # of a suppression file must not change that outcome.
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        assert payload.get("suppression_audit") is None
 
-    def test_rejected_without_suppress_even_with_dry_run(self, tmp_path):
-        # Regression (Codex review, fresh evidence): --dry-run exits via
-        # emit_dry_run's SystemExit before the CLI ever reaches the later,
-        # post-suppression-loading guard -- without an earlier check,
-        # `--audit-suppressions --dry-run` (no --suppress) reported "ok" for
-        # an invocation the identical non-dry-run call rejects outright.
+    def test_no_op_without_suppress_even_with_dry_run(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -105,8 +109,7 @@ class TestRequiresSuppress:
                 "--audit-suppressions", "--dry-run",
             ],
         )
-        assert result.exit_code != 0
-        assert "--audit-suppressions requires --suppress" in result.output
+        assert result.exit_code == 0, result.output
 
 
 class TestRejectedOnSetInputs:
@@ -510,7 +513,7 @@ class TestJsonReport:
             [
                 "compare", str(old_p), str(new_p),
                 "--suppress", str(suppress), "--audit-suppressions",
-                "--format", "json", "--report-mode", report_mode,
+                "--format", "json", "--view", report_mode,
             ],
         )
         assert result.exit_code == 4, result.output

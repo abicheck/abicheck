@@ -527,6 +527,9 @@ def _preflight_manifests_and_audit(
     *,
     old_dump_manifest: Path | None,
     new_dump_manifest: Path | None,
+    # ADR-068 D4/Phase 5: no longer read here -- `--audit-suppressions`
+    # without `--suppress` is a no-op now, not a rejection (see below).
+    # Kept on the signature so the caller's kwargs-forwarding stays uniform.
     audit_suppressions: bool,
     suppress: Path | None,
     pack_paths: Any,
@@ -558,15 +561,16 @@ def _preflight_manifests_and_audit(
         except ManifestValidationError as exc:
             raise click.UsageError(str(exc)) from exc
 
-    if audit_suppressions and suppress is None:
-        # Validated ahead of the --dry-run emit below, same reasoning as the
-        # directory/package rejection above (Codex review, fresh evidence):
-        # a dry run must not report "ok" for `--audit-suppressions` without
-        # `--suppress` when the identical non-dry-run invocation is rejected
-        # by the later (post-suppression-loading) guard in this function.
-        raise click.UsageError(
-            "--audit-suppressions requires --suppress (nothing to audit)."
-        )
+    # ADR-068 D4/Phase 5: `--audit-suppressions` with no `--suppress` used to
+    # be a hard UsageError here ("nothing to audit"). It is now a no-op --
+    # there is genuinely nothing to audit without a suppression file, and a
+    # rendering-only flag (this one now matches --show-filtered/
+    # --surface-metrics' own shape: it only ever gates whether an
+    # already-computed, possibly-absent section is shown) should never
+    # reject an otherwise-valid invocation just because it has nothing to
+    # display. `_attach_suppression_audit` below is unconditionally guarded
+    # on `suppress is not None` already, so `result.suppression_audit` stays
+    # `None` exactly as it would without the flag.
 
     # Manifest validity, ahead of the --dry-run emit for the same reason as
     # the two guards above -- see the helper for what deliberately does *not*
@@ -1327,9 +1331,12 @@ def run_compare(
     debuginfod_url: str | None,
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
     # unconditionally now (see compare_snapshots() call site below).
-    # explain_patterns survives, now pure rendering of the always-on ledger.
-    # --surface-metrics stays an opt-in flag (see adr027_compare_options'
-    # own docstring for why it wasn't folded into AUTO this phase).
+    # explain_patterns survives, now pure rendering of the always-on ledger
+    # (populated by --view patterns; see frontends.cli.options.view).
+    # surface_metrics is also unconditional now -- the CLI always passes
+    # True to compare_snapshots() below regardless of this parameter's
+    # value, matching pattern_verdicts' own precedent (see
+    # adr027_compare_options' docstring).
     explain_patterns: bool,
     surface_metrics: bool,
     reconcile_build_context: bool,
@@ -1908,9 +1915,14 @@ def run_compare(
     # modulation is unconditional now, not a flag (removed; see
     # adr027_compare_options). It is independently evidence-gated
     # (idiom-only demotion), so this never manufactures a false negative --
-    # it only fixes the bug where asking *why* (--explain-patterns) used to
+    # it only fixes the bug where asking *why* (--view patterns) used to
     # also decide *whether* modulation happened, which could change the
-    # verdict and exit code. --surface-metrics stays a real opt-in flag.
+    # verdict and exit code.
+    # ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
+    # too now (§4.1's AUTO classification) -- always True regardless of
+    # what the (now vestigial, accepted-for-compatibility) flag says, the
+    # same "the flag is a no-op, the analysis always runs" treatment
+    # pattern_verdicts=True above already gets.
     # Reporting reads the severity config only under the severity exit scheme;
     # resolved once here rather than re-spelled at each of the five consumers.
     report_severity = sev_config if resolved_cfg.exit_code_scheme == "severity" else None
@@ -1935,7 +1947,7 @@ def run_compare(
             force_public_symbols=force_public,
             extra_changes=extra_changes,
             pattern_verdicts=True,
-            surface_metrics=surface_metrics,
+            surface_metrics=True,
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=post_manifest_allowlist,
             reconcile_build_context=reconcile_build_context,

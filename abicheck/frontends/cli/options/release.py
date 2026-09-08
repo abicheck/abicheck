@@ -238,9 +238,11 @@ def debug_resolution_options(func: F) -> F:
 def adr027_compare_options(func: F) -> F:
     """Add the ADR-027 API-surface-intelligence options to ``compare``.
 
-    ``--explain-patterns`` (A4 modulation explanation) and
-    ``--surface-metrics`` (A1/D1.2 metric drift). Decorators apply
-    bottom-up, so they are listed here in reverse of their displayed order.
+    ``--surface-metrics`` (A1/D1.2 metric drift) is the only flag left
+    here. ``--explain-patterns`` (A4 modulation explanation) moved into
+    ``--view patterns`` (ADR-068 D4/Phase 5 §4.1: it is one of four
+    spellings of "which parts of the canonical result do I want rendered"
+    -- see ``frontends.cli.options.view``).
 
     ADR-068 D4/Phase 5 (one-comparison-product.md §6): pattern-verdict
     modulation (``--pattern-verdicts``) is no longer a flag at all -- it is
@@ -250,48 +252,39 @@ def adr027_compare_options(func: F) -> F:
     a break into a pass on its own -- it only ever demotes at
     header-aware-or-better evidence tiers or raises a lost-invariant break --
     so making it unconditional never manufactures a false negative, only
-    removes an opt-in a user could forget. ``--explain-patterns`` no longer
+    removes an opt-in a user could forget. ``--view patterns`` no longer
     implies it: it is now pure rendering over whatever modulation the
     (always-on) stage already recorded on ``result.pattern_modulations`` --
     it can change what is *shown*, never what was *decided* (the bug this
     decoupling fixes: asking "why" used to also flip "whether", which could
     change the verdict and exit code).
 
-    ``--surface-metrics`` is deliberately **not** folded into the same
-    AUTOMATIC treatment in this phase, despite §4.1's table also marking it
-    AUTO: unlike modulation (which only ever adjusts an *existing* finding's
-    effective verdict) or the suppression-audit/disposition-ledger fixes
-    this phase does make unconditional (an additive, independently-gated
-    JSON key), a surface-metric finding is a brand-new ``Change`` record
-    merged directly into ``result.changes`` with no separate suppressible-
-    but-hideable channel -- making it unconditional would add a new,
-    always-visible COMPATIBLE finding to *any* comparison whose public
-    symbol count changes at all (i.e. most real comparisons), which is a
-    much larger, harder-to-contain analysis-output change than this phase's
-    scope (a targeted correctness fix plus additive accounting) was set up
-    to absorb safely. Left as the pre-existing opt-in flag; folding it into
-    AUTO is deferred to a follow-up slice that can budget for updating every
-    exact-finding-count test it would touch.
+    ``--surface-metrics`` computation is unconditional too as of this same
+    phase (ADR-068 D4/Phase 5, §4.1's AUTO classification): every
+    ``compare`` now always computes the ADR-027 metric-drift findings and
+    merges them into ``result.changes`` exactly as ``--surface-metrics``
+    always did -- there is no longer a way to turn the *computation* off.
+    The flag survives, unchanged in name, but its role changes to a
+    rendering-adjacent one matching ``--audit-suppressions``' own precedent:
+    it no longer decides whether the findings exist, only whether client
+    code that reads it as an explicit opt-in still sees the flag it always
+    passed keep working (Click accepts and ignores it -- see
+    ``cli_compare_helpers.run_compare``'s own handling). See the PR that
+    landed this for the measurement that justified merging AUTOMATIC
+    treatment for this flag along with modulation/suppression-audit, where
+    an earlier note here had deferred it.
     """
     func = click.option(
         "--surface-metrics",
         "surface_metrics",
         is_flag=True,
         default=False,
-        help="Emit aggregate public-surface metric drift (ADR-027): "
-        "public_surface_grew/shrank, undocumented_export_ratio_increased. "
-        "Informational (COMPATIBLE).",
-    )(func)
-    func = click.option(
-        "--explain-patterns",
-        "explain_patterns",
-        is_flag=True,
-        default=False,
-        help="Print the idiom evidence behind each pattern-verdict "
-        "modulation (ADR-027). Pattern-verdict modulation itself runs "
-        "automatically wherever idiom evidence exists -- this flag only "
-        "controls whether that evidence is explained; it never changes "
-        "the verdict or exit code.",
+        help="No longer required: aggregate public-surface metric drift "
+        "(ADR-027: public_surface_grew/shrank, "
+        "undocumented_export_ratio_increased) is now always computed and "
+        "included in every comparison's findings (informational, "
+        "COMPATIBLE) -- ADR-068 D4/Phase 5. This flag is accepted for "
+        "backward compatibility and currently has no effect.",
     )(func)
     return func
 

@@ -154,6 +154,26 @@ def kinds_of(finding_set: FindingSet) -> frozenset[str]:
     return frozenset(f.kind for f in finding_set)
 
 
+#: ADR-068 D4/Phase 5: --surface-metrics computation is unconditional on
+#: `compare` now (ADR-027 A1/D1.2's aggregate roll-ups); `scan` has no
+#: equivalent concept at all, so these are expected, permanent compare-only
+#: "richer" noise for any scenario whose public-surface count changes --
+#: never a real scan capability compare is missing. Excluded from the
+#: source-depth (F-3/F-4) exact-identity checks the same way
+#: `assert_no_capability_loss` already treats every compare-only finding.
+SURFACE_METRIC_KINDS = frozenset(
+    {
+        ChangeKind.PUBLIC_SURFACE_GREW.value,
+        ChangeKind.PUBLIC_SURFACE_SHRANK.value,
+        ChangeKind.UNDOCUMENTED_EXPORT_RATIO_INCREASED.value,
+    }
+)
+
+
+def without_surface_metrics(finding_set: FindingSet) -> FindingSet:
+    return frozenset(f for f in finding_set if f.kind not in SURFACE_METRIC_KINDS)
+
+
 def write_snapshot(snapshot: Any, path: Path) -> Path:
     """Serialize *snapshot* to *path* for a CLI invocation to consume."""
     from abicheck.serialization import snapshot_to_json
