@@ -17,9 +17,23 @@ selects how deep the evidence-collection goes (binary → headers → build →
 source). **`abicheck compare OLD NEW` is now the recommended way to run a
 depth-pinned, source-aware comparison against a real baseline** — it runs
 the always-on compiler-free pattern pre-scan and the eleven cross-source
-checks automatically on every invocation, takes the identical `--depth`/
-`--since`/`--changed-path`/`--sources`/`--build-info` inputs `scan` does,
+checks automatically on every invocation, takes the same `--depth`/
+`--since`/`--changed-path`/`--sources`/`--build-info` *flags* `scan` does,
 and needs no separate orchestrator command.
+
+**`compare`'s `--depth` is weaker than `scan`'s in two ways this page's
+later guarantees don't cover** (verified live, not just from `--help`):
+omitting it has no risk-driven `auto` selection (`compare` deterministically
+defaults to `headers`; see [Let risk pick the
+depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
+below), and a *pinned* `--depth build`/`--depth source` with no evidence to
+satisfy it does not fail loudly the way [the warning
+below](#what-each-depth-reaches) describes for `scan` — `compare --depth
+source` on a pair with zero build/source evidence exits `0`/`NO_CHANGE`
+rather than `scan`'s hard evidence-contract error. Everywhere this page
+states a depth guarantee (the fail-loud warning, "an auto depth with a
+diff seed resolves to source" in the PR-gate worked example below), read it
+as `scan`-only unless it says otherwise.
 
 `abicheck scan ARTIFACT [OPTIONS]` remains a fully supported command and is
 still the one to reach for in a few specific cases this page calls out as
@@ -355,8 +369,10 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   --sources new=. --since origin/main --depth source
 ```
 
-- **Depth:** `auto` with a diff seed resolves to `source` (`--depth source`); pin
-  it explicitly if you want a fixed rung.
+- **Depth:** pinned explicitly here (`--depth source`) since `compare` has
+  no risk-driven `auto` selection (it defaults to `headers` when omitted,
+  regardless of a diff seed) — on `scan`, by contrast, omitting `--depth`
+  with a diff seed present resolves to `auto`'s risk-driven `source`.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
   break. `--budget` overflow (exit `5`) is `scan`-only for now — see
   [Exit Codes](../reference/exit-codes.md).

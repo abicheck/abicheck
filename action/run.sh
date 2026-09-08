@@ -4516,6 +4516,22 @@ else
     FINAL_EXIT=1
   fi
 
+  # NOT_COMPARABLE (exit 16, ADR-050 D2 -- compare's own equivalent of
+  # scan's exit 6) unconditionally fails the step, same as the scan
+  # branch's own check above and for the same reason: a scope/profile
+  # mismatch means no compatibility comparison ran at all, not that one
+  # ran and found (or didn't find) a break. This arm was missing entirely
+  # before this fix (Codex review, PR #1160, round 7, fresh evidence) --
+  # before the exit-16 dispatch arm existed, that exit code fell into the
+  # generic `VERDICT="ERROR"` case, which *does* fail the step via this
+  # function's own first `if` branch; adding the correct, more specific
+  # NOT_COMPARABLE verdict without also adding this check silently
+  # regressed a real `mode: compare` scope mismatch to a passing step.
+  if [[ "$VERDICT" == "NOT_COMPARABLE" ]]; then
+    echo "::error::abicheck reported NOT_COMPARABLE: the two sides were not extracted under a comparable profile/scope contract. See the JSON report's diff.reason for what mismatched."
+    FINAL_EXIT=1
+  fi
+
   # Severity-driven exit code 1 (from --severity-* flags)
   if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
     echo "::error::Severity-level error detected by abicheck."
