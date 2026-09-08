@@ -25,9 +25,14 @@ it should read in CHANGELOG.md. Delete the other sections.
   `dumper._run_clang`'s own probe-failure path now recovers a literal,
   explicitly-requested `--target=` via a new `_compiler_options.
   explicit_target_triple` helper, and — only when no explicit target was
-  requested either (and the resolved compiler isn't a CL-style driver
-  like `clang-cl`, whose flag syntax differs) — falls back to a triple
-  string derived from the running interpreter's own `sys.platform`.
+  requested either — falls back to a triple string derived from the
+  running interpreter's own `sys.platform`. Both fallbacks are skipped
+  entirely for a CL-style driver (`clang-cl`/`dpcpp-cl`): its flag syntax
+  differs (a forwarded `--target=` may be silently ignored rather than
+  honored), and it mostly targets Windows regardless of host OS (a real
+  `clang-cl -print-target-triple` reports a Windows triple even
+  cross-compiled from macOS), so guessing `sys.platform` there would
+  misclassify a Windows AST as Darwin on a macOS host.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

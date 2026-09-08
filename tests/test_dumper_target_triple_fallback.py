@@ -152,21 +152,26 @@ def test_successful_probe_is_never_overridden_by_explicit_target(
     assert parser._target_triple == "aarch64-apple-macos11"
 
 
-def test_probe_failure_under_a_cl_style_driver_does_not_recover_target(
+def test_probe_failure_under_a_cl_style_driver_recovers_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A CL-style driver (clang-cl/dpcpp-cl) parses MSVC-shaped flags, so a
     GNU-shaped ``-target=``/``--target=`` in forwarded options may be one it
     silently ignored rather than one it honored -- recovering it as if it
-    were real risks a WRONG platform guess. Falls through to the
-    sys.platform-based guess instead (harmless either way: clang-cl mainly
-    targets Windows, so sys.platform there is never "darwin")."""
+    were real risks a WRONG platform guess. It also gets no sys.platform
+    guess either (Codex review, fresh evidence): a real
+    ``clang-cl -print-target-triple`` reports a Windows triple regardless
+    of the HOST OS running it (cross-compiled from macOS included), so
+    guessing "darwin" from a macOS host here would misclassify a Windows
+    AST as Darwin. Stays bare None -- the same conservative default
+    ``is_darwin_target(None)`` already answers False for."""
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
     monkeypatch.setattr(
         dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
     )
     monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
     monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(sys, "platform", "darwin")
 
     parser = _header_ast_parser(
         [],
@@ -186,6 +191,40 @@ def test_probe_failure_under_a_cl_style_driver_does_not_recover_target(
     )
 
     assert isinstance(parser, _ClangAstParser)
-    # Not the ignored explicit target -- proves the CL-style gate fired.
-    assert parser._target_triple != "x86_64-apple-macos11"
-    assert parser._target_triple == sys.platform
+    assert parser._target_triple is None
+
+
+def test_successful_probe_still_honored_for_a_cl_style_driver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CL-style gate only ever suppresses the two FALLBACKS -- a
+    successfully-probed triple (the real ``clang-cl -print-target-triple``
+    output) is still trusted outright, same as for any other driver."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(
+        dumper, "_configured_target_triple", lambda *a, **k: "x86_64-pc-windows-msvc"
+    )
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options=None,
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-pc-windows-msvc"

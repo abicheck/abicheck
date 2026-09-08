@@ -623,33 +623,23 @@ def _header_ast_parser(
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
-            # A probe failure (`_configured_target_triple` returning None)
-            # carries no information about whether an explicit,
-            # possibly-non-native `--target=` was requested at all --
-            # recover the literal request instead of losing it (skipped
-            # for a CL-style driver, `clang-cl`/`dpcpp-cl`: it parses
-            # MSVC-shaped flags, so a GNU-shaped `-target=`/`--target=`
-            # forwarded to one may be one it silently ignored rather than
-            # honored, and recovering it as if real risks a WRONG platform
-            # guess). Only once NEITHER yields anything does this fall
-            # back to a literal `sys.platform`-based triple string --
-            # deliberately synthesized HERE, not inside
-            # `extract.headers.clang.context.is_darwin_target` itself,
-            # because that function's bare-`None` case also serves direct,
-            # no-pipeline-involved unit-test construction of `_ClangAstParser`
-            # (`tests/test_dumper_clang_extern_c_identity.py`'s "no
-            # target_triple at all" cases), which must keep answering
-            # "not Darwin" regardless of which OS actually runs the test
-            # suite -- only a REAL probe attempted by this real pipeline
-            # earns the sys.platform guess (Codex review, fresh evidence).
+            # On a probe failure, recover an explicit `--target=`, else
+            # (non-CL-style driver only) guess from `sys.platform` -- a
+            # CL-style driver mostly targets Windows regardless of host
+            # OS, so it gets neither fallback (stays bare `None`). The
+            # guess lives HERE, not in `is_darwin_target`, so a bare-
+            # `None` unit-test construction of `_ClangAstParser` is
+            # unaffected (Codex review, fresh evidence).
             target_triple=(
                 _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin)
                 or (
                     None
                     if _is_cl_style_driver_name(clang_bin)
-                    else _explicit_target_triple(gcc_options, gcc_option_tokens)
+                    else (
+                        _explicit_target_triple(gcc_options, gcc_option_tokens)
+                        or sys.platform
+                    )
                 )
-                or sys.platform
             ),
             no_binary_evidence=no_binary_evidence,
         )
