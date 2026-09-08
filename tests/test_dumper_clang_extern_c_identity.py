@@ -456,6 +456,58 @@ def test_parse_variables_explicit_asm_label_unstripped_on_darwin() -> None:
     assert var.entity_id.extra == ("mangled", "__Zfake_g")
 
 
+def test_parse_functions_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install (``void foo() asm("_foo");`` under
+    ``--target=x86_64-apple-darwin`` reports both a literal ``mangledName``
+    of ``"_foo"`` AND an ``AsmLabelAttr`` child): a single-underscore
+    explicit asm label is exactly as ``symbol_candidates``-matchable as
+    genuine Darwin extern-C bare-name decoration, so ``is_extern_c``'s
+    Darwin-gated ``symbol_candidates`` fallback wrongly classified it as
+    extern "C" even though the two tests above already keep the mangled
+    name itself preserved (``"_foo"``, not stripped to ``"foo"``) -- the
+    resulting ``EntityId`` still took the signature-free ``("extern_c",)``
+    branch instead of ``("mangled", "_foo")``, diverging from castxml's own
+    mangled-name identity for the identical declaration and risking a
+    manufactured remove/add pair in a castxml/clang or hybrid comparison."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "foo",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "_foo",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "_foo"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "_foo")
+
+
+def test_parse_variables_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> None:
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "VarDecl",
+            "name": "bar",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int"},
+            "mangledName": "_bar",
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "_bar"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "_bar")
+
+
 def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
     """Control for the two tests above: the SAME doubly-underscored input
     is never stripped off Darwin -- there is no such linker convention to

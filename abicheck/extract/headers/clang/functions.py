@@ -520,7 +520,15 @@ def parse_functions(
         # declaration is never plain C regardless of platform, so this
         # also preserves a genuine asm-label's own distinct identity
         # (`entity_id_for_function`'s `is_extern_c` branch always
-        # resolves `scope=()`, discarding it otherwise).
+        # resolves `scope=()`, discarding it otherwise). ALSO gated on
+        # NOT `has_asm_label` (Codex review, fresh evidence): a
+        # single-underscore explicit `asm("_foo")` label is exactly as
+        # `symbol_candidates`-matchable as genuine extern-C decoration --
+        # unlike the `__Z...` shape issue 19 closed, this one still
+        # reached `entity_id_for_function`'s `is_extern_c` branch even
+        # though the mangled name itself stays preserved, diverging from
+        # castxml's own mangled-name identity for the same declaration.
+        has_asm_label = _has_explicit_asm_label(node)
         is_extern_c = (
             entry.extern_c
             or raw_mangled == name
@@ -528,6 +536,7 @@ def parse_functions(
                 raw_mangled is not None
                 and not entry.scope
                 and _is_darwin_target(target_triple)
+                and not has_asm_label
                 and name in _symbol_candidates(raw_mangled)
             )
         )
@@ -537,7 +546,7 @@ def parse_functions(
             target_triple,
             name=name,
             is_extern_c=is_extern_c,
-            has_asm_label=_has_explicit_asm_label(node),
+            has_asm_label=has_asm_label,
         )
         quals = _function_qualifiers(qualtype)
         ret_type = _return_type(qualtype) or "void"

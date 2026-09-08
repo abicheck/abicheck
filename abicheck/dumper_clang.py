@@ -1294,7 +1294,14 @@ class _ClangAstParser:
             # also preserves a genuine, distinct `asm("_foo")` label's
             # own identity: see `functions.parse_functions`'s comment for
             # the full multi-round account of why each gate is load-
-            # bearing.
+            # bearing. ALSO gated on NOT `has_asm_label` (Codex review,
+            # fresh evidence, mirroring the identical fix in
+            # `functions.parse_functions`): a single-underscore explicit
+            # `asm("_foo")` label is exactly as `symbol_candidates`-
+            # matchable as genuine extern-C decoration, so it still
+            # reached `entity_id_for_variable`'s `is_extern_c` branch
+            # even though the mangled name itself stays preserved.
+            has_asm_label = _clang_context.has_explicit_asm_label(node)
             is_extern_c = (
                 entry.extern_c
                 or raw_mangled == name
@@ -1302,6 +1309,7 @@ class _ClangAstParser:
                     raw_mangled is not None
                     and not entry.scope
                     and _clang_context.is_darwin_target(self._target_triple)
+                    and not has_asm_label
                     and name in _clang_context.symbol_candidates(raw_mangled)
                 )
             )
@@ -1312,7 +1320,7 @@ class _ClangAstParser:
                 self._target_triple,
                 name=name,
                 is_extern_c=is_extern_c,
-                has_asm_label=_clang_context.has_explicit_asm_label(node),
+                has_asm_label=has_asm_label,
             )
             if not mangled:
                 continue
