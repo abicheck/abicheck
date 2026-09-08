@@ -59,6 +59,7 @@ rather than pinned to the one reported oneDAL file.
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import random
@@ -434,68 +435,58 @@ def test_a_file_one_byte_past_the_cap_still_answers_none(tmp_path):
     assert bounded_decoded_prefix(path) is None
 
 
-def test_a_request_larger_than_the_budget_never_reads_past_it(tmp_path, monkeypatch):
-    """A caller-supplied `n` above the raw-input budget must not make this
-    bounded function read (and allocate) `n` raw bytes on its first pass.
+@functools.lru_cache(maxsize=1)
+def _over_cap_payload() -> bytes:
+    """Low-ratio JSON whose *stored* form exceeds the raw cap -- the regime
+    where clamping to the cap changed the answer. Cached: the three
+    envelope parametrizations below share identical, deterministic content,
+    so regenerating ~1.4 MB of it per case was pure repeated cost."""
+    return _payload(entries=70000, entropy_bits=60, seed=21)
 
-    The cap was only consulted in the *escalation* step, so the initial
-    `raw_size = max(n, len(probe))` went straight past it (CodeRabbit
-    review). The one large-window caller in the tree passes exactly
-    `MARKER_SCAN_BYTES == _BOUNDED_PREFIX_MAX_RAW_BYTES` today, so nothing
-    over-read in practice -- but "bounded" is this function's whole
-    contract, and it was one constant change away from being false.
 
-    Asserted against the real read sizes rather than the return value,
-    because the return value is identical either way: this is a resource
-    bug, and a test that only checked the answer would have passed before
-    the fix.
+@pytest.mark.parametrize("compression", [None, *_ALGORITHMS])
+def test_a_request_larger_than_the_cap_is_still_served(tmp_path, compression):
+    """A prefix request above the raw-input cap must still be answered.
+
+    The cap bounds *amplification* -- raw input read per decoded byte asked
+    for -- not how much a caller may ask for. Clamping the first read to the
+    cap outright refuses prefixes the function can produce: one cap-sized
+    raw read cannot yield `n` decoded bytes once `n` exceeds
+    `cap x compression ratio`, so the request came back `None` while
+    `read_snapshot_bytes` returned the whole document.
+
+    `n` is deliberately 16x the cap rather than 4x: this fixture compresses
+    about 7.5:1, so at 4x a single cap-sized read *already* satisfies the
+    request and the failing regime is never entered -- the first version of
+    this test made exactly that mistake and passed against the bug it was
+    written for.
+
+    Covers plain, gzip and zstd, because the clamp lived on the compressed
+    path only and the plain branch returns before it -- a zstd-only test
+    said nothing about either of the other two (Codex review).
     """
-    zstandard = pytest.importorskip("zstandard")
+    if compression is SnapshotCompression.ZSTD:
+        pytest.importorskip("zstandard")
 
     from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
 
-    data = _payload(entries=4000, entropy_bits=48, seed=21)
-    path = tmp_path / "budget.json.zst"
-    path.write_bytes(zstandard.ZstdCompressor(write_checksum=False).compress(data))
+    data = _over_cap_payload()
+    if compression is None:
+        path = tmp_path / "big.json"
+        path.write_bytes(data)
+    else:
+        suffix = ".json.zst" if compression is SnapshotCompression.ZSTD else ".json.gz"
+        path, encoded = _write(tmp_path, f"big{suffix}", data, compression)
+        assert len(encoded) > _BOUNDED_PREFIX_MAX_RAW_BYTES, (
+            "fixture no longer exceeds the cap in stored form, so one "
+            "cap-sized read would reach EOF and the regime this test "
+            "exists for is never entered"
+        )
 
-    reads: list[int] = []
-    real_open = open
+    n = _BOUNDED_PREFIX_MAX_RAW_BYTES * 16
+    assert n > len(data), "n must exceed the payload so the whole of it is the answer"
 
-    class _RecordingFile:
-        def __init__(self, fh):
-            self._fh = fh
-
-        def read(self, size=-1):
-            reads.append(size)
-            return self._fh.read(size)
-
-        def __getattr__(self, name):
-            return getattr(self._fh, name)
-
-        # `with open(...) as f:` resolves the context-manager protocol on
-        # the type, so `__getattr__` never sees these two.
-        def __enter__(self):
-            self._fh.__enter__()
-            return self
-
-        def __exit__(self, *exc):
-            return self._fh.__exit__(*exc)
-
-    def _patched_open(*args, **kwargs):
-        return _RecordingFile(real_open(*args, **kwargs))
-
-    monkeypatch.setattr(
-        "abicheck.storage.snapshot_prefix.open", _patched_open, raising=False
-    )
-
-    # Ask for far more than the budget allows.
-    bounded_decoded_prefix(path, _BOUNDED_PREFIX_MAX_RAW_BYTES * 8)
-
-    largest = max(reads)
-    assert largest <= _BOUNDED_PREFIX_MAX_RAW_BYTES + 1, (
-        f"read {largest} raw bytes, past the "
-        f"{_BOUNDED_PREFIX_MAX_RAW_BYTES}-byte budget (+1 EOF probe): {reads}"
-    )
+    assert bounded_decoded_prefix(path, n) == read_snapshot_bytes(path)[:n]
 
 
 # ── The reported symptom, through the real public surface ───────────────────
