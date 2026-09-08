@@ -196,6 +196,17 @@ it should read in CHANGELOG.md. Delete the other sections.
   up; the `sys.platform` guess itself remains GNU-mode-only, since a
   CL-style driver's target has no reliable relationship to the host OS.
 
+- **The clang header-AST backend no longer starts a second, unnecessary
+  compiler subprocess on every successful dump.** The bare (option-free)
+  re-probe added to recover a probe failure's target triple was computed
+  eagerly, before the primary, option-bearing probe's own result was even
+  checked — so every clang dump paid for two `-print-target-triple`
+  subprocess invocations instead of one, and a configured compiler
+  wrapper that answers the primary probe but hangs on a bare invocation
+  could add up to 10 seconds to every header parse. The bare re-probe is
+  now deferred behind a closure and invoked only once the primary probe
+  (and, under CL mode, the explicit-target recovery) has already failed.
+
 - **`--write markdown=...`'s written report is always readable as UTF-8.**
   `tests/test_presentation_analysis_separation.py` read a `compare
   --write markdown=...` report file with the platform-default text
