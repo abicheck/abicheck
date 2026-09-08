@@ -634,7 +634,6 @@ def _header_ast_parser(
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
-
         def _bare_reprobe() -> str | None:
             # Deferred (Codex review, fresh evidence): eagerly evaluating this would
             # start a second compiler subprocess (its own 10s timeout) on every call.
@@ -660,6 +659,7 @@ def _header_ast_parser(
             public_dir_paths=public_dir_paths,
             target_triple=target_triple,
             no_binary_evidence=no_binary_evidence,
+            is_cxx=resolved_force_cpp,
         )
         stamped = cast(
             _ClangAstParser,

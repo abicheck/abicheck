@@ -439,6 +439,7 @@ def parse_functions(
     target_triple: str | None,
     default_value: DefaultValueEvaluator,
     no_binary_evidence: bool = False,
+    is_cxx: bool = True,
 ) -> list[Function]:
     funcs: list[Function] = []
     for entry in functions:
@@ -521,13 +522,22 @@ def parse_functions(
         # also preserves a genuine asm-label's own distinct identity
         # (`entity_id_for_function`'s `is_extern_c` branch always
         # resolves `scope=()`, discarding it otherwise). ALSO gated on
-        # NOT `has_asm_label` (Codex review, fresh evidence): a
-        # single-underscore explicit `asm("_foo")` label is exactly as
-        # `symbol_candidates`-matchable as genuine extern-C decoration --
-        # unlike the `__Z...` shape issue 19 closed, this one still
-        # reached `entity_id_for_function`'s `is_extern_c` branch even
-        # though the mangled name itself stays preserved, diverging from
-        # castxml's own mangled-name identity for the same declaration.
+        # NOT (`has_asm_label` AND `is_cxx`) (Codex review, fresh evidence,
+        # two rounds): a single-underscore explicit `asm("_foo")` label is
+        # exactly as `symbol_candidates`-matchable as genuine extern-C
+        # decoration, and in C++ mode it still reached this `is_extern_c`
+        # branch even though the mangled name itself stays preserved,
+        # diverging from castxml's own mangled-name identity for the same
+        # declaration. But C has no mangling to override in the first
+        # place -- a plain-C `asm(...)` label is routine (glibc/POSIX-style
+        # symbol versioning), not evidence of a deliberate identity
+        # override, so an unconditional gate wrongly forced a genuinely
+        # plain-C declaration down the C++/mangled-identity path, breaking
+        # self-comparison of an unchanged plain-C header (a spurious
+        # FUNC_LANGUAGE_LINKAGE_CHANGED). `is_cxx` -- `dumper.
+        # _clang_header_dump`'s own `resolved_force_cpp`, the mode that
+        # ACTUALLY produced this AST -- is the disambiguator: only in C++
+        # mode does an asm label's spelling carry that implication.
         has_asm_label = _has_explicit_asm_label(node)
         is_extern_c = (
             entry.extern_c
@@ -536,7 +546,7 @@ def parse_functions(
                 raw_mangled is not None
                 and not entry.scope
                 and _is_darwin_target(target_triple)
-                and not has_asm_label
+                and not (has_asm_label and is_cxx)
                 and name in _symbol_candidates(raw_mangled)
             )
         )

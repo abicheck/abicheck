@@ -1183,7 +1183,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE POINT "
             'OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
-            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`, itself gated `and not has_asm_label` in its own Darwin `symbol_candidates` branch -- a single-underscore explicit `asm(\"_foo\")` label is exactly as candidate-matchable as genuine decoration, so without the gate the mangled name stayed preserved but `entity_id_for_function`/`entity_id_for_variable` still took the wrong, signature-free `(\"extern_c\",)` branch instead of `(\"mangled\", \"_foo\")`). Both gate on "
+            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`, itself gated `and not (has_asm_label and is_cxx)` in its own Darwin `symbol_candidates` branch -- a single-underscore explicit `asm(\"_foo\")` label is exactly as candidate-matchable as genuine decoration, so without the gate the mangled name stayed preserved but `entity_id_for_function`/`entity_id_for_variable` still took the wrong, signature-free `(\"extern_c\",)` branch instead of `(\"mangled\", \"_foo\")`; gating on `is_cxx` -- the caller's own resolved compile-language mode -- is required because C has no mangling to override, so a genuinely plain-C asm-labeled declaration must stay `(\"extern_c\",)`, matching castxml, or self-comparing an unchanged plain-C header spuriously reports FUNC_LANGUAGE_LINKAGE_CHANGED). Both gate on "
             "`is_darwin_target(target_triple)`, always False for a bare `None`/empty triple (never "
             "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
             "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
@@ -1191,7 +1191,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "A bare re-probe of the SAME resolved `clang_bin` (keeping only its effective `--driver-mode=<value>` if any, `dumper._forwarded_driver_mode_token`) is tried under BOTH driver modes when the explicit-target recovery finds nothing -- a CL-style `-print-target-triple` is honored exactly like GNU's, so a target-prefixed CL-style name (e.g. `aarch64-apple-darwin-clang-cl`) reports its own prefixed default from the bare probe too, not just under GNU mode. Dropping the driver-mode token would silently revert a `clang-cl --driver-mode=g++` re-probe to CL mode, since the identical binary reports a different target bare vs. with that override: real evidence beats a static name-shape heuristic, since the earlier, option-bearing probe may have failed for a reason unrelated to `clang_bin`'s own identity. Only when that bare probe ALSO fails (GNU mode only) does `sys.platform` apply, gated on BOTH the RESOLVED `clang_bin` being the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`, version-suffix-stripped -- real Clang derives its own default target from argv[0], so basename -- not real identity, not raw spelling, and NOT merely differing from the plain name -- is what matters: an absolute path or a native version suffix still matches, a target-prefixed symlink correctly does not, and an arbitrary custom rename is answered by the bare re-probe, never by guessing it must be a cross-compiler) AND NOT `dumper_clang.clang_bin_is_explicitly_configured` (a `--compiler`/`--compiler-prefix` wrapper can coincidentally share the plain default's basename while genuinely not being it -- once BOTH probes fail for an explicitly-configured binary, that failure is itself evidence of an anomaly, not confirmation of a real native clang; this now ALSO suppresses the guess for a genuine absolute-path `--compiler` naming the real native clang, superseding this bug class's own earlier claim to the contrary). No fallback at all when no `@response-file`/`--config=<file>`/`--config-{user,system}-dir=<dir>` is forwarded AT ALL (`forwards_response_file`/`explicit_target_triple`'s shared `_opaque_option_source_tokens` void-back-to-None -- a config-*-dir points at a directory whose `clang.cfg` is loaded IMPLICITLY, no explicit `--config=` needed; real Clang scans the WHOLE arg list, response/config files included, before parsing even starts, so one could carry a later target OR retroactively flip CL-vs-GNU mode regardless of its position relative to a visible target). Shape check: `model.mangled_name.strip_macho_itanium_"
             "decoration`, NOT applied to castxml."
         ),
-        fixed_by=(1138, 1156),
+        fixed_by=(1138, 1156, 1167),
         seed_tests=(
             "tests/test_dumper_clang_extern_c_identity.py",
             "tests/test_dumper_hybrid_macho_idempotence.py",
@@ -1210,13 +1210,14 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 "already_pure",
                 "bare_asm_label",
                 "single_underscore_asm_label",
+                "single_underscore_asm_label_in_c_mode",
             ),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-fifth items below). "
-                    'Recurred TWENTY-FIVE times within #1138/#1149/#1156: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
+                    "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-sixth items below). "
+                    'Recurred TWENTY-SIX times within #1138/#1149/#1156/#1167: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
                     "explicit target recovered under a CL-style driver; the `sys.platform` guess leaking outside that gate; `--driver-mode=cl` on a plain `clang` name evading the name-only CL check; that gate recovering NO spelling when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named binary reverted to GNU mode "
                     "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
                     "driver name (`clang-18`) failing the basename check; a visible target trusted despite a later response file that could override it; that same fix wrongly trusting a preceding one too, since Clang's own driver-mode scan reads the whole arg list up front regardless of position; an exact-basename comparison alone wrongly treating ANY custom rename of the native compiler (e.g. `company-clang`) as a cross-compiler, closed by trying a bare re-probe of the identical binary first; an explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; an explicitly-"
@@ -1226,11 +1227,16 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "list (verified against a real Clang 18 install) and short-circuiting both stripping branches whenever it is present; and the fifteenth item's bare re-probe being "
                     "confined to the GNU branch only, leaving a target-prefixed CL-style driver (e.g. `aarch64-apple-darwin-clang-cl`) with no fallback once its own explicit-target "
                     "recovery found nothing, even though a real `clang-cl -print-target-triple` reports that same prefixed default (verified against a real Clang 18 "
-                    'install), closed by trying the identical bare re-probe under CL mode too; and a single-underscore explicit `asm("_foo")` label still tripping `is_extern_c`\'s Darwin '
+                    'install), closed by trying the identical bare re-probe under CL mode too; a single-underscore explicit `asm("_foo")` label still tripping `is_extern_c`\'s Darwin '
                     '`symbol_candidates` fallback even though the twenty-fourth item\'s own fix kept the mangled name preserved -- the resulting entity identity still took the wrong '
-                    '`("extern_c",)` branch instead of `("mangled", "_foo")` (verified against a real Clang 18 install), closed by gating that fallback `and not has_asm_label` too.'
+                    '`("extern_c",)` branch instead of `("mangled", "_foo")` (verified against a real Clang 18 install), closed by gating that fallback `and not has_asm_label`; and that '
+                    "very fix then wrongly excluding EVERY asm-labeled declaration, including a genuinely plain-C one -- real Clang emits the identical AST shape for "
+                    '`void foo(void) asm("_foo");` whether compiled as C or C++ (verified against a real Clang 18 install: same literal `mangledName`, same `AsmLabelAttr`, no way to tell '
+                    "them apart from the node alone), but C has no mangling to override in the first place, so treating a routine glibc/POSIX-style C asm label as a deliberate identity "
+                    "override broke self-comparison of an unchanged plain-C header (spurious FUNC_LANGUAGE_LINKAGE_CHANGED); closed by threading the caller's own resolved compile-language "
+                    "mode (`dumper._clang_header_dump`'s `resolved_force_cpp`) down as `is_cxx`, gating the exclusion `and not (has_asm_label and is_cxx)` instead."
                 ),
-                reference="#1138/#1149 follow-ups, fixed by #1156",
+                reference="#1138/#1149 follow-ups, fixed by #1156/#1167",
             ),
         ),
     ),
