@@ -8,11 +8,7 @@ is the composition ring between domain packages and frontends. This layer's prod
 
 ## Permitted imports
 
-Workflow code may import `abicheck.model`, `abicheck.storage`,
-`abicheck.extract`, `abicheck.compare`, and `abicheck.policy`. During the
-ADR-061 migration, legacy flat modules classified to those owners may remain
-dependencies, but workflow code must never import through `abicheck.cli`,
-`abicheck.service`, or another compatibility facade.
+Workflow code may import `abicheck.model`, `abicheck.storage`, `abicheck.extract`, `abicheck.compare`, and `abicheck.policy`. During the ADR-061 migration, legacy flat modules classified to those owners may remain dependencies, but workflow code must never import through `abicheck.cli`, `abicheck.service`, or another compatibility facade — except `abicheck.serialization` (`public_root_surfaces`' one documented exception, its own docstring: "the public compatibility surface"; precedents: `input_resolution.py`, `snapshot_load.py`, `findings.py`).
 
 Within this package, prefer explicit implementation-module imports. Package
 `__init__.py` files provide narrow external surfaces, not an internal service
@@ -49,7 +45,7 @@ without importing a ring it may not (`frontends` may import only `model`,
 | `extraction.py` | Input-side operations: header expansion, the L2 seed, the L3→L2 fold, build-source embedding |
 | `findings.py` | Finding identity and the probe matrix |
 | `scan_config.py` | Scan config, risk rules, and the public-provenance rule (owned here, not aliased) |
-| `scan_abi3_dry_run.py` | The `--abi3` dry-run precondition check both `scan --dry-run` renderers use (CLI cleanup phase two, PR 5 follow-up) — delegates candidate resolution to `scan_abi3_resolve.py` (a flat `workflows`-legacy root module, not this package: it needs `serialization.load_snapshot`, which has no ADR-061 layer of its own, and this migrated package may not import an unclassified module directly), so it stays outside the CLI-registration import cycle entirely |
+| `scan_abi3_dry_run.py` | The `--abi3` dry-run precondition check both `scan --dry-run` renderers use (CLI cleanup phase two, PR 5 follow-up) — delegates candidate resolution to `scan_abi3_resolve.py` (a flat `workflows`-legacy root module, not this package: besides `serialization` it also needs `python_ext`, which carries no "Permitted imports" exemption above), so it stays outside the CLI-registration import cycle entirely |
 | `suppression.py` | `SuppressionList`/`Suppression`, so a CLI helper can type and load a `--suppress` file without importing `policy`-classified `suppression.py` directly |
 
 `gate.py` earns its place rather than laundering an import: three orthogonal

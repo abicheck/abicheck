@@ -30,11 +30,8 @@ from abicheck.diff_build_config import (
     detect_api_depends_on_consumer_env,
     diff_matrix,
 )
-from abicheck.probe_harness import (
-    load_probe_spec,
-    run_probe_matrix,
-    write_matrix_snapshot,
-)
+from abicheck.probe_harness import load_probe_spec, run_probe_matrix
+from abicheck.workflows.findings import write_matrix_snapshot
 
 # These exercise stock cc/c++ only (no castxml), so they run in the default
 # lane and self-skip when a compiler is absent — mirroring the gcc-only
