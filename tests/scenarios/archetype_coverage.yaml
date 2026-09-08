@@ -28,7 +28,6 @@ scenarios:
       G6 is Done (BTF/CTF and SYCL PI/UR workflows) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       BTF/CTF parsing is unit-tested (tests/test_btf_metadata.py). Full
       automation needs real BTF blob fixtures and a documented "module vs
       vmlinux BTF" workflow so the compare runs end-to-end.
@@ -53,7 +52,6 @@ scenarios:
       G6 is Done (BTF/CTF and SYCL PI/UR workflows) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       SYCL metadata + diff is unit-tested (tests/test_diff_sycl.py) and there is
       a change-type example (catalog/cases/case82_sycl_overload_set_removed). Full
       automation needs a SYCL plugin fixture wired into a workflow-level run;

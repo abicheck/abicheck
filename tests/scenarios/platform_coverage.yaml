@@ -46,7 +46,6 @@ scenarios:
       G1 is Done (native PE/Mach-O compare validation and non-blocking MSVC+PDB lane) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       PE/COFF + PDB parsing is unit-tested (tests/test_pe_metadata_unit.py,
       tests/test_pdb_metadata.py) and a smoke e2e lane exists
       (tests/test_msvc_pdb_e2e.py, marked `msvc`). Full automation needs native
@@ -73,7 +72,6 @@ scenarios:
       G1 is Done (native PE/Mach-O compare validation and non-blocking MSVC+PDB lane) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       Mach-O parsing is unit-tested (tests/test_macho_metadata_unit.py,
       tests/test_macos_arm64_abi.py). Full automation needs a macOS CI lane with
       native dylib fixtures so the export trie and ARM64 ABI paths run end-to-end.
@@ -99,7 +97,6 @@ scenarios:
       G5 is Done (plugin-check CLI and host<->plugin API) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       The plugin_abi policy and consumer-scoped appcompat are unit-tested
       (tests/test_appcompat.py, tests/test_workflow_scenarios.py). Full automation
       needs a host/plugin example pair plus an optional host-contract check

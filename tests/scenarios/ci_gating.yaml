@@ -184,7 +184,6 @@ scenarios:
       G2 is Done (build matrix folds into compare/compare-release; bundle soname-skew is wired) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       The scoping rollup (scope.manual_review_required / public_additions /
       filtered_internal_changes) and changed_libraries that this gate keys off
       are unit-tested in tests/test_compare_release.py
@@ -223,7 +222,6 @@ scenarios:
       G3 is Done (workflow scenarios and Markdown/HTML coverage) — the plan record was
       retired after completion (see docs/contribute/plans/index.md).
       This specific scenario just has no automated end-to-end CLI test yet.
-    note: >
       changed_libraries and the scope.public_additions / filtered_internal_changes
       rollup are emitted today and unit-tested in tests/test_compare_release.py.
       Per-library release_recommendation is available in the --output-dir reports
