@@ -454,18 +454,29 @@ class TestExplicitTargetTriple:
 
 
 class TestExplicitTargetTripleClStyle:
-    """``cl_style=True`` (Codex review, second round, fresh evidence): a
-    CL/MSVC-compatibility-mode driver (``clang-cl``/``dpcpp-cl``, or a
-    generic ``clang --driver-mode=cl``) only ever honors the attached,
-    double-dash ``--target=<value>`` spelling -- the other spellings
-    ``explicit_target_triple`` otherwise recognizes for a GNU-style driver
-    complete with an "unknown argument ignored" warning under CL mode and
-    are never applied, so recovering one of them there would report a
-    target the driver itself dropped."""
+    """``cl_style=True`` (Codex review, third round, fresh evidence
+    correcting the second): a CL/MSVC-compatibility-mode driver
+    (``clang-cl``/``dpcpp-cl``, or a generic ``clang --driver-mode=cl``)
+    honors two spellings -- the attached, double-dash ``--target=<value>``
+    AND the separate-argument, single-dash ``-target <value>`` (a real
+    ``clang-cl -target <value> -print-target-triple`` exits successfully
+    and prints the value back) -- but NOT the attached, single-dash
+    ``-target=<value>`` or the separate-argument, double-dash
+    ``--target <value>``, which complete with an "unknown argument
+    ignored" warning under CL mode and are never applied, so recovering
+    one of THOSE would report a target the driver itself dropped."""
 
     def test_attached_double_dash_spelling_is_recovered(self) -> None:
         assert (
             explicit_target_triple("--target=x86_64-apple-darwin", (), cl_style=True)
+            == "x86_64-apple-darwin"
+        )
+
+    def test_separate_single_dash_spelling_is_recovered(self) -> None:
+        assert (
+            explicit_target_triple(
+                None, ("-target", "x86_64-apple-darwin"), cl_style=True
+            )
             == "x86_64-apple-darwin"
         )
 
@@ -475,13 +486,7 @@ class TestExplicitTargetTripleClStyle:
             is None
         )
 
-    def test_separate_argument_spellings_are_not_recovered(self) -> None:
-        assert (
-            explicit_target_triple(
-                None, ("-target", "x86_64-apple-darwin"), cl_style=True
-            )
-            is None
-        )
+    def test_separate_double_dash_spelling_is_not_recovered(self) -> None:
         assert (
             explicit_target_triple(
                 None, ("--target", "x86_64-apple-darwin"), cl_style=True
@@ -490,12 +495,12 @@ class TestExplicitTargetTripleClStyle:
         )
 
     def test_last_occurrence_wins_among_honored_spellings_only(self) -> None:
-        # The ignored separate-argument spelling must not "consume" a
-        # later, honored attached spelling, and the honored spelling must
-        # still win last-wins among itself.
+        # The ignored spellings must not "consume" a later, honored
+        # spelling, and the honored spellings must still win last-wins
+        # among themselves.
         assert (
             explicit_target_triple(
-                "-target x86_64-unknown-linux-gnu --target=x86_64-apple-darwin",
+                "--target x86_64-unknown-linux-gnu -target x86_64-apple-darwin",
                 (),
                 cl_style=True,
             )
@@ -503,7 +508,7 @@ class TestExplicitTargetTripleClStyle:
         )
         assert (
             explicit_target_triple(
-                "--target=x86_64-apple-darwin --target=x86_64-pc-windows-msvc",
+                "-target x86_64-apple-darwin --target=x86_64-pc-windows-msvc",
                 (),
                 cl_style=True,
             )

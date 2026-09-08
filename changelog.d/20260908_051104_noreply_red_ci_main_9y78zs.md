@@ -36,11 +36,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   `sys.platform` there would misclassify a Windows AST as Darwin on a
   macOS host. The explicit-`--target=` recovery itself stays active under
   CL mode too, but narrowed (`explicit_target_triple(..., cl_style=True)`)
-  to the one spelling a CL-style driver actually honors — attached,
-  double-dash `--target=<value>` — since a separate-argument or
-  single-dash-attached spelling completes with an "unknown argument
-  ignored" warning and is never applied; recovering one of those as if it
-  were real would risk applying the wrong platform normalization.
+  to the two spellings a CL-style driver actually honors — attached,
+  double-dash `--target=<value>` and separate-argument, single-dash
+  `-target <value>` — since the other two spellings (attached single-dash,
+  separate double-dash) complete with an "unknown argument ignored"
+  warning and are never applied; recovering one of those as if it were
+  real would risk applying the wrong platform normalization.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

@@ -191,19 +191,57 @@ def test_probe_failure_under_a_cl_style_driver_recovers_the_honored_spelling(
     assert parser._target_triple == "x86_64-apple-macos11"
 
 
+def test_probe_failure_under_a_cl_style_driver_recovers_the_separate_short_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The separate-argument, single-dash ``-target <value>`` spelling is
+    ALSO genuinely honored under CL mode (Codex review, third round,
+    fresh evidence correcting the second round's over-broad claim that
+    every separate-argument spelling was ignored): a real
+    ``clang-cl -target x86_64-apple-darwin -print-target-triple`` exits
+    successfully and prints the value back. So a probe failure still
+    recovers it, same as the attached double-dash spelling."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang-cl")
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="clang-cl",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="-target x86_64-apple-macos11",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-apple-macos11"
+
+
 @pytest.mark.parametrize(
     "gcc_options",
     [
         "-target=x86_64-apple-macos11",
-        "-target x86_64-apple-macos11",
         "--target x86_64-apple-macos11",
     ],
 )
 def test_probe_failure_under_a_cl_style_driver_ignores_unhonored_spellings(
     monkeypatch: pytest.MonkeyPatch, gcc_options: str
 ) -> None:
-    """The three spellings a real CL-style driver does NOT apply (single-
-    dash attached, and either separate-argument form) complete with an
+    """The two spellings a real CL-style driver does NOT apply (single-
+    dash attached, and separate-argument double-dash) complete with an
     "unknown argument ignored" warning rather than selecting the target --
     recovering one of them as if it were real risks a WRONG platform
     guess. It also gets no sys.platform guess either (Codex review, fresh

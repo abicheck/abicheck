@@ -410,18 +410,22 @@ def explicit_target_triple(
     following, separate argument) and ``--target=<value>``/``-target=<value>``
     (attached).
 
-    ``cl_style=True`` narrows recognition to the one spelling a CL/MSVC-
+    ``cl_style=True`` narrows recognition to the two spellings a CL/MSVC-
     compatibility-mode driver (``clang-cl``/``dpcpp-cl``, or a generic
     ``clang`` given ``--driver-mode=cl``) actually honors: the attached,
-    double-dash ``--target=<value>``. Fresh Codex review evidence (two
-    rounds): ``clang-cl -target=<value>`` (single-dash attached) and
-    ``clang-cl --target <value>``/``-target <value>`` (either separate-
-    argument spelling) complete with an "unknown argument ignored" warning
-    and are *not* applied, while ``clang-cl --target=<value>`` is
-    documented and does select the target — so recovering only that one
-    spelling under CL mode still reflects what the driver actually did,
-    where the unrestricted parse (correct for a GNU-style driver) would
-    recover a value the driver silently dropped.
+    double-dash ``--target=<value>``, and the separate-argument,
+    single-dash ``-target <value>``. Fresh Codex review evidence (three
+    rounds, the third correcting the second): a real
+    ``clang-cl -target <value> -print-target-triple`` exits successfully
+    and prints back ``<value>``, so that separate short spelling IS
+    honored despite looking like the attached-vs-separate distinction that
+    matters for the other two spellings; only the attached, single-dash
+    ``-target=<value>`` and the separate, double-dash ``--target <value>``
+    complete with an "unknown argument ignored" warning and are *not*
+    applied. Recovering only the two genuinely-honored spellings under CL
+    mode still reflects what the driver actually did, where the
+    unrestricted parse (correct for a GNU-style driver) would recover a
+    value the driver silently dropped.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -438,12 +442,14 @@ def explicit_target_triple(
         token = tokens[i]
         if token.startswith("--target="):
             value = token[len("--target=") :]
-        elif not cl_style:
-            if token.startswith("-target="):
-                value = token.partition("=")[2]
-            elif token in ("-target", "--target") and i + 1 < len(tokens):
-                value = tokens[i + 1]
-                i += 1
+        elif not cl_style and token.startswith("-target="):
+            value = token.partition("=")[2]
+        elif token == "-target" and i + 1 < len(tokens):
+            value = tokens[i + 1]
+            i += 1
+        elif not cl_style and token == "--target" and i + 1 < len(tokens):
+            value = tokens[i + 1]
+            i += 1
         i += 1
     return value
 
