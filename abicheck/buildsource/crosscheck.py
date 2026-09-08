@@ -833,13 +833,21 @@ def _check_odr_type_variant(
     # for the message/report, not because uniqueness depends on it.
     groups: dict[tuple[str, str], set[str]] = {}
     for conflict in surface.odr_conflicts:
-        name = str(conflict.get("qualified_name", "")) or "<anonymous>"
-        header = str(conflict.get("header", ""))
+        # `.get(field, default)` alone would let an explicit `None` value (a
+        # hand-edited or forward-versioned persisted row) through as-is,
+        # which `str()`-ing anywhere downstream would then turn into the
+        # literal text "None" -- checked with `isinstance(..., str)` before
+        # falling back, not a blind `str(...)` cast (Codex review, fifth
+        # follow-up, same class as the identity-collision fix below).
+        raw_name = conflict.get("qualified_name")
+        name = raw_name if isinstance(raw_name, str) and raw_name else "<anonymous>"
+        raw_header = conflict.get("header")
+        header = raw_header if isinstance(raw_header, str) else ""
         hashes = groups.setdefault((name, header), set())
         for hash_field in ("old_type_hash", "new_type_hash"):
-            value = str(conflict.get(hash_field, ""))
-            if value:
-                hashes.add(value)
+            hash_value = conflict.get(hash_field)
+            if isinstance(hash_value, str) and hash_value:
+                hashes.add(hash_value)
 
     findings: list[Change] = []
     for (name, header), hashes in groups.items():
@@ -1393,14 +1401,19 @@ def _check_identity_collision(
     for collision in surface.identity_collisions:
         identity = str(collision.get("identity", "")) or "<unknown>"
         qnames, usrs = groups.setdefault(identity, (set(), set()))
+        # `str(collision.get(field, ""))` would stringify an explicit
+        # `None` value (a hand-edited or forward-versioned persisted row)
+        # into the literal name `"None"`, which could then win `min()` --
+        # accept only an actual non-empty string (Codex review, fifth
+        # follow-up).
         for qname_field in ("qualified_name", "qualified_name_a"):
-            value = str(collision.get(qname_field, ""))
-            if value:
+            value = collision.get(qname_field)
+            if isinstance(value, str) and value:
                 qnames.add(value)
         for usr_field in ("usr_a", "usr_b"):
-            value = str(collision.get(usr_field, ""))
-            if value:
-                usrs.add(value)
+            usr_value = collision.get(usr_field)
+            if isinstance(usr_value, str) and usr_value:
+                usrs.add(usr_value)
 
     findings: list[Change] = []
     for identity, (qnames, usrs) in groups.items():
