@@ -238,9 +238,10 @@ e.g. `c++17`), `include_dirs:`/`defines:` (lists), `sysroot:`, and
 ### `debug:`
 
 Separate-debug-file resolution for ELF (ADR-021a), demoted off the CLI in
-ADR-040 Lever 2 — stable per-project debug-artifact knobs, each corresponding
-to a now-hidden CLI flag that still overrides the config value
-(`CLI > config`); the coarse per-run `--debug-root` stays a visible CLI flag.
+ADR-040 Lever 2 and later removed outright (ADR-068 D5) — stable per-project
+debug-artifact knobs, each the *only* remaining spelling of what used to be
+a `compare` CLI flag; the coarse per-run `--debug-root` stays a visible CLI
+flag. (`dump` keeps its own separate, visible copies of these four flags.)
 `format:` (`auto`/`dwarf`/`btf`/`ctf`, case-insensitive, default auto-pick)
 forces the ELF debug format for both sides (was `--debug-format`);
 `dwarf_only:` (default `false`) uses DWARF as the primary source even when

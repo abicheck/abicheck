@@ -181,11 +181,14 @@ Notes:
 
 ### Config demotion
 
-These flags are no longer in `compare --help`. They still function as
-overrides, but the reviewed home is `.abicheck.yml`. See the
-[config-file reference](../reference/config-file.md#debug).
+These flags no longer exist on `compare` at all -- `debug.format`/
+`debug.dwarf_only`/`debug.debuginfod`/`debug.debuginfod_url` in
+`.abicheck.yml` are their only remaining spelling (ADR-068 D5 / Phase 7a: a
+hidden-but-accepted flag still counts as public surface, so once a setting
+is fully config-backed the CLI spelling is removed outright rather than
+left hidden). See the [config-file reference](../reference/config-file.md#debug).
 
-| Was a flag | Now a config key (block → key) |
+| Was a flag | Now a config key only (block → key) |
 |------------|-------------------------------|
 | `--debug-format dwarf` | `debug.format: dwarf` |
 | `--dwarf-only` | `debug.dwarf_only: true` |
@@ -203,11 +206,10 @@ scope:
   show_redundant: false
 ```
 
-Precedence is **CLI > config > default**, so a script that still passes
-`--dwarf-only` keeps working and overrides the config value. The boolean
-toggles are two-way, so a one-off run can also force the value *off* over a
-config `true`: `--no-dwarf-only` (restore header parsing), `--no-debuginfod`,
-`--no-show-redundant`.
+A script that still passes `--dwarf-only`/`--debug-format`/`--debuginfod`/
+`--debuginfod-url` now exits `64` (`No such option`) -- rewrite it to set
+the equivalent `debug.*` key in `.abicheck.yml` instead. `--show-redundant`
+was retired the same way earlier and has no CLI spelling left either.
 
 **Not demoted (still visible flags):** `--debug-root` (the coarse per-run
 debug-tree override, now side-aware, see the table above); the toolchain

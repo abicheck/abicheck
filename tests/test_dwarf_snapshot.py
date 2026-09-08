@@ -691,10 +691,9 @@ class TestCLIDwarfFlags:
         norm = " ".join(_cli_help("dump").replace("│", "").split())
         assert "Writes nothing" in norm
 
-    def test_compare_hides_dwarf_only(self, _cli_help) -> None:
-        """compare --dwarf-only is demoted to the debug.dwarf_only config key and
-        hidden (ADR-040 Lever 2) — still a functional override, just off the
-        visible help. It remains visible on `dump`."""
+    def test_compare_has_no_dwarf_only_flag(self, _cli_help) -> None:
+        """compare's --dwarf-only was demoted to debug.dwarf_only (config),
+        then removed outright (ADR-068 D5). Still visible on `dump`."""
         assert "--dwarf-only" not in _cli_help("compare")
 
     @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
@@ -1426,18 +1425,19 @@ class TestCLIInProcess:
         # Should produce JSON output (not crash)
         assert '"library"' in result.output or '"functions"' in result.output
 
-    def test_compare_dwarf_only(self, _debug_lib: Path) -> None:
-        """compare --dwarf-only should work via CliRunner."""
+    def test_compare_dwarf_only(self, _debug_lib: Path, tmp_path: Path) -> None:
+        """compare's debug.dwarf_only config key works via CliRunner (ADR-068
+        D5: --dwarf-only was removed outright as a hidden compare flag)."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
 
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(_debug_lib), str(_debug_lib), "--dwarf-only",
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  dwarf_only: true\n")
+        result = CliRunner().invoke(main, [
+            "compare", str(_debug_lib), str(_debug_lib), "--config", str(config_path),
         ])
-        # Should succeed (comparing same lib to itself)
-        assert result.exit_code == 0
+        assert result.exit_code == 0  # Should succeed (comparing same lib to itself)
 
 
 # ── _print_data_sources direct call ──────────────────────────────────────────

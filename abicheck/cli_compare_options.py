@@ -347,19 +347,24 @@ def _reject_debug_format_for_non_elf(
     old_fmt: str | None,
     new_fmt: str | None,
 ) -> None:
-    """Reject --debug-format for PE/Mach-O inputs.
+    """Reject a forced ELF debug format for PE/Mach-O inputs.
 
     They force an ELF debug format and are silently ignored by the PE/Mach-O dump
     paths, so reject them up front (mirrors dump_cmd). JSON-snapshot / dump inputs
     have ``*_fmt == None`` and are unaffected.
+
+    ADR-068 D5 / Phase 7a: ``compare`` no longer has a ``--debug-format`` CLI
+    flag (only ``.abicheck.yml``'s ``debug.format`` key), so the message
+    names the config key rather than a flag that no longer exists.
     """
     if effective_debug_format is None:
         return
     for side, bfmt in (("old", old_fmt), ("new", new_fmt)):
         if bfmt in ("pe", "macho"):
             raise click.BadParameter(
-                f"--debug-format {effective_debug_format} is only supported "
-                f"for ELF binaries, but the {side} input is {bfmt.upper()}."
+                f"debug.format: {effective_debug_format} (.abicheck.yml) is "
+                f"only supported for ELF binaries, but the {side} input is "
+                f"{bfmt.upper()}."
             )
 
 

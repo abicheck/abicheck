@@ -173,41 +173,23 @@ def release_options(func: F) -> F:
 
 
 def debug_resolution_options(func: F) -> F:
-    """Separate-debug-file resolution (ADR-021a): roots + debuginfod + format.
+    """Separate-debug-file resolution (ADR-021a): roots.
 
     Currently a ``compare``-only family — it resolves *local* ELF debug
     artifacts, which the package-oriented (``compare-release``) and
     snapshot-oriented (``appcompat``) commands do not take. It
     lives here so the moment a second command needs it there is one definition to
     compose, not a copy to drift (ADR-037 D3).
+
+    ADR-068 D5 / one-comparison-product.md Phase 7a: this family used to also
+    carry ``--debug-format``/``--debuginfod-url``/``--debuginfod``/
+    ``--dwarf-only``, each already-hidden and already fully config-backed
+    (``debug.format``/``debug.debuginfod_url``/``debug.debuginfod``/
+    ``debug.dwarf_only`` in ``.abicheck.yml``) since their ADR-040 Lever 2
+    demotion. Hidden-but-accepted options are still public surface (D5), so
+    they were removed outright rather than left hidden — the config keys
+    remain the only way to set them for ``compare``.
     """
-    func = click.option(
-        "--debug-format",
-        "debug_format_opt",
-        type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
-        default=None,
-        hidden=True,
-        help="Force the ELF debug format for both sides (auto=pick best available). "
-        "Demoted to the debug.format config key (ADR-040 L2); this flag still "
-        "overrides it.",
-    )(func)
-    func = click.option(
-        "--debuginfod-url",
-        "debuginfod_url",
-        default=None,
-        hidden=True,
-        help="debuginfod server URL (overrides DEBUGINFOD_URLS env var). Demoted to "
-        "the debug.debuginfod_url config key (ADR-040 L2); this flag still overrides it.",
-    )(func)
-    func = click.option(
-        "--debuginfod/--no-debuginfod",
-        "debuginfod",
-        default=False,
-        hidden=True,
-        help="Enable debuginfod network resolution for debug info (opt-in). Demoted "
-        "to the debug.debuginfod config key (ADR-040 L2); --debuginfod/--no-debuginfod "
-        "still overrides it either way.",
-    )(func)
     func = click.option(
         "--debug-root",
         "debug_root",
@@ -217,17 +199,6 @@ def debug_resolution_options(func: F) -> F:
         "path-mirror, dSYM bundles). Applies to both sides; scope to one with an "
         "'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040).",
-    )(func)
-    func = click.option(
-        "--dwarf-only/--no-dwarf-only",
-        "dwarf_only",
-        default=False,
-        hidden=True,
-        help="Force DWARF-only mode for both sides: use DWARF debug info "
-        "as primary data source even when headers are available. Demoted to the "
-        "debug.dwarf_only config key (ADR-040 L2); --dwarf-only/--no-dwarf-only "
-        "still overrides it either way (e.g. --no-dwarf-only restores header parsing "
-        "for a one-off run).",
     )(func)
     return func
 

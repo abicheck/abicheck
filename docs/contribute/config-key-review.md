@@ -324,7 +324,13 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    had been the documented replacement long enough that the hidden spellings
    were pure dead weight rather than a live deprecation window. `--dwarf-only`
    was **not** renamed (a rename breaks documented command lines; left as-is).
-   (§3.4)
+   (§3.4) `--debug-format`/`--dwarf-only`/`--debuginfod`/`--debuginfod-url`
+   were later demoted from visible to *hidden* `compare` flags (ADR-040 Lever
+   2 Phase D, config-backed via `debug.*`), and finally removed outright from
+   `compare` (ADR-068 D5, one-comparison-product.md Phase 7a) — a
+   hidden-but-accepted option is still public surface, so `debug.*` in
+   `.abicheck.yml` is now their only remaining spelling on `compare`. They
+   remain real, visible flags on `dump`.
 4. ✅ **Done, and since completed.** `--report-mode` first gained `impact`
    as sugar for `full` + the standalone flag; that flag has since been
    removed, so `--report-mode impact` is now the only way to ask for the

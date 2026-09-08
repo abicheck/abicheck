@@ -123,10 +123,6 @@ def _resolve_compare_config(
     config: Path | None,
     severity_preset: str | None,
     scope_public_headers: bool,
-    debug_format_opt: str | None,
-    dwarf_only: bool,
-    debuginfod: bool,
-    debuginfod_url: str | None,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -138,6 +134,15 @@ def _resolve_compare_config(
     (``None`` when there is no config), captured by the same read so an
     ADR-049 receipt can prove *which revision* of the file supplied a value
     rather than only naming its path (Codex review, fresh evidence).
+
+    ADR-068 D5 / Phase 7a: ``compare`` no longer has ``--debug-format``/
+    ``--debuginfod``/``--debuginfod-url``/``--dwarf-only`` CLI flags (they
+    were hidden, already fully config-backed duplicates of ``debug.format``/
+    ``debug.debuginfod``/``debug.debuginfod_url``/``debug.dwarf_only``), so
+    ``resolve_compare_config`` below is called with no ``cli_debug_format``/
+    ``cli_dwarf_only``/``cli_debuginfod``/``cli_debuginfod_url`` override --
+    its defaults (``None``/``None``/``None``/``None``) mean the config value
+    (or the built-in default) always wins.
     """
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
     from .workflows.extraction import load_build_config_with_digest
@@ -155,16 +160,6 @@ def _resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
         cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        # ADR-040 Lever 2: debug-resolution demoted to config.
-        # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
-        # config wins); the is_flags need the COMMANDLINE-source gate so their
-        # default ``False`` doesn't mask a configured ``True``. ``--debug-format``
-        # already defaults to None (distinct from any real value), so no such
-        # gate is needed here.
-        cli_debug_format=resolve_dump_debug_format(debug_format_opt),
-        cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
-        cli_debuginfod=_cli_flag("debuginfod", debuginfod),
-        cli_debuginfod_url=debuginfod_url,
     )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
@@ -1316,7 +1311,6 @@ def run_compare(
     suppress: Path | None,
     policy: str, policy_file_path: Path | None,
     pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
-    dwarf_only: bool,
     severity_preset: str | None,
     config: Path | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
@@ -1325,12 +1319,9 @@ def run_compare(
     scope_public_headers: bool, show_filtered: bool,
     post_manifest_path: Path | None,
     report_mode: str,
-    debug_format_opt: str | None,
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
-    debuginfod: bool,
-    debuginfod_url: str | None,
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
     # unconditionally now (see compare_snapshots() call site below).
     # explain_patterns survives, now pure rendering of the always-on ledger.
@@ -1438,21 +1429,18 @@ def run_compare(
         config=config,
         severity_preset=severity_preset,
         scope_public_headers=scope_public_headers,
-        debug_format_opt=debug_format_opt,
-        dwarf_only=dwarf_only,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
     )
     sev_config = resolved_cfg.severity
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
-    # ADR-040 Lever 2: the demoted debug-resolution knobs are now resolved
-    # (CLI > config > default); overwrite the raw flag locals so the rest of
-    # the flow sees the merged values. The config-only knobs above
-    # (collapse/strict/justification/show_redundant) have no flag left to
-    # overwrite -- they are simply read off the resolved config.
+    # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
+    # --debug-format are gone as CLI flags (they were hidden, already
+    # config-backed duplicates) -- these are now config-only, read straight
+    # off the resolved config with no raw CLI local left to overwrite. The
+    # config-only knobs above (collapse/strict/justification/show_redundant)
+    # already worked this way.
     debug_format_opt = resolved_cfg.debug_format
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod

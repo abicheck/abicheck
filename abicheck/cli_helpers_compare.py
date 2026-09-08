@@ -574,10 +574,10 @@ def resolve_compare_config(
 
     Only the keys that still have a CLI flag take a ``cli_*`` argument. The
     per-category severity levels, the suppression strict/justification pair,
-    the public-symbol overlay, ``collapse_versioned_symbols`` and
-    ``show_redundant`` were hidden CLI duplicates of a config key and have
-    been removed from the CLI, so ``.abicheck.yml`` is now their only source
-    and they are read straight off *cfg*.
+    the public-symbol overlay, ``collapse_versioned_symbols``,
+    ``show_redundant``, and (ADR-068 D5) the debug-resolution quartet are
+    hidden/removed CLI duplicates of a config key -- ``.abicheck.yml`` is
+    their only source now; the matching ``cli_*`` params stay for tests only.
     """
     from .workflows.gate import resolve_severity_config
 

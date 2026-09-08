@@ -618,8 +618,9 @@ def _embed_inline_source_side(
                    "shape but adds properties.rootCauseId/rootCause to each "
                    "result; --format junit still renders as 'full'.")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
-# --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format: the
-# shared local-ELF debug-resolution family.
+# --debug-root{,1,2}: the shared local-ELF debug-resolution family. The
+# dwarf-only/debuginfod[-url]/debug-format hidden flags are gone (ADR-068 D5,
+# Phase 7a) -- debug.* .abicheck.yml keys are their only spelling now.
 @debug_resolution_options
 @evidence_options  # --depth, --sources, --build-info
 @changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)

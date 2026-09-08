@@ -184,13 +184,24 @@ class TestExitSchemeAnnouncement:
 
 
 class TestDebugFormatSelector:
-    def test_compare_hides_debug_format(self):
-        # ADR-040 Lever 2: --debug-format is demoted to the debug.format config
-        # key and hidden on compare (still a functional override; see
-        # test_debug_format_auto_accepted). It stays visible on `dump`.
+    def test_compare_has_no_debug_format_flag(self):
+        # ADR-068 D5 / Phase 7a: --debug-format was demoted to the
+        # debug.format config key (ADR-040 Lever 2), then removed outright as
+        # a hidden CLI flag (see test_debug_format_config_key_auto_accepted /
+        # test_debug_format_config_key_rejected_on_non_elf below for the
+        # config-only behavior). It stays visible on `dump`.
         out = CliRunner().invoke(main, ["compare", "--help"]).output
         assert "--debug-format" not in out
         assert "--debug-root" in out  # the coarse per-run override stays visible
+
+    def test_compare_debug_format_flag_exits_usage_error(self, tmp_path):
+        old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--debug-format", "auto"],
+        )
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_dump_exposes_debug_format(self):
         # --debug-format is a debug-info-tier flag, folded behind --help-all
@@ -219,24 +230,33 @@ class TestDebugFormatSelector:
         assert "--compile-db " not in out
         assert "--compile-db-filter" in out  # the filter alias stays visible
 
-    def test_debug_format_auto_accepted(self, tmp_path):
+    def test_debug_format_config_key_auto_accepted(self, tmp_path):
+        # ADR-068 D5 / Phase 7a: debug.format is now the only way to set this
+        # on compare -- prove the config key alone reproduces the deleted
+        # --debug-format flag's "auto" behavior.
         old_p, new_p = _write_identical(tmp_path)
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  format: auto\n")
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--debug-format", "auto"],
+            ["compare", str(old_p), str(new_p), "--config", str(config_path)],
         )
         assert result.exit_code == 0
 
-    def test_debug_format_rejected_on_non_elf(self, tmp_path):
-        # --debug-format dwarf/btf/ctf is ELF-only; compare must reject (not
-        # silently ignore) it for a PE/Mach-O binary input, like dump does.
+    def test_debug_format_config_key_rejected_on_non_elf(self, tmp_path):
+        # debug.format: dwarf/btf/ctf is ELF-only; compare must reject (not
+        # silently ignore) it for a PE/Mach-O binary input, like dump does --
+        # the same behavior the deleted --debug-format flag used to produce,
+        # now reached only through the config key (ADR-068 D5 / Phase 7a).
         old = tmp_path / "old.dll"
         new = tmp_path / "new.dll"
         old.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")  # PE magic
         new.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  format: dwarf\n")
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "--debug-format", "dwarf"],
+            ["compare", str(old), str(new), "--config", str(config_path)],
         )
         assert result.exit_code != 0
         combined = result.output + (result.stderr or "")

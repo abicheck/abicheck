@@ -64,14 +64,12 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     ),
     # Local-ELF debug-resolution family: registered but *not* required either — it
     # resolves local ELF debug artifacts the package/snapshot-oriented commands
-    # do not take.
+    # do not take. ``--dwarf-only``/``--debuginfod``/``--debuginfod-url``/
+    # ``--debug-format`` were hidden, config-backed duplicates removed outright
+    # in ADR-068 D5 / Phase 7a; only the coarse ``--debug-root`` remains.
     "debug_resolution": frozenset(
         {
-            "--dwarf-only",
             "--debug-root",
-            "--debuginfod",
-            "--debuginfod-url",
-            "--debug-format",
         }
     ),
 }

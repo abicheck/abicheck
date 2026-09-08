@@ -816,17 +816,16 @@ class TestCompareCommand:
         assert result.exit_code == 4
 
     def test_debug_format_auto_on_snapshots(self, tmp_path: Path) -> None:
-        # --debug-format auto resolves to None (cli.py:1815); JSON snapshot
-        # inputs have format None so the PE/Mach-O guard is skipped.
+        # debug.format: auto (ADR-068 D5: --debug-format is gone on compare,
+        # this is the only spelling now) resolves to None; JSON snapshots
+        # have format None so the PE/Mach-O guard is skipped.
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  format: auto\n")
         result = _invoke(
-            "compare",
-            str(old_f),
-            str(new_f),
-            "--debug-format",
-            "auto",
+            "compare", str(old_f), str(new_f), "--config", str(config_path),
         )
         assert result.exit_code == 0
 
