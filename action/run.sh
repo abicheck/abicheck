@@ -321,6 +321,27 @@ _is_release_style_operand() {
   return 1
 }
 
+# `scan --compile-db` is gone: --build-info already accepts a build dir, a
+# compile_commands.json, or a pre-captured pack, so a compile-db input is
+# one more way to name the same operand. Rejected rather than resolved by
+# the fallback when both are set, and *only* for `mode: scan` -- scan is
+# the one mode whose behavior this changed (it used to forward both
+# operands and the scan pipeline gave compile-db precedence, so collapsing
+# them onto one flag would silently analyze a different build context than
+# the same workflow used to). Compare and dump have always used the
+# build-info-wins fallback with no such guard -- that precedence is
+# pre-existing, documented behavior, not a regression, and is deliberately
+# left alone. Shared by both of `mode: scan`'s two internal CLI routings
+# (the legacy `scan` CLI branch, and the `compare`-translated branch --
+# ADR-068 D2, plan Phase 4 commit 1) so the check and its message exist in
+# exactly one place rather than two copies that could drift.
+_reject_scan_build_info_compile_db_conflict() {
+  if [[ -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
+    echo "::error::build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
+    exit 1
+  fi
+}
+
 # Whether *name* is a compare/scan CLI option that consumes a following
 # token as its own value (Click `nargs=1`, not a boolean flag) -- the full
 # combined option table of both commands, current as of this commit
@@ -1213,6 +1234,62 @@ if [[ -n "$ABI_BASELINE" \
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# `mode: scan` internal routing (ADR-068 D2; plan
+# docs/contribute/plans/one-comparison-product.md Phase 4 commit 1).
+#
+# `mode: scan` stays a fully documented, working Action input -- only its
+# *internal* implementation changes here. A scan invocation with a real
+# baseline (`--against`/`abi-baseline`, and not forced audit-only) is now
+# built and dispatched as a plain two-sided `compare AGAINST ARTIFACT`
+# below, collapsing this Action's own scan/compare branches into one shared
+# path for that case -- `compare`'s single-pair branch already accepts
+# every evidence/cross-toolchain flag scan's own baseline-compare path
+# does (`--sources`/`--build-info`/`--config`/`--depth`/`--since`/
+# `--changed-path`/`--ast-frontend`/`--compiler*`/`--sysroot`/`--nostdinc`/
+# `--policy`/`--suppress`/`--require-complete-analysis`), so this is a
+# faithful translation, not a narrowed one.
+#
+# Audit-only (no baseline) stays on the legacy `scan` CLI unconditionally
+# for this commit, even though `compare --no-baseline` exists (ADR-068 D2,
+# ADR-047 §8 S5): that CLI slice is still narrower than scan's own
+# audit-only surface today (no `--sources`/`--build-info`/`--depth`/
+# cross-toolchain flags, no secondary `--write`, and `--dry-run` is not
+# honored there at all -- `compare_no_baseline.py` never reads it, so it
+# would silently run the real audit instead of previewing it), and every
+# one of this Action's own required audit-only combinations (a bare scan,
+# `estimate`/dry-run, `new-library-set`) needs at least one of those. So is
+# `--artifact-set` (plan §3 #16/#17, P5 "not started"), `--budget`
+# (plan §3 #19, P3 "compare does not emit [exit 5] yet"), `--risk-rules`
+# (plan §3 #14, "Phase 7"), `--crosscheck`'s KEY=error promotion syntax
+# (plan §3 #23, "MERGE into policy"), and `--build-target` (no `compare`
+# equivalent at all yet, baseline or not -- `tests/test_action_run_
+# contract.py::test_action_flags_are_real_cli_options` pins this).
+#
+# `_CLI_MODE` (this section's own output) is the actual underlying CLI verb
+# this run dispatches -- "scan" or "compare" -- and is what every
+# downstream exit-code/PR-comment/output section below keys off from here
+# on, instead of the raw `$MODE` input (which stays "scan" for every one of
+# these routings: it is what the user asked for, not how it was served).
+_SCAN_HAS_BASELINE=false
+if [[ "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
+  _SCAN_HAS_BASELINE=true
+fi
+_SCAN_NEEDS_LEGACY_CLI=false
+if [[ "$MODE" == "scan" ]]; then
+  if [[ "$_SCAN_HAS_BASELINE" != "true" ]] \
+     || [[ -n "${INPUT_NEW_LIBRARY_SET:-}" || -n "${INPUT_BUDGET:-}" \
+           || -n "${INPUT_RISK_RULES:-}" || -n "${INPUT_CROSSCHECK:-}" \
+           || -n "${INPUT_BUILD_TARGET:-}" ]]; then
+    _SCAN_NEEDS_LEGACY_CLI=true
+  fi
+fi
+if [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" != "true" ]]; then
+  _CLI_MODE="compare"
+else
+  _CLI_MODE="$MODE"
+fi
+
 if [[ "$MODE" == "dump" ]]; then
   # ── Dump mode ───────────────────────────────────────────────────────────
   CMD+=(dump)
@@ -1650,7 +1727,11 @@ elif [[ "$MODE" == "deps-compare" ]]; then
     fi
   fi
 
-elif [[ "$MODE" == "scan" ]]; then
+elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
+  # ── Scan mode, legacy `scan` CLI passthrough ─────────────────────────────
+  # Only reached for a capability `compare` does not have yet (see the
+  # `_CLI_MODE` note above this whole if/elif chain) -- everything below is
+  # unchanged from before this Action's Phase 4 migration.
   # ── Scan mode (source-intelligence orchestrator) ─────────────────────────
   # One front-end over dump/compare: always-on pattern + cross-source tier,
   # then the pinned evidence level, optionally compared against --against.
@@ -1843,21 +1924,10 @@ elif [[ "$MODE" == "scan" ]]; then
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   # `scan --compile-db` is gone: --build-info already accepts a build dir, a
   # compile_commands.json, or a pack, so a compile-db input is one more way
-  # to name the same operand.
-  #
-  # Rejected rather than resolved by the fallback below when both are set,
-  # and *only* in scan mode. Scan is the one mode whose behavior this changed:
-  # it used to forward both operands (`--build-info` AND `--compile-db`) and
-  # the scan pipeline gave `compile-db` precedence, so collapsing them onto
-  # one flag silently analyzes a different build context than the same
-  # workflow used to (Codex review). Compare and dump have always used this
-  # same fallback -- `compare` never had a `--compile-db` flag to forward --
-  # so their "build-info wins" precedence is pre-existing, documented
-  # behavior, not a regression, and is deliberately left alone.
-  if [[ -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
-    echo "::error::build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
-    exit 1
-  fi
+  # to name the same operand. See `_reject_scan_build_info_compile_db_
+  # conflict`'s own docstring (defined near the other add_flag-family
+  # helpers above) for the full rationale.
+  _reject_scan_build_info_compile_db_conflict
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
@@ -2009,6 +2079,141 @@ elif [[ "$MODE" == "scan" ]]; then
     # needed here (Codex review, P2, fresh evidence).
     if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" \
        && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
+      PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+      CMD+=(--write "json=$PR_JSON")
+    fi
+  fi
+
+elif [[ "$MODE" == "scan" ]]; then
+  # ── Scan mode, internally routed through `compare` (ADR-068 D2; plan
+  #    Phase 4 commit 1) ────────────────────────────────────────────────────
+  # Reached only when `_SCAN_NEEDS_LEGACY_CLI` (computed above, before this
+  # if/elif chain) is false -- which, today, means exactly a genuine
+  # baseline is present (`--against`/`abi-baseline`, not forced
+  # audit-only) and none of the still-legacy-only capabilities were
+  # requested; see that section's own comment for the full boundary,
+  # including why audit-only (no baseline) stays on the unchanged `scan`
+  # CLI branch entirely for this commit. `--against`/`abi-baseline` maps
+  # onto a plain two-sided `compare AGAINST ARTIFACT` (a single-pair
+  # comparison, never the directory/package release fan-out -- scan never
+  # accepted a directory/package operand either, see the rejection below).
+  CMD+=(compare)
+  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"
+  # scan has no per-library fan-out (unlike compare) — a directory/package
+  # is normally caught early by action/validate-inputs.sh, before any
+  # dependency install; re-checked here for anyone invoking run.sh directly
+  # (e.g. tests) without that step, same message as before this migration.
+  if _is_release_style_operand "$SCAN_ARTIFACT"; then
+    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use new-library-set to audit a set with no old side, or mode: compare against a directory/package for a multi-library binary comparison instead."
+    exit 1
+  fi
+
+  CMD+=("${INPUT_AGAINST}" "$SCAN_ARTIFACT")
+
+  # -H/-I stay side-aware exactly as scan's own CLI already made them
+  # (ADR-040 L1): a bare value applies to both ARTIFACT and the baseline
+  # side; old-header/old-include and new-header/new-include scope to one
+  # side only.
+  add_flag "-H" "${INPUT_HEADER:-}"
+  add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
+  add_flag "-I" "${INPUT_INCLUDE:-}"
+  add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
+
+  # `--public-header-dir` has no dedicated `compare` flag at all (unlike
+  # `scan`) -- `compare` derives provenance AND extraction scope from `-H`'s
+  # own directory semantics alone (dump's own comment above has the full
+  # rationale; plan P4 confirms this is already `compare`'s existing,
+  # solved behavior). So it is forwarded only as an `-H new=` root here
+  # (a baseline is always present in this branch): SIDED, not bare (Codex
+  # review, later follow-up, fresh evidence, mirrored from the legacy
+  # branch's own identical fix) -- a bare -H root is side-both (ADR-040
+  # L1), which would also feed the candidate's public-header-dir tree into
+  # the baseline/old side's own header parse.
+  add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
+
+  add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
+
+  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
+  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
+  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
+  add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
+  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
+  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
+    CMD+=(--nostdinc)
+  fi
+
+  # scan's own --build-info/--compile-db mutual-exclusivity guard --
+  # shared with the legacy `scan` CLI branch's identical check, see
+  # `_reject_scan_build_info_compile_db_conflict`'s own docstring.
+  _reject_scan_build_info_compile_db_conflict
+  # Sided to `new=`, matching `compare`'s own single-pair branch above:
+  # scan's build/source evidence has only ever applied to the scanned
+  # ARTIFACT, never to the --against baseline side, and ARTIFACT is
+  # always this run's `new`/candidate operand.
+  add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
+  add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # No `--build-target` here: `compare` has no such option at all yet
+  # (unlike `dump`/`scan`) -- any request setting it routes to the legacy
+  # `scan` CLI branch instead, unconditionally, see the `_CLI_MODE`
+  # computation above this whole if/elif chain.
+  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+  add_single_flag "--since" "${INPUT_SINCE:-}"
+  add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
+
+  # `scan --against` takes @policy_options the same as `compare` -- always
+  # forwarded here, unlike the legacy branch's own guard, since a baseline
+  # is guaranteed present in this branch (cli_scan.py's own
+  # `_reject_comparison_only_flags()` rejection only ever applied to
+  # audit-only, which never reaches here).
+  add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
+  add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
+    CMD+=(--require-complete-analysis)
+  fi
+
+  # Format — scan's own public contract is unchanged (still text/json
+  # only, still validated/erroring the same way below). Internally, neither
+  # `compare` has a bare "text" format, so "text" maps to `compare`'s own
+  # "markdown".
+  FORMAT="${INPUT_FORMAT:-text}"
+  if [[ "$FORMAT" != "text" && "$FORMAT" != "json" ]]; then
+    echo "::error::mode: scan does not support format: $FORMAT. Only 'text' and 'json' are supported."
+    exit 1
+  fi
+  _CLI_FORMAT="$FORMAT"
+  [[ "$_CLI_FORMAT" == "text" ]] && _CLI_FORMAT="markdown"
+  CMD+=(--format "$_CLI_FORMAT")
+
+  # Computed here, not only after extra-args are appended to CMD below --
+  # same reason as compare mode's own early computation above (the PR_JSON
+  # sidecar-injection decision a few lines down needs to see an
+  # `extra-args --format` override too).
+  _EFFECTIVE_FORMAT="$(_effective_format)"
+
+  # dry-run — `compare`'s own dry-run handling is the real thing here
+  # (unlike `compare --no-baseline`, which the legacy branch alone still
+  # routes to for that reason), so it is forwarded exactly like `compare`
+  # mode's own branch does above.
+  if [[ "${INPUT_DRY_RUN:-false}" == "true" ]]; then
+    CMD+=(--dry-run)
+  elif _extra_args_has_dry_run_flag; then
+    :
+  else
+    OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+    if [[ -n "$OUTPUT_FILE" ]]; then
+      CMD+=(-o "$OUTPUT_FILE")
+    fi
+
+    # Render a second, always-unfiltered JSON report from this same run for
+    # the sticky PR comment (--write), the same way `compare` mode's own
+    # branch above does -- see that branch's own comment for the full
+    # rationale (including why this is unconditional on `pr-comment`).
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] \
+       && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -2992,11 +3197,17 @@ _blocking_gate_note() {
     | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
   if [[ -n "$_cats" ]]; then
     echo ">"
-    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" || "$MODE" == "scan" ]]; then
+    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" || "$_CLI_MODE" == "scan" ]]; then
       # `scan` is the second case that bypasses the flags at *every* tier: its
       # final branch detects the real severity category and sets FINAL_EXIT=1
       # unconditionally, so claiming the flags still decide would be the exact
-      # opposite of what happened (Codex review).
+      # opposite of what happened (Codex review). Keyed on `$_CLI_MODE`, not
+      # the raw `$MODE` input: a `mode: scan` run internally routed through
+      # `compare` (ADR-068 D2, Phase 4 commit 1) hits the generic `compare`
+      # final-dispatch branch below instead, which *does* let the flags
+      # decide except for this same SEVERITY_ERROR tier -- claiming the
+      # legacy `scan` CLI's unconditional-bypass behavior for a run that
+      # never reaches it would misdescribe what actually happened.
       echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
     else
       # Only the SEVERITY_ERROR tier bypasses the fail-on flags. At the
@@ -3147,7 +3358,15 @@ elif [[ "$MODE" == "dump" ]]; then
     fi
   fi
 
-elif [[ "$MODE" == "scan" ]]; then
+elif [[ "$_CLI_MODE" == "scan" ]]; then
+  # Keyed on `$_CLI_MODE`, not the raw `$MODE` input: a `mode: scan` run
+  # internally routed through `compare`/`compare --no-baseline` (ADR-068
+  # D2, Phase 4 commit 1) really does exit with `compare`'s own exit-code
+  # scheme (the `else` branch below), since that is the CLI that actually
+  # ran -- see the `_CLI_MODE` computation, before this script's whole
+  # command-building if/elif chain, for exactly which scan requests still
+  # reach the legacy CLI this branch describes.
+  #
   # scan exit codes: 0=compatible/advisory, 1=severity error or incomplete
   # contract coverage (see below), 2=API break, 4=ABI break, 5=budget
   # overflow, 6=not_comparable, 7=evidence contract error (ADR-037 D5).
@@ -4013,7 +4232,11 @@ elif [[ "$MODE" == "dump" ]]; then
   # dump: a producer — non-zero is always an error (already mapped above)
   :
 
-elif [[ "$MODE" == "scan" ]]; then
+elif [[ "$_CLI_MODE" == "scan" ]]; then
+  # Keyed on `$_CLI_MODE`, not `$MODE` -- see the exit-code dispatch's own
+  # identical note above. A `mode: scan` run routed through `compare`
+  # reaches the generic `compare` branch (the final `else` below) instead.
+  #
   # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
   # fails the step (the budget is a guard that must not be silently swallowed).
   if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \

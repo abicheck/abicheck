@@ -112,6 +112,20 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanPublicHeaderDirAlsoForwardedAsDashH:
     def test_public_header_dir_forwarded_as_both_flags(self) -> None:
+        # A baseline (against) is present and nothing else here needs the
+        # legacy `scan` CLI, so this request routes internally through
+        # `compare` (ADR-068 D2, plan Phase 4 commit 1) -- "compare", not
+        # "scan", is the real CLI verb dispatched. Unlike the legacy `scan`
+        # CLI, `compare` has no dedicated `--public-header-dir` option at
+        # all (`tests/test_action_run_contract.py::test_action_flags_are_
+        # real_cli_options` pins this) -- it derives provenance AND
+        # extraction scope from `-H`'s own directory semantics alone
+        # (plan P4), so the translated branch forwards the value only as
+        # an `-H` root, not as both flags the way the legacy branch's own
+        # (unchanged) forwarding still does -- see the sibling
+        # `TestScanPublicHeaderDirBareWhenNoOldSide`-style tests and
+        # `test_action_compile_context_parity.py`'s own marker note for the
+        # legacy branch's still-unconditional, still-both-flags behavior.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
@@ -120,13 +134,11 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_PUBLIC_HEADER_DIR": "include",
             }
         )
-        assert "scan" in cmd
-        # --public-header-dir (scope) is still forwarded, unchanged.
-        i = cmd.index("--public-header-dir")
-        assert cmd[i + 1] == "include"
-        # It must ALSO ride along as an -H root, so scan's own header
-        # extraction expands the whole directory the same way dump's does.
-        # SIDED (`new=include`), not bare, for a scalar scan with a resolved
+        assert "compare" in cmd
+        assert "--public-header-dir" not in cmd
+        # It rides along as an -H root instead, so header extraction
+        # expands the whole directory the same way dump's does. SIDED
+        # (`new=include`), not bare, for a scalar scan with a resolved
         # baseline (Codex review, later follow-up, fresh evidence): a bare
         # -H root is side-both (ADR-040 L1), so it also fed the candidate's
         # public-header-dir tree into the baseline/old side's own header

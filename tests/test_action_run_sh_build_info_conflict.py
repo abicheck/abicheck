@@ -46,15 +46,23 @@ import pytest
 from _workflow_exec import bash_executable
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
-_START = "  # Rejected rather than resolved by the fallback below when both are set,"
-_END = '  add_single_flag "--build-info"'
+# ADR-068 D2 / plan Phase 4 commit 1: the guard is now one shared function
+# (`_reject_scan_build_info_compile_db_conflict`), called from both of
+# `mode: scan`'s two internal CLI routings (the legacy `scan` CLI branch,
+# and the `compare`-translated branch) instead of being duplicated inline
+# at each site.
+_START = "_reject_scan_build_info_compile_db_conflict() {"
+_END = "\n}\n"
+_CALL_MARKER = "_reject_scan_build_info_compile_db_conflict"
 
 
 def _guard() -> str:
-    """The scan-mode guard, verbatim and dedented enough to run standalone."""
+    """The shared guard function, verbatim, plus a call to it -- runnable
+    standalone the same way the pre-refactor inline fragment was."""
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_START)
-    return text[start : text.index(_END, start)]
+    end = text.index(_END, start) + len(_END)
+    return text[start:end] + f"\n{_CALL_MARKER}\n"
 
 
 def _run(build_info: str, compile_db: str) -> subprocess.CompletedProcess[str]:
@@ -104,25 +112,49 @@ def test_one_or_neither_passes_through(build_info: str, compile_db: str) -> None
     assert "REACHED_END" in res.stdout
 
 
-def test_the_guard_covers_only_the_scan_forwarding_site() -> None:
-    """Three sites share the fallback; only scan's is behind the guard.
+def test_the_guard_covers_only_the_scan_forwarding_sites() -> None:
+    """Four sites share the fallback (dump, `compare`'s own single-pair
+    branch, and `mode: scan`'s two internal CLI routings -- the legacy
+    `scan` CLI branch and the `compare`-translated branch, ADR-068 D2 /
+    plan Phase 4 commit 1); only the two scan-mode ones call the guard.
 
     Pinning the scope directly, because the natural mistake here is a global
     guard -- which is what the first version of this fix was, and it broke
     compare mode's own pre-existing precedence test.
     """
     lines = RUN_SH.read_text(encoding="utf-8").splitlines()
-    guard_at = next(i for i, line in enumerate(lines) if line.startswith(_START))
-    # Only real forwarding sites -- the guard's own comment quotes the
-    # fallback expression too, and a text scan would count that as another.
+    # The guard is now one shared function, called from both scan-mode
+    # routings rather than duplicated inline at each -- count calls (a bare
+    # `_reject_scan_build_info_compile_db_conflict` line), not the function
+    # definition itself (`_reject_scan_build_info_compile_db_conflict() {`,
+    # which also contains the marker text but is not a call site).
+    calls = [
+        i
+        for i, line in enumerate(lines)
+        if line.strip() == _CALL_MARKER
+    ]
+    assert len(calls) == 2, calls
+    # Only real forwarding sites -- the guard's own comment/error text also
+    # quotes the fallback expression, and a text scan would count that as
+    # another.
     fallbacks = [
         i
         for i, line in enumerate(lines)
         if "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}" in line
         and ("add_single_flag" in line or "add_sided_flag" in line)
     ]
-    assert len(fallbacks) == 3, fallbacks
-    assert sum(1 for i in fallbacks if i > guard_at) == 1, (guard_at, fallbacks)
+    assert len(fallbacks) == 4, fallbacks
+    # Every `--build-info` forwarding site (there may be an unrelated
+    # `--sources` forward first, sided the same way, at the second call
+    # site) follows shortly after one of the two guard calls -- the dump/
+    # compare sites, which have no guard at all, come first in the file and
+    # are never near a call.
+    guarded = sum(
+        1
+        for call_at in calls
+        if any(0 < fb - call_at <= 6 for fb in fallbacks)
+    )
+    assert guarded == 2, (calls, fallbacks)
 
 
 def test_a_real_scan_mode_run_hits_the_guard(tmp_path: Path) -> None:

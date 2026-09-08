@@ -45,7 +45,19 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
+# ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
+# routings -- the legacy `scan` CLI branch (gated on `_SCAN_NEEDS_LEGACY_CLI`,
+# unchanged code, unconditionally forwarding these six flags exactly as
+# before) and a `compare`-translated branch (which only forwards them once a
+# baseline is present -- an audit-only request using any of them routes to
+# the legacy branch instead, see that branch's own `_SCAN_NEEDS_LEGACY_CLI`
+# computation). This file's parity assertions are about the legacy branch's
+# unconditional forwarding, so the marker is anchored there specifically
+# rather than to the (now ambiguous) bare `'elif [[ "$MODE" == "scan"
+# ]]; then'`, which the new translated branch's header also matches.
+_SCAN_MODE_MARKER = (
+    'elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then'
+)
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 # dump/scan have no release fan-out, so their regions end at the nostdinc
