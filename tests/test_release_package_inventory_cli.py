@@ -124,16 +124,20 @@ class TestPackageArchiveInventoryProvesAbsence:
         assert scope["completeness"] == "incomplete"
 
     def test_exit_8_needs_the_archive_proof(self, tmp_path: Path) -> None:
-        """``--fail-on-removed-library`` reads the *proven* removal set. Before
-        S3 no live operand could ever produce one; the directory pair still
+        """``gate.fail_on_removed_library`` reads the *proven* removal set
+        (Phase 7d, one-comparison-product.md §4.1: the former
+        ``--fail-on-removed-library`` flag, gone from the CLI). Before S3
+        no live operand could ever produce one; the directory pair still
         cannot, and that is the migration boundary."""
         old_dir, new_dir, old_pkg, new_pkg = _pair(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("gate:\n  fail_on_removed_library: true\n")
         code, _ = _run(
-            "compare", str(old_pkg), str(new_pkg), "--fail-on-removed-library"
+            "compare", str(old_pkg), str(new_pkg), "--config", str(cfg)
         )
         assert code == 8
         code, _ = _run(
-            "compare", str(old_dir), str(new_dir), "--fail-on-removed-library"
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg)
         )
         assert code == 0
 

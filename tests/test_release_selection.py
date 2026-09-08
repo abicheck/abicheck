@@ -392,14 +392,16 @@ class TestReleaseSelectionCli:
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  on_incomplete: block\n")
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--select-required",
             "libmissing.json",
-            "--on-incomplete-scope",
-            "block",
+            "--config",
+            str(cfg),
             "--format",
             "json",
         )

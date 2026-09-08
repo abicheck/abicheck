@@ -1426,22 +1426,25 @@ def env_matrix_option(func: F) -> F:
 
 
 def set_input_options(func: F) -> F:
-    """Set-input fan-out knobs: ``--dso-only`` / ``--output-dir``
-    / ``--select``/``--select-required``.
+    """Set-input fan-out knobs: ``--output-dir`` / ``--select``/``--select-required``.
 
     ADR-037 D7 folds ``compare-release`` into ``compare`` via input-type
     dispatch: when ``compare``'s operands are directories or packages it fans out
-    to a per-library comparison, and these flags tune that fan-out (executable
-    filtering, per-library report directory, and -- ADR-065
-    S1 -- an explicit member selection). On single-file
-    inputs they are a no-op and ``compare`` warns. Declared once here so the
-    dispatch and the deprecated ``compare-release`` alias share one surface.
-    Applied bottom-up, so listed in reverse of displayed order.
+    to a per-library comparison, and these flags tune that fan-out (per-library
+    report directory, and -- ADR-065 S1 -- an explicit member selection). On
+    single-file inputs they are a no-op and ``compare`` warns. Declared once
+    here so the dispatch and the deprecated ``compare-release`` alias share
+    one surface. Applied bottom-up, so listed in reverse of displayed order.
 
     ``-j/--jobs`` used to be part of this family (ADR-068 D5 / plan Phase
     7h): removed outright -- the fan-out already auto-detects the CPU count
     and clamps it to available memory, so a manual override was a tuning
     detail, not a per-run decision.
+
+    ``--dso-only`` (Phase 7d, one-comparison-product.md §4.1) is gone too --
+    ``release.dso_only`` in ``.abicheck.yml`` is its only source now (a
+    stable release-topology property, no surviving CLI override), resolved
+    onto :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`.
     """
     func = click.option(
         "--select-required",
@@ -1453,8 +1456,8 @@ def set_input_options(func: F) -> F:
         "-- ADR-065 S1; directory/package inputs only). Repeatable. With "
         "any --select/--select-required given, only declared members are "
         "compared. A missing declared-required member contributes to "
-        "--on-incomplete-scope's completeness gate; a plain --select "
-        "member does not.",
+        "the .abicheck.yml scope.on_incomplete completeness gate; a plain "
+        "--select member does not.",
     )(func)
     func = click.option(
         "--select",
@@ -1470,13 +1473,6 @@ def set_input_options(func: F) -> F:
         type=click.Path(path_type=Path),
         default=None,
         help="Directory to write per-library reports (directory/package inputs only).",
-    )(func)
-    func = click.option(
-        "--dso-only",
-        "dso_only",
-        is_flag=True,
-        default=False,
-        help="Only compare shared objects, skip executables (directory/package inputs only).",
     )(func)
     return func
 

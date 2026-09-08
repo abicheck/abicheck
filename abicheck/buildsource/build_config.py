@@ -221,6 +221,13 @@ class BuildConfig:
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view
     #: stays a visible CLI flag.
     scope_show_redundant: bool | None = None
+    #: ``scope.on_incomplete`` — Phase 7d (one-comparison-product.md §4.1):
+    #: the former ``compare --on-incomplete-scope`` (ADR-065 D6), demoted off
+    #: the CLI entirely (no surviving override) -- a project's CI strictness
+    #: for an incompletely checked directory/package release scope is a
+    #: stable property, not a per-run choice. ``None`` = unset, defaulting to
+    #: ``"warn"`` (the removed flag's own default) downstream.
+    scope_on_incomplete: str | None = None
     #: ``suppression:`` — hygiene policy (a project rule, not a per-run flag).
     suppression_strict: bool | None = None
     suppression_require_justification: bool | None = None
@@ -303,6 +310,21 @@ class BuildConfig:
     #: (``cli_options.parse_abi3_floor``), so config and CLI cannot accept
     #: different version syntaxes.
     python_abi3_floor: str | None = None
+    #: ``gate:`` — Phase 7d (one-comparison-product.md §4.1): CI gate policy
+    #: demoted off the CLI. ``gate.fail_on_removed_library`` is the former
+    #: ``compare --fail-on-removed-library`` (exit 8 when a library present
+    #: in OLD is proven removed in NEW, ADR-065 D2) -- a stable project
+    #: policy, no surviving CLI override. ``None`` = unset (no exit-8 gate).
+    gate_fail_on_removed_library: bool | None = None
+    #: ``release:`` — Phase 7d: directory/package release topology demoted
+    #: off the CLI, same shape as ``bundle:`` above (no surviving override).
+    #: ``release.dso_only`` is the former ``compare --dso-only`` (compare
+    #: only shared objects, skip executables); ``release.include_private_dso``
+    #: is the former ``compare --include-private-dso`` (include private
+    #: shared objects from non-standard paths). ``None`` = unset (both
+    #: default to the removed flags' own ``False``).
+    release_dso_only: bool | None = None
+    release_include_private_dso: bool | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -328,6 +350,8 @@ class BuildConfig:
             "debug",
             "bundle",
             "python",
+            "gate",
+            "release",
             "version",
             "risk_rules",
             "crosschecks",
@@ -357,6 +381,7 @@ class BuildConfig:
                 "public_symbols",
                 "show_redundant",
                 "public_header_dirs",
+                "on_incomplete",
             }
         ),
         "suppression": frozenset({"strict", "require_justification"}),
@@ -389,6 +414,10 @@ class BuildConfig:
         "bundle": frozenset({"system_providers", "cohorts"}),
         # ADR-068 D5: the stable half of the `--abi3` audit (its floor).
         "python": frozenset({"abi3_floor"}),
+        # Phase 7d (one-comparison-product.md §4.1): CI gate policy and
+        # directory/package release topology demoted off the CLI.
+        "gate": frozenset({"fail_on_removed_library"}),
+        "release": frozenset({"dso_only", "include_private_dso"}),
     }
 
     @classmethod
@@ -500,6 +529,8 @@ class BuildConfig:
         debug = _block(top, "debug")
         bundle = _block(top, "bundle")
         python_blk = _block(top, "python")
+        gate = _block(top, "gate")
+        release = _block(top, "release")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -536,6 +567,11 @@ class BuildConfig:
             public_symbols=_strs(scope, "public_symbols"),
             scope_show_redundant=_opt_bool(scope, "show_redundant"),
             public_header_dirs=_strs(scope, "public_header_dirs"),
+            scope_on_incomplete=_one_of(
+                _opt_str(scope, "on_incomplete"),
+                ("warn", "block"),
+                "scope.on_incomplete",
+            ),
             suppression_strict=_opt_bool(suppression, "strict"),
             suppression_require_justification=_opt_bool(
                 suppression, "require_justification"
@@ -597,6 +633,9 @@ class BuildConfig:
             ],
             bundle_cohorts=[s.strip() for s in _strs(bundle, "cohorts") if s.strip()],
             python_abi3_floor=_opt_str(python_blk, "abi3_floor"),
+            gate_fail_on_removed_library=_opt_bool(gate, "fail_on_removed_library"),
+            release_dso_only=_opt_bool(release, "dso_only"),
+            release_include_private_dso=_opt_bool(release, "include_private_dso"),
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -652,6 +691,8 @@ class BuildConfig:
             scope["show_redundant"] = self.scope_show_redundant
         if self.public_header_dirs:
             scope["public_header_dirs"] = list(self.public_header_dirs)
+        if self.scope_on_incomplete is not None:
+            scope["on_incomplete"] = self.scope_on_incomplete
         return scope
 
     def _suppression_block(self) -> dict[str, Any]:
@@ -733,6 +774,22 @@ class BuildConfig:
             return {"abi3_floor": self.python_abi3_floor}
         return {}
 
+    def _gate_block(self) -> dict[str, Any]:
+        """Non-default ``gate:`` keys (Phase 7d: CI gate policy)."""
+        if self.gate_fail_on_removed_library is not None:
+            return {"fail_on_removed_library": self.gate_fail_on_removed_library}
+        return {}
+
+    def _release_block(self) -> dict[str, Any]:
+        """Non-default ``release:`` keys (Phase 7d: directory/package
+        release topology)."""
+        release: dict[str, Any] = {}
+        if self.release_dso_only is not None:
+            release["dso_only"] = self.release_dso_only
+        if self.release_include_private_dso is not None:
+            release["include_private_dso"] = self.release_include_private_dso
+        return release
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -754,6 +811,8 @@ class BuildConfig:
             ("debug", self._debug_block()),
             ("bundle", self._bundle_block()),
             ("python", self._python_block()),
+            ("gate", self._gate_block()),
+            ("release", self._release_block()),
         ):
             if block:
                 out[key] = block

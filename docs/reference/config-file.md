@@ -125,9 +125,9 @@ an unknown-key error.
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
-`compile:`, `debug:`, `bundle:`, `python:`, `version:`, `risk_rules:`,
-`crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are the
-recognized top-level keys. See the
+`compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`, `version:`,
+`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
+`baseline:` are the recognized top-level keys. See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
 cover what each block does, its effective defaults, and behavior that isn't
@@ -181,6 +181,16 @@ this key were removed, so a project states it once, here — entries match
 matches `ns::foo`); **globs/wildcards are not supported** (`mylib_*` matches
 nothing), list each symbol. See
 [API-surface intelligence](../use/api-surface-intelligence.md).
+
+`on_incomplete:` (`warn`, the default, or `block`) is Phase 7d's
+(one-comparison-product.md §4.1) CONFIG-only replacement for the former
+`compare --on-incomplete-scope` on the directory/package release fan-out —
+**no CLI spelling exists any more**. Governs what an incompletely checked
+comparison scope does to the exit code (ADR-065 D6): `warn` reports every
+unchecked member and contributes `0`; `block` contributes `1`, folded with
+`max()` like the contract-coverage axis. A run that completed no comparison
+at all contributes `1` under either setting. See
+[Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness-adr-065).
 
 ---
 
@@ -323,6 +333,36 @@ The findings are advisory (`RISK`): gate them through `--policy` /
 module is an evidence-contract error (exit `7`), since the audit that was
 asked for cannot be performed at all. `scan --abi3` accepts the identical
 version spelling.
+
+---
+
+### `gate:`
+
+CI gate policy demoted off the CLI (Phase 7d, one-comparison-product.md
+§4.1). One key today: `fail_on_removed_library:` (default `false`) — the
+former `compare --fail-on-removed-library`/`--no-fail-on-removed-library`,
+**no CLI spelling any more**. Exits `8` when a library present in `OLD` is
+proven removed in `NEW` on `compare`'s directory/package fan-out — `NEW`'s
+inventory must be proven complete (ADR-065 D2); an unmatched library under
+an unproven inventory is reported as an incomplete scope instead. Whether a
+release enforces this gate is a stable project policy, not a per-run
+choice. See
+[Multi-binary § Comparison scope and completeness](../use/multi-binary.md#comparison-scope-and-completeness-adr-065).
+
+---
+
+### `release:`
+
+Directory/package release topology demoted off the CLI (Phase 7d,
+one-comparison-product.md §4.1), applying only to `compare`'s
+directory/package fan-out — **no CLI spelling exists for either key any
+more**:
+
+- `dso_only:` (default `false`) — the former `compare --dso-only`: only
+  compare shared objects, skip executables.
+- `include_private_dso:` (default `false`) — the former `compare
+  --include-private-dso`: include private (non-public) shared objects from
+  non-standard paths.
 
 ---
 

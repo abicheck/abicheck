@@ -754,20 +754,28 @@ class TestUnmatched:
 
     def test_removed_library_with_flag(self, tmp_path: Path) -> None:
         """ADR-065 D2: a plain directory cannot prove a removal, so no exit 8
-        (see test_release_scope_completeness.py for the proven case)."""
+        (see test_release_scope_completeness.py for the proven case). Phase
+        7d: gate.fail_on_removed_library config key (--fail-on-removed-
+        library is gone from the CLI)."""
         old_dir, new_dir = tmp_path / "old", tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        flag = "--fail-on-removed-library"
-        code, out = _invoke("compare", str(old_dir), str(new_dir), flag, "--format", "json")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("gate:\n  fail_on_removed_library: true\n")
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"
+        )
         assert code == 0
         assert json.loads(out)["comparison_scope"]["proven_removed"] == []
 
     def test_removed_and_breaking_exits_4_not_8(self, tmp_path: Path) -> None:
-        """BREAKING (4) takes priority over removed-library (8)."""
+        """BREAKING (4) takes priority over removed-library (8).
+
+        Phase 7d: gate.fail_on_removed_library config key, not the removed
+        --fail-on-removed-library flag."""
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         new_dir = tmp_path / "new"
@@ -776,11 +784,14 @@ class TestUnmatched:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libremoved.json", _snap())  # removed
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("gate:\n  fail_on_removed_library: true\n")
         code, _ = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
-            "--fail-on-removed-library",
+            "--config",
+            str(cfg),
         )
         assert code == 4
 

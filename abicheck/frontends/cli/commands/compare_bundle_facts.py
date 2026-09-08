@@ -297,10 +297,45 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         BundleFactsLibraryOverridesError,
         known_libraries_for_new_side,
     )
+
+    # Phase 7d (one-comparison-product.md §4.1): --dso-only/
+    # --include-private-dso/--fail-on-removed-library are config-only now
+    # (release.dso_only/release.include_private_dso/
+    # gate.fail_on_removed_library) -- loaded here, ahead of
+    # reject_unsupported_options, since a project that sets any of them can
+    # no longer state them as CLI kwargs for this dispatcher to reject.
+    from ....workflows.extraction import (
+        load_build_config_with_digest as _load_cfg_early,
+    )
     from ..options.params import _load_suppression_and_policy
     from .compare_bundle_facts_rejections import reject_unsupported_options
 
-    reject_unsupported_options(kwargs, new_is_stored=new_is_stored)
+    _early_cfg_path = kwargs.get("config")
+    _early_cfg = None
+    if _early_cfg_path is not None:
+        try:
+            _early_cfg = _load_cfg_early(_early_cfg_path)[0]
+        except ValueError as exc:
+            # Same parse-or-raise translation reject_unsupported_options()
+            # itself applies to kwargs["config"] a few lines below -- this
+            # load runs strictly before it now, so it must not bypass that
+            # existing "malformed config is a clean UsageError, never a raw
+            # traceback" contract (Codex review precedent, this module's
+            # own test suite).
+            raise click.UsageError(
+                f"cannot parse build config {_early_cfg_path}: {exc}"
+            ) from exc
+    reject_unsupported_options(
+        kwargs,
+        new_is_stored=new_is_stored,
+        dso_only=bool(_early_cfg.release_dso_only) if _early_cfg else False,
+        include_private_dso=(
+            bool(_early_cfg.release_include_private_dso) if _early_cfg else False
+        ),
+        fail_on_removed=(
+            bool(_early_cfg.gate_fail_on_removed_library) if _early_cfg else False
+        ),
+    )
 
     old_facts_path: Path = kwargs["old_input"]
     new_dir: Path = kwargs["new_input"]
@@ -333,17 +368,19 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     # compare.py's dispatch call site -- read the same field
     # ResolvedCompareConfig would, off the loaded BuildConfig directly.
     # Not re-validated: that call site already raises a UsageError for a
-    # malformed config before dispatch() ever runs. workflows.extraction,
-    # not buildsource.build_config_io: frontends may import workflows but
-    # not extract (build_config_io.py's own package).
-    from ....workflows.extraction import load_build_config_with_digest
-
-    _bundle_cfg_path = kwargs.get("config")
-    _bundle_cfg = (
-        load_build_config_with_digest(_bundle_cfg_path)[0] if _bundle_cfg_path else None
-    )
+    # malformed config before dispatch() ever runs. Reuses the config
+    # already loaded above for the Phase 7d reject_unsupported_options()
+    # call rather than parsing .abicheck.yml a second time.
+    _bundle_cfg = _early_cfg
     bundle_system_providers = list(_bundle_cfg.bundle_system_providers) if _bundle_cfg else []
     bundle_cohorts = list(_bundle_cfg.bundle_cohorts) if _bundle_cfg else []
+    # Phase 7d (one-comparison-product.md §4.1): --include-private-dso is
+    # gone as a CLI flag on `compare` -- release.include_private_dso in
+    # .abicheck.yml is its only source now, read off the same _bundle_cfg
+    # already loaded above for bundle_system_providers/cohorts.
+    include_private_dso_cfg = (
+        bool(_bundle_cfg.release_include_private_dso) if _bundle_cfg else False
+    )
 
     if new_is_stored:
         # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
@@ -447,7 +484,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     # uses on this identical lib_dir, so a manifest entry naming
                     # a library outside the bundle is a hard, immediate error
                     # instead of silently never being looked up.
-                    include_private_dso = bool(kwargs.get("include_private_dso", False))
+                    include_private_dso = include_private_dso_cfg
                     new_library_paths = known_libraries_for_new_side(
                         lib_dir, include_private_dso=include_private_dso
                     )
@@ -489,7 +526,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     # default and silently let resolve_input() auto-detect past
                     # it, which can change the extracted API and findings.
                     lang_explicit=bool(kwargs.get("lang_explicit", False)),
-                    include_private_dso=bool(kwargs.get("include_private_dso", False)),
+                    include_private_dso=include_private_dso_cfg,
                     manifest_path=kwargs.get("manifest_path"),
                     system_providers=bundle_system_providers or None,
                     cohorts=bundle_cohorts or None,
@@ -549,7 +586,13 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
                 )
 
-    scope_terms = scope_terms_for(result, kwargs)
+    scope_terms = scope_terms_for(
+        result,
+        kwargs,
+        on_incomplete_scope=(
+            _bundle_cfg.scope_on_incomplete if _bundle_cfg else None
+        ),
+    )
     if not result.per_library and result.scope_record is None:
         # No pair and no record to say so -> usage error (Codex). With a record
         # a zero-pair run renders like the fan-out's: D7 exits 1 (round 30).

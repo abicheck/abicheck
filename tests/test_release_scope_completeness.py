@@ -100,6 +100,38 @@ def _write_unreadable(dir_: Path, name: str, snap: AbiSnapshot) -> None:
     (dir_ / name).write_text(json.dumps(doc), encoding="utf-8")
 
 
+def _release_config(
+    tmp_path: Path,
+    *,
+    on_incomplete_scope: str | None = None,
+    fail_on_removed_library: bool | None = None,
+    dso_only: bool | None = None,
+    include_private_dso: bool | None = None,
+    name: str = ".abicheck.yml",
+) -> Path:
+    """Write a ``.abicheck.yml`` carrying the Phase 7d (one-comparison-
+    product.md §4.1) release/bundle topology config keys that replaced
+    ``compare``'s now-removed ``--on-incomplete-scope``/
+    ``--fail-on-removed-library``/``--dso-only``/``--include-private-dso``
+    flags, and return its path for a ``--config`` argument. A distinct
+    *name* lets a caller write more than one config into the same
+    ``tmp_path`` (e.g. one per parametrized policy)."""
+    lines: list[str] = []
+    if on_incomplete_scope is not None:
+        lines += ["scope:", f"  on_incomplete: {on_incomplete_scope}"]
+    if fail_on_removed_library is not None:
+        lines += ["gate:", f"  fail_on_removed_library: {str(fail_on_removed_library).lower()}"]
+    if dso_only is not None or include_private_dso is not None:
+        lines.append("release:")
+        if dso_only is not None:
+            lines.append(f"  dso_only: {str(dso_only).lower()}")
+        if include_private_dso is not None:
+            lines.append(f"  include_private_dso: {str(include_private_dso).lower()}")
+    cfg = tmp_path / name
+    cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return cfg
+
+
 def _invoke(*args: str) -> tuple[int, str]:
     from abicheck.cli import main
 
@@ -142,15 +174,16 @@ class TestTwelveVariantBaseline:
 
     @pytest.mark.parametrize("policy", ["warn", "block"])
     def test_one_member_directory_is_not_narrowed(
-        self, dirs: tuple[Path, Path], policy: str
+        self, dirs: tuple[Path, Path], policy: str, tmp_path: Path
     ) -> None:
         """Discovered cardinality is not intent: the same one candidate
         supplied as a *directory* selects every baseline member, so the
         eleven unmatched ones are unchecked and `block` still gates --
         a PR-controlled NEW tree cannot trim itself into a clean pass."""
         old, candidate = dirs
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(candidate.parent), "--on-incomplete-scope", policy
+            "compare", str(old), str(candidate.parent), "--config", str(cfg)
         )
         scope = doc["comparison_scope"]
         assert scope["selection"] == "all_expected"
@@ -161,11 +194,15 @@ class TestTwelveVariantBaseline:
         assert scope["proven_removed"] == []
         assert code == (1 if policy == "block" else 0)
 
-    @pytest.mark.parametrize("extra", [(), ("--fail-on-removed-library",)])
+    @pytest.mark.parametrize("fail_on_removed_library", [False, True])
     def test_one_comparison_eleven_out_of_scope_zero_removals(
-        self, dirs: tuple[Path, Path], extra: tuple[str, ...]
+        self, dirs: tuple[Path, Path], fail_on_removed_library: bool, tmp_path: Path
     ) -> None:
         old, new = dirs
+        extra: tuple[str, ...] = ()
+        if fail_on_removed_library:
+            cfg = _release_config(tmp_path, fail_on_removed_library=True)
+            extra = ("--config", str(cfg))
         code, doc = _invoke_json("compare", str(old), str(new), *extra)
         assert code == 0
         assert [lib["library"] for lib in doc["libraries"]] == ["libv3.json"]
@@ -183,11 +220,12 @@ class TestTwelveVariantBaseline:
         assert "libv3.json" not in doc["unmatched_old"]
 
     def test_block_policy_is_a_no_op_on_a_complete_scope(
-        self, dirs: tuple[Path, Path]
+        self, dirs: tuple[Path, Path], tmp_path: Path
     ) -> None:
         old, new = dirs
+        cfg = _release_config(tmp_path, on_incomplete_scope="block")
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", "block"
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 0
         assert doc["exit"]["incomplete_scope_contribution"] == 0
@@ -235,8 +273,9 @@ class TestMixedMatrix:
 
     def test_block_exits_1_naming_the_scope_axis(self, tmp_path: Path) -> None:
         old, new = self._dirs(tmp_path, breaking=False)
+        cfg = _release_config(tmp_path, on_incomplete_scope="block")
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", "block"
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 1
         assert doc["exit"]["code"] == 1
@@ -250,8 +289,9 @@ class TestMixedMatrix:
         self, tmp_path: Path, policy: str
     ) -> None:
         old, new = self._dirs(tmp_path, breaking=True)
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 4
         assert doc["exit"]["reasons"] == ["compatibility_gate"]
@@ -277,8 +317,9 @@ class TestZeroPairRelease:
         old, new = tmp_path / "old", tmp_path / "new"
         _write(old, "liba.json", _snap("liba.so"))
         _write(new, "libb.json", _snap("libb.so"))
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 1
         assert doc["libraries"] == []
@@ -379,8 +420,9 @@ class TestProvenRemoval:
         assert code == 0
         assert doc["verdict"] == "COMPATIBLE_WITH_RISK"
 
+        cfg = _release_config(tmp_path, fail_on_removed_library=True)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--fail-on-removed-library"
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 8
         assert doc["exit"]["reasons"] == ["removed_required_library"]
@@ -395,8 +437,9 @@ class TestProvenRemoval:
         _write(old, "libgone.so.json", _snap("libgone.so"))
         new = tmp_path / "new_pkg"
         _write_stored_package(new, {"liba.so": _snap("liba.so")})
+        cfg = _release_config(tmp_path, fail_on_removed_library=True)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--fail-on-removed-library"
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 8
         assert doc["comparison_scope"]["selection"] == "all_expected"
@@ -1029,8 +1072,9 @@ class TestStoredBaselineGating:
         assert doc["comparison_scope"]["unchecked"] == ["libdeg.so"]
         assert doc["comparison_scope"]["counts"]["failed"] == 1
         assert list(doc["libraries"]) == ["libok.so"]
+        cfg = _release_config(tmp_path, on_incomplete_scope="block")
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", "block"
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert code == 1
         assert doc["comparison_scope"]["incomplete_scope_exit_contribution"] == 1
@@ -1093,6 +1137,7 @@ class TestJunitScopeProjection:
         _write_unreadable(new, "libb.json", _snap("libb.so"))
         from abicheck.cli import main
 
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         result = CliRunner().invoke(
             main,
             [
@@ -1101,8 +1146,8 @@ class TestJunitScopeProjection:
                 str(new),
                 "--format",
                 "junit",
-                "--on-incomplete-scope",
-                policy,
+                "--config",
+                str(cfg),
             ],
         )
         return result.stdout
@@ -1149,6 +1194,7 @@ class TestJunitScopeProjection:
         from abicheck.cli import main
 
         for policy in ("warn", "block"):
+            cfg = _release_config(tmp_path, on_incomplete_scope=policy, name=f"{policy}.abicheck.yml")
             result = CliRunner().invoke(
                 main,
                 [
@@ -1157,8 +1203,8 @@ class TestJunitScopeProjection:
                     str(new),
                     "--format",
                     "junit",
-                    "--on-incomplete-scope",
-                    policy,
+                    "--config",
+                    str(cfg),
                 ],
             )
             root = ET.fromstring(result.stdout)

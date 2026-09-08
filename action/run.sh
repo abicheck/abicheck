@@ -396,6 +396,70 @@ PYEOF
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
 }
 
+# Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): `compare`'s
+# `--dso-only`/`--include-private-dso`/`--fail-on-removed-library` are gone
+# entirely (CONFIG class, no CLI override -- `.abicheck.yml`'s `release:`/
+# `gate:` blocks are their only source now). This Action's own
+# dso-only/include-private-dso/fail-on-removed-library inputs still exist,
+# so forwarding them now means synthesizing a small config overlay the run
+# reads via --config, the same "--config is NOT one of the flags the
+# release fan-out rejects" precedent add_compile_context_flags already
+# established for the compile: block above -- mutually exclusive with an
+# explicit build-config for the identical reason (no YAML-merge tool
+# guaranteed on every runner). Called from the release-style-operand branch
+# in `mode: compare`, AFTER that branch's own unconditional
+# `add_single_flag "--config" "$INPUT_BUILD_CONFIG"` has already run -- so
+# unlike add_compile_context_flags (which runs first and lets the later,
+# now-empty INPUT_BUILD_CONFIG forward turn into a no-op), this function
+# checks whether --config is already in CMD and refuses to add a second one.
+add_release_topology_config_flags() {
+  if [[ "${INPUT_DSO_ONLY:-false}" != "true" \
+        && "${INPUT_INCLUDE_PRIVATE_DSO:-false}" != "true" \
+        && "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" != "true" ]]; then
+    return 0
+  fi
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    echo "::error::mode: compare with a directory/package operand cannot combine dso-only/include-private-dso/fail-on-removed-library with build-config: those settings now live only in .abicheck.yml's release:/gate: blocks (Phase 7d CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
+    exit 1
+  fi
+  local overlay
+  overlay=$(mktemp)
+  ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-false}" \
+  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-false}" \
+  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" \
+  python3 - "$overlay" <<'PYEOF'
+# Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
+# valid YAML subset abicheck's own yaml.safe_load parses identically) from
+# this Action's release-topology inputs -- the config-only replacement for
+# the per-run flags Phase 7d removed from compare's directory/package
+# fan-out.
+import json
+import os
+import sys
+
+out_path = sys.argv[1]
+doc: dict[str, object] = {}
+release_blk: dict[str, object] = {}
+if os.environ.get("ABICHECK_RELEASE_DSO_ONLY") == "true":
+    release_blk["dso_only"] = True
+if os.environ.get("ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO") == "true":
+    release_blk["include_private_dso"] = True
+if release_blk:
+    doc["release"] = release_blk
+if os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY") == "true":
+    doc["gate"] = {"fail_on_removed_library": True}
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(doc, f)
+PYEOF
+  for _existing in "${CMD[@]}"; do
+    if [[ "$_existing" == "--config" ]]; then
+      echo "::error::internal: add_release_topology_config_flags called after --config was already added to the command line -- this is a bug in run.sh, not a user input problem."
+      exit 1
+    fi
+  done
+  CMD+=(--config "$overlay")
+}
+
 # A directory, a file whose name matches a recognized package extension, or
 # an extensionless RPM/Deb detected by magic bytes (mirrors package.py's
 # is_package(), including its magic-byte fallback — abicheck/package.py:547-554
@@ -1677,17 +1741,13 @@ elif [[ "$MODE" == "compare" ]]; then
     add_sided_flag "--devel-pkg" "old" "${INPUT_DEVEL_PKG1:-}"
     add_sided_flag "--devel-pkg" "new" "${INPUT_DEVEL_PKG2:-}"
 
-    if [[ "${INPUT_DSO_ONLY:-false}" == "true" ]]; then
-      CMD+=(--dso-only)
-    fi
-    if [[ "${INPUT_INCLUDE_PRIVATE_DSO:-false}" == "true" ]]; then
-      CMD+=(--include-private-dso)
-    fi
+    # Phase 7d: --dso-only/--include-private-dso/--fail-on-removed-library
+    # are gone from the CLI -- synthesized into a --config overlay instead
+    # (see add_release_topology_config_flags's own docstring for why this
+    # can't just call add_single_flag the way --keep-extracted does).
+    add_release_topology_config_flags
     if [[ "${INPUT_KEEP_EXTRACTED:-false}" == "true" ]]; then
       CMD+=(--keep-extracted)
-    fi
-    if [[ "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" == "true" ]]; then
-      CMD+=(--fail-on-removed-library)
     fi
   fi
 

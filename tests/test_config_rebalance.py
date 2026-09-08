@@ -208,6 +208,56 @@ class TestConfigPrecedence:
         assert r.dwarf_only is True
         assert r.show_redundant is True
 
+    def test_release_topology_default(self) -> None:
+        """Phase 7d (one-comparison-product.md §4.1): the release/bundle
+        topology knobs default to the removed flags' own defaults when
+        unset."""
+        r = resolve_compare_config(
+            None,
+            cli_severity_preset=None, cli_scope_public=None,
+        )
+        assert r.on_incomplete_scope == "warn"
+        assert r.fail_on_removed_library is False
+        assert r.release_dso_only is False
+        assert r.release_include_private_dso is False
+
+    def test_release_topology_config_beats_default(self) -> None:
+        """Phase 7d: scope.on_incomplete/gate.fail_on_removed_library/
+        release.dso_only/release.include_private_dso are the only source --
+        no CLI override at all, same shape as bundle_system_providers/
+        cohorts above."""
+        cfg = BuildConfig(
+            scope_on_incomplete="block",
+            gate_fail_on_removed_library=True,
+            release_dso_only=True,
+            release_include_private_dso=True,
+        )
+        r = resolve_compare_config(
+            cfg,
+            cli_severity_preset=None, cli_scope_public=None,
+        )
+        assert r.on_incomplete_scope == "block"
+        assert r.fail_on_removed_library is True
+        assert r.release_dso_only is True
+        assert r.release_include_private_dso is True
+
+    def test_release_topology_has_no_cli_override(self) -> None:
+        """Phase 7d: `resolve_compare_config` accepts no `cli_*` argument
+        for any of the four release/bundle topology knobs (ADR-068 D5 guard
+        #2, "no escape hatch") -- matching the debug-resolution precedent
+        above."""
+        import inspect
+
+        params = inspect.signature(resolve_compare_config).parameters
+        for removed in (
+            "cli_dso_only", "cli_fail_on_removed_library",
+            "cli_on_incomplete_scope", "cli_include_private_dso",
+        ):
+            assert removed not in params, (
+                f"resolve_compare_config still accepts {removed!r} -- the "
+                "Phase 7d override was supposed to be deleted, not just hidden"
+            )
+
 
 # ── round-trip ─────────────────────────────────────────────────────────────────
 
@@ -358,6 +408,12 @@ class TestFlagBudget:
         # them exactly the same as every other entry above.
         "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
         "--no-debuginfod", "--no-dwarf-only",
+        # Phase 7d (one-comparison-product.md §4.1): the release/bundle
+        # topology knobs joined this list too -- gate.fail_on_removed_library/
+        # release.dso_only/release.include_private_dso/scope.on_incomplete
+        # in .abicheck.yml are their only source now, no CLI escape hatch.
+        "--dso-only", "--fail-on-removed-library", "--no-fail-on-removed-library",
+        "--include-private-dso", "--on-incomplete-scope",
     )
 
     @staticmethod
@@ -418,6 +474,33 @@ class TestFlagBudget:
         # missing-argument handling for the *next* token; the boolean flags
         # take none.
         extra = ["x"] if flag in ("--debuginfod-url", "--debug-format") else []
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), flag, *extra],
+        )
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
+        assert flag in result.output
+
+    @pytest.mark.parametrize(
+        "flag",
+        ["--dso-only", "--fail-on-removed-library", "--no-fail-on-removed-library",
+         "--include-private-dso", "--on-incomplete-scope"],
+    )
+    def test_removed_release_topology_flags_exit_usage_error_on_compare(
+        self, tmp_path: Path, flag: str
+    ) -> None:
+        """Phase 7d (one-comparison-product.md §4.1): each removed
+        release/bundle topology flag exits 64 with Click's standard
+        'No such option' on `compare` -- the old spelling must not
+        silently resolve to anything, hidden or otherwise."""
+        old = tmp_path / "old.so"
+        new = tmp_path / "new.so"
+        old.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        new.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        # --on-incomplete-scope needs an operand or Click's own "no such
+        # option" would be pre-empted by missing-argument handling for the
+        # *next* token; the boolean flags take none.
+        extra = ["warn"] if flag == "--on-incomplete-scope" else []
         result = CliRunner().invoke(
             main, ["compare", str(old), str(new), flag, *extra],
         )

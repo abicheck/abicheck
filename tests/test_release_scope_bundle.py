@@ -34,6 +34,7 @@ from test_release_scope_completeness import (
     _facts_file,
     _invoke_json,
     _maps,
+    _release_config,
     _results,
     _write,
     _write_stored_package,
@@ -128,8 +129,9 @@ class TestBundleAnalysisScope:
         new = _facts_file(
             tmp_path, "new.bundlefacts.json", {"libalgo.so": libs["libalgo.so"]}
         )
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert _removal_findings(doc) == []
         assert doc["verdict"] != "BREAKING"
@@ -662,8 +664,9 @@ class TestStoredPackageDegradedMember:
         else:
             _write_stored_package(old, healthy)
             _write_stored_package(new, degraded, degraded=marker)
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
         assert by_name["libfoo.so"]["verdict"] == "failed"

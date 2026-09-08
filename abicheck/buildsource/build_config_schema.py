@@ -39,6 +39,10 @@ BOOL_SUBKEYS: dict[str, frozenset[str]] = {
         {"nostdinc", "ast_frontend_fallback", "allow_unsupported_castxml"}
     ),
     "debug": frozenset({"dwarf_only", "debuginfod"}),
+    # Phase 7d (one-comparison-product.md §4.1): CI gate policy and
+    # directory/package release topology, demoted off the CLI.
+    "gate": frozenset({"fail_on_removed_library"}),
+    "release": frozenset({"dso_only", "include_private_dso"}),
 }
 STR_SUBKEYS: dict[str, frozenset[str]] = {
     "build": frozenset({"system", "query", "compile_db"}),
@@ -46,6 +50,7 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
     "severity": frozenset(
         {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
     ),
+    "scope": frozenset({"on_incomplete"}),
     "source": frozenset({"method"}),
     "compile": frozenset(
         {"frontend", "std", "sysroot", "compiler", "frontend_context", "lang"}
