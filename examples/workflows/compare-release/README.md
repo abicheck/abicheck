@@ -2,8 +2,8 @@
 
 **Task:** "Did my next release break anything for existing consumers?"
 
-This is the first Phase 5 slice of the [examples/catalog split]
-(../../../docs/contribute/plans/examples-catalog-split.md) — a small, curated,
+This is the first Phase 5 slice of the examples/catalog split (retired
+plan record, `docs/contribute/plans/index.md`) — a small, curated,
 task-oriented example independent of the 197-case calibration catalog under
 `examples/case*/` (which exists to calibrate detectors, not to teach the
 CLI). See that plan's "Known gaps" table for the rest of this curated set,

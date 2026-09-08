@@ -2,7 +2,7 @@
 
 # Catalog coverage by dimension
 
-Phase 6 of the examples/catalog split: the calibration catalog under `examples/` is 208 `caseNN_*` fixtures, but not 208 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
+Phase 6 of the examples/catalog split (retired plan record; see `docs/contribute/plans/index.md`): the calibration catalog under `examples/` is 208 `caseNN_*` fixtures, but not 208 independent ABI/API concepts -- several are variants of the same rule, or scenarios composing rules already counted elsewhere. This page reports the catalog along five independent dimensions instead of one flat case count, so "three demonstrations of one rule" reads as "1 rule, 3 cases (1 canonical + 2 variants)" rather than "3 ABI concepts". Regenerate with `python scripts/gen_catalog_coverage_report.py` after any `ground_truth.json`, `catalog/taxonomy.json`, or `catalog/catalog_classification.yaml` change.
 
 ## Rule coverage
 
@@ -71,7 +71,7 @@ Every case, rule or scenario, tagged with the real-world ecosystem it models (`g
 
 ## Workflow coverage
 
-**7 workflow examples** so far, out of the 7 task-oriented workflows Phase 5 of the examples/catalog split (`docs/contribute/plans/examples-catalog-split.md`) targets: compare one library, audit a release, multi-library project, evidence depth (including build/source evidence), Python API, suppressions, GitHub Actions.
+**7 workflow examples** so far, out of the 7 task-oriented workflows Phase 5 of the examples/catalog split (retired plan record; see `docs/contribute/plans/index.md`) targets: compare one library, audit a release, multi-library project, evidence depth (including build/source evidence), Python API, suppressions, GitHub Actions.
 
 | Workflow | Task | Platforms | Executed steps |
 |---|---|---|---|

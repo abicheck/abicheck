@@ -1,9 +1,9 @@
 # CLAUDE.md — `examples/`
 
 This directory is the **curated, task-oriented tree** — small workflow
-walkthroughs a new user runs end to end, per audience (see
-[the examples/catalog split's corrected Phase 4 target model]
-(../docs/contribute/plans/examples-catalog-split.md)). It is not the
+walkthroughs a new user runs end to end, per audience (see the
+examples/catalog split's corrected Phase 4 target model — retired plan
+record, `docs/contribute/plans/index.md`). It is not the
 calibration corpus: the 197 `caseNN_*` fixtures the FP-rate, tier-accuracy,
 mutation, and full-catalog-coverage gates run against now live under
 `catalog/cases/` — see [`../catalog/CLAUDE.md`](../catalog/CLAUDE.md) for
@@ -17,8 +17,8 @@ workflows below and at the calibration catalog's own
 ## `workflows/` — curated user-facing examples (Phase 5, in progress)
 
 `examples/workflows/` is a **separate tree from the `caseNN_*` calibration
-catalog** under `catalog/cases/` — Phase 5 of the [examples/catalog split]
-(../docs/contribute/plans/examples-catalog-split.md). Its entries are
+catalog** under `catalog/cases/` — Phase 5 of the examples/catalog split
+(retired plan record, `docs/contribute/plans/index.md`). Its entries are
 small, complete, task-oriented projects a new user runs end-to-end
 (`cd examples/workflows/<name>`, build, run one `abicheck` command, read
 the output) — not calibration fixtures a gate scores. Consequently:

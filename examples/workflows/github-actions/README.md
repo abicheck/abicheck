@@ -3,8 +3,8 @@
 **Task:** "How do I run this check automatically on every pull request,
 without anyone remembering to run it (or writing a CI script myself)?"
 
-This is a Phase 5 slice of the [examples/catalog split]
-(../../../docs/contribute/plans/examples-catalog-split.md) — a small,
+This is a Phase 5 slice of the examples/catalog split (retired plan
+record, `docs/contribute/plans/index.md`) — a small,
 curated, task-oriented example independent of the 197-case calibration
 catalog under `catalog/cases/` (which exists to calibrate detectors, not to
 teach the CLI). See that plan's "What is left" section for the rest of this
