@@ -453,6 +453,29 @@ class TestExplicitTargetTriple:
             == "x86_64-unknown-linux-gnu"
         )
 
+    def test_a_response_file_after_the_target_voids_the_recovery(self) -> None:
+        # Codex review, thirteenth round, fresh evidence: a real
+        # `clang --target=x86_64-unknown-linux-gnu @darwin.rsp
+        # -print-target-triple` reports Darwin when the response file
+        # sets that -- the visible, earlier target is not trustworthy
+        # once a response file follows it.
+        assert (
+            explicit_target_triple("--target=x86_64-unknown-linux-gnu @darwin.rsp", ())
+            is None
+        )
+        assert explicit_target_triple(None, ("-target", "aarch64", "@resp.rsp")) is None
+
+    def test_a_response_file_before_the_target_does_not_void_the_recovery(
+        self,
+    ) -> None:
+        # Nothing follows the recognized target token to override it, so
+        # it is exactly as trustworthy as if the response file weren't
+        # there at all.
+        assert (
+            explicit_target_triple("@darwin.rsp --target=x86_64-unknown-linux-gnu", ())
+            == "x86_64-unknown-linux-gnu"
+        )
+
 
 class TestExplicitTargetTripleClStyle:
     """``cl_style=True`` (Codex review, third round, fresh evidence

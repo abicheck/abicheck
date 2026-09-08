@@ -1205,9 +1205,8 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "`is_darwin_target(target_triple)`, always False for a bare `None`/empty triple (never "
             "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
             "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
-            "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. "
-            "Under CL mode there is no `sys.platform` guess, and recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
-            "Under GNU mode the guess ALSO only applies when the RESOLVED `clang_bin` IS the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`; real Clang derives its own default target from argv[0], so basename -- not real executable identity, not raw spelling -- is what matters: an absolute path to the plain binary still matches, a target-prefixed symlink to that same binary correctly does not), and only when no `@response-file` token is forwarded (`_compiler_options.forwards_response_file`, since its contents may hide their own target this module cannot see without expanding it). Shape check: `model.mangled_name.strip_macho_itanium_"
+            "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. Under CL mode there is no `sys.platform` guess, and recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
+            "Under GNU mode the guess ALSO only applies when the RESOLVED `clang_bin` IS the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`, version-suffix-stripped -- real Clang derives its own default target from argv[0], so basename -- not real identity, not raw spelling -- is what matters: an absolute path or a native version suffix still matches, a target-prefixed symlink correctly does not), and only when no `@response-file` FOLLOWS the recovered target (`forwards_response_file`/`explicit_target_triple`'s own void-back-to-None -- a real compiler could still be overridden by that file's invisible contents; one preceding the target doesn't void it). Shape check: `model.mangled_name.strip_macho_itanium_"
             "decoration`, NOT applied to castxml."
         ),
         fixed_by=(1138, 1156),
@@ -1234,7 +1233,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "No Mach-O toolchain here -- code inspection + synthetic unit tests only. "
-                    "Recurred FOURTEEN times within #1138/#1149/#1156, each via Codex but one: "
+                    "Recurred SIXTEEN times within #1138/#1149/#1156, each via Codex but one: "
                     "Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE "
                     '`is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; '
                     "that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); "
@@ -1246,7 +1245,8 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "applying to an explicit cross-compiler unrelated to host OS; that same guess "
                     "wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an "
                     "absolute-path spelling of the identical native binary failing string equality; "
-                    "a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; and a `@response-file`'s own hidden target being ignored."
+                    "a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
+                    "driver name (`clang-18`) failing the basename check; and a visible target trusted even with a later response file that could override it."
                 ),
                 reference="#1138/#1149 follow-ups, fixed by #1156",
             ),

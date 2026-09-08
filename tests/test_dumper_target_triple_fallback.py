@@ -95,6 +95,21 @@ class TestIsDefaultClangBin:
             _is_default_clang_bin("/usr/bin/aarch64-apple-darwin-clang", "cc") is False
         )
 
+    def test_a_native_versioned_driver_still_matches(self) -> None:
+        # A packaged, version-suffixed Clang (e.g. Debian's clang-18) IS
+        # still the plain host default -- the version suffix carries no
+        # target information (Codex review, twelfth round, fresh
+        # evidence).
+        assert _is_default_clang_bin("clang-18", "cc") is True
+        assert _is_default_clang_bin("/usr/bin/clang-18", "cc") is True
+        assert _is_default_clang_bin("clang++-18", "c++") is True
+
+    def test_a_versioned_target_prefixed_symlink_still_does_not_match(self) -> None:
+        # Stripping the version suffix must not eat into the target
+        # prefix itself -- only a trailing numeric suffix is version
+        # information.
+        assert _is_default_clang_bin("aarch64-apple-darwin-clang-18", "cc") is False
+
 
 def test_probe_failure_recovers_explicit_target_triple(
     monkeypatch: pytest.MonkeyPatch,

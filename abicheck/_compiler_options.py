@@ -435,6 +435,19 @@ def explicit_target_triple(
     is a general normalization, not a one-off case: it reuses the exact
     same honored-spelling check above for whatever the stripped token
     turns out to be, attached or the first half of a separate pair alike.
+
+    An ``@response-file`` token AFTER the last recognized target token
+    voids that recovery back to ``None`` rather than trusting it as
+    final: a real compiler processes arguments left to right with later
+    values winning, and this module cannot see whether the response
+    file's own (invisible) contents carry a further target that would
+    override the one just recovered here (Codex review, fresh evidence —
+    ``clang --target=x86_64-unknown-linux-gnu @darwin.rsp
+    -print-target-triple`` genuinely reports Darwin when the response
+    file itself sets that). A response file BEFORE the last recognized
+    target is unaffected — nothing follows the recognized token to
+    override it, so it is exactly as trustworthy as if the response file
+    weren't there.
     """
     tokens: list[str] = []
     if gcc_options:
@@ -451,20 +464,29 @@ def explicit_target_triple(
             for token in tokens
         ]
     value: str | None = None
+    value_at = -1
     i = 0
     while i < len(tokens):
         token = tokens[i]
         if token.startswith("--target="):
             value = token[len("--target=") :]
+            value_at = i
         elif not cl_style and token.startswith("-target="):
             value = token.partition("=")[2]
+            value_at = i
         elif token == "-target" and i + 1 < len(tokens):
             value = tokens[i + 1]
             i += 1
+            value_at = i
         elif not cl_style and token == "--target" and i + 1 < len(tokens):
             value = tokens[i + 1]
             i += 1
+            value_at = i
         i += 1
+    if value is not None and any(
+        t.startswith("@") and len(t) > 1 for t in tokens[value_at + 1 :]
+    ):
+        return None
     return value
 
 

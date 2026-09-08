@@ -62,16 +62,27 @@ it should read in CHANGELOG.md. Delete the other sections.
   the exact same binary as plain `clang` (a real cross-toolchain wrapper
   shape whose basename alone changes the reported target). Conversely, a
   `--compiler` naming a non-clang-family binary, which `_resolve_clang_bin`
-  silently ignores in favor of the plain host default anyway, or an
+  silently ignores in favor of the plain host default anyway, an
   absolute-path spelling of that exact same native binary (e.g.
-  `/usr/bin/clang`), must not suppress the guess for what is genuinely
-  still the plain host compiler. Separately, the guess is also suppressed
-  whenever forwarded options include an unexpanded `@response-file` token
-  (`_compiler_options.forwards_response_file`): its contents — potentially
-  a `-target`/`--driver-mode=` of their own, which a real compiler process
-  honors — aren't visible to this module without reading and re-tokenizing
-  the file, so its mere presence is treated as "unknown evidence" rather
-  than "nothing else was requested".
+  `/usr/bin/clang`), or a native, version-suffixed driver name (e.g.
+  `clang-18`, which LLVM/Debian packaging commonly ships — the version
+  suffix is stripped before comparing, the same convention
+  `dumper_clang._is_cl_style_driver_name` already used), must not
+  suppress the guess for what is genuinely still the plain host compiler.
+  Separately, the guess is also suppressed whenever forwarded options
+  include an unexpanded `@response-file` token
+  (`_compiler_options.forwards_response_file`): its contents —
+  potentially a `-target`/`--driver-mode=` of their own, which a real
+  compiler process honors — aren't visible to this module without
+  reading and re-tokenizing the file, so its mere presence is treated as
+  "unknown evidence" rather than "nothing else was requested".
+  `explicit_target_triple` itself applies the same reasoning one level
+  deeper: a recovered target is voided back to `None` when a response
+  file token comes *after* it in the forwarded options (a real compiler
+  processes arguments left to right, so the file's own invisible
+  contents could still override the visible target), but not when the
+  response file precedes it (nothing follows the recognized token to
+  override it).
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

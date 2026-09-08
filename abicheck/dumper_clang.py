@@ -361,6 +361,20 @@ def _needs_sycl_host_only(cc_bin: str, tokens: list[str]) -> bool:
     return sycl_enabled
 
 
+def _strip_trailing_version_suffix(stem: str) -> str:
+    """Strip a trailing numeric version suffix (``clang-cl-20`` ->
+    ``clang-cl``, ``clang-18`` -> ``clang``) from an already-lowercased
+    binary stem.
+
+    LLVM/Debian packaging commonly ships a versioned executable alongside
+    (or instead of) the unversioned name -- shared by every name-only
+    driver-identity heuristic in this module (:func:`_is_cl_style_driver_name`,
+    :func:`_is_default_clang_bin`) so a packaged ``clang-18``/``clang-cl-20``
+    is recognized the same way its unversioned name would be.
+    """
+    return re.sub(r"-\d+(?:\.\d+)*$", "", stem)
+
+
 def _is_cl_style_driver_name(path: str) -> bool:
     """True for a CL-compatible driver name (``clang-cl``, Intel's ``dpcpp-cl``).
 
@@ -374,16 +388,14 @@ def _is_cl_style_driver_name(path: str) -> bool:
     equally name-only :func:`_is_clang_family_binary` this complements.
 
     Strips a trailing numeric version suffix first (``clang-cl-20`` ->
-    ``clang-cl``) -- LLVM/Debian packaging commonly ships a versioned
-    executable alongside (or instead of) the unversioned name; without
-    stripping it a packaged ``--compiler clang-cl-20`` would not be
-    recognized as CL-style and would wrongly reach the GNU-only S2
+    ``clang-cl``) -- without it a packaged ``--compiler clang-cl-20`` would
+    not be recognized as CL-style and would wrongly reach the GNU-only S2
     pre-scan, which silently ignores its unknown ``-dM``/``-M`` flags
     (Codex review) instead of being excluded and falling back to plain
     ``clang++``.
     """
     stem = Path(path).stem.lower()
-    return re.sub(r"-\d+(?:\.\d+)*$", "", stem).endswith("-cl")
+    return _strip_trailing_version_suffix(stem).endswith("-cl")
 
 
 def resolve_source_frontend_clang_bin(
@@ -478,8 +490,18 @@ def _is_default_clang_bin(clang_bin: str, compiler: str) -> bool:
     correctly recognized here, since its basename is unaffected by the
     directory portion of the path -- only a genuinely different
     invocation NAME changes Clang's own target-selection behavior.
+
+    Also strips a trailing numeric version suffix (:func:`
+    _strip_trailing_version_suffix`, ``clang-18`` -> ``clang``) before
+    comparing -- a native, versioned Clang driver `_resolve_clang_bin`
+    genuinely runs (LLVM/Debian packaging commonly ships one) is still
+    the plain host default in every way that matters here (Codex review,
+    fresh evidence): its own basename dispatch behaves identically to the
+    unversioned name once the version suffix -- which carries no target
+    information -- is set aside.
     """
-    return Path(clang_bin).name == _default_clang_bin_name(compiler)
+    stem = _strip_trailing_version_suffix(Path(clang_bin).stem.lower())
+    return stem == _default_clang_bin_name(compiler)
 
 
 def _resolve_clang_bin(
