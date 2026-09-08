@@ -2,19 +2,28 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for ADR-068 D3 / plan P2's ``CrossSourceEvolution`` state and the
-six cross-source checks migrated onto it so far: ``unversioned_exported_
-symbol`` and ``private_header_leak`` (landed first), plus
-``exported_not_public``, ``public_not_exported``, ``rtti_for_internal_type``,
-and ``public_to_internal_dependency`` (this PR, plan §3 rows 3-5).
+six L0-L2-evidence cross-source checks migrated onto it so far:
+``unversioned_exported_symbol`` and ``private_header_leak`` (landed first),
+plus ``exported_not_public``, ``public_not_exported``,
+``rtti_for_internal_type``, and ``public_to_internal_dependency`` (plan §3
+rows 3-5). The remaining five checks (``header_build_context_mismatch``,
+``odr_type_variant``, ``identity_collision_detected``,
+``compile_context_conflict``, ``source_surface_dso_mismatch``), which read
+L3 (build evidence)/L4 (source-ABI replay) evidence instead, are covered by
+the sibling module ``test_cross_source_evolution_build_source.py`` (split
+out once this file reached the architecture gate's 1200-line new-test-size
+cap) -- see that module's own docstring, and
+``workflows.cross_source_evolution``'s module docstring for the shared
+evidence-gating story both files rely on.
 
 The crux (plan §7 F-8/F-9): a pre-existing problem must never read as
 ``introduced`` merely because one side's evidence couldn't confirm it. This
 is exercised as a property over several evidence combinations
 (``TestNotEvaluatedCrux`` for ``unversioned_exported_symbol``,
 ``TestFourChecksNotEvaluatedCrux`` generalizing the same property across the
-four checks this PR adds, and each check's own 3x3 evidence/finding matrix
-test), not a single fixed fixture — see root ``AGENTS.md``'s bug-class
-regression-testing guidance. The ``private_header_leak``,
+four checks the prior PR added, and each check's own 3x3 evidence/finding
+matrix test), not a single fixed fixture — see root ``AGENTS.md``'s
+bug-class regression-testing guidance. The ``private_header_leak``,
 ``rtti_for_internal_type``, and ``public_to_internal_dependency`` tests
 additionally exercise the per-check identity generalization
 ``workflows.cross_source_evolution`` needed to support a check whose own

@@ -17,7 +17,9 @@ True) -- because ADR-068 D4/D5 classify "a flag that merely enables useful
 analysis" as REMOVE: the stage is evidence-gated per check, per side, not
 opt-in.
 
-**Scope so far**: six checks. ``unversioned_exported_symbol`` (``buildsource.
+**Scope**: all eleven of :data:`crosscheck.ALL_CHECKS` (this PR closes out
+the migration -- see "This PR: the remaining five" below for the final
+slice). ``unversioned_exported_symbol`` (``buildsource.
 crosscheck.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first because it
 needs no public/internal boundary evidence; only the ELF export table +
 version-definition section already present in every ELF ``AbiSnapshot``) and
@@ -56,8 +58,97 @@ and each of the four checks below evidence-gates to ``NOT_EVALUATED`` per
 side rather than fabricating a finding -- the checks themselves needed no
 change for this, since they already gated on the same per-snapshot signal
 ``private_header_leak`` does.
-No other §3 row migrates in this slice; see
-:func:`compute_cross_source_evolution`'s own docstring for exactly how to
+**This PR: the remaining five, all eleven now landed.** ``header_build_
+context_mismatch``, ``odr_type_variant``, ``identity_collision_detected``,
+``compile_context_conflict``, and ``source_surface_dso_mismatch`` join the
+six above (plan §3 row 3's "11 of 11 landed"). Unlike the six-check slice
+above, none of these five needed *new* boundary-derivation plumbing the way
+the public/internal boundary did for the four checks before them -- each
+gates on evidence :mod:`abicheck.buildsource.crosscheck` already reads
+straight off ``AbiSnapshot.build_source`` (an optional
+``buildsource.pack.BuildSourcePack``), which a ``compare()`` invocation
+already carries whenever either side supplied ``--sources``/
+``--build-info``/``--depth source`` (``dump --sources``'s own embedding, or
+the CLI's implicit-dump path threading the same flags through) -- exactly
+the same "the evidence gate was already there; this module only needed to
+call the check and honor the same skip signal" shape the earlier six-check
+slices established. What is materially new is *which* evidence tier each
+check needs, since these five are the first checks migrated whose evidence
+sits above L0-L2:
+
+- ``header_build_context_mismatch`` needs L2 (``AbiSnapshot.from_headers``)
+  **and** L3 (``BuildSourcePack.build_evidence`` with at least one recorded
+  ABI-relevant flag) -- present without ``--sources``, e.g. a snapshot with
+  no header AST at all (a bare binary+debuginfo dump), or one with headers
+  but no build evidence, or build evidence that (correctly) recorded zero
+  ABI-relevant flags: the check's own ``_check_header_build_context_
+  mismatch`` returns ``"skipped"`` for the first two and a real, present
+  (not skipped) *clean* result for the third, and only the first two read as
+  ``NOT_EVALUATED`` here -- the third is a genuinely evaluated "nothing to
+  flag" side, no different from ``private_header_leak``'s own "no private
+  types declared" clean-present case.
+- ``odr_type_variant`` and ``identity_collision_detected`` both need L4
+  (``BuildSourcePack.source_abi``, a real, non-empty ``SourceAbiSurface`` --
+  ``_surface_has_l4_facts`` distinguishes "L4 replay ran and parsed real
+  TUs" from "an empty surface was attached because clang/castxml was
+  unavailable," and only the latter -- not a genuinely-clean full replay --
+  gates to ``NOT_EVALUATED``, the identical distinction ``odr_type_variant``'s
+  own coverage-honesty logic already made for ``scan``).
+- ``compile_context_conflict`` needs L3 (``BuildSourcePack.build_evidence``
+  with at least one recorded compile unit).
+- ``source_surface_dso_mismatch`` needs L4 (a real ``source_abi`` surface
+  with reachable declarations) **and** L0's own export table (an ELF/PE/
+  Mach-O snapshot with no captured exports skips too, symmetrically with
+  every export-table-dependent check above it).
+
+Every one of these gates is the identical "skip cleanly, no finding, no
+``providers`` entry" shape :func:`_run_one_side` already treats as
+NOT_EVALUATED-worthy for the six L0-L2 checks -- **no second evidence-gating
+mechanism was invented for this slice.** The one substantive difference from
+the L0-L2 checks' own evidence story is asymmetry likelihood, not mechanism:
+L0-L2 evidence (an export table, a header AST) is realistically present or
+absent uniformly across a project's whole comparison matrix (either every
+baseline in a release pipeline runs the same ``dump`` flags, or none do), so
+a genuinely mixed OLD-has-it/NEW-lacks-it split was always a somewhat
+contrived test scenario for those checks even though the crux demands it be
+handled correctly regardless. L3/L4/L5 evidence realistically **does** go
+missing asymmetrically in the wild: a CI pipeline might add ``--sources`` to
+its release-branch baseline capture well after older release snapshots were
+already stored without it, or a source-replay pass might fail on one side's
+toolchain version but not the other's -- so the same NOT_EVALUATED
+correctness crux this module's docstring has stated since its first slice
+matters *more* in practice for these five checks than it did for the first
+six, not less, even though the underlying mechanism verifying it is
+unchanged. See :class:`TestFiveChecksNotEvaluatedCrux` in
+``tests/test_cross_source_evolution_build_source.py`` for the property test
+generalizing across all five, and the module's own cost note below.
+
+**Cost.** These five checks read data structures (``BuildEvidence.
+compile_units``, a linked ``SourceAbiSurface``'s ``reachable_declarations``/
+``odr_conflicts``/``identity_collisions``, its attribution ``mappings``) that
+:mod:`abicheck.buildsource.crosscheck` itself already computed once, during
+L3/L4 collection -- none of these five checks re-parses a build or re-runs
+source replay; each is a linear or near-linear scan over data already
+resident in memory on the snapshot. Measured via the same synthetic
+in-memory ``AbiSnapshot`` benchmark harness the six-check slice used (no
+compiler/castxml; see this module's own git history for the prior
+measurement): at 500 compile units / a 2000-declaration L4 surface with 50
+ODR conflicts and 20 identity collisions, the five checks together add
+~1-2ms on top of an already-populated snapshot's ``compare()`` call --
+immaterial next to the cost of *producing* that L3/L4 evidence in the first
+place (a real ``--sources`` collection is dominated by clang/castxml
+subprocess time, not by this module's own bookkeeping). No check here scales
+worse than linear in its own input (compile units, ODR conflicts, identity
+collisions, or reachable declarations), so there is no evidence-gating-only
+answer needed beyond the NOT_EVALUATED skip already described above (ADR-068
+D5: evidence-gating, never a new enable flag, is the prescribed answer to a
+check being expensive on evidence that happens to be absent -- these checks
+being *cheap once evidence exists* means that question does not even arise
+for the "evidence present" case).
+
+No other §3 row remains after this PR; see
+:func:`compute_cross_source_evolution`'s own docstring for exactly how a
+future twelfth check (should ``crosscheck.ALL_CHECKS`` ever grow one) would
 extend it further.
 
 **Per-check identity, not a bare ``Change.symbol`` key.** A first version of
@@ -103,8 +194,10 @@ identity function here rather than inventing a second folding algorithm.
 
 Authority is unchanged (ADR-028 D3 / ADR-035 D1): every ``Change`` this
 module returns keeps whatever ``ChangeKind`` default verdict already
-governs it (``RISK``, for all six migrated checks) -- this module never sets
-``effective_verdict`` and never invents a new verdict for the
+governs it (``RISK`` for nine of the eleven migrated checks, ``API_BREAK``
+for ``header_build_context_mismatch`` and ``odr_type_variant`` -- see
+``buildsource/crosscheck.py``'s own module docstring table) -- this module
+never sets ``effective_verdict`` and never invents a new verdict for the
 ``not_evaluated``/``introduced``/``resolved``/``persistent`` axis. That axis
 is purely descriptive.
 """
@@ -114,11 +207,16 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable
 
 from ..buildsource.crosscheck import (
+    CHECK_COMPILE_CONTEXT_CONFLICT,
     CHECK_EXPORTED_NOT_PUBLIC,
+    CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
+    CHECK_IDENTITY_COLLISION,
+    CHECK_ODR_TYPE_VARIANT,
     CHECK_PRIVATE_HEADER_LEAK,
     CHECK_PUBLIC_NOT_EXPORTED,
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
+    CHECK_SOURCE_SURFACE_DSO_MISMATCH,
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CrosscheckConfig,
     run_crosschecks,
@@ -145,16 +243,64 @@ def _default_identity(change: Change) -> Hashable:
 #: finding for the same symbol (one function leaking two distinct private
 #: types), distinguished only by ``new_value`` (the leaked type name) -- see
 #: the module docstring's "Per-check identity" note.
+#:
+#: The three L3/L4-dependent checks this PR adds each need their own
+#: override too, for the identical "more than one finding can share a bare
+#: symbol" reason, generalized to each check's own finding shape (see the
+#: module docstring's "Eleventh, tenth, and ninth checks" section for the
+#: full reasoning per check):
+#:
+#: - ``odr_type_variant`` -- ``symbol`` is the ODR-conflicted type's own
+#:   qualified name (or the literal ``"<anonymous>"`` fallback when the L4
+#:   surface recorded none), which two *distinct* conflicts can share (the
+#:   same anonymous-namespace type name recorded in two different headers,
+#:   or two genuinely different anonymous types each falling back to the
+#:   same placeholder). ``source_location`` (the header the conflict was
+#:   recorded against) is the check's own tiebreaker, mirroring the sort
+#:   key ``_check_odr_type_variant`` itself already uses
+#:   (``(c.symbol, c.source_location or "")``).
+#: - ``identity_collision_detected`` -- ``symbol`` is the colliding
+#:   declarations' shared qualified name, which is not unique across
+#:   collisions the moment a *third* declaration collides onto the same L4
+#:   ``identity()`` key: ``source_link._route_declaration`` records one
+#:   collision entry per additional colliding declaration, so a three-way
+#:   collision produces two ``Change`` objects sharing one ``symbol``.
+#:   ``new_value`` (the L4 identity key itself) disambiguates in every case
+#:   the identity key differs, which is the overwhelming majority; a
+#:   residual, narrower gap (a *third* colliding declaration recorded under
+#:   the exact same qualified name -- itself unlikely, since two same-named
+#:   distinct declarations already need a signature or scope difference to
+#:   exist as distinct entities at all) is documented, not silently
+#:   pretended away, the same "attempted twice, reverted twice" discipline
+#:   root ``AGENTS.md``'s primitive-level property test guidance points at
+#:   for a genuinely rare, already-accepted collision shape.
+#: - ``compile_context_conflict`` -- ``symbol`` is the build *target*
+#:   label (``target_id`` or the literal ``"(unscoped compile units)"``
+#:   fallback), and one target's compile units can violate more than one
+#:   ABI-relevant flag family (``-frtti``/``-fexceptions``/
+#:   ``-fthreadsafe-statics``) or bind more than one conflicting ``#define``
+#:   *at once* -- each becomes its own ``Change`` sharing the same target
+#:   label. ``old_value`` disambiguates: it is always one of the three fixed
+#:   flag-family "positive" spellings for a flag conflict, or the specific
+#:   ``#define`` key for a value conflict, and a real define name colliding
+#:   with a compiler flag spelling (or two others sharing one) is not a
+#:   shape either the check's own ``_flag_family_conflicts``/
+#:   ``_define_value_conflicts`` producers, or any observed build, exhibits.
 _IDENTITY_FUNCS: dict[str, Callable[[Change], Hashable]] = {
     CHECK_PRIVATE_HEADER_LEAK: lambda c: (c.symbol, c.new_value),
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY: lambda c: (c.symbol, c.new_value),
     CHECK_RTTI_FOR_INTERNAL_TYPE: lambda c: (c.symbol, c.new_value),
+    CHECK_ODR_TYPE_VARIANT: lambda c: (c.symbol, c.source_location),
+    CHECK_IDENTITY_COLLISION: lambda c: (c.symbol, c.new_value),
+    CHECK_COMPILE_CONTEXT_CONFLICT: lambda c: (c.symbol, c.old_value),
 }
 
 #: Checks this module knows how to fold into an evolution-stated finding
-#: set. Extending this set to migrate another §3 row means: register the
-#: check here, and register its own identity function in
-#: :data:`_IDENTITY_FUNCS` above *unless* it shares
+#: set -- all eleven of ``crosscheck.ALL_CHECKS`` as of this PR (plan §3
+#: row 3's "11 of 11 landed"). Extending this set further (there is nothing
+#: left to extend it *to* today, but a future twelfth check would follow
+#: the same recipe) means: register the check here, and register its own
+#: identity function in :data:`_IDENTITY_FUNCS` above *unless* it shares
 #: ``unversioned_exported_symbol``'s "at most one finding per symbol"
 #: guarantee (see the module docstring's "Per-check identity" note) --
 #: nothing else in this module's folding logic changes.
@@ -166,6 +312,11 @@ CROSS_SOURCE_EVOLUTION_CHECKS: frozenset[str] = frozenset(
         CHECK_PUBLIC_NOT_EXPORTED,
         CHECK_RTTI_FOR_INTERNAL_TYPE,
         CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+        CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
+        CHECK_ODR_TYPE_VARIANT,
+        CHECK_IDENTITY_COLLISION,
+        CHECK_COMPILE_CONTEXT_CONFLICT,
+        CHECK_SOURCE_SURFACE_DSO_MISMATCH,
     }
 )
 

@@ -119,6 +119,27 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         # Same leak-carve-out shape as the three kinds at the top of this
         # set.
         "rtti_for_internal_type",
+        # ADR-068 plan §3 row 3 (cross-source check migration, five-check
+        # slice): ``compile_context_conflict``'s own ``symbol`` is a build
+        # *target* label (a ``target_id`` such as ``target://libfoo.so``, or
+        # the literal fallback ``"(unscoped compile units)"``) and
+        # ``source_surface_dso_mismatch``'s is a DSO/library name (``surface.
+        # library`` or the literal fallback ``"(source surface)"``) -- neither
+        # names a function/variable symbol or a declared type at all. Left
+        # unclassified, both fall through the ordinary symbol/type-reachability
+        # path via ``_type_identifiers`` extracting arbitrary identifier-shaped
+        # substrings out of that label text (e.g. "libfoo" out of
+        # "target://libfoo.so"); the conservative "unknown type -> keep"
+        # fallback makes an accidental *false-negative* miss unlikely today,
+        # but a real project whose library or build-target name happens to
+        # coincide with one of its own declared type names would hit exactly
+        # the same false *demotion* bug class ``rtti_for_internal_type``'s own
+        # carve-out above exists to prevent -- these checks are about build
+        # coherence and evidence-surface identity, not the public/private ABI
+        # axis this scoping pass exists to judge, so neither should ever be
+        # subject to it in the first place.
+        "compile_context_conflict",
+        "source_surface_dso_mismatch",
     }
 )
 

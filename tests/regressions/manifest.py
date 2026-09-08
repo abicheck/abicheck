@@ -356,7 +356,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # per-check identity function (`_IDENTITY_FUNCS`), defaulting
             # to `symbol` (still correct for `unversioned_exported_symbol`)
             # and registering `(symbol, new_value)` for `private_header_leak`.
+            # The same generalized primitive (`_IDENTITY_FUNCS`) was reused,
+            # not reinvented, for three more checks migrated in the PR that
+            # closed out all eleven cross-source checks (plan §3 row 3):
+            # `odr_type_variant` (two ODR conflicts can share a qualified
+            # name -- `(symbol, source_location)`), `identity_collision_
+            # detected` (a three-way L4 identity collision produces two
+            # findings sharing one qualified name -- `(symbol, new_value)`),
+            # and `compile_context_conflict` (one build target can violate
+            # more than one ABI flag family/define at once -- `(symbol,
+            # old_value)`) -- see that sibling test module for their own
+            # identity-generalization tests.
             "tests/test_cross_source_evolution.py",
+            "tests/test_cross_source_evolution_build_source.py",
         ),
         # Phase 5's own two originally-tracked gaps here (a compare()-level
         # collision test, and an adversarial generator over the shapes
