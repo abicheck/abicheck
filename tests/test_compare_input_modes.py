@@ -299,11 +299,17 @@ class TestLinkerScriptInput:
     def test_dump_cli_follows_linker_script(self, tmp_path):
         # `dump` should follow the script (note on stderr) and then fail at the
         # ELF parser for the (fake) target — not "Cannot detect format".
+        # Phase 7 removed `--dwarf-only` from `dump`'s CLI (config-only now,
+        # `debug.dwarf_only`); this test's own intent (force DWARF-only mode
+        # rather than attempting header extraction on the fake target) is
+        # unaffected by which channel supplies it.
         _write_fake_elf(tmp_path / "libd.so.1")
         script = tmp_path / "libd.so"
         script.write_text("INPUT(libd.so.1)\n", encoding="utf-8")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  dwarf_only: true\n")
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(script), "--dwarf-only"])
+        result = runner.invoke(main, ["dump", str(script), "--config", str(cfg)])
         assert result.exit_code != 0
         assert "GNU ld linker script" in result.output
         assert "Cannot detect format" not in result.output
@@ -667,12 +673,16 @@ class TestCompareHelp:
         assert "ignored" in result.output.lower()
 
     def test_help_shows_new_options(self):
+        # Phase 7 (one-comparison-product.md §4.1) removed `--lang` from
+        # `compare`'s CLI entirely (config-only now, `compile.lang`) --
+        # it must not appear in --help any more.
         runner = CliRunner()
         result = runner.invoke(main, ["compare", "--help"])
         assert result.exit_code == 0
         for flag in ["-H", "--header", "--include", "--sources", "--build-info",
-                     "--version", "--lang"]:
+                     "--version"]:
             assert flag in result.output, f"{flag} not in help output"
+        assert "--lang" not in result.output
 
     def test_help_shows_examples(self):
         runner = CliRunner()

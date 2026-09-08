@@ -47,8 +47,8 @@ alongside it, informational only, never in place of it.
 
 | Old command | New flag | What it scopes to |
 |---|---|---|
-| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `--required-symbol`/`--required-symbols`. |
-| `plugin-check` | `compare --required-symbol SYM` (repeatable) / `--required-symbols FILE` (one symbol per line, `#` comments ignored) | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
+| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `--required-symbol`. |
+| `plugin-check` | `compare --required-symbol SYM` (repeatable) / `--required-symbol @FILE` (one symbol per line, `#` comments ignored) | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
 
 ```bash
 # Was: abicheck appcompat --app myapp old.so new.so
@@ -176,22 +176,36 @@ Notes:
 - The **version** flag defaults per side stay `old` / `new` — pass `--version`
   only when your `.so` files need explicit labels.
 - The `--ast-frontend` per-side overrides (`--ast-frontend old=` /
-  `--ast-frontend new=`) are **unchanged**: the base `--ast-frontend` is shared
-  with `dump` and `scan`, so that family was deliberately left alone.
+  `--ast-frontend new=`) are **gone from `compare`/`dump`** (Phase 7, CONFIG
+  class, no CLI override survives) — `scan` still carries the full family
+  unchanged. See "Config removal (Phase 7)" below.
 
-### Config demotion
+### Config removal (Phase 7)
 
-These flags are no longer in `compare --help`. They still function as
-overrides, but the reviewed home is `.abicheck.yml`. See the
-[config-file reference](../reference/config-file.md#debug).
+These flags are no longer in `compare --help` **or** `dump --help`, and no
+CLI override survives — `.abicheck.yml` is each field's only source now
+(ADR-068 D5 / Phase 7a: a hidden-but-accepted flag still counts as public
+surface, so once a setting is fully config-backed the CLI spelling is
+removed outright rather than left hidden). See the
+[config-file reference](../reference/config-file.md#debug) and its
+`compile:` section.
 
-| Was a flag | Now a config key (block → key) |
+| Was a flag | Now a config key only (block → key) |
 |------------|-------------------------------|
 | `--debug-format dwarf` | `debug.format: dwarf` |
 | `--dwarf-only` | `debug.dwarf_only: true` |
 | `--debuginfod` | `debug.debuginfod: true` |
 | `--debuginfod-url URL` | `debug.debuginfod_url: URL` |
-| `scope.show_redundant: true` | `scope.show_redundant: true` |
+| `dump --pdb-path` | `debug.pdb_path: PATH` (`compare`'s own sided `--pdb-path old=`/`new=` flag is unaffected) |
+| `--ast-frontend` | `compile.frontend: castxml\|clang\|hybrid\|auto` |
+| `--allow-ast-frontend-fallback` | `compile.ast_frontend_fallback: true` |
+| `--allow-unsupported-castxml` | `compile.allow_unsupported_castxml: true` |
+| `--compiler` / `--compiler-prefix` | `compile.compiler:` (one merged key — a trailing `-` is treated as a prefix, otherwise a full compiler path) |
+| `--compiler-option` (repeatable) | `compile.options:` (a YAML list) |
+| `--sysroot` | `compile.sysroot:` |
+| `--nostdinc` | `compile.nostdinc: true` |
+| `--frontend-context` | `compile.frontend_context: host\|device` |
+| `--lang` | `compile.lang: c++\|c` |
 
 Example `.abicheck.yml`:
 
@@ -199,28 +213,38 @@ Example `.abicheck.yml`:
 debug:
   format: auto
   dwarf_only: false
+compile:
+  frontend: clang
+  sysroot: /opt/sysroots/aarch64
+  nostdinc: true
+  options: [-march=armv8-a]
 scope:
   show_redundant: false
 ```
 
-Precedence is **CLI > config > default**, so a script that still passes
-`--dwarf-only` keeps working and overrides the config value. The boolean
-toggles are two-way, so a one-off run can also force the value *off* over a
-config `true`: `--no-dwarf-only` (restore header parsing), `--no-debuginfod`,
-`--no-show-redundant`.
+None of these have a CLI override any more — there is no `--no-dwarf-only`,
+no `--ast-frontend`, nothing to pass on the command line to win over the
+config value. A script that still passes one of the removed flags exits 64
+("No such option") -- rewrite it to set the equivalent `debug.*`/`compile.*`
+key in `.abicheck.yml` instead. `--show-redundant` was retired the same way
+earlier and has no CLI spelling left either.
 
 **Not demoted (still visible flags):** `--debug-root` (the coarse per-run
-debug-tree override, now side-aware, see the table above); the toolchain
-family (`--compiler` / `--compiler-prefix` / `--compiler-option` /
-`--sysroot` / `--nostdinc`, shared with `dump`/`scan`); and
+debug-tree override, now side-aware, see the table above); and
 `--scope-public-headers` / `--no-scope-public-headers` (the everyday on/off
-switch for public-surface scoping).
+switch for public-surface scoping). `scan` is unaffected by any row in the
+table above — it keeps every one of these flags as a real CLI option.
 
-### Run profiles (additive)
+### Run profiles: added, then removed
 
-New in the same line of work: `--profile {ci-gate,release-cut,quick}` bundles
-a workflow's common defaults into one token (explicit flags still win). It is
-additive — nothing to migrate — but it can replace habitual flag stacks.
+`--profile {ci-gate,release-cut,quick}` briefly bundled a workflow's common
+defaults into one token. It was removed outright (ADR-068 D5 / plan
+Phase 7e): it bundled evidence depth, report rendering, and CI gate policy
+behind one word, and a rendering choice may never carry a gate setting.
+There is no direct config-key replacement — state `--depth`, `--format`,
+and `--severity-preset` (or `.abicheck.yml`'s `severity:` block)
+independently. `quick`'s one-line summary survives as the first-class
+`--format oneline` choice; see [Output Formats](output-formats.md).
 
 ### GitHub Action
 

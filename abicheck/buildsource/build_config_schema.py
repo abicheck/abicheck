@@ -35,7 +35,9 @@ from __future__ import annotations
 BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
     "suppression": frozenset({"strict", "require_justification"}),
-    "compile": frozenset({"nostdinc"}),
+    "compile": frozenset(
+        {"nostdinc", "ast_frontend_fallback", "allow_unsupported_castxml"}
+    ),
     "debug": frozenset({"dwarf_only", "debuginfod"}),
 }
 STR_SUBKEYS: dict[str, frozenset[str]] = {
@@ -45,8 +47,10 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
         {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
     ),
     "source": frozenset({"method"}),
-    "compile": frozenset({"frontend", "std", "sysroot"}),
-    "debug": frozenset({"format", "debuginfod_url"}),
+    "compile": frozenset(
+        {"frontend", "std", "sysroot", "compiler", "frontend_context", "lang"}
+    ),
+    "debug": frozenset({"format", "debuginfod_url", "pdb_path"}),
     # ADR-068 D5: the project's declared abi3 floor, e.g. "3.9" (quoted --
     # a bare 3.9 is a YAML float, which this type check rejects outright
     # rather than coercing it into a version spelling).
@@ -58,7 +62,7 @@ LIST_SUBKEYS: dict[str, frozenset[str]] = {
     "build": frozenset({"targets"}),  # P0.2: root target(s) scoping L3 collection
     "sources": frozenset({"public_headers", "exclude"}),
     "scope": frozenset({"public_symbols", "public_header_dirs"}),
-    "compile": frozenset({"include_dirs", "defines"}),
+    "compile": frozenset({"include_dirs", "defines", "options"}),
     # CLI cleanup phase two, PR J: release/scan bundle topology, demoted off
     # the CLI from --bundle-system-providers/--bundle-cohort.
     "bundle": frozenset({"system_providers", "cohorts"}),

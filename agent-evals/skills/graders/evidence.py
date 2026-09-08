@@ -478,8 +478,11 @@ def suppression_flags(call: dict) -> list[str]:
 #: these answers a *different* question from an unscoped comparison of the
 #: same pair — "does it break this consumer", not "does it break someone" —
 #: and per that doc the two verdicts "legitimately diverge in both
-#: directions", so neither is a filtered view of the other.
-CONSUMER_SCOPE_FLAGS = ("--used-by", "--required-symbol", "--required-symbols")
+#: directions", so neither is a filtered view of the other. ADR-068 D5 /
+#: plan Phase 7h merged the separate `--required-symbols FILE` flag into
+#: `--required-symbol @FILE`, so there is no longer a second flag spelling
+#: to list here.
+CONSUMER_SCOPE_FLAGS = ("--used-by", "--required-symbol")
 
 
 def is_consumer_scoped(call: dict) -> bool:
@@ -529,7 +532,12 @@ def _stripped_binary_names(name: str) -> set[str]:
 
 
 def _required_symbols_file_targets(call: dict, value: str) -> list[str]:
-    """The symbol names listed in a `--required-symbols FILE` argument.
+    """The symbol names listed in a `--required-symbol @FILE` argument.
+
+    ADR-068 D5 / plan Phase 7h: the separate `--required-symbols FILE` flag
+    is gone -- `@FILE` is now one of `--required-symbol`'s own repeatable
+    values, so `value` here already has its leading `@` stripped by the
+    caller.
 
     Best-effort, silently empty on any failure — matching the
     false-negative-over-false-positive default this module uses throughout.
@@ -537,8 +545,8 @@ def _required_symbols_file_targets(call: dict, value: str) -> list[str]:
     stamps this from `Path.cwd()` at call time — the workspace directory
     under the run directory, which persists on disk after the run, unlike
     the process's own transient cwd), not against the run directory itself:
-    a relative `--required-symbols` operand is relative to where the agent
-    ran the command, which need not be the workspace root.
+    a relative `@FILE` operand is relative to where the agent ran the
+    command, which need not be the workspace root.
     """
     cwd = call.get("cwd")
     if not cwd:
@@ -577,11 +585,13 @@ def consumer_scope_targets_by_kind(call: dict) -> ScopeTargets:
 
     `--used-by`/`--required-symbol`, each repeatable and each carrying its
     value as a plain string operand, are recovered directly from argv.
-    `--required-symbols FILE` names a *file*, not the symbols themselves —
+    `--required-symbol @FILE` names a *file*, not the symbols themselves —
     its contents are read (see `_required_symbols_file_targets`) and each
     listed symbol contributes as its own `required_symbols` target; a file
     that can't be read (workspace already gone, unreadable path)
-    contributes nothing rather than fabricating a match.
+    contributes nothing rather than fabricating a match. (ADR-068 D5 /
+    plan Phase 7h merged the separate `--required-symbols FILE` flag into
+    this `@FILE` spelling.)
 
     `--used-by` takes a real path to the consumer binary, not a bare logical
     name — while a scenario's `invocation.used_by` declares the logical name
@@ -607,6 +617,15 @@ def consumer_scope_targets_by_kind(call: dict) -> ScopeTargets:
         for symbol in _required_symbols_file_targets(call, value):
             _add(required_symbols, symbol)
 
+    def _add_required_symbol(value: str) -> None:
+        # ADR-068 D5 / plan Phase 7h: '@FILE' is now one of
+        # --required-symbol's own repeatable values, replacing the
+        # separate --required-symbols FILE flag.
+        if value.startswith("@"):
+            _add_required_symbols_file(value[1:])
+        else:
+            _add(required_symbols, value)
+
     i = 0
     while i < len(argv):
         token = argv[i]
@@ -615,19 +634,13 @@ def consumer_scope_targets_by_kind(call: dict) -> ScopeTargets:
             i += 2
             continue
         if token == "--required-symbol" and i + 1 < len(argv):
-            _add(required_symbols, argv[i + 1])
-            i += 2
-            continue
-        if token == "--required-symbols" and i + 1 < len(argv):
-            _add_required_symbols_file(argv[i + 1])
+            _add_required_symbol(argv[i + 1])
             i += 2
             continue
         if token.startswith("--used-by="):
             _add(used_by, token[len("--used-by=") :])
         elif token.startswith("--required-symbol="):
-            _add(required_symbols, token[len("--required-symbol=") :])
-        elif token.startswith("--required-symbols="):
-            _add_required_symbols_file(token[len("--required-symbols=") :])
+            _add_required_symbol(token[len("--required-symbol=") :])
         i += 1
     return ScopeTargets(frozenset(used_by), frozenset(required_symbols))
 

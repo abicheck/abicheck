@@ -17,30 +17,31 @@ True) -- because ADR-068 D4/D5 classify "a flag that merely enables useful
 analysis" as REMOVE: the stage is evidence-gated per check, per side, not
 opt-in.
 
-**Scope so far**: six checks. ``unversioned_exported_symbol`` (``buildsource.
-crosscheck.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first because it
-needs no public/internal boundary evidence; only the ELF export table +
-version-definition section already present in every ELF ``AbiSnapshot``) and
-``private_header_leak`` (``CHECK_PRIVATE_HEADER_LEAK``) landed first. This
-slice adds the four checks plan §5 P4 named as blocked on a public/internal
-boundary: ``exported_not_public``, ``public_not_exported``,
-``rtti_for_internal_type``, and ``public_to_internal_dependency`` (plan §3
-rows 3-5). P4 itself -- deriving that boundary for `compare()` with no new
-CLI flag -- is solved *upstream* of this module, not here: every check below
-still gates on the check-local evidence signal already baked onto each
-snapshot (``crosscheck._origin_resolvable``/an attached L5 graph), unchanged.
-What is new is *how a `compare()`-produced snapshot gets a resolvable origin
-at all* without ``scan --public-header-dir``: a ``-H``/``--header``
-*directory* argument already fed ``provenance.apply_provenance`` before this
-PR (unchanged -- ``service_compare_pipeline._public_header_sets`` already
+**Scope: all eleven checks, fully migrated.** ``unversioned_exported_symbol``
+(``buildsource.crosscheck.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first
+because it needs no public/internal boundary evidence; only the ELF export
+table + version-definition section already present in every ELF
+``AbiSnapshot``) and ``private_header_leak`` (``CHECK_PRIVATE_HEADER_LEAK``)
+landed first. A second slice added the four checks plan §5 P4 named as
+blocked on a public/internal boundary: ``exported_not_public``,
+``public_not_exported``, ``rtti_for_internal_type``, and
+``public_to_internal_dependency`` (plan §3 rows 3-5). P4 itself -- deriving
+that boundary for `compare()` with no new CLI flag -- was solved *upstream*
+of this module, not here: every check below still gates on the check-local
+evidence signal already baked onto each snapshot (``crosscheck.
+_origin_resolvable``/an attached L4/L5 fact), unchanged. What that slice
+added was *how a `compare()`-produced snapshot gets a resolvable origin at
+all* without ``scan --public-header-dir``: a ``-H``/``--header`` *directory*
+argument already fed ``provenance.apply_provenance`` before that PR
+(unchanged -- ``service_compare_pipeline._public_header_sets`` already
 splits ``-H`` into files/directories via ``header_utils.
 split_public_header_inputs`` and folds any directory into the provenance
 set; note this is a pre-existing, narrower rule than ``scan
 --public-header-dir``'s own ``workflows.scan_config.public_provenance_set``
 -- a lone ``-H`` *file* with no directory still opts ``compare`` into
-classification today, unlike ``scan``, and this PR leaves that
+classification today, unlike ``scan``, and that PR left that
 `compare`-specific behavior exactly as it found it rather than
-retroactively tightening it). This PR adds a second source, a project's
+retroactively tightening it), plus a second source, a project's
 ``.abicheck.yml`` ``scope.public_header_dirs`` list (``buildsource.
 build_config.BuildConfig.public_header_dirs``), threaded through
 ``cli_compare_helpers.run_compare`` -> ``cli_resolve.
@@ -52,13 +53,24 @@ weaken the directory-vs-file asymmetry ``scan --public-header-dir`` itself
 still implements verbatim via ``cli_scan_baseline._public_provenance_set``
 (``workflows.scan_config.public_provenance_set``). With neither source
 present, every declaration stays ``ScopeOrigin.UNKNOWN`` exactly as before,
-and each of the four checks below evidence-gates to ``NOT_EVALUATED`` per
-side rather than fabricating a finding -- the checks themselves needed no
-change for this, since they already gated on the same per-snapshot signal
+and each of those four checks evidence-gates to ``NOT_EVALUATED`` per side
+rather than fabricating a finding -- the checks themselves needed no change
+for this, since they already gated on the same per-snapshot signal
 ``private_header_leak`` does.
-No other §3 row migrates in this slice; see
-:func:`compute_cross_source_evolution`'s own docstring for exactly how to
-extend it further.
+
+This slice adds the remaining five checks (plan §3 #3's last row): ``header_
+build_context_mismatch`` and ``odr_type_variant`` (need only an attached L3
+build-evidence / L4 source-ABI-surface fact, no public/internal boundary at
+all), ``identity_collision_detected`` (an L4 surface fact), and the two
+evidence-*coherence* checks ``compile_context_conflict`` and ``source_
+surface_dso_mismatch`` (an L3/L4 fact respectively). None of the five needed
+any P4-shaped boundary-derivation work: each already gates on evidence a
+`compare()`-produced snapshot can carry today (an embedded ``build_source``
+pack with build evidence / a source-ABI surface), the same way ``odr_type_
+variant``'s sibling checks above gate on header provenance. With every row
+of plan §3 #3 closed, this module's own extension point (below) is done for
+now -- a future new cross-source check registers here the same way, but
+there is no more backlog to work through.
 
 **Per-check identity, not a bare ``Change.symbol`` key.** A first version of
 this module keyed every check's OLD/NEW pairing on ``symbol`` alone, on the
@@ -98,6 +110,43 @@ identity would silently read that as one continuous ``PERSISTENT`` finding
 instead of the true resolved-old-type/introduced-new-type pair --
 mirroring ``private_header_leak``'s own reasoning even though the
 within-one-run collision it specifically guards against cannot happen here.
+
+The five checks this module's second slice adds need the identical
+treatment applied per-check, not a single shared rule:
+
+- ``header_build_context_mismatch`` and ``source_surface_dso_mismatch`` --
+  default identity is correct. Each emits **at most one** finding per
+  snapshot (a single aggregate finding over every ABI-relevant build flag,
+  and a single "surface maps to none of this binary's exports" finding
+  respectively), so ``symbol`` alone (``""``/the surface's own library name)
+  can never collide within one run.
+- ``odr_type_variant`` -- one finding per recorded L4 ``odr_conflicts``
+  entry, keyed on ``Change.symbol`` (the conflicting type's qualified name)
+  alone. But the same type name can carry more than one recorded conflict
+  when it is declared/defined across more than one header (each entry names
+  its own ``header``, stamped onto ``Change.source_location``) -- a bare
+  ``symbol`` identity would collapse two genuinely distinct per-header
+  conflicts sharing one type name onto a single OLD/NEW pairing. Registers
+  ``(symbol, source_location)``.
+- ``identity_collision_detected`` -- one finding per recorded L4 ``identity_
+  collisions`` entry, keyed on ``Change.symbol`` (the colliding declaration's
+  qualified name). The same qualified name can plausibly collide onto more
+  than one distinct identity key across separate USR pairs (``Change.
+  new_value``) -- same shape as ``private_header_leak``'s own motivating
+  case. Registers ``(symbol, new_value)``.
+- ``compile_context_conflict`` -- one finding per conflicting ABI-flag family
+  *or* per conflicting `#define` value, all keyed on ``Change.symbol`` (the
+  build target's own label). A single build target can carry **more than
+  one** conflict at once (e.g. disagreeing on both ``-frtti``/``-fno-rtti``
+  *and* a `#define` value) -- these are two independent findings sharing one
+  target label, the identical "more than one finding per symbol" shape
+  ``private_header_leak``/``public_to_internal_dependency`` already
+  motivated. ``new_value`` alone is not enough to disambiguate here (a flag
+  conflict's ``new_value`` is the negative flag spelling, a define
+  conflict's is the joined value list -- either could in principle collide
+  with the other), so this check registers the fuller ``(symbol, old_value,
+  new_value)``.
+
 A check whose own identity needs more than ``symbol`` registers its own
 identity function here rather than inventing a second folding algorithm.
 
@@ -114,11 +163,16 @@ from __future__ import annotations
 from collections.abc import Callable, Hashable
 
 from ..buildsource.crosscheck import (
+    CHECK_COMPILE_CONTEXT_CONFLICT,
     CHECK_EXPORTED_NOT_PUBLIC,
+    CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
+    CHECK_IDENTITY_COLLISION,
+    CHECK_ODR_TYPE_VARIANT,
     CHECK_PRIVATE_HEADER_LEAK,
     CHECK_PUBLIC_NOT_EXPORTED,
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
     CHECK_RTTI_FOR_INTERNAL_TYPE,
+    CHECK_SOURCE_SURFACE_DSO_MISMATCH,
     CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CrosscheckConfig,
     run_crosschecks,
@@ -149,6 +203,9 @@ _IDENTITY_FUNCS: dict[str, Callable[[Change], Hashable]] = {
     CHECK_PRIVATE_HEADER_LEAK: lambda c: (c.symbol, c.new_value),
     CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY: lambda c: (c.symbol, c.new_value),
     CHECK_RTTI_FOR_INTERNAL_TYPE: lambda c: (c.symbol, c.new_value),
+    CHECK_ODR_TYPE_VARIANT: lambda c: (c.symbol, c.source_location),
+    CHECK_IDENTITY_COLLISION: lambda c: (c.symbol, c.new_value),
+    CHECK_COMPILE_CONTEXT_CONFLICT: lambda c: (c.symbol, c.old_value, c.new_value),
 }
 
 #: Checks this module knows how to fold into an evolution-stated finding
@@ -157,7 +214,8 @@ _IDENTITY_FUNCS: dict[str, Callable[[Change], Hashable]] = {
 #: :data:`_IDENTITY_FUNCS` above *unless* it shares
 #: ``unversioned_exported_symbol``'s "at most one finding per symbol"
 #: guarantee (see the module docstring's "Per-check identity" note) --
-#: nothing else in this module's folding logic changes.
+#: nothing else in this module's folding logic changes. All eleven
+#: ``crosscheck.ALL_CHECKS`` entries are registered here now (plan §3 #3).
 CROSS_SOURCE_EVOLUTION_CHECKS: frozenset[str] = frozenset(
     {
         CHECK_UNVERSIONED_EXPORTED_SYMBOL,
@@ -166,6 +224,11 @@ CROSS_SOURCE_EVOLUTION_CHECKS: frozenset[str] = frozenset(
         CHECK_PUBLIC_NOT_EXPORTED,
         CHECK_RTTI_FOR_INTERNAL_TYPE,
         CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+        CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
+        CHECK_ODR_TYPE_VARIANT,
+        CHECK_IDENTITY_COLLISION,
+        CHECK_COMPILE_CONTEXT_CONFLICT,
+        CHECK_SOURCE_SURFACE_DSO_MISMATCH,
     }
 )
 

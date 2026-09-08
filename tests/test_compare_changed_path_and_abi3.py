@@ -336,7 +336,6 @@ class TestSetOnlyFlagWarnings:
         from abicheck.frontends.cli.operand_diagnostics import _warn_unused_set_flags
 
         _warn_unused_set_flags(  # type: ignore[arg-type]
-            jobs_explicit=kwargs.get("jobs_explicit", False),
             dso_only=kwargs.get("dso_only", False),
             output_dir=kwargs.get("output_dir"),
             select=kwargs.get("select", ()),
@@ -349,7 +348,6 @@ class TestSetOnlyFlagWarnings:
     @pytest.mark.parametrize(
         ("kwargs", "flag"),
         [
-            ({"jobs_explicit": True}, "-j/--jobs"),
             ({"dso_only": True}, "--dso-only"),
             ({"output_dir": Path("out")}, "--output-dir"),
             ({"select": ("libfoo.so",)}, "--select"),

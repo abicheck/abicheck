@@ -140,7 +140,7 @@ Beyond the core `compare`/`dump` flow:
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
 - [Output Formats](output-formats.md) — `--view show=...` filtering,
-  `--profile quick`'s one-line summary, `--view leaf|impact`,
+  `--format oneline`'s one-line summary, `--view leaf|impact`,
   redundancy filtering, SARIF/JUnit output, evidence-tier confidence, JSON
   schema.
 - `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
@@ -151,50 +151,38 @@ Beyond the core `compare`/`dump` flow:
   [Debian Symbols File Integration](debian-symbols.md).
 
 `--severity-*` (controlling exit codes and report labels) is covered in full
-on [Severity Configuration](severity.md); `--profile` below is core CLI
-flag mechanics, so it stays on this page.
+on [Severity Configuration](severity.md).
 
-#### `--profile`: one token for a whole workflow
+#### There is no `--profile` shortcut
 
-Common invocations bundle the same handful of flags. `--profile NAME` expands
-to a named set of workflow defaults so you don't retype them (ADR-040). An
-explicit flag always overrides the profile, so a profile is a starting point,
-not a straitjacket.
-
-| Profile | Expands to | Use when |
-|---------|-----------|----------|
-| `ci-gate` | `--depth headers --format review --severity-preset default` | Blocking a PR in CI |
-| `release-cut` | `--depth source --format markdown` (recommendation always shown) | Deciding a version bump at release time |
-| `quick` | `--depth binary` (one-line summary) | A fast "just tell me" look |
-
-Precedence is **explicit flag > profile > project config > default**: a
-`--profile` is a per-run choice you typed, so it overrides `.abicheck.yml`
-defaults, while any flag you type still overrides the profile. Public-surface
-scoping is on by default, so the profiles don't restate it.
-
-Profiles are **single-pair-only** — they bundle single-pair knobs (`--depth`,
-`--severity-preset`, the `review` digest) that the directory/package *release
-fan-out* doesn't accept. Passing `--profile` with two directories/packages is a
-usage error; configure release defaults (format, severity) in
-`.abicheck.yml`, which the fan-out reads.
+An earlier revision offered `--profile NAME` (`ci-gate`/`release-cut`/`quick`)
+to bundle a handful of flags into one token (ADR-040). It was removed
+(ADR-068 D5 / plan Phase 7e): it bundled three independent axes — evidence
+depth, report rendering, and CI gate policy — behind one word, and a
+rendering choice may never carry a gate setting. State the three
+independently instead:
 
 ```bash
-# CI gate — equivalent to the three flags in the table
-abicheck compare old.json new.json --profile ci-gate
+# What --profile ci-gate used to expand to
+abicheck compare old.json new.json --depth headers --format review \
+  --severity-preset default
 
-# Start from the release-cut profile but force JSON output (explicit flag wins)
-abicheck compare old.json new.json --profile release-cut --format json
+# What --profile release-cut used to expand to
+abicheck compare old.json new.json --depth source --format markdown
+
+# What --profile quick used to expand to (--format oneline replaces the
+# one-line summary; there is no depth-bundling replacement)
+abicheck compare old.json new.json --format oneline
 ```
 
-> `--view show=...` filtering, `scope.show_redundant: true`, `--profile quick`'s
+A project that wants `ci-gate`'s behavior on every run states depth, view,
+and severity in `.abicheck.yml` instead of retyping a preset.
+
+> `--view show=...` filtering, `scope.show_redundant: true`, `--format oneline`'s
 > one-line summary format, and `--view leaf|impact` are covered in full
 > on [Output Formats](output-formats.md). `--view show=...`/`show_redundant`/
 > `--view leaf|impact|root-cause` are display-only and do not affect the verdict or exit
-> code. `--profile quick` is not purely display-only, though: it is also an
-> *analysis* profile (its `--depth binary` skips deeper evidence collection),
-> so it can change coverage and findings, not just the summary's shape —
-> an explicit `--depth` still overrides it, same as any other profile-bundled
-> flag.
+> code.
 
 ### 3) Mixed mode: snapshot baseline vs live build
 

@@ -13,7 +13,9 @@
 > public` only once [`plans/public-contract-default.md`](../plans/public-contract-default.md)'s
 > open relevance defects close, never as CLI cleanup.
 
-**Status:** Accepted — phased implementation (Phase A run profiles + Phase B
+**Status:** Accepted — phased implementation (Phase A run profiles **landed,
+then reversed and removed 2026-09-07 per the amendment above** — `--profile`
+and `COMPARE_PROFILES` are gone, no config-key replacement; Phase B
 evidence-family collapse landed; Phase C Lever-1 remainder landed except the
 `ast-frontend` carve-out; Phase D landed as a constraint-aware subset —
 debug-resolution + `--show-redundant` demoted to config, toolchain and
@@ -194,7 +196,9 @@ its boundary normalization, its tests, and its docs together) so the branch
 is always shippable — a hard break is salami-sliced by concept, never left
 half-migrated with red tests.
 
-* **Phase A — Lever 3 (profiles).** Additive; no removals. *(landed)*
+* **Phase A — Lever 3 (profiles).** Additive; no removals. *(landed, then
+  reversed and removed 2026-09-07 — see the amendment at the top of this
+  ADR; `one-comparison-product.md` Phase 7e)*
 * **Phase B — Lever 1 evidence family.** `header`, `include`, `sources`,
   `build-info` side-aware (the primary flow). Highest-traffic concepts.
   *(landed — `COMPARE_FLAG_BUDGET_BASE` 76→70; the unregistered release engine

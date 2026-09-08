@@ -64,14 +64,12 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     ),
     # Local-ELF debug-resolution family: registered but *not* required either — it
     # resolves local ELF debug artifacts the package/snapshot-oriented commands
-    # do not take.
+    # do not take. ``--dwarf-only``/``--debuginfod``/``--debuginfod-url``/
+    # ``--debug-format`` were hidden, config-backed duplicates removed outright
+    # in ADR-068 D5 / Phase 7a; only the coarse ``--debug-root`` remains.
     "debug_resolution": frozenset(
         {
-            "--dwarf-only",
             "--debug-root",
-            "--debuginfod",
-            "--debuginfod-url",
-            "--debug-format",
         }
     ),
 }
@@ -166,7 +164,18 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: no CLI override at all (like ``--show-redundant`` above) — a stable,
 #: reviewed-in-a-PR release-topology property, not a per-run input, per this
 #: plan's own "belongs somewhere else" test.
-COMPARE_FLAG_BUDGET_BASE = 55
+#: Lowered 55→48 by Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1):
+#: ``--ast-frontend``/``--compiler``/``--compiler-prefix``/
+#: ``--compiler-option``/``--sysroot``/``--nostdinc`` (the original
+#: ``@compile_context_options`` bulk fold this ledger's own "60→66" note
+#: above describes) and ``--lang`` (part of the base surface since before
+#: this ledger existed) are all gone from ``compare``'s CLI entirely — no
+#: escape hatch, ``.abicheck.yml``'s ``compile:`` block is their only
+#: source now (−7). The three surviving per-flag ``COMPARE_FLAG_BUDGET_
+#: RAISES`` entries for this same family (``--allow-ast-frontend-fallback``/
+#: ``--allow-unsupported-castxml``/``--frontend-context``) are removed in
+#: the same change, not folded into ``BASE``.
+COMPARE_FLAG_BUDGET_BASE = 48
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable
@@ -175,11 +184,6 @@ COMPARE_FLAG_BUDGET_BASE = 55
 #: ``compare`` option, so demoting one to hidden/config means removing its entry
 #: (and lowering ``BASE`` if it belonged to the base surface).
 COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
-    "--allow-ast-frontend-fallback": (
-        "Explicitly permits a per-run semantic fallback from CastXML to Clang "
-        "when the selected CastXML toolchain cannot parse the headers. This is "
-        "an invocation-specific risk decision, not a stable project default."
-    ),
     "--post-manifest": (
         "G23 / #492: scopes the comparison to a POST Python export manifest's "
         "committed ABI surface. A per-run scoping input (which manifest to hold "
@@ -195,12 +199,6 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "version-requirement RISK findings into decidable COMPATIBLE/BREAKING "
         "verdicts. The matrix varies per deployment target checked, so it is a "
         "per-run input, not a stable project setting."
-    ),
-    "--profile": (
-        "ADR-040 Lever 3: a single per-run bundle of workflow defaults "
-        "(ci-gate/release/quick) that explicit flags always override. One visible "
-        "flag replaces the habit of typing 4-6; the reductions in ADR-040 Levers "
-        "1-2 lower BASE to bring the net well below today."
     ),
     "--write": (
         "Emits a second output format from the same comparison run to its own "
@@ -232,35 +230,17 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "explicit required-entrypoint contract for a plugin-host pairing. Varies "
         "per run (which symbols a given host resolves), not a project setting."
     ),
-    "--required-symbols": (
-        "ADR-043: file form of --required-symbol (one symbol per line). Same "
-        "per-run rationale."
-    ),
     "--diagnostic-comparison": (
         "ADR-050 D2: downgrades a comparability-gate hard failure (mismatched "
         "profile/scope ExtractionContract fingerprints) into a tentative diff "
         "for this one invocation. Whether a given OLD/NEW pair happens to be "
         "incomparable varies per run, not a stable project setting."
     ),
-    "--allow-unsupported-castxml": (
-        "Explicitly permits proceeding with a CastXML build outside "
-        "castxml_policy's supported version range for this one invocation "
-        "instead of aborting before headers are parsed. Same category as "
-        "--allow-ast-frontend-fallback: an invocation-specific risk decision "
-        "(exploratory-mode reproduction of a legacy toolchain), not a stable "
-        "project default."
-    ),
     "--dump-manifest": (
         "ADR-050 D3: a real multi-translation-unit dump for one side, in "
         "place of a single -H/--header list. Which side(s) need a manifest "
         "(and which manifest) varies per comparison, not a stable project "
         "setting."
-    ),
-    "--frontend-context": (
-        "ADR-050 D3/D5: which AST context the L2 header frontend should "
-        "target (host, or a future device/DPC++ selector). A per-run "
-        "extraction-target choice, not a stable project setting -- like "
-        "--ast-frontend."
     ),
     "--include-system-declarations": (
         "Shared with dump (cli_options.include_dependencies_option): whether "

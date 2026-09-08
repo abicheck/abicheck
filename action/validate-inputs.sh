@@ -28,6 +28,7 @@ NEW_LIBRARY="${INPUT_NEW_LIBRARY:-}"
 NEW_LIBRARY_SET="${INPUT_NEW_LIBRARY_SET:-}"
 OLD_LIBRARY="${INPUT_OLD_LIBRARY:-}"
 UPLOAD_SARIF="${INPUT_UPLOAD_SARIF:-false}"
+LANG_INPUT="${INPUT_LANG:-}"
 AST_FRONTEND="${INPUT_AST_FRONTEND:-}"
 GCC_PATH="${INPUT_GCC_PATH:-}"
 GCC_PREFIX="${INPUT_GCC_PREFIX:-}"
@@ -162,26 +163,39 @@ case "$MODE" in
           _fail "mode: compare does not support format: $FORMAT with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') — only 'json', 'markdown', and 'junit' are available for a directory/package comparison."
         fi
       elif [[ "$FORMAT" != "json" && "$FORMAT" != "markdown" && "$FORMAT" != "sarif" \
-            && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" ]]; then
-        _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', and 'review' are supported."
+            && "$FORMAT" != "html" && "$FORMAT" != "junit" && "$FORMAT" != "review" \
+            && "$FORMAT" != "oneline" ]]; then
+        _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', 'review', and 'oneline' are supported."
       fi
     fi
-    # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc)
-    # are rejected outright by run.sh for a directory/package operand — the
-    # per-library release fan-out never threads a CompileContext to each
-    # pair's header dump — so mirror that check here too (Codex review):
-    # without it, a workflow with a slow dependency-install step still
-    # passes this fail-fast validation and only errors after setup begins,
-    # reopening the exact silent-fallback-until-late-failure bug this
-    # script exists to prevent. "auto" is the documented no-op spelling of
-    # ast-frontend (same default resolution as leaving it unset) and must
-    # not trip this the way a real frontend choice does — mirrors run.sh.
+    # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/
+    # nostdinc) are rejected outright by run.sh for a directory/package
+    # operand — the per-library release fan-out never threads a
+    # CompileContext to each pair's header dump — so mirror that check here
+    # too (Codex review): without it, a workflow with a slow dependency-
+    # install step still passes this fail-fast validation and only errors
+    # after setup begins, reopening the exact silent-fallback-until-late-
+    # failure bug this script exists to prevent. "auto" is the documented
+    # no-op spelling of ast-frontend (same default resolution as leaving it
+    # unset) and must not trip this the way a real frontend choice does —
+    # mirrors run.sh. Phase 7 (one-comparison-product.md §4.1) removed all
+    # of these flags from compare's CLI, forwarded via a synthesized
+    # --config compile: block instead (run.sh's add_compile_context_flags,
+    # only reachable from the single-pair path) -- lang joined this group
+    # then, since it would otherwise be silently dropped for a
+    # directory/package operand rather than rejected.
     if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
        || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
-      if [[ (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
+      # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is
+      # the *default*, not a user override, so (mirroring the identical
+      # "auto" carve-out for ast-frontend just above) it must not by itself
+      # trip this guard (CodeRabbit review, PR #1146, finding #6; run.sh's
+      # own release-operand predicate carries the same fix).
+      if [[ (-n "$LANG_INPUT" && "$LANG_INPUT" != "c++") \
+            || (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
             || -n "$GCC_PATH" || -n "$GCC_PREFIX" || -n "$GCC_OPTIONS" \
             || -n "$SYSROOT" || "$NOSTDINC" == "true" ]]; then
-        _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
+        _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       fi
     fi
     # P0.4: require-complete-analysis is rejected outright by run.sh for a
@@ -220,7 +234,7 @@ if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
 fi
 
 # debug-info1/2, devel-pkg1/2, dso-only, include-private-dso, keep-extracted,
-# fail-on-removed-library, jobs: compare mode, directory/package operands only
+# fail-on-removed-library: compare mode, directory/package operands only
 # (action/run.sh's `_is_release_style_operand()` guard). Name/value kept as
 # separate parallel arrays (not a single colon-joined string) since these
 # values are often paths and may legitimately contain a colon themselves.
@@ -249,11 +263,6 @@ for _i in "${!_bool_input_names[@]}"; do
     _warn "${_bool_input_names[$_i]} is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
   fi
 done
-
-_JOBS="${INPUT_JOBS:-0}"
-if [[ "$_JOBS" != "0" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
-  _warn "jobs is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
-fi
 
 # used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/

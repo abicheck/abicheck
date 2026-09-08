@@ -223,7 +223,7 @@ Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, 
 pip install abicheck
 ```
 
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `--ast-frontend clang` (or `ABICHECK_AST_FRONTEND=clang`), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `ABICHECK_AST_FRONTEND=clang` (or `.abicheck.yml`'s `compile.frontend: clang` on `dump`/`compare`; `scan` also has its own `--ast-frontend clang` flag), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 
@@ -327,7 +327,7 @@ print(result.diff.verdict)       # e.g. Verdict.BREAKING
 print(len(result.diff.changes))  # number of detected changes
 ```
 
-`run_compare` returns a `CompareResult` with `diff`, `old_snapshot`, `new_snapshot`, and the resolved suppressions. The CLI and the API resolve through the same typed request objects and compatibility semantics, so equivalent resolved inputs give a script or an AI agent the same answer a human gets at the terminal; note that the CLI additionally folds in a discovered `.abicheck.yml`, `--profile`, and `--pack` before running, which a bare `run_compare` call does not. There is no separate protocol server; agents use the CLI's JSON/SARIF output or this API directly. A portable [Agent Skill](https://abicheck.github.io/abicheck/use/agent-skills/) (an internal candidate, not yet externally published) is generated from [`skills-src/`](skills-src/check-abi-compatibility/) with `python scripts/install_dev_skill.py`, so a coding agent can answer "will this break existing consumers?" on its own.
+`run_compare` returns a `CompareResult` with `diff`, `old_snapshot`, `new_snapshot`, and the resolved suppressions. The CLI and the API resolve through the same typed request objects and compatibility semantics, so equivalent resolved inputs give a script or an AI agent the same answer a human gets at the terminal; note that the CLI additionally folds in a discovered `.abicheck.yml` and `--pack` before running, which a bare `run_compare` call does not. There is no separate protocol server; agents use the CLI's JSON/SARIF output or this API directly. A portable [Agent Skill](https://abicheck.github.io/abicheck/use/agent-skills/) (an internal candidate, not yet externally published) is generated from [`skills-src/`](skills-src/check-abi-compatibility/) with `python scripts/install_dev_skill.py`, so a coding agent can answer "will this break existing consumers?" on its own.
 
 Snapshots, custom policies, rendering, and the CLI/API parity table: [Python API guide](https://abicheck.github.io/abicheck/use/python-api/).
 

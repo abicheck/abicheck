@@ -22,7 +22,6 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 
 from __future__ import annotations
 
-import logging
 import os
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -43,6 +42,7 @@ from .frontends.cli.options.params import (
 )
 
 if TYPE_CHECKING:
+    from .buildsource.build_config import BuildConfig
     from .service_scan import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
@@ -660,6 +660,30 @@ _enable_unsupported_castxml_for_command = _scoped_env_flag_callback(
 )
 
 
+def apply_compile_config_env_toggles(
+    ctx: click.Context, bc: BuildConfig | None
+) -> None:
+    """Apply ``compile.ast_frontend_fallback``/``compile.allow_unsupported_castxml``.
+
+    Phase 7 (one-comparison-product.md §4.1/§4.2): ``--allow-ast-frontend-
+    fallback``/``--allow-unsupported-castxml`` are removed from ``compare``/
+    ``dump`` (CONFIG class -- no CLI spelling survives, ADR-068 D5 guard #2).
+    Both were already pure per-invocation env-var togglers
+    (:func:`_scoped_env_flag_callback`), so a ``.abicheck.yml`` ``compile:``
+    block setting either to ``true`` reuses those same callbacks directly
+    (scoped to *ctx* the identical way, restored via ``ctx.call_on_close``)
+    rather than re-implementing the set/restore dance a second time.
+    ``scan`` is unaffected: it keeps both flags, which still win over a
+    config ``true`` simply by also being applied (idempotent env-var set).
+    """
+    if bc is None:
+        return
+    if bc.compile_ast_frontend_fallback:
+        _enable_ast_fallback_for_command(ctx, None, True)  # type: ignore[arg-type]
+    if bc.compile_allow_unsupported_castxml:
+        _enable_unsupported_castxml_for_command(ctx, None, True)  # type: ignore[arg-type]
+
+
 #: The AST frontends ``--ast-frontend`` accepts, in one place so the sided and
 #: single-valued spellings of the option cannot drift apart.
 AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
@@ -834,6 +858,7 @@ def merge_compile_config(
     *,
     frontend_explicit: bool = False,
     nostdinc_explicit: bool = False,
+    frontend_context_explicit: bool = False,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
@@ -862,7 +887,10 @@ def merge_compile_config(
     the project's ``compile:`` block for L2 the same way ``embed_build_source``
     honors its other non-executable settings for L3-L5 (Codex review). Only the
     non-executable ``compile:`` block is read here; ``build.query`` still requires
-    an explicit trusted ``--config`` (ADR-032 D5).
+    an explicit trusted ``--config`` (ADR-032 D5). ``compile.compiler`` gets the
+    identical trust gate for the identical reason: it names an executable to
+    invoke, so an auto-discovered config never selects one (CodeRabbit review,
+    PR #1146; see the ``compile.compiler`` handling below).
 
     A parse error is fail-loud for an **explicit** ``--config`` (``ClickException``)
     — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
@@ -929,6 +957,12 @@ def merge_compile_config(
         if bc.compile_std:
             config_tokens.append(f"-std={bc.compile_std}")
         config_tokens += [f"-D{d}" for d in bc.compile_defines]
+        # Phase 7 (compile.options — the demoted --compiler-option): raw
+        # pass-through tokens, appended after std/defines synthesis and
+        # before any surviving CLI --compiler-option tokens (scan only,
+        # since compare/dump no longer have the flag), same "config first,
+        # CLI wins a repeated flag" precedence as std/defines above.
+        config_tokens += list(bc.compile_options)
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI
@@ -947,19 +981,55 @@ def merge_compile_config(
     # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
     # direction; an unset flag inherits the config value (Codex review).
     nostdinc = cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
+    # Phase 7 (compile.compiler — the demoted --compiler/--compiler-prefix
+    # pair, merged into one config spelling): only consulted when the CLI
+    # gave neither (still possible on `scan`, which keeps both flags). A
+    # value ending in "-" is a cross-toolchain prefix; anything else is a
+    # full compiler path.
+    #
+    # Security (CodeRabbit review, PR #1146): this selects the executable
+    # invoked for header extraction, the same "arbitrary command from a
+    # config the operator didn't choose" shape ADR-032 D5 already gates for
+    # `build.query` — an auto-discovered `.abicheck.yml` (found by directory
+    # search, e.g. inside a fork PR's own branch content in CI) is never
+    # trusted to name it; only a config the operator explicitly passed via
+    # `--config` may. Ignored-not-silently-dropped: a clear diagnostic
+    # explains the skip, mirroring `build.query`'s own
+    # "ignored from auto-discovered .abicheck.yml" message.
+    gcc_path = cli_ctx.gcc_path
+    gcc_prefix = cli_ctx.gcc_prefix
+    if gcc_path is None and gcc_prefix is None and bc.compile_compiler:
+        if not explicit_config:
+            click.echo(
+                "warning: compile.compiler ignored from auto-discovered "
+                f"{cfg}; pass a trusted config with --config to permit "
+                "selecting a compiler executable.",
+                err=True,
+            )
+        elif bc.compile_compiler.endswith("-"):
+            gcc_prefix = bc.compile_compiler
+        else:
+            gcc_path = bc.compile_compiler
+    # Phase 7 (compile.frontend_context — the demoted --frontend-context):
+    # CLI > config, same explicitness-gated precedence as --nostdinc/
+    # --ast-frontend above. `scan` still carries a real Click default of
+    # "host" for this flag with no explicitness tracking of its own, so it
+    # always passes `frontend_context_explicit=False` here too -- a purely
+    # additive fallback with no prior config key to have collided with.
+    frontend_context = (
+        cli_ctx.frontend_context
+        if frontend_context_explicit
+        else (bc.compile_frontend_context or cli_ctx.frontend_context)
+    )
     merged = CompileContext(
-        gcc_path=cli_ctx.gcc_path,
-        gcc_prefix=cli_ctx.gcc_prefix,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=frontend,
-        # No config-file equivalent of --frontend-context exists (ADR-050
-        # D5) -- config merging only ever narrows CLI-unset fields, so the
-        # CLI-resolved value must simply survive the merge instead of
-        # silently reverting to CompileContext's "host" default.
-        frontend_context=cli_ctx.frontend_context,
+        frontend_context=frontend_context,
     )
     includes = tuple(cli_includes) + tuple(
         (base / p) if not Path(p).is_absolute() else Path(p)
@@ -1166,6 +1236,11 @@ def resolve_compile_context(
         sources=sources,
         frontend_explicit=_shared_frontend_explicit(ctx),
         nostdinc_explicit=_explicit("nostdinc"),
+        # `_explicit` reads `ctx.get_parameter_source`, which safely answers
+        # "not COMMANDLINE" for a parameter name a command no longer
+        # declares at all (compare/dump, Phase 7) rather than raising, so
+        # this always resolves False there and the config value applies.
+        frontend_context_explicit=_explicit("frontend_context"),
     )
 
 
@@ -1351,17 +1426,22 @@ def env_matrix_option(func: F) -> F:
 
 
 def set_input_options(func: F) -> F:
-    """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``
+    """Set-input fan-out knobs: ``--dso-only`` / ``--output-dir``
     / ``--select``/``--select-required``.
 
     ADR-037 D7 folds ``compare-release`` into ``compare`` via input-type
     dispatch: when ``compare``'s operands are directories or packages it fans out
-    to a per-library comparison, and these flags tune that fan-out (parallel
-    jobs, executable filtering, per-library report directory, and -- ADR-065
+    to a per-library comparison, and these flags tune that fan-out (executable
+    filtering, per-library report directory, and -- ADR-065
     S1 -- an explicit member selection). On single-file
     inputs they are a no-op and ``compare`` warns. Declared once here so the
     dispatch and the deprecated ``compare-release`` alias share one surface.
     Applied bottom-up, so listed in reverse of displayed order.
+
+    ``-j/--jobs`` used to be part of this family (ADR-068 D5 / plan Phase
+    7h): removed outright -- the fan-out already auto-detects the CPU count
+    and clamps it to available memory, so a manual override was a tuning
+    detail, not a per-run decision.
     """
     func = click.option(
         "--select-required",
@@ -1397,18 +1477,6 @@ def set_input_options(func: F) -> F:
         is_flag=True,
         default=False,
         help="Only compare shared objects, skip executables (directory/package inputs only).",
-    )(func)
-    func = click.option(
-        "-j",
-        "--jobs",
-        "jobs",
-        type=int,
-        default=0,
-        show_default=True,
-        help="Parallel library comparisons for directory/package inputs "
-        "(0 = auto-detect CPU count, clamped to fit available memory -- see "
-        "ABICHECK_RELEASE_JOB_MEM_GIB -- the default). An explicit positive "
-        "value is never memory-clamped.",
     )(func)
     return func
 
@@ -1463,7 +1531,7 @@ def artifact_set_options(func: F) -> F:
 #: ``compare``'s release-fanout/build-source/header-graph/evidence option
 #: groups moved to ``frontends/cli/options/release.py`` when this module
 #: reached the 2000-line hard cap -- the same split, for the same reason, as
-#: ``cli_profiles.py``/``cli_options_contract.py`` before it. Re-exported
+#: ``cli_options_contract.py`` before it. Re-exported
 #: here (``X as X``, so the re-export is explicit to mypy) because every
 #: existing caller -- and every existing test importing them from here --
 #: reaches these decorators through this module.
@@ -1472,165 +1540,7 @@ def artifact_set_options(func: F) -> F:
 #: ``cli_options_contract.py`` when this module reached the 2000-line hard
 #: cap. Re-exported here so every existing caller — the ``cli-contract``
 #: gate's own tests and ``tests/test_config_rebalance.py`` — keeps its
-#: import path, the same pattern used for ``cli_profiles.py`` below.
-from .frontends.cli.options.inventory import (  # noqa: E402
-    COMPARE_FLAG_BUDGET as COMPARE_FLAG_BUDGET,
-    COMPARE_FLAG_BUDGET_BASE as COMPARE_FLAG_BUDGET_BASE,
-    COMPARE_FLAG_BUDGET_RAISES as COMPARE_FLAG_BUDGET_RAISES,
-    FAMILY_DECORATOR as FAMILY_DECORATOR,
-    FAMILY_FLAGS as FAMILY_FLAGS,
-    INTENTIONAL_SUBSET as INTENTIONAL_SUBSET,
-    REQUIRED_FAMILIES as REQUIRED_FAMILIES,
-    VERDICT_EMITTING_COMMANDS as VERDICT_EMITTING_COMMANDS,
-    count_visible_options as count_visible_options,
-)
-
-#: ADR-040 Lever 3's run-profile *data* (the profile table, its ``--profile``
-#: option, and the receipt key) moved to ``cli_profiles.py`` when this module
-#: reached the 2000-line hard cap. Re-exported here so every existing caller
-#: — ``cli.py``'s ``compare`` wrapper and the profile tests — keeps its
-#: import path, the same pattern ``cli_helpers_compare`` already uses for its
-#: own moved helpers.
-#:
-#: The two *functions* below stayed: ``_profile_targets_set_input`` needs
-#: ``cli_resolve.classify_compare_operand``, so moving them would have made
-#: ``cli_profiles`` a new member of the CLI-registration import cycle rather
-#: than the leaf it is — a fresh SCC member for a size-cap split is exactly
-#: what the ``import-cycle-growth`` gate exists to catch, and the split works
-#: without one.
-#
-# Spelled ``X as X`` (an explicit re-export) rather than declared in an
-# ``__all__``: this module has never had one, and adding a three-name list
-# would quietly narrow what ``import *`` gives every other consumer.
-from .frontends.cli.options.profiles import (  # noqa: E402
-    COMPARE_PROFILES as COMPARE_PROFILES,
-    RUN_PROFILE_META_KEY as RUN_PROFILE_META_KEY,
-    profile_option as profile_option,
-)
-from .frontends.cli.options.release import (  # noqa: E402
-    adr027_compare_options as adr027_compare_options,
-    app_usage_scope_options as app_usage_scope_options,
-    build_source_compare_options as build_source_compare_options,
-    build_source_dump_options as build_source_dump_options,
-    debug_resolution_options as debug_resolution_options,
-    evidence_options as evidence_options,
-    release_options as release_options,
-    variant_kwargs_from_context as variant_kwargs_from_context,
-    variant_options as variant_options,
-)
-
-
-def _profile_targets_set_input(kwargs: dict[str, object]) -> bool:
-    """True when the ``compare`` operands are a directory/package (set)
-    input, *or* either operand is itself a stored ``BundleFacts`` document
-    (Codex review, PR #1060, round 13).
-
-    Mirrors the ADR-037 D7 dispatch (:func:`cli_resolve.classify_compare_operand`)
-    so profile handling matches how ``run_compare`` will actually route the
-    comparison, without duplicating the classification rules. A stored
-    ``BundleFacts`` document is not itself a directory/package operand --
-    ``classify_compare_operand`` reports it as an ordinary ``"file"`` -- but
-    it represents a whole multi-library bundle exactly the same way a
-    directory/package does, and is dispatched to the identical multi-
-    library ``compare_bundle_facts`` engine (``workflows.bundle_compare_
-    operand``), never the single-pair path a profile's knobs (``--depth``,
-    ``--severity-preset``, the ``review`` format) were designed for.
-    Without this, ``--profile quick`` on a stored/stored pair silently
-    injected e.g. ``depth="binary"`` into every library's evidence depth
-    instead of being rejected the same way a directory/package operand
-    already is.
-    """
-    from .cli_resolve import classify_compare_operand
-    from .workflows.bundle_compare_operand import looks_like_stored_bundle_facts
-
-    kinds: set[str] = set()
-    for key in ("old_input", "new_input"):
-        operand = kwargs.get(key)
-        if operand is None:
-            continue
-        path = Path(str(operand))
-        if looks_like_stored_bundle_facts(path):
-            return True
-        try:
-            kinds.add(classify_compare_operand(path))
-        except Exception:  # noqa: BLE001 - classification is best-effort here
-            # Logged rather than swallowed silently (bandit B112): an operand
-            # this classifier cannot read contributes no kind, and the real
-            # dispatch in ``run_compare`` reports it properly.
-            logging.getLogger(__name__).debug(
-                "unclassifiable operand %r", operand, exc_info=True
-            )
-    return bool(kinds & {"directory", "package"})
-
-
-def apply_compare_profile(ctx: object, kwargs: dict[str, object]) -> None:
-    """Fold the selected ``--profile`` defaults into *kwargs*, in place.
-
-    Pops ``profile`` from *kwargs* (it is a CLI-layer concept the downstream
-    ``run_compare`` signature does not take) and fills each setting the profile
-    declares **only** when the user left that option at its default.
-
-    **Profiles are single-pair-only.** A profile bundles single-pair-only knobs
-    (``--depth``, ``--severity-preset``) and single-pair report formats
-    (``review``) that the directory/package *release fan-out* deliberately does
-    not accept — the fan-out sources those from ``.abicheck.yml`` instead. Rather
-    than silently drop half a profile (the codebase rejects such flags loudly on
-    set inputs, e.g. :func:`cli_resolve._reject_evidence_flags_for_set_inputs`),
-    a ``--profile`` on directory/package operands is rejected with a message that
-    points at the config home for release defaults. This keeps the feature
-    consistent with the existing set-input contract and free of the per-key /
-    per-value special cases the fan-out would otherwise force.
-
-    **Precedence (single-pair): explicit flag > profile > project config >
-    default.** A ``--profile`` is a per-run choice the user typed on the command
-    line, so — like any typed flag — it overrides project ``.abicheck.yml``
-    defaults, while a genuinely typed flag still overrides the profile. Injection
-    is value-only and gated on ``ctx.get_parameter_source`` so an explicit flag
-    is never clobbered; the profile is **not** stamped as a command-line source
-    (nothing downstream needs the source, and not stamping keeps the mechanism
-    simple).
-    """
-    name = kwargs.pop("profile", None)
-    if not name:
-        return
-    from click.core import ParameterSource
-
-    if _profile_targets_set_input(kwargs):
-        raise click.UsageError(
-            f"--profile {name} is not supported for directory/package (release) "
-            "comparisons, or when either operand is a stored BundleFacts "
-            "document: profiles bundle single-pair-only knobs (--depth, "
-            "--severity-preset, the 'review' format). Configure release defaults "
-            "in .abicheck.yml (the fan-out reads format/severity from it), "
-            "or compare the libraries individually to use a profile."
-        )
-
-    profile = COMPARE_PROFILES[str(name)]
-    get_source = getattr(ctx, "get_parameter_source", None)
-    explicit = {
-        ParameterSource.COMMANDLINE,
-        ParameterSource.ENVIRONMENT,
-    }
-    injected: dict[str, object] = {}
-    for dest, value in profile.items():
-        src = get_source(dest) if get_source is not None else None
-        # Only fill a value the user did not set explicitly (DEFAULT / DEFAULT_MAP
-        # / unknown). An explicit --flag or a mapped env var stays untouched.
-        if src not in explicit:
-            kwargs[dest] = value
-            injected[dest] = value
-    # ADR-049 D7 gives a run profile its own precedence layer, so "nothing
-    # downstream needs the source" (above) stopped being true: an injected
-    # value is indistinguishable from a built-in default once it is in
-    # *kwargs*, and a receipt resolved without this recorded a profile's
-    # choice as a default nobody made (`cli_compare_receipt`). Recorded on
-    # the context rather than stamped as a command-line source, which would
-    # make a profile outrank the explicit flags it is documented to yield to.
-    meta = getattr(ctx, "meta", None)
-    if meta is not None:
-        meta[RUN_PROFILE_META_KEY] = {"name": str(name), "injected": injected}
-
-
+#: import path, the same pattern used for the modules re-exported below.
 #: G38 Phase 17's ``--bundle-facts-library-manifest`` option, a small,
 #: standalone leaf module (see its own docstring for why it isn't declared
 #: inline on ``compare_cmd``). Re-exported here for the same reason as
@@ -1642,11 +1552,34 @@ from .frontends.cli.options.bundle_facts import (  # noqa: E402
 
 #: ADR-049's contract-evaluation option decorator moved to
 #: ``cli_contract_options.py`` when this module reached its own 2000-line
-#: hard limit -- the same split, for the same reason, as ``cli_profiles.py``
-#: before it. Re-exported here (``X as X``, so the re-export is explicit to
-#: mypy) because it is a shared decorator callers already reach through this
-#: module, and a leaf holding option definitions never imports back.
+#: hard limit -- the same split, for the same reason, as the other
+#: ``frontends/cli/options/`` siblings. Re-exported here (``X as X``, so
+#: the re-export is explicit to mypy) because it is a shared decorator
+#: callers already reach through this module, and a leaf holding option
+#: definitions never imports back.
 from .frontends.cli.options.contract import (  # noqa: E402
     contract_options as contract_options,
     pack_option as pack_option,
+)
+from .frontends.cli.options.inventory import (  # noqa: E402
+    COMPARE_FLAG_BUDGET as COMPARE_FLAG_BUDGET,
+    COMPARE_FLAG_BUDGET_BASE as COMPARE_FLAG_BUDGET_BASE,
+    COMPARE_FLAG_BUDGET_RAISES as COMPARE_FLAG_BUDGET_RAISES,
+    FAMILY_DECORATOR as FAMILY_DECORATOR,
+    FAMILY_FLAGS as FAMILY_FLAGS,
+    INTENTIONAL_SUBSET as INTENTIONAL_SUBSET,
+    REQUIRED_FAMILIES as REQUIRED_FAMILIES,
+    VERDICT_EMITTING_COMMANDS as VERDICT_EMITTING_COMMANDS,
+    count_visible_options as count_visible_options,
+)
+from .frontends.cli.options.release import (  # noqa: E402
+    adr027_compare_options as adr027_compare_options,
+    app_usage_scope_options as app_usage_scope_options,
+    build_source_compare_options as build_source_compare_options,
+    build_source_dump_options as build_source_dump_options,
+    debug_resolution_options as debug_resolution_options,
+    evidence_options as evidence_options,
+    release_options as release_options,
+    variant_kwargs_from_context as variant_kwargs_from_context,
+    variant_options as variant_options,
 )

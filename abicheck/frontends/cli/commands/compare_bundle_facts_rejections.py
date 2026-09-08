@@ -172,12 +172,10 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             tuple(kwargs.get("used_by_apps") or ())
             + tuple(kwargs.get("used_by_manifests") or ())
         ),
-        required_symbols=(
-            tuple(kwargs.get("required_symbols_opt") or ())
-            or (
-                ("__file__",) if kwargs.get("required_symbols_file") is not None else ()
-            )
-        ),
+        # ADR-068 D5 / plan Phase 7h: the separate --required-symbols FILE
+        # flag is gone -- an '@FILE' value now arrives folded into this
+        # same tuple, so there is nothing left to OR in from a second kwarg.
+        required_symbols=tuple(kwargs.get("required_symbols_opt") or ()),
         use_cases_manifest=kwargs.get("use_cases_manifest"),
         diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
         audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
@@ -297,24 +295,24 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "supported together with a stored-bundle-facts OLD_INPUT."
         )
     if (
-        kwargs.get("debug_format_opt") is not None
-        or kwargs.get("dwarf_only") is True
-        or kwargs.get("debuginfod") is True
-        or kwargs.get("debuginfod_url") is not None
-        or kwargs.get("debug_roots")
+        kwargs.get("debug_roots")
         or kwargs.get("debug_roots_old")
         or kwargs.get("debug_roots_new")
     ):
-        # Codex review: these control which NEW-side ELF/DWARF facts get
-        # extracted (--debug-format/--dwarf-only select the debug-info
-        # source; --debuginfod/--debuginfod-url and --debug-root locate
-        # separate debug files), but compare_release_against_bundle_facts()
-        # calls service.resolve_input() with none of them -- always its own
-        # defaults, regardless of what was requested here. Rejected rather
-        # than silently comparing a different ABI surface than asked for.
+        # Codex review: --debug-root locates separate debug files, but
+        # compare_release_against_bundle_facts() calls service.resolve_input()
+        # with none of them -- always its own defaults, regardless of what was
+        # requested here. Rejected rather than silently comparing a different
+        # ABI surface than asked for.
+        #
+        # ADR-068 D5 / Phase 7a: --debug-format/--dwarf-only/--debuginfod/
+        # --debuginfod-url were hidden CLI flags and are gone entirely now
+        # (config-only via debug.format/debug.dwarf_only/debug.debuginfod/
+        # debug.debuginfod_url) -- there is no longer a kwargs key for any of
+        # them to check here at all. The equivalent config-set case is
+        # rejected below, by the debug: config-block check.
         raise click.UsageError(
-            "--debug-format/--dwarf-only/--debuginfod/--debuginfod-url/"
-            "--debug-root are not supported together with a stored-bundle-facts OLD_INPUT."
+            "--debug-root is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone as a flag (it's
     # unconditional everywhere else on `compare` now) -- nothing left to
@@ -368,17 +366,6 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "--view <mode>/--show-filtered are not supported together "
             "with a stored-bundle-facts OLD_INPUT (was --report-mode/"
             "--show-filtered)."
-        )
-    if kwargs.get("jobs"):
-        # Codex review: compare_release_against_bundle_facts() processes
-        # every matched library in a synchronous loop -- an explicit
-        # -j/--jobs N request was silently dropped. The silent default (0,
-        # "auto-detect") is left alone: unlike every other flag here,
-        # --jobs never changes the finding set/verdict/exit code, only
-        # wall-clock time, and dispatch() has no way to tell a default 0
-        # apart from the flag never having been given at all.
-        raise click.UsageError(
-            "--jobs is not supported together with a stored-bundle-facts OLD_INPUT."
         )
     if kwargs.get("no_bundle_analysis"):
         # Codex review: compare_release_against_bundle_facts() has no
@@ -453,13 +440,17 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
                 "debug_dwarf_only",
                 "debug_debuginfod",
                 "debug_debuginfod_url",
+                "debug_pdb_path",
             )
         ):
             # Same root cause as the --debug-format/--dwarf-only/
             # --debuginfod CLI-flag rejection above: CompileContext (what
             # this driver actually threads through to service.resolve_input)
-            # has no debug-format/dwarf-only/debuginfod fields at all, CLI
-            # flag or config alike.
+            # has no debug-format/dwarf-only/debuginfod/pdb-path fields at
+            # all, CLI flag or config alike -- debug.pdb_path included
+            # (CodeRabbit review, PR #1146, finding #3): the stored/stored
+            # and stored/live BundleFacts paths never consume a PDB path, so
+            # silently accepting it would look like it did something.
             _unsupported_config_blocks.append("debug:")
         if _bc.source_method is not None:
             # Codex review: source.method (s1-s6) drives run_compare's own
@@ -529,8 +520,8 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         # (cli_compare_release_helpers._release_md_bundle_findings) has
         # this identical pre-existing gap, so implementing it only here
         # would disagree with what that shared renderer already does.
-        # Rejected only when the flag is given explicitly, matching the
-        # --jobs precedent: the silent default (demangle ON) is left alone
+        # Rejected only when the flag is given explicitly: the silent
+        # default (demangle ON) is left alone
         # since json/the common per-library table never show a mangled
         # symbol at all -- only a rare bundle_* finding on a C++ symbol
         # would show one.
@@ -652,21 +643,12 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
     # neither side does any header-frontend extraction, so every one of
     # these was silently accepted and discarded rather than applied or
     # rejected.
-    if (
-        kwargs.get("compiler_path") is not None
-        or kwargs.get("compiler_prefix") is not None
-        or kwargs.get("compiler_option_tokens")
-        or kwargs.get("sysroot") is not None
-        or kwargs.get("nostdinc")
-        or kwargs.get("frontend_context") not in (None, "host")
-    ):
-        raise click.UsageError(
-            "--compiler/--compiler-prefix/--compiler-option/--sysroot/"
-            "--nostdinc/--frontend-context are not supported when both "
-            "OLD_INPUT and NEW_INPUT are stored BundleFacts documents: "
-            "neither side runs any header-frontend extraction for a compile "
-            "context to configure."
-        )
+    # Phase 7 (one-comparison-product.md §4.1): --compiler/--compiler-prefix/
+    # --compiler-option/--sysroot/--nostdinc/--frontend-context are gone from
+    # compare's CLI entirely -- an explicit --config declaring the matching
+    # compile: keys is rejected instead, by
+    # reject_explicit_compile_config_for_stored_pair below (this dispatcher
+    # already calls it for every explicit --config, stored/stored included).
     if kwargs.get("lang_explicit"):
         raise click.UsageError(
             "--lang is not supported when both OLD_INPUT and NEW_INPUT are "
@@ -703,6 +685,18 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
         or bc.compile_defines
         or bc.compile_sysroot is not None
         or bc.compile_nostdinc is not None
+        # Phase 7 (one-comparison-product.md §4.1): the compile-context
+        # fields that used to have a CLI override (--compiler/
+        # --compiler-prefix/--compiler-option/--frontend-context/
+        # --allow-ast-frontend-fallback/--allow-unsupported-castxml) are now
+        # config-only everywhere -- an explicit --config declaring any of
+        # them has exactly the same "no channel to honor it" problem the
+        # fields above already have.
+        or bc.compile_compiler is not None
+        or bc.compile_options
+        or bc.compile_ast_frontend_fallback is not None
+        or bc.compile_allow_unsupported_castxml is not None
+        or bc.compile_frontend_context is not None
     ):
         raise click.UsageError(
             f"{config_path} declares compile: settings, which are not "
@@ -714,35 +708,45 @@ def reject_explicit_compile_config_for_stored_pair(config_path: Path) -> None:
         )
 
 
-#: (Click parameter dest, CLI flag) pairs for the expose_value=False
-#: AST-override flags reject_ast_override_flags_for_stored_pair() checks --
-#: shared so the two never drift, since neither name is derivable from the
-#: other mechanically (Click's default dest derivation is one-way).
-_AST_OVERRIDE_FLAGS: tuple[tuple[str, str], ...] = (
-    ("allow_ast_frontend_fallback", "--allow-ast-frontend-fallback"),
-    ("allow_unsupported_castxml", "--allow-unsupported-castxml"),
-)
+# Phase 7 (one-comparison-product.md §4.1): --allow-ast-frontend-fallback/
+# --allow-unsupported-castxml are gone from compare's CLI entirely (CONFIG
+# class -- .abicheck.yml's compile.ast_frontend_fallback/
+# compile.allow_unsupported_castxml are their only source now, with no
+# surviving override). The former `reject_ast_override_flags_for_stored_pair`
+# rejected an explicitly-given CLI flag on a stored/stored comparison; its
+# config-key equivalent is `reject_explicit_compile_config_for_stored_pair`
+# above, which now also checks these two fields.
 
 
-def reject_ast_override_flags_for_stored_pair(ctx: click.Context) -> None:
-    """Raise ``click.UsageError`` for an explicitly-given
-    ``--allow-ast-frontend-fallback``/``--allow-unsupported-castxml`` on a
-    stored/stored comparison (Codex review, PR #1060, round 11).
+def apply_env_toggles_for_stored_pair(
+    ctx: click.Context,
+    config_path: Path | None,
+    apply_env_toggles: Any,
+) -> None:
+    """Apply ``compile.ast_frontend_fallback``/``compile.allow_unsupported_
+    castxml`` for the stored-OLD_FACTS + live-NEW_INPUT ``compare`` path.
 
-    Both flags are ``expose_value=False`` (``cli_options.
-    _scoped_env_flag_callback`` sets a scoped env var as a side effect and
-    never adds a ``kwargs`` entry at all), so ``reject_unsupported_
-    options()`` -- which reads only ``kwargs`` -- can never see either flag
-    to reject it: neither side of a stored/stored comparison runs any
-    header-frontend AST extraction for either flag to affect, so both were
-    silently accepted and had no effect. ``ctx.get_parameter_source()``
-    still answers ``COMMANDLINE`` for an ``expose_value=False`` option --
-    Click records the source at parse time regardless of exposure -- so
-    this checks the one place that survives instead of ``kwargs``."""
-    for dest, flag in _AST_OVERRIDE_FLAGS:
-        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE:
-            raise click.UsageError(
-                f"{flag} is not supported when both OLD_INPUT and NEW_INPUT "
-                "are stored BundleFacts documents: neither side runs any "
-                "header-frontend AST extraction for it to affect."
-            )
+    CodeRabbit review, PR #1146, finding #5: this dispatch path
+    (``compare_bundle_facts.resolve_dispatch_compile_context``) does real
+    header-AST extraction later (``dispatch()``'s own
+    ``compare_release_against_bundle_facts`` call), but never applied these
+    two toggles the way ``run_compare``/``dump`` do -- call this after
+    ``resolve_compile_context`` has already validated *config_path* (fail-
+    loud for an explicit ``--config``, best-effort for an auto-discovered
+    one) and before extraction runs. Split out here (rather than left
+    inline in ``compare_bundle_facts.py``) purely to keep that module under
+    its own architecture line-count cap, matching why this whole sibling
+    module exists. *apply_env_toggles* is the caller's own already-imported
+    ``cli_options.apply_compile_config_env_toggles`` -- taken as a
+    parameter rather than imported here so this validation-only module
+    doesn't gain a fresh ``cli_options`` edge (this module is not already a
+    member of the pre-existing, allowlisted CLI-registration import cycle
+    the way ``compare_bundle_facts.py`` itself already is; importing
+    ``cli_options`` directly here would grow that cycle by one node, which
+    AGENTS.md says never to do reactively).
+    """
+    if config_path is None:
+        return
+    from ....workflows.extraction import load_build_config_with_digest
+
+    apply_env_toggles(ctx, load_build_config_with_digest(config_path)[0])

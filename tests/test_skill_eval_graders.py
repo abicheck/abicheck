@@ -582,7 +582,7 @@ class TestEvidenceReading:
         [
             ["compare", "old.so", "new.so", "--used-by", "app"],
             ["compare", "old.so", "new.so", "--required-symbol", "sym"],
-            ["compare", "old.so", "new.so", "--required-symbols", "syms.txt"],
+            ["compare", "old.so", "new.so", "--required-symbol", "@syms.txt"],
         ],
     )
     def test_is_consumer_scoped_recognizes_every_dial(self, argv):
@@ -660,11 +660,11 @@ class TestEvidenceReading:
         assert "widget" not in targets
         assert "libwidget" in targets
 
-    def test_required_symbols_file_contents_contribute_targets(self, tmp_path):
-        """`--required-symbols FILE` names a file, not the symbols
+    def test_required_symbol_at_file_contents_contribute_targets(self, tmp_path):
+        """`--required-symbol @FILE` names a file, not the symbols
         themselves -- the file's own listed symbols must each become a
         target, resolved against the call's own recorded cwd (Codex
-        review, PR #808)."""
+        review, PR #808; `@FILE` merged from `--required-symbols`, 7h)."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         (workspace / "syms.txt").write_text(
@@ -675,8 +675,8 @@ class TestEvidenceReading:
                 "compare",
                 "old.so",
                 "new.so",
-                "--required-symbols",
-                "syms.txt",
+                "--required-symbol",
+                "@syms.txt",
             ],
             "cwd": str(workspace),
         }
@@ -765,20 +765,20 @@ class TestEvidenceReading:
         )
         assert {"renderer", "analytics-daemon"} <= union
 
-    def test_required_symbols_file_missing_or_unresolvable_is_a_silent_no_op(
+    def test_required_symbol_at_file_missing_or_unresolvable_is_a_silent_no_op(
         self, tmp_path
     ):
         """False-negative-over-false-positive: a workspace already gone, or
         no recorded cwd at all, must not raise and must not fabricate a
         match."""
         no_cwd = ev.consumer_scope_targets(
-            {"argv": ["compare", "a", "b", "--required-symbols", "syms.txt"]}
+            {"argv": ["compare", "a", "b", "--required-symbol", "@syms.txt"]}
         )
         assert no_cwd == frozenset()
 
         missing_file = ev.consumer_scope_targets(
             {
-                "argv": ["compare", "a", "b", "--required-symbols", "syms.txt"],
+                "argv": ["compare", "a", "b", "--required-symbol", "@syms.txt"],
                 "cwd": str(tmp_path / "gone"),
             }
         )

@@ -302,10 +302,11 @@ class TestSmallHelpers:
         compare_help = runner.invoke(main, ["compare", "--help"]).output
         assert "Per-side overrides" in compare_help
         assert "Build & source evidence" in compare_help
-        # `dump`'s curated --help (G21.8 M2) folds the Toolchain/Provenance
-        # panels' options behind --help-all; check the panels there.
+        # `dump`'s curated --help (G21.8 M2) folds the Dependencies/Provenance
+        # panels behind --help-all. Phase 7 removed the "Toolchain" panel
+        # entirely (compile: config only now).
         dump_help = runner.invoke(main, ["dump", "--help-all"]).output
-        assert "Toolchain" in dump_help and "Provenance" in dump_help
+        assert "Dependencies" in dump_help and "Provenance" in dump_help
 
     def test_missing_requested_evidence_layers(self) -> None:
         # G21.7: a requested layer that came back NOT_COLLECTED — or PARTIAL with
@@ -398,23 +399,24 @@ class TestSmallHelpers:
         assert "carry only L0-L2 data" not in result.output
 
     def test_dump_compiler_option_threaded_to_non_elf(self, tmp_path, monkeypatch) -> None:
-        # ADR-037 D3 (Codex): --compiler-option is now threaded into the native
+        # ADR-037 D3 (Codex): compile.options is threaded into the native
         # PE/Mach-O header-scoping path (resolved before format dispatch), so the
         # old "will be ignored" warning is gone and the context reaches the dump.
         #
         # ADR-063 Phase 1: the real PE/Mach-O run now executes through
         # `execute_dump_request`, not the retired `handle_non_elf_dump` --
-        # patch `abicheck.service_dump_native._dump_macho` instead (the same
-        # depth below the format dispatch `abicheck.dumper.dump` sits at for
-        # the ELF precedent, `test_compile_context_parity.py::
-        # test_dump_reads_compile_block_from_config`), and assert on the
-        # `compile` CompileContext it receives.
+        # patch `abicheck.service_dump_native._dump_macho` instead, and
+        # assert on the `compile` CompileContext it receives. Phase 7
+        # removed --compiler-option from dump entirely: compile.options in
+        # .abicheck.yml is its only spelling now.
         import struct
 
         from abicheck.model import AbiSnapshot
 
         dylib = tmp_path / "fake.dylib"
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  options: [-DX]\n", encoding="utf-8")
         captured: dict[str, object] = {}
 
         def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
@@ -424,7 +426,7 @@ class TestSmallHelpers:
         monkeypatch.setattr(
             "abicheck.service_dump_native._dump_macho", _fake_dump_macho
         )
-        result = CliRunner().invoke(main, ["dump", str(dylib), "--compiler-option=-DX"])
+        result = CliRunner().invoke(main, ["dump", str(dylib), "--config", str(cfg)])
         assert result.exit_code == 0, result.output
         assert "will be ignored" not in result.output
         assert getattr(captured["compile"], "gcc_option_tokens") == ("-DX",)
@@ -489,12 +491,11 @@ class TestSmallHelpers:
         assert "-DFOO=1" in gcc_option_tokens
 
     def test_dump_compiler_option_help(self) -> None:
-        # G21.5: the repeatable --compiler-option is documented on dump. It's a
-        # toolchain-tier flag, folded behind --help-all by dump's curated
-        # --help (G21.8 M2).
+        # Phase 7: --compiler-option is gone from dump's CLI entirely --
+        # compile.options in .abicheck.yml is its only spelling now.
         out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
-        assert "--compiler-option" in norm
+        assert "--compiler-option" not in norm
 
     def test_dump_depth_help_shows_four_rungs(self) -> None:
         runner = CliRunner()
@@ -652,8 +653,8 @@ class TestExitSchemeHelpers:
         assert capsys.readouterr().err == ""
 
     def test_announce_suppressed_for_oneline(self, capsys) -> None:
-        # The internal one-line format (service_render.ONELINE_FORMAT,
-        # reached via --profile quick) is suppressed the same way json/sarif/
+        # The one-line format (service_render.ONELINE_FORMAT,
+        # --format oneline) is suppressed the same way json/sarif/
         # junit are -- it isn't one of the three human-readable format names,
         # so the same `fmt not in {...}` check covers it with no separate
         # boolean (CLI cleanup phase two, PR 1: --stat removed).
@@ -816,17 +817,16 @@ class TestCompareCommand:
         assert result.exit_code == 4
 
     def test_debug_format_auto_on_snapshots(self, tmp_path: Path) -> None:
-        # --debug-format auto resolves to None (cli.py:1815); JSON snapshot
-        # inputs have format None so the PE/Mach-O guard is skipped.
+        # debug.format: auto (ADR-068 D5 / Phase 7a: --debug-format is gone
+        # on compare, this is the only spelling now) resolves to None; JSON
+        # snapshots have format None so the PE/Mach-O guard is skipped.
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  format: auto\n")
         result = _invoke(
-            "compare",
-            str(old_f),
-            str(new_f),
-            "--debug-format",
-            "auto",
+            "compare", str(old_f), str(new_f), "--config", str(config_path),
         )
         assert result.exit_code == 0
 
@@ -868,12 +868,12 @@ class TestCompareCommand:
         assert result.exit_code == 64
         assert "No such option" in result.output
 
-    def test_quick_profile_one_line_summary(self, tmp_path: Path) -> None:
-        # --profile quick is --stat's sole surviving one-line-summary use.
+    def test_oneline_format_one_line_summary(self, tmp_path: Path) -> None:
+        # --format oneline is --stat's sole surviving one-line-summary use.
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
-        result = _invoke("compare", str(old_f), str(new_f), "--profile", "quick")
+        result = _invoke("compare", str(old_f), str(new_f), "--format", "oneline")
         assert result.exit_code == 4
         assert "\n" not in result.stdout.strip()  # stderr carries the scope warning
 
@@ -1826,11 +1826,11 @@ class TestUsedByScoping:
             "based on the full library verdict, BREAKING"
         ) in result.stdout
 
-    def test_quick_profile_one_liner_always_states_the_full_library_verdict(
+    def test_oneline_format_always_states_the_full_library_verdict(
         self, tmp_path, monkeypatch
     ) -> None:
         """CLI cleanup phase two, PR 1 originally made the internal one-line
-        format (``--profile quick``) route through a scoped-replacement
+        format (``--format oneline``, formerly ``--profile quick``) route through a scoped-replacement
         renderer so it printed the scoped-compatible verdict instead of the
         full-library BREAKING one, to match the (then-authoritative) scoped
         exit code.
@@ -1866,7 +1866,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, self._result(verdict=Verdict.COMPATIBLE))
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick",
+            "--format", "oneline",
         )
         assert result.exit_code == 4  # the full-library BREAKING verdict
         # The verdict label leads with the full-library result (BREAKING),
@@ -1879,7 +1879,7 @@ class TestUsedByScoping:
         assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
         assert "1 detected, 0 gating, 1 non_gating" in result.stdout
 
-    def test_quick_profile_one_liner_does_not_count_a_scoped_only_finding(
+    def test_oneline_format_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch
     ) -> None:
         """Originally: a scoped-only finding (one with no backing
@@ -1909,13 +1909,13 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick",
+            "--format", "oneline",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
         assert "1 detected, 1 gating" in result.stdout
 
-    def test_quick_profile_one_liner_unaffected_by_show_only(
+    def test_oneline_format_unaffected_by_show_only(
         self, tmp_path, monkeypatch
     ) -> None:
         """Originally targeted a "self-contradictory 'BREAKING: no changes
@@ -1938,13 +1938,13 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick", "--view", "show=compatible",
+            "--format", "oneline", "--view", "show=compatible",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
         assert "1 detected, 1 gating" in result.stdout
 
-    def test_quick_profile_one_liner_counts_an_ordinary_in_scope_removal(
+    def test_oneline_format_counts_an_ordinary_in_scope_removal(
         self, tmp_path, monkeypatch
     ) -> None:
         """The far more common shape than either test above: an ordinary
@@ -1998,7 +1998,7 @@ class TestUsedByScoping:
         monkeypatch.setattr(appcompat_mod, "scope_diff_to_app", _scoped_for)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick",
+            "--format", "oneline",
             "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4

@@ -368,7 +368,7 @@ class TestProvenRemoval:
             new, {"liba.so": _snap("liba.so"), "libb.so": _snap("libb.so")}
         )
 
-        code, doc = _invoke_json("compare", str(old), str(new), "-j", "1")
+        code, doc = _invoke_json("compare", str(old), str(new))
         scope = doc["comparison_scope"]
         assert scope["new_inventory"]["completeness"] == "proven"
         assert scope["old_inventory"]["completeness"] == "unproven"
@@ -380,7 +380,7 @@ class TestProvenRemoval:
         assert doc["verdict"] == "COMPATIBLE_WITH_RISK"
 
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "-j", "1", "--fail-on-removed-library"
+            "compare", str(old), str(new), "--fail-on-removed-library"
         )
         assert code == 8
         assert doc["exit"]["reasons"] == ["removed_required_library"]
@@ -396,7 +396,7 @@ class TestProvenRemoval:
         new = tmp_path / "new_pkg"
         _write_stored_package(new, {"liba.so": _snap("liba.so")})
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "-j", "1", "--fail-on-removed-library"
+            "compare", str(old), str(new), "--fail-on-removed-library"
         )
         assert code == 8
         assert doc["comparison_scope"]["selection"] == "all_expected"

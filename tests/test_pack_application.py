@@ -192,13 +192,15 @@ class TestAPackActuallyConfiguresTheRun:
         # The finding is still reported -- only the gate moved.
         assert json.loads(result.output)["verdict"] == "BREAKING"
 
-    def test_a_gate_pack_category_applies_alongside_a_discarded_profile_placeholder(
+    def test_a_gate_pack_category_applies_alongside_a_configured_category(
         self, pair: tuple[Path, Path], tmp_path: Path
     ) -> None:
-        """Codex review, PR #1062: a discarded `ci-gate` placeholder preset
-        used to still count as "a preset is stated", pinning every category
-        and silently dropping a gate pack's assignment to a category the
-        project never touched (pre-fix: silently exit 0; post-fix: 1)."""
+        """Codex review, PR #1062 (retargeted after ADR-068 D5 / plan Phase
+        7e removed ``--profile`` outright, along with the placeholder-preset
+        deviation this test originally guarded): a project-configured
+        category must not pin every *other* category too, or a gate pack's
+        assignment to a category the project never touched would be
+        silently dropped (pre-fix: silently exit 0; post-fix: 1)."""
         old_p, new_p = pair
         config = tmp_path / ".abicheck.yml"
         config.write_text("severity:\n  abi_breaking: warning\n", encoding="utf-8")
@@ -213,8 +215,6 @@ class TestAPackActuallyConfiguresTheRun:
             (new_p, old_p),
             "--format",
             "json",
-            "--profile",
-            "ci-gate",
             "--config",
             str(config),
             "--pack",

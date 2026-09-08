@@ -40,7 +40,7 @@ def append_coverage_warnings_suite(root: ET.Element, result: DiffResult) -> int:
     notices there, and surfacing all of them here would flood every JUnit
     document with boilerplate testcases instead of the one signal this
     finding is actually about (matches `cli_compare_options.
-    echo_coverage_warnings`'s identical `--profile quick` scoping). Rendered
+    echo_coverage_warnings`'s identical `--format oneline` scoping). Rendered
     as a passing ``<testcase>`` with a ``<system-out>`` message -- not
     ``<error>``/``<failure>`` -- since this is advisory and must not turn a
     green JUnit-consuming build red.

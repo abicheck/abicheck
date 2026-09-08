@@ -180,7 +180,7 @@ class TestEmbeddedInstantiationManifest:
         _write_directory(new_pkg, new_libs)
 
         ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+            "compare", str(old_pkg), str(new_pkg), "--format", "json"
         )
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
@@ -692,7 +692,7 @@ class TestEmbeddedManifestForEmptyVariant:
         _write_directory(new_pkg, new_libs)
 
         ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+            "compare", str(old_pkg), str(new_pkg), "--format", "json"
         )
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
@@ -745,8 +745,6 @@ class TestBundleFactsOutCarriesEmbeddedManifest:
             str(new_pkg),
             "--format",
             "json",
-            "-j",
-            "1",
             "--bundle-facts-out",
             str(out_path),
         )
@@ -841,7 +839,7 @@ class TestBothSidesEmptyVariantsStillEnforceManifests:
         write_project_manifest(new_pkg, new_manifest)
 
         ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json", "-j", "1"
+            "compare", str(old_pkg), str(new_pkg), "--format", "json"
         )
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []

@@ -599,7 +599,7 @@ class TestNoteIfSameBinaryCompared:
     def test_oneline_profile_still_surfaces_the_warning_on_stderr(
         self, tmp_path, monkeypatch
     ):
-        """Codex review: `--profile quick` renders through
+        """Codex review: `--format oneline` renders through
         `service_render.to_stat`, a fixed one-line summary with no room for
         a `coverage_warnings` entry -- every other format already surfaces
         it inline (JSON/SARIF/markdown/HTML), so this format silently
@@ -619,7 +619,7 @@ class TestNoteIfSameBinaryCompared:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", "--profile", "quick", str(so_path), str(so_path)]
+            main, ["compare", "--format", "oneline", str(so_path), str(so_path)]
         )
         assert "byte-identical" in result.output, result.output
 
@@ -627,8 +627,8 @@ class TestNoteIfSameBinaryCompared:
         self, tmp_path
     ):
         """Codex review, fresh evidence: an earlier revision of the fix
-        above echoed *every* `coverage_warnings` entry in `--profile
-        quick`, not just the same-binary one -- breaking the pre-existing,
+        above echoed *every* `coverage_warnings` entry in `--format
+        oneline`, not just the same-binary one -- breaking the pre-existing,
         tested one-line contract for the common case of comparing two
         JSON snapshots with no binary metadata (which appends a "no
         binary metadata available" warning, unrelated to this feature).
@@ -654,14 +654,13 @@ class TestNoteIfSameBinaryCompared:
         new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
 
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--profile", "quick"]
+            main, ["compare", str(old_p), str(new_p), "--format", "oneline"]
         )
         assert result.exit_code == 0, result.output
-        # stdout, not the stderr-mixed `result.output`: `quick`'s
-        # `depth=binary` (ADR-063 Phase 8's ceiling fix) means this
-        # unscoped-headers fixture no longer resolves a public-header
-        # surface at that depth either, and that scope-fallback warning is
-        # by design routed to stderr so it never corrupts this contract.
+        # stdout, not the stderr-mixed `result.output`: this fixture gives
+        # no `-H` headers, so no public-header surface resolves regardless
+        # of depth, and that scope-fallback warning is by design routed to
+        # stderr so it never corrupts this contract.
         assert result.stdout.strip().count("\n") == 0, result.output
         assert "Warning:" not in result.stdout, result.output
 

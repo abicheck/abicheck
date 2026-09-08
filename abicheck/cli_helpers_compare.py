@@ -324,39 +324,39 @@ _collect_force_public_symbols = collect_force_public_symbols
 
 def load_required_symbols(
     symbols: tuple[str, ...],
-    symbols_file: Path | None,
-) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
-    """Combine ``--required-symbol`` values with a ``--required-symbols`` file.
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None, str | None]:
+    """Combine ``--required-symbol`` values, expanding any ``@FILE`` entry
+    (ADR-068 D5 / plan Phase 7h merged ``--required-symbols FILE`` into this
+    form: one symbol per line, ``#`` comments ignored, ADR-043; at most one
+    ``@FILE`` per invocation, matching the singular flag it replaces).
 
-    The file format is one symbol per line; blank lines and ``#`` comments are
-    ignored (ADR-043, folds the removed ``plugin-check`` command's manifest).
-
-    Returns the combined contract, *what the file itself contributed*, and the
-    digest of its bytes (both empty/``None`` when no file was given), all from
-    the one read. A required-symbol contract selects the base policy
-    (ADR-043), so an ADR-049 receipt has to identify what really did it: the
-    file's own contribution is what decides whether naming that file is a true
-    claim, since a file that parsed to nothing selected nothing (Codex review,
-    fresh evidence). The digest is over raw bytes, so it matches the file on
-    disk rather than a newline-normalized rendering of it.
+    Returns ``(combined, from_file, digest, path)`` -- the last three
+    ``None``/empty when no ``@FILE`` was given, so a receipt can tell "no
+    file" from "a file that parsed to nothing" (Codex review).
     """
-    from_file: list[str] = []
-    digest: str | None = None
-    if symbols_file is not None:
-        import hashlib
+    import hashlib
 
-        data = symbols_file.read_bytes()
-        digest = hashlib.sha256(data).hexdigest()
-        for line in data.decode("utf-8").splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                from_file.append(stripped)
+    literal = [v for v in symbols if not v.startswith("@")]
+    files = [v[1:] for v in symbols if v.startswith("@")]
+    if len(files) > 1:
+        raise click.UsageError(
+            f"--required-symbol accepts at most one '@FILE' value; got {files}. "
+            "Combine both files, or pass the extras as plain values."
+        )
+    from_file: list[str] = []
+    digest = path = None
+    if files:
+        candidate = Path(files[0])
+        if not candidate.is_file():
+            raise click.UsageError(f"--required-symbol @{candidate}: no such file.")
+        data = candidate.read_bytes()
+        digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
+        from_file = [
+            s for line in data.decode("utf-8").splitlines()
+            if (s := line.strip()) and not s.startswith("#")
+        ]
     # De-duplicate while preserving first-seen order.
-    return (
-        tuple(dict.fromkeys([*symbols, *from_file])),
-        tuple(from_file),
-        digest,
-    )
+    return tuple(dict.fromkeys([*literal, *from_file])), tuple(from_file), digest, path
 
 
 def resolve_force_public_scope(
@@ -505,6 +505,10 @@ class ResolvedCompareConfig:
     dwarf_only: bool = False
     debuginfod: bool = False
     debuginfod_url: str | None = None
+    #: Phase 7 (one-comparison-product.md §4.1): ``--lang`` demoted to
+    #: ``compile.lang`` with no surviving CLI override. ``None`` when
+    #: unset -- the caller (``run_compare``) applies ``LANG_DEFAULT``.
+    compile_lang: str | None = None
     #: ADR-040 Lever 2: ``--show-redundant`` demoted to ``scope.show_redundant``.
     show_redundant: bool = False
     #: The CLI-or-config severity values (``None`` when neither set), kept raw so
@@ -561,10 +565,6 @@ def resolve_compare_config(
     *,
     cli_severity_preset: str | None,
     cli_scope_public: bool | None,
-    cli_debug_format: str | None = None,
-    cli_dwarf_only: bool | None = None,
-    cli_debuginfod: bool | None = None,
-    cli_debuginfod_url: str | None = None,
 ) -> ResolvedCompareConfig:
     """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
 
@@ -574,10 +574,11 @@ def resolve_compare_config(
 
     Only the keys that still have a CLI flag take a ``cli_*`` argument. The
     per-category severity levels, the suppression strict/justification pair,
-    the public-symbol overlay, ``collapse_versioned_symbols`` and
-    ``show_redundant`` were hidden CLI duplicates of a config key and have
-    been removed from the CLI, so ``.abicheck.yml`` is now their only source
-    and they are read straight off *cfg*.
+    the public-symbol overlay, ``collapse_versioned_symbols``,
+    ``show_redundant``, and (Phase 7) the four ``debug:`` knobs were hidden
+    CLI duplicates of a config key and have been removed from the CLI
+    entirely (no surviving override, ADR-068 D5 guard #2), so
+    ``.abicheck.yml`` is now their only source, read straight off *cfg*.
     """
     from .workflows.gate import resolve_severity_config
 
@@ -620,17 +621,14 @@ def resolve_compare_config(
 
     source_method = cfg.source_method if cfg else None
 
-    # ADR-040 Lever 2: debug-resolution demotion (CLI > config).
-    debug_format = _pick(cli_debug_format, cfg.debug_format if cfg else None, None)
-    dwarf_only = bool(
-        _pick(cli_dwarf_only, cfg.debug_dwarf_only if cfg else None, False)
-    )
-    debuginfod = bool(
-        _pick(cli_debuginfod, cfg.debug_debuginfod if cfg else None, False)
-    )
-    debuginfod_url = _pick(
-        cli_debuginfod_url, cfg.debug_debuginfod_url if cfg else None, None
-    )
+    # Phase 7 (ADR-068 D5): debug-resolution knobs are config-only now -- no
+    # CLI flag survives to override them (ADR-040 Lever 2 demoted them to a
+    # config-key-with-override first; Phase 7 removed the override itself).
+    debug_format = cfg.debug_format if cfg else None
+    dwarf_only = bool(cfg.debug_dwarf_only) if cfg else False
+    debuginfod = bool(cfg.debug_debuginfod) if cfg else False
+    debuginfod_url = cfg.debug_debuginfod_url if cfg else None
+    compile_lang = cfg.compile_lang if cfg else None
     show_redundant = bool(cfg.scope_show_redundant) if cfg else False
     bundle_system_providers = tuple(cfg.bundle_system_providers) if cfg else ()
     bundle_cohorts = tuple(cfg.bundle_cohorts) if cfg else ()
@@ -648,6 +646,7 @@ def resolve_compare_config(
         dwarf_only=dwarf_only,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url if isinstance(debuginfod_url, str) else None,
+        compile_lang=compile_lang,
         show_redundant=show_redundant,
         merged_severity_preset=eff_preset,
         merged_severity_abi_breaking=eff_abi,

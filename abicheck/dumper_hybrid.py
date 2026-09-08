@@ -139,7 +139,11 @@ from .model import (
     replace_with_fact_sync,
 )
 from .model.identity import EntityId, EntityKind, with_mangled_name
-from .model.mangled_name import _skip_template_args, itanium_scope_components
+from .model.mangled_name import (
+    _skip_template_args,
+    itanium_scope_components,
+    strip_macho_itanium_decoration,
+)
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name
@@ -193,25 +197,20 @@ def _split_top_level_commas(s: str) -> list[str]:
 
 
 def _macho_normalize_mangled(mangled: str) -> str:
-    """Strip the single Darwin linker-symbol leading underscore clang's
-    Mach-O ``mangledName`` carries, matching castxml's prefix-free
-    convention on the same platform.
+    """Strip a still-present Darwin linker-symbol leading underscore,
+    matching castxml's prefix-free convention on the same platform.
 
-    Darwin prepends exactly one underscore to every global symbol's
-    compiler-computed name (a C function ``foo`` -> ``_foo``; a C++ Itanium
-    name, which itself starts with ``_Z``, -> ``__ZN...``). clang's
-    ``-ast-dump=json`` ``mangledName`` field reports the real, platform-
-    accurate linker symbol (WITH that extra underscore), while castxml's own
-    ``mangled`` XML attribute is the "pure" Itanium name (WITHOUT it) — see
-    ``dumper_clang._ClangAstParser._visibility``'s docstring, which already
-    handles this same mismatch for export-table matching via
-    ``_symbol_candidates``. Without normalizing it here too, EVERY Mach-O
-    C++ function/variable's clang-side mangled key differs from its
-    castxml-side key, so the hybrid merge's ``cf.mangled not in
-    merged_mangled`` dedup check is always true — treating every function
-    castxml already emitted as "clang-only" and duplicating the entire
-    function list (Codex review).
+    Darwin prepends one underscore to every global symbol (C ``foo`` ->
+    ``_foo``; Itanium ``_Z...`` -> ``__Z...``). The header-AST backends now
+    normalize this at the point of origin too, so *mangled* reaching here
+    is ordinarily **already** undecorated -- the Itanium half delegates to
+    ``model.mangled_name.strip_macho_itanium_decoration`` (the one
+    canonical ``"__Z..."`` -> ``"_Z..."`` shape check); every other shape,
+    including a bare ``"_foo"`` -> ``"foo"``, is handled below as before.
     """
+    stripped = strip_macho_itanium_decoration(mangled)
+    if stripped != mangled or mangled.startswith("_Z"):
+        return stripped
     return mangled[1:] if mangled.startswith("_") else mangled
 
 

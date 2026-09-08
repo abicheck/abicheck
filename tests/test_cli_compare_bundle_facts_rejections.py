@@ -272,17 +272,23 @@ class TestCompareOldBundleFactsEarlyRejections:
     def test_lang_explicit_is_forwarded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Codex review: an explicit --lang c++ was indistinguishable from
-        # Click's own identical default once inside dispatch(), so a
+        # Codex review: an explicit compile.lang: c++ was indistinguishable
+        # from the built-in default once inside dispatch(), so a
         # language-ambiguous NEW-side header could be silently auto-detected
         # away from the caller's explicit request. Proven the same way
         # test_includes_from_config_are_merged_and_forwarded is: capture
         # what compare_cmd forwards to dispatch(), not
         # compare_release_against_bundle_facts's own behavior.
+        #
+        # Phase 7 (one-comparison-product.md §4.1) removed `--lang` from
+        # `compare`'s CLI entirely; `.abicheck.yml`'s `compile.lang` is the
+        # only remaining way to request it explicitly.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  lang: c++\n")
 
         from abicheck.frontends.cli.commands import compare_bundle_facts
 
@@ -297,8 +303,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--lang",
-            "c++",
+            "--config",
+            str(cfg),
             "--format",
             "json",
         )
@@ -876,11 +882,15 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--require-complete-analysis" in out
 
-    def test_dwarf_only_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: --dwarf-only/--debug-format/--debuginfod/
-        # --debug-root select or locate NEW-side debug info, but
+    def test_debug_root_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review: --debug-root locates NEW-side debug info, but
         # compare_release_against_bundle_facts()'s per-library
-        # service.resolve_input() call is never given any of them.
+        # service.resolve_input() call is never given it.
+        #
+        # ADR-068 D5 / Phase 7a: --dwarf-only/--debug-format/--debuginfod/
+        # --debuginfod-url were hidden CLI flags and are gone entirely now
+        # (config-only via the debug: block) -- see
+        # test_config_debug_block_is_rejected below for that equivalent case.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
@@ -890,13 +900,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--dwarf-only",
+            "--debug-root",
+            str(tmp_path),
             "--format",
             "json",
         )
 
         assert code == 64
-        assert "--dwarf-only" in out
+        assert "--debug-root" in out
 
     def test_surface_metrics_is_accepted_as_a_no_op(self, tmp_path: Path) -> None:
         # CodeRabbit/Codex review on PR #1154: compare_release_against_

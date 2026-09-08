@@ -454,7 +454,7 @@ class ExplicitCompatibilityInputs:
     #: that used ``plugin_abi`` (Codex review, fresh evidence).
     policy_base_option: str | None = None
     #: The file that option named, when it has one
-    #: (``--required-symbols FILE``), and the digest of the bytes read from
+    #: (``--required-symbol @FILE``), and the digest of the bytes read from
     #: it. Without them the receipt can say a symbol list selected the policy
     #: but not *which* list, which is the same gap the policy-file and
     #: suppression sources carry digests to close (Codex review).
@@ -566,55 +566,6 @@ class ProjectCompatibilityInputs:
         )
 
 
-@dataclass(frozen=True)
-class RunProfileInputs:
-    """What a selected ``--profile`` filled in, at D7's ``run_profile`` tier.
-
-    ``cli_options.apply_compare_profile`` folds a profile's defaults into the
-    command's kwargs only where the user left the option alone, so by the
-    time the live run reads them a profile-selected value is
-    indistinguishable from a built-in default. Resolving the receipt without
-    this layer therefore did not merely under-claim the source -- it produced
-    a *wrong* value: ``--profile ci-gate`` runs with
-    ``severity_preset="default"``, while a resolution that never saw the
-    profile answers "no severity setting in effect" for a run stating no
-    severity flag.
-
-    **A deliberate deviation from D7, recorded rather than smoothed over.**
-    ADR-049 scopes ``run_profile`` to execution fields (depth, format,
-    budget, workflow) and assigns severity to the *gate* namespace -- yet
-    the pre-existing ``ci-gate`` bundle
-    (:data:`~abicheck.cli_options.COMPARE_PROFILES`) really does select it.
-    Encoding what the bundle does today is the honest receipt; the two ways
-    to remove the deviation (move the key out of ``ci-gate`` into a gate
-    pack, or amend D7) both change user-visible behavior or the ADR, so
-    neither belongs in the wiring change that found it. Only this one field
-    passes ``allow_run_profile=True``; a profile assigning any other field
-    still raises, which is what keeps the deviation from spreading.
-
-    (Before CLI cleanup phase two PR G2, this field was ``exit_code_scheme``
-    -- ``ci-gate`` forced ``--exit-code-scheme severity`` directly. PR G2
-    deleted that manual selector everywhere, so ``ci-gate`` was migrated to
-    state ``severity_preset: "default"`` instead: the identical
-    ``SeverityConfig`` the old forced scheme paired with, but expressed as
-    an actual severity setting -- which is what now drives the one
-    automatic algorithm to ``"severity"``, preserving this profile's exact
-    pre-PR-G2 behavior. This field renamed to match.)
-
-    The remaining ``ci-gate``/``release-cut``/``quick`` keys (``depth``,
-    ``fmt``, ``recommend``, ``stat``) are execution/report concerns with no
-    field in this configuration at all, so they are not modelled here.
-    """
-
-    #: The profile's own name (``ci-gate``/``release-cut``/``quick``), for
-    #: the receipt's ``reference``.
-    name: str | None = None
-    #: ``severity_preset``, only when the profile actually supplied it -- an
-    #: explicitly typed flag is filtered out by ``apply_compare_profile``
-    #: before it ever reaches here.
-    severity_preset: str | None = None
-
-
 # --------------------------------------------------------------------------
 # Candidate construction helpers.
 # --------------------------------------------------------------------------
@@ -683,7 +634,6 @@ def _resolve(
     pack_option: str = "--pack",
     default_is_stated: bool = False,
     require_legacy_alias_agreement: bool = True,
-    allow_run_profile: bool = False,
 ) -> tuple[Hashable, ValueProvenance]:
     """Resolve one field, letting a selected pack fill it only if nothing else did.
 
@@ -716,11 +666,6 @@ def _resolve(
     that same layer -- and refining a preset with one category flag
     (``--severity-preset strict`` plus ``severity.addition: info``) is legal, not a
     conflict.
-
-    *allow_run_profile* is forwarded to :func:`resolve_field`, which rejects a
-    ``RUN_PROFILE`` candidate for any field the caller has not opted in --
-    D7 scopes that layer to execution fields. See :class:`RunProfileInputs`
-    for the one field this module opts in, and why.
     """
     all_candidates = list(candidates)
     if not all_candidates and pack is not None and not default_is_stated:
@@ -742,7 +687,6 @@ def _resolve(
         all_candidates,
         default=default,
         require_legacy_alias_agreement=require_legacy_alias_agreement,
-        allow_run_profile=allow_run_profile,
     )
 
 
@@ -967,7 +911,6 @@ def resolve_compatibility_evaluation_config(
     front_end: FrontEnd = FrontEnd.CLI,
     explicit: ExplicitCompatibilityInputs | None = None,
     project: ProjectCompatibilityInputs | None = None,
-    profile: RunProfileInputs | None = None,
     api_spellings: Mapping[str, str] | None = None,
 ) -> CompatibilityEvaluationConfig:
     """Resolve one complete effective configuration plus its receipt.
@@ -993,11 +936,6 @@ def resolve_compatibility_evaluation_config(
       the Phase 6 flag's own documented contract ("an explicit value outranks
       those"). Making that pair an error would reject a combination the live
       CLI accepts today.
-
-    *profile* is what a selected ``--profile`` filled in; it contributes at
-    D7's ``run_profile`` tier, between the explicit and project-config
-    layers. See :class:`RunProfileInputs` for the one field it can state and
-    the ADR deviation that field records.
 
     There is no ``exit_code_scheme``/``--exit-code-scheme`` field to resolve
     any more (CLI cleanup phase two PR G2 deleted the manual algorithm
@@ -1069,31 +1007,8 @@ def resolve_compatibility_evaluation_config(
     # (Codex review, fresh evidence). One expression decides this and the
     # `default_is_stated` gate below, so the exemption and the precedence it
     # anticipates cannot drift apart.
-    # Computed here (not just below, next to the candidate list it also
-    # gates) because `preset_stated`'s own profile clause needs it: a
-    # profile's placeholder preset is discarded once the project states its
-    # own severity policy (see the candidate-building comment below), so
-    # counting the placeholder as "stated" here regardless would pin every
-    # category as `_STATED_ELSEWHERE` even though nothing downstream ever
-    # used the profile's value -- silently blocking a gate pack's own
-    # category assignment from applying (Codex review, fresh evidence).
-    project_states_severity = project is not None and any(
-        getattr(project, attr) is not None
-        for attr in (
-            "severity_preset",
-            "severity_abi_breaking",
-            "severity_potential_breaking",
-            "severity_quality_issues",
-            "severity_addition",
-        )
-    )
     preset_stated = (
         explicit.severity_preset is not None
-        or (
-            profile is not None
-            and profile.severity_preset is not None
-            and not project_states_severity
-        )
         or (project is not None and project.severity_preset is not None)
     )
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
@@ -1345,40 +1260,6 @@ def resolve_compatibility_evaluation_config(
                 sha256=explicit_preset.sha256,
             )
         )
-    # A `--profile` fills `severity_preset` in only where the user left the
-    # flag alone, so it never ties with the explicit candidate above -- it
-    # sits between that and the project config, exactly where D7 puts
-    # `run_profile` (the same deliberate D7 exception `RunProfileInputs`'s
-    # own docstring records, generalized from the removed
-    # `exit_code_scheme` field to `severity_preset`: `ci-gate` states this
-    # field now, per CLI cleanup phase two PR G2's migration, since the
-    # manual algorithm selector `ci-gate` used to set no longer exists).
-    # Codex review, PR #1062, fresh evidence: `ci-gate`'s injected
-    # `"default"` is a placeholder that only exists to activate the
-    # algorithm (see `cli_compare_options._resolve_profile_severity_preset`,
-    # which the live gate computation already discards this candidate to
-    # match) -- once the project states its own severity policy, THAT is
-    # what actually scores the run, so omit the placeholder here too rather
-    # than let the receipt record a `run_profile`-attributed value the live
-    # gate never used. `project_states_severity` is computed once, above
-    # (next to `preset_stated`, which needs the identical predicate).
-    if (
-        profile is not None
-        and profile.severity_preset is not None
-        and not project_states_severity
-    ):
-        profile_preset = severity_preset_identity(profile.severity_preset)
-        preset_candidates.append(
-            _candidate(
-                SelectorLayer.RUN_PROFILE,
-                profile_preset,
-                option="--profile",
-                source_kind="run_profile",
-                reference=profile.name,
-                version=profile_preset.version,
-                sha256=profile_preset.sha256,
-            )
-        )
     if project is not None and project.severity_preset is not None:
         project_preset = severity_preset_identity(project.severity_preset)
         preset_candidates.append(
@@ -1398,7 +1279,6 @@ def resolve_compatibility_evaluation_config(
         GATE_PRESET_FIELD,
         preset_candidates,
         default=_default(None),
-        allow_run_profile=True,
     )
 
     preset_base = (
@@ -1475,9 +1355,9 @@ def resolve_compatibility_evaluation_config(
     # severity level -- all already folded into `levels`/`severity_active`
     # above). No candidates, no D7 resolution, and no provenance entry of
     # its own to compute -- there is no longer a selector any front end,
-    # profile, project config, or pack can state to move this value in
-    # either direction.
-    severity_active = _severity_active(explicit, project, gate_pack_fields, profile)
+    # project config, or pack can state to move this value in either
+    # direction.
+    severity_active = _severity_active(explicit, project, gate_pack_fields)
     auto_scheme = gate_exit_code_scheme(severity_active)
 
     gate_packs, prov[GATE_PACKS_FIELD] = packs_by_field[GATE_PACKS_FIELD]
@@ -1544,19 +1424,17 @@ def _severity_active(
     explicit: ExplicitCompatibilityInputs,
     project: ProjectCompatibilityInputs | None,
     gate_pack_fields: Mapping[str, Hashable],
-    profile: RunProfileInputs | None = None,
 ) -> bool:
     """Whether *any* severity setting is in effect (drives ``auto``).
 
     Mirrors ``cli_helpers_compare.resolve_compare_config``'s own
-    ``severity_active`` -- a preset or any per-category value, from the CLI,
-    a ``--profile``, or the project config -- and additionally counts a
-    ``kind: gate`` pack that assigns a category, since a pack-supplied
-    severity is no less "in effect" than a config-supplied one.
+    ``severity_active`` -- a preset or any per-category value, from the CLI
+    or the project config -- and additionally counts a ``kind: gate`` pack
+    that assigns a category, since a pack-supplied severity is no less "in
+    effect" than a config-supplied one.
     """
     if (
         explicit.severity_preset is not None
-        or (profile is not None and profile.severity_preset is not None)
         or (project is not None and project.severity_preset is not None)
     ):
         return True
@@ -1688,7 +1566,7 @@ def compare_cli_inputs(
 
     *policy_base_option* names the option that selected ``policy`` when it was
     not ``--policy``: ``compare`` switches an untouched ``--policy`` to
-    ``plugin_abi`` for a ``--required-symbol``/``--required-symbols``
+    ``plugin_abi`` for a ``--required-symbol``
     contract, and that value is read as stated regardless of
     *explicit_parameters* (it was not typed, but it was chosen -- see
     :attr:`ExplicitCompatibilityInputs.policy_base_option`).
@@ -1942,9 +1820,9 @@ def unstatable_selectors(
     (``--policy``/``scope_public`` are D7 aliases for the fields they
     select), so a check restricted to the request tier would have passed
     the very defect it was written for. Layers that describe a *file*
-    (``PROJECT_CONFIG``, ``RUN_RECIPE``, ``RUN_PROFILE``) are excluded:
-    those hops correctly name config keys such as ``severity.preset``,
-    which are not request fields and never should be.
+    (``PROJECT_CONFIG``, ``RUN_RECIPE``) are excluded: those hops correctly
+    name config keys such as ``severity.preset``, which are not request
+    fields and never should be.
 
     :func:`cross_front_end_differences` structurally cannot catch either:
     :func:`_normalized_provenance` drops option spellings *on purpose*, since

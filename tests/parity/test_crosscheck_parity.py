@@ -2,20 +2,17 @@
 """Parity for the eleven cross-source checks (plan §7 F-5/F-6/F-7/F-10 and
 the rest of ADR-068 §1's list).
 
-Each check is exercised on a **committed, compiler-free** snapshot fixture —
-the G20 audit/cross-source example corpus (``catalog/cases/case14x-18x``,
-also used by ``tests/test_g20_catalog.py``) for the eight checks it covers,
-plus three small synthetic snapshots (``_synthetic_snapshots.py``) for the
-checks that corpus doesn't happen to exercise on its own
-(``compile_context_conflict``, ``source_surface_dso_mismatch``,
-``identity_collision_detected``).
-
-For each check: ``run_crosschecks`` (the production function
-``scan_engine.py`` is the sole caller of) must find it; the real ``compare``
-CLI, given the same evidence self-compared, must NOT — that absence is
-exactly what ``tests/parity/gaps.py`` records as an expected, phase-owned
-gap. If either side of that ever flips, ``assert_no_capability_loss`` fails
-loudly, naming the check.
+All eleven checks are migrated onto ``compare()``'s automatic pipeline now
+(plan §3 #3, ``workflows/cross_source_evolution.py``), so this module's own
+scan-only table (``_SCENARIOS``) is empty — every check instead gets its own
+positive "reaches compare" test below, mirroring
+``test_unversioned_exported_symbol_reaches_compare``'s original shape. The
+G20 audit/cross-source example corpus (``catalog/cases/case14x-18x``, also
+used by ``tests/test_g20_catalog.py``) and three small synthetic snapshots
+(``_synthetic_snapshots.py``, for ``compile_context_conflict``,
+``source_surface_dso_mismatch``, and ``identity_collision_detected`` — the
+checks that corpus doesn't happen to exercise on its own) still supply every
+fixture; only the assertion direction changed as each check's gap closed.
 """
 
 from __future__ import annotations
@@ -50,64 +47,31 @@ def _g20_snapshot(case_name: str, filename: str = "snapshot.abi.json") -> AbiSna
     return load_snapshot(path)
 
 
-#: check name -> (snapshot factory, source, F-row) -- covers all eleven
-#: crosscheck.ALL_CHECKS entries. "source" documents where the fixture
-#: comes from, for a reader diffing this against ADR-068 §1's own list.
-_SCENARIOS: dict[str, tuple[object, str]] = {
-    # F-10: preprocessing/build-context inconsistency.
-    "header_build_context_mismatch": (
-        lambda: _g20_snapshot("case148_xcheck_header_build_mismatch"),
-        "case148_xcheck_header_build_mismatch",
-    ),
-    # NOTE: private_header_leak, exported_not_public, public_not_exported,
-    # rtti_for_internal_type, and public_to_internal_dependency are all
-    # deliberately absent from this table now (F-5/F-6/F-7) -- they migrated
-    # onto `compare()`'s automatic pipeline alongside
-    # unversioned_exported_symbol (ADR-068 §3 rows 3-5). See
-    # test_private_header_leak_reaches_compare and its four siblings below
-    # for their own (positive) parity coverage.
-    "odr_type_variant": (
-        lambda: _g20_snapshot("case149_xcheck_odr_variant"),
-        "case149_xcheck_odr_variant",
-    ),
-    # F-10's sibling: also a preprocessing/build-context class of check.
-    "compile_context_conflict": (
-        synth.compile_context_conflict_snapshot,
-        "synthetic (tests/parity/_synthetic_snapshots.py)",
-    ),
-    "source_surface_dso_mismatch": (
-        synth.source_surface_dso_mismatch_snapshot,
-        "synthetic (tests/parity/_synthetic_snapshots.py)",
-    ),
-    "identity_collision_detected": (
-        synth.identity_collision_snapshot,
-        "synthetic (tests/parity/_synthetic_snapshots.py)",
-    ),
-}
+#: check name -> (snapshot factory, source, F-row). Empty now: all eleven
+#: crosscheck.ALL_CHECKS entries have migrated onto compare()'s automatic
+#: pipeline (ADR-068 §3), so there is no remaining scan-only check to table
+#: here -- see each check's own "reaches_compare" test below instead.
+_SCENARIOS: dict[str, tuple[object, str]] = {}
 
 
 def test_scenarios_cover_every_crosscheck() -> None:
     """Guard against silently dropping a check from the corpus above.
 
-    Six checks are deliberately excluded: ``unversioned_exported_symbol``
-    and ``private_header_leak`` landed first, and ``exported_not_public``,
-    ``public_not_exported``, ``rtti_for_internal_type``, and
-    ``public_to_internal_dependency`` land in this PR (ADR-068 §3 rows
-    3-5). All six have already reached ``compare()`` and so have no place
-    in this "scan-only" table -- see
-    ``test_unversioned_exported_symbol_reaches_compare`` and its five
+    All eleven checks are deliberately excluded now: ``unversioned_exported_
+    symbol`` and ``private_header_leak`` landed first; ``exported_not_
+    public``, ``public_not_exported``, ``rtti_for_internal_type``, and
+    ``public_to_internal_dependency`` landed next (ADR-068 §3 rows 3-5); and
+    ``header_build_context_mismatch``, ``odr_type_variant``,
+    ``identity_collision_detected``, ``compile_context_conflict``, and
+    ``source_surface_dso_mismatch`` land in this PR. All eleven have already
+    reached ``compare()`` and so have no place in this "scan-only" table --
+    see ``test_unversioned_exported_symbol_reaches_compare`` and its ten
     siblings below instead.
     """
     from abicheck.buildsource.crosscheck import ALL_CHECKS
 
-    assert set(_SCENARIOS) == set(ALL_CHECKS) - {
-        "unversioned_exported_symbol",
-        "private_header_leak",
-        "exported_not_public",
-        "public_not_exported",
-        "rtti_for_internal_type",
-        "public_to_internal_dependency",
-    }
+    assert set(_SCENARIOS) == set(ALL_CHECKS) - set(ALL_CHECKS)
+    assert set(_SCENARIOS) == set()
     # Every one of these must also be a registered, phase-owned gap --
     # otherwise a real loss here would (correctly) fail as "unexplained".
     assert set(_SCENARIOS) <= set(EXPECTED_GAPS)
@@ -259,6 +223,108 @@ def test_public_to_internal_dependency_reaches_compare(tmp_path: Path) -> None:
     assert "public_to_internal_dependency" in kinds_of(compare_findings), (
         "capability regression: compare() no longer reaches "
         "public_to_internal_dependency automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_header_build_context_mismatch_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 #3 (this PR): like ``public_to_internal_dependency``, this
+    check is no longer scan-only -- ``compare`` must find it too, self-compared,
+    the same way ``run_crosschecks`` does."""
+    snapshot = _g20_snapshot("case148_xcheck_header_build_mismatch")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "header_build_context_mismatch" in kinds_of(scan_findings), (
+        "fixture regression: case148_xcheck_header_build_mismatch no longer "
+        "makes run_crosschecks produce header_build_context_mismatch -- fix "
+        "the fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "header_build_context_mismatch" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "header_build_context_mismatch automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_odr_type_variant_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 #3 (this PR): see
+    ``test_header_build_context_mismatch_reaches_compare`` above -- same shape."""
+    snapshot = _g20_snapshot("case149_xcheck_odr_variant")
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "odr_type_variant" in kinds_of(scan_findings), (
+        "fixture regression: case149_xcheck_odr_variant no longer makes "
+        "run_crosschecks produce odr_type_variant -- fix the fixture, not "
+        "this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "odr_type_variant" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "odr_type_variant automatically (ADR-068 D3/D4/D5, checker.compare's "
+        "cross_source_checks)"
+    )
+
+
+def test_compile_context_conflict_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 #3 (this PR): the evidence-coherence checks migrate too --
+    same shape as the crosscheck-proper five, from the synthetic fixture the
+    scan-only table above used to key it under."""
+    snapshot = synth.compile_context_conflict_snapshot()
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "compile_context_conflict" in kinds_of(scan_findings), (
+        "fixture regression: compile_context_conflict_snapshot no longer "
+        "makes run_crosschecks produce compile_context_conflict -- fix the "
+        "fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "compile_context_conflict" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "compile_context_conflict automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_source_surface_dso_mismatch_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 #3 (this PR): see
+    ``test_compile_context_conflict_reaches_compare`` above -- same shape."""
+    snapshot = synth.source_surface_dso_mismatch_snapshot()
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "source_surface_dso_mismatch" in kinds_of(scan_findings), (
+        "fixture regression: source_surface_dso_mismatch_snapshot no longer "
+        "makes run_crosschecks produce source_surface_dso_mismatch -- fix "
+        "the fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "source_surface_dso_mismatch" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "source_surface_dso_mismatch automatically (ADR-068 D3/D4/D5, "
+        "checker.compare's cross_source_checks)"
+    )
+
+
+def test_identity_collision_detected_reaches_compare(tmp_path: Path) -> None:
+    """ADR-068 §3 #3 (this PR): see
+    ``test_compile_context_conflict_reaches_compare`` above -- same shape."""
+    snapshot = synth.identity_collision_snapshot()
+    scan_findings = crosscheck_finding_set(snapshot)
+    assert "identity_collision_detected" in kinds_of(scan_findings), (
+        "fixture regression: identity_collision_snapshot no longer makes "
+        "run_crosschecks produce identity_collision_detected -- fix the "
+        "fixture, not this assertion"
+    )
+
+    snap_path = write_snapshot(snapshot, tmp_path / "snap.abi.json")
+    compare_findings = compare_finding_set(snap_path, snap_path)
+    assert "identity_collision_detected" in kinds_of(compare_findings), (
+        "capability regression: compare() no longer reaches "
+        "identity_collision_detected automatically (ADR-068 D3/D4/D5, "
         "checker.compare's cross_source_checks)"
     )
 

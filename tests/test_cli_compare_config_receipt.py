@@ -21,11 +21,9 @@ and Phase 4 persisted an ``evaluation_context`` block, but the two were not
 joined: the block carried what ``checker.compare`` could reconstruct from its
 own arguments, with each front end patching the fields it happened to know
 about afterwards. This covers the seam that replaced that -- the CLI resolving
-one object through the canonical resolver and installing it -- plus the two
-claims the module docstring of :mod:`abicheck.cli_compare_receipt` makes:
-that the gate the receipt reports is the gate the run was scored with, and
-that a ``--profile``-injected value is recorded as the profile's choice
-rather than as a default nobody made.
+one object through the canonical resolver and installing it -- plus the claim
+the module docstring of :mod:`abicheck.cli_compare_receipt` makes: that the
+gate the receipt reports is the gate the run was scored with.
 
 ``tests/test_cli_compare_contract_evaluation.py`` covers the flag itself and
 the per-field provenance cases that predate this wiring; this file covers
@@ -170,22 +168,19 @@ class TestCanonicalResolverIsWhatRuns:
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["selected_by"][0]["option"] == "--required-symbol"
 
-    def test_a_symbols_file_contract_names_the_file_option_and_the_file(self, tmp_path):
-        """A `--required-symbols FILE` run never passes `--required-symbol`.
-
-        Naming the inline flag would fabricate a selector and leave the list
-        that really chose `plugin_abi` unidentifiable (Codex review, fresh
-        evidence).
-        """
+    def test_a_symbols_file_contract_names_the_file_and_the_option(self, tmp_path):
+        """A `--required-symbol @FILE` run's receipt names the file and its
+        digest (ADR-068 D5 / plan Phase 7h: `--required-symbols FILE` was
+        merged into this `@FILE` spelling)."""
         listed = tmp_path / "required.txt"
         listed.write_text("# contract\napi_b\n", encoding="utf-8")
-        ctx = _context(tmp_path, "--required-symbols", str(listed))
+        ctx = _context(tmp_path, "--required-symbol", f"@{listed}")
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["path"] == str(listed)
         hop = prov["selected_by"][0]
-        assert hop["option"] == "--required-symbols"
+        assert hop["option"] == "--required-symbol"
         assert hop["path"] == str(listed)
         # The digest is over the file's raw bytes, from the same read that
         # parsed the symbols.
@@ -198,15 +193,16 @@ class TestCanonicalResolverIsWhatRuns:
     ):
         """Passing a file is not the same as the file supplying the contract.
 
-        With `--required-symbol api_b --required-symbols empty.txt` the file
+        With `--required-symbol api_b --required-symbol @empty.txt` the file
         parses to nothing, so naming it omits the option that actually made
         the contract non-empty (Codex review, fresh evidence — the sharper
-        half of the file-attribution fix).
+        half of the file-attribution fix; generalized from the removed
+        `--required-symbols` flag to the merged `@FILE` spelling).
         """
         empty = tmp_path / "required.txt"
         empty.write_text("# nothing but a comment\n", encoding="utf-8")
         ctx = _context(
-            tmp_path, "--required-symbol", "api_b", "--required-symbols", str(empty)
+            tmp_path, "--required-symbol", "api_b", "--required-symbol", f"@{empty}"
         )
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
@@ -242,128 +238,6 @@ class TestCanonicalResolverIsWhatRuns:
         # D7 puts a `--policy` candidate at the LEGACY_ALIAS layer: it is the
         # older spelling `--policy` supersedes.
         assert ctx["field_provenance"]["policy.base"]["layer"] == "legacy_alias"
-
-
-class TestRunProfileLayer:
-    """``--profile``'s injected values are the profile's choice, not defaults."""
-
-    def test_ci_gate_scheme_is_recorded_as_the_run_profile(self, tmp_path):
-        """CLI cleanup phase two PR G2 migrated ``ci-gate`` from injecting
-        ``exit_code_scheme: "severity"`` to injecting
-        ``severity_preset: "default"`` -- behavior-preserving, since stating
-        a severity preset is exactly what flips the now-purely-derived
-        ``gate.exit_code_scheme`` to ``severity``, and it's the field
-        ``apply_compare_profile`` actually fills in without stamping a
-        source, so a resolution that never saw the profile would otherwise
-        answer ``legacy`` for a run that really scored ``severity`` -- a
-        wrong *value*, not merely an under-claimed source.
-        """
-        ctx = _context(tmp_path, "--profile", "ci-gate")
-
-        assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "severity"
-        prov = ctx["field_provenance"]["gate.preset"]
-        assert prov["layer"] == "run_profile"
-        assert prov["reference"] == "ci-gate"
-        assert prov["selected_by"][0]["option"] == "--profile"
-
-    def test_a_typed_flag_still_outranks_the_profile(self, tmp_path):
-        """The profile is documented to yield to an explicit flag, and
-        ``apply_compare_profile`` never overwrites one -- so the receipt must
-        name the flag, not the profile."""
-        ctx = _context(
-            tmp_path,
-            "--profile",
-            "ci-gate",
-            "--severity-preset",
-            "strict",
-        )
-        assert ctx["resolved_config"]["gate"]["preset"]["id"] == "strict"
-        assert ctx["field_provenance"]["gate.preset"]["layer"] == (
-            "explicit_cli"
-        )
-
-    def test_no_profile_leaves_no_run_profile_layer(self, tmp_path):
-        ctx = _context(tmp_path)
-        assert ctx["field_provenance"]["gate.preset"]["layer"] == (
-            "built_in_default"
-        )
-
-    def test_a_configured_project_preset_outranks_the_placeholder(self, tmp_path):
-        """Codex review, PR #1062, fresh evidence: `ci-gate`'s injected
-        `"default"` is a placeholder that exists only to activate the
-        algorithm -- the live gate computation
-        (`cli_compare_options._resolve_profile_severity_preset`) already
-        discards it once the project states its own severity policy, so the
-        receipt must agree, not attribute a `run_profile`-sourced `"default"`
-        for a run that actually scored the project's `info-only`.
-
-        Not routed through `_context` (asserts exit_code in (1, 2, 4)):
-        `info-only` demotes the fixture's real API break's own severity
-        contribution to 0 -- exit 1 here is `--contract auto`'s orthogonal
-        contract-coverage axis (ADR-049 Phase 7), not the gate, which is
-        exactly the point: the gate and coverage axes are independent, and
-        this test is about the gate/receipt agreeing, not about the
-        coverage floor.
-        """
-        config = tmp_path / ".abicheck.yml"
-        config.write_text("severity:\n  preset: info-only\n", encoding="utf-8")
-        old_p, new_p = _write_pair(tmp_path)
-        result = CliRunner().invoke(
-            main,
-            [
-                "compare", str(old_p), str(new_p),
-                "--contract", "auto", "--format", "json",
-                "--profile", "ci-gate", "--config", str(config),
-            ],
-        )
-        assert result.exit_code == 1, result.output
-        ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
-        assert ctx["resolved_config"]["gate"]["preset"]["id"] == "info-only"
-        prov = ctx["field_provenance"]["gate.preset"]
-        assert prov["layer"] == "project_config"
-        assert prov["path"] == str(config)
-        # gate.exit_code_scheme is purely derived and carries no
-        # field_provenance entry at all any more (PR G2).
-        assert "gate.exit_code_scheme" not in ctx["field_provenance"]
-
-    def test_apply_compare_profile_records_only_what_it_injected(self):
-        """The meta record is what the receipt reads; an explicitly-set option
-        must not appear in it, or the profile would claim a value the user
-        chose."""
-        from abicheck.cli_options import RUN_PROFILE_META_KEY, apply_compare_profile
-
-        class _Ctx:
-            def __init__(self, explicit: set[str]) -> None:
-                self.meta: dict = {}
-                self._explicit = explicit
-
-            def get_parameter_source(self, name):
-                from click.core import ParameterSource
-
-                return (
-                    ParameterSource.COMMANDLINE
-                    if name in self._explicit
-                    else ParameterSource.DEFAULT
-                )
-
-        ctx = _Ctx(explicit={"severity_preset"})
-        kwargs: dict = {"profile": "ci-gate", "severity_preset": "strict"}
-        apply_compare_profile(ctx, kwargs)
-        record = ctx.meta[RUN_PROFILE_META_KEY]
-        assert record["name"] == "ci-gate"
-        assert "severity_preset" not in record["injected"]
-        assert record["injected"]["depth"] == "headers"
-
-    def test_no_profile_records_nothing(self):
-        from abicheck.cli_options import RUN_PROFILE_META_KEY, apply_compare_profile
-
-        class _Ctx:
-            def __init__(self) -> None:
-                self.meta: dict = {}
-
-        ctx = _Ctx()
-        apply_compare_profile(ctx, {"profile": None})
-        assert RUN_PROFILE_META_KEY not in ctx.meta
 
 
 class TestGateParityWithTheLiveRun:

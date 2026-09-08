@@ -74,7 +74,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--jobs", "1")
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4, out
         assert "## Per-Library Findings" in out
         assert "`libfoo.json` Findings" in out
@@ -127,7 +127,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--jobs", "1")
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0, out
         assert "## Per-Library Findings" not in out
 
@@ -157,7 +157,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(old_dir / "libfoo.json", old_snap)
         _write_snap(new_dir / "libfoo.json", new_snap)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--jobs", "1")
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4, out
         assert "additional findings omitted" in out
         # Codex review, PR #1016: the truncation note must not point to
@@ -198,7 +198,7 @@ class TestReleaseMarkdownCarriesSymbolNames:
         _write_snap(new_dir / "libfoo.json", new_snap)
 
         code, out = _invoke(
-            "compare", str(old_dir), str(new_dir), "--jobs", "1", "--format", "json"
+            "compare", str(old_dir), str(new_dir), "--format", "json"
         )
         assert code == 4, out
         data = json.loads(out)

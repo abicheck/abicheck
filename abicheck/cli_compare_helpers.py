@@ -50,7 +50,6 @@ from .cli_compare_options import (
     _reject_set_input_flags,
     _resolve_debug_roots,
     _resolve_demangle,
-    _resolve_profile_severity_preset,
     _warn_force_public_ignored,
     echo_coverage_warnings,
 )
@@ -77,6 +76,7 @@ from .cli_helpers_compare import (
     resolve_force_public_scope,
 )
 from .cli_options import (
+    LANG_DEFAULT,
     _shared_frontend_explicit,
     resolve_compile_context,
     resolve_contract_domain,
@@ -123,12 +123,7 @@ def _resolve_compare_config(
     *,
     config: Path | None,
     severity_preset: str | None,
-    severity_preset_from_profile: bool = False,
     scope_public_headers: bool,
-    debug_format_opt: str | None,
-    dwarf_only: bool,
-    debuginfod: bool,
-    debuginfod_url: str | None,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
@@ -140,7 +135,15 @@ def _resolve_compare_config(
     (``None`` when there is no config), captured by the same read so an
     ADR-049 receipt can prove *which revision* of the file supplied a value
     rather than only naming its path (Codex review, fresh evidence).
-    *severity_preset_from_profile*: see :func:`_resolve_profile_severity_preset`.
+
+    ADR-068 D5 / Phase 7a: ``compare`` no longer has ``--debug-format``/
+    ``--debuginfod``/``--debuginfod-url``/``--dwarf-only`` CLI flags (they
+    were hidden, already fully config-backed duplicates of ``debug.format``/
+    ``debug.debuginfod``/``debug.debuginfod_url``/``debug.dwarf_only``), so
+    ``resolve_compare_config`` below is called with no ``cli_debug_format``/
+    ``cli_dwarf_only``/``cli_debuginfod``/``cli_debuginfod_url`` override --
+    its defaults (``None``/``None``/``None``/``None``) mean the config value
+    (or the built-in default) always wins.
     """
     from .cli_helpers_compare import discover_project_config, resolve_compare_config
     from .workflows.extraction import load_build_config_with_digest
@@ -154,23 +157,10 @@ def _resolve_compare_config(
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
 
-    severity_preset = _resolve_profile_severity_preset(
-        severity_preset, from_profile=severity_preset_from_profile, project_cfg=project_cfg
-    )
     resolved_cfg = resolve_compare_config(
         project_cfg,
         cli_severity_preset=severity_preset,
         cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        # ADR-040 Lever 2: debug-resolution demoted to config.
-        # ``--debug-format``/``--debuginfod-url`` default to None (absent ⇒
-        # config wins); the is_flags need the COMMANDLINE-source gate so their
-        # default ``False`` doesn't mask a configured ``True``. ``--debug-format``
-        # already defaults to None (distinct from any real value), so no such
-        # gate is needed here.
-        cli_debug_format=resolve_dump_debug_format(debug_format_opt),
-        cli_dwarf_only=_cli_flag("dwarf_only", dwarf_only),
-        cli_debuginfod=_cli_flag("debuginfod", debuginfod),
-        cli_debuginfod_url=debuginfod_url,
     )
     return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
@@ -376,6 +366,20 @@ def _render_compare_dry_run(
         "source scope: target on each side (compare has no PR change seed)"
         if collect_mode in ("source-target", "source-changed", "graph-full")
         else None,
+    )
+    from .frontends.cli.compare_dry_run import add_compare_cost_preview_section
+    from .workflows.compare_cost_preview import estimate_compare_dry_run_cost
+
+    add_compare_cost_preview_section(
+        result,
+        *estimate_compare_dry_run_cost(
+            old_input=old_input, new_input=new_input,
+            depth=depth, source_method=source_method,
+            headers=headers, includes=includes,
+            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+            old_sources=old_sources, new_sources=new_sources,
+            old_build_info=old_build_info, new_build_info=new_build_info,
+        ),
     )
     all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
     result.add(
@@ -588,7 +592,7 @@ def _preflight_manifests_and_audit(
 def _resolve_required_symbol_policy(
     ctx: click.Context, policy: str, required_symbols: tuple[str, ...],
     required_symbols_from_file: tuple[str, ...],
-    required_symbols_file: Path | None, required_symbols_sha: str | None,
+    required_symbols_path: str | None, required_symbols_sha: str | None,
 ) -> tuple[str, str | None, Path | None, str | None]:
     """Pick ``policy`` for a ``--required-symbol`` contract, and say what picked it.
 
@@ -601,13 +605,12 @@ def _resolve_required_symbol_policy(
     that used ``plugin_abi``).
 
     Which spelling actually *contributed* decides what the receipt names -- not
-    merely which was passed. A ``--required-symbols FILE`` run never passed
-    ``--required-symbol``, so naming the inline flag fabricates a selector; but a
-    file that parsed to nothing selected nothing either, so naming it for a
-    ``--required-symbol api_b --required-symbols empty.txt`` run omits the option
-    that really made the contract non-empty (Codex review, two rounds). The file
-    form wins when it contributed, since it is then both true and the one
-    carrying a path and digest to audit.
+    merely which was passed. ADR-068 D5 / plan Phase 7h folded the old, separate
+    ``--required-symbols FILE`` flag into ``--required-symbol @FILE``, so both
+    forms now share one option name for the receipt -- but a file that parsed
+    to nothing still selected nothing (Codex review, two rounds, generalized):
+    the ``@FILE`` form wins the receipt's path/digest only when it actually
+    contributed a symbol.
 
     Returns ``(policy, selected_by, selected_path, selected_sha)``.
     """
@@ -617,8 +620,9 @@ def _resolve_required_symbol_policy(
         return policy, None, None, None
     if required_symbols_from_file:
         return (
-            "plugin_abi", "--required-symbols",
-            required_symbols_file, required_symbols_sha,
+            "plugin_abi", "--required-symbol",
+            Path(required_symbols_path) if required_symbols_path else None,
+            required_symbols_sha,
         )
     return "plugin_abi", "--required-symbol", None, None
 
@@ -691,6 +695,7 @@ def _embed_inline_source_sides(
     old_build_info: Path | None, new_build_info: Path | None,
     old_h: Any, new_h: Any, old_inc: Any, new_inc: Any,
     old_version: str, new_version: str, lang: str,
+    lang_explicit: bool = False,
     header_backend: str,
     old_header_backend: str | None, new_header_backend: str | None,
     compile_context: Any,
@@ -758,17 +763,19 @@ def _embed_inline_source_sides(
     # (Codex review). The per-side override is added back below, where it is
     # genuinely explicit for that side.
     _frontend_explicit = _shared_frontend_explicit(ctx)
-    # G31 Phase C follow-up (Codex review): --lang has the identical
+    # G31 Phase C follow-up: --lang had the identical
     # ctx.invoke-loses-COMMANDLINE-source problem as --ast-frontend/
-    # --nostdinc immediately above -- without this, a `compare --lang c++
-    # --old-sources tree/` side would silently resolve `lang_explicit=False`
-    # in the nested `dump_cmd` invocation below regardless of what the user
-    # actually typed, discarding the explicit request on a
-    # language-ambiguous header exactly like the bug this file's sibling
-    # non-inline path (run_compare's own `lang_explicit`) already fixed.
-    _lang_explicit = (
-        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
-    )
+    # --nostdinc immediately above -- without forwarding the caller's
+    # already-resolved explicitness, a raw `--old/new-sources` tree side
+    # would silently resolve `lang_explicit=False` in the nested
+    # `dump_cmd` invocation below regardless of what the caller actually
+    # requested, discarding the explicit request on a language-ambiguous
+    # header. Phase 7 removed `--lang` from `compare`'s CLI entirely, so
+    # the only remaining source of an explicit request is `compile.lang`
+    # in `.abicheck.yml` -- already resolved by the caller (run_compare)
+    # into *lang_explicit* above, since `ctx.get_parameter_source("lang")`
+    # can never report COMMANDLINE any more.
+    _lang_explicit = lang_explicit
 
     _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
     # Cleanup on context teardown so the temp dir never leaks, even if an
@@ -849,7 +856,6 @@ def _resolve_evaluation_config(
     # overwritten with above -- the resolver merges them itself, and a
     # pre-merged value would look CLI-stated.
     from .cli_compare_receipt import resolve_and_apply, typed_parameter_names
-    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
     from .compatibility_evaluation_resolver import (
         FieldResolutionError,
         PackConflictError,
@@ -882,7 +888,6 @@ def _resolve_evaluation_config(
             policy_file=pf,
             suppression=suppression,
             suppress_path=suppress,
-            run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
             policy_option=policy_selected_by,
             policy_path=policy_selected_path,
             policy_sha256=policy_selected_sha,
@@ -1290,7 +1295,7 @@ def run_compare(
     ctx: click.Context,
     *,
     old_input: Path, new_input: Path,
-    jobs: int, dso_only: bool, output_dir: Path | None,
+    dso_only: bool, output_dir: Path | None,
     fail_on_removed: bool, on_incomplete_scope: str = "warn",
     support_promise: str = "off",
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
@@ -1299,16 +1304,29 @@ def run_compare(
     include_private_dso: bool, keep_extracted: bool,
     manifest_path: Path | None,  # bundle_system_providers/cohorts: PR J, see resolved_cfg
     no_bundle_analysis: bool, bundle_facts_out: Path | None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
-    header_backend: str,
-    sysroot: Path | None, nostdinc: bool,
+    headers: tuple[Path, ...], includes: tuple[Path, ...],
+    # Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1): `lang`/
+    # `header_backend`/`sysroot`/`nostdinc`/`compiler_path`/
+    # `compiler_prefix`/`compiler_option_tokens`/`old_header_backend`/
+    # `new_header_backend` are no longer CLI-populated -- `--lang`/
+    # `--ast-frontend`/`--compiler`/`--compiler-prefix`/`--compiler-option`/
+    # `--sysroot`/`--nostdinc` are all gone from `compare`'s CLI (CONFIG
+    # class; `.abicheck.yml`'s `compile:` block is their only source now).
+    # `lang` is resolved from config below (no `CompileContext` field for
+    # it); the rest reach the same `resolve_compile_context` call as
+    # before with fixed "nothing explicit" inputs, which already treats an
+    # unset/default value as "defer to config" the same way `compile.std`/
+    # `compile.defines` already did.
+    lang: str | None = None,
+    header_backend: str = "auto",
+    sysroot: Path | None = None, nostdinc: bool = False,
     # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
     # internal-only, defaulted-None parameter -- see cli.py's dump_cmd for
     # why (never populated from the CLI anymore, only ever None here).
     gcc_options: str | None = None,
     compiler_path: str | None = None, compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
-    old_header_backend: str | None, new_header_backend: str | None,
+    old_header_backend: str | None = None, new_header_backend: str | None = None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,
@@ -1316,7 +1334,6 @@ def run_compare(
     suppress: Path | None,
     policy: str, policy_file_path: Path | None,
     pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
-    dwarf_only: bool,
     severity_preset: str | None,
     config: Path | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
@@ -1325,12 +1342,9 @@ def run_compare(
     scope_public_headers: bool, show_filtered: bool,
     post_manifest_path: Path | None,
     report_mode: str,
-    debug_format_opt: str | None,
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
-    debuginfod: bool,
-    debuginfod_url: str | None,
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
     # unconditionally now (see compare_snapshots() call site below).
     # explain_patterns survives, now pure rendering of the always-on ledger
@@ -1357,7 +1371,6 @@ def run_compare(
     used_by_apps: tuple[ConsumerAppInput, ...] = (),
     used_by_manifests: tuple[Path, ...] = (),
     required_symbols_opt: tuple[str, ...] = (),
-    required_symbols_file: Path | None = None,
     diagnostic_comparison: bool = False,
     contract_mode: str | None = None,
     audit_suppressions: bool = False,
@@ -1392,17 +1405,19 @@ def run_compare(
     _setup_verbosity(verbose)
 
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
-    # discarded ..." known gap): --lang carries the same Click default
+    # discarded ..." known gap): --lang used to carry the same Click default
     # ("c++", indistinguishable from a genuine --lang c++) that dump_cmd's
-    # own lang_explicit detection exists to resolve — mirrors the
-    # already-established _frontend_explicit/_nostdinc_explicit pattern in
-    # _embed_inline_source_sides below. Threaded through
+    # own lang_explicit detection existed to resolve. Threaded through
     # _resolve_compare_snapshots -> CompareRequest.lang_explicit so a live
     # ELF/PE/Mach-O side's header-AST pass honors an explicit request on a
     # language-ambiguous header instead of silently auto-detecting past it.
-    lang_explicit = (
-        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
-    )
+    #
+    # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI spelling
+    # left on `compare` at all, so `ctx.get_parameter_source("lang")` can
+    # never report COMMANDLINE any more -- `compile.lang` in `.abicheck.yml`
+    # is the only remaining source of an explicit request, resolved below
+    # once `resolved_cfg` exists (Codex review: computing this before that
+    # resolution silently discarded every config-set `compile.lang`).
 
     # Workstream D-S1: merge --used-by-manifest-named consumers into the same
     # --used-by pipeline before anything else looks at used_by_apps -- every
@@ -1420,51 +1435,66 @@ def run_compare(
         )
         used_by_apps = (*used_by_apps, *manifest_specs)
 
-    required_symbols, required_symbols_from_file, required_symbols_sha = (
-        load_required_symbols(required_symbols_opt, required_symbols_file)
+    required_symbols, required_symbols_from_file, required_symbols_sha, required_symbols_path = (
+        load_required_symbols(required_symbols_opt)
     )
     if used_by_apps and required_symbols:
         raise click.UsageError(
-            "--used-by and --required-symbol/--required-symbols are mutually "
+            "--used-by and --required-symbol are mutually "
             "exclusive: scope the comparison to either application imports or "
             "an explicit required-symbol contract, not both."
         )
     policy, policy_selected_by, policy_selected_path, policy_selected_sha = (
         _resolve_required_symbol_policy(
             ctx, policy, required_symbols,
-            required_symbols_from_file, required_symbols_file, required_symbols_sha,
+            required_symbols_from_file, required_symbols_path, required_symbols_sha,
         )
     )
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
-    _injected = (ctx.meta.get(_RUN_PROFILE_META_KEY) or {}).get("injected", {})
     cfg_path, project_cfg, resolved_cfg, cfg_sha = _resolve_compare_config(
         config=config,
         severity_preset=severity_preset,
-        severity_preset_from_profile="severity_preset" in _injected,
         scope_public_headers=scope_public_headers,
-        debug_format_opt=debug_format_opt,
-        dwarf_only=dwarf_only,
-        debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
     )
     sev_config = resolved_cfg.severity
     scope_public_headers = resolved_cfg.scope_public
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
-    # ADR-040 Lever 2: the demoted debug-resolution knobs are now resolved
-    # (CLI > config > default); overwrite the raw flag locals so the rest of
-    # the flow sees the merged values. The config-only knobs above
-    # (collapse/strict/justification/show_redundant) have no flag left to
-    # overwrite -- they are simply read off the resolved config.
+    # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
+    # --debug-format are gone as CLI flags (hidden, already config-backed
+    # duplicates) -- config-only now, read straight off the resolved config
+    # with no raw CLI local to overwrite, same as collapse/strict/
+    # justification/show_redundant above.
     debug_format_opt = resolved_cfg.debug_format
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod
     debuginfod_url = resolved_cfg.debuginfod_url
     show_redundant = resolved_cfg.show_redundant
+    # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI flag
+    # left either; `compile.lang` is its only source, defaulting to the
+    # same `LANG_DEFAULT` ("c++") the removed flag carried so an
+    # unconfigured project's behavior is unchanged. `lang` is always None
+    # here (compare_cmd's own kwargs never carry a "lang" key any more --
+    # the stored-bundle-facts dispatch path resolves its own `lang`/
+    # `lang_explicit` upstream in compare.py and never reaches run_compare
+    # at all), so `resolved_cfg.compile_lang` is the sole source of both
+    # the resolved value and its explicitness.
+    if lang is None:
+        lang = resolved_cfg.compile_lang or LANG_DEFAULT
+    lang_explicit = resolved_cfg.compile_lang is not None
+    # Phase 7: `--allow-ast-frontend-fallback`/`--allow-unsupported-castxml`
+    # are gone from compare's CLI too; a `.abicheck.yml` `compile:` block
+    # setting either to `true` has the identical effect the removed flag
+    # had (both were already pure env-var togglers).
+    from .buildsource.build_config import BuildConfig as _BuildConfig
+    from .cli_options import apply_compile_config_env_toggles
+
+    apply_compile_config_env_toggles(
+        ctx, project_cfg if isinstance(project_cfg, _BuildConfig) else None
+    )
 
     # P1.1 (Codex review): resolved ahead of the inline-embed block below (not
     # just before _resolve_compare_snapshots, where this used to live) so a raw
@@ -1510,7 +1540,6 @@ def run_compare(
         )
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
-            from .cli_options import RUN_PROFILE_META_KEY as _RUN_PROFILE_META_KEY
 
             release_pack_application = resolve_release_pack_application_from_ctx(
                 ctx,
@@ -1522,7 +1551,6 @@ def run_compare(
                 project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
                 policy_option=policy_selected_by, policy_path=policy_selected_path,
                 policy_sha256=policy_selected_sha,
-                run_profile=ctx.meta.get(_RUN_PROFILE_META_KEY),
             )
 
     # Parsed here, in the preflight, not only at the post-comparison
@@ -1536,9 +1564,8 @@ def run_compare(
     #
     # After the flag-combination rejections above, for the reason the
     # --dump-manifest parse below states for itself: when --use-cases was
-    # never going to work here at all, "not supported here" (the one-line
-    # --profile quick case) is the useful message, not "your manifest is
-    # malformed".
+    # never going to work here at all, "not supported here" is the useful
+    # message, not "your manifest is malformed".
     #
     # The *other* --use-cases exit a dry run still cannot predict is "neither
     # side carries a source graph", and deliberately so: that is a property
@@ -1619,7 +1646,7 @@ def run_compare(
             suppress=suppress, strict_suppressions=strict_suppressions,
             require_justification=require_justification,
             policy=policy, policy_file_path=policy_file_path,
-            dso_only=dso_only, jobs=jobs,
+            dso_only=dso_only,
             fail_on_removed=fail_on_removed, on_incomplete_scope=on_incomplete_scope,
             support_promise=support_promise,
             select=select, select_required=select_required,
@@ -1645,6 +1672,7 @@ def run_compare(
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
             depth=release_depth,
+            public_header_dirs=project_config_public_header_dirs(project_cfg),
             # Codex review (PR #1154 follow-up): --view's derived values were
             # silently dropped from this dispatch -- forwarded raw
             # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
@@ -1655,9 +1683,8 @@ def run_compare(
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
     _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
-    jobs_explicit = ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
     _warn_unused_set_flags(
-        jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir,
+        dso_only=dso_only, output_dir=output_dir,
         select=select, select_required=select_required,
     )
 
@@ -1756,6 +1783,7 @@ def run_compare(
             old_build_info=old_build_info, new_build_info=new_build_info,
             old_h=old_h, new_h=new_h, old_inc=old_inc, new_inc=new_inc,
             old_version=old_version, new_version=new_version, lang=lang,
+            lang_explicit=lang_explicit,
             header_backend=header_backend,
             old_header_backend=old_header_backend,
             new_header_backend=new_header_backend,

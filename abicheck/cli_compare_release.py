@@ -257,17 +257,6 @@ if TYPE_CHECKING:
 )
 @verbose_option
 @click.option(
-    "-j",
-    "--jobs",
-    "jobs",
-    type=int,
-    default=0,
-    show_default=True,
-    help="Number of parallel library comparisons (0 = auto-detect CPU count, "
-    "clamped to fit available memory -- see ABICHECK_RELEASE_JOB_MEM_GIB -- "
-    "the default). An explicit positive value is never memory-clamped.",
-)
-@click.option(
     "--instantiation-manifest",
     "manifest_path",
     type=click.Path(exists=True, path_type=Path),
@@ -374,7 +363,6 @@ def compare_release_cmd(
     include_private_dso: bool,
     keep_extracted: bool,
     verbose: bool,
-    jobs: int,
     manifest_path: Path | None,
     bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
@@ -454,6 +442,15 @@ def compare_release_cmd(
     show_only: str | None = None,
     demangle: bool | None = None,
     explain_patterns: bool = False,
+    # CodeRabbit review, PR #1138: a project's `.abicheck.yml`
+    # `scope.public_header_dirs` (`workflows.public_header_boundary.
+    # project_config_public_header_dirs`), resolved once by the caller
+    # (`cli_compare_helpers.run_compare`, the same place that already
+    # resolves `project_cfg` for the single-pair path) and forwarded here --
+    # same internal-parameter shape as `compile_context`/`pack_application`
+    # above. `None` (the default) is a true no-op: every library is compared
+    # exactly as it was before this parameter existed.
+    public_header_dirs: list[Path] | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -570,7 +567,7 @@ def compare_release_cmd(
     # dedup_validate_overrides_warnings(): this whole release run reloads
     # the same --policy-file several times over -- the early strict-
     # suppression validation just below, the per-library fan-out (including
-    # its default `--jobs 0` ThreadPoolExecutor parallel path -- see
+    # its auto-detected (`jobs=0`) ThreadPoolExecutor parallel path -- see
     # _compare_release_parallel's own docstring for how the dedup scope
     # reaches those worker threads), and (when a probe matrix is given) the
     # matrix-result path all load it independently, so without this a
@@ -771,7 +768,10 @@ def compare_release_cmd(
                     or secondary_fmt == "junit"
                     or bundle_facts_out is not None
                 ),
-                jobs=jobs,
+                # ADR-068 D5 / plan Phase 7h: -j/--jobs removed outright --
+                # always auto-detect (and memory-clamp), never a manual
+                # override.
+                jobs=0,
                 scope_to_public_surface=scope_public_headers,
                 include_dependencies=include_dependencies,
                 severity_config=severity_config,
@@ -782,6 +782,7 @@ def compare_release_cmd(
                 depth=depth,
                 show_only=show_only,
                 explain_patterns=explain_patterns,
+                public_header_dirs=public_header_dirs,
             )
 
             for key in matched_keys:
@@ -956,6 +957,7 @@ def compare_release_cmd(
                                 pdb=old_dbg,
                                 compile=compile_context,
                                 include_dependencies=include_dependencies,
+                                public_header_dirs=public_header_dirs,
                             ),
                             lang=lang,
                             depth=depth,

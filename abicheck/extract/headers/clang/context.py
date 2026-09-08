@@ -47,11 +47,13 @@ own default-value evaluator as an explicit parameter for the same reason
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from ....dumper_clang_vtable import build_vtable, is_record_definition
 from ....model import AccessLevel, ScopeOrigin, Visibility
 from ....model.identity import ScopePath
+from ....model.mangled_name import strip_macho_itanium_decoration
 from ....name_classification import strip_anonymous_type_location
 from ....provenance import classify_origin, header_from_location
 from .templates import build_specialization_index
@@ -314,13 +316,114 @@ def is_darwin_target(target_triple: str | None) -> bool:
     substring test over the whole triple) also avoids a false match from
     an unrelated component that merely happens to CONTAIN one of these
     tokens.
+
+    **Falls back to the running interpreter's own ``sys.platform`` when
+    *target_triple* is unavailable** (Codex review, macOS CI, fresh
+    evidence): *target_triple* here is whatever ``dumper._configured_
+    target_triple`` managed to probe by shelling out to the configured
+    compiler with ``-print-target-triple`` -- a real subprocess call that
+    can fail (a compiler resolution mismatch, a sandboxed/restricted CI
+    runner, a compiler build that doesn't support the flag) independently
+    of what platform this process is actually running on. When that probe
+    comes back empty, the previous behavior silently treated the target as
+    non-Darwin and skipped normalization entirely -- reproducing this
+    exact bug even on a real Darwin host. A header-AST extraction always
+    runs *natively* on the machine whose compiler produced the AST (there
+    is no cross-compilation path through this parser), so when the probe
+    is unavailable, the process's own OS is the next-best and highly
+    reliable signal: it is never wrong about which OS it is actually
+    running on, unlike an external probe that can simply fail. This can
+    only ever make Darwin detection *more* likely to succeed when the
+    process truly is on Darwin -- it never overrides an explicit,
+    successfully-probed non-Darwin triple.
     """
     if not target_triple:
-        return False
+        return sys.platform == "darwin"
     components = target_triple.lower().split("-")
     return "apple" in components or any(
         component.startswith(_DARWIN_OS_NAMES) for component in components
     )
+
+
+def strip_darwin_itanium_decoration(
+    raw_mangled: str | None,
+    mangled: str,
+    target_triple: str | None,
+    *,
+    name: str = "",
+    is_extern_c: bool = False,
+) -> str:
+    """Strip a still-present Darwin linker-decoration underscore, for
+    either a real Itanium mangled name (``"__Z..."`` -> ``"_Z..."``) or a
+    plain C-linkage bare name (``"_foo"`` -> ``"foo"``).
+
+    Darwin decorates every global symbol with one leading underscore; for
+    a real Itanium name (always starting ``"_Z"``) that produces
+    ``"__Z..."``. clang's ``mangledName``/``self._target_triple`` reports
+    that decorated linker symbol, while castxml's own ``mangled`` is
+    always the pure spelling -- stripped here so the model's own
+    ``mangled`` field matches on every platform (shared by
+    ``extract.headers.clang.functions.parse_functions`` and
+    ``dumper_clang.parse_variables`` so a bare ``--ast-frontend clang``
+    dump on Darwin gets it too, not only a castxml+clang hybrid merge --
+    macOS CI review, fresh evidence).
+
+    The Itanium case is gated on the doubly-underscore-decorated shape
+    (``"__Z..."``) specifically, not "any leading underscore": that shape
+    is unambiguous ON DARWIN (a real Itanium name always starts with a
+    single ``"_Z"``), whereas a bare, single-underscore-prefixed name
+    (``"_foo"``) is generally indistinguishable from a real, explicit
+    ``asm("_foo")`` label naming a distinct identity. **Both cases still
+    require ``is_darwin_target(target_triple)`` first** -- a literal
+    ``"__ZN..."``-shaped ``mangledName`` is unusual but syntactically legal
+    on a genuinely NON-Darwin target too (an explicit ``asm("__Zfoo")``
+    label, however contrived), and unconditionally treating that shape as
+    decoration regardless of platform previously broke exactly that,
+    documented case (see ``tests/test_dumper_clang_extern_c_identity.py``'s
+    ``test_parse_functions_mangled_field_unaffected_off_darwin``: an
+    earlier, ungated revision of this strip stripped a literal
+    off-Darwin ``"__Z..."`` name too). Delegates to :func:`~abicheck.model.
+    mangled_name.strip_macho_itanium_decoration` for the shape test itself,
+    the single canonical home for that structural check (also used by
+    ``model.mangled_name``'s own Itanium-scope parsing and
+    ``dumper_hybrid._macho_normalize_mangled``) -- but only calls it once
+    ``is_darwin_target`` has already confirmed the platform.
+
+    Both gates lean on the SAME ``is_darwin_target`` check for their
+    platform confirmation, which is what makes that check's own
+    ``sys.platform`` fallback (see its docstring) load-bearing here too: if
+    the external ``-print-target-triple`` compiler probe behind
+    *target_triple* fails or returns something this module's Darwin-triple
+    heuristic doesn't recognize, neither case would strip anything on a
+    real Darwin host without that fallback -- reproducing this exact class
+    of bug even though the underlying evidence (a real compiled Mach-O
+    binary) never changed.
+
+    The plain-C-linkage case (macOS CI, fresh evidence: a real Darwin
+    ``extern "C"`` declaration's decorated ``mangledName`` -- ``"_c_func"``
+    for source-level ``c_func`` -- was left unstripped, disagreeing with
+    castxml's undecorated spelling and the real Mach-O export table alike,
+    for the identical reason the Itanium case above was fixed) needs an
+    extra, narrower gate on top: *is_extern_c*, the caller's own already-
+    computed boolean (``entry.extern_c``, ``raw_mangled == name``, or the
+    existing Darwin/no-scope bare-name fallback -- see either caller's own
+    docstring). Reusing that exact boolean, rather than re-deriving a
+    separate condition here, means this only strips when the caller has
+    ALREADY concluded -- from a real, explicit ``extern "C"`` AST node or
+    an already-vetted heuristic -- that this declaration's true identity
+    IS its bare name; it does not widen what counts as evidence. Still
+    requires *mangled* to be EXACTLY ``"_" + name`` (not merely
+    underscore-prefixed) so a real, distinct asm-label spelling that
+    happens to differ from the bare name is never touched.
+    """
+    if raw_mangled is None or not is_darwin_target(target_triple):
+        return mangled
+    stripped = strip_macho_itanium_decoration(mangled)
+    if stripped != mangled:
+        return stripped
+    if is_extern_c and name and mangled == "_" + name:
+        return name
+    return mangled
 
 
 def visibility(

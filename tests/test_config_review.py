@@ -186,25 +186,39 @@ class TestExitSchemeAnnouncement:
 
 class TestDebugFormatSelector:
     def test_compare_hides_debug_format(self):
-        # ADR-040 Lever 2: --debug-format is demoted to the debug.format config
-        # key and hidden on compare (still a functional override; see
-        # test_debug_format_auto_accepted). It stays visible on `dump`.
+        # Phase 7a (one-comparison-product.md §4.1, "H" rows): --debug-format
+        # is deleted outright from `compare` (not merely hidden) -- neither
+        # --help nor --help-all shows it. debug.format is its only spelling.
         out = CliRunner().invoke(main, ["compare", "--help"]).output
         assert "--debug-format" not in out
+        out_all = CliRunner().invoke(main, ["compare", "--help-all"]).output
+        assert "--debug-format" not in out_all
         assert "--debug-root" in out  # the coarse per-run override stays visible
 
-    def test_dump_exposes_debug_format(self):
-        # --debug-format is a debug-info-tier flag, folded behind --help-all
-        # by dump's curated --help (G21.8 M2) -- still visible there.
+    def test_dump_hides_debug_format_too(self):
+        # Phase 7c: --debug-format is deleted outright from `dump` too --
+        # unlike the "H" rows on compare, it was VISIBLE (not hidden) on
+        # dump before this phase; there is no deprecation-window policy in
+        # this repo (AGENTS.md), so it is deleted the same way, not merely
+        # hidden behind --help-all.
         out = CliRunner().invoke(main, ["dump", "--help-all"]).output
-        assert "--debug-format" in out
-        # The dump selector still shows the [auto|dwarf|btf|ctf] choices.
-        assert "[auto|dwarf|btf|ctf]" in out
+        assert "--debug-format" not in out
+        assert "[auto|dwarf|btf|ctf]" not in out
+
+    def test_compare_debug_format_flag_exits_usage_error(self, tmp_path):
+        old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--debug-format", "auto"],
+        )
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_legacy_dwarf_flag_removed(self, tmp_path):
         # H1 hidden-shim deletion: the legacy --btf/--ctf/--dwarf spellings
         # were deleted outright (not merely hidden) -- --debug-format
-        # {dwarf,btf,ctf} is the only selector left.
+        # {dwarf,btf,ctf} is the only selector left. --debug-format itself
+        # is now deleted too (Phase 7a), so both are equally gone.
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -220,24 +234,58 @@ class TestDebugFormatSelector:
         assert "--compile-db " not in out
         assert "--compile-db-filter" in out  # the filter alias stays visible
 
-    def test_debug_format_auto_accepted(self, tmp_path):
+    def test_debug_format_auto_accepted_via_config(self, tmp_path, monkeypatch):
+        # Auto-discovered config (cwd-upward), no --config flag.
+        monkeypatch.chdir(tmp_path)
+        Path(".abicheck.yml").write_text("debug:\n  format: auto\n", encoding="utf-8")
         old_p, new_p = _write_identical(tmp_path)
+        result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p)])
+        assert result.exit_code == 0
+
+    def test_debug_format_config_key_auto_accepted(self, tmp_path):
+        # ADR-068 D5 / Phase 7a: debug.format is now the only way to set this
+        # on compare -- prove the config key alone reproduces the deleted
+        # --debug-format flag's "auto" behavior. Explicit --config, unlike
+        # the auto-discovered variant above.
+        old_p, new_p = _write_identical(tmp_path)
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  format: auto\n")
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--debug-format", "auto"],
+            ["compare", str(old_p), str(new_p), "--config", str(config_path)],
         )
         assert result.exit_code == 0
 
-    def test_debug_format_rejected_on_non_elf(self, tmp_path):
-        # --debug-format dwarf/btf/ctf is ELF-only; compare must reject (not
+    def test_debug_format_rejected_on_non_elf_via_config(self, tmp_path, monkeypatch):
+        # debug.format dwarf/btf/ctf is ELF-only; compare must reject (not
         # silently ignore) it for a PE/Mach-O binary input, like dump does.
+        # Auto-discovered config (cwd-upward), no --config flag.
+        monkeypatch.chdir(tmp_path)
+        Path(".abicheck.yml").write_text("debug:\n  format: dwarf\n", encoding="utf-8")
         old = tmp_path / "old.dll"
         new = tmp_path / "new.dll"
         old.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")  # PE magic
         new.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")
+        result = CliRunner().invoke(main, ["compare", str(old), str(new)])
+        assert result.exit_code != 0
+        combined = result.output + (result.stderr or "")
+        assert "ELF" in combined
+
+    def test_debug_format_config_key_rejected_on_non_elf(self, tmp_path):
+        # debug.format: dwarf/btf/ctf is ELF-only; compare must reject (not
+        # silently ignore) it for a PE/Mach-O binary input, like dump does --
+        # the same behavior the deleted --debug-format flag used to produce,
+        # now reached only through the config key (ADR-068 D5 / Phase 7a).
+        # Explicit --config, unlike the auto-discovered variant above.
+        old = tmp_path / "old.dll"
+        new = tmp_path / "new.dll"
+        old.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")  # PE magic
+        new.write_bytes(b"MZ\x90\x00\x03\x00\x00\x00")
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  format: dwarf\n")
         result = CliRunner().invoke(
             main,
-            ["compare", str(old), str(new), "--debug-format", "dwarf"],
+            ["compare", str(old), str(new), "--config", str(config_path)],
         )
         assert result.exit_code != 0
         combined = result.output + (result.stderr or "")

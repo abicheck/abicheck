@@ -208,9 +208,9 @@ def _coverage_message(
 
 #: The one output format that already carries the ledger, so the stderr
 #: notice would be a second copy of what the report states -- but only when
-#: the *full* report is rendered. The internal ``"oneline"`` fmt (CLI cleanup
-#: phase two, PR 1 -- see ``service_render.ONELINE_FORMAT``; reached only via
-#: the built-in ``quick`` --profile, ``--stat``'s sole surviving use) is a
+#: the *full* report is rendered. The ``"oneline"`` fmt (CLI cleanup
+#: phase two, PR 1 -- see ``service_render.ONELINE_FORMAT``; ``--stat``'s
+#: sole surviving use, reachable directly via ``--format oneline``) is a
 #: summary that omits both ledger keys, so a run rendering it is ledgerless
 #: whatever else it also renders (Codex review, originally about ``--stat``'s
 #: `to_stat_json`, same reasoning now applies to `to_stat`).

@@ -23,12 +23,9 @@ Bundles ``release_options`` (directory/package release-comparison knobs),
 canonical name for the pre-existing ``build_source_compare_options`` alias,
 kept here too) --
 every stacked-decorator option group that adds no edge back into the
-CLI-registration import cycle, mirroring why ``apply_compare_profile``/
-``_profile_targets_set_input`` stayed behind in :mod:`abicheck.cli_options`
-itself (they reach ``cli_resolve``, this module does not reach anything
-beyond ``click``/``params``).
+CLI-registration import cycle.
 
-Deliberately a **leaf**, the same shape as this package's ``profiles.py``/
+Deliberately a **leaf**, the same shape as this package's
 ``contract.py``/``secondary_output.py`` siblings: it restates the one-line
 ``F`` TypeVar rather than importing it back from its former home, so the
 split adds no edge to the CLI-registration import cycle.
@@ -176,41 +173,23 @@ def release_options(func: F) -> F:
 
 
 def debug_resolution_options(func: F) -> F:
-    """Separate-debug-file resolution (ADR-021a): roots + debuginfod + format.
+    """Separate-debug-file resolution (ADR-021a): roots.
 
     Currently a ``compare``-only family — it resolves *local* ELF debug
     artifacts, which the package-oriented (``compare-release``) and
     snapshot-oriented (``appcompat``) commands do not take. It
     lives here so the moment a second command needs it there is one definition to
     compose, not a copy to drift (ADR-037 D3).
+
+    ADR-068 D5 / one-comparison-product.md Phase 7a: this family used to also
+    carry ``--debug-format``/``--debuginfod-url``/``--debuginfod``/
+    ``--dwarf-only``, each already-hidden and already fully config-backed
+    (``debug.format``/``debug.debuginfod_url``/``debug.debuginfod``/
+    ``debug.dwarf_only`` in ``.abicheck.yml``) since their ADR-040 Lever 2
+    demotion. Hidden-but-accepted options are still public surface (D5), so
+    they were removed outright rather than left hidden — the config keys
+    remain the only way to set them for ``compare``.
     """
-    func = click.option(
-        "--debug-format",
-        "debug_format_opt",
-        type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
-        default=None,
-        hidden=True,
-        help="Force the ELF debug format for both sides (auto=pick best available). "
-        "Demoted to the debug.format config key (ADR-040 L2); this flag still "
-        "overrides it.",
-    )(func)
-    func = click.option(
-        "--debuginfod-url",
-        "debuginfod_url",
-        default=None,
-        hidden=True,
-        help="debuginfod server URL (overrides DEBUGINFOD_URLS env var). Demoted to "
-        "the debug.debuginfod_url config key (ADR-040 L2); this flag still overrides it.",
-    )(func)
-    func = click.option(
-        "--debuginfod/--no-debuginfod",
-        "debuginfod",
-        default=False,
-        hidden=True,
-        help="Enable debuginfod network resolution for debug info (opt-in). Demoted "
-        "to the debug.debuginfod config key (ADR-040 L2); --debuginfod/--no-debuginfod "
-        "still overrides it either way.",
-    )(func)
     func = click.option(
         "--debug-root",
         "debug_root",
@@ -220,17 +199,6 @@ def debug_resolution_options(func: F) -> F:
         "path-mirror, dSYM bundles). Applies to both sides; scope to one with an "
         "'old='/'new=' prefix, repeating the flag per side "
         "(e.g. --debug-root old=dbg1 --debug-root new=dbg2). Repeatable (ADR-040).",
-    )(func)
-    func = click.option(
-        "--dwarf-only/--no-dwarf-only",
-        "dwarf_only",
-        default=False,
-        hidden=True,
-        help="Force DWARF-only mode for both sides: use DWARF debug info "
-        "as primary data source even when headers are available. Demoted to the "
-        "debug.dwarf_only config key (ADR-040 L2); --dwarf-only/--no-dwarf-only "
-        "still overrides it either way (e.g. --no-dwarf-only restores header parsing "
-        "for a one-off run).",
     )(func)
     return func
 
@@ -292,11 +260,10 @@ def adr027_compare_options(func: F) -> F:
 def app_usage_scope_options(func: F) -> F:
     """Add the ADR-043 app-usage/required-symbol scoping options to ``compare``.
 
-    ``--used-by`` and ``--required-symbol``/
-    ``--required-symbols`` are mutually exclusive scoping mechanisms folding
-    the former standalone ``appcompat``/``plugin-check`` commands into
-    ``compare``. Decorators apply bottom-up, so they are listed here in
-    reverse of their displayed order.
+    ``--used-by`` and ``--required-symbol`` are mutually exclusive scoping
+    mechanisms folding the former standalone ``appcompat``/``plugin-check``
+    commands into ``compare``. Decorators apply bottom-up, so they are
+    listed here in reverse of their displayed order.
 
     ``--used-by-manifest`` (Workstream D-S1) is a third way to name a
     consumer, additive to (never a replacement for) ``--used-by``: each
@@ -307,7 +274,14 @@ def app_usage_scope_options(func: F) -> F:
     merged into the same ``--used-by`` pipeline -- they show up in the same
     ``used_by[]``/``consumer_scope`` report block, contribute to the same
     worst-wins scoped gate, and are still mutually exclusive with
-    ``--required-symbol``/``--required-symbols``.
+    ``--required-symbol``.
+
+    ADR-068 D5 / plan Phase 7h: ``--required-symbols FILE`` (the separate
+    file-only flag) is gone. ``--required-symbol`` now accepts ``@FILE`` as
+    one of its repeatable values -- two spellings of "name a required
+    symbol" collapse into one flag, matching how the file form and the
+    inline form always fed the identical contract (see
+    :func:`~abicheck.cli_helpers_compare.load_required_symbols`).
     """
     func = click.option(
         "--used-by-manifest",
@@ -322,26 +296,21 @@ def app_usage_scope_options(func: F) -> F:
         "skipped and reported, never aborts the run). Merged into the "
         "same scoping pipeline as --used-by; every listed consumer counts "
         "toward the reported 'N of M consumers affected' summary. "
-        "Mutually exclusive with --required-symbol/--required-symbols.",
-    )(func)
-    func = click.option(
-        "--required-symbols",
-        "required_symbols_file",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        default=None,
-        help="File of required symbols, one per line (blank lines and '#' "
-        "comments ignored). Combined with any --required-symbol values.",
+        "Mutually exclusive with --required-symbol.",
     )(func)
     func = click.option(
         "--required-symbol",
         "required_symbols_opt",
         multiple=True,
         help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
-        "and requires (repeatable; folds `plugin-check`). The full library "
-        "comparison always determines this run's own verdict/exit code; "
-        "this contract's own confirmed/potential/unresolved impact is "
-        "reported alongside it (informational), never in place of it. "
-        "Mutually exclusive with --used-by.",
+        "and requires (repeatable; folds `plugin-check`). '@FILE' reads "
+        "required symbols from FILE, one per line (blank lines and '#' "
+        "comments ignored) -- combinable with plain symbol values, but "
+        "at most one '@FILE' per invocation. The full library comparison "
+        "always determines this run's own verdict/exit code; this "
+        "contract's own confirmed/potential/unresolved impact is reported "
+        "alongside it (informational), never in place of it. Mutually "
+        "exclusive with --used-by.",
     )(func)
     func = click.option(
         "--used-by",
@@ -356,7 +325,7 @@ def app_usage_scope_options(func: F) -> F:
         "reported alongside it (informational), never in place of it. "
         "OLD/NEW may be real library binaries or JSON snapshots carrying "
         "binary evidence (a `dump` of a real library, not headers-only). "
-        "Mutually exclusive with --required-symbol/--required-symbols.",
+        "Mutually exclusive with --required-symbol.",
     )(func)
     return func
 

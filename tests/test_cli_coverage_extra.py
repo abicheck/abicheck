@@ -226,49 +226,21 @@ class TestShowOnlyValidation:
 
 
 class TestStatOutput:
-    """--stat was removed (CLI cleanup phase two, PR 1); --profile quick is
-    its sole surviving one-line-summary use."""
+    """--stat was removed (CLI cleanup phase two, PR 1); ``--format oneline``
+    is its sole surviving one-line-summary replacement (ADR-068 D5 / plan
+    Phase 7e: this used to be reachable only via the now-removed
+    ``--profile quick``, promoted to a first-class ``--format`` choice
+    instead of losing the capability)."""
 
-    def test_quick_profile_with_explicit_json_returns_full_json(
-        self, tmp_path: Path
-    ) -> None:
-        """``--profile quick --format json`` returns full JSON, not a
-        summary-only shape.
-
-        A deliberate behaviour refinement over the old ``--stat --format
-        json`` (which returned a summary-only shape regardless of the
-        explicit format): an explicit ``--format`` on the command line now
-        outranks the profile's own injected one-line default (the usual
-        "explicit flag > profile" precedence, ``apply_compare_profile``), so
-        the user's clear intent to get JSON is honored rather than silently
-        overridden.
-        """
-        old = _make_json_snapshot(tmp_path, name="libold", version="1.0")
-        new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
-
-        runner = CliRunner(**_ISOLATED_STDOUT_RUNNER_KWARGS)
-        result = runner.invoke(main, [
-            "compare", str(old), str(new), "--profile", "quick", "--format", "json",
-        ])
-        assert result.exit_code == 0
-        # Read stdout (not .output) so any stderr warning — e.g. the
-        # public-surface scoping fallback — does not corrupt the JSON payload.
-        # Isolated from stderr on every supported Click version via
-        # _ISOLATED_STDOUT_RUNNER_KWARGS above (Click <8.2 merges the two by
-        # default unless mix_stderr=False is passed explicitly).
-        data = json.loads(result.stdout)
-        assert "verdict" in data
-        assert "changes" in data
-
-    def test_quick_profile_text_output(self, tmp_path: Path) -> None:
-        """``--profile quick`` alone produces a one-line summary containing
-        the verdict."""
+    def test_oneline_format_text_output(self, tmp_path: Path) -> None:
+        """``--format oneline`` produces a one-line summary containing the
+        verdict."""
         old = _make_json_snapshot(tmp_path, name="libold", version="1.0")
         new = _make_json_snapshot(tmp_path, name="libnew", version="2.0")
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old), str(new), "--profile", "quick",
+            "compare", str(old), str(new), "--format", "oneline",
         ])
         assert result.exit_code == 0
         output = result.output.strip()

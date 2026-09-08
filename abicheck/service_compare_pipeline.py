@@ -699,6 +699,7 @@ def run_compare(
     depth: str | None = None,
     *,
     severity_preset: str | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -741,6 +742,14 @@ def run_compare(
     ``severity_preset`` (Codex review): forwards onto ``CompareRequest``'s
     identically-named field; ``None`` is a no-op.
 
+    ``public_header_dirs`` (CodeRabbit review, PR #1138): a project's
+    ``scope.public_header_dirs``, folded unchanged into both sides'
+    ``InputSpec.public_header_dirs`` -- closes the release fan-out's own
+    gap, since ``cli_compare_release_pairwise._run_compare_pair`` calls
+    this shim rather than ``cli_resolve._resolve_compare_snapshots``
+    (which already threads this config key for a single-pair compare).
+    ``None`` is a no-op, matching every pre-existing caller.
+
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
         ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
@@ -749,6 +758,7 @@ def run_compare(
         SnapshotError: If either input cannot be loaded.
         ValidationError: If inputs have unrecognised formats.
     """
+    _public_header_dirs = tuple(public_header_dirs or ())
     request = CompareRequest(
         old=InputSpec(
             path=old_input,
@@ -759,6 +769,7 @@ def run_compare(
             debug_roots=tuple(old_debug_roots or ()),
             include_dependencies=include_dependencies,
             compile=compile_context,
+            public_header_dirs=_public_header_dirs,
         ),
         new=InputSpec(
             path=new_input,
@@ -769,6 +780,7 @@ def run_compare(
             debug_roots=tuple(new_debug_roots or ()),
             include_dependencies=include_dependencies,
             compile=compile_context,
+            public_header_dirs=_public_header_dirs,
         ),
         lang=lang,
         frontend=frontend,

@@ -40,6 +40,7 @@ requirement — this is clang-only).
 
 from __future__ import annotations
 
+import json
 import platform
 import shutil
 import subprocess
@@ -213,6 +214,14 @@ def test_compiler_option_include_dir_promotes_transitively_reached_header(
 
     from abicheck.cli import main
 
+    # Phase 7 (one-comparison-product.md §4.2, ADR-037 D8.1): --ast-frontend/
+    # --compiler-option are gone from dump's CLI entirely -- compile.frontend/
+    # compile.options in .abicheck.yml are their only spelling now.
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        json.dumps({"compile": {"frontend": "clang", "options": [f"-I{include_dir}"]}}),
+        encoding="utf-8",
+    )
     out = tmp_path / "out.json"
     runner = CliRunner()
     result = runner.invoke(
@@ -222,12 +231,10 @@ def test_compiler_option_include_dir_promotes_transitively_reached_header(
             str(so),
             "-H",
             str(include_dir / "api.h"),
-            "--ast-frontend",
-            "clang",
+            "--config",
+            str(cfg),
             # No plain -I at all -- the only include search path is given
-            # via --compiler-option, which must still count as explicit.
-            "--compiler-option",
-            f"-I{include_dir}",
+            # via compile.options, which must still count as explicit.
             "-o",
             str(out),
         ],

@@ -362,15 +362,19 @@ class TestDumpDryRun:
         assert compile_db_from_build_info(nested, (header,)) is None
 
     def test_debug_format_against_pe_binary_is_usage_error(self, tmp_path: Path) -> None:
-        # --debug-format (and the legacy --dwarf/--btf/--ctf flags) is only
-        # meaningful for ELF; the real run raises BadParameter (exit 64) for
-        # a PE/Mach-O binary. Dry-run previously never checked this either,
-        # and an earlier fix wrongly downgraded it to a blocker (exit 1) --
-        # see the sibling compile-db test above (CodeRabbit review).
+        # debug.format (Phase 7c: --debug-format is gone from dump's CLI --
+        # config-only now, same removal as the legacy --dwarf/--btf/--ctf
+        # flags before it) is only meaningful for ELF; the real run raises
+        # BadParameter (exit 64) for a PE/Mach-O binary. Dry-run previously
+        # never checked this either, and an earlier fix wrongly downgraded it
+        # to a blocker (exit 1) -- see the sibling compile-db test above
+        # (CodeRabbit review).
         pe = tmp_path / "foo.dll"
         pe.write_bytes(b"MZ" + b"\x00" * 60)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  format: dwarf\n", encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["dump", str(pe), "--dry-run", "--debug-format", "dwarf"]
+            main, ["dump", str(pe), "--dry-run", "--config", str(cfg)]
         )
         assert result.exit_code == 64, result.output
         assert "Usage:" in result.output
@@ -549,6 +553,47 @@ class TestCompareDryRun:
         assert "requested depth: (not given)" in result.output
         assert "effective depth: source" in result.output
         assert "inferred" in result.output
+
+    def test_dry_run_shows_cost_preview_comparable_to_scan_dry_run(
+        self, tmp_path: Path, source_tree_with_compile_db: Path
+    ) -> None:
+        # Phase 2f (one-comparison-product.md #35): `compare --dry-run` must
+        # project L0-L5 evidence-collection cost the same way `scan --dry-run`
+        # already does -- reusing `estimate_scan`/`estimate_compare_cost`
+        # rather than a second cost model. Not asserting identical numbers
+        # (the two commands probe different operand shapes, and compare sums
+        # both sides) -- only that both previews are populated, on a
+        # comparable build/source-depth scenario.
+        old = tmp_path / "old.abi.json"
+        new = tmp_path / "new.abi.json"
+        _write_snapshot(old, "1.0")
+        _write_snapshot(new, "2.0")
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old), str(new), "--dry-run",
+                "--sources", "old=" + str(source_tree_with_compile_db),
+                "--sources", "new=" + str(source_tree_with_compile_db),
+                "--depth", "source",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Cost preview:" in result.output
+        assert "L0_binary" in result.output
+        assert "projected total" in result.output
+
+        scan_binary = tmp_path / "libfoo.so"
+        scan_binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        scan_result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(scan_binary), "--dry-run",
+                "--sources", str(source_tree_with_compile_db),
+                "--depth", "source",
+            ],
+        )
+        assert scan_result.exit_code in (0, 1), scan_result.output
+        assert "projected total" in scan_result.output
 
 
 class TestDepsTreeDryRun:

@@ -691,9 +691,9 @@ Their scoping now folds into `compare` itself:
   real application binary; its actual imports/required symbol versions scope
   the comparison. `OLD`/`NEW` may be real library binaries or JSON snapshots
   that carry binary evidence (a `dump` of a real library, not headers-only).
-  Mutually exclusive with `--required-symbol`/`--required-symbols`.
-- **`compare --required-symbol SYM`** (repeatable) / **`--required-symbols
-  FILE`** — folds `plugin-check`. Scopes the comparison to an explicit
+  Mutually exclusive with `--required-symbol`.
+- **`compare --required-symbol SYM`** (repeatable) / **`--required-symbol
+  @FILE`** — folds `plugin-check`. Scopes the comparison to an explicit
   dlopen/dlsym entrypoint contract instead of the full diff. Mutually
   exclusive with `--used-by`.
 
