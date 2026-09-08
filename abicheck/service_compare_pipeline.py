@@ -532,6 +532,7 @@ def classify_compare_pair(
             else None
         ),
         pattern_verdicts=request.pattern_verdicts,
+        collapse_versioned_symbols=request.collapse_versioned_symbols,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=service.load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
