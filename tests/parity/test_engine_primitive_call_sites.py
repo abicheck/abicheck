@@ -40,11 +40,23 @@ enables useful analysis") -- which is exactly why none of the eleven checks
 is registered in ``tests/parity/gaps.py`` any more; see
 ``test_crosscheck_parity.py``'s own positive coverage for all eleven.
 ``run_crosschecks`` therefore backs no remaining scan-only gap at all (its
-entry below carries no ``gap_key``); only ``pattern_scan``/
-``run_preprocessor_scan`` still do. Only the raw structural claim this
+entry below carries no ``gap_key``). Only the raw structural claim this
 module checks -- "nothing but scan_engine.py (and, for `run_crosschecks`,
 `cross_source_evolution.py`) calls the primitive at all" -- needed updating
 to admit that one caller.
+
+**``scan_files``/``run_preprocessor_scan`` closed outright (Phase 2b,
+plan §3 #6/#8):** unlike ``run_crosschecks``, neither primitive backs more
+than one gap key, and this slice migrates the whole capability -- both are
+now called from ``abicheck/workflows/pattern_preprocessor_scan.py``
+(``compare()``'s own ``pattern_preprocessor_scan`` keyword, default
+``True``, no opt-in flag), so neither is tracked in this module's
+``_ENGINE_PRIMITIVES`` table any more -- there is no remaining scan-only
+row either backs. Their `tests/parity/gaps.py` entries are deleted in the
+same PR that adds this caller (this module's own docstring's rule, applied
+for real this time rather than only demonstrated for `run_crosschecks`'s
+partial case). ``EXPECTED_GAPS`` is now empty: every one of the originally
+listed fifteen scan-only capabilities is closed.
 """
 
 from __future__ import annotations
@@ -68,16 +80,6 @@ _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
         "buildsource/crosscheck.py",
         ("scan_engine.py", "workflows/cross_source_evolution.py"),
         None,  # fully migrated -- no scan-only crosscheck gap remains
-    ),
-    "scan_files": (
-        "buildsource/pattern_scan.py",
-        ("scan_engine.py",),
-        "pattern_scan",
-    ),
-    "run_preprocessor_scan": (
-        "buildsource/preprocessor_scan.py",
-        ("scan_engine.py",),
-        "preprocessor_scan",
     ),
 }
 
@@ -212,6 +214,47 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
         f"{function_name}() has no production caller at all under abicheck/ "
         f"-- expected exactly {sorted(expected)} (ADR-068 §1)"
     )
+
+
+#: The two primitives Phase 2b closes outright (plan §3 #6/#8): function
+#: name -> (defining module, the exact caller set now expected). Neither
+#: backs a remaining scan-only gap key, so unlike `_ENGINE_PRIMITIVES`
+#: above these carry no `tests/parity/gaps.py` cross-reference -- this
+#: table's own job is narrower: pin the caller set so a *third* caller
+#: (or the loss of either expected one) is still caught structurally.
+_CLOSED_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "scan_files": (
+        "buildsource/pattern_scan.py",
+        ("scan_engine.py", "workflows/pattern_preprocessor_scan.py"),
+    ),
+    "run_preprocessor_scan": (
+        "buildsource/preprocessor_scan.py",
+        ("scan_engine.py", "workflows/pattern_preprocessor_scan.py"),
+    ),
+}
+
+
+@pytest.mark.parametrize("function_name", sorted(_CLOSED_ENGINE_PRIMITIVES))
+def test_closed_primitive_has_exactly_the_expected_callers(function_name: str) -> None:
+    """Phase 2b (plan §3 #6/#8): `compare()` now reaches both primitives
+    via `workflows/pattern_preprocessor_scan.py`, alongside `scan_engine.py`
+    -- pins the exact set so a regression (losing either caller) or a
+    surprise third caller both fail loudly."""
+    defining_module, expected_callers = _CLOSED_ENGINE_PRIMITIVES[function_name]
+    expected = {f"abicheck/{m}" for m in expected_callers}
+
+    sites = _call_sites(function_name, defining_module)
+    sites = {p: n for p, n in sites.items() if p != Path("abicheck") / defining_module}
+    callers = {_posix(p) for p in sites}
+    assert callers == expected, (
+        f"{function_name}() caller set changed -- expected exactly "
+        f"{sorted(expected)}, found {sorted(callers)}"
+    )
+
+
+def test_pattern_scan_and_preprocessor_scan_are_no_longer_registered_gaps() -> None:
+    assert "pattern_scan" not in EXPECTED_GAPS
+    assert "preprocessor_scan" not in EXPECTED_GAPS
 
 
 @pytest.mark.parametrize(

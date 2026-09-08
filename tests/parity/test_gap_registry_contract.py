@@ -24,18 +24,16 @@ from __future__ import annotations
 
 from .gaps import ALL_EXPECTED_GAPS, EXPECTED_GAPS, NOT_YET_IMPLEMENTED_ANYWHERE
 
-#: What is left of the original fifteen-capability red set now that all
-#: eleven cross-source checks are migrated onto compare()'s pipeline:
-#: pattern_scan + preprocessor_scan (Phase 2b) alone. changed_path_localization,
-#: abi3_audit, and all eleven crosscheck checks were deleted from the
-#: registry by the PRs that closed them (`compare --since/--changed-path`,
-#: `compare --abi3`, `checker.compare`'s automatic `cross_source_checks`
-#: stage): a closed gap is removed, never left listed, which is what makes
-#: this registry the migration's own definition of done (plan §6 Phase 0/3).
-_REQUIRED_SCAN_ONLY_KEYS = {
-    "pattern_scan",
-    "preprocessor_scan",
-}
+#: The original fifteen-capability red set is now fully closed: all eleven
+#: cross-source checks (Phase 2a) and pattern_scan/preprocessor_scan
+#: (Phase 2b), alongside changed_path_localization and abi3_audit (Phase
+#: 2c/2d), were all deleted from the registry by the PRs that closed them
+#: (`compare --since/--changed-path`, `compare --abi3`, `checker.compare`'s
+#: automatic `cross_source_checks` stage, `checker.compare`'s automatic
+#: `pattern_preprocessor_scan` stage): a closed gap is removed, never left
+#: listed, which is what makes this registry the migration's own definition
+#: of done (plan §6 Phase 0/3).
+_REQUIRED_SCAN_ONLY_KEYS: set[str] = set()
 
 
 def test_registry_names_exactly_the_required_scan_only_capabilities() -> None:
@@ -68,13 +66,12 @@ def test_crosscheck_keys_match_all_checks() -> None:
     ``rtti_for_internal_type``, and ``public_to_internal_dependency`` (plan
     §3 rows 3-5), then the remaining five -- ``header_build_context_
     mismatch``, ``odr_type_variant``, ``identity_collision_detected``,
-    ``compile_context_conflict``, and ``source_surface_dso_mismatch`` (this
-    PR). None of the eleven is a registered scan-only gap any more, so no
-    ``crosscheck.ALL_CHECKS`` name survives in ``EXPECTED_GAPS`` at all."""
+    ``compile_context_conflict``, and ``source_surface_dso_mismatch``. None
+    of the eleven is a registered scan-only gap any more, so no
+    ``crosscheck.ALL_CHECKS`` name survives in ``EXPECTED_GAPS`` at all --
+    which, alongside pattern_scan/preprocessor_scan's own closure (Phase
+    2b), is exactly why ``EXPECTED_GAPS`` is empty."""
     from abicheck.buildsource.crosscheck import ALL_CHECKS
 
-    crosscheck_keys = {
-        k for k in EXPECTED_GAPS if k not in {"pattern_scan", "preprocessor_scan"}
-    }
-    assert crosscheck_keys == set()
+    assert set(EXPECTED_GAPS) == set()
     assert set(ALL_CHECKS) & set(EXPECTED_GAPS) == set()

@@ -45,16 +45,28 @@ additively, into the same `-H`-directory-derived public/internal boundary
 (`provenance.apply_provenance`) `compare`'s live-binary dumping already
 built from a `-H` *directory* argument — see `workflows/
 cross_source_evolution.py`'s own module docstring for the exact wiring and
-the directory-vs-file asymmetry it preserves verbatim. The pattern/
-preprocessor scans and the abi3 audit's `scan`-only enrichment paths are
-unaffected; `scan` itself is untouched and not yet retired. Originally
-verified against `main` at `309c8a82` on 2026-09-06 by Click introspection
-and call-site inspection, not by help text or status prose; re-verified
-against `main` at `f7b4fdcc` on 2026-09-07, again against `main` at
-`2a64dc3c` on 2026-09-07 after merging the automatic-default change with
-#1125's `private_header_leak` migration, again on 2026-09-07 after the
-four-check slice, and again on 2026-09-07 after this PR's five-check slice
-closed out all eleven checks — re-verify again against current `main`
+the directory-vs-file asymmetry it preserves verbatim. **Phase 2b is now
+landed too**: the lexical pattern pre-scan and the preprocessor pre-scan
+(§3 #6/#8) run automatically on every `compare()` invocation the same
+way — `checker.compare`'s own `pattern_preprocessor_scan` keyword, default
+`True`, no opt-in flag — via `workflows/pattern_preprocessor_scan.py`'s
+`compute_pattern_preprocessor_scan`, folded through the same
+`CrossSourceEvolution` axis rather than a second one; the result rides a
+new, always-present `pattern_preprocessor_scan` report block (advisory
+only, since neither primitive ever produced a verdict-bearing finding even
+under `scan`) rather than `ChangeKind` findings, and both entries are gone
+from `tests/parity/gaps.py`. All fifteen originally-registered scan-only
+capabilities are closed now (the eleven cross-source checks, pattern +
+preprocessor scan, changed-path localization, and the abi3 audit); `scan`
+itself is untouched and not yet retired. Originally verified against `main`
+at `309c8a82` on 2026-09-06 by Click introspection and call-site inspection,
+not by help text or status prose; re-verified against `main` at `f7b4fdcc`
+on 2026-09-07, again against `main` at `2a64dc3c` on 2026-09-07 after
+merging the automatic-default change with #1125's `private_header_leak`
+migration, again on 2026-09-07 after the four-check slice, again on
+2026-09-07 after the five-check slice closed out all eleven checks, and
+again on 2026-09-07 after the pattern/preprocessor-scan slice closed
+Phase 2b — re-verify again against current `main`
 (`git log -1 --format=%H origin/main`) before trusting any capability-loss
 table row above as still accurate.
 **Effort:** XL · **Risk:** high — this deletes a public command and moves
@@ -192,9 +204,9 @@ identity; **DELETE** — leaves the product.
 | 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). `scan --against`'s own baseline-compare path strips the automatically-produced findings back out of its diff (`cli_scan_baseline._strip_automatic_cross_source_findings`), preserving its pre-existing, documented invariant that a single-version hygiene finding stays advisory unless explicitly promoted via `--crosscheck KEY=error` |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | **Landed.** Public/internal boundary from `-H` provenance + `.abicheck.yml` `scope.public_header_dirs` (#22, now solved for both sources) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | **Landed.** As #4 |
-| 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | Phase 2 |
+| 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — `checker.compare`'s `pattern_preprocessor_scan` keyword, default `True`, no flag (ADR-068 D4/D5), via `workflows/pattern_preprocessor_scan.py`; folded through `CrossSourceEvolution`, surfaced as the new `pattern_preprocessor_scan` report block (advisory, no `ChangeKind`, since the primitive never produced one under `scan` either) |
 | 7 | Pattern verdict modulation | `compare --pattern-verdicts` (already on `compare`) | `compare`, always-on where evidence exists | AUTOMATIC | Decouple `--explain-patterns` (ADR-068 D4) |
-| 8 | Preprocessor checks | `buildsource/preprocessor_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | Phase 2 |
+| 8 | Preprocessor checks | `buildsource/preprocessor_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — as #6 |
 | 9 | Build-context analysis / reconciliation | `scan` L3 collection; `compare --reconcile-build-context` | `compare --depth build`, reconciliation always-on when build context is present | AUTOMATIC + MERGE | ADR-039 reconciliation already shipped |
 | 10 | Source-ABI replay (L4) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | Parity on POI scoping (#11) |
 | 11 | Source-graph analysis (L5) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | ADR-037 D6 keeps L5 internal |
@@ -537,7 +549,28 @@ One PR per capability group, each landing with parity tests going green:
   strips the automatic stage's findings back out of that one diff and
   recomputes its verdict, for every migrated check, restoring the
   documented invariant;
-- **2b** pattern + preprocessor scans (#6, #8);
+- **2b** pattern + preprocessor scans (#6, #8) — **landed**: both
+  `buildsource/pattern_scan.py`'s lexical pre-scan and
+  `buildsource/preprocessor_scan.py`'s preprocessor pre-scan now run
+  automatically inside `compare()`'s pipeline (`checker.compare`'s
+  `pattern_preprocessor_scan`, default `True`, no CLI/API/Action opt-in
+  flag — ADR-068 D4/D5), via `workflows/pattern_preprocessor_scan.py`'s
+  `compute_pattern_preprocessor_scan`. Each primitive runs independently on
+  OLD and NEW — file/build evidence derived entirely from what each
+  snapshot already recorded (declared `source_header` provenance +
+  embedded L3 `build_source.build_evidence`, no second collection pass —
+  see that module's own docstring) — and folds into the same
+  `CrossSourceEvolution` axis 2a's cross-source checks use. Unlike 2a,
+  neither primitive ever produced a `ChangeKind`-bearing finding, even
+  under `scan` (both are documented "advisory facts... never a verdict on
+  their own"), so the migration keeps that shape: a new, always-present
+  `pattern_preprocessor_scan` report block (`report_schema_version` 3.12)
+  rather than new `ChangeKind`s — read-only, never reaching the verdict,
+  severity, or exit code. Both entries are gone from
+  `tests/parity/gaps.py`, and `scan_files`/`run_preprocessor_scan` are no
+  longer tracked in `test_engine_primitive_call_sites.py`'s
+  gap-cross-referenced table (neither backs any remaining scan-only row),
+  though their exact two-caller sets stay pinned there;
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
   scoping parity for `--depth source` (#10, #11) — **landed**: the seed and
   ADR-043 D7's scoping rule now have one owner (`workflows/changed_paths.py`)
