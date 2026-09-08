@@ -351,6 +351,34 @@ _merge_config_overlay_with_discovered_project_config() {
 # the project config carries is passed through untouched). Writes the
 # merged result as JSON, a valid YAML subset abicheck's own yaml.safe_load
 # parses identically.
+#
+# Two trust/correctness properties this merge must preserve, since the
+# result is always written to the path the caller passes via --config --
+# every "was --config explicit" check in the engine treats that as operator
+# authorization, regardless of how this file's content was assembled
+# (Codex review, PR #1159):
+#
+# 1. An auto-discovered .abicheck.yml is untrusted, repository-controlled
+#    content -- exactly what cli_options.py's compile.compiler gate and
+#    ADR-032 D5's build.query gate exist to withhold executable-authorized
+#    "explicit --config" status from. Copying either key into this
+#    synthesized, always-explicit overlay would launder that untrusted
+#    document into "operator authorized this to run" the moment any
+#    unrelated Action input (dso-only, ast-frontend, ...) is set. So both
+#    keys are stripped from the discovered document's copy before merging;
+#    a project that genuinely wants either to run must supply it via this
+#    Action's own explicit build-config input instead (a real, deliberate
+#    operator action), never inherit it silently from repo-discovered
+#    config.
+# 2. A relative path inside the discovered config (e.g.
+#    compile.include_dirs: [include]) resolves against that config's own
+#    *project root* (config_paths.project_root_for_config), not against
+#    wherever this scratch overlay file happens to be written (an
+#    mktemp path, typically under /tmp). Left alone, merging silently
+#    changes the base every relative include dir resolves against,
+#    dropping headers from extraction with no diagnostic. So every
+#    compile.include_dirs entry from the discovered document is rewritten
+#    to an absolute path against the real project root before merging.
 import json
 import os
 import sys
@@ -358,7 +386,7 @@ from pathlib import Path
 
 import yaml
 
-from abicheck.config_paths import find_config_in_dir
+from abicheck.config_paths import find_config_in_dir, project_root_for_config
 
 out_path = sys.argv[1]
 overlay = json.loads(os.environ["ABICHECK_OVERLAY_JSON"])
@@ -367,17 +395,76 @@ start = Path(os.environ.get("ABICHECK_PROJECT_CONFIG_START") or ".").resolve()
 candidates = [start, *start.parents]
 
 base: dict[str, object] = {}
+found_path: Path | None = None
 for directory in candidates:
     found = find_config_in_dir(directory)
     if found is None:
         continue
+    found_path = found
     try:
         loaded = yaml.safe_load(found.read_text(encoding="utf-8"))
-    except Exception:
-        loaded = None
+    except Exception as exc:
+        # Matching the ordinary CLI's own discover_project_config() path
+        # (cli_helpers_compare.py): a malformed *discovered* config is a
+        # real usage error there, not a silent "proceed as if unconfigured"
+        # -- so this Action must not quietly drop every one of the
+        # project's own settings (severity/suppress/scope/bundle/...)
+        # just because a synthesized topology/compile-context input was
+        # also set (Codex review, PR #1159).
+        print(
+            f"::error::failed to parse the discovered project config {found}: "
+            f"{exc}. Refusing to silently proceed as if no project config "
+            "existed -- fix the file or remove it.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if isinstance(loaded, dict):
         base = loaded
     break
+
+if isinstance(base.get("build"), dict) and "query" in base["build"]:
+    stripped_build = dict(base["build"])
+    del stripped_build["query"]
+    base["build"] = stripped_build
+    print(
+        "::warning::the discovered .abicheck.yml's build.query was dropped "
+        "from this Action's synthesized --config overlay -- an "
+        "auto-discovered config is never trusted to run a build-system "
+        "query; set build-config explicitly (naming a config you reviewed) "
+        "to opt in.",
+        file=sys.stderr,
+    )
+if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
+    stripped_compile = dict(base["compile"])
+    del stripped_compile["compiler"]
+    base["compile"] = stripped_compile
+    print(
+        "::warning::the discovered .abicheck.yml's compile.compiler was "
+        "dropped from this Action's synthesized --config overlay -- an "
+        "auto-discovered config is never trusted to select a compiler "
+        "executable; set build-config explicitly (naming a config you "
+        "reviewed) to opt in.",
+        file=sys.stderr,
+    )
+
+if found_path is not None and isinstance(base.get("compile"), dict):
+    include_dirs = base["compile"].get("include_dirs")
+    if include_dirs is not None:
+        root = project_root_for_config(found_path)
+
+        def _abs(p: object) -> object:
+            if not isinstance(p, str):
+                return p
+            pp = Path(p)
+            return str(pp) if pp.is_absolute() else str((root / pp).resolve())
+
+        compile_blk = dict(base["compile"])
+        compile_blk["include_dirs"] = (
+            [_abs(p) for p in include_dirs]
+            if isinstance(include_dirs, list)
+            else _abs(include_dirs)
+        )
+        base["compile"] = compile_blk
 
 for key, value in overlay.items():
     if isinstance(value, dict) and isinstance(base.get(key), dict):
@@ -391,6 +478,15 @@ with open(out_path, "w", encoding="utf-8") as f:
     json.dump(base, f)
 PYEOF
   )
+  local _merge_status=$?
+  # No `set -e` in this script (established precedent, e.g.
+  # add_flag_shlex_split above): a nonzero exit here must not be silently
+  # swallowed, since that would leave the caller writing a possibly-partial
+  # or missing overlay file and proceeding as if the merge had succeeded.
+  if [[ $_merge_status -ne 0 ]]; then
+    echo "::error::failed to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (see the error above). Refusing to silently proceed."
+    exit 1
+  fi
 }
 
 _COMPILE_CONTEXT_CONFIG_OVERLAY=""

