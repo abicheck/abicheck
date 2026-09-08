@@ -12,13 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Binary-tier oneAPI scan driver (validation/oneapi-scan-2026-06.md).
+"""Binary-tier oneAPI compare driver (validation/oneapi-scan-2026-06.md).
 
 For each planned ``(lib, pair)`` it downloads the **pinned** conda-forge / Intel
-artifacts, dumps the old side and runs ``abicheck scan --depth binary``,
-recording verdict / coverage / DWARF presence / SONAME / wall time to
-``data/oneapi_scan_2026-06.json``. Network + ``abicheck`` on PATH required; this
-is a slow real-world lane, not a unit test.
+artifacts, dumps the old side and runs ``abicheck compare --depth binary``
+(ADR-068 D2, plan §6 Phase 4 -- this is a plain two-sided binary-depth
+comparison with no crosscheck/audit-only capability involved, so `compare`
+reproduces it exactly), recording verdict / coverage / DWARF presence / SONAME
+/ wall time to ``data/oneapi_scan_2026-06.json``. Network + ``abicheck`` on
+PATH required; this is a slow real-world lane, not a unit test.
 
 Reproducibility: each pair pins the exact ``old_file``/``new_file`` build
 basename (like ``data/manifest.json``), so a rebuild publishing a higher build
@@ -248,10 +250,9 @@ def run() -> list[dict]:
             proc = subprocess.run(
                 [
                     "abicheck",
-                    "scan",
-                    new_so,
-                    "--against",
+                    "compare",
                     str(base),
+                    new_so,
                     "--depth",
                     "binary",
                     "--format",
@@ -264,31 +265,40 @@ def run() -> list[dict]:
                 timeout=900,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
-            row["status"] = "SCAN_FAILED"
+            row["status"] = "COMPARE_FAILED"
             row["detail"] = str(exc)[-300:]
             results.append(row)
             continue
         row["wall_s"] = round(time.monotonic() - start, 2)
         row["exit"] = proc.returncode
-        # A BREAKING scan exits non-zero (2/4) but still writes JSON; gate on a
-        # freshly-written report, not the exit code.
+        # A BREAKING compare exits non-zero (2/4) but still writes JSON; gate
+        # on a freshly-written report, not the exit code.
         if not out.exists():
-            row["status"] = "SCAN_FAILED"
+            row["status"] = "COMPARE_FAILED"
             row["detail"] = proc.stderr[-300:]
             results.append(row)
             continue
         try:
-            scan = json.loads(out.read_text())
+            report = json.loads(out.read_text())
         except (OSError, json.JSONDecodeError) as exc:
-            row["status"] = "SCAN_FAILED"
+            row["status"] = "COMPARE_FAILED"
             row["detail"] = (proc.stderr or str(exc))[-300:]
             results.append(row)
             continue
-        cov = {r["layer"]: r["status"] for r in scan.get("coverage", [])}
-        row["verdict"] = scan.get("verdict")
-        row["L0"] = cov.get("L0_binary")
-        row["L1"] = cov.get("L1_debug")
-        row["diff"] = scan.get("diff") or {}
+        # `compare`'s canonical ReportDocument JSON has no scan-schema
+        # `coverage` list at `--depth binary` (`layer_coverage` here only
+        # ever carries build/source (L3+) rows -- empty at binary/headers
+        # depth, confirmed against a local fixture since no scan-schema
+        # equivalent survives to compare against). `evidence_tiers` (a flat
+        # list of tier names actually used, e.g. ["elf"] / ["elf", "dwarf"])
+        # is populated unconditionally and is what this row's L0/L1 flags
+        # actually need -- whether ELF and DWARF evidence were present.
+        # `changes` is `compare`'s flat finding list, replacing scan's `diff`.
+        tiers = set(report.get("evidence_tiers") or [])
+        row["verdict"] = report.get("verdict")
+        row["L0"] = "present" if "elf" in tiers else "not_collected"
+        row["L1"] = "present" if "dwarf" in tiers else "not_collected"
+        row["diff"] = report.get("changes") or []
         row["status"] = "OK"
         results.append(row)
     return results

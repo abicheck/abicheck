@@ -77,7 +77,8 @@ from abicheck.model import (  # noqa: E402
     Visibility,
 )
 
-# The five collection depths the ``abicheck scan --depth`` dial exposes, and the
+# The five collection depths the ``abicheck compare --depth`` dial exposes
+# (ADR-068 D2 -- `compare` absorbed `scan`'s depth dial in Phase 4), and the
 # evidence layer each one reaches (see docs/concepts/evidence-and-detectability).
 DEPTHS: tuple[str, ...] = ("binary", "headers", "build", "source", "full")
 DEPTH_LAYER = {
