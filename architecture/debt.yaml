@@ -873,12 +873,12 @@
     },
     {
       "path": "abicheck/frontends/cli/commands/compare_bundle_facts.py",
-      "baseline_lines": 811,
+      "baseline_lines": 816,
       "target": "frontends (already home; split its stored/stored PR I branch or its PR J bundle: config read into a sibling module if it grows further)",
       "rule": "no_growth",
       "category": "adr062_new_capability_growth",
       "owner": "abicheck maintainers",
-      "rationale": "Not legacy debt: two independent tracks landed in parallel and collided at merge -- PR I's stored/stored compare_stored_bundle_facts_pair() dispatch branch (#1062) and PR J's .abicheck.yml bundle: config read replacing the removed --bundle-system-providers/--bundle-cohort CLI flags (this PR) -- pushing the file from main's own 800-line cap to 811 once merged. The merge also fixed a real bug the collision would otherwise have reintroduced: the stored/live compare_release_against_bundle_facts() call site's cohorts= argument still read the now-dead kwargs.get('bundle_cohorts') instead of the resolved bundle: config value.",
+      "rationale": "Not legacy debt: two independent tracks landed in parallel and collided at merge -- PR I's stored/stored compare_stored_bundle_facts_pair() dispatch branch (#1062) and PR J's .abicheck.yml bundle: config read replacing the removed --bundle-system-providers/--bundle-cohort CLI flags (this PR) -- pushing the file from main's own 800-line cap to 811 once merged. The merge also fixed a real bug the collision would otherwise have reintroduced: the stored/live compare_release_against_bundle_facts() call site's cohorts= argument still read the now-dead kwargs.get('bundle_cohorts') instead of the resolved bundle: config value. Raised 811 -> 816 (CodeRabbit review, PR #1146, finding #5): resolve_dispatch_compile_context() now applies compile.ast_frontend_fallback/compile.allow_unsupported_castxml before the header-AST extraction this dispatch path triggers (compare_bundle_facts_rejections.apply_env_toggles_for_stored_pair, both toggles were previously silently ignored on this path even though they work on the main compare/dump paths). The toggle logic itself (~15 lines) moved to that sibling compare_bundle_facts_rejections.py module rather than growing inline; that sibling module takes cli_options.apply_compile_config_env_toggles as a parameter rather than importing cli_options itself, since (unlike this file) it is not already a member of the pre-existing, allowlisted CLI-registration import cycle -- importing cli_options there directly grew that cycle by one node (test_no_unapproved_import_cycle_growth caught it), which AGENTS.md says never to do reactively. The handful of lines that remain here are the irreducible import + call-site glue this file (already a cycle member) absorbs instead.",
       "review_by": "2026-11-30"
     },
     {
@@ -1613,12 +1613,12 @@
     },
     {
       "path": "tests/test_compile_db_filter_scope.py",
-      "baseline_lines": 1228,
+      "baseline_lines": 1237,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1228 -> 1237 (PR #1146 CI-failure fix): Phase 7 removed compare/dump's `--ast-frontend` CLI flag in favor of `.abicheck.yml`'s `compile.frontend`, so this file's three `dump`-CLI-invoking tests now each write a small temp config file and pass `--config` instead of the retired flag pair -- the minimum call-site update for each, no new logic to move elsewhere.",
       "review_by": "2026-11-30"
     },
     {
@@ -1803,12 +1803,12 @@
     },
     {
       "path": "tests/test_dumper_manifest.py",
-      "baseline_lines": 1771,
+      "baseline_lines": 1772,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 6 for ADR-063 Phase 2's closing slice: the stub header-AST parser gained the two entity-id sidecar methods the real parsers now expose.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised by 6 for ADR-063 Phase 2's closing slice: the stub header-AST parser gained the two entity-id sidecar methods the real parsers now expose. Raised 1771 -> 1772 (PR #1146 CI-failure fix): test_run_tu_fragments_preserves_declared_order_despite_completion_order was the one multi-worker test in this file missing the `mem_cap` clamp override every sibling multi-worker test here already applies, so its genuine-concurrency assertion flaked on a host whose available memory sits below the per-worker budget (unrelated to this PR's own compare/dump flag-demotion changes). The one added line matches the file's own established convention exactly; there is no new logic to move elsewhere.",
       "review_by": "2026-11-30"
     },
     {
@@ -1843,12 +1843,12 @@
     },
     {
       "path": "tests/test_dwarf_snapshot.py",
-      "baseline_lines": 1723,
+      "baseline_lines": 1791,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. This entry's baseline had drifted stale to 1723 while the file itself independently reached 1790 lines on both sides of a later merge (main's own CLI-flag-consolidation-5-7/feat-cli-phase7-groups-7d-7h work and this branch's Phase 7 compile/debug config work each touched only comment text at the same test, netting the file to an identical 1790 on both parents without either author's own architecture-check run catching the pre-existing gap). Synced 1723 -> 1791 at the merge of the two (one net line from reconciling the two branches' near-duplicate test comments), rather than leaving a debt entry that undercounts a size neither PR alone introduced.",
       "review_by": "2026-11-30"
     },
     {

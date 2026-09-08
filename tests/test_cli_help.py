@@ -163,7 +163,6 @@ class TestCompareHelpAllDisclosure:
         for common_flag in (
             "--header",
             "--include",
-            "--lang",
             "--output",
             "--format",
             "--show-only",
@@ -179,6 +178,14 @@ class TestCompareHelpAllDisclosure:
             "--dry-run",
         ):
             assert common_flag in out, f"{common_flag} missing from curated --help"
+
+    def test_dump_curated_help_keeps_debug_root(self) -> None:
+        """CodeRabbit review, PR #1146, finding #4: `dump` binds --debug-root
+        to the plural `debug_roots` parameter, but DUMP_COMMON_OPTION_NAMES
+        omitted that name -- so plain `dump --help` never showed a real,
+        still-supported flag."""
+        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        assert "--debug-root" in out
 
     def test_curated_help_reports_hidden_count_and_points_to_help_all(self) -> None:
         result = CliRunner().invoke(main, ["compare", "--help"])
@@ -224,10 +231,12 @@ class TestCompareHelpAllDisclosure:
             assert int(m.group(1)) == expected_recoverable, command
 
     def test_help_all_shows_everything_curated_hides(self) -> None:
+        # Phase 7 (one-comparison-product.md §4.1): --sysroot/--ast-frontend
+        # are gone from compare's CLI entirely (compile.* config only), and
+        # CLI flag consolidation 5-7 removed -j/--jobs too, so none of the
+        # three belong in this "still renders somewhere" list any more.
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
-            "--sysroot",
-            "--ast-frontend",
             "--write",
             "--report-mode",
             "--pdb-path",
@@ -261,8 +270,10 @@ class TestCompareHelpAllDisclosure:
         snap_json = snapshot_to_json(AbiSnapshot(library="x", version="1"))
         old.write_text(snap_json, encoding="utf-8")
         new.write_text(snap_json, encoding="utf-8")
+        # CLI flag consolidation 5-7 removed -j/--jobs from compare entirely;
+        # --pdb-path is a still-real advanced/hidden flag to prove this with.
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--compiler", "/usr/bin/gcc"]
+            main, ["compare", str(old), str(new), "--pdb-path", "x.pdb"]
         )
         assert result.exit_code == 0, result.output
 
@@ -280,7 +291,14 @@ _HELP_ALL_COMMANDS: list[
     (
         "dump",
         cli_help.DUMP_COMMON_OPTION_NAMES,
-        ("--sysroot", "--ast-frontend", "--follow-deps", "--debug-root", "--pdb-path"),
+        # Phase 7c (one-comparison-product.md §4.2): --sysroot/--ast-frontend/
+        # --pdb-path are gone from dump's CLI entirely (compile:/debug:
+        # config only), so they no longer belong in this "still renders
+        # somewhere" list. --debug-root moved to the common list below
+        # (CodeRabbit review, PR #1146, finding #4): it is a real,
+        # still-supported flag that plain `dump --help` must show, not one
+        # that only appears via --help-all.
+        ("--follow-deps",),
         (
             "--header",
             "--include",
@@ -289,6 +307,7 @@ _HELP_ALL_COMMANDS: list[
             "--build-info",
             "--output",
             "--verbose",
+            "--debug-root",
         ),
     ),
     (
@@ -416,16 +435,19 @@ class TestDumpAndScanHelpAllDisclosure:
     def test_dump_advanced_option_still_functional_after_curated_help_render(
         self, tmp_path
     ) -> None:
-        """--compiler is hidden from curated `dump --help` but must still work."""
+        """--compile-db-filter is hidden from curated `dump --help` but must
+        still work (Phase 7c: --compiler itself is gone from dump's CLI
+        entirely -- compile.compiler config only -- so it can no longer
+        serve as this test's advanced-but-functional example)."""
         CliRunner().invoke(main, ["dump", "--help"])
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
         result = CliRunner().invoke(
-            main, ["dump", str(so_path), "--compiler", "/usr/bin/gcc"]
+            main, ["dump", str(so_path), "--compile-db-filter", "src/**"]
         )
         # Not a valid ELF, so this is expected to fail downstream -- the point
-        # is that Click accepts the (curated-hidden) --compiler flag at all,
-        # rather than rejecting it as "no such option".
+        # is that Click accepts the (curated-hidden) --compile-db-filter flag
+        # at all, rather than rejecting it as "no such option".
         assert "no such option" not in result.output.lower()
 
     def test_scan_advanced_option_still_functional_after_curated_help_render(

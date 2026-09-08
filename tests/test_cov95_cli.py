@@ -302,10 +302,11 @@ class TestSmallHelpers:
         compare_help = runner.invoke(main, ["compare", "--help"]).output
         assert "Per-side overrides" in compare_help
         assert "Build & source evidence" in compare_help
-        # `dump`'s curated --help (G21.8 M2) folds the Toolchain/Provenance
-        # panels' options behind --help-all; check the panels there.
+        # `dump`'s curated --help (G21.8 M2) folds the Dependencies/Provenance
+        # panels behind --help-all. Phase 7 removed the "Toolchain" panel
+        # entirely (compile: config only now).
         dump_help = runner.invoke(main, ["dump", "--help-all"]).output
-        assert "Toolchain" in dump_help and "Provenance" in dump_help
+        assert "Dependencies" in dump_help and "Provenance" in dump_help
 
     def test_missing_requested_evidence_layers(self) -> None:
         # G21.7: a requested layer that came back NOT_COLLECTED — or PARTIAL with
@@ -398,23 +399,24 @@ class TestSmallHelpers:
         assert "carry only L0-L2 data" not in result.output
 
     def test_dump_compiler_option_threaded_to_non_elf(self, tmp_path, monkeypatch) -> None:
-        # ADR-037 D3 (Codex): --compiler-option is now threaded into the native
+        # ADR-037 D3 (Codex): compile.options is threaded into the native
         # PE/Mach-O header-scoping path (resolved before format dispatch), so the
         # old "will be ignored" warning is gone and the context reaches the dump.
         #
         # ADR-063 Phase 1: the real PE/Mach-O run now executes through
         # `execute_dump_request`, not the retired `handle_non_elf_dump` --
-        # patch `abicheck.service_dump_native._dump_macho` instead (the same
-        # depth below the format dispatch `abicheck.dumper.dump` sits at for
-        # the ELF precedent, `test_compile_context_parity.py::
-        # test_dump_reads_compile_block_from_config`), and assert on the
-        # `compile` CompileContext it receives.
+        # patch `abicheck.service_dump_native._dump_macho` instead, and
+        # assert on the `compile` CompileContext it receives. Phase 7
+        # removed --compiler-option from dump entirely: compile.options in
+        # .abicheck.yml is its only spelling now.
         import struct
 
         from abicheck.model import AbiSnapshot
 
         dylib = tmp_path / "fake.dylib"
         dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  options: [-DX]\n", encoding="utf-8")
         captured: dict[str, object] = {}
 
         def _fake_dump_macho(*args: object, **kwargs: object) -> AbiSnapshot:
@@ -424,7 +426,7 @@ class TestSmallHelpers:
         monkeypatch.setattr(
             "abicheck.service_dump_native._dump_macho", _fake_dump_macho
         )
-        result = CliRunner().invoke(main, ["dump", str(dylib), "--compiler-option=-DX"])
+        result = CliRunner().invoke(main, ["dump", str(dylib), "--config", str(cfg)])
         assert result.exit_code == 0, result.output
         assert "will be ignored" not in result.output
         assert getattr(captured["compile"], "gcc_option_tokens") == ("-DX",)
@@ -489,12 +491,11 @@ class TestSmallHelpers:
         assert "-DFOO=1" in gcc_option_tokens
 
     def test_dump_compiler_option_help(self) -> None:
-        # G21.5: the repeatable --compiler-option is documented on dump. It's a
-        # toolchain-tier flag, folded behind --help-all by dump's curated
-        # --help (G21.8 M2).
+        # Phase 7: --compiler-option is gone from dump's CLI entirely --
+        # compile.options in .abicheck.yml is its only spelling now.
         out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
-        assert "--compiler-option" in norm
+        assert "--compiler-option" not in norm
 
     def test_dump_depth_help_shows_four_rungs(self) -> None:
         runner = CliRunner()
@@ -816,9 +817,9 @@ class TestCompareCommand:
         assert result.exit_code == 4
 
     def test_debug_format_auto_on_snapshots(self, tmp_path: Path) -> None:
-        # debug.format: auto (ADR-068 D5: --debug-format is gone on compare,
-        # this is the only spelling now) resolves to None; JSON snapshots
-        # have format None so the PE/Mach-O guard is skipped.
+        # debug.format: auto (ADR-068 D5 / Phase 7a: --debug-format is gone
+        # on compare, this is the only spelling now) resolves to None; JSON
+        # snapshots have format None so the PE/Mach-O guard is skipped.
         snap = _snap()
         old_f = _write_snap(tmp_path / "old.json", snap)
         new_f = _write_snap(tmp_path / "new.json", snap)

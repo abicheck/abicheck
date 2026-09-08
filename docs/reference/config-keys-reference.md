@@ -26,10 +26,16 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 
 | Sub-key | Type |
 |---|---|
+| `allow_unsupported_castxml` | bool |
+| `ast_frontend_fallback` | bool |
+| `compiler` | str |
 | `defines` | list[str] (or a single str) |
 | `frontend` | str |
+| `frontend_context` | str |
 | `include_dirs` | list[str] (or a single str) |
+| `lang` | str |
 | `nostdinc` | bool |
+| `options` | list[str] (or a single str) |
 | `std` | str |
 | `sysroot` | str |
 
@@ -41,6 +47,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `debuginfod_url` | str |
 | `dwarf_only` | bool |
 | `format` | str |
+| `pdb_path` | str |
 
 ### `python:`
 

@@ -622,6 +622,7 @@ def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
     from abicheck.dumper_manifest import _run_tu_fragments
 
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
+    monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
     order: list = []
 
     def _stub(headers, extra_includes, **kwargs):

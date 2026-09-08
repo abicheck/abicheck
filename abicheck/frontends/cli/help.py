@@ -79,7 +79,13 @@ COMMAND_GROUPS: dict[str, list[dict[str, object]]] = {
 # default trailing panel, so a new flag never has to be added here to work.
 OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
     "* compare": [
-        {"name": "Inputs", "options": ["--header", "--include", "--lang"]},
+        # Phase 7 (one-comparison-product.md §4.1): --lang and the whole
+        # "Toolchain (header parsing)" panel this file used to carry here
+        # (--ast-frontend/--compiler/--compiler-prefix/--compiler-option/
+        # --sysroot/--nostdinc) are gone from compare's CLI entirely --
+        # .abicheck.yml's compile: block is their only source now, so
+        # there is nothing left here to group.
+        {"name": "Inputs", "options": ["--header", "--include"]},
         {
             "name": "Output & reporting",
             "options": [
@@ -90,17 +96,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--show-only",
                 "--config",
                 "--verbose",
-            ],
-        },
-        {
-            "name": "Toolchain (header parsing)",
-            "options": [
-                "--ast-frontend",
-                "--compiler",
-                "--compiler-prefix",
-                "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
             ],
         },
         {
@@ -169,37 +164,27 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
     ],
     "* dump": [
+        # Phase 7 (one-comparison-product.md §4.2): --lang and the whole
+        # "Toolchain" panel this file used to carry here (--ast-frontend/
+        # --compiler/--compiler-prefix/--compiler-option/--sysroot/
+        # --nostdinc) are gone from dump's CLI entirely -- .abicheck.yml's
+        # compile: block is their only source now.
         {
             "name": "Inputs",
             "options": [
                 "--header",
                 "--include",
                 "--version",
-                "--lang",
             ],
         },
         {"name": "Output", "options": ["--output", "--dry-run", "--verbose"]},
         {
-            "name": "Toolchain",
-            "options": [
-                "--ast-frontend",
-                "--compiler",
-                "--compiler-prefix",
-                "--compiler-option",
-                "--sysroot",
-                "--nostdinc",
-            ],
-        },
-        {
+            # Phase 7c: --dwarf-only/--debug-format/--debuginfod/
+            # --debuginfod-url/--pdb-path are gone too (debug: config block
+            # only); only the coarse per-run --debug-root override stays a
+            # visible flag, matching compare's own "Debug info" panel.
             "name": "Debug info",
-            "options": [
-                "--dwarf-only",
-                "--debug-format",
-                "--debug-root",
-                "--debuginfod",
-                "--debuginfod-url",
-                "--pdb-path",
-            ],
+            "options": ["--debug-root"],
         },
         {
             "name": "Build & source evidence (--depth build/source)",
@@ -391,7 +376,8 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Inputs
         "header",
         "include",
-        "lang",
+        # --lang has no Click dest here any more (Phase 7: compile.lang
+        # config-only, one-comparison-product.md §4.1).
         # Output & reporting
         "output",
         "fmt",
@@ -578,6 +564,14 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "dump_manifest_path",
         # Project config
         "build_config",
+        # Debug info -- the coarse per-run override stays visible on `dump`
+        # too, same as on `compare` above (whose own dest is the singular
+        # `debug_root`, split into sided paths by `cli_options.py`; `dump`
+        # binds this flag straight to the plural `debug_roots` multiple=True
+        # parameter -- CodeRabbit review, PR #1146, finding #4: this name
+        # was missing here, so plain `dump --help` never showed a real,
+        # still-supported flag).
+        "debug_roots",
         # Output
         "output",
         "snapshot_compression",

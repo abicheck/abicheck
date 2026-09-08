@@ -228,12 +228,7 @@ success means one `COVERED` row per current ground-truth entry, with no
 
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
-`case60_base_class_position_changed`, `case69_trivial_to_nontrivial`, and
-`case89_inline_accessor_renamed_pimpl_member` (stripped headers loses the L2
-evidence the inline-body/renamed-member check needs and reports the weaker
-`API_BREAK` `field_renamed` instead of `BREAKING`
-`inline_body_references_renamed_member` — same reduced-evidence pattern as
-the other five, not a false positive).
+`case60_base_class_position_changed`, and `case69_trivial_to_nontrivial`.
 
 Release and stripped full-catalog lanes remain reported-only plus false-positive
 guarded. The fixed ten-case build/source proof is blocking. A complete
@@ -252,10 +247,9 @@ Recent build/source and ABI-mode examples:
 
 Current mode-specific backlog: stripped headers under-classifies
 `case103_toolchain_flag_drift`, `case117_no_unique_address`,
-`case129_struct_return_convention`, `case60_base_class_position_changed`,
-`case69_trivial_to_nontrivial`, and
-`case89_inline_accessor_renamed_pimpl_member`; default/debug and
-release-header modes classify those catalog cases correctly.
+`case129_struct_return_convention`, `case60_base_class_position_changed`, and
+`case69_trivial_to_nontrivial`; default/debug and release-header modes
+classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 

@@ -55,7 +55,9 @@ Marked ``integration`` (needs a real compiler) -- the marker itself, not
 just this test's own skipif guards, is what keeps it out of the default
 fast lane (tests/CLAUDE.md: "Mark tests that shell out ... so default runs
 stay fast"), so it must stay on this test even though the test body itself
-only ever shells out to g++/clang. Uses ``--ast-frontend clang`` like its
+only ever shells out to g++/clang. Uses ``compile.frontend: clang`` (via
+a temp ``.abicheck.yml`` + ``--config``, since Phase 7 removed compare/dump's
+``--ast-frontend`` CLI spelling) like its
 ``test_pvxs_regression.py`` sibling; both tests' own skip guards ask only
 for g++ and clang, not castxml, but ``tests/conftest.py``'s
 ``_integration_skip_reason()`` currently requires castxml too for *any*
@@ -177,6 +179,8 @@ def test_missing_dependency_include_dir_gives_actionable_hint(
     _build_lib(src_dir, dep_dir, so_path)
 
     out_json = tmp_path / "report.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = CliRunner().invoke(
@@ -186,8 +190,8 @@ def test_missing_dependency_include_dir_gives_actionable_hint(
                 str(so_path),
                 "-H",
                 str(src_dir / "main.h"),
-                "--ast-frontend",
-                "clang",
+                "--config",
+                str(cfg),
                 "-o",
                 str(out_json),
             ],
@@ -222,6 +226,8 @@ def test_dependency_include_dir_supplied_scan_and_self_compare_succeed(
     _build_lib(src_dir, dep_dir, so_path)
 
     out_json = tmp_path / "report.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
     result = CliRunner().invoke(
         main,
         [
@@ -232,8 +238,8 @@ def test_dependency_include_dir_supplied_scan_and_self_compare_succeed(
             str(src_dir / "main.h"),
             "-I",
             str(dep_dir),
-            "--ast-frontend",
-            "clang",
+            "--config",
+            str(cfg),
             "--format",
             "json",
             "-o",

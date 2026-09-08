@@ -73,25 +73,41 @@ class TestDumpVerbose:
 # ── debug format on non-ELF binaries ─────────────────────────────────────
 
 class TestDumpDebugFormatValidation:
-    def test_debug_format_btf_rejected_for_pe_binary(self, tmp_path):
+    def test_debug_format_btf_rejected_for_pe_binary(self, tmp_path, monkeypatch):
+        # Phase 7c (one-comparison-product.md §4.2): --debug-format is gone
+        # from dump's CLI -- debug.format is its only spelling now, and the
+        # PE/Mach-O rejection still fires for a config-selected format.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  format: btf\n", encoding="utf-8")
         dll = tmp_path / "foo.dll"
         dll.write_bytes(b"MZ" + b"\0" * 62)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(dll), "--debug-format", "btf"])
+        result = runner.invoke(main, ["dump", str(dll), "--config", str(cfg)])
 
         assert result.exit_code != 0
         assert "--debug-format btf is only supported for ELF binaries, not PE" in result.output
 
-    def test_debug_format_ctf_rejected_for_macho_binary(self, tmp_path):
+    def test_debug_format_ctf_rejected_for_macho_binary(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  format: ctf\n", encoding="utf-8")
         dylib = tmp_path / "libfoo.dylib"
         dylib.write_bytes(b"\xfe\xed\xfa\xcf" + b"\0" * 60)
 
         runner = CliRunner()
-        result = runner.invoke(main, ["dump", str(dylib), "--debug-format", "ctf"])
+        result = runner.invoke(main, ["dump", str(dylib), "--config", str(cfg)])
 
         assert result.exit_code != 0
         assert "--debug-format ctf is only supported for ELF binaries, not MACHO" in result.output
+
+    def test_debug_format_flag_deleted_outright(self, tmp_path):
+        # Phase 7c: --debug-format itself has no CLI spelling any more.
+        dll = tmp_path / "foo.dll"
+        dll.write_bytes(b"MZ" + b"\0" * 62)
+        runner = CliRunner()
+        result = runner.invoke(main, ["dump", str(dll), "--debug-format", "btf"])
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
     def test_legacy_btf_ctf_dwarf_flags_removed(self, tmp_path):
         # H1 hidden-shim deletion: the legacy --btf/--ctf/--dwarf spellings
@@ -109,24 +125,31 @@ class TestDumpDebugFormatValidation:
 # ── --lang on compare ────────────────────────────────────────────────────
 
 class TestCompareLang:
-    def test_lang_c_accepted(self, tmp_path):
+    """Phase 7 (one-comparison-product.md §4.1): --lang is gone from
+    compare's CLI entirely -- compile.lang is its only spelling now (default
+    LANG_DEFAULT, "c++", when unset)."""
+
+    def test_lang_flag_deleted_outright(self, tmp_path):
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--lang", "c",
         ])
-        assert result.exit_code == 0
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
-    def test_lang_cpp_accepted(self, tmp_path):
+    def test_lang_c_accepted_via_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Path(".abicheck.yml").write_text("compile:\n  lang: c\n", encoding="utf-8")
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--lang", "c++",
-        ])
+        result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code == 0
 
-    def test_lang_c_forwarded_to_resolve_input(self, tmp_path, monkeypatch):
-        """When comparing ELF files with --lang c, _resolve_input passes lang='c' to dump()."""
+    def test_lang_c_forwarded_to_resolve_input_via_config(self, tmp_path, monkeypatch):
+        """compile.lang: c reaches dump() as lang='c' on both sides."""
+        monkeypatch.chdir(tmp_path)
+        Path(".abicheck.yml").write_text("compile:\n  lang: c\n", encoding="utf-8")
         # Write two fake ELF files (magic bytes)
         old_so = tmp_path / "old.so"
         new_so = tmp_path / "new.so"
@@ -145,7 +168,7 @@ class TestCompareLang:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header), "--lang", "c",
+            "compare", str(old_so), str(new_so), "-H", str(header),
         ])
         assert result.exit_code == 0
         # Both old and new sides should have lang="c" forwarded. A header-scoped
@@ -158,14 +181,14 @@ class TestCompareLang:
             assert call.get("lang") == "c"
             assert call.get("compiler") == "cc"
 
-    def test_lang_invalid_rejected(self, tmp_path):
+    def test_lang_invalid_rejected_by_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Path(".abicheck.yml").write_text("compile:\n  lang: rust\n", encoding="utf-8")
         old_p, new_p = _write_snapshots(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "compare", str(old_p), str(new_p), "--lang", "rust",
-        ])
+        result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
         assert result.exit_code != 0
-        assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
+        assert "compile.lang" in result.output
 
 
 # ── per-side --ast-frontend old= / --ast-frontend new= on compare ───────
@@ -180,8 +203,28 @@ class TestPerSideHeaderBackend:
         header.write_text("int foo();\n", encoding="utf-8")
         return old_so, new_so, header
 
-    def test_per_side_backend_routed_independently(self, tmp_path, monkeypatch):
-        """--ast-frontend old=castxml + new=clang reach each side."""
+    def test_ast_frontend_flag_deleted_outright(self, tmp_path, monkeypatch):
+        # Phase 7 (one-comparison-product.md §4.1): --ast-frontend (sided or
+        # not) is gone from compare's CLI entirely -- compile.frontend is
+        # its only spelling now, with no per-side notion any more (a config
+        # applies one frontend to both sides, matching what "a stable
+        # project property" means).
+        old_so, new_so, header = self._two_elf(tmp_path)
+        for args in (
+            ["--ast-frontend", "old=castxml", "--ast-frontend", "new=clang"],
+            ["--ast-frontend", "clang"],
+        ):
+            result = CliRunner().invoke(main, [
+                "compare", str(old_so), str(new_so), "-H", str(header), *args,
+            ])
+            assert result.exit_code == 64
+            assert "No such option" in result.output
+
+    def test_ast_frontend_from_config_reaches_both_sides(self, tmp_path, monkeypatch):
+        """compile.frontend: clang reaches both sides via dump() (the
+        pre-existing config key --ast-frontend already deferred to)."""
+        monkeypatch.chdir(tmp_path)
+        Path(".abicheck.yml").write_text("compile:\n  frontend: clang\n", encoding="utf-8")
         old_so, new_so, header = self._two_elf(tmp_path)
         calls = []
 
@@ -192,56 +235,11 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "old=castxml", "--ast-frontend", "new=clang",
         ])
         assert result.exit_code == 0
-        # The L0 hard-removal fold-in (case97 fix) would add two more calls,
-        # but only when the resolved snapshot has a real source_path to
-        # re-probe — the fake snapshot here has none, so it no-ops.
-        assert len(calls) == 2
-        # _resolve_compare_snapshots dumps old first, then new.
-        assert calls[0].get("header_backend") == "castxml"
-        assert calls[1].get("header_backend") == "clang"
-
-    def test_per_side_inherits_global_default(self, tmp_path, monkeypatch):
-        """Without per-side flags, both sides inherit --ast-frontend."""
-        old_so, new_so, header = self._two_elf(tmp_path)
-        calls = []
-
-        def fake_dump(**kwargs):
-            calls.append(kwargs)
-            return AbiSnapshot(library="libfoo.so", version="1.0")
-
-        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "clang",
-        ])
-        assert result.exit_code == 0
-        # A header-scoped compare also fires the L0 hard-removal fold-in
-        # (case97 fix), which re-resolves both sides symbols-only (no
-        # header_backend of interest) — restrict to the real per-side calls.
         header_calls = [c for c in calls if c.get("headers")]
         assert len(header_calls) == 2
         assert all(c.get("header_backend") == "clang" for c in header_calls)
-
-    def test_one_side_override_other_inherits(self, tmp_path, monkeypatch):
-        """A single per-side flag overrides only that side; the other inherits."""
-        old_so, new_so, header = self._two_elf(tmp_path)
-        calls = []
-
-        def fake_dump(**kwargs):
-            calls.append(kwargs)
-            return AbiSnapshot(library="libfoo.so", version="1.0")
-
-        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
-        result = CliRunner().invoke(main, [
-            "compare", str(old_so), str(new_so), "-H", str(header),
-            "--ast-frontend", "castxml", "--ast-frontend", "new=clang",
-        ])
-        assert result.exit_code == 0
-        assert calls[0].get("header_backend") == "castxml"
-        assert calls[1].get("header_backend") == "clang"
 
     def test_resolve_compare_snapshots_routes_backend_per_side(self, monkeypatch):
         """Direct unit: ``_resolve_compare_snapshots`` gives each side its own
@@ -292,28 +290,24 @@ class TestPerSideHeaderBackend:
 # ── --lang on dump ───────────────────────────────────────────────────────
 
 class TestDumpLang:
-    def test_lang_c_accepted(self, tmp_path, monkeypatch):
+    """Phase 7c (one-comparison-product.md §4.2): --lang is gone from dump's
+    CLI entirely -- compile.lang is its only spelling now."""
+
+    def test_lang_flag_deleted_outright(self, tmp_path):
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
-
-        captured = {}
-        def fake_dump(**kwargs):
-            captured.update(kwargs)
-            return AbiSnapshot(library="libfoo.so", version="1.0")
-
-        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
-
         runner = CliRunner()
         result = runner.invoke(main, [
             "dump", str(so_path), "-H", str(header), "--lang", "c",
         ])
-        assert result.exit_code == 0
-        # When --lang c is passed, compiler should be "cc"
-        assert captured.get("compiler") == "cc"
+        assert result.exit_code == 64
+        assert "No such option" in result.output
 
-    def test_lang_cpp_sends_cpp_compiler(self, tmp_path, monkeypatch):
+    def test_lang_c_accepted_via_config(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  lang: c\n", encoding="utf-8")
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -327,9 +321,47 @@ class TestDumpLang:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "--lang", "c++",
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        assert result.exit_code == 0
+        # When compile.lang: c is configured, compiler should be "cc"
+        assert captured.get("compiler") == "cc"
+
+    def test_lang_cpp_sends_cpp_compiler_via_config(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  lang: c++\n", encoding="utf-8")
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        header = tmp_path / "foo.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+
+        captured = {}
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
+        assert result.exit_code == 0
+        assert captured.get("compiler") == "c++"
+
+    def test_lang_default_is_cpp_with_no_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        header = tmp_path / "foo.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+
+        captured = {}
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
         assert result.exit_code == 0
         assert captured.get("compiler") == "c++"
 
@@ -465,7 +497,38 @@ class TestDumpLang:
 # ── Cross-compilation flags on dump ──────────────────────────────────────
 
 class TestDumpCrossCompilation:
-    def test_compiler_path_forwarded(self, tmp_path, monkeypatch):
+    """Phase 7b (one-comparison-product.md §4.2, ADR-037 D8.1): --compiler/
+    --compiler-prefix/--compiler-option/--sysroot/--nostdinc are gone from
+    dump's CLI entirely -- .abicheck.yml's compile: block is their only
+    spelling now (compile.compiler merges the former --compiler/
+    --compiler-prefix pair: a trailing "-" is a prefix, anything else a
+    full path)."""
+
+    def test_cross_compile_flags_deleted_outright(self, tmp_path):
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        header = tmp_path / "foo.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+        runner = CliRunner()
+        for flag, value in (
+            ("--compiler", "/usr/bin/aarch64-linux-gnu-g++"),
+            ("--compiler-prefix", "aarch64-linux-gnu-"),
+            ("--compiler-option", "-march=armv8-a"),
+            ("--sysroot", str(tmp_path)),
+        ):
+            result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), flag, value])
+            assert result.exit_code == 64, flag
+            assert "No such option" in result.output, flag
+        for flag in ("--nostdinc", "--no-nostdinc"):
+            result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), flag])
+            assert result.exit_code == 64, flag
+            assert "No such option" in result.output, flag
+
+    def test_compiler_path_forwarded_via_config(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "compile:\n  compiler: /usr/bin/aarch64-linux-gnu-g++\n", encoding="utf-8"
+        )
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -479,14 +542,17 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header),
-            "--compiler", "/usr/bin/aarch64-linux-gnu-g++",
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
         assert result.exit_code == 0
         assert captured.get("gcc_path") == "/usr/bin/aarch64-linux-gnu-g++"
 
-    def test_compiler_prefix_forwarded(self, tmp_path, monkeypatch):
+    def test_compiler_prefix_forwarded_via_config(self, tmp_path, monkeypatch):
+        # compile.compiler ending in "-" is the merged spelling of the
+        # former --compiler-prefix.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "compile:\n  compiler: aarch64-linux-gnu-\n", encoding="utf-8"
+        )
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -500,14 +566,15 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header),
-            "--compiler-prefix", "aarch64-linux-gnu-",
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"
 
-    def test_gcc_options_forwarded(self, tmp_path, monkeypatch):
+    def test_compiler_options_forwarded_via_config(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "compile:\n  options:\n    - -march=armv8-a\n", encoding="utf-8"
+        )
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -521,20 +588,21 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header),
-            "--compiler-option", "-march=armv8-a",
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
         assert result.exit_code == 0
         assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)
 
-    def test_sysroot_forwarded(self, tmp_path, monkeypatch):
+    def test_sysroot_forwarded_via_config(self, tmp_path, monkeypatch):
+        sysroot_dir = tmp_path / "sysroot"
+        sysroot_dir.mkdir()
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            f"compile:\n  sysroot: {sysroot_dir}\n", encoding="utf-8"
+        )
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
         header.write_text("int foo();\n", encoding="utf-8")
-        sysroot_dir = tmp_path / "sysroot"
-        sysroot_dir.mkdir()
 
         captured = {}
         def fake_dump(**kwargs):
@@ -544,14 +612,13 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header),
-            "--sysroot", str(sysroot_dir),
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
         assert result.exit_code == 0
         assert captured.get("sysroot") == sysroot_dir
 
-    def test_nostdinc_forwarded(self, tmp_path, monkeypatch):
+    def test_nostdinc_forwarded_via_config(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  nostdinc: true\n", encoding="utf-8")
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -565,13 +632,20 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header), "--nostdinc",
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
         assert result.exit_code == 0
         assert captured.get("nostdinc") is True
 
-    def test_multiple_cross_flags_combined(self, tmp_path, monkeypatch):
+    def test_multiple_cross_config_keys_combined(self, tmp_path, monkeypatch):
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "compile:\n"
+            "  compiler: aarch64-linux-gnu-\n"
+            "  options:\n"
+            "    - -march=armv8-a\n"
+            "  nostdinc: true\n",
+            encoding="utf-8",
+        )
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         header = tmp_path / "foo.h"
@@ -585,12 +659,7 @@ class TestDumpCrossCompilation:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "dump", str(so_path), "-H", str(header),
-            "--compiler-prefix", "aarch64-linux-gnu-",
-            "--compiler-option", "-march=armv8-a",
-            "--nostdinc",
-        ])
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header), "--config", str(cfg)])
         assert result.exit_code == 0
         assert captured.get("gcc_prefix") == "aarch64-linux-gnu-"
         assert captured.get("gcc_option_tokens") == ("-march=armv8-a",)

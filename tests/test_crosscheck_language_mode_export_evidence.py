@@ -158,6 +158,8 @@ def test_self_compare_reports_no_change_for_plain_unnamespaced_functions(
     _build_lib(src_dir, so_path)
 
     out_json = tmp_path / "report.json"
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(f"compile:\n  frontend: {ast_frontend}\n", encoding="utf-8")
     result = CliRunner().invoke(
         main,
         [
@@ -166,8 +168,8 @@ def test_self_compare_reports_no_change_for_plain_unnamespaced_functions(
             str(so_path),
             "-H",
             str(src_dir / "main.h"),
-            "--ast-frontend",
-            ast_frontend,
+            "--config",
+            str(cfg),
             "--format",
             "json",
             "-o",

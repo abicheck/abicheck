@@ -272,17 +272,23 @@ class TestCompareOldBundleFactsEarlyRejections:
     def test_lang_explicit_is_forwarded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Codex review: an explicit --lang c++ was indistinguishable from
-        # Click's own identical default once inside dispatch(), so a
+        # Codex review: an explicit compile.lang: c++ was indistinguishable
+        # from the built-in default once inside dispatch(), so a
         # language-ambiguous NEW-side header could be silently auto-detected
         # away from the caller's explicit request. Proven the same way
         # test_includes_from_config_are_merged_and_forwarded is: capture
         # what compare_cmd forwards to dispatch(), not
         # compare_release_against_bundle_facts's own behavior.
+        #
+        # Phase 7 (one-comparison-product.md §4.1) removed `--lang` from
+        # `compare`'s CLI entirely; `.abicheck.yml`'s `compile.lang` is the
+        # only remaining way to request it explicitly.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("compile:\n  lang: c++\n")
 
         from abicheck.frontends.cli.commands import compare_bundle_facts
 
@@ -297,8 +303,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--lang",
-            "c++",
+            "--config",
+            str(cfg),
             "--format",
             "json",
         )
