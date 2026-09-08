@@ -157,6 +157,33 @@ def _skip_template_args(s: str, i: int) -> int | None:
     return None
 
 
+def strip_macho_itanium_decoration(mangled: str) -> str:
+    """Strip Darwin/Mach-O's own linker leading-underscore decoration from
+    an otherwise-real Itanium mangled name, when doing so is unambiguous.
+
+    Darwin's linker prepends one leading underscore to *every* global C/C++
+    symbol at the object-file level. For a genuine Itanium mangled name --
+    which always starts with a single ``"_Z"`` -- that decoration produces
+    an unmistakable ``"__Z..."`` shape: no real Itanium mangling ever
+    begins with two underscores, so recognizing and stripping this one is
+    always safe and needs no platform/target-triple confirmation at all
+    (unlike a bare, singly-underscore-prefixed C-linkage name, which IS
+    genuinely ambiguous with a real, distinct ``asm("_foo")`` label --
+    callers that also know the declaration is genuinely ``extern "C"``
+    resolve that narrower case themselves; see
+    ``extract.headers.clang.context.strip_darwin_itanium_decoration``).
+
+    Returns *mangled* unchanged for every other shape. The single canonical
+    home for this specific structural check -- previously duplicated,
+    independently, by :func:`_itanium_strip_prefix` below,
+    ``extract.headers.clang.context.strip_darwin_itanium_decoration``, and
+    ``dumper_hybrid._macho_normalize_mangled`` -- so a Mach-O-target
+    identity fix made in one no longer needs to be separately rediscovered
+    and reapplied in the other two.
+    """
+    return mangled[1:] if mangled.startswith("__Z") else mangled
+
+
 def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     """Strip ``_Z`` and optional nested-name prefix from a mangled symbol.
 
@@ -170,13 +197,12 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     ``dumper_clang.py``'s own ``_visibility()`` docstring — clang's
     ``mangledName`` is ``"__ZN3lib3addEii"`` on macOS, not the plain
     Itanium ``"_ZN3lib3addEii"``), so a bare ``mangled.startswith("_Z")``
-    check rejects every symbol on that platform. Normalized away here by
-    stripping one leading underscore before the check, mirroring
+    check rejects every symbol on that platform. Normalized away here
+    (via :func:`strip_macho_itanium_decoration`) before the check, mirroring
     ``dumper_clang.py``'s own ``_symbol_candidates()`` de-prefixing
     approach for the identical Mach-O quirk.
     """
-    if mangled.startswith("__Z"):
-        mangled = mangled[1:]
+    mangled = strip_macho_itanium_decoration(mangled)
     if not mangled.startswith("_Z"):
         return None
     s = mangled[2:]

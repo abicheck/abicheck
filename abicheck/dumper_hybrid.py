@@ -139,7 +139,11 @@ from .model import (
     replace_with_fact_sync,
 )
 from .model.identity import EntityId, EntityKind, with_mangled_name
-from .model.mangled_name import _skip_template_args, itanium_scope_components
+from .model.mangled_name import (
+    _skip_template_args,
+    itanium_scope_components,
+    strip_macho_itanium_decoration,
+)
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name
@@ -197,21 +201,16 @@ def _macho_normalize_mangled(mangled: str) -> str:
     matching castxml's prefix-free convention on the same platform.
 
     Darwin prepends one underscore to every global symbol (C ``foo`` ->
-    ``_foo``; Itanium ``_Z...`` -> ``__Z...``); see
-    ``dumper_clang._ClangAstParser._visibility``'s docstring for the same
-    mismatch in export-table matching. ``extract.headers.clang.functions.
-    parse_function_element``/``dumper_clang.parse_variables`` now normalize
-    this at the point of origin too (a bare ``--ast-frontend clang`` dump
-    with no castxml side needed the identical fix), so *mangled* reaching
-    here is ordinarily **already** undecorated on Darwin. Blindly stripping
-    one leading underscore regardless (the original behavior) would corrupt
-    an already-pure Itanium name (``"_Z10fi"`` -> ``"Z10fi"``); that shape
-    is recognizable unambiguously (a still-decorated name is always
-    ``"__Z..."``, never plain ``"_Z..."``), so gating the no-op on that
-    prefix leaves every other shape (``"_foo"`` -> ``"foo"``) unchanged.
+    ``_foo``; Itanium ``_Z...`` -> ``__Z...``). The header-AST backends now
+    normalize this at the point of origin too, so *mangled* reaching here
+    is ordinarily **already** undecorated -- the Itanium half delegates to
+    ``model.mangled_name.strip_macho_itanium_decoration`` (the one
+    canonical ``"__Z..."`` -> ``"_Z..."`` shape check); every other shape,
+    including a bare ``"_foo"`` -> ``"foo"``, is handled below as before.
     """
-    if mangled.startswith("_Z"):
-        return mangled
+    stripped = strip_macho_itanium_decoration(mangled)
+    if stripped != mangled or mangled.startswith("_Z"):
+        return stripped
     return mangled[1:] if mangled.startswith("_") else mangled
 
 
