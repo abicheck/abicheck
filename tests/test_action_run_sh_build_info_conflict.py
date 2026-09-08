@@ -105,11 +105,22 @@ def test_one_or_neither_passes_through(build_info: str, compile_db: str) -> None
 
 
 def test_the_guard_covers_only_the_scan_forwarding_site() -> None:
-    """Three sites share the fallback; only scan's is behind the guard.
+    """Four sites share the fallback; two of them (both reachable only from
+    `mode: scan`) are behind their own guard.
 
     Pinning the scope directly, because the natural mistake here is a global
     guard -- which is what the first version of this fix was, and it broke
     compare mode's own pre-existing precedence test.
+
+    ADR-068 Phase 4 item 1 added the fourth site: `mode: scan` reimplemented
+    internally as `abicheck compare` for a single-artifact `scan --against`
+    run in `format: json` (see run.sh's own `_SCAN_USES_LEGACY_CLI` gate
+    comment) forwards `--build-info` through the identical
+    `${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}` fallback -- and needed the
+    identical duplicate-input guard immediately before it, since `compile-db`
+    was scan's own input either way and this migration must not silently
+    resurrect the "both set, compile-db silently dropped" defect this
+    guard exists to prevent for scan's other (legacy-CLI) forwarding site.
     """
     lines = RUN_SH.read_text(encoding="utf-8").splitlines()
     guard_at = next(i for i, line in enumerate(lines) if line.startswith(_START))
@@ -121,8 +132,20 @@ def test_the_guard_covers_only_the_scan_forwarding_site() -> None:
         if "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}" in line
         and ("add_single_flag" in line or "add_sided_flag" in line)
     ]
-    assert len(fallbacks) == 3, fallbacks
-    assert sum(1 for i in fallbacks if i > guard_at) == 1, (guard_at, fallbacks)
+    assert len(fallbacks) == 4, fallbacks
+    assert sum(1 for i in fallbacks if i > guard_at) == 2, (guard_at, fallbacks)
+    # Both scan-reachable sites (the legacy-CLI branch and the compare-
+    # migrated branch) carry their own preceding hard-error guard -- not
+    # just the first one -- so a workflow setting both build-info and
+    # compile-db for a migrated `scan --against` run still gets the loud
+    # rejection, not a silent compile-db drop.
+    guard_condition = '-n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}"'
+    for fallback_at in (i for i in fallbacks if i > guard_at):
+        preceding = lines[max(0, fallback_at - 15) : fallback_at]
+        assert any(guard_condition in line for line in preceding), (
+            fallback_at,
+            preceding,
+        )
 
 
 def test_a_real_scan_mode_run_hits_the_guard(tmp_path: Path) -> None:
