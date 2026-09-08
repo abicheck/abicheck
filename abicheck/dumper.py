@@ -75,6 +75,7 @@ from .dumper_clang import (
     _needs_sycl_host_only as _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
     _resolve_dpcpp_multi_context,
+    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -623,18 +624,21 @@ def _header_ast_parser(
             pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
-        # Probe-failure fallback chain (Codex/CodeRabbit review, fresh
-        # evidence): explicit `--target=` (CL-style spellings only under CL
-        # mode); else, under GNU mode, a bare re-probe of `clang_bin` plus
-        # only its effective `--driver-mode=` (dropping it would silently
-        # revert a `clang-cl --driver-mode=g++` re-probe to CL mode); else
-        # `_is_default_clang_bin`-gated `sys.platform`. No fallback while
-        # `@response-file`/`--config[-*-dir]=` may hide the real target.
+        # Probe-failure fallback (Codex/CodeRabbit review, fresh evidence):
+        # explicit `--target=`; a bare GNU-mode re-probe plus its own
+        # `--driver-mode=`; else `sys.platform`, gated on real identity AND
+        # not explicit `--compiler` provenance (a wrapper can share the
+        # default's basename). No fallback while `@response-file`/`--config[-*-dir]=` may hide the real target.
         is_cl_mode = _effective_driver_mode_is_cl(
             _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
+        _guess_ok = (
+            _target_known
+            and _is_default_clang_bin(clang_bin, compiler)
+            and not _clang_bin_is_explicitly_configured(gcc_path, gcc_prefix)
+        )
         target_triple = _configured_target_triple(
             gcc_options, gcc_option_tokens, clang_bin
         ) or (
@@ -646,11 +650,7 @@ def _header_ast_parser(
                 if _target_known
                 else None
             )
-            or (
-                sys.platform
-                if _target_known and _is_default_clang_bin(clang_bin, compiler)
-                else None
-            )
+            or (sys.platform if _guess_ok else None)
         )
         parser = _ClangAstParser(
             ast_root,

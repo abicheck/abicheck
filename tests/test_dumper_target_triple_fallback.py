@@ -40,6 +40,7 @@ from abicheck.dumper_clang import (
     _ClangAstParser,
     _default_clang_bin_name,
     _is_default_clang_bin,
+    clang_bin_is_explicitly_configured,
 )
 
 
@@ -109,6 +110,31 @@ class TestIsDefaultClangBin:
         # prefix itself -- only a trailing numeric suffix is version
         # information.
         assert _is_default_clang_bin("aarch64-apple-darwin-clang-18", "cc") is False
+
+
+class TestClangBinIsExplicitlyConfigured:
+    """Explicit ``--compiler``/``--compiler-prefix`` PROVENANCE, not the
+    resolved binary's basename -- a wrapper explicitly configured this way
+    can coincidentally share the plain default's basename while still
+    genuinely not being it (Codex review, fresh evidence: such a wrapper
+    can produce a real AST while not implementing ``-print-target-triple``
+    at all, so `_is_default_clang_bin`'s basename check alone would wrongly
+    let the last-resort `sys.platform` guess apply to it)."""
+
+    def test_neither_given(self) -> None:
+        assert clang_bin_is_explicitly_configured(None, None) is False
+
+    def test_a_clang_family_compiler_path_is_explicit(self) -> None:
+        assert clang_bin_is_explicitly_configured("/opt/wrapper/clang", None) is True
+
+    def test_a_non_clang_family_compiler_path_is_not_explicit(self) -> None:
+        # Mirrors `_resolve_clang_bin`'s own adoption condition: a
+        # `gcc_path` naming a non-clang-family binary is silently ignored,
+        # so its mere presence isn't "explicitly configured" for clang.
+        assert clang_bin_is_explicitly_configured("/usr/bin/gcc", None) is False
+
+    def test_a_compiler_prefix_is_explicit(self) -> None:
+        assert clang_bin_is_explicitly_configured(None, "aarch64-apple-darwin-") is True
 
 
 def test_probe_failure_recovers_explicit_target_triple(
@@ -264,14 +290,24 @@ def test_probe_failure_with_a_response_file_alongside_a_target_does_not_recover_
 
 
 @pytest.mark.skipif(shutil.which("clang") is None, reason="needs a real clang on PATH")
-def test_probe_failure_with_an_absolute_path_to_the_native_clang_still_guesses(
+def test_probe_failure_with_an_explicit_absolute_path_no_longer_guesses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``--compiler`` naming the native default Clang by an absolute path
-    (e.g. ``/usr/bin/clang``, resolved here via a real ``shutil.which``)
-    is still the plain host default, just spelled differently -- the AST
-    genuinely came from the native compiler, so the `sys.platform` guess
-    must still apply (Codex review, tenth round, fresh evidence)."""
+    """Superseded contract (Codex review, fresh evidence, correcting the
+    tenth round's own claim): this test used to assert the `sys.platform`
+    guess still applies when ``--compiler`` names the native Clang by an
+    absolute path, reasoning the AST genuinely came from the native
+    compiler. That reasoning predates the bare re-probe
+    (`_configured_target_triple(None, ..., clang_bin)`) this module now
+    tries first -- for a REAL clang binary, that re-probe essentially
+    never fails (`-print-target-triple` is always supported), so reaching
+    this last-resort branch at all while `--compiler` was explicitly
+    adopted is now itself evidence of an anomaly (e.g. a non-conforming
+    wrapper sharing the plain default's basename), not confirmation of a
+    genuine native clang. `clang_bin_is_explicitly_configured` now
+    suppresses the guess for any adopted `--compiler`/`--compiler-prefix`,
+    real absolute-path native clang included -- the safe answer once both
+    probes have failed for an explicitly-configured binary is "unknown"."""
     resolved_native_clang = shutil.which("clang")
     assert resolved_native_clang is not None
     ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
@@ -302,7 +338,7 @@ def test_probe_failure_with_an_absolute_path_to_the_native_clang_still_guesses(
     )
 
     assert isinstance(parser, _ClangAstParser)
-    assert parser._target_triple == "darwin"
+    assert parser._target_triple is None
 
 
 def test_probe_failure_with_a_resolved_cross_compiler_does_not_guess_sys_platform(
@@ -899,6 +935,47 @@ def test_probe_failure_with_a_config_user_dir_does_not_guess_sys_platform(
         gcc_path=None,
         gcc_prefix=None,
         gcc_options="--config-user-dir=/etc/clang",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple is None
+
+
+def test_probe_failure_with_an_explicitly_configured_wrapper_does_not_guess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: an explicit ``--compiler`` wrapper can
+    be installed at a path whose basename happens to be plain ``clang``
+    (`_is_default_clang_bin` alone would call it the native default) while
+    still not implementing ``-print-target-triple`` at all, failing both
+    the option-bearing probe and the bare re-probe. Its explicit
+    provenance (`--compiler` was actually adopted, per
+    `clang_bin_is_explicitly_configured`) must suppress the last-resort
+    `sys.platform` guess too, or a Darwin-targeting wrapper on a Linux
+    host would be recorded as `linux`."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    monkeypatch.setattr(dumper, "_configured_target_triple", lambda *a, **k: None)
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "/opt/wrapper/clang")
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c",
+        gcc_path="/opt/wrapper/clang",
+        gcc_prefix=None,
+        gcc_options="-O2",
         sysroot=None,
         nostdinc=False,
         lang=None,

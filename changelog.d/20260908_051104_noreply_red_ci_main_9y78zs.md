@@ -128,6 +128,22 @@ it should read in CHANGELOG.md. Delete the other sections.
   reports Windows — two different answers for the identical binary — so
   omitting the override entirely would have silently reverted a
   GNU-mode-forced re-probe back to CL mode.
+  Finally, the last-resort `sys.platform` guess is now also suppressed
+  whenever `clang_bin` was resolved via an explicitly-adopted
+  `--compiler`/`--compiler-prefix` (`dumper_clang.
+  clang_bin_is_explicitly_configured`), even one whose basename
+  coincides with the plain default — a `--compiler` wrapper can be
+  installed at a path named plain `clang`/`clang++` while genuinely not
+  being it, producing a real AST without implementing
+  `-print-target-triple` at all; once both probes have failed for an
+  explicitly-configured binary, that itself is evidence of an anomaly,
+  not confirmation of a genuine native compiler. This also means a
+  literal absolute-path `--compiler` naming the real native clang no
+  longer reaches the guess if its own bare re-probe somehow still fails
+  (vanishingly unlikely for genuine clang, since `-print-target-triple`
+  is always supported) — the earlier, narrower contract for that exact
+  scenario is superseded now that the bare re-probe is available as
+  strictly better evidence in every case where it succeeds.
   `extract.headers.clang.context.is_darwin_target` itself is unchanged
   and still answers `False` for a bare `None`/empty triple unconditionally
   — the `sys.platform` guess is deliberately synthesized one layer up, in

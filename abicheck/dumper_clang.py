@@ -535,6 +535,32 @@ def _resolve_clang_bin(
     return clang_bin
 
 
+def clang_bin_is_explicitly_configured(
+    gcc_path: str | None, gcc_prefix: str | None
+) -> bool:
+    """Whether :func:`_resolve_clang_bin` took an explicit ``--compiler``/
+    ``--compiler-prefix`` branch for these inputs, rather than falling
+    through to the plain, unconfigured host default.
+
+    Mirrors that function's own adoption condition instead of re-deriving
+    one from the resolved `clang_bin` string, since a resolved binary's
+    BASENAME can coincide with the plain default name even when it was
+    genuinely explicitly configured -- a ``--compiler`` wrapper installed
+    at a path whose basename happens to be plain ``clang``/``clang++``
+    (Codex review, fresh evidence: such a wrapper can produce a real AST
+    while not implementing ``-print-target-triple`` at all, failing both
+    the option-bearing probe and the bare re-probe; treating it as the
+    native host default purely because its basename matches would then
+    let :func:`dumper._run_clang`'s last-resort ``sys.platform`` guess
+    substitute the wrong platform for an explicitly cross-targeting
+    wrapper). Callers gate that guess on this being ``False`` in addition
+    to :func:`_is_default_clang_bin`'s own basename check -- the two
+    answer different questions (real identity vs. explicit provenance)
+    and neither alone is sufficient.
+    """
+    return bool(gcc_path and _is_clang_family_binary(gcc_path)) or bool(gcc_prefix)
+
+
 #: Clang AST node kinds for the function-like declarations we emit. Includes the
 #: C++ special members so a public constructor/destructor/conversion change is
 #: captured, mirroring castxml's ``Constructor``/``Destructor``/``Converter``.
