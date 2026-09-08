@@ -1199,27 +1199,27 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, a linker-decorated spelling must be stripped to "
-            "the pure spelling at the POINT OF ORIGIN in every header-AST "
-            "backend's own parse step, not only inside the castxml+clang "
-            "hybrid-merge path, for BOTH shapes decoration takes: a real "
-            "Itanium name (`__Z...` -> `_Z...`, unconditional -- that "
-            'shape is unambiguous) and a genuine extern "C"/plain-C bare '
-            "name (`_foo` -> `foo`, gated on the caller's own already-"
-            "computed `is_extern_c` -- entry.extern_c or the existing "
-            "bare-name-equality heuristic -- reusing that exact boolean "
-            "rather than re-deriving a separate, less precise condition). "
-            "`Function.mangled`/`Variable.mangled` must match on every "
-            "platform/frontend combination, including a bare "
-            "`--ast-frontend clang` dump with no castxml side. A `_foo` "
-            "with NO extern-C evidence stays untouched (indistinguishable "
-            'from a real `asm("_foo")` label). A name already pure must '
-            "not be stripped again."
+            "On Darwin, a linker-decorated spelling must be stripped to the "
+            "pure spelling at the POINT OF ORIGIN in every header-AST "
+            "backend's own parse step, for both a real Itanium name "
+            '(`__Z...` -> `_Z...`, unconditional) and a genuine extern "C"'
+            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). "
+            "Both are gated on `is_darwin_target(target_triple)`, which "
+            "must fall back to `sys.platform` (never overriding an "
+            "explicit non-Darwin triple) whenever the `-print-target-"
+            "triple` subprocess probe behind `target_triple` is "
+            "unavailable, rather than silently reading a failed probe as "
+            "non-Darwin. The shape check itself is the one canonical "
+            "`model.mangled_name.strip_macho_itanium_decoration`, reused "
+            "by `extract.headers.clang.context.strip_darwin_itanium_"
+            "decoration`, `model.mangled_name._itanium_strip_prefix`, and "
+            "`dumper_hybrid._macho_normalize_mangled` alike."
         ),
         fixed_by=(1138,),
         seed_tests=(
             "tests/test_dumper_clang_extern_c_identity.py",
             "tests/test_dumper_hybrid_macho_idempotence.py",
+            "tests/test_mangled_name_macho_decoration.py",
         ),
         public_surfaces=(),
         axes={
@@ -1235,19 +1235,19 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain in this dev environment to verify "
-                    "end to end -- verified via code inspection + synthetic "
-                    "AST-JSON unit tests only; macOS CI is the only real-"
-                    "binary signal (which is what caught this class's own "
-                    "second, narrower residual: the extern-C/plain-C bare-"
-                    "name shape was originally missed, only the Itanium "
-                    "shape was fixed in the first pass)."
+                    "No Mach-O toolchain here -- verified via code "
+                    "inspection + synthetic unit tests only. Recurred "
+                    "THREE times on macOS CI, each prior fix leaving one "
+                    "narrower residual (Itanium shape, then plain-C bare-"
+                    "name shape, then `is_darwin_target` reading False "
+                    "purely from a failed probe); the `sys.platform` "
+                    "fallback is verified only by monkeypatching"
                 ),
                 reference=(
-                    "PR #1138 follow-up: CI's integration-tests "
-                    "(macos-latest) job reported 4 failures from this exact "
-                    "mismatch for a bare --ast-frontend clang dump, twice "
-                    "(Itanium shape, then the narrower extern-C shape)"
+                    "PR #1138 follow-up: macos-latest integration-tests "
+                    "reported this exact mismatch three times -- Itanium "
+                    "shape, extern-C shape, then this session's identical "
+                    "'__Z10plain_funci' != '_Z10plain_funci' symptom"
                 ),
             ),
         ),
