@@ -225,7 +225,7 @@ stays as recorded in `.github/AGENTS.md`.
 reads `_report_query ... scope_incomplete` (the report's own
 `comparison_scope.completeness`/`run_outcome.scope` reading `incomplete`) and
 only decides whether the step summary names an accepted gap under the default
-`--on-incomplete-scope warn`; it never fails the step (Codex review).
+`scope.on_incomplete: warn`; it never fails the step (Codex review).
 `_scope_gated()` mirrors `_coverage_gated()` exactly (report contribution
 first -- `_report_query ... scope_contribution`, the max of the release
 `exit` block's `incomplete_scope_contribution`/`no_comparison_completed_
