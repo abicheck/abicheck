@@ -130,17 +130,27 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.json",
+                # A live-binary baseline, not a stored `.json` snapshot
+                # (Codex review, PR #1160, four rounds): a snapshot baseline
+                # can carry a `dependency_scope: full` tag `scan`'s own
+                # baseline path reads and matches on the candidate side,
+                # which a plain `compare` invocation has no equivalent for
+                # -- so any `--against`/`abi-baseline` ending in `.json` now
+                # stays on the legacy CLI regardless of depth (see the
+                # routing comment above `_SCAN_NEEDS_LEGACY_CLI` in run.sh).
+                # A live binary carries no such tag, so this keeps the
+                # scenario this test actually exercises -- public-header-
+                # dir's fold into -H under `compare` -- reachable.
+                "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
                 # An explicit --depth is required to route through `compare`
                 # here (Codex review, PR #1160, P1): omitting --depth on a
                 # baseline scan is scan's own risk-driven `auto` selection,
                 # which `compare --depth` has no equivalent for, so an
-                # unpinned depth now stays on the legacy `scan` CLI instead
-                # (see the routing comment above `_SCAN_NEEDS_LEGACY_CLI` in
-                # run.sh). Pinning it here keeps this test's real subject --
-                # public-header-dir's fold into -H under `compare` -- actually
-                # exercised.
+                # unpinned depth now stays on the legacy `scan` CLI instead.
+                # `headers` also keeps this off the build/source
+                # evidence-contract-divergence restriction (Codex review,
+                # PR #1160, P1, second round).
                 "INPUT_DEPTH": "headers",
             }
         )

@@ -586,6 +586,13 @@ _extra_args_has_scan_only_flag() {
       --against | --pattern-verdicts | --no-pattern-verdicts)
       return 0
       ;;
+    # `--format text` (Codex review P2, PR #1160, four rounds): a
+    # value-taking option, so this is checked by value, not just name --
+    # `scan --help-all` lists `text`/`json`; `compare --help-all` doesn't
+    # have `text` at all (json/markdown/sarif/html/junit/review instead).
+    --format)
+      [[ "$_value" == "text" ]] && return 0
+      ;;
     esac
   done <<<"$(_extra_args_options)"
   return 1
@@ -1275,18 +1282,23 @@ fi
 # `scan`'s baseline-compare path and `compare`'s own pipeline that this
 # routing must stay off of, not just a flag-support gap:
 #
-# - **Cross-source finding severity.** `scan`'s baseline path calls
-#   `_strip_automatic_cross_source_findings()` (`cli_scan_baseline.py`) to
-#   keep single-version hygiene findings (`header_build_context_mismatch`,
-#   `odr_type_variant`, ...) advisory-only -- reported in the crosscheck
-#   block, never folded into the old/new diff or its verdict/exit code.
-#   `compare`'s own automatic cross-source-checks stage has no such
-#   stripping: the identical finding becomes a real API break there. Since
-#   both checks are gated on L3/L4 evidence, any baseline scan that
-#   supplies `--sources`/`--build-info`/`--compile-db` stays on the legacy
-#   CLI unconditionally -- routing it to `compare` could turn a
+# - **Cross-source finding severity, and the evidence-contract floor.**
+#   `scan`'s baseline path calls `_strip_automatic_cross_source_findings()`
+#   (`cli_scan_baseline.py`) to keep single-version hygiene findings
+#   (`header_build_context_mismatch`, `odr_type_variant`, ...)
+#   advisory-only -- reported in the crosscheck block, never folded into
+#   the old/new diff or its verdict/exit code. `compare`'s own automatic
+#   cross-source-checks stage has no such stripping: the identical finding
+#   becomes a real API break there, which could turn a
 #   `fail-on-api-break: true` pass into a failure on a hygiene finding the
-#   same scan request previously only reported (Codex review P1, PR #1160).
+#   same scan request previously only reported. Symmetrically, a *pinned*
+#   `--depth build`/`--depth source` with no evidence to satisfy it is
+#   `scan`'s own hard evidence-contract floor (exit 7,
+#   `EVIDENCE_CONTRACT_ERROR`, ADR-037 D5) -- `compare` has no such floor
+#   and can exit 0 reporting the evidence merely absent. Both checks are
+#   gated on that same depth, so `--depth build`/`--depth source` (with or
+#   without `--sources`/`--build-info`/`--compile-db`) stays on the legacy
+#   CLI unconditionally (Codex review P1, PR #1160, two rounds).
 # - **Per-side header/include roots: additive vs. overriding.** `scan`
 #   documents (`action.yml`) that a shared `header`/`include` root and a
 #   side-specific `new-header`/`old-header`/`new-include`/`old-include`
@@ -1298,6 +1310,24 @@ fi
 #   dependency header for one side. So a baseline scan combining a shared
 #   header/include root with a side-specific one for the same kind also
 #   stays on the legacy CLI (Codex review P1, PR #1160).
+# - **Report JSON schema.** `compare`'s report carries
+#   `report_schema_version`/root `changes`; `scan`'s carries
+#   `scan_schema_version`/nested `diff.findings`/`coverage`/`crosscheck` --
+#   different, incompatible shapes (`cli_pr_comment.py`'s own docstring
+#   distinguishes them by the `scan_schema_version` key). The sticky PR
+#   comment renderer (`abicheck.pr_comment`) auto-detects which shape it was
+#   handed and renders correctly either way, so that path is unaffected --
+#   but a workflow's own downstream step parsing the raw JSON this Action
+#   writes to `-o`/`output-file` (or a secondary `--write`) would silently
+#   receive the wrong shape. So a baseline scan requesting `output-file` or
+#   a JSON `--write` via `extra-args` stays on the legacy CLI, and the
+#   baseline is checked by its resolved `--against`/`abi-baseline` value's
+#   own `.json` extension too: a stored snapshot can carry a
+#   `dependency_scope: full` tag from `dump --include-system-declarations`
+#   that `scan`'s own baseline path reads and matches on the candidate side
+#   (`_scan_candidate_include_dependencies`) -- a plain `compare` invocation
+#   has no such tag-matching step and would reject a previously-valid scan
+#   as a dependency-scope mismatch (Codex review, PR #1160, four rounds).
 #
 # Audit-only (no baseline) stays on the legacy `scan` CLI unconditionally
 # for this commit, even though `compare --no-baseline` exists (ADR-068 D2,
@@ -1352,9 +1382,12 @@ if [[ "$MODE" == "scan" ]]; then
            || -n "${INPUT_RISK_RULES:-}" || -n "${INPUT_CROSSCHECK:-}" \
            || -n "${INPUT_BUILD_TARGET:-}" ]] \
      || [[ -z "${INPUT_DEPTH:-}" ]] \
-     || [[ -n "${INPUT_SOURCES:-}" || -n "${INPUT_BUILD_INFO:-}" || -n "${INPUT_COMPILE_DB:-}" ]] \
+     || [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" ]] \
      || [[ ( -n "${INPUT_HEADER:-}" && ( -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_NEW_HEADER:-}" ) ) \
            || ( -n "${INPUT_INCLUDE:-}" && ( -n "${INPUT_OLD_INCLUDE:-}" || -n "${INPUT_NEW_INCLUDE:-}" ) ) ]] \
+     || [[ "${INPUT_AGAINST:-}" == *.json ]] \
+     || [[ -n "${INPUT_OUTPUT_FILE:-}" ]] \
+     || _extra_args_has_write_flag \
      || _extra_args_has_scan_only_flag; then
     _SCAN_NEEDS_LEGACY_CLI=true
   fi
@@ -3583,8 +3616,15 @@ elif [[ "$_CLI_MODE" == "scan" ]]; then
 else
   # compare exit codes: 0=compatible, 1=severity error, 2=API_BREAK,
   # 4=BREAKING, 8=REMOVED_LIBRARY (directory/package operands with
-  # fail-on-removed-library set). Click also uses exit code 2 for
-  # usage/argument errors — detect via stderr.
+  # fail-on-removed-library set), 16=NOT_COMPARABLE (a scope/profile
+  # mismatch -- `comparability.py`, `cli_compare_helpers.py`'s single-pair
+  # path and `cli_compare_release_helpers.py`'s release fan-out both use
+  # this code; scan's own equivalent is exit 6, handled in the sibling
+  # branch above -- Codex review P2, PR #1160, four rounds: this arm was
+  # missing entirely, so a translated `mode: scan` request hitting it fell
+  # into the generic `*) VERDICT="ERROR"` case below, which made
+  # `_maybe_post_pr_comment`'s own ERROR guard skip posting the report). Click
+  # also uses exit code 2 for usage/argument errors — detect via stderr.
   if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
     VERDICT="ERROR"
     echo "::error::abicheck failed due to a CLI argument or configuration error (exit code 2)."
@@ -3670,6 +3710,7 @@ else
         fi
         ;;
       8) VERDICT="REMOVED_LIBRARY" ;;
+      16) VERDICT="NOT_COMPARABLE" ;;
       *) VERDICT="ERROR" ;;
     esac
   fi
