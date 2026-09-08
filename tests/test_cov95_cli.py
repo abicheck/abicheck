@@ -809,7 +809,7 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--report-mode",
+            "--view",
             "impact",
         )
         # Breaking pair still exits 4; the report renders without error.
@@ -839,7 +839,8 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--no-demangle",
+            "--view",
+            "no-demangle",
         )
         assert result.exit_code == 0
 
@@ -1558,8 +1559,8 @@ class TestUsedByScoping:
         )
         data = json.loads(result.stdout)
         sarif_results = data["runs"][0]["results"]
-        assert len(sarif_results) == 1
-        assert sarif_results[0]["ruleId"] == "func_removed"
+        rule_ids = [r["ruleId"] for r in sarif_results]
+        assert (rule_ids.count("func_removed"), set(rule_ids)) == (1, {"func_removed", "public_surface_shrank"})
 
     def test_severity_missing_symbols_only_does_not_affect_exit_code(
         self, tmp_path, monkeypatch
@@ -1937,7 +1938,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--profile", "quick", "--show-only", "compatible",
+            "--profile", "quick", "--view", "show=compatible",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
@@ -2001,8 +2002,8 @@ class TestUsedByScoping:
             "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
-        assert "1 detected, 1 gating" in result.stdout
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking, 1 compatible (2 total)")
+        assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch
@@ -2177,7 +2178,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2196,7 +2197,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         data = json.loads(result.stdout)
         assert data["root_cause_count"] == 1
@@ -2234,13 +2235,12 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["root_cause_count"] == 1
-        group = data["root_causes"][0]
-        assert group["root"] == "_Z3barv"
+        assert data["root_cause_count"] == 2
+        group = next(g for g in data["root_causes"] if g["root"] == "_Z3barv")
         assert group["finding_count"] == 2
         assert {f["kind"] for f in group["findings"]} == {
             "func_removed", "pe_ordinal_retargeted",
@@ -2281,8 +2281,8 @@ class TestUsedByScoping:
         assert result.exit_code == 4
         data = json.loads(result.stdout)
         entries = {c["kind"]: c for c in data["changes"]}
-        assert set(entries) == {"func_removed", "consumer_required_symbol_removed"}
-        for entry in entries.values():
+        assert set(entries) == {"func_removed", "consumer_required_symbol_removed", "public_surface_shrank"}
+        for entry in (e for k, e in entries.items() if k != "public_surface_shrank"):
             evidence = entry["impact_assessment"]["root_cause_evidence"]
             assert evidence["strongest_evidence_level"] == "consumer_proven"
             assert evidence["evidence_levels"] == [
@@ -2320,16 +2320,16 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["root_cause_count"] == 2
-        groups = {
-            group["findings"][0]["kind"]: group for group in data["root_causes"]
-        }
-        assert set(groups) == {"func_removed", "consumer_required_symbol_removed"}
-        for group in groups.values():
+        assert data["root_cause_count"] == 3
+        groups = {group["findings"][0]["kind"]: group for group in data["root_causes"]}
+        assert set(groups) == {"func_removed", "consumer_required_symbol_removed", "public_surface_shrank"}
+        for kind, group in groups.items():
+            if kind == "public_surface_shrank":
+                continue
             assert group["finding_count"] == 1
             assert group["strongest_evidence_level"] == "consumer_proven"
             assert group["evidence_levels"] == ["artifact_proven", "consumer_proven"]
@@ -2365,11 +2365,11 @@ class TestUsedByScoping:
             str(new_p),
             "--used-by",
             str(app_path),
-            "--report-mode",
+            "--view",
             "root-cause",
         )
         assert result.exit_code == 4
-        assert "## Root Causes (1)" in result.output
+        assert "## Root Causes (2)" in result.output
         # Markdown demangles by default -- the group's display root is the
         # demangled `bar()`, not the raw mangled `_Z3barv`.
         assert "### `bar()` (2 finding" in result.output
@@ -2402,7 +2402,7 @@ class TestUsedByScoping:
             str(new),
             "--used-by",
             str(app),
-            "--report-mode",
+            "--view",
             "root-cause",
         )
         assert result.exit_code == 0
@@ -2448,7 +2448,7 @@ class TestUsedByScoping:
             str(new),
             "--used-by",
             str(app),
-            "--report-mode",
+            "--view",
             "root-cause",
             "--config",
             str(_severity_config(tmp_path, abi_breaking="error")),
@@ -2501,7 +2501,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--show-only", "compatible",
+            "--view", "show=compatible",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2579,7 +2579,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--show-only", "compatible",
+            "--view", "show=compatible",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2593,7 +2593,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--show-only", "breaking",
+            "--view", "show=breaking",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]

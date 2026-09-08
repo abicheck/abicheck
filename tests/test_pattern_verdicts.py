@@ -737,7 +737,7 @@ def test_cli_explain_patterns(tmp_path) -> None:
     _save(old, op)
     _save(new, np)
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- modulation is
-    # unconditional now (evidence-gated), so --explain-patterns alone is
+    # unconditional now (evidence-gated), so --view patterns alone is
     # enough to exercise this path.
     res = CliRunner().invoke(
         main,
@@ -745,7 +745,8 @@ def test_cli_explain_patterns(tmp_path) -> None:
             "compare",
             str(op),
             str(np),
-            "--explain-patterns",
+            "--view",
+            "patterns",
             "--format",
             "json",
             "-o",
@@ -757,7 +758,7 @@ def test_cli_explain_patterns(tmp_path) -> None:
     assert any(
         m["rule_id"] == "handle-token-changed" for m in payload["pattern_modulations"]
     )
-    # --explain-patterns prints the ledger (with evidence edges).
+    # --view patterns prints the ledger (with evidence edges).
     combined = res.output + (res.stderr if res.stderr_bytes else "")
     assert "Pattern-aware modulations" in combined
     assert "handle-token-changed" in combined
@@ -772,7 +773,7 @@ def test_cli_no_modulations_message(tmp_path) -> None:
     snap = _handle_snapshot("struct Foo *")
     p = tmp_path / "s.abi.json"
     _save(snap, p)
-    res = CliRunner().invoke(main, ["compare", str(p), str(p), "--explain-patterns"])
+    res = CliRunner().invoke(main, ["compare", str(p), str(p), "--view", "patterns"])
     assert res.exit_code == 0, res.output
     combined = res.output + (res.stderr if res.stderr_bytes else "")
     assert "No pattern-aware modulations applied." in combined

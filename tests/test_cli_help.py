@@ -152,7 +152,7 @@ class TestCompareHelpAllDisclosure:
             "--ast-frontend",
             "--jobs",
             "--write",
-            "--report-mode",
+            "--probe-matrix",
             "--pdb-path",
         ):
             assert advanced_flag not in out, (
@@ -167,7 +167,7 @@ class TestCompareHelpAllDisclosure:
             "--lang",
             "--output",
             "--format",
-            "--show-only",
+            "--view",
             "--config",
             "--severity-preset",
             "--used-by",
@@ -231,7 +231,7 @@ class TestCompareHelpAllDisclosure:
             "--ast-frontend",
             "--jobs",
             "--write",
-            "--report-mode",
+            "--probe-matrix",
             "--pdb-path",
         ):
             assert advanced_flag in out

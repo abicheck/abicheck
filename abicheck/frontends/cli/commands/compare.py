@@ -93,7 +93,7 @@ if TYPE_CHECKING:
 
 from ....cli import main
 from ..runtime import (
-    _validate_show_only,
+    _validate_view,
 )
 from .dump import dump_cmd
 
@@ -543,10 +543,20 @@ def _embed_inline_source_side(
                 "comparison, only json/markdown/junit are available, and only "
                 "one --write is supported there.",
 )
-@click.option("--demangle/--no-demangle", default=None,
-              help="Demangle C++ symbol names in markdown/review/html output "
-                   "(default ON; use --no-demangle to turn off). json/sarif/junit "
-                   "always keep raw mangled names for downstream tooling to match on.")
+@click.option(
+    "--view", "view", multiple=True, callback=_validate_view, expose_value=True,
+    metavar="TOKEN",
+    help="Repeatable rendering selector (ADR-068 D4): never changes the "
+         "verdict, findings, or exit code. Replaces --report-mode/"
+         "--show-only/--demangle/--no-demangle/--explain-patterns. TOKEN: "
+         "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
+         "'show=<tokens>' (severity/element/action filter, same vocabulary "
+         "as the old --show-only, repeatable to OR groups together); "
+         "'demangle'/'no-demangle' (C++ demangling, default ON for "
+         "markdown/review/html); 'patterns' (explain pattern-verdict "
+         "modulation, which always runs where evidence exists). Example: "
+         "--view leaf --view demangle --view show=breaking,functions.",
+)
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options
@@ -598,26 +608,6 @@ def _embed_inline_source_side(
                    "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
                    "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
                    "verdict and report (G2: probe -> compare; ADR-040).")
-@click.option("--show-only", "show_only", default=None,
-              callback=_validate_show_only, expose_value=True, is_eager=False,
-              help="Comma-separated filter tokens to limit displayed changes. "
-                   "Severity: breaking, api-break, risk, compatible. "
-                   "Element: functions, variables, types, enums, elf. "
-                   "Action: added, removed, changed. "
-                   "AND across dimensions, OR within. Does not affect exit codes.")
-@click.option("--report-mode", "report_mode",
-              type=click.Choice(["full", "leaf", "impact", "root-cause"], case_sensitive=True),
-              default="full", show_default=True,
-              help="Report mode: 'full' lists all changes individually (default), "
-                   "'leaf' groups by root type changes with impact lists, "
-                   "'impact' behaves as 'full' plus an impact summary table "
-                   "listing root changes and the interfaces they affect, "
-                   "'root-cause' groups findings sharing a root cause "
-                   "(Change.caused_by_type) under one entry for "
-                   "--format json/markdown (the default rendered text output); "
-                   "--format sarif keeps its normal one-result-per-finding "
-                   "shape but adds properties.rootCauseId/rootCause to each "
-                   "result; --format junit still renders as 'full'.")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format: the
 # shared local-ELF debug-resolution family.
@@ -758,6 +748,14 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # forwarded options (explicit flags always win) and drop the CLI-only
     # ``profile`` key before delegating to the typed run_compare signature.
     apply_compare_profile(ctx, kwargs)
+
+    # ADR-068 D4/Phase 5: resolve --view (frontends.cli.options.view) into
+    # the same report_mode/show_only/demangle/explain_patterns dest names
+    # those retired flags used to populate, so every downstream consumer
+    # needs no change of its own. No profile injects those dests.
+    from ..options.view import parse_view_tokens
+
+    kwargs.update(parse_view_tokens(kwargs.pop("view", ())))
 
     # ADR-068 D2 / plan §6 Phase 2e: `--no-baseline` is an explicit
     # declaration, never inferred from arity -- branch before the two-sided

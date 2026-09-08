@@ -85,9 +85,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--output",
                 "--format",
-                "--demangle",
-                "--report-mode",
-                "--show-only",
+                "--view",
                 "--config",
                 "--verbose",
             ],
@@ -148,7 +146,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Build-config matrix & idioms",
             "options": [
                 "--probe-matrix",
-                "--explain-patterns",
                 "--surface-metrics",
             ],
         },
@@ -384,8 +381,10 @@ def configure_rich_help() -> None:
 # help screen changes.
 #
 # Dest names (``click.Option.name``), not flag strings: a few options share
-# aliases (``-o``/``--output``) or are on/off pairs (``--demangle``/
-# ``--no-demangle``) where only one dest exists either way.
+# aliases (``-o``/``--output``) or are repeatable/tuple-valued (``--view``,
+# ADR-068 D4/Phase 5's collapse of --report-mode/--show-only/--demangle/
+# --no-demangle/--explain-patterns into one dest) where only one dest exists
+# either way.
 COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
     {
         # Inputs
@@ -395,8 +394,7 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # Output & reporting
         "output",
         "fmt",
-        "show_only",
-        "demangle",
+        "view",
         # Policy & severity
         "config",
         "policy",

@@ -351,7 +351,8 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         # release-shaped comparison path. Rejected rather than partially
         # honored ahead of that pre-existing gap.
         raise click.UsageError(
-            "--show-only is not supported together with a stored-bundle-facts OLD_INPUT."
+            "--view show=... is not supported together with a "
+            "stored-bundle-facts OLD_INPUT (was --show-only)."
         )
     if kwargs.get("report_mode") not in (None, "full") or kwargs.get("show_filtered"):
         # Codex review: same root cause as --show-only above -- report_mode
@@ -360,8 +361,9 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         # dispatcher never calls. Same identical pre-existing gap on the
         # live release fan-out's own per-library to_json() calls.
         raise click.UsageError(
-            "--report-mode/--show-filtered are not supported together "
-            "with a stored-bundle-facts OLD_INPUT."
+            "--view <mode>/--show-filtered are not supported together "
+            "with a stored-bundle-facts OLD_INPUT (was --report-mode/"
+            "--show-filtered)."
         )
     if kwargs.get("jobs"):
         # Codex review: compare_release_against_bundle_facts() processes
@@ -529,8 +531,9 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
         # symbol at all -- only a rare bundle_* finding on a C++ symbol
         # would show one.
         raise click.UsageError(
-            "--demangle/--no-demangle is not supported together with "
-            "a stored-bundle-facts OLD_INPUT."
+            "--view demangle/--view no-demangle is not supported together "
+            "with a stored-bundle-facts OLD_INPUT (was --demangle/"
+            "--no-demangle)."
         )
     if new_is_stored:
         _reject_new_side_extraction_options_for_stored_pair(kwargs)

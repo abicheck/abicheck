@@ -1129,8 +1129,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--show-only",
-            "breaking",
+            "--view",
+            "show=breaking",
             "--format",
             "json",
         )

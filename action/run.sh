@@ -352,9 +352,9 @@ _extra_args_is_value_option() {
     --lang | --ld-library-path | --manifest | --max-findings | --max-json-object-nodes | \
     --new-variant | --old-variant | --output | --output-dir | --pack | \
     --pdb-path | --policy | --post-manifest | --probe-matrix | --profile | \
-    --public-header-dir | --report-mode | --required-symbol | --required-symbols | --risk-rules | \
-    --search-path | --severity-preset | --show-only | --since | --sources | \
-    --suppress | --sysroot | --use-cases | --used-by | --version | \
+    --public-header-dir | --required-symbol | --required-symbols | --risk-rules | \
+    --search-path | --severity-preset | --since | --sources | \
+    --suppress | --sysroot | --use-cases | --used-by | --version | --view | \
     --write | -H | -I | -j | -o)
       return 0
       ;;
@@ -3688,11 +3688,18 @@ _can_reuse_primary_json() {
   # whole scan/compare a second time just to get JSON that had already been
   # produced, for scan doubling potentially expensive --depth build/source
   # work and describing a separate, budget-metered run.
+  # ADR-068 D4/Phase 5: --show-only is gone -- its equivalent is one of
+  # --view's repeatable tokens (`--view show=...`), so only *that* token
+  # (never `--view leaf`/`--view demangle`/etc., which change no content)
+  # disqualifies reuse. Indexed, not a plain `for arg in` loop, since the
+  # token-form `--view show=...` needs the *next* array element to see the
+  # value; the inline `--view=show=...` form carries it in the same element.
   [[ -n "$(_json_report_src)" ]] || return 1
-  local arg
-  for arg in ${CMD[@]+"${CMD[@]}"}; do
-    case "$arg" in
-      --show-only | --show-only=*) return 1 ;;
+  local i
+  for ((i = 0; i < ${#CMD[@]}; i++)); do
+    case "${CMD[$i]}" in
+      --view) [[ "${CMD[$((i + 1))]:-}" == show=* ]] && return 1 ;;
+      --view=show=*) return 1 ;;
     esac
   done
   return 0
@@ -3706,14 +3713,23 @@ _build_json_cmd() {
       --format | -o | --output | --output-file)
         ((i++))  # skip the flag's value too
         ;;
-      --show-only)
-        # Display filter ("limit displayed changes", does NOT affect exit codes).
-        # Keeping it would hide gated breaks from the comment while the check
-        # still fails red — drop it (and its value) so the comment sees the
-        # full change set the gate acted on.
-        ((i++))  # skip the flag's value too
+      --view)
+        # ADR-068 D4/Phase 5: --show-only's replacement token. A
+        # `--view show=...` occurrence is a display filter ("limit
+        # displayed changes", does NOT affect exit codes) -- keeping it
+        # would hide gated breaks from the comment while the check still
+        # fails red, so drop it (and its value) so the comment sees the
+        # full change set the gate acted on. Every other --view token
+        # (leaf/impact/root-cause/demangle/no-demangle/patterns) changes
+        # no content, only how it's grouped/spelled/explained, so it is
+        # kept -- the loop below falls through to the default case for it.
+        if [[ "${CMD[$((i + 1))]:-}" == show=* ]]; then
+          ((i++))  # drop the token and its value
+        else
+          PR_CMD_JSON+=("${CMD[$i]}")
+        fi
         ;;
-      --show-only=*)
+      --view=show=*)
         : # same display filter, inline value form — drop it for the re-run.
         ;;
       *)

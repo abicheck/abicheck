@@ -663,7 +663,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
     if d["show_only_note"] is not None:
         note = d["show_only_note"]
         lines.append(
-            f"> Filtered by: `--show-only {note['show_only']}` "
+            f"> Filtered by: `--view show={note['show_only']}` "
             f"({note['shown']} of {note['total']} changes shown)"
         )
         lines.append("")

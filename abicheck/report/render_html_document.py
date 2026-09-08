@@ -295,7 +295,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
             section_htmls.append(
                 "<div class='section'><p class='empty'>"
                 f"No changes match the current filter "
-                f"(<code>--show-only {h(empty_state['show_only'])}</code>). "
+                f"(<code>--view show={h(empty_state['show_only'])}</code>). "
                 f"{empty_state['all_changes_count']} change(s) exist but are "
                 f"excluded by the filter."
                 "</p></div>"
@@ -330,7 +330,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     if show_only:
         filter_note = (
             f"<div class='section' style='background:#e3f2fd; padding:10px; border-left:4px solid #1976d2;'>"
-            f"<strong>🔍 Filtered by:</strong> <code>--show-only {h(show_only)}</code> "
+            f"<strong>🔍 Filtered by:</strong> <code>--view show={h(show_only)}</code> "
             f"({d['display_changes_count']} of {d['all_changes_count']} changes shown)"
             f"</div>"
         )

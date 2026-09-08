@@ -420,7 +420,7 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 "_Z4keepv",
                 "--contract",
                 "all",
-                "--report-mode",
+                "--view",
                 "root-cause",
                 "--format",
                 "json",

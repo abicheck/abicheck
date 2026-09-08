@@ -157,7 +157,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--demangle",
+            "--view",
+            "demangle",
             "--format",
             "markdown",
         )
@@ -198,7 +199,7 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--report-mode",
+            "--view",
             "leaf",
             "--format",
             "json",
