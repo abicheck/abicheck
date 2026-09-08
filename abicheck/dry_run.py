@@ -54,6 +54,15 @@ SECTION_ORDER: tuple[str, ...] = (
     "Headers and compile context",
     "Build/source inputs",
     "Build query (trust)",
+    # ADR-035 D10 evidence-collection cost projection, folded straight into
+    # `scan --dry-run`'s "Resolved depth and source scope" section
+    # (`frontends/cli/scan_dry_run.py`); `compare --dry-run`'s own combined
+    # old+new preview (one-comparison-product.md #35, Phase 2f;
+    # `cli_compare_helpers._render_compare_dry_run`) gets a titled section
+    # of its own instead, since a compare has two operands' worth of cost
+    # to show and folding both into the depth section read as one side's
+    # numbers.
+    "Cost preview",
     "Tools and frontends",
     "Configuration and value origins",
     # ADR-063 Track T4 ("Dump request contract"): `dump --dry-run`'s own
