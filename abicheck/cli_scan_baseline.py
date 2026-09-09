@@ -1231,9 +1231,15 @@ def _run_baseline_compare(
     # is genuinely revising an already-terminal ledger entry, which is
     # exactly what `override_suppressed_change` is for (see its own
     # docstring).
+    #
+    # `rule=RuleProvenance(...)`, not `rule=None` (Codex review, fourth
+    # round): `--crosscheck KEY=off` has no `Suppression` object to project,
+    # but `rule=None` also erased the provenance `DispositionLedger.rules()`
+    # needs, even though `Change.suppression_rule` carried the string.
+    # `rule_id` matches that string exactly.
     if enabled_checks is not None:
         from .buildsource.crosscheck import ALL_CHECKS
-        from .workflows.disposition import override_suppressed_change
+        from .workflows.disposition import RuleProvenance, override_suppressed_change
 
         _disabled = frozenset(ALL_CHECKS) - enabled_checks
         if _disabled:
@@ -1247,11 +1253,15 @@ def _run_baseline_compare(
                 _dropped_ids = {id(c) for c in _dropped}
                 diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
                 for c in _dropped:
-                    c.suppression_rule = f"crosscheck:{c.kind.value}=off"
+                    _rule_id = f"crosscheck:{c.kind.value}=off"
+                    c.suppression_rule = _rule_id
                     override_suppressed_change(
                         getattr(diff, "disposition_ledger", None),
                         c,
-                        rule=None,
+                        rule=RuleProvenance(
+                            rule_id=_rule_id,
+                            reason=f"disabled via --crosscheck {c.kind.value}=off",
+                        ),
                         application_point="scan_crosscheck_off",
                     )
                 diff.suppressed_changes = [*diff.suppressed_changes, *_dropped]
@@ -1264,10 +1274,16 @@ def _run_baseline_compare(
     # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 
-    def _hashable_path(p: Path) -> Path:  # skip linker-script resolution for a text snapshot/manifest, which can coincidentally match the INPUT()/GROUP() probe (Codex review)
+    def _hashable_path(
+        p: Path,
+    ) -> Path:  # skip linker-script resolution for a text snapshot/manifest, which can coincidentally match the INPUT()/GROUP() probe (Codex review)
         from .service import sniff_text_format
 
-        return p if sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+        return (
+            p
+            if sniff_text_format(p) in ("json", "perl", "symvers")
+            else resolve_linker_script_chain(p)
+        )
 
     try:
         old_meta = collect_metadata(_hashable_path(baseline))

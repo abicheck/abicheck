@@ -18,6 +18,7 @@ from abicheck.policy.disposition_close import (
     override_suppression,
 )
 from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
+from abicheck.policy.rule_provenance import RuleProvenance
 
 
 def _change(symbol: str = "_Zfoo") -> Change:
@@ -96,3 +97,90 @@ class TestOverrideSuppressionRewritesAnAlreadyRecordedChange:
         )
 
         assert ledger.record_for(c).disposition is Disposition.SUPPRESSED
+
+
+class TestOverrideSuppressionAcceptsSyntheticRuleProvenance:
+    """Codex review, PR #1172, fourth round: a caller with no real
+    ``Suppression`` object (``--crosscheck KEY=off`` is a scan-only policy,
+    not a suppression-file rule) must still be able to record a rule/reason
+    a structured ledger consumer (``DispositionLedger.rules()``/
+    ``rule_for()``) can read back -- passing bare ``rule=None`` recorded a
+    correct terminal disposition with no provenance at all, even though the
+    caller had a perfectly good rule id and reason to give it.
+    """
+
+    def test_a_rule_provenance_object_is_stored_as_is(self) -> None:
+        ledger = DispositionLedger()
+        c = _change()
+        ledger.record(c, Disposition.GATING, application_point="p", from_gate=True)
+
+        provenance = RuleProvenance(
+            rule_id="crosscheck:exported_not_public=off",
+            reason="disabled via --crosscheck exported_not_public=off",
+        )
+        override_suppression(
+            ledger, c, rule=provenance, application_point="scan_crosscheck_off"
+        )
+
+        record = ledger.record_for(c)
+        assert record is not None
+        assert record.disposition is Disposition.SUPPRESSED
+        assert record.rule is provenance
+        assert record.rule.rule_id == "crosscheck:exported_not_public=off"
+        assert record.rule.reason == "disabled via --crosscheck exported_not_public=off"
+
+    def test_rules_reports_the_synthetic_provenance(self) -> None:
+        # The actual regression: DispositionLedger.rules() is what a
+        # structured audit consumer queries -- rule=None made this omit the
+        # crosscheck:KEY=off rule entirely even though the rendered
+        # suppressed row carried the string via Change.suppression_rule.
+        ledger = DispositionLedger()
+        c = _change()
+        ledger.record(c, Disposition.GATING, application_point="p", from_gate=True)
+
+        override_suppression(
+            ledger,
+            c,
+            rule=RuleProvenance(rule_id="crosscheck:exported_not_public=off"),
+            application_point="scan_crosscheck_off",
+        )
+
+        rule_ids = {r.rule_id for r, _count in ledger.rules()}
+        assert "crosscheck:exported_not_public=off" in rule_ids
+
+    def test_source_file_override_replaces_it_on_a_provenance_object(self) -> None:
+        ledger = DispositionLedger()
+        c = _change()
+        ledger.record(c, Disposition.GATING, application_point="p", from_gate=True)
+
+        override_suppression(
+            ledger,
+            c,
+            rule=RuleProvenance(rule_id="r"),
+            application_point="scan_crosscheck_off",
+            source_file="policy.yml",
+        )
+
+        assert ledger.record_for(c).rule.source_file == "policy.yml"
+
+    def test_module_level_helper_skips_source_file_lookup_for_a_provenance_object(
+        self,
+    ) -> None:
+        # override_suppressed_change's `suppression` kwarg is meaningless for
+        # an already-built RuleProvenance -- must not raise trying to derive
+        # a source file from it via the Suppression-shaped helper.
+        ledger = DispositionLedger()
+        c = _change()
+        ledger.record(c, Disposition.GATING, application_point="p", from_gate=True)
+
+        override_suppressed_change(
+            ledger,
+            c,
+            rule=RuleProvenance(rule_id="crosscheck:exported_not_public=off"),
+            application_point="scan_crosscheck_off",
+            suppression=object(),
+        )
+
+        record = ledger.record_for(c)
+        assert record.rule.rule_id == "crosscheck:exported_not_public=off"
+        assert record.rule.source_file is None

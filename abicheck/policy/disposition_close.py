@@ -49,7 +49,7 @@ from .disposition_ledger import (
     _verdict_class_of,
     record_suppressed_change,
 )
-from .rule_provenance import rule_provenance
+from .rule_provenance import RuleProvenance, rule_provenance
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import Change, DiffResult
@@ -695,7 +695,7 @@ def override_suppression(
     ledger: DispositionLedger,
     change: Change,
     *,
-    rule: Suppression | None,
+    rule: Suppression | RuleProvenance | None,
     application_point: str,
     source_file: str | None = None,
 ) -> None:
@@ -716,6 +716,17 @@ def override_suppression(
     discard the correction, leaving the ledger disagreeing with the
     finding's real, reported disposition (the bug this function closes).
 
+    *rule* is normally a real :class:`~abicheck.suppression.Suppression`,
+    projected through :func:`~abicheck.policy.rule_provenance.rule_provenance`
+    like every other disposition. A caller with no such rule object -- a
+    scan-only policy like ``--crosscheck KEY=off``, which is not a
+    suppression-file entry at all -- passes an already-built
+    :class:`~abicheck.policy.rule_provenance.RuleProvenance` directly instead
+    (Codex review, fourth round: passing bare ``rule=None`` here recorded a
+    correct terminal disposition with no rule/reason a structured ledger
+    consumer could read back, even though ``Change.suppression_rule`` carried
+    the human-readable string).
+
     A no-op if *change* was never recorded -- nothing to override. Leaves
     every field ``record_suppression`` would not have set
     (``reclassified_by``, ``reason_code``, ``scope_decided``,
@@ -730,12 +741,19 @@ def override_suppression(
     index = ledger.index_for(change)
     if index is None:
         return
+    provenance: RuleProvenance | None
+    if isinstance(rule, RuleProvenance):
+        provenance = (
+            rule if source_file is None else replace(rule, source_file=source_file)
+        )
+    else:
+        provenance = rule_provenance(rule, source_file=source_file)
     record = ledger._records[index]  # noqa: SLF001
     ledger._records[index] = replace(  # noqa: SLF001
         record,
         disposition=Disposition.SUPPRESSED,
         application_point=application_point,
-        rule=rule_provenance(rule, source_file=source_file),
+        rule=provenance,
         verdict_class=_verdict_class_of(change),
         gate_excluded=True,
     )
@@ -745,7 +763,7 @@ def override_suppressed_change(
     ledger: DispositionLedger | None,
     change: Change,
     *,
-    rule: Suppression | None,
+    rule: Suppression | RuleProvenance | None,
     application_point: str,
     suppression: object | None = None,
 ) -> None:
@@ -755,7 +773,8 @@ def override_suppressed_change(
     above -- see that function's own docstring for why this is a distinct
     primitive rather than a second call to ``record_suppressed_change``
     (first-write-wins would silently no-op it). Same ``None`` ledger
-    handling and ``source_file`` resolution.
+    handling; *source_file* resolution is skipped for an already-built
+    ``RuleProvenance`` (it carries its own, or deliberately none).
     """
     if ledger is None:
         return
@@ -764,5 +783,9 @@ def override_suppressed_change(
         change,
         rule=rule,
         application_point=application_point,
-        source_file=_source_file_for(suppression, rule),
+        source_file=(
+            None
+            if isinstance(rule, RuleProvenance)
+            else _source_file_for(suppression, rule)
+        ),
     )

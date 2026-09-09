@@ -40,9 +40,14 @@ wins) recorder is a no-op there -- ``override_suppressed_change`` is the
 dedicated, explicitly-a-revision primitive that call site actually needs;
 see ``disposition_close.override_suppression``'s own docstring (that module,
 not ``disposition_ledger.py``: the 800-line production-file seam).
+``RuleProvenance`` joined for the same call site's fourth reason: a
+``--crosscheck KEY=off`` policy is not a suppression-file rule, so it builds
+its own synthetic provenance directly rather than duck-typing a fake
+``Suppression`` (Codex review, fourth round).
 
 Re-export only, deliberately: ``policy/disposition_ledger.py``/
-``disposition_close.py`` remain the modules to read and to change.
+``disposition_close.py``/``policy/rule_provenance.py`` remain the modules to
+read and to change.
 """
 
 from __future__ import annotations
@@ -55,8 +60,10 @@ from ..policy.disposition_close import (
 from ..policy.disposition_ledger import (
     record_suppressed_change as record_suppressed_change,
 )
+from ..policy.rule_provenance import RuleProvenance as RuleProvenance
 
 __all__ = [
+    "RuleProvenance",
     "close_consumer_scope",
     "ledger_for",
     "override_suppressed_change",
