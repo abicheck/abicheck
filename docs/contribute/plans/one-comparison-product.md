@@ -623,8 +623,12 @@ section's *actual* state, not the target it originally described:
   has no `compare` equivalent), `--depth build`/`--depth source` (`scan`'s
   own hard evidence-contract floor, exit 7, has no `compare` equivalent),
   a shared `header`/`include` root combined with a side-specific one, a
-  `.json`-extension baseline, `--output-file`, and any `--write`/scan-only
-  `extra-args` flag. Audit-only (no baseline) is unchanged and still stays
+  `.json`-extension (compressed or content-detected JSON snapshot included)
+  baseline, `--output-file`, an effective non-JSON/text `--format` (from the
+  dedicated Action input or an `extra-args` override), a `-o`/`--output`
+  path via `extra-args`, and any other `--write`/scan-only `extra-args`
+  flag (`--abi3`, the compile-context-option family included). Audit-only
+  (no baseline) is unchanged and still stays
   on the legacy CLI entirely (a separate, larger gap — see the predicate's
   own comment in `run.sh`). The ~40-branch collapse this bullet originally
   promised does **not** happen until every one of those rows closes too;

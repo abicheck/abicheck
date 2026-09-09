@@ -394,8 +394,13 @@ condition (the "unconditionally true" catch-all `9f2166e5c` added) is closed
 by this fix and removed. Its other, narrower conditions — `--budget`,
 `--risk-rules`, `--crosscheck`, `--build-target` (no `compare` flag
 equivalent), risk-driven `auto` depth selection (no `compare` equivalent),
-`--header`/`--include` vs. baseline-side duplicates, a `.json`-extension
-baseline file, `--output-file`, a `--write`/scan-only `extra-args` flag —
+`--header`/`--include` vs. baseline-side duplicates, a `.json`-extension or
+compressed (`.gz`/`.zst`)/content-detected JSON snapshot baseline file,
+`--output-file`, an effective (dedicated- or `extra-args`-supplied)
+non-JSON/text `--format`, a `-o`/`--output` output path via `extra-args`,
+and a `--write`/scan-only `extra-args` flag (`--abi3`,
+`--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the
+compile-context-option family included) —
 are **independent, still-open capability gaps**, not instances of this
 divergence; `_SCAN_NEEDS_LEGACY_CLI` keeps routing those cases to the legacy
 CLI until each grows its own `compare` equivalent (tracked in

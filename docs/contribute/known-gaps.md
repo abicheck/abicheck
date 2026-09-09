@@ -6658,10 +6658,21 @@ severity divergence the amendment closed:
   `headers`, never deeper. Routing that case onto `compare` would silently
   cap a high-risk change that should have reached source replay.
 - `--header`/`--include` combined with the dedicated baseline-side inputs,
-  a `.json`-extension `--against` baseline, `--output-file`, and any
-  `--write`/scan-only flag reaching through the general `extra-args`
+  a `.json`-extension (compressed `.gz`/`.zst` included) or
+  content-detected JSON snapshot `--against` baseline, `--output-file`, and
+  any `--write`/scan-only flag reaching through the general `extra-args`
   passthrough — each a real shape `compare`'s current flag surface doesn't
   yet cover identically.
+- An effective non-JSON/text `--format` (from the dedicated Action input or
+  from an `extra-args` override) and a `-o`/`--output` output path supplied
+  via `extra-args` — `scan` and `compare` disagree on accepted format
+  values and on the shape of the file each writes, so both stay on the
+  legacy CLI. A `--crosscheck`/`--budget`/`--risk-rules`/`--build-target`
+  passed the same way, and the compile-context-option family (`--abi3`,
+  `--frontend-context`, `--allow-ast-frontend-fallback`, `--lang`,
+  `--ast-frontend`, `--compiler*`, `--sysroot`, `--nostdinc`) reaching
+  through `extra-args`, are the same underlying gaps as the two rows
+  above, just via the passthrough rather than a dedicated Action input.
 
 Not fixed here: closing each of these needs a new `compare` CLI flag (or an
 equivalent `.abicheck.yml` key plus Action wiring), which is Click-surface
