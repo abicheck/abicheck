@@ -833,13 +833,21 @@ def _check_odr_type_variant(
     # for the message/report, not because uniqueness depends on it.
     groups: dict[tuple[str, str], set[str]] = {}
     for conflict in surface.odr_conflicts:
-        name = str(conflict.get("qualified_name", "")) or "<anonymous>"
-        header = str(conflict.get("header", ""))
+        # `.get(field, default)` alone would let an explicit `None` value (a
+        # hand-edited or forward-versioned persisted row) through as-is,
+        # which `str()`-ing anywhere downstream would then turn into the
+        # literal text "None" -- checked with `isinstance(..., str)` before
+        # falling back, not a blind `str(...)` cast (Codex review, fifth
+        # follow-up, same class as the identity-collision fix below).
+        raw_name = conflict.get("qualified_name")
+        name = raw_name if isinstance(raw_name, str) and raw_name else "<anonymous>"
+        raw_header = conflict.get("header")
+        header = raw_header if isinstance(raw_header, str) else ""
         hashes = groups.setdefault((name, header), set())
         for hash_field in ("old_type_hash", "new_type_hash"):
-            value = str(conflict.get(hash_field, ""))
-            if value:
-                hashes.add(value)
+            hash_value = conflict.get(hash_field)
+            if isinstance(hash_value, str) and hash_value:
+                hashes.add(hash_value)
 
     findings: list[Change] = []
     for (name, header), hashes in groups.items():
@@ -1375,20 +1383,41 @@ def _check_identity_collision(
     # itself. `min(qnames)` is a deterministic function of the group's
     # *set* of names, so it is stable regardless of visitation order (Codex
     # review, third follow-up).
+    #
+    # Both `qualified_name` (the newly-arriving entity) AND
+    # `qualified_name_a` (whichever entity was already the stored "current"
+    # one, i.e. `usr_a`'s owner) are collected -- a real two-participant
+    # collision (the common case) produces exactly *one* record, whose
+    # `qualified_name` alone only ever names the entity visited second.
+    # Reading `qualified_name` in isolation therefore reproduces the exact
+    # same order-dependence this fix exists to close, just requiring only
+    # two participants (not three) to trigger, since the entity visited
+    # first is never named at all otherwise (Codex review, fourth
+    # follow-up: the third follow-up's own regression test used two
+    # synthetic records to exercise the three-participant chain, which
+    # masked that the realistic *two*-participant, one-record case was
+    # still broken).
     groups: dict[str, tuple[set[str], set[str]]] = {}
     for collision in surface.identity_collisions:
         identity = str(collision.get("identity", "")) or "<unknown>"
-        qname = str(collision.get("qualified_name", "")) or identity
         qnames, usrs = groups.setdefault(identity, (set(), set()))
-        qnames.add(qname)
+        # `str(collision.get(field, ""))` would stringify an explicit
+        # `None` value (a hand-edited or forward-versioned persisted row)
+        # into the literal name `"None"`, which could then win `min()` --
+        # accept only an actual non-empty string (Codex review, fifth
+        # follow-up).
+        for qname_field in ("qualified_name", "qualified_name_a"):
+            value = collision.get(qname_field)
+            if isinstance(value, str) and value:
+                qnames.add(value)
         for usr_field in ("usr_a", "usr_b"):
-            value = str(collision.get(usr_field, ""))
-            if value:
-                usrs.add(value)
+            usr_value = collision.get(usr_field)
+            if isinstance(usr_value, str) and usr_value:
+                usrs.add(usr_value)
 
     findings: list[Change] = []
     for identity, (qnames, usrs) in groups.items():
-        qname = min(qnames)
+        qname = min(qnames) if qnames else identity
         sorted_usrs = sorted(usrs)
         usr_list = ", ".join(repr(u) for u in sorted_usrs)
         findings.append(

@@ -344,6 +344,7 @@ def test_linker_detects_identity_collision_via_usr() -> None:
         {
             "identity": a.identity(),
             "qualified_name": "Widget",
+            "qualified_name_a": "Widget",
             "usr_a": "c:@N@a@F@Widget#I#",
             "usr_b": "c:@N@b@F@Widget#I#",
         }
@@ -435,6 +436,7 @@ def test_linker_detects_identity_collision_even_when_dedup_key_also_matches() ->
         {
             "identity": a.identity(),
             "qualified_name": "Widget",
+            "qualified_name_a": "Widget",
             "usr_a": "c:@N@a@F@Widget#I#",
             "usr_b": "c:@N@b@F@Widget#I#",
         }

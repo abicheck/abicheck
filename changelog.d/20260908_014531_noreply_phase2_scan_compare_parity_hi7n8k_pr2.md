@@ -55,7 +55,31 @@
   second round. Fixed by deriving the group's canonical `symbol` as `min()`
   over the group's qualified-name set (a deterministic function of the set,
   not of arrival order). `odr_type_variant` has no equivalent seam since its
-  group key already includes `qualified_name` itself.
+  group key already includes `qualified_name` itself. Fourth follow-up
+  round: the third round's fix was itself incomplete for the *realistic*
+  two-participant collision (the common case) — `source_link._route_declaration`
+  creates exactly one record for it, and that record's own `qualified_name`
+  names only the entity visited second, so the entity owning `usr_a` never
+  contributed a name to the group's qname set at all. Fixed at the producer
+  (`_route_declaration`'s new `qualified_name_a` field, carrying
+  `identity_to_qname`'s pre-overwrite value for the key) plus the consumer's
+  qname-collection loop reading it. Fifth follow-up round, two issues: (a)
+  `identity_to_qname` is updated unconditionally per entity, including a
+  USR-less one — a USR-less entity sharing the identity key, visited
+  between two USR-bearing ones, could overwrite it with an unrelated third
+  name, desyncing `qualified_name_a` from `usr_a`'s real owner. Fixed with
+  a dedicated `identity_to_usr_qname` map updated only alongside
+  `identity_to_usr`. (b) both the ODR and identity-collision qname/hash/USR
+  collection loops blindly `str()`-ed a `.get(field, default)` result,
+  which would stringify an explicit `None` (a hand-edited/forward-versioned
+  persisted row) into the literal text `"None"` and let it win `min()`;
+  fixed by requiring `isinstance(value, str)` before accepting a value. A
+  related, narrower gap — an old-format persisted snapshot from before
+  `qualified_name_a` existed, compared against a freshly-linked new one —
+  is documented as an accepted, transitional `KnownGap` in
+  `tests/regressions/manifest.py` rather than engineered around: it only
+  affects a comparison spanning the exact schema-introducing commit and
+  self-resolves once a snapshot corpus is regenerated past it.
 - **`odr_type_variant` findings on a public type could be wrongly demoted
   as "not-exported."** `abicheck/surface.py`'s public-surface scoping
   classifies a finding as symbol-level or type-level before deciding

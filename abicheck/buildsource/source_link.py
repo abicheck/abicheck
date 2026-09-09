@@ -1513,6 +1513,14 @@ class _LinkState:
     #: itself. Only populated when the linked producer actually stamped a USR
     #: (the clang plugin; castxml/plain-clang extractors never do).
     identity_to_usr: dict[str, str] = field(default_factory=dict)
+    #: identity -> the qualified_name of whichever entity currently owns
+    #: `identity_to_usr[identity]`, updated in lockstep with it (never by
+    #: `identity_to_qname`'s own unconditional per-entity update below,
+    #: which can be overwritten by a *different*, USR-less entity sharing
+    #: the same identity key visited in between -- Codex review: a
+    #: USR-less entity visited between two USR-bearing ones would otherwise
+    #: desync which name `qualified_name_a` reports as owning `usr_a`).
+    identity_to_usr_qname: dict[str, str] = field(default_factory=dict)
     identity_collisions: list[dict[str, Any]] = field(default_factory=list)
     # (qualified_name, declaring header) -> type_hash, for ODR detection. The
     # declaring header is part of the key because castxml reports a bare type
@@ -1638,12 +1646,40 @@ def _route_declaration(
             {
                 "identity": key,
                 "qualified_name": entity.qualified_name,
+                # `qualified_name` above is *this* (newly-arriving) entity's
+                # own name; the entity that owns `usr_a` (whichever was
+                # already the stored "current" USR for this key) never gets
+                # a record of its own -- for the common two-participant
+                # collision there is exactly one record total, and its
+                # `qualified_name` names only the entity visited *second*.
+                # `identity_to_usr_qname` holds the qname of whichever entity
+                # currently owns `prev_usr` -- a consumer that needs both
+                # participants' names (crosscheck._check_identity_collision,
+                # to derive an order-independent canonical symbol) would
+                # otherwise only ever see one of the two, and always the
+                # same one a naive "whichever record is first" read would
+                # already get wrong (Codex review, fourth follow-up: the
+                # fresh evidence was that a *real* two-participant collision
+                # emits only one record, not the two synthetic records the
+                # prior fix's own test constructed). Deliberately NOT
+                # `identity_to_qname` (the general-purpose, unconditionally-
+                # updated map): a USR-less entity sharing this identity key,
+                # visited between two USR-bearing ones, would overwrite
+                # `identity_to_qname` with its own name while leaving
+                # `identity_to_usr` untouched (its own `if usr:` guard below
+                # skips a USR-less entity) -- reading `identity_to_qname`
+                # here would then stamp an unrelated third entity's name as
+                # `usr_a`'s owner (Codex review, fifth follow-up). A
+                # dedicated map updated only in the same `if usr:` branch
+                # that updates `identity_to_usr` keeps the two in lockstep.
+                "qualified_name_a": state.identity_to_usr_qname.get(key, ""),
                 "usr_a": prev_usr,
                 "usr_b": usr,
             }
         )
     if usr:
         state.identity_to_usr[key] = usr
+        state.identity_to_usr_qname[key] = entity.qualified_name or key
     state.identity_to_qname[key] = entity.qualified_name or key
     if primary:
         state.decl_to_symbol[key] = primary

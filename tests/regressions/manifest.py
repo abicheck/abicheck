@@ -411,7 +411,43 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # USR pair was before round 2 -- fixed by deriving the group's
             # canonical `symbol` as `min()` over the *set* of qualified
             # names seen for that group, a deterministic function of the
-            # set rather than of arrival order.
+            # set rather than of arrival order. Round 5 found round 4's own
+            # fix was still incomplete for the *realistic* two-participant
+            # collision (the common case): `_route_declaration` creates
+            # exactly one record for it, and that record's own
+            # `qualified_name` names only the entity visited second -- the
+            # entity owning `usr_a` never contributed a name to the group's
+            # qname set at all, so `min()` over an effectively one-element
+            # set was still positionally determined. Fixed at the producer
+            # (`source_link._route_declaration`, new `qualified_name_a`
+            # field carrying `identity_to_qname`'s pre-overwrite value) plus
+            # reading it in `_check_identity_collision`'s qname-collection
+            # loop. Round 6 found two more issues in that same area: (a)
+            # `identity_to_qname` is updated unconditionally per entity,
+            # including a USR-less one -- a USR-less entity sharing the
+            # identity key, visited between two USR-bearing ones, could
+            # overwrite it with an unrelated third name, desyncing
+            # `qualified_name_a` from `usr_a`'s real owner; fixed with a
+            # dedicated `identity_to_usr_qname` map updated only alongside
+            # `identity_to_usr`. (b) both the ODR and identity-collision
+            # qname/hash/USR collection loops blindly `str()`-ed a
+            # `.get(field, default)` result, which would stringify an
+            # explicit `None` (a hand-edited/forward-versioned persisted
+            # row) into the literal text `"None"` and let it win `min()`;
+            # fixed by requiring `isinstance(value, str)` before accepting
+            # a value. A related, narrower concern raised in the same round
+            # -- an *old-format* persisted snapshot from before
+            # `qualified_name_a` existed, compared against a freshly-linked
+            # new one, could see the two sides' qname sets have different
+            # cardinality and disagree on `min()` -- was deliberately left
+            # as a documented, transitional gap rather than engineered
+            # around: it only affects a comparison spanning the exact
+            # schema-introducing commit, is not reproducible once the
+            # corpus of persisted snapshots is regenerated past it, and
+            # `identity_collisions` is an unversioned bag of dicts with no
+            # existing per-row migration precedent to extend (see the
+            # `KnownGap` this class carries for the accepted-limitation
+            # discipline this follows).
             "tests/test_cross_source_evolution.py",
             "tests/test_cross_source_evolution_build_source.py",
         ),
@@ -473,6 +509,31 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "PR's registry/generator-registration work."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
+            KnownGap(
+                description=(
+                    "identity_collision_detected's qualified_name_a field "
+                    "(added to disambiguate a collision's canonical symbol "
+                    "order-independently — see this class's own PR #1155 "
+                    "round-6 comment above) is absent from any "
+                    "identity_collisions row persisted before that field "
+                    "existed. Comparing such a legacy OLD-side snapshot "
+                    "against a freshly-linked NEW side whose participants "
+                    "carry different qualified names can see the two "
+                    "sides' qname sets disagree in cardinality and pick a "
+                    "different min(), reporting a spurious "
+                    "RESOLVED+INTRODUCED pair for an unchanged collision "
+                    "(Codex review, PR #1155). Not attempted: per-row "
+                    "schema migration for identity_collisions, an "
+                    "unversioned bag of dicts with no existing per-row "
+                    "migration precedent to extend, or a report SCHEMA_"
+                    "VERSION bump — either is a real, separate design task "
+                    "for a residual that only manifests when comparing "
+                    "across the exact commit this field was introduced in, "
+                    "and self-resolves once a snapshot corpus is "
+                    "regenerated past it."
+                ),
+                reference="PR #1155",
             ),
         ),
     ),

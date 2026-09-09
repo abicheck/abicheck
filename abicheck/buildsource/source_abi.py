@@ -522,7 +522,15 @@ class SourceAbiSurface:
     #: identity, so two different USRs sharing one ``identity()`` can only
     #: mean two different declarations collided; never fires from a mere
     #: "one side has no USR", which proves nothing either way. Each entry:
-    #: ``{"identity": ..., "qualified_name": ..., "usr_a": ..., "usr_b": ...}``.
+    #: ``{"identity": ..., "qualified_name": ..., "qualified_name_a": ...,
+    #: "usr_a": ..., "usr_b": ...}`` -- ``qualified_name``/``usr_b`` name the
+    #: newly-arriving entity that triggered this collision record;
+    #: ``qualified_name_a``/``usr_a`` name whichever entity was already the
+    #: stored "current" one for this identity key. Both participants'
+    #: qualified names are needed to derive an order-independent canonical
+    #: symbol downstream (``crosscheck._check_identity_collision``): a real
+    #: two-participant collision produces exactly one entry, so
+    #: ``qualified_name`` alone only ever names the entity visited second.
     identity_collisions: list[dict[str, Any]] = field(default_factory=list)
     unmatched: dict[str, list[str]] = field(
         default_factory=lambda: {"symbols_without_decl": [], "decls_without_symbol": []}

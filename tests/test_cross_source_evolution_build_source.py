@@ -594,6 +594,163 @@ def test_identity_collision_detected_symbol_order_independent_across_sides() -> 
     assert hits[0].symbol == "f"  # min("f", "g"), deterministic either way
 
 
+def test_identity_collision_detected_real_two_participant_collision_symbol_stable() -> (
+    None
+):
+    """Codex review, fourth follow-up: the prior fix's own regression test
+    used two *synthetic* transition records to exercise a three-participant
+    chain, which masked that the realistic **two**-participant collision
+    (the common case) is a *single* record -- ``source_link._route_declaration``
+    never creates a record for the first entity it sees at a given identity
+    key (there is no ``prev_usr`` yet to compare against), only for the
+    second, differently-USR'd arrival. That single record's own
+    ``qualified_name`` therefore always names the entity visited *second*;
+    without ``qualified_name_a`` (this fix's own addition, carrying whichever
+    name ``identity_to_qname`` held for the first entity at collision time),
+    the entity visited first would never contribute a name to the group's
+    qname set at all -- reproducing the exact order-dependence the third
+    follow-up's fix was supposed to close, just with two participants
+    instead of three. Fixture shape matches exactly what
+    ``_route_declaration`` actually emits for a two-participant collision:
+    one record, ``qualified_name`` = the second entity's own name,
+    ``qualified_name_a`` = the first entity's own name."""
+
+    def _snap(first_name: str, second_name: str) -> AbiSnapshot:
+        surface = SourceAbiSurface(
+            identity_collisions=[
+                {
+                    "identity": "shared#sha256:abc",
+                    "qualified_name": second_name,
+                    "qualified_name_a": first_name,
+                    "usr_a": "c:@N@a@F@Widget#I#",
+                    "usr_b": "c:@N@b@F@Widget#I#",
+                }
+            ],
+            reachable_declarations=[
+                SourceEntity(id="d0", kind="function", qualified_name="f")
+            ],
+        )
+        return AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            build_source=BuildSourcePack(root="", source_abi=surface),
+        )
+
+    old = _snap("Widget_a", "Widget_b")  # entity A visited first, B second
+    new = _snap("Widget_b", "Widget_a")  # same pair, swapped visitation order
+    changes = compute_cross_source_evolution(old, new)
+    hits = [c for c in changes if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED]
+    assert len(hits) == 1
+    assert hits[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
+    assert hits[0].symbol == "Widget_a"  # min(), deterministic either way
+
+
+def test_identity_collision_detected_usr_less_entity_does_not_desync_qname() -> None:
+    """Codex review, fifth follow-up: a USR-less declaration sharing the
+    same identity key, visited *between* two USR-bearing declarations,
+    must not become ``qualified_name_a``'s owner. ``source_link.
+    _route_declaration``'s general-purpose ``identity_to_qname`` map is
+    updated unconditionally per entity (including USR-less ones), while
+    ``identity_to_usr`` is only ever updated when the visiting entity has a
+    USR -- reading ``identity_to_qname`` for ``qualified_name_a`` would
+    therefore stamp an unrelated third entity's name as the owner of
+    ``usr_a``. Exercised through the real producer with three entities
+    sharing one identity: A (USR), M (no USR, same qname as itself, not
+    A/B), then B (USR, differs from A) -- the collision record's
+    ``qualified_name_a`` must still name A, not M."""
+    from abicheck.buildsource.source_abi import SourceAbiTu, SourceLocation
+    from abicheck.buildsource.source_link import link_source_abi
+
+    # All three share one `identity()` key via a common mangled_name
+    # (identity() prefers mangled_name over qualified_name#signature_hash),
+    # despite carrying three different qualified_name spellings -- the
+    # genuinely-different-names collision shape this fix targets.
+    shared_mangled = "_Z6WidgetE"
+    a = SourceEntity(
+        id="decl://a::Widget#sig1",
+        kind="function",
+        qualified_name="Widget_a",
+        mangled_name=shared_mangled,
+        signature_hash="sig1",
+        source_location=SourceLocation(path="a.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@a@F@Widget#I#"},
+    )
+    # USR-less: shares the identity key (same mangled_name) but carries no
+    # "usr" in `names`, so it never updates `identity_to_usr`.
+    m = SourceEntity(
+        id="decl://m::Widget#sig1",
+        kind="function",
+        qualified_name="Widget_middle",
+        mangled_name=shared_mangled,
+        signature_hash="sig1",
+        source_location=SourceLocation(path="m.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+    )
+    b = SourceEntity(
+        id="decl://b::Widget#sig1",
+        kind="function",
+        qualified_name="Widget_b",
+        mangled_name=shared_mangled,
+        signature_hash="sig1",
+        source_location=SourceLocation(path="b.h", line=1, origin="PUBLIC_HEADER"),
+        visibility="public_header",
+        names={"usr": "c:@N@b@F@Widget#I#"},
+    )
+    assert a.identity() == m.identity() == b.identity()
+    surface = link_source_abi(
+        [
+            SourceAbiTu(functions=[a]),
+            SourceAbiTu(functions=[m]),
+            SourceAbiTu(functions=[b]),
+        ]
+    )
+    assert len(surface.identity_collisions) == 1
+    collision = surface.identity_collisions[0]
+    assert collision["usr_a"] == "c:@N@a@F@Widget#I#"
+    # The real bug: without a dedicated identity_to_usr_qname map, this
+    # would read "Widget_middle" (M's own name) instead of "Widget_a".
+    assert collision["qualified_name_a"] == "Widget_a"
+
+
+def test_identity_collision_detected_ignores_explicit_none_participant_name() -> None:
+    """Codex review, fifth follow-up: a hand-edited or forward-versioned
+    persisted row can carry an explicit ``None`` (JSON ``null``) for
+    ``qualified_name_a``/``usr_a``/``usr_b`` rather than omitting the key.
+    Blindly ``str()``-ing that value turns it into the literal text
+    ``"None"``, which could then win ``min(qnames)`` and report a bogus
+    symbol. Only a real, non-empty string may be accepted."""
+    surface = SourceAbiSurface(
+        identity_collisions=[
+            {
+                "identity": "f#sha256:abc",
+                "qualified_name": "f",
+                "qualified_name_a": None,
+                "usr_a": "c:@F@f#",
+                "usr_b": "c:@N@ns@F@f#",
+            }
+        ],
+        reachable_declarations=[
+            SourceEntity(id="d0", kind="function", qualified_name="f")
+        ],
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        build_source=BuildSourcePack(root="", source_abi=surface),
+    )
+    from abicheck.buildsource.crosscheck import run_crosschecks
+
+    result = run_crosschecks(snap)
+    hits = [
+        c for c in result.findings if c.kind == ChangeKind.IDENTITY_COLLISION_DETECTED
+    ]
+    assert len(hits) == 1
+    assert hits[0].symbol == "f"  # min({"f"}), never the literal "None"
+
+
 def test_identity_collision_detected_authority_unchanged() -> None:
     from abicheck.checker_policy import RISK_KINDS
 
