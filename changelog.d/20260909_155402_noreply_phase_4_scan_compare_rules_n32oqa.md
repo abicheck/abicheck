@@ -6,12 +6,14 @@
   scans). Overflow reports exit `5` (ADR-064's `BUDGET_OVERFLOW` axis)
   instead of running unbounded. Absorbed from `scan --budget`
   (ADR-068 §3 #19); typed API: `CompareRequest.budget_s`.
-- **`compare`'s `--depth build`/`--depth source` evidence-contract floor** —
-  a pinned depth whose evidence neither side's snapshot actually reached now
-  reports exit `7` (`EVIDENCE_CONTRACT_ERROR`) instead of silently degrading
-  to shallower evidence and reporting `NO_CHANGE`. Closes a real,
-  previously-undocumented gap in `compare`'s own native-CLI resolution
-  (ADR-068 §3 #28).
+- **`compare`'s `--depth build`/`--depth source` live-extraction
+  evidence-contract floor** — a pinned depth that a *live* binary side's own
+  extraction fails to reach now reports exit `7` (`EVIDENCE_CONTRACT_ERROR`)
+  instead of silently degrading to shallower evidence and reporting
+  `NO_CHANGE`. Pre-serialized snapshot operands stay exempt (there is
+  nothing this run extracted to blame). Closes a real, previously-
+  undocumented gap in `compare`'s own native-CLI resolution (ADR-068 §3
+  #28).
 
 ### Fixed
 

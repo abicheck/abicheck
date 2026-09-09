@@ -125,3 +125,25 @@ def report_abi3_evidence_contract_error(result: Any, failure: str | None) -> Non
     record_abi3_evidence_contract_error(result, failure)
     if failure is not None:
         click.echo(f"error: {failure}", err=True)
+
+
+def report_depth_evidence_contract_error(
+    result: Any,
+    depth: str | None,
+    old: Any,
+    new: Any,
+    *,
+    old_is_live: bool,
+    new_is_live: bool,
+) -> None:
+    """Stamp ADR-064's exit-7 axis for an unsatisfied ``--depth build``/``--depth
+    source`` pin (ADR-068 §3 #28). Same shape as
+    :func:`report_abi3_evidence_contract_error` just above -- a thin
+    ``frontends``-legal bind of the ``workflows`` re-export of the
+    ``policy``-layer check (ADR-061 dependency direction:
+    ``frontends -> workflows``, never ``frontends -> policy`` directly)."""
+    from ...workflows.depth_evidence_contract import record_depth_evidence_contract_error
+
+    record_depth_evidence_contract_error(
+        result, depth, old, new, old_is_live=old_is_live, new_is_live=new_is_live
+    )

@@ -68,8 +68,18 @@ for why (two distinct selectors can demangle to the same display string).
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import click
+
+from .errors import ProfileMismatchError, ScopeMismatchError
+from .frontends.cli.runtime import _write_or_echo
+
+if TYPE_CHECKING:
+    from .model import AbiSnapshot
 
 
 def _fold_scoped_compat_into_text(
@@ -583,3 +593,154 @@ def _fold_suppression_audit_into_text(
         return "\n".join([text, "\n".join(lines)])
 
     return text
+
+
+# ADR-068 §3 #19/§4 (Phase 4 commit 2, Codex review): the abort-report
+# renderers below moved here from cli_compare_helpers.py for the identical
+# reason every other function in this module did -- that file sits at the
+# AI-readiness gate's 2000-line hard cap (no allowlist mechanism there), so
+# new lines must land in a sibling module, not grow it. Unlike this module's
+# other functions (fold text into an already-computed report), these render
+# a *whole* report for a run that produced no DiffResult at all (a
+# comparability-gate refusal or a budget-overflow abort) -- distinct enough
+# to warrant its own docstring note here rather than reading as scope creep
+# on the "fold-in" name.
+
+
+def _report_not_comparable(
+    exc: ProfileMismatchError | ScopeMismatchError,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    fmt: str,
+    output: Path | None,
+) -> None:
+    """Surface an ADR-050 D2 comparability-gate hard failure to the user.
+
+    ``checker.compare``'s gate raises before any ``diff_*`` module runs, so
+    there is no ``DiffResult`` for any renderer to work with — unlike an
+    ordinary verdict, this cannot be formatted the way a completed comparison
+    would be. ``--format json`` gets the schema-conformant ``{"verdict":
+    null, "reason": {...}}`` document (schema 2.17,
+    ``compare_report.schema.json``); ``sarif``/``junit`` get a real,
+    spec-conformant document of their own (a failed-invocation SARIF run /
+    an errored JUnit testcase — both formats have a genuine, standard way to
+    represent "the run didn't complete", distinct from "zero findings") via
+    :func:`sarif.to_sarif_not_comparable`/
+    :func:`junit_report.to_junit_xml_not_comparable`, so CI tooling
+    consuming those artifacts sees the failure instead of a missing file.
+    ``markdown``/``html``/``review`` get the same clear stderr message a
+    ``click.UsageError`` would produce and no output file — those are
+    human-facing formats already reading this stderr output, and neither has
+    an equivalent "run failed" document convention worth fabricating one for.
+    """
+    kind = "profile_mismatch" if isinstance(exc, ProfileMismatchError) else "scope_mismatch"
+    message = str(exc)
+    click.echo(
+        f"Error: '{old.library}' old={old.version!r} new={new.version!r} are not "
+        f"comparable: {message}\n"
+        "The two snapshots were not extracted under a comparable profile/scope "
+        "contract (ADR-050 D1/D2), so no verdict was produced. Pass "
+        '--diagnostic-comparison to force a tentative diff (stamped '
+        'assurance: "none") if you understand the risk.',
+        err=True,
+    )
+    from .report.not_comparable import OperationalStatus
+
+    _report_run_aborted(
+        kind, message, old.library, old.version, new.version,
+        fmt=fmt, output=output, operational=OperationalStatus.NOT_COMPARABLE,
+    )
+
+
+def _report_run_aborted(
+    kind: str,
+    message: str,
+    library: str,
+    old_version: str,
+    new_version: str,
+    *,
+    fmt: str,
+    output: Path | None,
+    operational: Any,
+) -> None:
+    """Render an aborted-run refusal report -- generalizes :func:`_report_not_comparable`.
+
+    Takes plain strings, not an ``AbiSnapshot`` pair: unlike the
+    comparability-gate refusal above, a budget-overflow abort (ADR-068 §3
+    #19) can happen *before* either side ever resolves to a snapshot at
+    all -- there is nothing to read ``.library``/``.version`` off yet, so
+    every caller passes what it has (a resolved snapshot's real fields, or
+    the raw operand paths' names when resolution itself never completed).
+
+    ADR-068 §3 #19: the budget-overflow abort (``--budget``, exit 5) shares
+    the identical shape ``_report_not_comparable`` already established for
+    ADR-050's comparability refusal (exit 6) -- no ``DiffResult`` exists in
+    either case, so the same schema-conformant JSON refusal document
+    (``report/not_comparable.py``, already parameterized by
+    :class:`~abicheck.policy.outcome.OperationalStatus`) and the same
+    generic SARIF/JUnit "run did not complete" renderers apply verbatim,
+    just with a different *kind*/*operational* pair. Split out so a second
+    abort axis does not have to duplicate the format dispatch.
+    """
+    refusal = (library, old_version, new_version, kind, message)
+    if fmt == "json":
+        from .report.not_comparable import render_not_comparable_json
+        from .schemas import REPORT_SCHEMA_VERSION
+
+        _write_or_echo(
+            output,
+            render_not_comparable_json(
+                *refusal,
+                report_schema_version=REPORT_SCHEMA_VERSION,
+                operational=operational,
+            ),
+        )
+    elif fmt == "sarif":
+        from .report.render_json import render_mapping_as_json
+        from .sarif import to_sarif_not_comparable
+
+        _write_or_echo(output, render_mapping_as_json(to_sarif_not_comparable(*refusal)))
+    elif fmt == "junit":
+        from .junit_report import to_junit_xml_not_comparable
+
+        xml = to_junit_xml_not_comparable(library, old_version, new_version, kind, message)
+        _write_or_echo(output, xml)
+
+
+def _exit_on_budget_overflow(
+    exc: Exception,
+    budget: str | None,
+    label: str,
+    library: str,
+    old_version: str,
+    new_version: str,
+    *,
+    fmt: str,
+    output: Path | None,
+) -> None:
+    """Render ADR-068 §3 #19's budget-overflow abort (exit 5) and exit.
+
+    Shared by every ``deadline.DeadlineExceeded`` catch site in
+    ``cli_compare_helpers.run_compare`` (Codex review: a bare ``sys.exit(5)``
+    bypassed report rendering entirely, so ``--format json``/``-o``/
+    ``--write`` silently produced nothing on overflow -- the same generic
+    aborted-run document :func:`_report_run_aborted` already gives the
+    comparability-gate refusal). *label* is just the stderr message's own
+    naming of what was being compared (raw operand paths before resolution,
+    or the resolved library name after); *library*/*old_version*/
+    *new_version* feed the structured report the same way.
+    """
+    click.echo(
+        f"Error: --budget {budget!r} exceeded while comparing {label}: {exc}. "
+        "Pin a shallower --depth or raise the budget; a budget never "
+        "silently narrows evidence.",
+        err=True,
+    )
+    from .report.not_comparable import OperationalStatus
+
+    _report_run_aborted(
+        "budget_overflow", str(exc), library, old_version, new_version,
+        fmt=fmt, output=output, operational=OperationalStatus.BUDGET_OVERFLOW,
+    )
+    sys.exit(5)

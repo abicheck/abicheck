@@ -447,17 +447,28 @@ trade a possible *false negative* for a shorter CLI — not convenience.
 | Default (or `--no-pattern-verdicts`) baseline scan reaching `compare`'s unconditional pattern-verdict modulation | **(a) — already covered, moot** | `compare` has had no `--pattern-verdicts`/`--explain-patterns`-implies-modulation flag since D4 landed (verified: absent from `compare --help-all`) — modulation is unconditional, evidence-gated, with no off switch anywhere. Once every `mode: scan` request routes to `compare`, this is simply the run's real, current behavior, not a divergence to route around. |
 | `--max-findings`, `--show-suppressed`, `--manifest`, `--public-header-dir` (dedicated Action input unaffected), `--against` (already routed structurally) | **(a)/(b) — already covered or already-ruled DELETE** (§3 rows #20, #26, #17, #22, #1) | No new ruling needed; the table in §3 already classifies each and none required Action-level translation logic beyond what direct field passthrough already does. |
 
-**Consequence for `action/run.sh`:** `_SCAN_NEEDS_LEGACY_CLI` and its call
-sites are deleted outright. Every `mode: scan` request — baseline and
-audit-only alike — is now assembled as a `compare`/`compare --no-baseline`
-invocation. `new-library-set` and `build-target` inputs are rejected with a
-clear `::error::` naming the blocking prerequisite (ADR-065 S3, and `dump`'s
-own config-cleanup phase, respectively) rather than silently degrading or
-routing to a branch that no longer exists; `risk-rules`/`crosscheck` inputs
-are rejected the same way, naming their `.abicheck.yml` replacement. This is
-what D8 calls hard removal with no deprecation window, applied to the
-Action's own input surface for the first time — previously only the CLI's
-flag surface was held to it.
+**Consequence for `action/run.sh`, once implemented (not this commit — see
+below):** `_SCAN_NEEDS_LEGACY_CLI` and its call sites are deleted outright.
+Every `mode: scan` request — baseline and audit-only alike — is assembled as
+a `compare`/`compare --no-baseline` invocation. `new-library-set` and
+`build-target` inputs are rejected with a clear `::error::` naming the
+blocking prerequisite (ADR-065 S3, and `dump`'s own config-cleanup phase,
+respectively) rather than silently degrading or routing to a branch that no
+longer exists; `risk-rules`/`crosscheck` inputs are rejected the same way,
+naming their `.abicheck.yml` replacement. This is what D8 calls hard removal
+with no deprecation window, applied to the Action's own input surface for
+the first time — previously only the CLI's flag surface was held to it.
+
+**Current state (CodeRabbit review, this same commit):** the ruling table
+above is complete, but `_SCAN_NEEDS_LEGACY_CLI` and its ~17 `MODE == "scan"`
+branches are **not yet deleted** — `action/run.sh` is unchanged by this
+commit. Deletion is blocked on `compare --no-baseline` gaining
+`--sources`/`--build-info`/`--depth`/`--dry-run` support (a real, separate
+gap this investigation surfaced, outside this commit's file ownership; see
+`docs/contribute/known-gaps.md`'s matching entry for the exact remaining
+steps), since audit-only `mode: scan` still needs the legacy CLI until that
+closes. Only the two (c) items (`--budget`, the depth evidence-contract
+floor) are implemented in this commit, on `compare` itself.
 
 ## Alternatives considered
 
