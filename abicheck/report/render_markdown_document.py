@@ -83,7 +83,7 @@ reproducing.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import Any, cast
 
@@ -308,7 +308,7 @@ def render_review_digest_document(doc: ReportDocument) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _change_row(c: Any) -> dict[str, Any]:
+def _change_row(c: Any, evidence_tiers: Sequence[str] = ()) -> dict[str, Any]:
     """A JSON-safe row for one ``Change``, carrying every field
     ``_render_change_row``/``_render_change_row_oneline``/
     ``_render_leaf_type_change_row`` need -- including ``impact_for(kind)``,
@@ -317,14 +317,23 @@ def _change_row(c: Any) -> dict[str, Any]:
     "registry lookup on the render side" issue. ``symbol`` is only read by
     the leaf-mode row renderer (``_format_leaf_type_change``'s ``###
     {symbol} — {desc}`` heading); every other caller ignores it.
+
+    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets
+    ``impact_for`` append its evidence caveat for an ``UNATTRIBUTED``
+    finding here too -- Codex review, fresh evidence: this Markdown path
+    kept the unconditional impact text even after the JSON reporter
+    gained the caveat (Finding C(ii)). Omitting it (the default) keeps
+    every pre-existing caller -- which has no evidence_tiers to hand --
+    byte-identical to before this parameter existed.
     """
-    from ..checker_policy import impact_for
+    from ..checker_policy import evidence_status_for_result, impact_for
 
     kind = getattr(c, "kind", None)
     relevance = getattr(c, "contract_relevance", None)
     assurance = getattr(c, "contract_assurance", None)
     affected = getattr(c, "affected_symbols", None)
     cse = getattr(c, "cross_source_evolution", None)
+    evidence_status = evidence_status_for_result(c, evidence_tiers) if kind else None
     return {
         "kind": kind.value if kind else "",
         "symbol": getattr(c, "symbol", None),
@@ -334,7 +343,7 @@ def _change_row(c: Any) -> dict[str, Any]:
         "source_location": getattr(c, "source_location", None),
         "affected_symbols": list(affected) if affected else [],
         "caused_count": getattr(c, "caused_count", 0) or 0,
-        "impact": impact_for(kind) if kind else None,
+        "impact": impact_for(kind, evidence_status) if kind else None,
         "contract_relevance": getattr(relevance, "value", None),
         "contract_reason_code": getattr(c, "contract_reason_code", None),
         "contract_assurance": getattr(assurance, "value", None),
@@ -419,7 +428,9 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     return line
 
 
-def _not_evaluated_mapping(section: Any) -> dict[str, Any] | None:
+def _not_evaluated_mapping(
+    section: Any, evidence_tiers: Sequence[str] = ()
+) -> dict[str, Any] | None:
     """JSON-safe fold of a ``NotEvaluatedSection`` (or ``None``), shared by
     every view that discloses ADR-049 D1's unscored findings (full, leaf,
     root-cause)."""
@@ -427,7 +438,11 @@ def _not_evaluated_mapping(section: Any) -> dict[str, Any] | None:
         return None
     return {
         "entries": [
-            {"row": _change_row(e.change), "label": e.label, "suffix": e.suffix}
+            {
+                "row": _change_row(e.change, evidence_tiers),
+                "label": e.label,
+                "suffix": e.suffix,
+            }
             for e in section.entries
         ]
     }
@@ -555,11 +570,11 @@ def build_markdown_document(
                 "heading": g.heading,
                 "oneline": g.oneline,
                 "note_lines": list(g.note_lines),
-                "rows": [_change_row(c) for c in g.changes],
+                "rows": [_change_row(c, result.evidence_tiers) for c in g.changes],
             }
             for g in severity_data.groups
         ],
-        "not_evaluated": _not_evaluated_mapping(not_evaluated),
+        "not_evaluated": _not_evaluated_mapping(not_evaluated, result.evidence_tiers),
         "environment_drift": _opt_asdict(rm.compute_environment_drift(changes)),
         "empty_message": (
             None

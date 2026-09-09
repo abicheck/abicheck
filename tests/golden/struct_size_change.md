@@ -43,7 +43,7 @@
 ## ❌ Breaking Changes
 
 - **type_size_changed**: Size changed: Point (64 → 96 bits) (`64` → `96`)
-  > Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.
+  > Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access. (Evidence note: this run's available evidence does not fully confirm this specific finding -- treat the consequence above as plausible, not confirmed.)
 
 ## ✅ Additions
 

@@ -239,7 +239,7 @@ def test_impact_for_unattributed_appends_evidence_caveat() -> None:
     hedged = impact_for(ChangeKind.FUNC_REMOVED, EvidenceStatus.UNATTRIBUTED)
     assert hedged.startswith(base)
     assert hedged != base
-    assert "does not establish a matching symbol-table entry" in hedged
+    assert "available evidence does not fully confirm" in hedged
 
 
 def test_impact_for_artifact_proven_is_unchanged() -> None:
@@ -259,7 +259,7 @@ def test_reporter_json_impact_carries_the_unattributed_caveat() -> None:
     c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
     d = _change_to_dict(c, evidence_tiers=["header", "elf"])
     assert d["evidence_status"] == EvidenceStatus.UNATTRIBUTED.value
-    assert "does not establish a matching symbol-table entry" in d["impact"]
+    assert "available evidence does not fully confirm" in d["impact"]
 
 
 def test_reporter_json_impact_stays_bare_when_artifact_proven() -> None:
@@ -268,7 +268,7 @@ def test_reporter_json_impact_stays_bare_when_artifact_proven() -> None:
     c = _change(ChangeKind.FUNC_REMOVED, symbol_binding="global")
     d = _change_to_dict(c, evidence_tiers=["header", "elf"])
     assert d["evidence_status"] == EvidenceStatus.ARTIFACT_PROVEN.value
-    assert "does not establish a matching symbol-table entry" not in d["impact"]
+    assert "available evidence does not fully confirm" not in d["impact"]
 
 
 def test_evidence_status_for_result_symbol_binding_check_is_elf_only() -> None:
