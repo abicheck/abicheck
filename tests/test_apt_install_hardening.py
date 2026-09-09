@@ -511,6 +511,18 @@ def logical_lines(script: str) -> list[str]:
     lines: list[str] = []
     pending = ""
     for raw in script.splitlines():
+        # A comment runs to the end of the *physical* line: a backslash
+        # inside one is comment text, not a continuation, so bash goes on
+        # to execute the next line. Splicing it would bury that line inside
+        # a string starting with `#`, which the scan skips as a comment --
+        # hiding a real gating command (Codex review, PR #1183; verified
+        # against bash, which really does run the following line).
+        # Only a line that starts a command can be a comment: while
+        # `pending` is open, a `#` arrives mid-command and bash splices
+        # first, so the comment applies to the joined line instead.
+        if not pending and raw.lstrip().startswith("#"):
+            lines.append(raw.strip())
+            continue
         # Checked on the raw line: trailing whitespace after the backslash
         # means it is not adjacent to the newline, so bash does not splice.
         # An escaped backslash (`\\\\`) ends the line; a single one continues it.
@@ -835,6 +847,11 @@ class TestLogicalLines:
         "probe a\\\\\nprobe b\n",
         "probe one\nprobe two\n",
         "probe x \\\n\nprobe y\n",
+        # A backslash inside a comment is comment text: bash runs the
+        # NEXT line, so the helper must not swallow it (Codex, PR #1183).
+        "# note \\\nprobe update\n",
+        "# plain comment\nprobe update\n",
+        "  # indented \\\nprobe update\n",
     )
 
     @requires_apt_harness
