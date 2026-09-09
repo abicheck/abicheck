@@ -869,3 +869,47 @@ class TestInvalidExitCodeScheme:
                     policy="not_a_policy",
                 )
             )
+
+
+class TestPatternVerdictsIsUnconditionalAtTier2:
+    """Codex review, fresh evidence (PR #1154 follow-up: "Make automatic
+    analysis unconditional at Tier 2"): ADR-068 D4 made pattern-verdict
+    modulation unconditional for `compare` -- the native single-pair CLI and
+    the release fan-out's own per-library helper both hardcode
+    `pattern_verdicts=True` at their own call sites, but `classify_compare_
+    pair` (the shared Tier-2 chokepoint every other caller of
+    `service.run_compare`/`run_compare_request` -- the typed API, the stored-
+    BundleFacts drivers -- goes through) used to forward the request's own
+    `pattern_verdicts` field, which defaults to `False`. A bare
+    `CompareRequest()` therefore reached compatibility policy with
+    modulation disabled, diverging from every other entry point for an
+    otherwise-identical comparison -- exactly the class of divergence
+    `surface_metrics` (never even a `CompareRequest` field, forced
+    unconditionally at this same chokepoint) was already fixed for."""
+
+    def test_true_is_forwarded_regardless_of_the_request_field(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.service as service_mod
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        old, new = _write(tmp_path, *_breaking_pair())
+
+        real_compare_snapshots = service_mod.compare_snapshots
+        seen_pattern_verdicts: list[object] = []
+
+        def _spy_compare_snapshots(old_snap, new_snap, *args, **kwargs):
+            seen_pattern_verdicts.append(kwargs.get("pattern_verdicts"))
+            return real_compare_snapshots(old_snap, new_snap, *args, **kwargs)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+
+        # `CompareRequest`'s own `pattern_verdicts` field is left at its
+        # default (False) -- the whole point is that the chokepoint no
+        # longer trusts it.
+        request = CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
+        assert request.pattern_verdicts is False
+        run_compare_request(request)
+
+        assert seen_pattern_verdicts == [True]

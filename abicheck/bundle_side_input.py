@@ -522,13 +522,18 @@ def compare_release_against_bundle_facts(
             # fix, the release fan-out) -- omitting it here silently dropped
             # public_surface_grew/public_surface_shrank findings for a
             # stored-OLD-facts-vs-live-NEW comparison that an identical
-            # library pair would get from `compare` directly.
+            # library pair would get from `compare` directly. Codex review,
+            # fresh evidence (follow-up: "Make automatic analysis
+            # unconditional at Tier 2"): pattern-verdict modulation
+            # (ADR-068 D4) is the identical class of AUTO analysis and was
+            # missing the same way here -- forced True for the same reason.
             diff = service.compare_snapshots(
                 old_snapshot,
                 new_snapshot,
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
+                pattern_verdicts=True,
                 surface_metrics=True,
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:

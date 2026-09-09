@@ -290,13 +290,18 @@ def compare_stored_bundle_facts_pair(
             # chokepoint -- omitting it here silently dropped
             # public_surface_grew/public_surface_shrank findings a
             # stored/stored comparison of the identical library pair would
-            # get from a live `compare`.
+            # get from a live `compare`. Codex review, fresh evidence
+            # (follow-up: "Make automatic analysis unconditional at Tier
+            # 2"): pattern-verdict modulation (ADR-068 D4) is the identical
+            # class of AUTO analysis and was missing the same way here --
+            # forced True for the same reason.
             diff = compare_snapshots(
                 projected_old_snapshots[key],
                 projected_new_snapshots[key],
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
+                pattern_verdicts=True,
                 surface_metrics=True,
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:

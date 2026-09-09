@@ -184,9 +184,8 @@ abicheck compare old.json new.json --view show=breaking,functions,removed
 ```
 
 **Markdown / JSON / HTML**: Changes are filtered before rendering. A note shows
-how many changes matched: `> Filtered by: --show-only ... (5 of 42 changes shown)`
-(the note keeps the `--show-only` spelling for the token vocabulary it names —
-only the outer flag is now `--view show=...`).
+how many changes matched: `> Filtered by: --view show=... (5 of 42 changes
+shown)` (each OR'd `--view show=...` group renders as its own token).
 
 **SARIF**: The `show_only` parameter filters which results appear in the SARIF
 output.

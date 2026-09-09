@@ -889,7 +889,13 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
     live-NEW driver used to be one of three call sites that never forwarded
     ``surface_metrics=True``, silently omitting ``public_surface_grew``/
     ``public_surface_shrank`` findings a scalar ``compare`` of the identical
-    pair would report (AGENTS.md's "One model, any cardinality" rule)."""
+    pair would report (AGENTS.md's "One model, any cardinality" rule).
+
+    ``pattern_verdicts`` (Codex review, fresh evidence, follow-up: "Make
+    automatic analysis unconditional at Tier 2") is the identical class of
+    AUTO analysis (ADR-068 D4) and had the same gap -- asserted alongside
+    ``surface_metrics`` below rather than in a separate test class, since
+    both are proven by the same spy on the same call."""
 
     def test_surface_metrics_true_is_forwarded_to_compare_snapshots(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -924,9 +930,11 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
 
         real_compare_snapshots = service_mod.compare_snapshots
         seen_surface_metrics: list[object] = []
+        seen_pattern_verdicts: list[object] = []
 
         def _spy_compare_snapshots(old, new, *args, **kwargs):
             seen_surface_metrics.append(kwargs.get("surface_metrics"))
+            seen_pattern_verdicts.append(kwargs.get("pattern_verdicts"))
             return real_compare_snapshots(old, new, *args, **kwargs)
 
         monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
@@ -934,6 +942,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
         compare_release_against_bundle_facts(facts_path, new_dir)
 
         assert seen_surface_metrics == [True]
+        assert seen_pattern_verdicts == [True]
 
     def test_public_surface_growth_is_reported(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
