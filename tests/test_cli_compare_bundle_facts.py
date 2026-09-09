@@ -251,6 +251,46 @@ class TestCompareOldBundleFacts:
         assert "JSON containers" in out
         assert "Traceback" not in out
 
+    def test_max_json_object_nodes_override_ignored_when_config_auto_discovered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (PR #1174): unlike an *explicit* ``--config``, a
+        ``.abicheck.yml`` auto-discovered by walking up from cwd may be
+        content the same untrusted checkout supplies (e.g. a PR's own
+        working tree in CI) -- so it must not be able to raise the
+        pre-``json.loads()`` decode-bomb budget the way an explicit
+        ``--config`` can (the sibling test above). Mirrors
+        ``resolve_dispatch_compile_context``'s existing explicit-vs-
+        auto-discovered trust distinction for ``compile:``."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        # Same budget-of-1 as the explicit-config test above, but written
+        # where discover_project_config() finds it with no --config flag.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("resource_limits:\n  max_bundle_facts_decode_nodes: 1\n")
+        monkeypatch.chdir(tmp_path)
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--format",
+            "json",
+        )
+
+        # Had the auto-discovered budget of 1 been honored, this would fail
+        # with "JSON containers" the same way the explicit-config test does.
+        assert code == 0, out
+        assert "JSON containers" not in out
+
     def test_max_json_object_nodes_flag_removed(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"

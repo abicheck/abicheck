@@ -779,7 +779,12 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         kwargs["lang"], kwargs["lang_explicit"] = resolve_stored_bundle_lang(
             kwargs, config_explicit=_cfg_explicit, new_is_stored=_bundle_operands.new_is_stored, lang_default=LANG_DEFAULT,
         )
-        dispatch_bundle_facts(compile_context=_compile_context, new_is_stored=_bundle_operands.new_is_stored, **kwargs)
+        dispatch_bundle_facts(
+            compile_context=_compile_context,
+            new_is_stored=_bundle_operands.new_is_stored,
+            config_explicit=_cfg_explicit,
+            **kwargs,
+        )
         return
     reject_bundle_facts_manifest_without_old_bundle_facts(kwargs)
     run_compare(ctx, **kwargs)

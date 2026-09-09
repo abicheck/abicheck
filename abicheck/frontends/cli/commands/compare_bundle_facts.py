@@ -223,7 +223,7 @@ def _load_library_overrides(
     return overrides.headers, overrides.includes, overrides.compile
 
 
-def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any) -> None:
+def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explicit: bool = False, **kwargs: Any) -> None:
     """Handle a ``compare OLD_FACTS NEW_INPUT`` invocation where OLD_FACTS
     classified as a stored BundleFacts document.
 
@@ -235,6 +235,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     ``compare_release_against_bundle_facts`` (which extracts and dumps
     NEW_INPUT as a live directory/package). The default ``False`` is the
     original stored/live shape, unchanged.
+
+    *config_explicit* is ``compare_cmd``'s own ``_config_explicit``,
+    threaded through unchanged -- by dispatch time ``kwargs["config"]``
+    no longer distinguishes an explicit path from an auto-discovered one.
 
     *kwargs* is ``compare_cmd``'s already-parsed, already-``normalize_sided_
     options``-processed option dict -- the same dict that would otherwise be
@@ -400,8 +404,14 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     )
     # Phase 7g: --max-json-object-nodes is gone -- resource_limits.
     # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now.
+    # Codex review: unlike the policy knobs above, this guards a decode-bomb
+    # budget over content that may itself be attacker-controlled -- only an
+    # *explicit* --config may raise it, not an auto-discovered one (which
+    # can come from the same untrusted checkout being decoded).
     max_json_object_nodes_cfg = (
-        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes if _bundle_cfg else None
+        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes
+        if _bundle_cfg and config_explicit
+        else None
     )
 
     if new_is_stored:
