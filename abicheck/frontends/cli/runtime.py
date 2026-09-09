@@ -605,10 +605,10 @@ def _finalize_compare_result(
         result.old_metadata is None and result.new_metadata is None
         and old_snapshot is not None and new_snapshot is not None
     ):
-        from ...serialization import snapshot_content_digest
+        from ...workflows.gate import snapshot_identity_digest
 
-        old_digest = snapshot_content_digest(old_snapshot)
-        new_digest = snapshot_content_digest(new_snapshot)
+        old_digest = snapshot_identity_digest(old_snapshot)
+        new_digest = snapshot_identity_digest(new_snapshot)
     note_if_same_binary_compared(
         result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
     )

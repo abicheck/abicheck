@@ -271,6 +271,25 @@ def test_reporter_json_impact_stays_bare_when_artifact_proven() -> None:
     assert "available evidence does not fully confirm" not in d["impact"]
 
 
+def test_leaf_mode_markdown_impact_carries_the_unattributed_caveat() -> None:
+    """Codex review, fresh evidence: `--report-mode leaf` still called
+    `_change_row`/`_not_evaluated_mapping` with no `evidence_tiers` after
+    the full-mode view was fixed, leaving the overclaim in leaf reports."""
+    from abicheck.report.dispatch_markdown import to_markdown
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    md = to_markdown(result, report_mode="leaf")
+    assert "available evidence does not fully confirm" in md
+
+
 def test_evidence_status_for_result_symbol_binding_check_is_elf_only() -> None:
     # symbol_binding mirrors Function.elf_binding/Variable.elf_binding and is
     # never populated on a PE/Mach-O run regardless of evidence quality --
