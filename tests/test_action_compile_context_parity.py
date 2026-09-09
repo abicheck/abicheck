@@ -1368,19 +1368,31 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
 
 class TestCompileContextDiscoversSourcesRootOwnConfig:
     """Codex review, PR #1159 (P1, fresh evidence): ``embed_build_source()``
-    (``abicheck/buildsource/embed.py``) reads ``build:``/``compile:``/
-    ``source:``/``debug:`` from ``build_config or discover_build_config(
-    raw_sources)`` -- a SEPARATE, narrower lookup than ``discover_project_
-    config()``'s own checkout-root walk this merge helper already performs.
-    ``discover_build_config`` is non-recursive and anchored at ``--sources``
-    itself: when that directory carries its own ``.abicheck.yml``, the
-    native CLI uses it EXCLUSIVELY for those four blocks whenever no
-    explicit ``--config`` is given, never even consulting the checkout-root
-    config for them. Because this Action always ends up passing an explicit
-    ``--config`` once any compile-context input is set, that discovery
-    previously never ran at all (``build_config is not None``), silently
-    dropping the sources root's own build settings the moment an unrelated
-    input (e.g. ``gcc-path``) triggered this overlay's synthesis."""
+    (``abicheck/buildsource/embed.py``) reads ``build:``/``sources:`` from
+    ``build_config or discover_build_config(raw_sources)`` -- a SEPARATE,
+    narrower lookup than ``discover_project_config()``'s own checkout-root
+    walk this merge helper already performs. ``discover_build_config`` is
+    non-recursive and anchored at ``--sources`` itself: when that directory
+    carries its own ``.abicheck.yml``, the native CLI uses it EXCLUSIVELY
+    for those two blocks whenever no explicit ``--config`` is given, never
+    even consulting the checkout-root config for them. Because this Action
+    always ends up passing an explicit ``--config`` once any compile-context
+    input is set, that discovery previously never ran at all
+    (``build_config is not None``), silently dropping the sources root's own
+    build settings the moment an unrelated input (e.g. ``gcc-path``)
+    triggered this overlay's synthesis.
+
+    Deliberately NOT ``compile:``/``source:`` (singular)/``debug:`` -- a
+    later round (fresh evidence, same PR) caught that those three blocks
+    are pair-wide (``resolve_compile_context``, ``resolved_cfg.
+    source_method``, ``resolved_cfg.debug_format`` all apply to BOTH
+    operands), and ``embed_build_source()``'s own call site never actually
+    reads any of the three -- only ``build.query``/``compile_db``/
+    ``targets`` and ``sources.public_headers``/``exclude``/``graph``.
+    Promoting them from a NEW-only sources-root config into the single
+    shared ``--config`` would silently apply NEW-only settings to OLD's own
+    header parsing too. See ``test_sources_root_compile_block_is_never_
+    sourced_from_the_sources_root`` below."""
 
     def test_sources_root_build_block_is_discovered_and_merged(
         self, tmp_path: Path
@@ -1499,7 +1511,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         assert doc["sources"] == {"graph": "full", "exclude": ["vendor/**"]}
         assert doc["severity"] == {"abi_breaking": "error"}
 
-    def test_empty_sources_root_config_clears_the_checkout_root_blocks(
+    def test_empty_sources_root_config_clears_the_checkout_root_build_and_sources_blocks(
         self, tmp_path: Path
     ) -> None:
         """Codex review, PR #1159 (P1, third round, fresh evidence): an
@@ -1508,11 +1520,17 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         still selects it, and ``load_build_config``'s own ``if not
         isinstance(raw, dict): return BuildConfig()`` treats that as an
         empty (all-default) ``BuildConfig`` -- never a fallback to the
-        checkout-root document's own ``build:``/``compile:``/``source:``/
-        ``debug:`` blocks, since ``discover_build_config``'s selection is
-        exclusive. Gating the whole replacement on ``isinstance(...,
-        dict)`` skipped it entirely for this case, silently leaving the
-        checkout-root's own settings in place instead of clearing them."""
+        checkout-root document's own ``build:``/``sources:`` blocks, since
+        ``discover_build_config``'s selection is exclusive. Gating the whole
+        replacement on ``isinstance(..., dict)`` skipped it entirely for
+        this case, silently leaving the checkout-root's own settings in
+        place instead of clearing them.
+
+        ``compile:`` is deliberately excluded from this clearing (see the
+        class docstring and ``test_sources_root_compile_block_is_never_
+        sourced_from_the_sources_root`` below) -- the checkout-root's own
+        ``compile.sysroot`` is a pair-wide setting untouched by an unrelated
+        NEW-side sources-root config being empty, so it must survive here."""
         (tmp_path / ".abicheck.yml").write_text(
             "severity:\n  abi_breaking: error\n"
             "build:\n  system: make\n"
@@ -1532,18 +1550,60 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        # The checkout-root's own build:/compile.sysroot must NOT survive --
-        # the empty sources-root config clears them, exactly as the native
-        # CLI's own embed_build_source() would (an empty BuildConfig, not
-        # the checkout-root's settings).
+        # The checkout-root's own build: must NOT survive -- the empty
+        # sources-root config clears it, exactly as the native CLI's own
+        # embed_build_source() would (an empty BuildConfig, not the
+        # checkout-root's settings).
         assert "build" not in doc
-        assert "sysroot" not in doc.get("compile", {})
+        # ...but compile.sysroot is a pair-wide setting, never sourced from
+        # (or cleared by) the sources-root config -- it survives untouched.
+        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
         # This Action's own synthesized compile.compiler still applies --
-        # the overlay is merged in afterward, on top of the (now-empty)
-        # sources-root base.
+        # the overlay is merged in afterward, on top of the checkout-root
+        # config's own compile: block.
         assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
         # Unrelated checkout-root-only keys (severity:) still survive.
         assert doc["severity"] == {"abi_breaking": "error"}
+
+    def test_sources_root_compile_block_is_never_sourced_from_the_sources_root(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1159 (P1, fresh evidence, fourth round): a
+        --sources tree's own compile:/source:(singular)/debug: blocks must
+        NOT be promoted into the single shared --config -- those three
+        blocks are pair-wide (resolve_compile_context "applies to both
+        sides", resolved_cfg.source_method, resolved_cfg.debug_format),
+        while embed_build_source() only ever reads build:/sources: from the
+        sources-root document. Promoting compile: here would silently apply
+        a NEW-only compile context (defines, include dirs, language) to
+        OLD's own header parsing too."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
+            "source:\n  method: s6\n"
+            "debug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # The checkout-root's own compile.sysroot survives -- the
+        # sources-root's own compile: block is never consulted.
+        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
+        # The sources-root's source:/debug: blocks never reach the shared
+        # config at all -- they would apply pair-wide if they did.
+        assert "source" not in doc
+        assert "debug" not in doc
 
 
 class TestCompileContextOverlayGenerationIsIsolated:

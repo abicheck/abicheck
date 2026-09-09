@@ -659,22 +659,36 @@ else:
     # Codex review, fresh evidence: mirror embed_build_source()'s own
     # `build_config or discover_build_config(raw_sources)` selection
     # (abicheck/buildsource/embed.py). That function is what actually reads
-    # build:/compile:/source:/debug: for L3-L5 embedding, and it is a
-    # SEPARATE, narrower lookup than the checkout-root walk just above --
-    # non-recursive, anchored at the --sources tree itself, never walking up
-    # to parents. When no explicit --config is given, a --sources directory
-    # carrying its own .abicheck.yml is used EXCLUSIVELY for those four
-    # blocks; the checkout-root config found above (if any) is never even
-    # consulted for them. Since this Action always ends up passing an
-    # explicit --config once any compile-context input is set, that
-    # discovery would otherwise never run at all (`build_config is not
-    # None`), silently dropping the sources root's own build settings.
-    # Replicate the same outcome here: when --sources names a directory
-    # with its own config file (distinct from whatever was found above),
-    # its own build:/compile:/source:/debug: blocks REPLACE (not merge
-    # into) the checkout-root document's own such blocks -- and become the
-    # project-root anchor for the compile.include_dirs resolution below --
+    # build:/sources: for L3-L5 embedding, and it is a SEPARATE, narrower
+    # lookup than the checkout-root walk just above -- non-recursive,
+    # anchored at the --sources tree itself, never walking up to parents.
+    # When no explicit --config is given, a --sources directory carrying its
+    # own .abicheck.yml is used EXCLUSIVELY for those two blocks; the
+    # checkout-root config found above (if any) is never even consulted for
+    # them. Since this Action always ends up passing an explicit --config
+    # once any compile-context input is set, that discovery would otherwise
+    # never run at all (`build_config is not None`), silently dropping the
+    # sources root's own build settings. Replicate the same outcome here:
+    # when --sources names a directory with its own config file (distinct
+    # from whatever was found above), its own build:/sources: blocks REPLACE
+    # (not merge into) the checkout-root document's own such blocks --
     # exactly as if no explicit --config had been in the way.
+    #
+    # Deliberately NOT compile:/source:(singular)/debug: -- a second Codex
+    # review (fresh evidence, PR #1159) caught that those three blocks are
+    # pair-wide, not per-side: compile: flows through resolve_compile_context
+    # ("It applies to both sides", cli_compare_helpers.py), source:(singular)
+    # .method resolves resolved_cfg.source_method (also pair-wide,
+    # cli_helpers_compare.py), and debug: resolves resolved_cfg.debug_format
+    # for both operands. embed_build_source()'s own call site never reads
+    # any of the three (confirmed by tracing collect_inline_pack() and
+    # build_config.py: only build.query/compile_db/targets and
+    # sources.public_headers/exclude/graph are consumed inside that
+    # NEW-side-only call). Promoting them from a NEW-only sources-root
+    # config into this single shared --config would silently apply
+    # NEW-only compile/debug/source-method settings to OLD's own parsing
+    # too -- exactly the class of bug the earlier (incorrect) five-block
+    # version of this comment invited.
     sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
     if sources_root_env:
         sources_found = discover_build_config(Path(sources_root_env))
@@ -702,29 +716,30 @@ else:
             # else might otherwise apply. Gating this whole replacement on
             # `isinstance(sources_loaded, dict)` skipped it entirely for
             # that case, silently leaving the checkout-root document's own
-            # build:/sources:/compile:/source:/debug: (if any) in place --
-            # exactly the settings the native path would NOT have applied,
-            # since discover_build_config()'s selection is exclusive.
+            # build:/sources: (if any) in place -- exactly the settings the
+            # native path would NOT have applied, since
+            # discover_build_config()'s selection is exclusive.
             # `sources_loaded if isinstance(..., dict) else {}` makes an
-            # empty/non-mapping file clear all five blocks instead, matching
+            # empty/non-mapping file clear both blocks instead, matching
             # `load_build_config`'s own empty-BuildConfig outcome exactly.
             if isinstance(sources_loaded, dict):
                 _validate_or_exit(sources_loaded, sources_found)
             _sources_doc = sources_loaded if isinstance(sources_loaded, dict) else {}
             # "sources" (plural -- public_headers/exclude/graph) is a
-            # DISTINCT top-level block from "source" (singular,
-            # BuildConfig's own build.source_replay-facing settings) --
-            # both are read by embed_build_source()'s BuildConfig and
-            # both belong to whichever ONE file backs it (Codex review,
-            # fresh evidence: a source-root sources.graph: full silently
-            # narrowing to the checkout-root's/default summary before
-            # collect_inline_pack() reads cfg.graph_detail).
-            for _blk_key in ("build", "sources", "compile", "source", "debug"):
+            # DISTINCT top-level block from "source" (singular, pair-wide
+            # source.method -- deliberately excluded, see above). Only the
+            # two genuinely NEW-side-scoped blocks are replaced here.
+            for _blk_key in ("build", "sources"):
                 if _blk_key in _sources_doc:
                     base[_blk_key] = _sources_doc[_blk_key]
                 else:
                     base.pop(_blk_key, None)
-            found_path = sources_found
+            # found_path is NOT reassigned to sources_found: it anchors
+            # compile.include_dirs resolution below, and compile: is a
+            # pair-wide block that (per above) is never sourced from the
+            # sources-root config -- it must keep resolving against
+            # whichever document actually supplied base["compile"]
+            # (the checkout-root config, if any).
 
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip the two executable-authorizing keys before merging (see
