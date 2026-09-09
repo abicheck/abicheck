@@ -1056,3 +1056,54 @@ class TestCompileContextRejectsAutoDiscoveredConfig:
         assert "cannot combine" in result.stdout
         assert "build-config" in result.stdout
         assert "already-checked-out" not in result.stdout
+
+    def test_fails_loud_when_the_sources_tree_has_its_own_config(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence: dump/compare's own compile-context
+        auto-discovery isn't only the cwd-upward walk -- merge_compile_
+        config also falls back to a lookup rooted at the ``--sources`` tree
+        itself (``discover_build_config``), which a cwd-upward-only check
+        misses entirely when ``sources`` names a directory that is neither
+        ``$PWD`` nor an ancestor of it. Uses two unrelated directories (cwd
+        and the sources tree) to prove this isn't reachable via the
+        cwd-upward walk alone."""
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        sources_tree = tmp_path / "unrelated_sources_tree"
+        sources_tree.mkdir()
+        (sources_tree / ".abicheck.yml").write_text(
+            "severity:\n  addition: error\n", encoding="utf-8"
+        )
+        result = self._run_from(
+            cwd,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(sources_tree),
+            },
+        )
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert "cannot combine" in result.stdout
+        assert "already-checked-out project config" in result.stdout
+        assert str(sources_tree / ".abicheck.yml") in result.stdout
+
+    def test_succeeds_with_sources_set_but_no_discoverable_config_there(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion: an --sources tree with no .abicheck.yml of its own
+        doesn't trip the new check."""
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        sources_tree = tmp_path / "plain_sources_tree"
+        sources_tree.mkdir()
+        result = self._run_from(
+            cwd,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(sources_tree),
+            },
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        cmd = result.stdout.splitlines()
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"

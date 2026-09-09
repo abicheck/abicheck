@@ -322,34 +322,50 @@ add_compile_context_flags() {
   fi
   # Codex review, PR #1154 follow-up: the explicit `build-config` input
   # above isn't the only way a project config can already be in play --
-  # `compare`/`dump` auto-discover a checked-out `.abicheck.yml` (cwd-
-  # upward for `compare`) when no `--config` is given at all. Writing this
-  # overlay and passing it as `--config` REPLACES that discovery entirely
-  # (an explicit --config is the CLI's one source of truth, never merged
-  # with a discovered one) -- so a real project config's severity/
-  # suppression/scope/bundle/etc. settings would be silently dropped for
-  # this run, exactly the "second config source shadows the first" failure
-  # already rejected loudly above for an *explicit* build-config. Same
-  # fail-loud precedent, extended to the auto-discovered case.
+  # `compare`/`dump` auto-discover a checked-out `.abicheck.yml` when no
+  # `--config` is given at all, via TWO independent mechanisms merge_
+  # compile_config itself falls back to: a cwd-upward walk
+  # (discover_project_config, what compare's own severity/scope/
+  # suppression resolution also uses), and -- separately -- a lookup
+  # rooted at the `--sources` tree itself (discover_build_config), which
+  # a cwd-upward walk alone does not cover when `sources` names a
+  # directory outside (and not an ancestor of) `$PWD` (Codex review,
+  # fresh evidence: dump/compare `--sources` case). Writing this overlay
+  # and passing it as `--config` REPLACES either discovery entirely (an
+  # explicit --config is the CLI's one source of truth, never merged with
+  # a discovered one) -- so a real project config's severity/suppression/
+  # scope/bundle/etc. settings would be silently dropped for this run,
+  # exactly the "second config source shadows the first" failure already
+  # rejected loudly above for an *explicit* build-config. Same fail-loud
+  # precedent, extended to both auto-discovered cases.
   local _checkout_dir="$PWD"
   if _discovered_cfg=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path
 
 from abicheck.cli_helpers_compare import discover_project_config
+from abicheck.config_paths import discover_build_config
 
 # Run from the private, empty $_PY_SAFE_DIR (never the checkout) so this
 # invocation can never itself be shadowed by a same-named abicheck.py/
-# abicheck/ package a PR-controlled checkout might plant -- but the
-# discovery walk itself must still search the REAL checkout, passed
-# explicitly as `start` (captured BEFORE the `cd` above) rather than
-# relying on Path.cwd(), which would resolve to $_PY_SAFE_DIR instead.
-found = discover_project_config(start=Path(sys.argv[1]))
+# abicheck/ package a PR-controlled checkout might plant -- but both
+# discovery walks must still search the REAL checkout/sources tree,
+# passed explicitly (captured BEFORE the `cd` above) rather than relying
+# on Path.cwd(), which would resolve to $_PY_SAFE_DIR instead.
+checkout_dir, sources = sys.argv[1], sys.argv[2] or None
+found = discover_project_config(start=Path(checkout_dir))
+if found is None and sources:
+    # Resolve a relative `sources` against the real checkout, not this
+    # process'\''s own cwd ($_PY_SAFE_DIR, after the `cd` above).
+    sources_path = Path(sources)
+    if not sources_path.is_absolute():
+        sources_path = Path(checkout_dir) / sources_path
+    found = discover_build_config(sources_path)
 if found is not None:
     print(found)
     sys.exit(0)
 sys.exit(1)
-' "$_checkout_dir" 2>/dev/null); then
+' "$_checkout_dir" "${INPUT_SOURCES:-}" 2>/dev/null); then
     echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with an already-checked-out project config ('$_discovered_cfg' would otherwise be auto-discovered): those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in that file instead (pass it via build-config), and drop the separate input(s)."
     exit 1
   fi
