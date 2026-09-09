@@ -79,11 +79,27 @@ base ref is available.
 
 ### Pin the depth
 
-`depth` is the single evidence-depth dial, and `mode: compare` reads it
-identically to `mode: scan`. Pin it for reproducible CI — unlike `scan`,
+`depth` is the single evidence-depth dial, and `mode: compare` reads the same
+values `mode: scan` does. Pin it for reproducible CI — unlike `scan`,
 `compare` has no risk-driven `auto` rung yet (plan §3 row 13); omitting
 `depth` on `compare` defaults deterministically to `headers`, not a
-risk-based choice:
+risk-based choice.
+
+**`compare`'s pinned depth is not a contract the way `scan`'s is.** `scan
+--depth source` with no `--sources`/`--build-info` given hard-fails before
+comparing (exit 7, "pinned depth 'source' ... needs source evidence, but no
+--sources/--build-info was given") — a pinned depth without the evidence to
+back it is an error, not a silent downgrade. `compare --depth source` has no
+such floor: with the same missing evidence it degrades silently to a
+binary-only comparison and can still exit 0 (verified live — see the gap
+table in [`docs/use/scan-levels.md`](scan-levels.md)). A copied
+`mode: compare` workflow that stops supplying `sources:`/`build-info:` (or
+never had it) will keep reporting green without ever running the L3-L5
+analysis it asked for, where the equivalent `mode: scan` workflow would fail
+loudly instead. Until `compare` gains its own evidence-floor enforcement,
+treat `sources:`/`build-info:` as load-bearing for any pinned `depth: build`
+or `depth: source` under `mode: compare` — nothing checks that they were
+actually supplied.
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
