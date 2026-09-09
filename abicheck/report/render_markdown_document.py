@@ -99,6 +99,7 @@ from .contract_conflicts_markdown import (
     ContractConflictsSection,
     render_contract_conflicts_section,
 )
+from .cross_source_evolution import CROSS_SOURCE_EVOLUTION_MD_TAGS
 from .disposition_audit import (
     DispositionAudit,
     compute_disposition_audit,
@@ -321,6 +322,7 @@ def _change_row(c: Any) -> dict[str, Any]:
     relevance = getattr(c, "contract_relevance", None)
     assurance = getattr(c, "contract_assurance", None)
     affected = getattr(c, "affected_symbols", None)
+    cse = getattr(c, "cross_source_evolution", None)
     return {
         "kind": kind.value if kind else "",
         "symbol": getattr(c, "symbol", None),
@@ -335,6 +337,13 @@ def _change_row(c: Any) -> dict[str, Any]:
         "contract_reason_code": getattr(c, "contract_reason_code", None),
         "contract_assurance": getattr(assurance, "value", None),
         "correlated_change_kind": getattr(c, "correlated_change_kind", None),
+        # ADR-068 finding A: this row type feeds the default full-mode
+        # Markdown report (`to_markdown`'s primary view) -- until this fix
+        # it never carried the OLD->NEW evolution state
+        # `workflows.cross_source_evolution` stamps on every hygiene
+        # finding, so a `persistent` (pre-existing) finding rendered
+        # indistinguishably from newly `introduced` drift.
+        "cross_source_evolution": getattr(cse, "value", None),
     }
 
 
@@ -354,11 +363,23 @@ def _row_contract_tag(row: Mapping[str, Any]) -> str | None:
     return tag
 
 
+def _row_cross_source_evolution_suffix(row: Mapping[str, Any]) -> str:
+    """``_change_row``-based counterpart of ``cross_source_evolution.
+    cross_source_evolution_md_suffix`` -- same tag, read from the JSON-safe
+    row instead of a live ``Change``."""
+    cse = row.get("cross_source_evolution")
+    if cse is None:
+        return ""
+    tag = CROSS_SOURCE_EVOLUTION_MD_TAGS.get(cse, cse)
+    return f"\n  > Cross-source hygiene: {tag}"
+
+
 def _render_change_row_oneline(row: Mapping[str, Any]) -> str:
     line = f"- **{row['kind']}**: {row['description']}"
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
+    line += _row_cross_source_evolution_suffix(row)
     return line
 
 
@@ -392,6 +413,7 @@ def _render_change_row(row: Mapping[str, Any]) -> str:
     correlated = row.get("correlated_change_kind")
     if correlated:
         line += f"\n  > See also: `{correlated}` finding for the same symbol"
+    line += _row_cross_source_evolution_suffix(row)
     return line
 
 

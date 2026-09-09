@@ -200,7 +200,53 @@ def test_evidence_status_for_result_downgrades_artifact_proven_to_unattributed()
 def test_evidence_status_for_result_keeps_artifact_proven_with_binary_evidence() -> (
     None
 ):
-    c = _change(ChangeKind.FUNC_REMOVED)
+    # A real ELF-observed removal: symbol_binding is stamped from the
+    # snapshot's own symbol table, the same as diff_symbols._check_removed_
+    # function does for a genuine removal.
+    c = _change(ChangeKind.FUNC_REMOVED, symbol_binding="global")
+    assert (
+        evidence_status_for_result(c, ["header", "elf"])
+        is EvidenceStatus.ARTIFACT_PROVEN
+    )
+
+
+def test_evidence_status_for_result_downgrades_unattributed_finding_despite_elf_tier() -> (
+    None
+):
+    # ADR-068 finding C: a comparison that DID examine a real ELF symbol
+    # table can still produce a BREAKING_KINDS finding synthesized from
+    # header-only evidence with no corresponding export (e.g. a header-only
+    # overload-set member never matched against a mangled ELF symbol). The
+    # comparison-level evidence_tiers check alone can't see this -- only the
+    # finding's own unset symbol_binding can.
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    assert (
+        evidence_status_for_result(c, ["header", "elf"]) is EvidenceStatus.UNATTRIBUTED
+    )
+
+
+def test_evidence_status_for_result_symbol_binding_check_is_elf_only() -> None:
+    # symbol_binding mirrors Function.elf_binding/Variable.elf_binding and is
+    # never populated on a PE/Mach-O run regardless of evidence quality --
+    # the per-finding check must not fire there, or every genuine PE/Mach-O
+    # removal would be misdowngraded.
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    assert (
+        evidence_status_for_result(c, ["header", "pe"])
+        is EvidenceStatus.ARTIFACT_PROVEN
+    )
+    assert (
+        evidence_status_for_result(c, ["header", "macho"])
+        is EvidenceStatus.ARTIFACT_PROVEN
+    )
+
+
+def test_evidence_status_for_result_symbol_binding_check_is_kind_scoped() -> None:
+    # Most BREAKING_KINDS members (e.g. TYPE_SIZE_CHANGED) never populate
+    # symbol_binding regardless of how solid their evidence is -- the
+    # per-finding check must only apply to the kinds whose own detector
+    # actually stamps it.
+    c = _change(ChangeKind.TYPE_SIZE_CHANGED)  # symbol_binding N/A for this kind
     assert (
         evidence_status_for_result(c, ["header", "elf"])
         is EvidenceStatus.ARTIFACT_PROVEN
