@@ -817,6 +817,23 @@ _extra_args_forces_legacy_scan_cli() {
         # risk-scores the seed (Codex/CodeRabbit review, fresh evidence).
         return 0
         ;;
+      --config)
+        # Fresh evidence, seventh Codex review round: `--config FILE` is
+        # accepted by BOTH commands and reaches this same escape hatch, but
+        # `_config_sets_source_method` (the dedicated-input gate condition)
+        # only ever inspects `INPUT_BUILD_CONFIG` or the cwd
+        # auto-discovered file -- never an override reaching it through
+        # `extra-args`, which Click resolves as the LAST `--config` seen
+        # regardless of source, so an `extra-args: --config custom.yml`
+        # always wins over a `build-config` input too. The identical
+        # auto-depth-resolution mismatch class as `build-config`'s own gap,
+        # one level further down the config-resolution chain. Forced
+        # unconditionally, not re-parsed for its own `source.method`: this
+        # tokenizer already takes the safe, over-inclusive direction
+        # everywhere else it can't fully reproduce compare's own
+        # resolution (e.g. `--sources`/`--build-info`/`--compile-db` below).
+        return 0
+        ;;
       --format)
         [[ "$_value" != "json" ]] && return 0
         ;;
@@ -934,6 +951,47 @@ from pathlib import Path
 try:
     from abicheck.scan_engine import _scan_candidate_include_dependencies
     print("1" if _scan_candidate_include_dependencies(Path(sys.argv[1])) else "0")
+except Exception:
+    print("1")
+' "$_baseline" 2>/dev/null)
+  [[ "$_result" == "1" ]]
+}
+
+# Mirrors `cli_scan_baseline._baseline_is_native_library`'s own content-first
+# sniff (seventh Codex review round, P1, fresh evidence): a native
+# `--against` library (not a JSON/ABICC-dump snapshot, which already has its
+# headers baked in) is re-parsed from source when headers are given, so
+# `cli_scan_baseline._resolve_baseline_header_scope` deliberately reuses the
+# candidate's own `-H` for the old side too whenever no dedicated old-side
+# header was given -- "correct only when the headers did not change", but
+# strictly better than the alternative of reading the old side purely as a
+# headerless binary while the new side gets full header-derived facts. The
+# migrated `compare` invocation forwards `new-header`/`public-header-dir`
+# scoped to `new=` only, with nothing filling the old side -- an old library
+# exporting `existing` and a new library exporting `existing`+`added`, with
+# only `new-header` given, diverges: `scan` reports no change (both sides
+# read through the identical header, which is what scan's fallback is for),
+# migrated `compare` reports `func_added` (the old side has no header
+# evidence at all to match against). Reuses the real Python sniff rather
+# than reimplementing binary-format detection a second time in bash, same
+# rationale as the dependency-scope helper above. Echoes "1" (assume
+# native, the direction that leads to reproducing scan's reuse rather than
+# silently leaving the gap open) whenever this can't be reliably determined.
+_migrated_compare_against_is_native_library() {
+  local _baseline="$1"
+  if [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    return 0
+  fi
+  if ! _is_path_already_qualified "$_baseline"; then
+    _baseline="$PWD/$_baseline"
+  fi
+  local _result
+  _result=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+try:
+    from abicheck.cli_scan_baseline import _baseline_is_native_library
+    print("1" if _baseline_is_native_library(Path(sys.argv[1])) else "0")
 except Exception:
     print("1")
 ' "$_baseline" 2>/dev/null)
@@ -2555,6 +2613,27 @@ elif [[ "$MODE" == "scan" ]]; then
   # requires it), so this always scopes to `new=`, matching scan's own
   # sided branch for the identical "with a resolved baseline" case.
   add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  # Seventh Codex review round, P1, fresh evidence: reproduce
+  # `cli_scan_baseline._resolve_baseline_header_scope`'s own old-side
+  # header-reuse fallback for a native `--against` library -- when no
+  # dedicated `old-header` was given but the candidate has header evidence
+  # of its own (`new-header`/`public-header-dir`) and the baseline is a
+  # real binary (not a JSON/ABICC-dump snapshot, which already carries its
+  # own headers), `scan` deliberately re-parses the old side through the
+  # SAME headers as the candidate rather than leaving it a headerless
+  # binary next to a header-evidenced new side. Without this, the migrated
+  # `compare` invocation left the old side with no header at all in exactly
+  # this shape, changing findings (verified: an old library exporting
+  # `existing`, a new library exporting `existing`+`added`, only
+  # `new-header` given -- `scan` reports no change, migrated `compare`
+  # reported `func_added`).
+  if [[ -z "${INPUT_OLD_HEADER:-}" ]] \
+     && { [[ -n "${INPUT_NEW_HEADER:-}" ]] || [[ -n "${INPUT_PUBLIC_HEADER_DIR:-}" ]]; } \
+     && _migrated_compare_against_is_native_library "${INPUT_AGAINST}"; then
+    echo "::warning::mode: scan (migrated to 'abicheck compare' internally): --against '${INPUT_AGAINST}' is a native library parsed with the new build's header(s) (new-header/public-header-dir) -- reusing them for the old side too, matching scan's own fallback. If the old library's real public headers differ from the new build's, pass old-header explicitly (the diff may otherwise be wrong/noisy)."
+    add_sided_flag "-H" "old" "${INPUT_NEW_HEADER:-}"
+    add_sided_flag "-H" "old" "${INPUT_PUBLIC_HEADER_DIR:-}"
+  fi
 
   add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"

@@ -425,6 +425,13 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
             "--pattern-verdicts",
             "--no-pattern-verdicts",
             "--show-suppressed",
+            # Seventh Codex review round, P1 (fresh evidence): `--config
+            # FILE` is accepted by both commands and reaches this same
+            # escape hatch, but the dedicated `_config_sets_source_method`
+            # gate condition never inspects an override reaching it
+            # through `extra-args` -- Click's own last-flag-wins means it
+            # always beats a `build-config` input too.
+            "--config custom.yml",
         ],
     )
     def test_scan_only_extra_arg_stays_on_scan(self, extra_args: str) -> None:
@@ -709,3 +716,100 @@ class TestScanStaysOnLegacyCliForFullDependencyScopeBaseline:
         baseline.write_text("{}", encoding="utf-8")
         cmd = _run_cmd(_base_env(INPUT_AGAINST=str(baseline)))
         assert cmd[1] == "compare", cmd
+
+
+def _native_lib(tmp_path: Path, name: str = "baseline.so") -> str:
+    # `_baseline_is_native_library`'s content-first sniff recognizes real
+    # ELF magic bytes -- matches the identical fixture the sibling
+    # cross-source-fallback test module already uses for the same purpose.
+    path = tmp_path / name
+    path.write_bytes(b"\x7fELF")
+    return str(path)
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestMigratedCompareReusesHeadersForNativeBaseline:
+    """Seventh Codex review round, P1 (fresh evidence): ``cli_scan_baseline.
+    _resolve_baseline_header_scope`` deliberately reuses the candidate's own
+    header(s) for the old side too when ``--against`` is a native library
+    (re-parsed from source, unlike a JSON/ABICC-dump snapshot which already
+    carries its own headers) and no dedicated old-side header was given --
+    "correct only when the headers did not change" (the function's own
+    docstring), but strictly better than leaving the old side a headerless
+    binary next to a header-evidenced new side. The migrated ``compare``
+    invocation forwarded ``new-header``/``public-header-dir`` scoped to
+    ``new=`` only, with nothing filling the old side: verified directly
+    against an old library exporting ``existing`` and a new library
+    exporting ``existing``+``added``, with only ``new-header`` given --
+    ``scan`` reports no change (both sides read through the identical
+    header), the un-fixed migrated ``compare`` reported ``func_added``
+    (the old side had no header evidence to match the addition against).
+    """
+
+    def test_new_header_reused_for_old_side_on_native_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        header = str(tmp_path / "api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=header,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={header}" in cmd, cmd
+        assert f"new={header}" in cmd, cmd
+
+    def test_public_header_dir_reused_for_old_side_on_native_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        header_dir = str(tmp_path / "include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_PUBLIC_HEADER_DIR=header_dir,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={header_dir}" in cmd, cmd
+        assert f"new={header_dir}" in cmd, cmd
+
+    def test_explicit_old_header_is_not_overridden(self, tmp_path: Path) -> None:
+        # The reuse fallback only fires when old-header is absent -- an
+        # explicitly-given old-header must win, exactly like scan's own
+        # fallback only ever applies "without them" (no dedicated old-side
+        # header).
+        new_header = str(tmp_path / "new-api.h")
+        old_header = str(tmp_path / "old-api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=new_header,
+                INPUT_OLD_HEADER=old_header,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={old_header}" in cmd, cmd
+        assert f"old={new_header}" not in cmd, cmd
+
+    def test_no_reuse_for_json_baseline(self, tmp_path: Path) -> None:
+        # A JSON/ABICC-dump snapshot baseline already carries its own
+        # headers -- no reuse needed, and none must be added.
+        baseline = tmp_path / "baseline.abicheck.json"
+        baseline.write_text("{}", encoding="utf-8")
+        header = str(tmp_path / "api.h")
+        cmd = _run_cmd(
+            _base_env(INPUT_AGAINST=str(baseline), INPUT_NEW_HEADER=header)
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={header}" not in cmd, cmd
+
+    def test_no_reuse_when_new_side_has_no_header_either(
+        self, tmp_path: Path
+    ) -> None:
+        # Nothing to reuse -- neither side gets a sided -H at all, and this
+        # must not itself force the legacy CLI (the default, header-less
+        # case this migration was built for in the first place).
+        cmd = _run_cmd(_base_env(INPUT_AGAINST=_native_lib(tmp_path)))
+        assert cmd[1] == "compare", cmd
+        assert not any(tok.startswith("old=") for tok in cmd), cmd

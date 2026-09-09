@@ -139,3 +139,16 @@ it should read in CHANGELOG.md. Delete the other sections.
   previously valid `--write json=report.json --write json=report.json`
   scan step would otherwise start hard-failing under a migrated
   invocation.
+  A seventh review round closed two more gaps: an effective `--config`
+  reaching a migrated invocation through `extra-args` (rather than the
+  dedicated `build-config` input) now also stays on the legacy CLI, since
+  Click's own last-flag-wins means it always overrides `build-config` too,
+  and `_config_sets_source_method` never inspected it; and the migrated
+  `compare` invocation now reproduces `cli_scan_baseline`'s own old-side
+  header-reuse fallback for a native `--against` library -- when no
+  dedicated `old-header` is given but the candidate has header evidence of
+  its own (`new-header`/`public-header-dir`), `scan` deliberately re-parses
+  the old side through the SAME headers as the candidate rather than
+  leaving it a headerless binary next to a header-evidenced new side, and
+  the un-fixed migrated `compare` invocation left the old side with no
+  header at all in exactly this shape, changing findings.
