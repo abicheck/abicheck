@@ -1226,6 +1226,30 @@ def _format_release_junit(
     findings included (the synthetic testsuite appended below is filtered
     the same way a real library's is, since it rides through the identical
     ``(DiffResult, old_snapshot)`` shape).
+
+    *show_impact* (``--view impact``, Codex review, PR #1154 third
+    follow-up: "Fresh evidence after the prior per-library impact-view
+    fix ... this JUnit branch renders from ``diff_pairs`` and forwards
+    only ``show_only`` ... silently omits the requested impact view")
+    is deliberately **not** a parameter here at all, matching single-pair
+    ``compare``'s own already-shipped behaviour: ``service_render.
+    render_output``'s ``fmt == "junit"`` branch never receives or forwards
+    ``show_impact`` either, so ``compare --format junit --view impact`` on
+    a single old/new pair already renders ordinary JUnit XML with no
+    impact representation, silently, today -- this is not a release-only
+    gap this function introduced, it is the release engine agreeing with
+    the single-pair contract it exists to mirror (ADR-037 D1/D7). An
+    impact table is inherently prose (a ranked list of affected symbols
+    with explanations, see ``report/build.py``'s ``impact_table``) with no
+    natural ``<testsuite>``/``<testcase>`` projection the way a filtered
+    finding set has, and JUnit's actual consumers (CI dashboards matching
+    on pass/fail per testcase) have no use for it -- the same reasoning
+    that makes *demangle* a no-op for junit/json above. Silently doing
+    nothing here (rather than rejecting ``--view impact`` outright for a
+    release JUnit render) preserves that parity: rejecting only the
+    release path would make it *more* restrictive than the single-pair
+    command for the identical flag combination, which is the opposite of
+    what every other ``--view``-forwarding fix in this file does.
     """
     from .junit_report import to_junit_xml_multi
 

@@ -539,6 +539,75 @@ class TestReleaseViewImpactAggregate:
         assert secondary_lib["impact_table"]["root_entries"]
 
 
+class TestReleaseViewImpactJUnitParity:
+    """``--format junit --view impact`` on a directory/package operand
+    (Codex review, PR #1154 third follow-up): a release JUnit render never
+    receives ``show_impact`` at all, unlike the JSON/Markdown renders proven
+    above. This is not a release-only gap -- single-pair ``compare --format
+    junit --view impact`` already renders ordinary JUnit XML with no impact
+    representation, silently, since ``service_render.render_output``'s own
+    ``fmt == "junit"`` branch never forwards ``show_impact`` either. This
+    class pins that parity (not a bug fix, a regression guard): the release
+    JUnit render must keep behaving exactly like the single-pair one for the
+    identical flag combination -- it must not start rejecting the
+    combination (which would make the release path *more* restrictive than
+    single-pair `compare` for the same flags) and it must not start
+    injecting some release-only impact representation into JUnit XML that
+    single-pair `compare` has no equivalent of."""
+
+    def test_release_junit_with_view_impact_matches_release_junit_without_it(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+
+        with_impact = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "junit", "--view", "impact",
+        )
+        without_impact = _invoke(
+            "compare", str(old_dir), str(new_dir), "--format", "junit",
+        )
+        assert with_impact.exit_code == 4, with_impact.output
+        assert without_impact.exit_code == 4, without_impact.output
+        assert with_impact.output == without_impact.output
+
+    def test_release_junit_with_view_impact_carries_no_impact_markup(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "junit", "--view", "impact",
+        )
+        assert result.exit_code == 4, result.output
+        assert "<?xml" in result.output
+        assert "impact" not in result.output.lower()
+
+    def test_single_pair_junit_with_view_impact_also_carries_no_impact_markup(
+        self, tmp_path: Path
+    ) -> None:
+        """Same struct-size-change library, compared as a single old/new
+        ``.json`` pair rather than a directory -- confirms the release
+        fan-out's silent no-op (asserted above) matches the single-pair
+        path it exists to mirror (ADR-037 D1/D7), not just a release-side
+        coincidence. Doesn't assert byte-identical output: a release render
+        also carries its own ``comparison_scope`` testsuite the single-pair
+        path never emits, which is an orthogonal, already-covered
+        difference, not part of what this test pins."""
+        old_dir, new_dir = _write_struct_size_change_pair(tmp_path)
+        old_snap_path = old_dir / "libfoo.json"
+        new_snap_path = new_dir / "libfoo.json"
+
+        single_pair = _invoke(
+            "compare", str(old_snap_path), str(new_snap_path),
+            "--format", "junit", "--view", "impact",
+        )
+        assert single_pair.exit_code == 4, single_pair.output
+        assert "<?xml" in single_pair.output
+        assert "impact" not in single_pair.output.lower()
+
+
 class TestReleaseViewShowOnlySecondaryWriteStaysFull:
     """Codex review, PR #1154 second follow-up ("Apply release show filters
     inside each renderer"): a secondary ``--write`` report is documented/

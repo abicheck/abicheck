@@ -548,10 +548,20 @@ def retired_surface_scan_targets(
     `docs/`, each kept advertising a retired flag after removal, invisible
     above (Codex review, fresh evidence -- twice, one file each).
 
+    `tools/**/*.md` is here for the identical reason one step further out
+    still: a first-party companion tool's own README documents real
+    invocations of the main CLI too (e.g. `tools/clang-layout-tool/
+    README.md`'s "Using it with abicheck" section), and this sweep
+    previously stopped at the repository root -- `--ast-frontend`'s
+    removal from `compare` left that page advertising it, invisible here
+    the same way every other one-directory-further-out gap in this
+    function's own history was (Codex review, fresh evidence).
+
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
-    `catalog/ground_truth.json`, `README.md`, `AGENTS.md`), which cannot
-    collide with a docs-relative key, so an allowlist entry stays unambiguous.
+    `catalog/ground_truth.json`, `README.md`, `AGENTS.md`,
+    `tools/<tool>/README.md`), which cannot collide with a docs-relative
+    key, so an allowlist entry stays unambiguous.
     """
     targets = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
     targets += [
@@ -570,6 +580,12 @@ def retired_surface_scan_targets(
     for name in ("README.md", "AGENTS.md"):
         if (root / name).is_file():
             targets.append((root / name, name))
+    tools_dir = root / "tools"
+    if tools_dir.is_dir():
+        targets += [
+            (p, f"tools/{p.relative_to(tools_dir).as_posix()}")
+            for p in sorted(tools_dir.rglob("*.md"))
+        ]
     return targets
 
 

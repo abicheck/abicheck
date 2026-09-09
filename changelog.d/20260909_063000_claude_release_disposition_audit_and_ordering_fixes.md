@@ -37,3 +37,12 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   retired `compare --pattern-verdicts` flag (pattern-verdict modulation is
   unconditional now); copying it verbatim exited with a usage error instead
   of producing the documented finding.
+- `tools/clang-layout-tool/README.md` referenced the retired
+  `--ast-frontend clang` flag in its example command and prose; the docs
+  contract's retired-surface sweep didn't scan `tools/` at all, so this
+  went uncaught. The sweep now covers every `tools/**/*.md`.
+- Documented (no behavior change) that `compare --format junit --view
+  impact` on a directory/package release intentionally renders ordinary
+  JUnit XML with no impact representation, matching single-pair
+  `compare`'s own already-shipped identical no-op for the same flag
+  combination.
