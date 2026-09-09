@@ -6696,6 +6696,31 @@ reported as `introduced`. The parity harness (`tests/parity/`) already has
 the scan-vs-compare shape needed to gate it, and the eleven fixtures above
 are a ready-made acceptance corpus.
 
+### `compare --no-baseline` accepts `--contract` but never wires it through
+
+Found in the same Phase 4 documentation slice, verified by reading
+`frontends/cli/commands/compare_no_baseline.py` against `main` at the same
+commit above (fd6ba681). `compare --no-baseline` accepts `--contract
+public|exports|all|auto` — Click parses it, `--help` documents it — but
+`_run_no_baseline_compare_cmd` never reads `kwargs.get("contract")` (or a
+resolved `contract_mode`) and never passes anything contract-related to
+`run_no_baseline_compare`. The contract-coverage ledger this axis's exit
+contribution folds from is therefore never populated on this path: a
+`compare --no-baseline NEW --contract public` run against a headerless
+candidate exits `0`, where the equivalent two-sided `compare OLD NEW
+--contract public` exits `1` for missing public-header coverage. The flag
+is accepted but silently inert, not merely undocumented — a CI job relying
+on it as a gate gets no warning that it never ran.
+
+Not fixed here, same file-ownership boundary as the gap above. The fix is
+threading the resolved `contract_mode`/`contract_evaluation` config through
+`_run_no_baseline_compare_cmd` into `run_no_baseline_compare`, the same way
+the two-sided `compare` path already does via
+`compatibility_evaluation_frontend`/`contract_pipeline`. Recorded in
+[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact)
+rather than left as a silent behavioral gap in the doc that would otherwise
+claim the axis "applies exactly as it would for a two-sided run."
+
 ### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
 
 Found while closing ADR-068's baseline cross-source authority divergence

@@ -420,9 +420,12 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
 ```
 
 - **Depth:** pinned explicitly here (`--depth source`) since `compare` has
-  no risk-driven `auto` selection (it defaults to `headers` when omitted,
-  regardless of a diff seed) — on `scan`, by contrast, omitting `--depth`
-  with a diff seed present resolves to `auto`'s risk-driven `source`.
+  no risk-driven `auto` selection — omitting `--depth` never picks a rung by
+  risk, but with `--sources new=.` already given (as above) it would still
+  infer `source-target` from that input, not `headers`; the pin exists for
+  reproducibility, not because omitting it would fall back to `headers`
+  here. On `scan`, by contrast, omitting `--depth` with a diff seed present
+  resolves to `auto`'s risk-driven `source`.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
   break. `--budget` overflow (exit `5`) is `scan`-only for now — see
   [Exit Codes](../reference/exit-codes.md).

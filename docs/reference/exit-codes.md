@@ -171,9 +171,20 @@ there is no prior surface, so `run_outcome.scope` reads `complete` and the
 never emits an addition, a removal, or a compatibility verdict —
 `run_outcome.compatibility` and the top-level `verdict` are JSON `null`,
 and `changes` is always `[]`. The compatibility axis therefore always
-contributes `0` to the exit code; the orthogonal analysis-assurance and
-contract-coverage axes below still apply exactly as they would for a
-two-sided run, folded with the same `max` discipline.
+contributes `0` to the exit code; the orthogonal analysis-assurance axis
+still applies as it would for a two-sided run.
+
+**The contract-coverage axis does not, yet.** `compare --no-baseline`
+accepts `--contract`, but
+`frontends/cli/commands/compare_no_baseline.py` never forwards it (or a
+resolved `contract_mode`) to `run_no_baseline_compare` — the coverage
+ledger this axis folds from is simply never populated on this path. A
+`compare --no-baseline NEW --contract public` run against a headerless
+candidate exits `0`, where the equivalent two-sided `compare OLD NEW
+--contract public` would exit `1` for missing public-header coverage.
+Treat `--contract` on `--no-baseline` as accepted but currently inert
+rather than as an active gate; this is a known gap, not documented
+behavior to rely on.
 
 ## Analysis-assurance contribution (P0.4)
 
