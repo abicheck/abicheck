@@ -147,3 +147,54 @@ class TestDebugPdbPathRejectedOnlyForTwoLivePeOperands:
         )
 
         assert not (code == 64 and "debug.pdb_path" in out), out
+
+
+class TestDebugPdbPathRejectedForReleaseFanOut:
+    """Codex review, PR #1180, third round ("Reject PDB config for release
+    fan-outs"): the two-live-PE-sides check above sees the raw directory/
+    package *operand*, never its per-member DLLs, so it never fires for a
+    directory/package compare -- ``detect_binary_format(directory)`` is
+    ``None``. The release dispatch has no PDB parameter of its own at all,
+    so a configured ``debug.pdb_path`` used to be silently dropped: every
+    member fell back to auto-discovery with no PDB, which can hide a real
+    layout change behind a false clean release verdict. Now rejected
+    outright for a directory/package operand, the same way every other
+    single-pair-only flag already is.
+    """
+
+    def test_rejected_for_directory_operands(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_fake_pe(old_dir / "widget.dll")
+        _write_fake_pe(new_dir / "widget.dll")
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("debug:\n  pdb_path: C:/symbols/foo.pdb\n")
+
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--config", str(config_path), "--format", "json",
+        )
+
+        assert code == 64, out
+        assert "debug.pdb_path" in out
+        assert "directory/package" in out
+
+    def test_accepted_for_directory_operands_without_pdb_path_configured(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion: the rejection must not regress an ordinary directory
+        compare with no debug.pdb_path configured."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_fake_pe(old_dir / "widget.dll")
+        _write_fake_pe(new_dir / "widget.dll")
+
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir), "--format", "json",
+        )
+
+        assert not (code == 64 and "debug.pdb_path" in out), out

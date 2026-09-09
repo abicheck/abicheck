@@ -111,3 +111,28 @@ class TestBudgetBoundaryCheck:
         # Before the fix, the secondary target was never written at all.
         assert secondary_p.exists() and secondary_p.stat().st_size > 0
         assert b"<testsuite" in secondary_p.read_bytes()
+
+    def test_zero_budget_renders_abort_for_markdown_and_html_too(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, fresh evidence, PR #1180 ("Render aborts for every
+        # accepted output format"): _render_one only handled json/sarif/
+        # junit -- a markdown or html target stayed silently absent (or, if
+        # it already existed from a prior successful run, stale) on abort.
+        old_p, new_p = _write_snapshots(tmp_path)
+        md_p = tmp_path / "out.md"
+        html_p = tmp_path / "out.html"
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--budget", "0s",
+                "--format", "markdown", "-o", str(md_p),
+                "--write", f"html={html_p}",
+            ],
+        )
+        assert result.exit_code == 5, result.output
+        assert md_p.exists() and md_p.stat().st_size > 0
+        assert "comparison aborted" in md_p.read_text(encoding="utf-8")
+        assert html_p.exists() and html_p.stat().st_size > 0
+        assert "comparison aborted" in html_p.read_text(encoding="utf-8")

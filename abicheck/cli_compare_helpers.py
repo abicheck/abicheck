@@ -941,7 +941,7 @@ def _reject_flags_unsupported_for_set_inputs(
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
     suppress: Path | None = None,
-    budget: str | None = None,
+    budget: str | None = None, pdb_path: Path | None = None,
 ) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -971,7 +971,7 @@ def _reject_flags_unsupported_for_set_inputs(
         suppress=suppress,
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
-        budget=budget,
+        budget=budget, pdb_path=pdb_path,
     )
     _reject_compile_context_for_set_inputs(ctx)
     return _reject_evidence_flags_for_set_inputs(ctx)
@@ -1419,7 +1419,7 @@ def run_compare(
             require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
             suppress=suppress,
-            budget=budget,
+            budget=budget, pdb_path=pdb_path,
         )
         # Codex review, fresh evidence ("Validate release-only view
         # restrictions before dry-run exit"): --view leaf/root-cause is

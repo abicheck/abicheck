@@ -68,6 +68,7 @@ def _reject_set_input_flags(
     include_labels: dict[Path, str] | None = None,
     require_complete_analysis: bool = False,
     budget: str | None = None,
+    pdb_path: Path | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -96,6 +97,23 @@ def _reject_set_input_flags(
             "--env-matrix is not supported for directory/package (release) "
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
+        )
+    if pdb_path is not None:
+        # Codex review, PR #1180, fresh evidence ("Reject PDB config for
+        # release fan-outs"): compare_pdb_config's own PE-liveness check
+        # never fires here -- it sees the raw directory/package path, not
+        # its PE members, so it never rejects. The release dispatch below
+        # has no PDB parameter of its own at all, so a configured
+        # debug.pdb_path would otherwise be silently dropped, every member
+        # falling back to auto-discovery with no PDB.
+        raise click.UsageError(
+            "debug.pdb_path is not supported for directory/package "
+            "(release) comparisons: the per-library fan-out has no "
+            "per-member PDB parameter, so the configured value would be "
+            "silently ignored while every member fell back to auto-"
+            "discovery (an embedded PDB path, or a same-named .pdb next "
+            "to the DLL). Compare the specific library individually to "
+            "use it."
         )
     if used_by_apps:
         raise click.UsageError(
