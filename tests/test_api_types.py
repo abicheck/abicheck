@@ -195,6 +195,35 @@ class TestCompareRequestValidate:
         with pytest.raises(ValidationError, match="gccxml"):
             req.validate()
 
+    # ── ADR-068 §3 #19: budget_s finite/non-negative floor (Codex review,
+    #    fresh evidence, PR #1178) ──────────────────────────────────────────
+
+    @pytest.mark.parametrize("budget_s", [0, 0.0, 1, 900.5, None])
+    def test_valid_budget_s_accepted(self, budget_s):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), budget_s=budget_s
+        )
+        assert req.validation_errors() == []
+
+    @pytest.mark.parametrize(
+        "budget_s", [float("nan"), float("inf"), float("-inf"), -1.0, -0.5]
+    )
+    def test_non_finite_or_negative_budget_s_rejected(self, budget_s):
+        # The typed API reaches the identical deadline_scope(request.budget_s)
+        # call `run_compare_request` enters with no CLI in between, so it
+        # needs the same math.isfinite floor the CLI's own --budget parser
+        # (_parse_budget) already applies -- an infinite deadline never trips
+        # deadline.check()'s `left <= 0` test, and nan never compares true
+        # either way, so both would otherwise silently disable the guard.
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), budget_s=budget_s
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "budget_s" in errors[0]
+        with pytest.raises(ValidationError, match="budget_s"):
+            req.validate()
+
     def test_android_frontend_without_sources_rejected(self):
         # 'android' is source-ABI only (no header-AST path) — a header-only run
         # can't use it (ADR-037 D8/D9).

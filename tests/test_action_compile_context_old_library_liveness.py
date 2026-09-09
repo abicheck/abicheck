@@ -54,6 +54,22 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 
+# The FIRST `elif [[ "$MODE" == "scan" ]]; then` in the file is scan's
+# translated-to-compare branch (ADR-068 D2) -- reached only when
+# `$_SCAN_NEEDS_LEGACY_CLI` is false. Anchored on its own unique header
+# comment rather than the bare mode-test line itself: that exact substring
+# also appears inside a comment in `_compile_context_sources_pairwise()`'s
+# own docstring in `action/run.sh` (referencing this very branch), which
+# sits well before the real branch and would make a plain `text.index()`
+# search anchor to the wrong (and non-executable) location.
+_SCAN_TRANSLATED_MODE_MARKER = "# ── Scan mode, internally routed through"
+# This branch's own call to the shared helper -- a one-line region, mirroring
+# dump's identical single-line extraction (`_run_region_with_cwd` only needs
+# `add_compile_context_flags` to actually run; it does not need every other
+# flag this branch also forwards).
+_SCAN_TRANSLATED_COMPILE_CONTEXT_START = "add_compile_context_flags true"
+_SCAN_TRANSLATED_COMPILE_CONTEXT_END = "add_compile_context_flags true"
+
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 
 # compare's region (Phase 7) starts at the gating comment (these inputs are
@@ -67,6 +83,12 @@ _COMPARE_COMPILE_CONTEXT_END = "else\n    add_compile_context_flags true\n  fi"
 
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
+    _SCAN_TRANSLATED_COMPILE_CONTEXT_START: _SCAN_TRANSLATED_COMPILE_CONTEXT_END,
+}
+
+_MODE_VALUE_FOR_MARKER: dict[str, str] = {
+    _COMPARE_MODE_MARKER: "compare",
+    _SCAN_TRANSLATED_MODE_MARKER: "scan",
 }
 
 # add_compile_context_flags() itself (Phase 7): extracted verbatim, since
@@ -260,7 +282,7 @@ def _run_region_with_cwd(
     ``.abicheck.yml``/``--sources`` discovery sees the real fixtures each
     test below writes to ``tmp_path``."""
     harness = (
-        'MODE="compare"\n'
+        f'MODE="{_MODE_VALUE_FOR_MARKER[mode_marker]}"\n'
         'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
@@ -579,3 +601,98 @@ class TestCompileContextPairwiseOldLibraryClassification:
         assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
         assert "source" not in doc
         assert "debug" not in doc
+
+
+class TestCompileContextTranslatedScanStaysSingleSidedRegardlessOfLiveness:
+    """Codex review, PR #1171 (P1, fresh evidence, ninth AND tenth rounds).
+
+    The ninth round argued ``scan --against`` internally routed through
+    ``compare`` (ADR-068 D2) should be treated pairwise whenever
+    ``--against`` is itself a live binary, by analogy with ``compare``'s own
+    OLD/NEW liveness distinction. That analogy does not hold: unlike
+    ``compare``'s genuinely independent, two-sided model, native ``scan``
+    resolves ONE shared ``compile_context`` for the whole invocation
+    (``resolve_compile_context()``, ``abicheck/cli_scan.py``) and applies it
+    to BOTH the baseline and the candidate regardless of whether the
+    baseline is live -- ``cli_scan_baseline.py``'s own
+    ``_run_baseline_compare`` threads that identical ``compile_context``
+    into the baseline's own ``InputSpec``/``SideEvidence`` too. So the
+    ``--sources``-root's own ``compile:``/``source:``/``debug:`` block being
+    the intended, single source for that one shared context is scan's own
+    real, native, already-established behavior for a live baseline just as
+    much as for a stored one -- the tenth round found the ninth round's fix
+    would have made the Action's translated route silently diverge from
+    that native behavior for the exact same user-facing `scan --against`
+    request. Reverted: ``scan``'s translated branch is single-sided
+    UNCONDITIONALLY, the same as before the ninth round, proven here for
+    both operand shapes so neither direction regresses silently again."""
+
+    def test_translated_scan_is_single_sided_when_against_is_a_live_binary(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/sources-root-sysroot\n"
+            "source:\n  method: s6\n"
+            "debug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "baseline.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8)
+        cmd, _ = _run_region_with_cwd(
+            _SCAN_TRANSLATED_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_AGAINST": "baseline.so",
+            },
+            tmp_path,
+            _SCAN_TRANSLATED_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # Single-sided even though --against is a live binary: matches
+        # native scan's own one-shared-compile_context behavior, which
+        # applies the sources-root config to the baseline too.
+        assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
+        assert doc["source"] == {"method": "s6"}
+        assert doc["debug"] == {"format": "dwarf"}
+
+    def test_translated_scan_is_single_sided_when_against_is_a_stored_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/sources-root-sysroot\n"
+            "source:\n  method: s6\n"
+            "debug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "baseline.abicheck.json").write_bytes(b'{"schema_version": 1}')
+        cmd, _ = _run_region_with_cwd(
+            _SCAN_TRANSLATED_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_AGAINST": "baseline.abicheck.json",
+            },
+            tmp_path,
+            _SCAN_TRANSLATED_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # Single-sided: the stored baseline does no header/debug extraction
+        # of its own, so the sources-root's own compile:/source:/debug: are
+        # the intended, only source for the scanned ARTIFACT.
+        assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
+        assert doc["source"] == {"method": "s6"}
+        assert doc["debug"] == {"format": "dwarf"}

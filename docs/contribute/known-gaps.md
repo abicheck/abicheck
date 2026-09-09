@@ -6726,66 +6726,118 @@ claim the axis "applies exactly as it would for a two-sided run."
 Found while closing ADR-068's baseline cross-source authority divergence
 (see the ADR's 2026-09-09 amendment,
 [`plans/one-comparison-product.md`](plans/one-comparison-product.md) Phase
-4). `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI` predicate no longer treats
-*every* `mode: scan` baseline request as needing the legacy CLI — the
-severity/gating divergence that forced that catch-all
-(`9f2166e5c`) is fixed (`scan --against`'s baseline path no longer strips
-cross-source findings to advisory-only; see the ADR amendment). But the
-predicate's other, narrower conditions remain live and route to the legacy
-CLI for real, independent reasons — none of them are instances of the
-severity divergence the amendment closed:
+4). **Update (2026-09-09, Phase 4 commit 2):** the maintainer re-scoped this
+work — the Action does not keep a compatible interface with every `scan`
+capability, so each remaining condition below is now ruled (a) already
+covered, (b) dropped as a documented breaking change, or (c) genuinely
+required and implemented — see ADR-068's second 2026-09-09 amendment for the
+full per-condition table. Two rows closed for real in this commit:
 
-- `--budget`, `--risk-rules`, `--crosscheck`, `--build-target` — `scan`-only
-  Action inputs with no `compare` flag equivalent yet (`compare --help-all`
-  has none of them). Plan §3 rows #14/#19/#23 and the `--build-target` row
-  track each as its own migration item.
-- No explicit `--depth` — `scan`'s risk-driven `auto` depth selection
-  (binary/headers/build/source scored off the diff) has no `compare`
-  equivalent; omitting `--depth` on `compare` deterministically defaults to
-  `headers`, never deeper. Routing that case onto `compare` would silently
-  cap a high-risk change that should have reached source replay.
-- An explicit `--depth build`/`--depth source` — `scan`'s own hard
-  evidence-contract floor (exit 7 when a pinned depth's evidence was never
-  collected) has no `compare` equivalent on the single-pair path; routing
-  this case onto `compare` would silently drop the contract instead of
-  reporting the same real, actionable error `scan` gives today.
-- `--header`/`--include` combined with the dedicated baseline-side inputs,
-  a `.json`-extension (compressed `.gz`/`.zst` included) or
-  content-detected JSON snapshot `--against` baseline, `--output-file`, and
-  any `--write`/scan-only flag reaching through the general `extra-args`
-  passthrough — each a real shape `compare`'s current flag surface doesn't
-  yet cover identically.
-- An effective non-JSON/text `--format` (from the dedicated Action input or
-  from an `extra-args` override) and a `-o`/`--output` output path supplied
-  via `extra-args` — `scan` and `compare` disagree on accepted format
-  values and on the shape of the file each writes, so both stay on the
-  legacy CLI. A `--crosscheck`/`--budget`/`--risk-rules`/`--build-target`
-  passed the same way, and the compile-context-option family (`--abi3`,
-  `--frontend-context`, `--allow-ast-frontend-fallback`, `--lang`,
-  `--ast-frontend`, `--compiler*`, `--sysroot`, `--nostdinc`) reaching
-  through `extra-args`, are the same underlying gaps as the two rows
-  above, just via the passthrough rather than a dedicated Action input.
-- A default (or explicit `--no-pattern-verdicts`) baseline scan — `compare`'s
-  pattern-verdict modulation has been unconditional since ADR-068 D4, with
-  no flag left on that side to turn it off at all, while `scan --against`
-  still defaults `--pattern-verdicts` off. Only an explicit bare
-  `--pattern-verdicts` in `extra-args` (matching `compare`'s forced-on
-  behavior exactly) is safe to route; every other case — the default, or
-  an explicit `--no-pattern-verdicts` (which `compare` has nothing to
-  translate onto) — stays on the legacy CLI.
+- **`--budget` — closed.** `compare` gained a `--budget` option
+  (`frontends/cli/commands/compare.py`), enforced via
+  `deadline.deadline_scope` around both the resolve and classify phases
+  (remaining-time-aware, not a fresh full budget on each entry), setting
+  `DiffResult.budget_overflow` (exit 5) on overflow. Verified live. Typed API:
+  `CompareRequest.budget_s`. **Known, accepted narrowing**: bounds two
+  coarser phases (resolve, classify) rather than `scan_engine.py`'s own
+  finer per-stage checks — still a real, enforced ceiling, not a capability
+  gap.
+- **An explicit `--depth build`/`--depth source` with unreached evidence —
+  closed.** This was a real, undocumented `compare` gap distinct from
+  everything else in this entry: `compare --depth build old.so new.so` with
+  no `--sources`/`--build-info` silently degraded to symbols-only evidence
+  and reported `NO_CHANGE`/exit 0 (verified live) — `workflows.artifact.
+  execute.enforce_requested_depth` already implemented this exact floor as a
+  hard `ValidationError`/exit 64, but only for the typed-API resolution path
+  (`resolve_compare_request`); the native CLI's own resolution
+  (`cli_resolve._resolve_compare_snapshots`) never called it. New
+  `policy/depth_evidence_contract.py` recomputes the same floor and records
+  it as ADR-064's exit-7 axis instead of raising (mirroring `workflows.
+  abi3_audit.record_abi3_evidence_contract_error`'s existing pattern),
+  wired into both the native CLI and the typed pipeline. Verified live:
+  `compare --depth build` on an evidence-free pair now exits `7`.
 
-Not fixed here: closing each of these needs a new `compare` CLI flag (or an
-equivalent `.abicheck.yml` key plus Action wiring), which is Click-surface
-work reserved for the CLI-flag-consolidation workstream, not the
-scan/compare *semantics* parity this gap tracks. Tractable per row, in the
-order plan §3 already sequences them — `--budget`/`--risk-rules`/
-`--crosscheck`/`--build-target` first (each already has a named target in
-the plan's migration table), the risk-driven `auto` depth dial last (it
-needs its own scoring model on `compare`'s side, not just a flag rename).
-`_SCAN_NEEDS_LEGACY_CLI`'s own comment in `action/run.sh` names each
-surviving condition against this same list — when the last one closes, the
-predicate (and the ~17 `MODE == "scan"` branches it guards) can finally be
-deleted rather than shrunk further.
+Ruled (b), dropped, documented breaking changes to `mode: scan` (see the
+ADR amendment for the full reasoning each):
+
+- `--risk-rules` and risk-driven `auto` depth selection (no explicit
+  `--depth`) — omitting `--depth` on `compare` already deterministically
+  defaults to `headers`, so dropping the risk-scoring auto-escalation
+  removes a sometimes-deeper convenience, not a floor; a CI job wanting
+  guaranteed source-level assurance must now pin `--depth source` itself.
+- `--crosscheck KEY=error` promotion syntax — already superseded: all
+  eleven cross-source checks reach `compare` as ordinary `ChangeKind`s, so
+  `--policy`/`.abicheck.yml`'s `policy.overrides` already lets a user
+  control any one check's severity; only the `KEY=LEVEL` *syntax* itself
+  does not survive.
+- `--build-target` — no `compare`/`dump` flag or config equivalent exists
+  yet (`.abicheck.yml`'s planned `build.targets` CONFIG key, §4.2, is not
+  implemented for either command); implementing it is `dump`'s own
+  CLI/config-cleanup phase (a different workstream's owned files), not this
+  one's.
+- `--artifact-set`/`new-library-set` — ADR-065 S3's package component
+  inventories (plan Prerequisite P5) are explicitly "Not started"; routing
+  this onto `compare --no-baseline DIR` today would silently narrow its
+  member-selection/coverage guarantees rather than reproduce them, which is
+  exactly the false-negative risk the (c) admission bar exists to catch.
+
+Ruled (a), already covered by `compare` today, no Action-level gap left once
+routed unconditionally: the additive-vs-overriding `--header`/`--include`
+combination (fixed by unioning the shared root into each side in `run.sh`
+itself, no `compare` change needed); a `.json`/`.gz`/`.zst`/content-sniffed
+snapshot baseline's `dependency_scope` tag matching (`service.run_dump`'s
+`include_dependencies` parameter already provides it); `--output-file` and a
+bare `-o`/`--write` via `extra-args` (`compare` already has `-o` and a
+repeatable `--write`); the compile-context-option family reaching through
+`extra-args` (`--lang`/`--ast-frontend`/`--compiler*`/`--sysroot`/etc. were
+already removed from `compare`/`dump`'s own CLI before this gap was first
+written, in favor of `.abicheck.yml`'s `compile.*` — `scan` just hadn't
+migrated yet, so this was never a `compare`-side gap); the default (or
+`--no-pattern-verdicts`) pattern-verdict divergence (moot once routed:
+`compare`'s modulation has been unconditional, with no off switch, since
+D4). **A genuinely new (a) finding this commit's investigation also
+surfaced, not previously documented:** the non-JSON/`json` `--format`
+restriction and the scan-vs-compare *JSON schema shape* itself were never a
+`compare` flag gap — `compare` already accepts every format `scan` did.
+Once `mode: scan` routes to `compare` unconditionally, its JSON output
+switches from `scan_schema_version`/nested `diff.findings` to
+`report_schema_version`/root `changes` — **a documented breaking change to
+the JSON shape**, not a remaining capability gap: any workflow step parsing
+that file by its old shape must update to the canonical `ReportDocument`
+shape.
+
+**A separate, newly-confirmed gap this investigation surfaced, not yet
+closed:** `compare --no-baseline` (the audit-only replacement for `scan`
+without `--against`, ADR-068 D2) genuinely does not read `--sources`/
+`--build-info`/`--depth` from its own CLI kwargs today
+(`frontends/cli/commands/compare_no_baseline.py`'s `_run_no_baseline_compare_cmd`
+only reads `headers`/`includes`/`lang`/`public_headers*`), does not honor
+`--dry-run` (never checked), and supports only `json`/`markdown` formats
+(`_SUPPORTED_FORMATS`) — confirming, not merely repeating, the narrower
+audit-only capability set this entry's Action-routing comment already
+described. This means the Action's *audit-only* `mode: scan` (no baseline)
+cannot yet route to `compare --no-baseline` without narrowing what it
+collects, and stays out of scope for this commit's file ownership
+(`frontends/cli/commands/compare_no_baseline.py` is not among the files this
+phase owns). Tractable when picked up: thread `sources`/`build_info`/
+`depth`/`dry_run` from `_run_no_baseline_compare_cmd`'s own `kwargs` into
+the audit pipeline the way the two-sided path already does, and extend
+`_SUPPORTED_FORMATS`.
+
+Not fixed here (deferred to a follow-up in this same phase, once the audit-
+only gap above closes): `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI` predicate
+itself, and the ~17 `MODE == "scan"` branches it guards, are not yet deleted
+— doing so safely requires the audit-only routing above to actually work
+(today's Action still routes every audit-only `mode: scan` request to the
+legacy CLI unconditionally, independent of this predicate), and a
+line-for-line removal of a script this size without an Action e2e run to
+verify against was judged higher-risk than shipping the two closed (c) items
+and this ruling on their own. The routing predicate's *decision table* is
+now complete (every condition ruled); what remains is mechanical: replace
+the predicate's body with the two (b) hard-error checks plus the header/
+include union fix, delete the legacy scan-CLI assembly branch and the now-
+dead `_CLI_MODE == "scan"` downstream branches, once `compare --no-baseline`
+closes the audit-only gap above.
 
 ### `scan`'s JSON `diff.findings[]` entries never carry `gate_contribution`
 

@@ -673,6 +673,10 @@ def _embed_inline_source_side(
                    "add/remove/size change the build proves never happened is moved to an "
                    "audit bucket instead of the verdict. No-op unless snapshots carry "
                    "build_context_defines + per-field guards.")
+@click.option("--budget", "budget", default=None,
+              help="ADR-068 §3 #19: a wall-clock guard on this run's deadline-aware "
+                   "stages, so a CI job fails clearly (exit 5) instead of running "
+                   "unbounded. A duration like 15m/900s/1h; unset means no budget.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, resolve "
                    "depth/scope, show tool/config resolution -- and print a report "

@@ -57,6 +57,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # docstrings for why).
         "--abi3",
         "--audit-suppressions",
+        "--budget",
         "--bundle-facts-library-manifest",
         "--bundle-facts-out",
         "--changed-path",

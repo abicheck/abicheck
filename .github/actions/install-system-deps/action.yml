@@ -4,7 +4,7 @@ description: >-
   per-attempt timeout and retried a few times, instead of a bare `sudo
   apt-get ...` with no timeout of its own.
 
-  Motivation: PR #800's CI run hit a real, reproducible hang in a bare
+  Motivation (1): PR #800's CI run hit a real, reproducible hang in a bare
   `apt-get update && apt-get install` step on a GitHub-hosted runner -- the
   step produced zero output (not even the download-progress lines a slow but
   progressing install would print) for the entire duration until GitHub's own
@@ -19,6 +19,12 @@ description: >-
   unavailable mirror, since no CI-side retry substitutes for the mirror
   actually coming back.
 
+  Motivation (2): `apt-get update`'s exit status must never gate the job.
+  It fails as a whole when *any* configured source fails, including the
+  third-party vendor repositories pre-baked into GitHub's runner images that
+  none of the packages asked for here ever come from -- see install.sh's own
+  header for the full account. `install` is the gate; `update` is advisory.
+
 inputs:
   packages:
     description: Space-separated apt package list to install.
@@ -29,27 +35,9 @@ runs:
   steps:
     - name: apt-get update/install (retried, each attempt bounded)
       shell: bash
-      run: |
-        set -u
-        attempts=3
-        for attempt in $(seq 1 "$attempts"); do
-          # `timeout`'s default signal is SIGTERM, which a caught/ignored
-          # signal in apt-get, dpkg, or sudo's own child-signal handling can
-          # survive indefinitely -- `timeout` then just waits forever for the
-          # process to exit, never escalating on its own (Codex review,
-          # confirmed against a real TERM-ignoring subprocess: `timeout N
-          # cmd` alone did not bound it, `timeout -k 10 N cmd` did). Without
-          # `--kill-after` this reintroduces the exact silent-hang failure
-          # mode this action exists to close. `-k 10` sends SIGKILL 10s after
-          # the initial SIGTERM if the process is still alive.
-          if timeout -k 10 120 sudo apt-get update -qq \
-              && timeout -k 10 240 sudo apt-get install -y ${{ inputs.packages }}; then
-            exit 0
-          fi
-          if [ "$attempt" -lt "$attempts" ]; then
-            echo "::warning::apt-get attempt $attempt/$attempts failed or timed out, retrying in 10s..."
-            sleep 10
-          fi
-        done
-        echo "::error::apt-get install failed after $attempts attempts (packages: ${{ inputs.packages }})"
-        exit 1
+      # `packages` is passed through the environment, never interpolated into
+      # this command line, so a workflow expression cannot be spliced into the
+      # shell the script runs in.
+      env:
+        INPUT_PACKAGES: ${{ inputs.packages }}
+      run: bash "$GITHUB_ACTION_PATH/install.sh"

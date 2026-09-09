@@ -339,3 +339,52 @@ class TestResolvedExecutionContextWiring:
             "old": old_ctx,
             "new": old_ctx,
         }
+
+
+class TestDeadlineBoundaryCheck:
+    """ADR-068 §3 #19 (Codex review, fresh evidence, PR #1178).
+
+    A stored-snapshot-only pair needs no subprocess/extraction work at all,
+    so nothing inside ``resolve_compare_request``/``classify_compare_pair``
+    would otherwise ever call ``deadline.check()`` -- an already-expired
+    ``budget_s`` (0, or exhausted by an earlier phase) silently completed
+    instead of raising ``DeadlineExceeded``. Mirrors the identical fix on
+    the native ``compare`` CLI, exercised at the CLI layer by
+    ``tests/test_compare_budget_boundary.py``.
+    """
+
+    def _request(self, tmp_path, *, budget_s):
+        old_p = tmp_path / "old.abi.json"
+        new_p = tmp_path / "new.abi.json"
+        from abicheck.serialization import snapshot_to_json
+
+        old_p.write_text(
+            snapshot_to_json(AbiSnapshot(library="libtest.so", version="1.0")),
+            encoding="utf-8",
+        )
+        new_p.write_text(
+            snapshot_to_json(AbiSnapshot(library="libtest.so", version="2.0")),
+            encoding="utf-8",
+        )
+        return CompareRequest(
+            old=InputSpec.of(str(old_p)),
+            new=InputSpec.of(str(new_p)),
+            budget_s=budget_s,
+        )
+
+    def test_zero_budget_raises_deadline_exceeded_for_typed_callers(
+        self, tmp_path
+    ) -> None:
+        from abicheck import deadline
+        from abicheck.service import run_compare_request
+
+        request = self._request(tmp_path, budget_s=0)
+        with pytest.raises(deadline.DeadlineExceeded):
+            run_compare_request(request)
+
+    def test_positive_budget_completes_normally(self, tmp_path) -> None:
+        from abicheck.service import run_compare_request
+
+        request = self._request(tmp_path, budget_s=300)
+        result = run_compare_request(request)
+        assert result.diff is not None

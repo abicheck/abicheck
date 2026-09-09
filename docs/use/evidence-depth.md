@@ -33,7 +33,7 @@ are capturing a reusable snapshot instead of comparing.
     invocation only where `compare` has **no equivalent today** — each such
     place says so explicitly and links to the tracking gap.
 
-**Four capabilities on this page are still `scan`-only** (verified live
+**Three capabilities on this page are still `scan`-only** (verified live
 against the current build, not read off `--help`), and each is an open
 migration item in
 [`plans/one-comparison-product.md`](../contribute/plans/one-comparison-product.md)
@@ -58,14 +58,18 @@ migration item in
   but does not yet reproduce the audit's findings — see [Single-build
   audit](#single-build-audit-no-baseline) below and
   [Scenario S5](../integration/scenarios/single-build-audit.md).
-- **`--budget`, `--crosscheck KEY=error`, `--build-target`.** No `compare`
-  flag equivalent (§3 rows 19/23 and the `--build-target` row). `dump` does
-  carry its own `--build-target`; `compare` does not.
+
+`--budget` no longer belongs on that list: `compare` gained its own
+`--budget` wall-clock guard (ADR-068 §3 #19) — exit `5` on overflow applies
+to both commands now. `--crosscheck KEY=error` promotion syntax and
+`--build-target` scoping still have no `compare` equivalent (`dump` does
+carry its own `--build-target`; `compare` does not).
 
 `abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
 **positional** argument (not a flag); `--against OLD` is the previous
 dump/library/directory/package to compare against, and omitting it means a
-one-build audit.
+one-build audit — `scan` is required for every no-baseline audit until the
+`compare --no-baseline` crash above is fixed.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -433,8 +437,8 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   here. On `scan`, by contrast, omitting `--depth` with a diff seed present
   resolves to `auto`'s risk-driven `source`.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
-  break. `--budget` overflow (exit `5`) is `scan`-only for now — see
-  [Exit Codes](../reference/exit-codes.md).
+  break. `--budget` overflow (exit `5`) applies to both `compare` and `scan`
+  — see [Exit Codes](../reference/exit-codes.md).
 - `--depth source` folds the L5 reachability **edges scoped to the changed TUs**
   for cross-symbol impact in the report. The *whole-library* reachability graph
   is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung.

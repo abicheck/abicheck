@@ -218,7 +218,7 @@ identity; **DELETE** — leaves the product.
 | 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | ADR-065 S3 component inventories |
 | 17 | Set member-identity/provider manifest (`scan --manifest`) | `cli_scan_helpers.load_artifact_set_manifest`; ADR-056; cli-cleanup PR H | `.abicheck.yml` bundle/provider contract, read by the same path | CONFIG | ADR-056 superseded; G42 provider resolution |
 | 18 | Analysis completeness/assurance | `analysis_assurance`, `--require-complete-analysis` (both commands) | `compare` (already present) | MERGE | Vision E-S1/S2 landed |
-| 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | ADR-064 axis already modelled |
+| 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | **Landed** (2026-09-09, Phase 4 commit 2): `deadline.deadline_scope` around `compare`'s resolve + classify phases, remaining-time-aware; sets `DiffResult.budget_overflow`. Typed API: `CompareRequest.budget_s` |
 | 20 | Finding cap (`--max-findings`) | `cli_scan_baseline` summary truncation | — | DELETE | `--write json=` guarantees the full result (ADR-068 D4) |
 | 21 | JSON resource budget (`--max-json-object-nodes` on `compare`) | `bundle_facts` decode | execution/storage config, calibrated `resource_limits:` | CONFIG | **Landed** (Phase 7g). Real bytes-per-node calibration against a synthetic oneDAL-scale corpus (`scripts/benchmark_scaling._build_onedal_large_surface`, ~9.3 bytes/node, stable across scale) found the existing `DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` already ~6x below the single-library, 25k-function oneDAL-scale case's own 5.8M nodes — the CLI flag's own documented "can need well over this" escape hatch confirmed as the common case, not an edge one, for its own named scenario. The CLI flag is gone; `.abicheck.yml`'s `resource_limits.max_bundle_facts_decode_nodes` (int) is the only way to change the budget now, and only an *explicit* `--config` may *raise* it past the default -- an auto-discovered `.abicheck.yml` may still *lower* it (Codex review, PR #1174, second round; `resolve_max_json_object_nodes_cfg()`). The *default* itself is deliberately left unchanged, not recalibrated up to match the measurement (Codex review, PR #1174: raising the ambient default would raise every unconfigured/untrusted run's own decode-bomb ceiling by the same factor) — see `bundle_facts.py`'s own docstring for the full measurement table and this reasoning. Deliberately kept node-based rather than re-expressed as a memory size (the design cli-cleanup-phase-two.md's own now-superseded text proposed) — converting a memory budget to a node budget via this measured *legitimate-payload* ratio would size the node budget for an adversarial payload's much lower bytes/node density too, silently weakening the exact container-count defense `storage.json_budget` exists to provide |
 | 22 | Public-header boundary (`--public-header-dir`) | `cli_scan_baseline._public_provenance_set` | `-H` directory provenance + `.abicheck.yml` `scope.public_header_dirs` | MERGE | **Landed** for `compare`'s directory/config sources (`provenance.apply_provenance`, fed from a `-H` directory argument and/or the new `scope.public_header_dirs` config key — distinct from the pre-existing `scope.public` boolean). Directory-vs-file provenance rule preserved verbatim; `scan --public-header-dir` itself is untouched |
@@ -227,7 +227,7 @@ identity; **DELETE** — leaves the product.
 | 25 | Contract evaluation (`--contract`) | shared | unchanged on `compare` | MERGE | — |
 | 26 | Suppression display (`--show-suppressed`) | `cli_scan` | disposition ledger, always computed | AUTOMATIC | ADR-067 S1 landed |
 | 27 | Not-comparable outcome (exit `6`) | `scan_engine` | `compare` (already has `_EXIT_NOT_COMPARABLE`) | MERGE | — |
-| 28 | Evidence-contract abort (exit `7`) | `scan_engine._check_scan_evidence_contract` | `compare` `ExitDecision` axis | COMPARE-STAGE | `compare` does not emit `7` today — must be added before deletion |
+| 28 | Evidence-contract abort (exit `7`) | `scan_engine._check_scan_evidence_contract` | `compare` `ExitDecision` axis | COMPARE-STAGE | **Landed** (2026-09-09, Phase 4 commit 2): new `policy/depth_evidence_contract.py`, wired into both the native CLI and the typed pipeline — closes a real, previously-undocumented gap (`compare --depth build` with no evidence silently exited 0) |
 | 29 | Coverage/depth reporting lines | `cli_scan_helpers.render_*` | `report/` compute/render pair | INTERNAL | ADR-061 `report/` pair rule |
 | 30 | `scan` report schema (`SCAN_SCHEMA_VERSION`) | `service_scan`, `workflows/scan_abort_result.py` | one `ReportDocument` | DELETE | Every consumer migrated (Phase 4) |
 | 31 | `ScanRequest` / `ScanResult` typed API | `service_scan.py` | `CompareRequest` / `CompareResult` | DELETE (fields absorbed) | ADR-055 registry update |
@@ -427,7 +427,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
 | P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — now covering all **eleven** checks: `unversioned_exported_symbol` and `private_header_leak` landed first (the latter generalized the matching primitive's per-finding identity — a symbol-only key silently collapsed two distinct leaked types flagged on the same function; identity is now a per-check function, defaulting to `symbol` for a check without that ambiguity), `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, `public_to_internal_dependency` joined next (two more, `rtti_for_internal_type` and `public_to_internal_dependency`, also needed the per-check identity generalization), and `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` close out the row in this PR (`odr_type_variant`, `identity_collision_detected`, and `compile_context_conflict` also needed their own composite identity). All eleven checks are now reachable by every front end: `compare()` runs the whole stage automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test for all eleven checks. **Update (2026-09-09, Phase 4 commit 1, ADR-068 amendment):** the stripping behavior described above was itself the bug — a cross-source finding is `RISK`/`API_BREAK`-severity by design (D3's authority rule), never advisory-only, so `scan --against`'s baseline-compare path no longer strips it back out; `cli_scan_baseline._strip_automatic_cross_source_findings` is deleted, and a baseline `scan` now gates a cross-source finding exactly as `compare` does — same verdict, same severity, same exit-code contribution. `scan`'s own dedicated `crosscheck` report block and `--crosscheck KEY=error` promotion remain a separate, scan-only surface, unaffected. See §3 #3 above for the full account |
-| P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
+| P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | **Landed** (2026-09-09, Phase 4 commit 2) — `--budget` and the `--depth build`/`source` evidence-contract floor both emit their axis now; see §3 rows #19/#28 |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | **Solved** for both named sources: `-H` directory provenance already fed `provenance.apply_provenance` (unchanged, file-vs-directory asymmetry preserved verbatim — a lone `-H` *file* still does not, on its own, establish a boundary the same way `scan --public-header-dir` requires a directory; note `compare`'s own pre-existing `-H` handling was already slightly looser than that rule before this PR and is left as it was found, see `workflows/cross_source_evolution.py`'s module docstring); this PR adds `.abicheck.yml`'s `scope.public_header_dirs` (a new key, distinct from the pre-existing `scope.public` boolean the plan's own shorthand risked conflating it with) as a second, additive source, threaded through `cli_compare_helpers.run_compare` → `cli_resolve._resolve_compare_snapshots`'s `config_public_header_dirs` parameter into the same `InputSpec.public_header_dirs`/`apply_provenance` machinery. No new CLI flag. `scan --public-header-dir` itself is untouched |
 | P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
 | P6 | `EntityId`-based public closure (ADR-063 Phase 2) and `public-contract-default.md` Phase 6's two open relevance defects plus two uncovered measurement lanes | Phase 9 only — the `--scope-public-headers` → `--contract public` collapse | Open. **Not a string heuristic, and never traded for a shorter CLI** |
@@ -619,31 +619,48 @@ the Action's translation is re-enabled for every request shape that
 divergence used to force onto the legacy CLI. What follows is this
 section's *actual* state, not the target it originally described:
 
-- **Action — commit 1, landed.** `mode: scan` re-implemented internally as
-  `mode: compare` for a baseline comparison, *except* for the specific,
-  narrower request shapes `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI`
-  predicate documents and `docs/contribute/known-gaps.md` tracks: `--budget`,
-  `--risk-rules`, `--crosscheck`, `--build-target` (no `compare` flag
-  equivalent yet), no explicit `--depth` (risk-driven `auto` depth selection
-  has no `compare` equivalent), `--depth build`/`--depth source` (`scan`'s
-  own hard evidence-contract floor, exit 7, has no `compare` equivalent),
-  a shared `header`/`include` root combined with a side-specific one, a
-  `.json`-extension (compressed or content-detected JSON snapshot included)
-  baseline, `--output-file`, an effective non-JSON/text `--format` (from the
-  dedicated Action input or an `extra-args` override), a `-o`/`--output`
-  path via `extra-args`, any other `--write`/scan-only `extra-args`
-  flag (`--abi3`, the compile-context-option family included), and a default
-  (or explicit `--no-pattern-verdicts`) baseline scan — `compare`'s pattern-
-  verdict modulation has been unconditional since D4 with no flag left to
-  turn it off, but `scan --against` still defaults it off, so only an
-  explicit bare `--pattern-verdicts` in `extra-args` is safe to route.
-  Audit-only
-  (no baseline) is unchanged and still stays
-  on the legacy CLI entirely (a separate, larger gap — see the predicate's
-  own comment in `run.sh`). The ~40-branch collapse this bullet originally
-  promised does **not** happen until every one of those rows closes too;
-  each is its own, still-open migration item in the table above (`--budget`
-  #19, `--risk-rules` #14, `--crosscheck` #23, `--build-target`'s own row).
+- **Action — commit 1 landed; commit 2 (2026-09-09) re-scopes and closes the
+  two real (c) gaps.** The maintainer's explicit ruling for commit 2: the
+  Action does **not** keep a compatible interface with every `scan`
+  capability — each condition `_SCAN_NEEDS_LEGACY_CLI` checked is ruled (a)
+  already covered, (b) dropped (a documented breaking change), or (c)
+  genuinely required, per ADR-068's second 2026-09-09 amendment (full table
+  there; `docs/contribute/known-gaps.md`'s matching entry has the condensed
+  version). Two (c) items are closed for real, on `compare` itself, in this
+  commit:
+  - `--budget` — `compare` gained a `--budget` option
+    (`frontends/cli/commands/compare.py`), enforced via
+    `deadline.deadline_scope` (remaining-time-aware across both the resolve
+    and classify phases), setting `DiffResult.budget_overflow`/exit 5 on
+    overflow. Verified live. Typed API: `CompareRequest.budget_s`.
+  - `--depth build`/`--depth source`'s evidence-contract floor — a real,
+    previously-undocumented `compare` gap (`compare --depth build` with no
+    evidence silently degraded to symbols-only and reported `NO_CHANGE`/exit
+    0, verified live), now closed via new `policy/depth_evidence_contract.py`
+    (mirrors `workflows.abi3_audit.record_abi3_evidence_contract_error`'s
+    existing exit-7-axis pattern), wired into both the native CLI and the
+    typed pipeline. Verified live: now exits `7`.
+
+  `--risk-rules`, risk-driven `auto` depth selection, `--crosscheck`'s
+  `KEY=error` syntax, and `--build-target` are ruled (b) dropped (each with
+  its own documented-breaking-change reasoning in the ADR amendment) rather
+  than implemented — none crosses the false-negative bar the (c) admission
+  test sets. `--artifact-set`/`new-library-set` is also (b), pending ADR-065
+  S3 (still "Not started", a different workstream). The header/include
+  additive-vs-overriding divergence, JSON-snapshot `dependency_scope`
+  tag-matching, `--output-file`/`-o`/`--write`, the compile-context-option
+  `extra-args` family, and the pattern-verdicts default divergence are all
+  ruled (a) — already covered by `compare` today (the compile-context family
+  was demoted off `compare`'s own CLI before this gap was ever written; the
+  Action just hadn't caught up). **`_SCAN_NEEDS_LEGACY_CLI` itself is not
+  yet deleted in this commit** — this investigation also surfaced a
+  separate, real gap in `compare --no-baseline` (the audit-only path:
+  `--sources`/`--build-info`/`--depth`/`--dry-run` are not read by
+  `frontends/cli/commands/compare_no_baseline.py` today, and only `json`/
+  `markdown` formats are supported), outside this commit's file ownership,
+  that must close before every `mode: scan` request — audit-only included —
+  can safely route to `compare` unconditionally. See the known-gaps entry
+  for the exact remaining mechanical steps once that closes.
 - **Typed API — not started.** `ScanRequest`/`ScanResult` still define every
   field they did before this commit (`service_scan.py`); only
   `collapse_versioned_symbols` has been absorbed into `CompareRequest`
