@@ -338,6 +338,21 @@ add_compile_context_flags() {
   # exactly the "second config source shadows the first" failure already
   # rejected loudly above for an *explicit* build-config. Same fail-loud
   # precedent, extended to both auto-discovered cases.
+  # Codex review, fresh evidence: the discovery invocation below can fail for
+  # two reasons the exit code alone can't distinguish -- "no config found"
+  # (its own explicit `sys.exit(1)`) and "the script itself couldn't run"
+  # (e.g. an ImportError, on a self-hosted runner where $_PY_BIN resolves but
+  # can't import abicheck -- exactly the case $_PY_BIN_HAS_ABICHECK's own
+  # preflight above already anticipates). Treating both as "not found" would
+  # let this fall through to writing the overlay below even when discovery
+  # never actually ran, silently shadowing a real project config's severity/
+  # suppression/scope/bundle settings instead of failing loud like every
+  # other case in this function. So this must fail closed on that precondition
+  # rather than let the ambiguous exit code decide.
+  if [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with a self-hosted runner's Python interpreter ('${_PY_BIN:-<none found on PATH>}') that cannot import abicheck: this Action cannot safely check whether an already-checked-out .abicheck.yml would otherwise be auto-discovered (and therefore shadowed by these settings) without it. Install abicheck into the interpreter this Action resolves (\`command -v python3\`/\`python\`), or pass build-config explicitly with these settings declared in its compile: block instead."
+    exit 1
+  fi
   local _checkout_dir="$PWD"
   if _discovered_cfg=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys

@@ -1107,3 +1107,43 @@ class TestCompileContextRejectsAutoDiscoveredConfig:
         cmd = result.stdout.splitlines()
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
+
+    def test_fails_closed_when_python_cannot_import_abicheck(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence ("Fail closed when config discovery
+        cannot import abicheck"): the discovery invocation's exit code alone
+        can't distinguish "no config found" (its own explicit ``sys.exit(1)``)
+        from "the script itself couldn't run" (e.g. an ImportError) -- both
+        are nonzero. On a self-hosted runner where ``$_PY_BIN`` resolves but
+        can't import abicheck ($_PY_BIN_HAS_ABICHECK's own preflight above
+        resolves false, exactly the case it exists to anticipate), the old
+        code silently took the "not found" branch and proceeded to write the
+        overlay -- passing it as --config without ever actually having
+        checked whether a real project config would otherwise be discovered
+        and shadowed. Simulates that precondition by forcing
+        $_PY_BIN_HAS_ABICHECK false after the real preflight runs (this
+        environment's own python3 genuinely has abicheck importable, so the
+        real preflight alone can't reach this branch)."""
+        harness = (
+            f'MODE="{_mode_value_for_marker(_DUMP_MODE_MARKER)}"\n'
+            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + _py_safe_dir_source()
+            + _py_bin_has_abicheck_source()
+            + '_PY_BIN_HAS_ABICHECK="false"\n'
+            + _add_flag_source()
+            + _is_release_style_operand_source()
+            + _add_compile_context_flags_source()
+            + "\nCMD=()\n"
+        )
+        script = (
+            harness
+            + _compile_context_region(_DUMP_MODE_MARKER, _DUMP_COMPILE_CONTEXT_START)
+            + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+        )
+        env = {**os.environ, "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++"}
+        result = _run_bash_script(script, env, check=False, cwd=tmp_path)
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert "cannot import abicheck" in result.stdout
+        assert "already-checked-out project config" not in result.stdout
