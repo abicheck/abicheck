@@ -29,6 +29,7 @@ only translates CLI options in, and the resulting report out.
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ from ....report.no_baseline import (
     render_no_baseline,
 )
 from ....workflows.no_baseline_compare import (
+    NoBaselineCompareResult,
     candidate_is_live_artifact,
     public_header_sets_for_candidate,
     resolve_no_baseline_candidate,
@@ -370,30 +372,64 @@ def _reject_unsupported_options(kwargs: dict[str, Any]) -> None:
             )
 
 
-def _run_no_baseline_compare_cmd(
-    ctx: click.Context, candidate: Path, **kwargs: Any
-) -> None:
-    """Run and report a ``compare --no-baseline`` audit of *candidate*."""
-    fmt = kwargs.get("fmt") or "markdown"
-    if fmt not in _SUPPORTED_FORMATS:
-        raise click.UsageError(_unsupported_format_message(fmt))
-    output = kwargs.get("output")
-    dry_run = bool(kwargs.get("dry_run", False))
+@dataclass(frozen=True)
+class _ResolvedInvocation:
+    """One ``--no-baseline`` invocation, already validated and resolved.
 
+    Exists so the command body below reads as the four phases it actually
+    has -- validate, resolve, run, report -- rather than as one 160-line
+    sequence in which a guard and a resolution step look alike. Frozen, and
+    holding only values (no ``kwargs`` dict), so a later phase cannot reach
+    back for a raw parameter the validation phase already ruled on.
+    """
+
+    fmt: str
+    output: Path | None
+    dry_run: bool
+    secondary_writes: tuple[tuple[str, Path], ...]
+    headers: list[Path]
+    includes: list[Path]
+    public_headers: list[Path]
+    public_header_dirs: list[Path]
+    lang: str
+    lang_explicit: bool
+    sources: Path | None
+    build_info: Path | None
+    build_config: Path | None
+    depth: str | None
+    include_dependencies: bool
+    contract_mode: str | None
+    contract_evaluation: bool
+    require_complete_analysis: bool
+
+
+def _validate_no_baseline_invocation(kwargs: dict[str, Any]) -> None:
+    """Refuse every invocation this path cannot honour, before any work.
+
+    Ordered so the cheapest, most specific message wins: an unsupported
+    ``--format`` names the ruling, then the two writer-coherence rules, then
+    the sided-input and unimplemented-option guards. All of them are usage
+    errors (exit 64) rather than silent no-ops -- see
+    :data:`_UNSUPPORTED_OPTIONS` for why that inversion is the rule here.
+    """
     from ....dry_run import reject_dry_run_with_output
     from ..options import reject_incoherent_secondary_writes
 
+    fmt = kwargs.get("fmt") or "markdown"
+    if fmt not in _SUPPORTED_FORMATS:
+        raise click.UsageError(_unsupported_format_message(fmt))
+
+    output = kwargs.get("output")
+    dry_run = bool(kwargs.get("dry_run", False))
     # ADR-068 D4: "a complete machine-readable result must always be
     # obtainable without a second run" -- `--write` was accepted and silently
-    # dropped on this path (the same silently-inert-flag class as `--contract`
-    # and the evidence options above), so a job asking for a JSON artifact
-    # alongside a human-readable one got nothing and no warning. The two
-    # coherence rules (`--dry-run` writes nothing; a secondary PATH may not
-    # collide with `-o`) come from the shared guard both `compare` forms use,
-    # not a second copy.
-    secondary_writes: tuple[tuple[str, Path], ...] = tuple(
-        kwargs.get("secondary_writes") or ()
-    )
+    # dropped on this path (the same silently-inert-flag class as
+    # `--contract` and the evidence options), so a job asking for a JSON
+    # artifact alongside a human-readable one got nothing and no warning.
+    # The two coherence rules (`--dry-run` writes nothing; a secondary PATH
+    # may not collide with `-o`) come from the shared guard both `compare`
+    # forms use, not a second copy.
+    secondary_writes = tuple(kwargs.get("secondary_writes") or ())
     reject_dry_run_with_output(dry_run, output)
     reject_incoherent_secondary_writes(
         dry_run=dry_run, output=output, secondary_writes=secondary_writes
@@ -406,43 +442,116 @@ def _run_no_baseline_compare_cmd(
     _reject_old_sided_inputs(kwargs)
     _reject_unsupported_options(kwargs)
 
+
+def _resolve_no_baseline_invocation(
+    ctx: click.Context, kwargs: dict[str, Any]
+) -> _ResolvedInvocation:
+    """Turn already-validated CLI values into the one resolved object.
+
+    Resolution only -- every refusal has happened in
+    :func:`_validate_no_baseline_invocation` by the time this runs, so
+    nothing here has to decide whether an input is allowed, only what it
+    means.
+    """
     headers = list(kwargs.get("headers") or ()) + list(
         kwargs.get("new_headers_only") or ()
     )
     includes = list(kwargs.get("includes") or ()) + list(
         kwargs.get("new_includes_only") or ()
     )
-    lang = kwargs.get("lang") or "c++"
-    lang_src = ctx.get_parameter_source("lang") if ctx is not None else None
-    lang_explicit = lang_src == click.core.ParameterSource.COMMANDLINE
     public_headers, public_header_dirs = public_header_sets_for_candidate(
         headers,
         list(kwargs.get("public_headers") or ()),
         list(kwargs.get("public_header_dirs") or ()),
     )
+    lang_src = ctx.get_parameter_source("lang") if ctx is not None else None
 
-    # A bare/`both=` --sources/--build-info lands on *both* per-side dests
-    # (`cli_options._split_sided_single`); `_reject_old_sided_inputs` above
-    # has already rejected an explicitly OLD-scoped one, so reading the NEW
-    # dest here is exactly "the candidate's evidence".
-    sources = kwargs.get("new_sources")
-    build_info = kwargs.get("new_build_info")
-    depth = kwargs.get("depth")
+    # ADR-049: `--contract VALUE` is what activates the evaluator on the CLI,
+    # and `auto` maps back to "no explicit domain stated" so D7's lower tiers
+    # decide -- resolved through the same two helpers
+    # `cli_compare_helpers.run_compare` calls, so an equivalent one-sided and
+    # two-sided invocation activate identically. Before this, `--contract`
+    # was parsed and documented on this path but never read at all: the
+    # contract-coverage ledger never populated, so the flag was a silently
+    # inert gate (a CI job relying on it got no warning that it never ran).
+    contract_mode_raw = kwargs.get("contract_mode")
 
-    if dry_run:
+    return _ResolvedInvocation(
+        fmt=kwargs.get("fmt") or "markdown",
+        output=kwargs.get("output"),
+        dry_run=bool(kwargs.get("dry_run", False)),
+        secondary_writes=tuple(kwargs.get("secondary_writes") or ()),
+        headers=headers,
+        includes=includes,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        lang=kwargs.get("lang") or "c++",
+        lang_explicit=lang_src == click.core.ParameterSource.COMMANDLINE,
+        # A bare/`both=` --sources/--build-info lands on *both* per-side dests
+        # (`cli_options._split_sided_single`); the validation phase has
+        # already rejected an explicitly OLD-scoped one, so reading the NEW
+        # dest here is exactly "the candidate's evidence".
+        sources=kwargs.get("new_sources"),
+        build_info=kwargs.get("new_build_info"),
+        build_config=kwargs.get("build_config"),
+        depth=kwargs.get("depth"),
+        include_dependencies=bool(kwargs.get("include_dependencies", False)),
+        contract_mode=resolve_contract_domain(contract_mode_raw, ctx),
+        contract_evaluation=resolve_contract_evaluation(contract_mode_raw),
+        require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
+    )
+
+
+def _emit_no_baseline_report(
+    result: NoBaselineCompareResult, inv: _ResolvedInvocation
+) -> None:
+    """Render the audit in every requested format, then exit accordingly."""
+    text, exit_code = render_no_baseline(
+        result, inv.fmt, require_complete_analysis=inv.require_complete_analysis
+    )
+    _write_or_echo(inv.output, text)
+    for write_fmt, write_path in inv.secondary_writes:
+        # Rendered from the *same* result, never a second run -- ADR-068 D4's
+        # "presentation never changes analysis" applies here exactly as it
+        # does to the two-sided path, and the exit code is the primary
+        # render's, identical by construction since both project one
+        # document. Written through the same writer `-o/--output` uses, which
+        # creates a missing parent directory and turns a write failure into a
+        # clean Click error rather than a traceback on an otherwise-complete
+        # run (Codex review, P2).
+        rendered, _ = render_no_baseline(
+            result, write_fmt, require_complete_analysis=inv.require_complete_analysis
+        )
+        _safe_write_output(write_path, rendered)
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+
+def _run_no_baseline_compare_cmd(
+    ctx: click.Context, candidate: Path, **kwargs: Any
+) -> None:
+    """Run and report a ``compare --no-baseline`` audit of *candidate*.
+
+    Four phases, one each: refuse what this path cannot honour, resolve what
+    it can, run the audit, report it.
+    """
+    _validate_no_baseline_invocation(kwargs)
+    inv = _resolve_no_baseline_invocation(ctx, kwargs)
+
+    if inv.dry_run:
         from ....dry_run import emit_dry_run
         from ..no_baseline_dry_run import build_no_baseline_dry_run_result
 
         emit_dry_run(
             build_no_baseline_dry_run_result(
                 candidate=candidate,
-                depth=depth,
-                headers=tuple(headers),
-                includes=tuple(includes),
-                public_header_dirs=tuple(public_header_dirs),
-                sources=sources,
-                build_info=build_info,
-                fmt=fmt,
+                depth=inv.depth,
+                headers=tuple(inv.headers),
+                includes=tuple(inv.includes),
+                public_header_dirs=tuple(inv.public_header_dirs),
+                sources=inv.sources,
+                build_info=inv.build_info,
+                fmt=inv.fmt,
                 contract_mode=kwargs.get("contract_mode"),
                 # The same carve-out the real run applies below, from the
                 # same helper -- so the preview and the run can never
@@ -453,17 +562,17 @@ def _run_no_baseline_compare_cmd(
 
     new_snapshot = resolve_no_baseline_candidate(
         candidate,
-        headers=headers,
-        includes=includes,
-        lang=lang,
-        lang_explicit=lang_explicit,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-        sources=sources,
-        build_info=build_info,
-        build_config=kwargs.get("build_config"),
-        depth=depth,
-        include_dependencies=bool(kwargs.get("include_dependencies", False)),
+        headers=inv.headers,
+        includes=inv.includes,
+        lang=inv.lang,
+        lang_explicit=inv.lang_explicit,
+        public_headers=inv.public_headers,
+        public_header_dirs=inv.public_header_dirs,
+        sources=inv.sources,
+        build_info=inv.build_info,
+        build_config=inv.build_config,
+        depth=inv.depth,
+        include_dependencies=inv.include_dependencies,
     )
 
     suppression, policy_file_obj = _load_suppression_and_policy(
@@ -471,18 +580,6 @@ def _run_no_baseline_compare_cmd(
         kwargs.get("policy") or "strict_abi",
         kwargs.get("policy_file_path"),
     )
-
-    # ADR-049: `--contract VALUE` is what activates the evaluator on the CLI,
-    # and `auto` maps back to "no explicit domain stated" so D7's lower tiers
-    # decide -- resolved through the same two `cli_options` helpers
-    # `cli_compare_helpers.run_compare` calls, so an equivalent one-sided and
-    # two-sided invocation activate identically. Before this, `--contract`
-    # was parsed and documented on this path but never read at all: the
-    # contract-coverage ledger never populated, so the flag was a silently
-    # inert gate (a CI job relying on it got no warning that it never ran).
-    contract_mode_raw = kwargs.get("contract_mode")
-    contract_evaluation = resolve_contract_evaluation(contract_mode_raw)
-    contract_mode = resolve_contract_domain(contract_mode_raw, ctx)
 
     result = run_no_baseline_compare(
         new_snapshot,
@@ -497,39 +594,18 @@ def _run_no_baseline_compare_cmd(
         collapse_versioned_symbols=bool(
             kwargs.get("collapse_versioned_symbols", False)
         ),
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
+        contract_evaluation=inv.contract_evaluation,
+        contract_mode=inv.contract_mode,
         # ADR-064's exit-7 axis: a pinned --depth build/source that this
         # run's evidence did not reach. Recorded by the workflow (after
         # classification, the same point the two-sided native CLI path
         # records it) rather than here, so a front end cannot pick up the
         # audit and forget the orthogonal axis.
-        depth=depth,
+        depth=inv.depth,
         candidate_is_live=candidate_is_live_artifact(candidate),
     )
 
-    require_complete = bool(kwargs.get("require_complete_analysis", False))
-    text, exit_code = render_no_baseline(
-        result, fmt, require_complete_analysis=require_complete
-    )
-    _write_or_echo(output, text)
-    for write_fmt, write_path in secondary_writes:
-        # Rendered from the *same* result, never a second run -- ADR-068 D4's
-        # "presentation never changes analysis" applies here exactly as it
-        # does to the two-sided path, and the exit code is the primary
-        # render's, identical by construction since both project one document.
-        rendered, _ = render_no_baseline(
-            result, write_fmt, require_complete_analysis=require_complete
-        )
-        # The same writer `-o/--output` goes through, not a bare
-        # `Path.write_text` -- it creates a missing parent directory and
-        # translates a write failure into a clean Click error, so a
-        # `--write json=out/dir/x.json` under a directory that does not
-        # exist yet does not end an otherwise-complete analysis in a
-        # FileNotFoundError traceback (Codex review, P2).
-        _safe_write_output(write_path, rendered)
-    if exit_code != 0:
-        sys.exit(exit_code)
+    _emit_no_baseline_report(result, inv)
 
 
 def _unsupported_format_message(fmt: str, *, flag: str = "--format") -> str:

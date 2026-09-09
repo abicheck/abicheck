@@ -301,3 +301,75 @@ def test_a_suppressed_finding_never_gates(pattern: str, case: str) -> None:
         )
     )
     assert baseline.exit_code == suppressed.exit_code
+
+
+# ---------------------------------------------------------------------------
+# The gating half: what happens when an orthogonal axis actually fires.
+# ---------------------------------------------------------------------------
+
+
+def _gated_result(case: str = "case143_audit_accidental_export"):
+    """A real audit result whose evidence-contract axis has fired.
+
+    Set on the ``DiffResult`` directly rather than driven through a live
+    ``--depth build`` run, so the gating half is testable without a
+    toolchain — this asserts what the *renderers* do with a non-zero exit,
+    which is independent of which axis produced it.
+    """
+    result = _result(case)
+    result.diff.evidence_contract_error = True
+    return result
+
+
+def test_a_gated_audit_fails_exactly_one_junit_case() -> None:
+    """The other half of the JUnit rule: a real gate must be visible.
+
+    Making findings passing (the fix for the reported bug) is only correct
+    if the run's *own* failure still surfaces — otherwise JUnit would report
+    a clean suite for a run that exited non-zero, which is the reported bug
+    inverted.
+    """
+    result = _gated_result()
+    doc = compute_no_baseline_document(result)
+    assert doc.exit_code != 0, "fixture precondition: the axis must have fired"
+
+    text, exit_code = render_no_baseline(result, "junit")
+    assert exit_code == doc.exit_code
+    root = ET.fromstring(text)
+    failures = root.findall(".//failure")
+    assert len(failures) == 1, "exactly the run-level gate, never a finding"
+    assert root.find(".//testcase[@name='exit code']") is not None
+    assert str(doc.exit_code) in (failures[0].text or "")
+
+
+def test_a_gated_audit_still_reports_its_findings_as_passing() -> None:
+    """A gate firing must not retroactively make advisory findings failures."""
+    result = _gated_result()
+    text, _ = render_no_baseline(result, "junit")
+    root = ET.fromstring(text)
+    for case in root.findall(".//testcase"):
+        if case.get("name") == "exit code":
+            continue
+        assert case.find("failure") is None, (
+            f"{case.get('classname')} became a failure because the run gated"
+        )
+
+
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS))
+def test_every_format_reports_the_gated_exit_code(fmt: str) -> None:
+    """ADR-068 D4 again, on the path where the number is not 0."""
+    result = _gated_result()
+    doc = compute_no_baseline_document(result)
+    _, exit_code = render_no_baseline(result, fmt)
+    assert exit_code == doc.exit_code != 0
+
+
+def test_an_unknown_format_is_an_internal_error_not_a_silent_default() -> None:
+    """``render_no_baseline`` must not quietly fall back to some format.
+
+    The CLI rejects an unsupported format before reaching here, so an
+    unknown value is a programming error — and returning markdown instead
+    would hand a caller the wrong artifact under the name it asked for.
+    """
+    with pytest.raises(ValueError, match="unsupported --no-baseline format"):
+        render_no_baseline(_result("case143_audit_accidental_export"), "html")

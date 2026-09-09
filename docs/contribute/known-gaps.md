@@ -6993,6 +6993,35 @@ against all four regressions, including the over-correction (making JUnit
 pass by *dropping* findings satisfies the failure-count invariant while
 losing the audit's whole content — a separate test catches that).
 
+**Coverage and complexity follow-up (same pass).** Codecov's patch gate
+and CodeFactor both flagged the first two commits, and both were acting on
+something real rather than on noise:
+
+- **The new CLI surface was verified by hand and pinned by nothing.** Every
+  usage error, the `--write` path, and the `--dry-run` preview had been
+  confirmed at a terminal while being written, and no test named any of
+  them -- the same "confirmed once by the person who just wrote it" gap this
+  entry's own history keeps producing. `tests/test_compare_no_baseline_cli.py`
+  drives all of it through the real Click entry point (which formats render
+  and how, which invocations are refused and what the message says, what
+  reaches disk, what the process exits with), and
+  `tests/test_no_baseline_report_formats.py` gained the *gating* half that
+  the P1-2 fix's own correctness depends on: a run whose orthogonal axis
+  fires must still fail exactly one JUnit case, and its advisory findings
+  must still pass. Coverage of the five new/changed modules went from 90% to
+  94%, with the CLI module 80% -> 95% and the dry-run builder 0% -> 100%.
+- **The command body was one 159-line function** (cyclomatic complexity
+  ~30) doing validation, resolution, execution and reporting in sequence,
+  which is what CodeFactor's "complex method" pattern is for -- and it
+  passed on the first commit, failing only once the review fixes grew it.
+  Split into the four phases it always had: `_validate_no_baseline_
+  invocation` (every refusal, before any work), `_resolve_no_baseline_
+  invocation` (into a frozen `_ResolvedInvocation`, so a later phase cannot
+  reach back for a raw parameter the validation phase already ruled on),
+  the run itself, and `_emit_no_baseline_report`. Now 78 lines at complexity
+  4. Behaviour-preserving: the CLI tests above were written *before* the
+  split, precisely so it was protected.
+
 **The class, not just the four instances.** "Accepted but never read" is
 the single defect this path has now produced four separate times
 (`--contract`; `--sources`/`--build-info`/`--depth`/`--dry-run`; `--write`;
