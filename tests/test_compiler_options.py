@@ -6,7 +6,11 @@ import pytest
 from abicheck import _compiler_options
 from abicheck._compiler_options import (
     _split_gcc_options_windows,
+    effective_driver_mode_is_cl,
     explicit_language_standard,
+    explicit_target_triple,
+    forwarded_driver_mode_token,
+    forwards_response_file,
     has_explicit_cpp_std,
     has_explicit_std,
     language_standard_field,
@@ -389,3 +393,344 @@ class TestLanguageStandardField:
             language_standard_field(None, "-std=gnu11", (), resolved_standard=None)
             == "gnu11"
         )
+
+
+class TestExplicitTargetTriple:
+    """dumper_toolchain._configured_target_triple's own probe-failure
+    fallback (Codex review, fresh evidence): when a live ``clang
+    -print-target-triple`` probe fails, it must recover an explicitly
+    requested ``-target``/``--target=`` value rather than losing it --
+    extract.headers.clang.context.is_darwin_target's own sys.platform
+    fallback for a bare None is only safe when NO explicit target was
+    requested at all."""
+
+    def test_none_when_nothing_forwarded(self) -> None:
+        assert explicit_target_triple(None, ()) is None
+        assert explicit_target_triple("-O2", ("-Wall",)) is None
+
+    def test_extracts_attached_long_spelling_from_gcc_options_string(self) -> None:
+        assert (
+            explicit_target_triple("-O2 --target=x86_64-unknown-linux-gnu", ())
+            == "x86_64-unknown-linux-gnu"
+        )
+
+    def test_extracts_attached_short_spelling_from_gcc_option_tokens(self) -> None:
+        assert (
+            explicit_target_triple(None, ("-target=aarch64-apple-macos11",))
+            == "aarch64-apple-macos11"
+        )
+
+    def test_extracts_separate_argument_spelling(self) -> None:
+        # Clang also accepts "-target <value>" as two separate argv entries,
+        # unlike -std=/--std= which is always attached.
+        assert (
+            explicit_target_triple(None, ("-target", "x86_64-pc-windows-msvc"))
+            == "x86_64-pc-windows-msvc"
+        )
+        assert (
+            explicit_target_triple(None, ("--target", "x86_64-pc-windows-msvc"))
+            == "x86_64-pc-windows-msvc"
+        )
+
+    def test_dangling_target_flag_with_no_following_value_is_ignored(self) -> None:
+        # A malformed/truncated command line must not raise or return a
+        # bogus value pulled from thin air.
+        assert explicit_target_triple(None, ("-target",)) is None
+
+    def test_last_occurrence_wins_across_both_sources(self) -> None:
+        assert (
+            explicit_target_triple(
+                "-target=x86_64-unknown-linux-gnu", ("-target=aarch64-apple-macos11",)
+            )
+            == "aarch64-apple-macos11"
+        )
+
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        assert explicit_target_triple('-DFOO="unterminated', ()) is None
+        assert (
+            explicit_target_triple(
+                '-DFOO="unterminated', ("--target=x86_64-unknown-linux-gnu",)
+            )
+            == "x86_64-unknown-linux-gnu"
+        )
+
+    def test_a_response_file_after_the_target_voids_the_recovery(self) -> None:
+        # Codex review, thirteenth round, fresh evidence: a real
+        # `clang --target=x86_64-unknown-linux-gnu @darwin.rsp
+        # -print-target-triple` reports Darwin when the response file
+        # sets that -- the visible, earlier target is not trustworthy
+        # once a response file follows it.
+        assert (
+            explicit_target_triple("--target=x86_64-unknown-linux-gnu @darwin.rsp", ())
+            is None
+        )
+        assert explicit_target_triple(None, ("-target", "aarch64", "@resp.rsp")) is None
+
+    def test_a_response_file_before_the_target_also_voids_the_recovery(
+        self,
+    ) -> None:
+        # CodeRabbit review, fresh evidence, correcting the thirteenth
+        # round's own claim that a PRECEDING response file is safe: real
+        # Clang determines its CL-vs-GNU driver mode from an early scan
+        # of the entire argument list, response files included, so one
+        # before the visible target could flip the mode the caller's own
+        # `cl_style` was computed under -- changing which spellings are
+        # even honored for the token that follows. With no way to see
+        # inside the file, this must also be treated as unknown.
+        assert (
+            explicit_target_triple("@darwin.rsp --target=x86_64-unknown-linux-gnu", ())
+            is None
+        )
+
+    def test_an_explicit_config_file_also_voids_the_recovery(self) -> None:
+        # Codex review, fresh evidence, empirically verified against a
+        # real Clang 18 install: `--config=<file>` is honored the same way
+        # a response file is (both AST generation and
+        # `-print-target-triple` apply it), so it must void recovery the
+        # identical way, regardless of position.
+        assert (
+            explicit_target_triple(
+                "--target=x86_64-unknown-linux-gnu --config=darwin.cfg", ()
+            )
+            is None
+        )
+        assert (
+            explicit_target_triple(None, ("--config", "darwin.cfg", "-target", "aarch64"))
+            is None
+        )
+
+
+class TestExplicitTargetTripleClStyle:
+    """``cl_style=True`` (Codex review, third round, fresh evidence
+    correcting the second): a CL/MSVC-compatibility-mode driver
+    (``clang-cl``/``dpcpp-cl``, or a generic ``clang --driver-mode=cl``)
+    honors two spellings -- the attached, double-dash ``--target=<value>``
+    AND the separate-argument, single-dash ``-target <value>`` (a real
+    ``clang-cl -target <value> -print-target-triple`` exits successfully
+    and prints the value back) -- but NOT the attached, single-dash
+    ``-target=<value>`` or the separate-argument, double-dash
+    ``--target <value>``, which complete with an "unknown argument
+    ignored" warning under CL mode and are never applied, so recovering
+    one of THOSE would report a target the driver itself dropped."""
+
+    def test_attached_double_dash_spelling_is_recovered(self) -> None:
+        assert (
+            explicit_target_triple("--target=x86_64-apple-darwin", (), cl_style=True)
+            == "x86_64-apple-darwin"
+        )
+
+    def test_separate_single_dash_spelling_is_recovered(self) -> None:
+        assert (
+            explicit_target_triple(
+                None, ("-target", "x86_64-apple-darwin"), cl_style=True
+            )
+            == "x86_64-apple-darwin"
+        )
+
+    def test_attached_single_dash_spelling_is_not_recovered(self) -> None:
+        assert (
+            explicit_target_triple("-target=x86_64-apple-darwin", (), cl_style=True)
+            is None
+        )
+
+    def test_separate_double_dash_spelling_is_not_recovered(self) -> None:
+        assert (
+            explicit_target_triple(
+                None, ("--target", "x86_64-apple-darwin"), cl_style=True
+            )
+            is None
+        )
+
+    def test_last_occurrence_wins_among_honored_spellings_only(self) -> None:
+        # The ignored spellings must not "consume" a later, honored
+        # spelling, and the honored spellings must still win last-wins
+        # among themselves.
+        assert (
+            explicit_target_triple(
+                "--target x86_64-unknown-linux-gnu -target x86_64-apple-darwin",
+                (),
+                cl_style=True,
+            )
+            == "x86_64-apple-darwin"
+        )
+        assert (
+            explicit_target_triple(
+                "-target x86_64-apple-darwin --target=x86_64-pc-windows-msvc",
+                (),
+                cl_style=True,
+            )
+            == "x86_64-pc-windows-msvc"
+        )
+
+    def test_none_when_nothing_forwarded(self) -> None:
+        assert explicit_target_triple(None, (), cl_style=True) is None
+
+    def test_clang_forwarding_prefix_is_stripped_for_an_attached_spelling(
+        self,
+    ) -> None:
+        # clang-cl's documented `/clang:<arg>` mechanism passes <arg>
+        # straight through to the underlying Clang driver -- a real
+        # `clang-cl /clang:--target=x86_64-apple-darwin` is confirmed to
+        # select that target (Codex review, fresh evidence).
+        assert (
+            explicit_target_triple(
+                "/clang:--target=x86_64-apple-darwin", (), cl_style=True
+            )
+            == "x86_64-apple-darwin"
+        )
+
+    def test_clang_forwarding_prefix_only_applies_under_cl_style(self) -> None:
+        # A GNU-style driver has no `/clang:` forwarding syntax at all --
+        # the literal token is not a recognized spelling there.
+        assert explicit_target_triple("/clang:--target=x86_64-apple-darwin", ()) is None
+
+
+class TestEffectiveDriverModeIsCl:
+    """A compile unit can select clang's CL/MSVC-compatibility mode via an
+    explicit ``--driver-mode=cl`` on an otherwise generically-named
+    ``clang`` binary (``buildsource.header_compile_context``'s own
+    "Preserve an explicit --driver-mode=cl" docstring) -- a name-only CL
+    check like ``dumper_clang._is_cl_style_driver_name`` misses this shape
+    entirely. Conversely, an explicit ``--driver-mode=g++`` on a
+    ``clang-cl``-named binary genuinely switches OUT of CL mode (a real
+    ``clang-cl --driver-mode=g++ -print-target-triple`` reports a
+    GNU-shaped target) -- a name-only check alone can't be revoked either
+    (Codex review, both directions, fresh evidence each time)."""
+
+    def test_name_only_when_no_override_forwarded(self) -> None:
+        assert effective_driver_mode_is_cl(False, None, ()) is False
+        assert effective_driver_mode_is_cl(True, None, ()) is True
+        assert effective_driver_mode_is_cl(False, "-O2", ("-Wall",)) is False
+
+    def test_explicit_cl_override_wins_over_a_gnu_name(self) -> None:
+        assert (
+            effective_driver_mode_is_cl(False, "--driver-mode=cl /std:c++20", ())
+            is True
+        )
+        assert effective_driver_mode_is_cl(False, None, ("--driver-mode=cl",)) is True
+
+    def test_explicit_non_cl_override_wins_over_a_cl_style_name(self) -> None:
+        # The direction the OR-based predecessor of this function got
+        # wrong: a CL-named binary explicitly told to act as g++ is not
+        # CL mode any more.
+        assert effective_driver_mode_is_cl(True, None, ("--driver-mode=g++",)) is False
+        assert effective_driver_mode_is_cl(True, "--driver-mode=gcc", ()) is False
+
+    def test_last_override_wins(self) -> None:
+        assert (
+            effective_driver_mode_is_cl(
+                False, None, ("--driver-mode=cl", "--driver-mode=g++")
+            )
+            is False
+        )
+        assert (
+            effective_driver_mode_is_cl(
+                True, None, ("--driver-mode=g++", "--driver-mode=cl")
+            )
+            is True
+        )
+
+    def test_separate_argument_spelling_is_not_an_override(self) -> None:
+        # "--driver-mode=<value>" is documented as attached-only; a bare
+        # "--driver-mode" with a separate "cl" argument is not the same
+        # flag and must not be treated as an override either way.
+        assert (
+            effective_driver_mode_is_cl(False, None, ("--driver-mode", "cl")) is False
+        )
+        assert effective_driver_mode_is_cl(True, None, ("--driver-mode", "g++")) is True
+
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        assert effective_driver_mode_is_cl(False, '-DFOO="unterminated', ()) is False
+        assert (
+            effective_driver_mode_is_cl(
+                False, '-DFOO="unterminated', ("--driver-mode=cl",)
+            )
+            is True
+        )
+
+
+class TestForwardedDriverModeToken:
+    """The one option a caller re-probing `clang_bin` with a deliberately
+    narrowed argument list must still preserve, or the SAME binary's own
+    interpretation silently reverts to its name-based default (Codex
+    review, fresh evidence: a real ``clang-cl --driver-mode=g++
+    -print-target-triple`` reports the host GNU target, while a bare
+    ``clang-cl -print-target-triple`` reports Windows -- two different
+    answers for the identical binary)."""
+
+    def test_empty_when_no_override_forwarded(self) -> None:
+        assert forwarded_driver_mode_token(None, ()) == ()
+        assert forwarded_driver_mode_token("-O2", ("-Wall",)) == ()
+
+    def test_returns_the_override_as_a_single_token(self) -> None:
+        assert forwarded_driver_mode_token(None, ("--driver-mode=g++",)) == (
+            "--driver-mode=g++",
+        )
+        assert forwarded_driver_mode_token("--driver-mode=cl", ()) == (
+            "--driver-mode=cl",
+        )
+
+    def test_last_override_wins(self) -> None:
+        assert forwarded_driver_mode_token(
+            None, ("--driver-mode=cl", "--driver-mode=g++")
+        ) == ("--driver-mode=g++",)
+
+    def test_separate_argument_spelling_is_not_an_override(self) -> None:
+        assert forwarded_driver_mode_token(None, ("--driver-mode", "cl")) == ()
+
+
+class TestForwardsResponseFile:
+    """A ``@response-file`` token's contents are invisible to this module
+    without expanding it, so its mere presence must be treated as
+    "unknown evidence", not "no target requested" (Codex review,
+    eleventh round, fresh evidence: a response file can genuinely carry
+    its own ``-target``/``--driver-mode=``, and a real compiler process
+    honors it)."""
+
+    def test_none_when_absent(self) -> None:
+        assert forwards_response_file(None, ()) is False
+        assert forwards_response_file("-O2 -Wall", ("-std=c++20",)) is False
+
+    def test_detects_it_in_gcc_options_string(self) -> None:
+        assert forwards_response_file("@response.rsp", ()) is True
+
+    def test_detects_it_in_gcc_option_tokens(self) -> None:
+        assert forwards_response_file(None, ("@response.rsp",)) is True
+
+    def test_a_bare_at_sign_alone_does_not_match(self) -> None:
+        # Not a real response-file token -- nothing follows the "@".
+        assert forwards_response_file(None, ("@",)) is False
+
+    def test_malformed_gcc_options_does_not_raise(self) -> None:
+        assert forwards_response_file('-DFOO="unterminated', ()) is False
+        assert forwards_response_file('-DFOO="unterminated', ("@response.rsp",)) is True
+
+    def test_detects_an_attached_config_file(self) -> None:
+        # Codex review, fresh evidence, empirically verified against a real
+        # Clang 18 install: `--config=<file>` is honored by both AST
+        # generation and `-print-target-triple`, exactly like a response
+        # file -- its contents are equally invisible to this module.
+        assert forwards_response_file("--config=darwin.cfg", ()) is True
+
+    def test_detects_a_separate_config_file(self) -> None:
+        assert forwards_response_file(None, ("--config", "darwin.cfg")) is True
+
+    def test_a_trailing_bare_config_flag_does_not_match(self) -> None:
+        # No following argument -- not a real `--config <file>` pair.
+        assert forwards_response_file(None, ("--config",)) is False
+
+    def test_config_user_dir_and_system_dir_also_match(self) -> None:
+        # Codex review, fresh evidence, empirically verified against a
+        # real Clang 18 install: `--config-user-dir=<dir>` (and its
+        # `--config-system-dir=` sibling) implicitly loads a `clang.cfg`
+        # from that directory with no explicit `--config=` at all, and it
+        # is honored the same way (both AST generation and
+        # `-print-target-triple` apply it).
+        assert forwards_response_file("--config-user-dir=/etc", ()) is True
+        assert forwards_response_file("--config-system-dir=/etc", ()) is True
+
+    def test_config_user_dir_separate_argument_does_not_match(self) -> None:
+        # Only the attached `--config-user-dir=<dir>` spelling is honored
+        # by real Clang -- a separate-argument form completes with
+        # "unknown argument ignored" and selects nothing.
+        assert forwards_response_file(None, ("--config-user-dir", "/etc")) is False

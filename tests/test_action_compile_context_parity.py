@@ -437,6 +437,87 @@ def _read_compile_config_overlay(cmd: list[str]) -> dict[str, Any]:
     return doc.get("compile", {})
 
 
+class TestCompileContextOverlayMktempIsRunnerTempAnchored:
+    """Regression: the mktemp call minting the synthesized --config overlay
+    path used to be a bare ``mktemp`` -- unlike every other temp-file mktemp
+    call in run.sh -- which on windows-latest's Git Bash resolves under its
+    own MSYS-internal /tmp mount. That path is later opened directly by a
+    native (non-MSYS) Python process (this module's own
+    ``_read_compile_config_overlay``, and the real `--config`-consuming CLI
+    invocation `run.sh` itself makes), which cannot resolve an MSYS-only
+    spelling and fails with FileNotFoundError -- confirmed as the
+    windows-latest unit-tests CI job's only failure on main.
+
+    A platform-specific end-to-end reproduction only fails on windows-latest,
+    so it can't by itself guard against a regression on the Linux/macOS
+    lanes that run every PR. This asserts the *source pattern* directly
+    (same technique test_action_run_sh_py_safe_path.py and siblings already
+    use for adjacent mktemp calls), which fails on every platform the moment
+    the anchored template reverts to a bare mktemp."""
+
+    def test_mktemp_is_anchored_under_runner_temp(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index(_COMPILE_CONTEXT_FN_START)
+        # Only the overlay's own creation site, not every mktemp in the file.
+        marker = "_COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp"
+        idx = text.index(marker, start)
+        line_end = text.index("\n", idx)
+        line = text[idx:line_end]
+        assert line == (
+            "_COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "
+            '"${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")'
+        ), line
+
+
+class TestCompileContextInputsTravelViaStdinNotEnvVars:
+    """Regression: ``add_compile_context_flags()`` used to forward its eight
+    raw input values (lang/frontend/gcc-path/gcc-prefix/gcc-options/sysroot/
+    nostdinc) as environment variables (``ABICHECK_COMPILE_GCC_PATH=...``)
+    prefixed onto a ``python3`` invocation on windows-latest. A value shaped
+    like a POSIX absolute path -- a normal cross-compilation ``gcc-path``,
+    e.g. ``/opt/gcc-14/bin/g++`` -- triggers Git Bash/MSYS's automatic path
+    conversion when forwarded that way to a native, non-MSYS ``python3.exe``,
+    silently rewriting it into a Windows path (inserting ``Program Files``
+    and its embedded space) before the script ever saw it -- confirmed as
+    the windows-latest unit-tests CI job's failure once the mktemp fix let
+    these tests reach their real assertions for the first time.
+
+    Only actual argv/envp entries are subject to that conversion; stdin
+    content never is (the same fix already applied to
+    ``add_flag_shlex_split()``'s single-value case, above). Like the mktemp
+    regression above, a platform-specific end-to-end reproduction only fails
+    on windows-latest, so this asserts the *source pattern* directly: no
+    ``ABICHECK_COMPILE_*`` env-var assignment remains anywhere in the
+    function, and the helper script is invoked with its data piped in via
+    stdin rather than baked into its environment."""
+
+    def _function_source(self) -> str:
+        text = RUN_SH.read_text(encoding="utf-8")
+        start = text.index(_COMPILE_CONTEXT_FN_START)
+        end = text.index(_COMPILE_CONTEXT_FN_END, start) + len(_COMPILE_CONTEXT_FN_END)
+        return text[start:end]
+
+    def test_no_abicheck_compile_env_var_assignment_remains(self) -> None:
+        source = self._function_source()
+        assert "ABICHECK_COMPILE_" not in source, source
+
+    def test_helper_invocation_pipes_data_via_stdin(self) -> None:
+        source = self._function_source()
+        needle = 'PYTHONPATH= "$_PY_BIN" "$_compile_context_helper_py"'
+        assert needle in source, source
+        # The invocation is fed by a `printf ... | (cd ... && "$_PY_BIN"
+        # ...)` pipe, not a bare call -- confirms the eight values really
+        # travel on stdin, not baked into the environment.
+        idx = source.index(needle)
+        preceding = source[:idx]
+        # "printf ... | (cd \"$_PY_SAFE_DIR\" && PYTHONPATH= ...)" -- the
+        # pipe feeds the whole subshell, not just the trailing PYTHONPATH=
+        # assignment, so the immediately-preceding token is "&&", not "|".
+        assert preceding.rstrip().endswith("&&"), preceding[-200:]
+        assert "|" in preceding, preceding
+        assert "printf " in preceding, preceding
+
+
 class TestCompileContextForwardingParity:
     """scan forwards the six flags directly; dump/compare (Phase 7) forward
     the identical settings via a synthesized --config compile: block."""
@@ -1178,7 +1259,13 @@ class TestCompileContextOverlayGenerationIsIsolated:
     def test_source_uses_isolated_interpreter_not_bare_python3(self) -> None:
         fn_source = _add_compile_context_flags_source()
         assert '(cd "$_PY_SAFE_DIR"' in fn_source
-        assert 'PYTHONPATH= "$_PY_BIN" -' in fn_source
+        # The overlay-generation script itself is a real file (not a
+        # heredoc fed to "$_PY_BIN" -) since PR #1162's own fix needs
+        # stdin free for the piped NUL-separated data -- see
+        # TestCompileContextInputsTravelViaStdinNotEnvVars. Isolation is
+        # still $_PY_BIN/$_PY_SAFE_DIR with PYTHONPATH cleared, just
+        # invoked against that file instead of "-".
+        assert 'PYTHONPATH= "$_PY_BIN" "$_compile_context_helper_py"' in fn_source
         for line in fn_source.splitlines():
             stripped = line.strip()
             assert not stripped.startswith("python3 ") and stripped != "python3"

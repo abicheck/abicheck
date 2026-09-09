@@ -5594,7 +5594,7 @@ looked like the obvious fix and wasn't.
   > where the earlier "flip it to `effective_frontend`" attempt (recorded
   > above) was not, and exactly what is still open: the plan's own **item 2**
   > in
-  > [`cli-cleanup-phase-two.md`](plans/cli-cleanup-phase-two.md), which was the
+  > `cli-cleanup-phase-two.md`, which was the
   > narrative owner for this item's status. **Update (2026-09-06): that plan
   > is closed and this item dissolves rather than closing** — ADR-068 retires
   > `scan`, so the unflagged-default half disappears with `scan_engine`
@@ -6035,13 +6035,29 @@ looked like the obvious fix and wasn't.
   at runtime for the same reason `scan_abi3_resolve.py` does. Unlike
   `check_ai_readiness.py`'s `import-cycle-growth` check,
   `dependency-direction` has no allowlist mechanism to grandfather either
-  violation while the reclassification lands. **Not fixed**: a correct
-  fix needs a real migration slice -- extracting `serialization.py`'s
-  `python_ext` coupling (so a `storage`-classified module doesn't reach
-  into `extract`) and re-routing `probe_harness.py`'s snapshot round-trip
-  through something `compare` may legitimately import -- verified against
-  the full architecture gate, not a one-line `modules.yaml` edit. Left
-  `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
+  violation while the reclassification lands. **Both fixed.**
+  `serialization.py`'s own `python_ext` coupling closed first (ADR-061 gap
+  E closure package 5, slice 1, 2026-09-07): the `detect_python_extension()`
+  backfill moved out of `serialization.py` into
+  `abicheck/workflows/snapshot_load.py::backfill_python_ext_from_evidence()`,
+  called as an explicit post-load step -- `serialization.py` no longer
+  imports `python_ext` at all (it imports `workflows.snapshot_load`
+  instead, and `python_ext_from_dict` from `.model`, a plain dataclass
+  parser, not the `extract`-classified `python_ext.py`). The
+  `probe_harness.py` half closed second (slice 2, 2026-09-08): its
+  snapshot round-trip (`.to_dict()`/`.to_json()`/`.from_dict()`,
+  `write_matrix_snapshot`/`load_matrix_snapshot`) moved out of
+  `probe_harness.py` entirely into `abicheck/workflows/findings.py`, which
+  may legitimately import both `compare` (for the dataclasses) and
+  `serialization`. `probe_harness.py` no longer calls
+  `serialization.snapshot_to_dict`/`snapshot_from_dict` at all. Neither
+  latent violation this entry named is still open; `serialization.py`
+  itself stays unclassified (`public_root_surfaces`) since its own
+  ~1500-line `snapshot_to_dict`/`snapshot_from_dict` codec proper was not
+  part of either slice -- that remains a separate, not-yet-attempted
+  classification, verified against the full
+  architecture gate, before `serialization.py` itself can be classified
+  `storage`. Left `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
   placement (its own docstring already states the reason and the
   precedent it follows) as accepted debt until that slice is done.
 

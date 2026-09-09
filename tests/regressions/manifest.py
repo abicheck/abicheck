@@ -46,99 +46,9 @@ already apply to `ChangeKind`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from .bug_class_schema import BugClass, KnownGap
 
-
-@dataclass(frozen=True)
-class KnownGap:
-    """A residual the class's current tests deliberately do not close.
-
-    Per AGENTS.md's "Fix the cause, not the instance": a gap is tracked
-    here rather than left as prose only. `canary_test`, when set, must be
-    a *dedicated* executable canary written specifically for this gap that
-    fails loudly if the residual silently closes or silently widens — never
-    a pointer to an existing suite that happens to cover the same class but
-    doesn't encode this specific gap. Leave it `None` for a gap that is
-    tracked but not yet monitored by a canary; `None` is honest, a
-    mismatched path is not (Codex review, PR #885).
-
-    "Fails loudly" is a strict requirement, checked by
-    `tests/test_regressions_manifest.py::test_known_gap_canaries_exist`, not
-    just documented here: an ordinary `@pytest.mark.xfail` is non-strict by
-    this repository's own pytest config (no `xfail_strict` ini option), so
-    an unexpected pass (XPASS, i.e. the gap silently closed) still reports
-    green — use `@pytest.mark.xfail(..., strict=True)` instead. A bare
-    `@pytest.mark.skip` is rejected outright: a skipped test never executes
-    at all, so it cannot detect the residual closing *or* widening — it
-    only proves the file exists. A conditional runtime `pytest.xfail(...)`
-    call (`if not fixed_yet(): pytest.xfail(...)`) is **not** an equivalent
-    substitute for `strict=True`, despite looking like one: once the
-    guarding condition stops being met (the gap closes), execution falls
-    through to whatever follows and, if that now passes, pytest records an
-    ordinary PASS — not an XPASS — so nothing distinguishes it from any
-    other passing test and CI stays green with no alert (Codex review,
-    PR #885, fresh evidence after the first review round). A canary with no
-    xfail/skip decorator at all must instead directly assert the *residual's
-    own bound* (the specific degraded/wrong value the gap currently
-    produces) rather than the eventually-correct behavior — asserting the
-    bound fails loudly the moment the real behavior diverges from it, in
-    either direction.
-    """
-
-    #: What's not covered (one sentence — the full account lives in
-    #: AGENTS.md's "Known gaps" section or the linked issue/PR).
-    description: str
-    #: Issue or PR number this gap traces to, e.g. "PR #843".
-    reference: str
-    #: Path to a *dedicated* canary test for this exact gap, or `None` if
-    #: this residual is tracked but not yet monitored by one.
-    canary_test: str | None = None
-
-
-@dataclass(frozen=True)
-class BugClass:
-    """One durable, cross-PR bug-class entry."""
-
-    #: Stable, dotted identifier — e.g. "identity.environment_taint".
-    #: Referenced by a future PR's "Bug class" answer instead of restating
-    #: the invariant from scratch.
-    id: str
-    #: One-sentence statement of the invariant that must hold for every
-    #: input, not just the originally reported one.
-    invariant: str
-    #: Issue/PR numbers this class's own escape history traces through —
-    #: for traceability, not for the integrity check to validate against
-    #: GitHub (this registry has no network access).
-    fixed_by: tuple[int, ...]
-    #: Paths to the test(s) carrying the generalized/property/metamorphic
-    #: suite for this class. At least one is required — a class with no
-    #: test is a "Known gaps" AGENTS.md paragraph, not a registry entry.
-    seed_tests: tuple[str, ...]
-    #: Documented, user-facing entry points this class's own seed_tests
-    #: actually invoke — "cli" only for a real Click/`CliRunner`
-    #: invocation, "python-api" only for a call through `abicheck.service`,
-    #: "github-action" only for a real execution of a workflow/composite-
-    #: action step. A seed test that imports an internal module directly
-    #: (`abicheck.checker`, `abicheck.surface`, `abicheck.dumper_clang`,
-    #: ...) — which is most of this registry today — exercises none of
-    #: these, and this field must stay `()` for it: a claimed surface a
-    #: seed test doesn't reach conceals exactly the missing cross-surface
-    #: coverage a contributor is supposed to discover here (Codex review,
-    #: PR #885). Free-form beyond that rule; not yet cross-checked against
-    #: a fixed vocabulary.
-    public_surfaces: tuple[str, ...] = ()
-    #: Axis name -> the values *actually exercised*, e.g.
-    #: {"algorithm": ("zstd", "gzip")} when a seed test genuinely round-
-    #: trips through both. The same rule as `public_surfaces` applies to a
-    #: "frontend" axis specifically: {"frontend": ("castxml", "clang")}
-    #: requires a seed test that invokes the real castxml/clang backend —
-    #: not one that feeds a hand-built AST/XML fragment into an internal
-    #: parser class directly, which is frontend-agnostic and earns no
-    #: frontend axis entry at all. Free-form beyond that rule; documents
-    #: *coverage* breadth, not a schema this module enforces.
-    axes: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    #: Residuals this class's current tests do not close (see `KnownGap`).
-    known_gaps: tuple[KnownGap, ...] = ()
+__all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 
 
 #: The bug classes named in
@@ -510,6 +420,55 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="storage.short_decode_mistaken_for_complete_decode",
+        invariant=(
+            "A bounded read over a compressed/streamed source must never "
+            'treat "the decoder returned without raising" as "the '
+            'decode is complete": a stream cut at an arbitrary raw-byte '
+            "boundary yields a *short* result -- commonly zero bytes -- "
+            "with no exception at all, so a result shorter than the "
+            "requested length is a truncation signal that must escalate "
+            "the raw read exactly as a raised exception does, unless the "
+            "underlying source is already exhausted. Concretely: "
+            "bounded_decoded_prefix(p, n) == read_snapshot_bytes(p)[:n] "
+            "for every valid storage envelope whose first n decoded bytes "
+            "are reachable within the reader's own raw-input budget, at "
+            "every compression ratio; past that budget the answer is None "
+            '("no prefix within budget"), never a short value that would '
+            "read as the real prefix."
+        ),
+        fixed_by=(1164,),
+        seed_tests=("tests/test_bounded_decoded_prefix_properties.py",),
+        public_surfaces=("python-api",),
+        axes={
+            "algorithm": ("zstd", "gzip"),
+            "compression_ratio": ("low", "high"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    'The same "short read is not EOF" shape exists in '
+                    "every other bounded/streamed reader in the tree "
+                    "(`workflows/bundle_compare_operand.py`'s own larger-"
+                    "window probe, `snapshot_cache.py`'s archive reader, "
+                    "the DWARF/PE section readers). Only the snapshot "
+                    "storage envelope's prefix primitive has a "
+                    "generalized suite; the siblings are untested against "
+                    "this invariant. Separately, the bounded reader's own "
+                    "guarantee stops at its raw-input cap: an envelope can "
+                    "place arbitrarily much stored input before its n-th "
+                    "decoded byte (a tiny data frame, a megabyte skippable "
+                    "frame, then the payload), and reading far enough to "
+                    "decode it is the whole-file decompression the bounded "
+                    "reader exists to avoid. That case answers None by "
+                    "design and is pinned by a test, but it is a real "
+                    "narrowing of the invariant above, not a closed case."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="trust_boundary.shell_workflow_injection",
         invariant=(
             "Every scalar input to a shell script or composite-Action "
@@ -517,11 +476,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             "bytes, and untrusted data cannot create additional commands, "
             "$GITHUB_OUTPUT records, paths, or side effects."
         ),
-        fixed_by=(705, 758, 836, 919),
+        fixed_by=(705, 758, 836, 919, 1165),
         seed_tests=(
             "tests/test_reusable_workflow_execution.py",
             "tests/test_check_project_workflow_execution.py",
             "tests/test_action_run_sh_helpers.py",
+            # PR #1165: `action/validate-inputs.sh`'s own annotation
+            # emitters. Every message there interpolates a
+            # workflow-controlled INPUT_* value into a line-delimited
+            # GitHub annotation, so a value carrying a newline forged an
+            # `::error::`/`::set-output::` command of its own -- a live
+            # defect on the pre-existing `build-info` site, not only on
+            # the tombstones the same PR added. Fixed once in the shared
+            # `_warn`/`_fail` helpers.
+            "tests/test_action_validate_inputs.py",
         ),
         public_surfaces=("github-action",),
         axes={
@@ -541,6 +509,20 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             )
         },
         known_gaps=(
+            KnownGap(
+                description=(
+                    "`action/run.sh` emits its own annotations with "
+                    'inline `echo "::error::..."` calls rather than '
+                    "through a shared helper, and several interpolate an "
+                    "INPUT_* value the same way validate-inputs.sh did. "
+                    "PR #1165 fixed validate-inputs.sh at its two "
+                    "emitters (covering every site in that file at once) "
+                    "but deliberately did not widen into run.sh's ~20 "
+                    "inline sites, which need their own pass and their "
+                    "own executing corpus."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
             KnownGap(
                 description=(
                     "The hostile-input execution corpus (shared via "
@@ -1199,27 +1181,24 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.macho_mangled_identity_normalization",
         invariant=(
-            "On Darwin, a linker-decorated spelling must be stripped to the "
-            "pure spelling at the POINT OF ORIGIN in every header-AST "
-            "backend's own parse step, for both a real Itanium name "
-            '(`__Z...` -> `_Z...`, unconditional) and a genuine extern "C"'
-            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). "
-            "Both are gated on `is_darwin_target(target_triple)`, which "
-            "must fall back to `sys.platform` (never overriding an "
-            "explicit non-Darwin triple) whenever the `-print-target-"
-            "triple` subprocess probe behind `target_triple` is "
-            "unavailable, rather than silently reading a failed probe as "
-            "non-Darwin. The shape check itself is the one canonical "
-            "`model.mangled_name.strip_macho_itanium_decoration`, reused "
-            "by `extract.headers.clang.context.strip_darwin_itanium_"
-            "decoration`, `model.mangled_name._itanium_strip_prefix`, and "
-            "`dumper_hybrid._macho_normalize_mangled` alike."
+            "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE POINT "
+            'OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
+            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`). Both gate on "
+            "`is_darwin_target(target_triple)`, always False for a bare `None`/empty triple (never "
+            "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
+            "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
+            "Whether CL mode is EFFECTIVELY active (`_compiler_options.effective_driver_mode_is_cl`) is the last `--driver-mode=<value>` override if any, else the binary's own name -- not a plain OR of the two, which can never be revoked back to GNU mode. Under CL mode there is no `sys.platform` guess, and explicit-target recovery (`cl_style=True`) is narrowed to the spellings actually honored (attached `--target=<value>`, separate `-target <value>`, either `/clang:`-forwarded), never one silently ignored. "
+            "A bare re-probe of the SAME resolved `clang_bin` (keeping only its effective `--driver-mode=<value>` if any, `dumper._forwarded_driver_mode_token`) is tried under BOTH driver modes when the explicit-target recovery finds nothing -- a CL-style `-print-target-triple` is honored exactly like GNU's, so a target-prefixed CL-style name (e.g. `aarch64-apple-darwin-clang-cl`) reports its own prefixed default from the bare probe too, not just under GNU mode. Dropping the driver-mode token would silently revert a `clang-cl --driver-mode=g++` re-probe to CL mode, since the identical binary reports a different target bare vs. with that override: real evidence beats a static name-shape heuristic, since the earlier, option-bearing probe may have failed for a reason unrelated to `clang_bin`'s own identity. Only when that bare probe ALSO fails (GNU mode only) does `sys.platform` apply, gated on BOTH the RESOLVED `clang_bin` being the plain host default by invocation BASENAME (`dumper_clang._is_default_clang_bin`, version-suffix-stripped -- real Clang derives its own default target from argv[0], so basename -- not real identity, not raw spelling, and NOT merely differing from the plain name -- is what matters: an absolute path or a native version suffix still matches, a target-prefixed symlink correctly does not, and an arbitrary custom rename is answered by the bare re-probe, never by guessing it must be a cross-compiler) AND NOT `dumper_clang.clang_bin_is_explicitly_configured` (a `--compiler`/`--compiler-prefix` wrapper can coincidentally share the plain default's basename while genuinely not being it -- once BOTH probes fail for an explicitly-configured binary, that failure is itself evidence of an anomaly, not confirmation of a real native clang; this now ALSO suppresses the guess for a genuine absolute-path `--compiler` naming the real native clang, superseding this bug class's own earlier claim to the contrary). No fallback at all when no `@response-file`/`--config=<file>`/`--config-{user,system}-dir=<dir>` is forwarded AT ALL (`forwards_response_file`/`explicit_target_triple`'s shared `_opaque_option_source_tokens` void-back-to-None -- a config-*-dir points at a directory whose `clang.cfg` is loaded IMPLICITLY, no explicit `--config=` needed; real Clang scans the WHOLE arg list, response/config files included, before parsing even starts, so one could carry a later target OR retroactively flip CL-vs-GNU mode regardless of its position relative to a visible target). Shape check: `model.mangled_name.strip_macho_itanium_"
+            "decoration`, NOT applied to castxml."
         ),
-        fixed_by=(1138,),
+        fixed_by=(1138, 1156),
         seed_tests=(
             "tests/test_dumper_clang_extern_c_identity.py",
             "tests/test_dumper_hybrid_macho_idempotence.py",
             "tests/test_mangled_name_macho_decoration.py",
+            "tests/test_compiler_options.py",
+            "tests/test_dumper_target_triple_fallback.py",
+            "tests/test_castxml_literal_double_underscore_mangled.py",
         ),
         public_surfaces=(),
         axes={
@@ -1235,20 +1214,23 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "No Mach-O toolchain here -- verified via code "
-                    "inspection + synthetic unit tests only. Recurred "
-                    "THREE times on macOS CI, each prior fix leaving one "
-                    "narrower residual (Itanium shape, then plain-C bare-"
-                    "name shape, then `is_darwin_target` reading False "
-                    "purely from a failed probe); the `sys.platform` "
-                    "fallback is verified only by monkeypatching"
+                    "No Mach-O toolchain here -- Codex/CodeRabbit code review, plus one real Clang 18 install (used to verify the eighteenth-through-twenty-fourth items below). "
+                    'Recurred TWENTY-FOUR times within #1138/#1149/#1156: Itanium/plain-C shapes reading False on a failed probe; a guess INSIDE `is_darwin_target` plus an unconditional castxml strip corrupting `asm("__Zfake")`; that guess moved back inside `is_darwin_target` (caught by real macos-latest CI); a possibly-ignored '
+                    "explicit target recovered under a CL-style driver; the `sys.platform` guess leaking outside that gate; `--driver-mode=cl` on a plain `clang` name evading the "
+                    "name-only CL check; that gate recovering NO spelling when two are honored; a `/clang:`-forwarded spelling still missed; a CL-named binary reverted to GNU mode "
+                    "still treated as CL; the `sys.platform` guess applying to an explicit cross-compiler unrelated to host OS; that same guess wrongly suppressed for a `gcc_path` `_resolve_clang_bin` itself ignores; an absolute-path spelling of the identical native binary failing string equality; a real-executable-identity fix wrongly equating a target-prefixed symlink with plain `clang`; a `@response-file`'s own hidden target being ignored; a native versioned "
+                    "driver name (`clang-18`) failing the basename check; a visible target trusted despite a later response file that could override it; that same fix wrongly trusting a preceding one too, since Clang's own driver-mode scan reads the whole arg list up front regardless of position; an exact-basename comparison alone wrongly "
+                    "treating ANY custom rename of the native compiler (e.g. `company-clang`) as a cross-compiler, closed by trying a bare re-probe of the identical binary first; an "
+                    "explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; an explicitly-"
+                    "configured `--compiler` wrapper sharing the plain default's basename while not being it, still getting the guess purely on basename evidence; and, once a "
+                    'genuine Darwin target IS confirmed, a literal `asm("__Zfake")` label being indistinguishable by shape alone from a real compiler-generated decorated Itanium '
+                    "mangling (both are equally `__Z...`-shaped), closed by `has_explicit_asm_label` detecting clang's own distinct `AsmLabelAttr` child node under the declaration's "
+                    '`"inner"` list (verified against a real Clang 18 install) and short-circuiting both stripping branches whenever it is present; and the fifteenth item\'s bare '
+                    "re-probe being confined to the GNU branch only, leaving a target-prefixed CL-style driver (e.g. `aarch64-apple-darwin-clang-cl`) with no fallback once its own "
+                    "explicit-target recovery found nothing, even though a real `clang-cl -print-target-triple` reports that same prefixed default (verified against a real Clang 18 "
+                    "install), closed by trying the identical bare re-probe under CL mode too."
                 ),
-                reference=(
-                    "PR #1138 follow-up: macos-latest integration-tests "
-                    "reported this exact mismatch three times -- Itanium "
-                    "shape, extern-C shape, then this session's identical "
-                    "'__Z10plain_funci' != '_Z10plain_funci' symptom"
-                ),
+                reference="#1138/#1149 follow-ups, fixed by #1156",
             ),
         ),
     ),

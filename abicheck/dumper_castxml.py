@@ -113,7 +113,6 @@ from .model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
-from .model.mangled_name import strip_macho_itanium_decoration
 from .provenance import header_from_location
 
 
@@ -475,15 +474,16 @@ class _CastxmlParser:
             name = el.get("name", "")
             # C-mode castxml does not emit a mangled attribute for C-linkage variables
             # (C has no name mangling); fall back to plain name as the symbol key,
-            # mirroring the same pattern in parse_functions(). `strip_macho_
-            # itanium_decoration` is a defensive, confirmed-no-op normalization
-            # for every castxml build tested so far (see the identical
+            # mirroring the same pattern in parse_functions(). Deliberately NOT
+            # run through `strip_macho_itanium_decoration` (see the identical
             # comment in `extract.headers.castxml.functions.
-            # parse_function_element` for the full reasoning) -- kept here too
-            # so a differently-behaving castxml build/version can't silently
-            # reintroduce Darwin's Itanium double-underscore decoration into
-            # this snapshot's own `Variable.mangled` identity.
-            mangled = strip_macho_itanium_decoration(el.get("mangled", "")) or name
+            # parse_function_element`): castxml's own `mangled` attribute never
+            # carries Darwin's Itanium double-underscore decoration to begin
+            # with, so unconditionally stripping a `"__Z..."`-shaped value
+            # here would corrupt the one real case that shape CAN mean for
+            # this backend -- a literal, explicit ``asm("__Zfake")`` label,
+            # which castxml reports verbatim regardless of target.
+            mangled = el.get("mangled", "") or name
             if not mangled:
                 continue
             # Real ELF export evidence overrides castxml's language-mode guess

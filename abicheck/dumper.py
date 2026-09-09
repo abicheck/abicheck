@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import shutil as shutil  # noqa: F401  # legacy test patch target
 import subprocess
+import sys
 import tempfile
 import warnings
 from collections.abc import Callable
@@ -36,6 +37,12 @@ if TYPE_CHECKING:
 from defusedxml import ElementTree as DefusedET
 
 from . import deadline, dumper_cache, qualified_name_segments
+from ._compiler_options import (
+    effective_driver_mode_is_cl as _effective_driver_mode_is_cl,
+    explicit_target_triple as _explicit_target_triple,
+    forwarded_driver_mode_token as _forwarded_driver_mode_token,
+    forwards_response_file as _forwards_response_file,
+)
 from .castxml_policy import evaluate_castxml_version
 from .dumper_ast_config import (
     _CPP_ONLY_PATTERNS as _CPP_ONLY_PATTERNS,
@@ -62,10 +69,13 @@ from .dumper_castxml_probe import (
 from .dumper_clang import (
     _clang_available as _clang_available,
     _ClangAstParser as _ClangAstParser,
+    _is_cl_style_driver_name as _is_cl_style_driver_name,
+    _is_default_clang_bin as _is_default_clang_bin,
     _is_dpcpp_family_binary as _is_dpcpp_family_binary,
     _needs_sycl_host_only as _needs_sycl_host_only,
     _resolve_clang_bin as _resolve_clang_bin,
     _resolve_dpcpp_multi_context,
+    clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
 )
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -614,15 +624,41 @@ def _header_ast_parser(
             pruning_header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(public_header_paths + public_dir_paths),
             exported_symbols=frozenset(exported_dynamic | exported_static),
         )
+        # Probe-failure fallback (Codex/CodeRabbit review, fresh evidence): explicit `--target=`; a bare
+        # re-probe (both driver modes, since a CL-style ``-print-target-triple`` is honored too) plus its
+        # own `--driver-mode=`; else `sys.platform` under GNU mode only, gated on real identity AND not
+        # explicit `--compiler` provenance (a wrapper can share the default's basename). No fallback
+        # while `@response-file`/`--config[-*-dir]=` may hide the real target.
+        is_cl_mode = _effective_driver_mode_is_cl(
+            _is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
+        )
+        _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
+        _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
+
+        def _bare_reprobe() -> str | None:
+            # Deferred (Codex review, fresh evidence): eagerly evaluating this would
+            # start a second compiler subprocess (its own 10s timeout) on every call.
+            return _configured_target_triple(None, _bare_reprobe_args, clang_bin) if _target_known else None
+
+        _guess_ok = (
+            _target_known
+            and _is_default_clang_bin(clang_bin, compiler)
+            and not _clang_bin_is_explicitly_configured(gcc_path, gcc_prefix)
+        )
+        target_triple = _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin) or (
+            (_explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True) or _bare_reprobe())
+            if is_cl_mode
+            else _explicit_target_triple(gcc_options, gcc_option_tokens)
+            or _bare_reprobe()
+            or (sys.platform if _guess_ok else None)
+        )
         parser = _ClangAstParser(
             ast_root,
             exported_dynamic,
             exported_static,
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
-            target_triple=_configured_target_triple(
-                gcc_options, gcc_option_tokens, clang_bin
-            ),
+            target_triple=target_triple,
             no_binary_evidence=no_binary_evidence,
         )
         stamped = cast(

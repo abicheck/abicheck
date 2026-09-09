@@ -98,30 +98,31 @@ hundreds more generic C++ change kinds.
 
 ## Highest-priority improvements
 
-### 0. Finish the existing wheel foundations
+### 0. The existing wheel foundations (G9, G10, G16 — done; G4 — planned)
 
-Before expanding scope, three existing gaps should be closed because they
-directly affect trustworthy scientific-Python scans.
+These three gaps have since been closed, because they directly affect
+trustworthy scientific-Python scans; G4 remains open, as the separate,
+XL-effort item described above.
 
-- **Vendored-library matching — [G9](plans/g9-wheel-vendored-matching.md).**
+- **Vendored-library matching — G9 (done).**
   `auditwheel` and `delocate` rename bundled libraries with content hashes.
-  abicheck currently may interpret every rebuilt dependency as removed and
-  re-added, losing the actual dependency delta. The project's own analysis
-  found that this can conceal a real vendored SONAME break.
-- **Platform-floor verification — [G10](plans/g10-glibc-floor-check.md).**
-  Comparing required `GLIBC_*` versions with the manylinux tag is already
-  planned. It should then be generalized to musllinux, macOS deployment
-  targets, Windows API/UCRT requirements, `GLIBCXX`/`CXXABI`, and CPU
-  instruction-set floors.
-- **Header frontend robustness — [G16](plans/g16-header-scope-toolchain-robustness.md) /
-  [G4](plans/g4-header-ast-extractor.md).** Real-world scanning found 21
-  repeated cases in which header-scoped analysis aborted in host system
-  headers, preventing public-versus-private surface classification. Moving
-  toward a robust libclang frontend is important for projects that provide
-  native public headers.
-
-These are less novel than the features below, but they determine whether
-users trust the result.
+  Filename- and embedded-SONAME/install-name normalization (`strip_vendor_hash`)
+  now pairs a rebuilt dependency across the hash rename instead of reporting
+  it as removed-and-re-added, so a real vendored SONAME break stays visible
+  through the noise.
+- **Platform-floor verification — G10 (done).**
+  The manylinux glibc floor check (`platform_baseline_floor_raised`,
+  declared via `--env-matrix`'s `runtime_floors`) is implemented; musllinux,
+  macOS deployment targets, Windows API/UCRT requirements, `GLIBCXX`/`CXXABI`,
+  and CPU instruction-set floors are covered by later work (see §3 below).
+- **Header frontend robustness — G16 (done) /
+  [G4](plans/g4-header-ast-extractor.md) (still planned).** Real-world
+  scanning found 21 repeated cases in which header-scoped analysis aborted
+  in host system headers, preventing public-versus-private surface
+  classification; `HeaderToolchainError` and header-scope toolchain
+  diagnostics now surface that failure instead of silently mis-scoping.
+  Moving toward a robust libclang frontend (G4) for projects that provide
+  native public headers remains a separate, larger undertaking.
 
 ### 1. A first-class Cython API/ABI frontend
 
@@ -438,7 +439,7 @@ It could extract:
 - module GIL declarations.
 - package build configuration.
 
-The project's current Python API plan ([G23](plans/g23-python-level-api-diff.md))
+The project's current Python API plan (G23)
 deliberately leaves runtime introspection and docstring fallback as future
 work, so this is a natural additive provider rather than a redesign.
 
@@ -670,14 +671,14 @@ problems faced by SciPy and compiled scientific Python.
 
 | Idea above | Closest existing plan/ADR | Relationship |
 |---|---|---|
-| §0 Wheel foundations | [G9](plans/g9-wheel-vendored-matching.md) ✅, [G10](plans/g10-glibc-floor-check.md) ✅, [G16](plans/g16-header-scope-toolchain-robustness.md) ✅ / [G4](plans/g4-header-ast-extractor.md) (still planned, XL) | G9, G10, and G16 are now done. G4 (the libclang frontend) remains the large, separate, high-risk piece — a new heavy optional dependency and a second full parser backend, deliberately not attempted alongside G9/G10/G16. |
+| §0 Wheel foundations | G9 ✅, G10 ✅, G16 ✅ / [G4](plans/g4-header-ast-extractor.md) (still planned, XL) | G9, G10, and G16 are now done. G4 (the libclang frontend) remains the large, separate, high-risk piece — a new heavy optional dependency and a second full parser backend, deliberately not attempted alongside G9/G10/G16. |
 | §1 Cython API/ABI frontend | **[G25](plans/g25-cython-api-abi-frontend.md)** (`UC-ARCH-cython-api`, `planned`) | Gap-plan-ified. Same shape as G23's `.pyi` surface work; narrower than [ADR-034](adr/034-managed-runtime-and-non-c-abi-frontends.md)'s general non-native-language scope. |
-| §2 NumPy C-API envelope | **[G26](plans/g26-numpy-capi-envelope.md)** (`UC-TC-numpy-capi-envelope`, `partial`) | Consumption detection, NPY_TARGET_VERSION extraction, and the wheel-metadata cross-check are done; the raw NPY_ABI_VERSION/NPY_API_VERSION hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the plan's "Out of scope". New provider; extends the existing CPython-extension recognition ([G14](plans/g14-stable-abi-subset.md)) to NumPy's own capsule-based API. |
-| §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `partial`) | Linux GLIBCXX/CXXABI floor extension, musllinux glibc-dependency check, macOS deployment-target check, wheel-tag architecture-mismatch check, and a narrow RPATH-portability/vendored-closure check pair are done; Windows, CPU-ISA, the full per-tag closure policy, and CLI auto-derivation from a wheel's own tag remain planned. Generalizes [G10](plans/g10-glibc-floor-check.md) across platforms/toolchains; reuses [G13](plans/g13-arch-mismatch-guard.md)/[G12](plans/g12-security-hardening.md) machinery. |
-| §4 Release-matrix parity | [G2](plans/g2-build-config-and-bundle.md) (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md) | Extends multi-binary release compare from "verdict" to "support-set delta." |
+| §2 NumPy C-API envelope | **[G26](plans/g26-numpy-capi-envelope.md)** (`UC-TC-numpy-capi-envelope`, `partial`) | Consumption detection, NPY_TARGET_VERSION extraction, and the wheel-metadata cross-check are done; the raw NPY_ABI_VERSION/NPY_API_VERSION hex constants need disassembly to recover (out of scope, same reasoning as G4) — see the plan's "Out of scope". New provider; extends the existing CPython-extension recognition (G14) to NumPy's own capsule-based API. |
+| §3 Wheel/deployment verification | **[G27](plans/g27-wheel-deployment-verification.md)** (`UC-TC-wheel-deployment-claims`, `partial`) | Linux GLIBCXX/CXXABI floor extension, musllinux glibc-dependency check, macOS deployment-target check, wheel-tag architecture-mismatch check, and a narrow RPATH-portability/vendored-closure check pair are done; Windows, CPU-ISA, the full per-tag closure policy, and CLI auto-derivation from a wheel's own tag remain planned. Generalizes G10 across platforms/toolchains; reuses G13/G12 machinery. |
+| §4 Release-matrix parity | G2 (build matrix), [ADR-002](adr/002-multi-binary-release-compare.md) | Extends multi-binary release compare from "verdict" to "support-set delta." |
 | §5 Downstream-impact analysis | `abicheck/appcompat.py`, [ADR-005](adr/005-application-compat-check.md) | Extends existing app-compat checking into a scientific-Python consumer graph. |
 | §6 One-command PyPI/conda compare | none yet | New CLI surface; would need a package-resolution/caching layer not currently in scope. |
-| §7 Hermetic runtime-surface provider | [G23](plans/g23-python-level-api-diff.md) (deferred runtime fallback), [ADR-021b](adr/021-mcp-security-model.md) (sandboxing posture) | Picks up G23's explicitly-deferred runtime-introspection path. |
+| §7 Hermetic runtime-surface provider | G23 (deferred runtime fallback), [ADR-021b](adr/021-mcp-security-model.md) (sandboxing posture) | Picks up G23's explicitly-deferred runtime-introspection path. |
 | §8 BLAS/LAPACK/Fortran profile | [ADR-010](adr/010-policy-profile-system.md) (policy profiles) | New profile + new fact extraction (LP64/ILP64, OpenMP runtime IDs) the profile system doesn't yet have inputs for. |
 | §9 Deprecation-aware policy | none yet | Needs multi-baseline history, which the current two-snapshot `compare` model doesn't carry. |
 | §10 ufunc/gufunc/dtype surface | none yet | New provider alongside NumPy C-API envelope (§2); explicitly out of scope for G26 itself (see that plan's "Out of scope"). |

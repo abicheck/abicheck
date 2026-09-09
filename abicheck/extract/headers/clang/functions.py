@@ -80,6 +80,7 @@ from .context import (
     _Decl,
     access_level as _access_level,
     clang_deprecated_message as _clang_deprecated_message,
+    has_explicit_asm_label as _has_explicit_asm_label,
     is_builtin_file,
     is_darwin_target as _is_darwin_target,
     qualtype as _qualtype,
@@ -536,6 +537,7 @@ def parse_functions(
             target_triple,
             name=name,
             is_extern_c=is_extern_c,
+            has_asm_label=_has_explicit_asm_label(node),
         )
         quals = _function_qualifiers(qualtype)
         ret_type = _return_type(qualtype) or "void"

@@ -1,10 +1,12 @@
 # ADR-050: Comparability Contract — Profile/Scope Fingerprints and the Multi-TU Manifest
 
 **Date:** 2026-07-22
-**Status:** Accepted — implemented (Phase 0 and Phases A–E; D1–D6). See
-[G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) for the
+**Status:** Accepted — implemented (Phase 0 and Phases A–E; D1–D6). The
 per-phase implementation record, including the post-merge D5/D6 review
-follow-up. One thing remains intentionally unbuilt, not a gap in this ADR's
+follow-up, lived in the G32 plan record, retired after completion (see
+`docs/contribute/plans/index.md`); this ADR's own Context/Decision below
+is the surviving account. One thing remains intentionally unbuilt, not a
+gap in this ADR's
 model: `service.run_dump` itself accepts `dump_manifest` (public API,
 documented), so a direct caller can already dump both sides manifest-driven
 and hand the snapshots to `compare_snapshots` — but the one-call
@@ -2498,5 +2500,5 @@ this split, if picked up, would be sequenced.
   [ADR-041](041-compiler-facts-semantic-impact-graph.md) (coverage-honesty
   pattern this ADR's gate follows), [ADR-045](045-identity-based-old-new-entity-matching.md)
   (return-type-out-of-identity precedent for D4)
-- [G32](../plans/g32-comparability-contract-and-multi-tu-manifest.md) —
-  phased implementation plan
+- G32 (retired plan record, `docs/contribute/plans/index.md`) —
+  the phased implementation plan this ADR was built from

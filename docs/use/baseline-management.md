@@ -60,10 +60,11 @@ breaking changes before they ship.
 > already-parsed `ElfMetadata` (e.g. a stored `AbiSnapshot.elf`) instead
 > of requiring the old release's binaries on disk. See each function's
 > own docstring for the full contract; there is no CLI wiring for this
-> module and none is planned without a concrete use case (see
-> `docs/contribute/plans/product-baseline-per-library-header-roots.md`
-> for the one follow-up slice implemented so far, and its own "Out of
-> scope" section for what isn't).
+> module and none is planned without a concrete use case (the one
+> follow-up slice implemented so far — per-library header roots for
+> `compare_product_directories`, PR #829 — is recorded in
+> `abicheck/product_baseline.py` and its test file; the implementation
+> plan that tracked it is retired now that it shipped).
 
 This page covers the **lifecycle model**: what a baseline is, why most
 projects need two of them, and what makes a baseline comparable across
