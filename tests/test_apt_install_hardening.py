@@ -374,39 +374,82 @@ class TestPackagesAreNotInterpolatedIntoTheShell:
 
 
 #: Commands that genuinely *absorb* a failure: each exits 0 no matter what
-#: preceded it, so a step ending in one cannot abort. Deliberately a small
-#: allowlist rather than "the line contains `||`" — that weaker rule accepts
-#: `apt-get update || exit 1`, `|| false`, or `|| apt-get update` (a retry
-#: whose own failure still aborts), which reintroduce the exact gating this
-#: whole change removes while keeping the guard green (Codex review, P2 on
-#: PR #1182).
-_NON_FAILING_SINKS = frozenset({"true", ":", "echo", "printf"})
+#: preceded it. Deliberately a small allowlist rather than "the line contains
+#: `||`" -- that weaker rule accepts `apt-get update || exit 1`, `|| false`,
+#: or `|| apt-get update` (a retry whose own failure still aborts), which
+#: reintroduce the exact gating this change removes while keeping the guard
+#: green (Codex review, P2 on PR #1182).
+#:
+#: `printf` is deliberately NOT here: it exits non-zero on a bad format
+#: (`printf '%d' abc`), so it is not unconditionally absorbing the way
+#: `true`, `:` and a plain `echo` are.
+_NON_FAILING_SINKS = frozenset({"true", ":", "echo"})
 
 
 def update_failure_is_absorbed(line: str) -> bool:
     """True when this line's ``apt-get update`` cannot abort its step.
 
-    The status a shell line exits with is the status of its *last* command,
-    so a chain `a || b || c` is absorbed only if `c` is. Anything this cannot
-    parse is reported as NOT absorbed: for a guard, an unreadable line is a
-    line to look at, not one to wave through.
+    ``a || b || c`` short-circuits at the *first* success, so the line exits
+    0 if **any** fallback succeeds -- not only the last one. (`false || true
+    || false` exits 0; an earlier revision of this predicate claimed
+    otherwise, and differential-testing it against real bash --
+    ``test_predicate_agrees_with_real_bash`` below -- is what caught it.)
+    A fallback that always succeeds therefore absorbs the failure wherever
+    it sits in the chain.
+
+    Checking a fallback's first word is not enough, though: a pipeline takes
+    its status from its last element, so ``|| echo warn | false`` exits 1
+    while opening with an allowlisted command, and ``|| echo hi; false``
+    replaces the status outright with a second statement (Codex review,
+    second P2 on PR #1182). So any shell operator other than ``||`` after
+    the first ``||`` disqualifies the line: ``;``, ``&``, ``&&``, ``|`` and
+    redirections all make the outcome something this cannot vouch for, and a
+    guard that cannot vouch for a line should flag it, not pass it.
+
+    Quoting is respected -- the ``;`` inside ``echo "...; ..."`` is text, not
+    a separator -- which is why this tokenizes rather than scanning
+    characters. Anything unparseable is reported as NOT absorbed.
     """
     if "||" not in line:
         return False
-    tail = line.rsplit("||", 1)[1].strip().rstrip(";&").strip()
-    if not tail:
-        return False
+
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
     try:
-        words = shlex.split(tail)
+        tokens = list(lexer)
     except ValueError:
         return False
-    if not words:
+
+    punctuation = set(lexer.punctuation_chars)
+
+    def is_operator(tok: str) -> bool:
+        return bool(tok) and set(tok) <= punctuation
+
+    if "||" not in tokens:
         return False
-    # `sudo true` absorbs exactly as `true` does; skip a leading sudo.
-    head = words[0]
-    if head == "sudo" and len(words) > 1:
-        head = words[1]
-    return head in _NON_FAILING_SINKS
+    after = tokens[tokens.index("||") + 1 :]
+    if any(is_operator(tok) and tok != "||" for tok in after):
+        return False
+
+    # Split the remaining fallbacks on `||`; any one of them succeeding ends
+    # the chain at 0.
+    segments: list[list[str]] = [[]]
+    for tok in after:
+        if tok == "||":
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+
+    for segment in segments:
+        if not segment:
+            continue
+        head = segment[0]
+        # `sudo true` absorbs exactly as `true` does; skip a leading sudo.
+        if head == "sudo" and len(segment) > 1:
+            head = segment[1]
+        if head in _NON_FAILING_SINKS:
+            return True
+    return False
 
 
 class TestNoWorkflowGatesInstallOnUpdate:
@@ -486,7 +529,9 @@ class TestUpdateFailureAbsorptionPredicate:
             "sudo apt-get update -qq || sudo apt-get update -qq || true",
             "apt-get update||true",
             "sudo apt-get update || sudo true",
-            "sudo apt-get update -qq || printf 'stale\\n'",
+            # A `;` inside quotes is text, not a statement separator -- this
+            # is clang-plugin.yml's real line.
+            'sudo apt-get update || echo "::warning::stale; continuing"',
         ],
     )
     def test_absorbed_forms_are_accepted(self, line: str) -> None:
@@ -507,12 +552,71 @@ class TestUpdateFailureAbsorptionPredicate:
             "sudo apt-get update ||",
             # Unparseable is not a pass.
             "sudo apt-get update || 'unterminated",
+            # A pipeline takes its status from its LAST element, and a second
+            # statement replaces it outright -- an allowlisted first word
+            # proves nothing (Codex review, second P2; each verified to exit
+            # 1 under real bash).
+            "sudo apt-get update || echo warning | false",
+            "sudo apt-get update || echo hi; false",
+            "sudo apt-get update || true && false",
+            "sudo apt-get update || echo hi & false",
+            # printf is not unconditionally absorbing: a bad format exits 1.
+            "sudo apt-get update || printf '%d' abc",
         ],
     )
     def test_gating_forms_are_rejected(self, line: str) -> None:
         assert not update_failure_is_absorbed(line)
 
-    def test_only_the_last_link_of_a_chain_decides(self) -> None:
-        """`a || b || c` exits with c's status, so only c can absorb."""
+    def test_a_sink_anywhere_in_a_chain_absorbs(self) -> None:
+        """`||` short-circuits at the first success, so position is irrelevant.
+
+        Both of these exit 0 under real bash. An earlier revision asserted
+        the second was NOT absorbed, on a "only the last link decides"
+        reading that is simply wrong -- the kind of self-derived oracle
+        AGENTS.md warns about, caught by the differential test below.
+        """
         assert update_failure_is_absorbed("apt-get update || false || true")
-        assert not update_failure_is_absorbed("apt-get update || true || false")
+        assert update_failure_is_absorbed("apt-get update || true || false")
+
+    @requires_apt_harness
+    @pytest.mark.parametrize(
+        "form",
+        [
+            "CMD || true",
+            "CMD || :",
+            'CMD || echo "::warning::stale"',
+            'CMD || echo "::warning::stale; continuing"',
+            "CMD || sudo true",
+            "CMD || CMD || true",
+            "CMD||true",
+            "CMD",
+            "CMD && echo installed",
+            "CMD || exit 1",
+            "CMD || false",
+            "CMD || CMD",
+            "CMD || echo warning | false",
+            "CMD || echo hi; false",
+            "CMD || true && false",
+            "CMD || printf '%d' abc",
+            "CMD || false || true",
+            "CMD || true || false",
+        ],
+    )
+    def test_predicate_agrees_with_real_bash(self, form: str) -> None:
+        """The oracle is bash itself, not this module's own reasoning.
+
+        AGENTS.md: a general invariant needs "a stated oracle that is not the
+        same formula/helper the implementation itself uses". Here the failing
+        `apt-get update` is stood in for by `false`, and bash's own exit
+        status for the whole line is the ground truth the predicate must
+        reproduce. This is the check that falsified the chain-ordering claim
+        an earlier revision shipped.
+        """
+        executable = form.replace("CMD", "false")
+        real_exit = subprocess.run(
+            ["bash", "-c", executable], capture_output=True
+        ).returncode
+        predicted = update_failure_is_absorbed(form.replace("CMD", "apt-get update"))
+        assert predicted == (real_exit == 0), (
+            f"{form!r}: predicate says absorbed={predicted}, bash exits {real_exit}"
+        )
