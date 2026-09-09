@@ -1794,7 +1794,7 @@
   "$defs": {
     "prescan_layer_coverage": {
       "type": "object",
-      "description": "Schema 3.13: the mandatory ADR-033 D6 coverage row both pre-scan sides carry (LayerCoverage.to_dict() -- pattern_scan.PatternScanResult.coverage() / preprocessor_scan.PreprocessorScanResult.coverage()).",
+      "description": "Schema 3.13 (Codex review, PR #1169, eleventh round, fresh evidence: also types the remaining fields LayerCoverage.to_dict() unconditionally emits, not just layer/status/confidence/detail): the mandatory ADR-033 D6 coverage row both pre-scan sides carry (LayerCoverage.to_dict() -- pattern_scan.PatternScanResult.coverage() / preprocessor_scan.PreprocessorScanResult.coverage()). requested_roots/resolved_roots/transitive_targets/compile_units/link_units are P0.2 root-target-scoping fields that stay empty/null for these two pre-scans (which never scope by build target) -- typed here for the shape they always carry, not because pattern/preprocessor pre-scan populates them.",
       "additionalProperties": true,
       "properties": {
         "layer": {
@@ -1810,6 +1810,26 @@
         },
         "detail": {
           "type": "string"
+        },
+        "elapsed_s": {
+          "type": "number"
+        },
+        "requested_roots": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "resolved_roots": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "transitive_targets": {
+          "type": ["integer", "null"]
+        },
+        "compile_units": {
+          "type": ["integer", "null"]
+        },
+        "link_units": {
+          "type": ["integer", "null"]
         }
       }
     },

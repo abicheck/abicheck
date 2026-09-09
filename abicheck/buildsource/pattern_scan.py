@@ -986,8 +986,18 @@ def scan_files(
         else None
     )
     missing_roots = 0
+    # Eleventh round, fresh evidence: `iter_source_files` dedupes existing
+    # candidates into a `set[Path]`, so a caller passing the same root twice
+    # (duplicate `--header` values, a directly-constructed API input) only
+    # ever scans it once -- this accounting must dedupe identically, or a
+    # single missing input inflates `files_skipped` by however many times
+    # it was repeated in `roots`.
+    seen_roots: set[Path] = set()
     for r in roots:
         rp = Path(r)
+        if rp in seen_roots:
+            continue
+        seen_roots.add(rp)
         if rp.exists():
             continue
         if changed_suffixes is not None and not changed_suffixes:

@@ -725,15 +725,14 @@ class TestReportValidatesAgainstSchema:
 
 @_requires_jsonschema
 class TestPrescanSideSchemaTyping:
-    """Codex review (PR #1169, third round): pattern_prescan/preprocessor_
-    prescan sides were unconstrained free-form objects despite the schema
-    description documenting a `coverage` block and `scope_reason` enum.
-    `$defs/pattern_prescan_side`/`preprocessor_prescan_side` now type the
-    public fields; these tests exercise both directions."""
+    """`$defs/pattern_prescan_side`/`preprocessor_prescan_side` type the
+    pattern_prescan/preprocessor_prescan sides' public fields (Codex
+    review, PR #1169, third/eleventh rounds); exercises both directions."""
 
     def _payload(self, block: str, side: dict) -> dict:
-        f = _fn("api", "_Z3apiv")
-        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        snap = AbiSnapshot(
+            library="libfoo.so.1", version="1.0", functions=[_fn("api", "_Z3apiv")]
+        )
         payload = json.loads(reporter.to_json(compare(snap, snap)))
         payload[block] = {"old": side, "new": side}
         return payload
@@ -762,6 +761,17 @@ class TestPrescanSideSchemaTyping:
             {"files_scanned": 0, "scope_reason": "made_up_reason"},
             {"files_scanned": 0, "coverage": 1},
             {"files_scanned": 0, "coverage": {"status": "made_up_status"}},
+            # Eleventh round: prescan_layer_coverage's other unconditionally-
+            # emitted LayerCoverage.to_dict() fields, not just status.
+            {"files_scanned": 0, "coverage": {"status": "present", "elapsed_s": "x"}},
+            {
+                "files_scanned": 0,
+                "coverage": {"status": "present", "requested_roots": "x"},
+            },
+            {
+                "files_scanned": 0,
+                "coverage": {"status": "present", "transitive_targets": "x"},
+            },
         ],
     )
     def test_pattern_prescan_side_rejects_malformed_field(self, side):

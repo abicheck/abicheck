@@ -152,4 +152,16 @@
   selects nothing at all, unambiguously, so a missing, no-suffix
   directory root under `changed_paths=()` still read `unreadable_inputs`
   instead of `empty_seed`. Added a short-circuit exemption for a truly
-  empty changed-path set before the suffix heuristic runs.
+  empty changed-path set before the suffix heuristic runs. Eleventh
+  follow-up round (Codex review, PR #1169, eleventh round, fresh
+  evidence), two more gaps: (a) `prescan_layer_coverage` only typed
+  `layer`/`status`/`confidence`/`detail`, leaving `LayerCoverage.
+  to_dict()`'s other unconditionally-emitted fields (`elapsed_s`/
+  `requested_roots`/`resolved_roots`/`transitive_targets`/
+  `compile_units`/`link_units`) unconstrained despite the newly-versioned
+  coverage shape advertising them. Now typed. (b) the missing-root
+  accounting loop didn't dedupe `roots` the way `iter_source_files`
+  dedupes existing candidates into a `set[Path]`, so the same missing
+  file listed twice (duplicate `--header` values, a directly-constructed
+  API input) inflated `files_skipped` by however many times it repeated.
+  Added a `seen_roots: set[Path]` guard.

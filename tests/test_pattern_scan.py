@@ -901,6 +901,19 @@ def test_scan_files_missing_directory_root_exempted_under_a_truly_empty_seed(
     assert res.files_skipped == 0
 
 
+def test_scan_files_deduplicates_a_repeated_missing_root(tmp_path: Path) -> None:
+    """Codex review, eleventh round, fresh evidence: `iter_source_files`
+    dedupes existing candidates into a `set[Path]`, so a caller passing the
+    same root twice (duplicate `--header` values, a directly-constructed
+    API input) only ever scans it once. The missing-root accounting must
+    dedupe identically -- one missing input must not inflate
+    `files_skipped` by however many times it's repeated in `roots`."""
+    missing = tmp_path / "missing.hpp"
+    res = scan_files([missing, missing, missing])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+
+
 def test_scan_files_accepts_a_one_shot_changed_paths_iterable(
     tmp_path: Path,
 ) -> None:
