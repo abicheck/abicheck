@@ -823,6 +823,39 @@ def test_scan_files_counts_missing_sibling_root_even_when_another_scans(
     assert res.coverage().status is CoverageStatus.PARTIAL
 
 
+def test_scan_files_counts_unresolved_changed_path_beneath_existing_root(
+    tmp_path: Path,
+) -> None:
+    """Codex review, sixth round, fresh evidence: a `changed_paths` entry
+    naming a deleted/renamed file beneath an EXISTING root is the same
+    acquisition-failure shape as a missing root, but the root-existence
+    check alone cannot see it -- `iter_source_files` simply never
+    discovers the absent descendant. `roots=[tmp_path]` (exists) +
+    `changed_paths=["deleted.hpp"]` (doesn't exist under it) previously
+    reported `files_skipped == 0`, indistinguishable from a real, valid
+    empty diff."""
+    (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
+    res = scan_files([tmp_path], changed_paths=["deleted.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+    assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
+def test_scan_files_empty_changed_paths_is_not_flagged_as_unresolved(
+    tmp_path: Path,
+) -> None:
+    """Sibling case to the one above: an empty (but non-``None``)
+    ``changed_paths`` -- the real, valid, by-design empty-diff scope
+    ``workflows.lexical_prescan``'s own ``empty_seed`` reason covers -- has
+    zero entries to be unresolved, so it must not read as an acquisition
+    failure the way a changed-path entry naming something absent does."""
+    (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
+    res = scan_files([tmp_path], changed_paths=())
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+    assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
 def test_scan_files_counts_unreadable_as_skipped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

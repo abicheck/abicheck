@@ -86,4 +86,17 @@
   fact counts, indistinguishable from a fully-covered scan, in every mode
   except the review digest. Now mirrors `_preprocessor_side_markdown_
   line`'s own pre-existing `partial` handling (a visible "⚠️ partial
-  coverage (...)" suffix).
+  coverage (...)" suffix). Seventh follow-up round (Codex review, PR #1169,
+  sixth round, fresh evidence): a `changed_paths` entry naming a deleted/
+  renamed file beneath an EXISTING root is the same acquisition-failure
+  shape the fourth round's fix closed for a missing *root*, but invisible
+  to a root-existence check alone -- `roots=[src]` (exists) +
+  `changed_paths=["src/deleted.hpp"]` (doesn't exist under it) previously
+  read `files_skipped == 0`, misclassified as a real, valid empty diff.
+  `iter_source_files` split into `_discover_candidate_files` (the
+  unfiltered walk) plus `_iter_source_files_with_unresolved` (filters it
+  AND counts `changed_paths` entries matching no real candidate anywhere
+  under the roots) so `scan_files` gets both the filtered file list and the
+  unresolved count from one walk, not two; an empty (but non-`None`)
+  `changed_paths` -- the real, valid `empty_seed` scope -- has zero
+  entries to be unresolved, so it is correctly left alone.

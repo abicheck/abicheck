@@ -213,12 +213,12 @@
     },
     {
       "path": "abicheck/buildsource/pattern_scan.py",
-      "baseline_lines": 963,
+      "baseline_lines": 1011,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 941 -> 963 (PR #1169, Codex review, fourth round, fresh evidence): `scan_files` now counts a supplied root that is neither a file nor a directory (deleted/renamed after being selected) as skipped, same as an unreadable *found* file -- previously `iter_source_files` dropped it with no accounting at all, so a side with one missing root among several read as a clean, fully-covered scan even though that root contributed no evidence. The process-pool path was split into `_scan_files_parallel` so the new accounting has one shared return value to adjust regardless of which path (serial/parallel/fallback) ran, rather than needing the same fix three times over.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 941 -> 963 (PR #1169, Codex review, fourth round, fresh evidence): `scan_files` now counts a supplied root that is neither a file nor a directory (deleted/renamed after being selected) as skipped, same as an unreadable *found* file -- previously `iter_source_files` dropped it with no accounting at all, so a side with one missing root among several read as a clean, fully-covered scan even though that root contributed no evidence. The process-pool path was split into `_scan_files_parallel` so the new accounting has one shared return value to adjust regardless of which path (serial/parallel/fallback) ran, rather than needing the same fix three times over. Raised 963 -> 1011 (PR #1169, Codex review, sixth round, fresh evidence): a `changed_paths` entry naming a deleted/renamed file beneath an EXISTING root is the same acquisition-failure shape the fourth round's fix closed for a missing *root*, but invisible to a root-existence check alone. `iter_source_files` split into `_discover_candidate_files` (the unfiltered walk) plus `_iter_source_files_with_unresolved` (filters it AND counts `changed_paths` entries matching no real candidate anywhere under the roots) so `scan_files` gets both the filtered file list and the unresolved count from one walk, not two.",
       "review_by": "2026-11-30"
     },
     {
