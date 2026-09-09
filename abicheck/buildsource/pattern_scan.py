@@ -750,22 +750,45 @@ def _is_scannable(path: Path) -> bool:
     return not _looks_binary(path)
 
 
-def _discover_candidate_files(roots: Iterable[str | Path]) -> list[Path]:
-    """Every scannable C/C++ source/header file under ``roots`` (files or
-    directories), with no ``changed_paths`` filtering applied.
+def iter_source_files(
+    roots: Iterable[str | Path],
+    changed_paths: Iterable[str] | None = None,
+) -> list[Path]:
+    """Collect C/C++ source/header files under ``roots`` (files or directories).
 
     A ``root`` that is a **file** is honored regardless of suffix — the caller
     pointed at it directly. A ``root`` that is a **directory** is walked (with
     VCS metadata dirs pruned, see :data:`_PRUNED_DIR_SEGMENTS`) and filtered by
     :func:`_is_scannable` (known suffixes + small text extensionless headers).
-    The walk is deterministic (sorted) for reproducible reports.
+    When ``changed_paths`` is given, the result is intersected with it (by
+    suffix-matching the path tail), implementing the ADR-035 D2 "changed +
+    public" scope: callers pass public roots and the PR's changed paths. The
+    walk is deterministic (sorted) for reproducible reports.
 
-    Split out of :func:`iter_source_files` (Codex review, sixth round) so a
-    caller needing BOTH the ``changed_paths``-filtered result and the full,
-    unfiltered candidate set (to detect an unresolved changed-path entry,
-    see :func:`_iter_source_files_with_unresolved`) pays for one walk, not
-    two.
+    **Deliberately NOT attempted**: distinguishing "a `changed_paths` entry
+    matches no candidate because the entry names a deleted/renamed file" from
+    "a `changed_paths` entry matches no candidate because it is an ordinary,
+    expected out-of-scope path" (a `.cpp`/`README.md`/anything outside
+    ``roots`` or outside :func:`_is_scannable`'s suffix set -- the normal
+    case for the *other* files in a real multi-file PR diff, since
+    ``changed_paths`` is the whole diff's file list, not a pre-filtered
+    subset). A per-entry "unresolved" check was attempted (Codex review,
+    sixth round) and reverted after the seventh round's review found it
+    unsound in exactly this way: `roots=[include]` + `changed_paths=
+    ["README.md"]` (an ordinary out-of-scope file, present in nearly every
+    real PR) counted as an acquisition failure, and a `changed_paths` entry
+    that ALSO named the same file as a missing root double-counted it. Per
+    this repo's own "attempted twice, reverted twice" discipline for a
+    heuristic that keeps finding one more counterexample, this narrow class
+    (a changed-path entry naming a file specifically deleted from within an
+    otherwise-existing, in-scope root) stays a documented, accepted gap
+    rather than a third attempt -- see :func:`scan_files`'s own missing-root
+    accounting (a *root* that no longer exists) for the shape that IS fixed.
     """
+    changed_suffixes: set[str] | None = None
+    if changed_paths is not None:
+        changed_suffixes = {str(p).replace("\\", "/") for p in changed_paths}
+
     collected: set[Path] = set()
     for root in roots:
         rp = Path(root)
@@ -791,55 +814,12 @@ def _discover_candidate_files(roots: Iterable[str | Path]) -> list[Path]:
         for cand, explicit in candidates:
             if not explicit and not _is_scannable(cand):
                 continue
+            if changed_suffixes is not None and not _path_changed(
+                cand, changed_suffixes
+            ):
+                continue
             collected.add(cand)
     return sorted(collected)
-
-
-def _iter_source_files_with_unresolved(
-    roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None,
-) -> tuple[list[Path], int]:
-    """:func:`iter_source_files`'s result, plus a count of ``changed_paths``
-    entries matching no real candidate anywhere under ``roots`` at all.
-
-    Codex review, sixth round, fresh evidence: a deleted/renamed changed-path
-    entry is a THIRD acquisition-failure shape ``scan_files``'s own
-    missing-*root* accounting (fourth round) cannot see, since the root it
-    lives under (an existing directory) may still exist just fine --
-    ``roots=[src]`` (exists) + ``changed_paths=["src/deleted.hpp"]``
-    (doesn't) previously read ``files_scanned == 0, files_skipped == 0``,
-    misclassified as a real, valid empty diff. Checked against the FULL,
-    unfiltered candidate set from one walk, so a legitimately-scoped-out
-    entry (a real changed path that exists but isn't a header/source file
-    this pre-scan cares about) is not itself flagged.
-    """
-    roots = list(roots)
-    candidates = _discover_candidate_files(roots)
-    if changed_paths is None:
-        return candidates, 0
-    changed = [str(p).replace("\\", "/") for p in changed_paths]
-    changed_suffixes = set(changed)
-    filtered = [c for c in candidates if _path_changed(c, changed_suffixes)]
-    unresolved = sum(
-        1 for entry in changed if not any(_path_changed(c, {entry}) for c in candidates)
-    )
-    return filtered, unresolved
-
-
-def iter_source_files(
-    roots: Iterable[str | Path],
-    changed_paths: Iterable[str] | None = None,
-) -> list[Path]:
-    """Collect C/C++ source/header files under ``roots`` (files or directories).
-
-    When ``changed_paths`` is given, the result is intersected with it (by
-    suffix-matching the path tail), implementing the ADR-035 D2 "changed +
-    public" scope: callers pass public roots and the PR's changed paths. See
-    :func:`_discover_candidate_files` for the unfiltered walk this delegates
-    to.
-    """
-    files, _ = _iter_source_files_with_unresolved(roots, changed_paths)
-    return files
 
 
 def _path_changed(candidate: Path, changed: set[str]) -> bool:
@@ -963,15 +943,7 @@ def scan_files(
     # (serial, parallel, and the parallel-failure fallback) inherits it
     # uniformly rather than needing the same fix three times over.
     missing_roots = sum(1 for r in roots if not Path(r).exists())
-    files, unresolved_changed_paths = _iter_source_files_with_unresolved(
-        roots, changed_paths
-    )
-    # Sixth round, fresh evidence: a changed-path entry naming a deleted/
-    # renamed file beneath an EXISTING root (so the root-existence check
-    # above sees nothing wrong) is the same acquisition-failure shape --
-    # `iter_source_files` simply never discovers the absent descendant, so
-    # this must be counted the same way a missing root is.
-    missing_roots += unresolved_changed_paths
+    files = iter_source_files(roots, changed_paths)
     jobs = _resolve_scan_jobs(len(files))
     if jobs <= 1:
         result = _scan_files_serial(files)

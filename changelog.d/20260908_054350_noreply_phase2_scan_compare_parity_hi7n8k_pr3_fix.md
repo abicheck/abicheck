@@ -99,4 +99,22 @@
   under the roots) so `scan_files` gets both the filtered file list and the
   unresolved count from one walk, not two; an empty (but non-`None`)
   `changed_paths` -- the real, valid `empty_seed` scope -- has zero
-  entries to be unresolved, so it is correctly left alone.
+  entries to be unresolved, so it is correctly left alone. **Reverted**
+  (Codex review, PR #1169, seventh round, fresh evidence): the seventh
+  round's own "unresolved" mechanism above was unsound. `changed_paths` is
+  the WHOLE PR diff's file list, not a pre-filtered subset -- an ordinary
+  out-of-scope entry (`README.md`, a `.cpp` file outside `roots`, anything
+  outside `_is_scannable`'s suffix set) never matches any candidate either,
+  which is the normal case for every OTHER file in a real multi-file diff,
+  so most real PRs would have false-positived a partial-coverage/
+  acquisition-failure warning. A second, independent bug in the same
+  mechanism: a root named as both a root AND a matching `changed_paths`
+  entry double-counted the identical missing file. Per this repo's own
+  "attempted twice, reverted twice" discipline for a heuristic that keeps
+  finding one more counterexample, `_discover_candidate_files`/
+  `_iter_source_files_with_unresolved` were removed and `iter_source_files`
+  restored to its fourth-round shape; its own docstring now documents the
+  narrow residual (a `changed_paths` entry naming a file deleted from
+  within an otherwise-existing, in-scope root reads as a real, valid empty
+  diff rather than an acquisition failure) as an accepted, deliberately-
+  not-fixed gap rather than attempting a third heuristic.

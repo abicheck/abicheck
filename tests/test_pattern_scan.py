@@ -823,37 +823,65 @@ def test_scan_files_counts_missing_sibling_root_even_when_another_scans(
     assert res.coverage().status is CoverageStatus.PARTIAL
 
 
-def test_scan_files_counts_unresolved_changed_path_beneath_existing_root(
+def test_scan_files_out_of_scope_changed_path_is_not_flagged_as_unreadable(
     tmp_path: Path,
 ) -> None:
-    """Codex review, sixth round, fresh evidence: a `changed_paths` entry
-    naming a deleted/renamed file beneath an EXISTING root is the same
-    acquisition-failure shape as a missing root, but the root-existence
-    check alone cannot see it -- `iter_source_files` simply never
-    discovers the absent descendant. `roots=[tmp_path]` (exists) +
-    `changed_paths=["deleted.hpp"]` (doesn't exist under it) previously
-    reported `files_skipped == 0`, indistinguishable from a real, valid
-    empty diff."""
+    """Codex review, sixth round attempted a per-entry ``changed_paths``
+    "unresolved" check (a deleted/renamed file beneath an existing root);
+    the seventh round found it unsound and it was reverted: ``changed_paths``
+    is the WHOLE PR diff's file list, not a pre-filtered subset, so an
+    ordinary out-of-scope entry (a file outside ``roots``, or outside
+    :func:`_is_scannable`'s suffix set, e.g. ``README.md``) never matches
+    any candidate either -- exactly the normal case for every OTHER file in
+    a real multi-file PR diff. This pins that the reverted behaviour stays
+    reverted: such an entry must never count as skipped/unreadable."""
     (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
-    res = scan_files([tmp_path], changed_paths=["deleted.hpp"])
+    res = scan_files([tmp_path], changed_paths=["README.md", "src/other.cpp"])
     assert res.files_scanned == 0
-    assert res.files_skipped == 1
+    assert res.files_skipped == 0
     assert res.coverage().status is CoverageStatus.NOT_COLLECTED
 
 
-def test_scan_files_empty_changed_paths_is_not_flagged_as_unresolved(
+def test_scan_files_missing_root_and_matching_changed_path_not_double_counted(
     tmp_path: Path,
 ) -> None:
-    """Sibling case to the one above: an empty (but non-``None``)
-    ``changed_paths`` -- the real, valid, by-design empty-diff scope
-    ``workflows.lexical_prescan``'s own ``empty_seed`` reason covers -- has
-    zero entries to be unresolved, so it must not read as an acquisition
-    failure the way a changed-path entry naming something absent does."""
+    """Codex review, seventh round: when the same missing file is named as
+    both a root and a changed-path entry, only the missing-root check
+    (fourth round) may count it -- never twice."""
+    missing = tmp_path / "deleted.hpp"
+    res = scan_files([missing], changed_paths=["deleted.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+
+
+def test_scan_files_empty_changed_paths_reports_no_skips(
+    tmp_path: Path,
+) -> None:
+    """An empty (but non-``None``) ``changed_paths`` -- the real, valid,
+    by-design empty-diff scope ``workflows.lexical_prescan``'s own
+    ``empty_seed`` reason covers -- has zero entries, so it must not read
+    as an acquisition failure."""
     (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
     res = scan_files([tmp_path], changed_paths=())
     assert res.files_scanned == 0
     assert res.files_skipped == 0
     assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
+def test_scan_files_deleted_changed_path_beneath_existing_root_is_a_known_gap(
+    tmp_path: Path,
+) -> None:
+    """Documents the accepted, deliberately-NOT-fixed limitation
+    :func:`iter_source_files`'s own docstring records: a ``changed_paths``
+    entry naming a file specifically deleted from within an otherwise-
+    existing, in-scope root reads identically to a real, valid empty diff
+    (``files_skipped == 0``) rather than as an acquisition failure -- the
+    seventh round's attempted fix for this exact shape produced worse false
+    positives on ordinary out-of-scope changed paths and was reverted."""
+    (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
+    res = scan_files([tmp_path], changed_paths=["deleted.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
 
 
 def test_scan_files_counts_unreadable_as_skipped(
