@@ -1008,17 +1008,20 @@ def _run_baseline_compare(
     max_findings: int | None = None,
     require_complete_analysis: bool = False,
     requested_depth: str | None = None,
+    enabled_checks: frozenset[str] | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
-    Single-version cross-source findings are reported in the scan's dedicated
-    ``crosscheck`` block and stay advisory for baseline comparisons unless the
-    maintainer explicitly promotes one with ``--crosscheck KEY=error``. They are
-    not folded into ``extra_changes`` by default: doing so lets a candidate-side
-    evidence hygiene finding such as ``header_build_context_mismatch`` turn a
-    clean old/new artifact diff into an ``API_BREAK`` false positive. Real
-    old/new embedded build/source drift is still diffed below via
-    ``prepare_embedded_build_source``.
+    Cross-source findings from `compare_snapshots`'s automatic
+    `cross_source_checks` stage are gated exactly like any other finding
+    (ADR-068 D3/amendment) -- *except* a check the caller explicitly
+    disabled via `--crosscheck KEY=off` (`enabled_checks` excludes it):
+    `scan`'s own `--crosscheck` contract predates the migration and still
+    applies to baseline comparisons, so an automatic-stage finding for a
+    disabled check is dropped below, same as `scan`'s dedicated
+    single-snapshot `crosscheck` mechanism already respects it (Codex
+    review). `enabled_checks=None` means every check stays enabled (`scan`'s
+    own default, matching `_parse_crosschecks`'s no-flags case).
 
     *headers*/*includes* are the same scan header inputs used to build the
     candidate, threaded into the baseline parse so a native ``--baseline``
@@ -1207,6 +1210,34 @@ def _run_baseline_compare(
     # was the divergence the amendment closes (D3's own authority rule --
     # these findings stay RISK/API_BREAK and were never advisory-only --
     # scan's stripping just never caught up to the migration).
+    #
+    # `--crosscheck KEY=off` is a narrower, still-live exception (Codex
+    # review): the automatic stage itself has no per-check disable (ADR-068
+    # D4/D5, "no opt-out for a real front end" -- it is not one), but
+    # `scan`'s own `--crosscheck` flag predates that stage and its `off`
+    # level is a `scan`-specific contract, not an opt-out on `compare`.
+    # Drop only the findings for checks the caller explicitly disabled,
+    # exactly like scan's dedicated single-snapshot `crosscheck` mechanism
+    # already does via `CrosscheckConfig.enabled`.
+    if enabled_checks is not None:
+        from .buildsource.crosscheck import ALL_CHECKS
+
+        _disabled = frozenset(ALL_CHECKS) - enabled_checks
+        if _disabled:
+            _dropped = {
+                id(c)
+                for c in diff.changes
+                if getattr(c, "cross_source_evolution", None)
+                and getattr(c.kind, "value", None) in _disabled
+            }
+            if _dropped:
+                diff.changes = [c for c in diff.changes if id(c) not in _dropped]
+                if policy_file is not None:
+                    diff.verdict = policy_file.compute_verdict(diff.changes)
+                else:
+                    from .checker_policy import compute_verdict
+
+                    diff.verdict = compute_verdict(diff.changes, policy=policy)
     # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 

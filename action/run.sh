@@ -1570,6 +1570,18 @@ _extra_args_has_scan_only_flag() {
     --format)
       [[ "$_value" == "text" ]] && return 0
       ;;
+    # `--depth build`/`--depth source` via the general extra-args
+    # passthrough (Codex review, PR #1172): the dedicated `depth` Action
+    # input already forces the legacy CLI for these two (the
+    # evidence-contract-floor divergence below); a caller overriding it
+    # through `extra-args` instead must not slip past that same guard.
+    # Click's own `DepthParam` lowercases and accepts any case, so this
+    # check is too.
+    --depth)
+      case "$(printf '%s' "$_value" | tr '[:upper:]' '[:lower:]')" in
+      build | source) return 0 ;;
+      esac
+      ;;
     esac
   done <<<"$(_extra_args_options)"
   return 1
@@ -2361,15 +2373,20 @@ fi
 # guards against.
 _SCAN_NEEDS_LEGACY_CLI=false
 if [[ "$MODE" == "scan" ]]; then
+  # Case-insensitive, matching `DepthParam.convert()` (Codex review,
+  # PR #1172): a raw `INPUT_DEPTH` spelled `BUILD`/`SOURCE` (or any other
+  # casing Click itself accepts) must trip the same evidence-contract-floor
+  # guard as the lowercase spelling, not silently route onto `compare`.
+  _depth_lc_route=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
   if [[ "$_SCAN_HAS_BASELINE" != "true" ]] \
      || [[ -n "${INPUT_NEW_LIBRARY_SET:-}" || -n "${INPUT_BUDGET:-}" \
            || -n "${INPUT_RISK_RULES:-}" || -n "${INPUT_CROSSCHECK:-}" \
            || -n "${INPUT_BUILD_TARGET:-}" ]] \
      || [[ -z "${INPUT_DEPTH:-}" ]] \
-     || [[ "${INPUT_DEPTH:-}" == "build" || "${INPUT_DEPTH:-}" == "source" ]] \
-     || [[ ( -n "${INPUT_HEADER:-}" && ( -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_NEW_HEADER:-}" ) ) \
+     || [[ "$_depth_lc_route" == "build" || "$_depth_lc_route" == "source" ]] \
+     || [[ ( -n "${INPUT_HEADER:-}" && ( -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_NEW_HEADER:-}" || -n "${INPUT_PUBLIC_HEADER_DIR:-}" ) ) \
            || ( -n "${INPUT_INCLUDE:-}" && ( -n "${INPUT_OLD_INCLUDE:-}" || -n "${INPUT_NEW_INCLUDE:-}" ) ) ]] \
-     || [[ "${INPUT_AGAINST:-}" == *.json ]] \
+     || [[ "${INPUT_AGAINST:-}" == *.json || "${INPUT_AGAINST:-}" == *.json.gz || "${INPUT_AGAINST:-}" == *.json.zst ]] \
      || [[ -n "${INPUT_OUTPUT_FILE:-}" ]] \
      || _extra_args_has_write_flag \
      || _extra_args_has_scan_only_flag; then

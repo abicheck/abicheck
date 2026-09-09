@@ -1389,6 +1389,7 @@ def run_scan_core(
                     requested_depth=(
                         public_depth_value(eff_depth_enum) if pinned_explicit else None
                     ),
+                    enabled_checks=frozenset(enabled_checks),
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

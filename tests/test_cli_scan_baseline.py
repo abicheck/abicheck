@@ -629,3 +629,102 @@ class TestEmitEstimate:
         data = json.loads(out_p.read_text(encoding="utf-8"))
         assert data["mode"] == "pr"
         assert data["estimate"][0]["layer"] == "L2_header"
+
+
+class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
+    """``--crosscheck KEY=off`` (Codex review, PR #1172): since ADR-068's
+    2026-09-09 amendment stopped stripping ``compare_snapshots``'s automatic
+    cross-source findings from a baseline scan (``_run_baseline_compare``
+    no longer calls the deleted ``_strip_automatic_cross_source_findings``),
+    an explicitly *disabled* check's finding could still reach the diff
+    through that automatic stage even though ``scan``'s own dedicated
+    single-snapshot ``crosscheck`` mechanism already honored ``off`` --
+    the automatic stage has no per-check disable of its own (ADR-068
+    D4/D5), so nothing filtered it out post-migration. Regression test for
+    ``_run_baseline_compare``'s own ``enabled_checks`` parameter, which
+    restores that.
+    """
+
+    def _self_compared_export_case(self, tmp_path: Path) -> Path:
+        import sys
+
+        repo = Path(__file__).resolve().parent.parent
+        if str(repo / "scripts") not in sys.path:
+            sys.path.insert(0, str(repo / "scripts"))
+        import example_catalog
+
+        from abicheck.serialization import load_snapshot, snapshot_to_json
+
+        snap = load_snapshot(
+            example_catalog.case_dir("case143_audit_accidental_export")
+            / "snapshot.abi.json"
+        )
+        p = tmp_path / "snap.abi.json"
+        p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return p
+
+    def test_off_drops_the_automatic_stage_finding_too(
+        self, tmp_path: Path
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(p), "--against", str(p),
+                "--crosscheck", "exported_not_public=off",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["verdict"] == "NO_CHANGE"
+        assert not (payload.get("diff") or {}).get("findings")
+
+    def test_no_crosscheck_flag_still_gates_by_default(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: with no `--crosscheck` override at all, the
+        # finding must still gate (this is the ADR-068 amendment's own
+        # behavior, not something the `off` fix should quietly undo).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(p), "--against", str(p), "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output  # RISK stays exit 0 by default
+        payload = json.loads(result.stdout)
+        assert payload["verdict"] == "COMPATIBLE_WITH_RISK"
+        kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
+        assert "exported_not_public" in kinds
+
+    def test_off_on_an_unrelated_check_leaves_this_one_gating(
+        self, tmp_path: Path
+    ) -> None:
+        # Only the disabled check's own findings are dropped -- disabling a
+        # different check must not accidentally suppress this one.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(p), "--against", str(p),
+                "--crosscheck", "private_header_leak=off",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["verdict"] == "COMPATIBLE_WITH_RISK"
+        kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
+        assert "exported_not_public" in kinds
