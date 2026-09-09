@@ -394,6 +394,10 @@ condition (the "unconditionally true" catch-all `9f2166e5c` added) is closed
 by this fix and removed. Its other, narrower conditions — `--budget`,
 `--risk-rules`, `--crosscheck`, `--build-target` (no `compare` flag
 equivalent), risk-driven `auto` depth selection (no `compare` equivalent),
+an explicit `--depth build`/`--depth source` (`compare`'s single-pair path
+has no equivalent evidence-contract floor — a pinned build/source depth with
+no evidence to satisfy it is a real, reported error under `scan`, not a
+silent downgrade, and `compare` has nothing that reproduces that contract),
 `--header`/`--include` vs. baseline-side duplicates, a `.json`-extension or
 compressed (`.gz`/`.zst`)/content-detected JSON snapshot baseline file,
 `--output-file`, an effective (dedicated- or `extra-args`-supplied)

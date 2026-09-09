@@ -3596,6 +3596,14 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
     CMD+=($INPUT_EXTRA_ARGS)
   fi
 fi
+# --- END: extra-args append block ---
+# (CodeRabbit review, PR #1172, round 20: a dedicated, code-shaped sentinel
+# for tests/test_action_run_sh_scan_routing_edge_cases.py's
+# `_region_through_extra_args_append()` -- a human-readable comment on the
+# *next* block was a fragile boundary marker, since rewording that prose for
+# an unrelated reason would silently break the test's `text.index` lookup.
+# This line's own text is the boundary and needs no other justification to
+# stay unchanged.)
 
 # Recomputed here (idempotently -- compare/scan mode already computed it
 # above, right after their own `$FORMAT` was set, so their own PR_JSON

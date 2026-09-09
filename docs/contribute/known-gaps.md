@@ -6657,6 +6657,11 @@ severity divergence the amendment closed:
   equivalent; omitting `--depth` on `compare` deterministically defaults to
   `headers`, never deeper. Routing that case onto `compare` would silently
   cap a high-risk change that should have reached source replay.
+- An explicit `--depth build`/`--depth source` — `scan`'s own hard
+  evidence-contract floor (exit 7 when a pinned depth's evidence was never
+  collected) has no `compare` equivalent on the single-pair path; routing
+  this case onto `compare` would silently drop the contract instead of
+  reporting the same real, actionable error `scan` gives today.
 - `--header`/`--include` combined with the dedicated baseline-side inputs,
   a `.json`-extension (compressed `.gz`/`.zst` included) or
   content-detected JSON snapshot `--against` baseline, `--output-file`, and

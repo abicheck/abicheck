@@ -764,9 +764,12 @@ class TestPatternVerdictsDefaultStaysOnLegacyCli:
 #: translated `compare` invocation unstripped, a real "no such option"
 #: usage error on the one request shape that predicate was meant to let
 #: through safely.
-_EXTRA_ARGS_APPEND_END_MARKER = (
-    "# Recomputed here (idempotently -- compare/scan mode already computed it"
-)
+#: CodeRabbit review, PR #1172, round 20: this used to match the *next*
+#: block's own human-readable comment, which would silently break on an
+#: unrelated reword of that prose. `action/run.sh` now carries a dedicated,
+#: code-shaped sentinel immediately after the extra-args append block's own
+#: closing `fi` for exactly this purpose -- match that instead.
+_EXTRA_ARGS_APPEND_END_MARKER = "# --- END: extra-args append block ---"
 
 
 def _region_through_extra_args_append() -> str:
