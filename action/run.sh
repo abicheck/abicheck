@@ -714,16 +714,22 @@ _effective_format() {
 # `--format` forces the legacy CLI only when its value isn't `json` --
 # `compare` has no `text` format at all (scan's own default), matching the
 # dedicated `INPUT_FORMAT` condition in the gate below.
-# Whether a project `.abicheck.yml`/`.abicheck.yaml` -- auto-discovered by
-# the real `abicheck` CLI itself upward from the current directory, per
+# Whether the EFFECTIVE project config -- `build-config`/`--config FILE`
+# when the Action gives one explicitly (a TRUSTED path, per `scan
+# --help-all`: cwd auto-discovery applies only when `--config` is omitted),
+# else `.abicheck.yml`/`.abicheck.yaml` auto-discovered by the real
+# `abicheck` CLI itself upward from the current directory, per
 # `cli_scan.py`'s own `--config` help text ("auto-discovered upward from the
-# current directory when [no explicit --config]"); no Action input names
-# this file's path at all, so `run.sh` has no other way to see it -- states
-# ANY explicit `source: {method: ...}` value. Checked only at the checkout
-# root (`$PWD`, where the Action's own working directory always is), not a
-# full upward walk: the common case (repo-root config) is covered, and a
-# config discovered from a directory *above* the checkout is not a shape
-# this Action's own single-repo checkout model produces anyway.
+# current directory when [no explicit --config]") -- states ANY explicit
+# `source: {method: ...}` value. A second Codex review round found the
+# original version of this check only ever looked at `$PWD`, silently
+# missing a real `source.method` living in a `build-config`-named file
+# elsewhere. The cwd-discovery fallback branch is still checked only at the
+# checkout root (`$PWD`, where the Action's own working directory always
+# is), not a full upward walk: the common case (repo-root config, no
+# `build-config` given) is covered, and a config discovered from a
+# directory *above* the checkout is not a shape this Action's own
+# single-repo checkout model produces anyway.
 #
 # Originally scoped to `method: auto` alone (`compare`'s own auto-resolution
 # has no config-driven equivalent for that value at all and raises a usage
@@ -753,7 +759,25 @@ _effective_format() {
 # CLI, never a wrong answer.
 _config_sets_source_method() {
   local _cfg=""
-  if [[ -f "$PWD/.abicheck.yml" ]]; then
+  # `build-config`/`--config FILE` selects a TRUSTED project config
+  # explicitly (`scan --help-all`) -- cwd auto-discovery only applies when
+  # it's omitted (second Codex review pass on this function, fresh
+  # evidence: the earlier "fixed" reply still only opened
+  # `$PWD/.abicheck.yml`/`.abicheck.yaml`, so an Action step passing
+  # `build-config: some/other/path.yml` with an explicit `source.method`
+  # in THAT file went undetected, since it never lives at the checkout
+  # root at all). Checked first, and exclusively when set: an explicit
+  # `--config` means abicheck never falls back to auto-discovery, so a
+  # `.abicheck.yml` that happens to also sit at `$PWD` is irrelevant here.
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    _cfg="${INPUT_BUILD_CONFIG}"
+    if ! _is_path_already_qualified "$_cfg"; then
+      _cfg="$PWD/$_cfg"
+    fi
+    if [[ ! -f "$_cfg" ]]; then
+      return 1
+    fi
+  elif [[ -f "$PWD/.abicheck.yml" ]]; then
     _cfg="$PWD/.abicheck.yml"
   elif [[ -f "$PWD/.abicheck.yaml" ]]; then
     _cfg="$PWD/.abicheck.yaml"

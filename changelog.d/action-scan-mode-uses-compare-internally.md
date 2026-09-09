@@ -123,4 +123,11 @@ it should read in CHANGELOG.md. Delete the other sections.
   detection to also match YAML's flow-style spelling (`source: {method:
   auto}`, on one line), which the original block-style-only pattern missed
   entirely -- silently migrating that configuration to `compare` and hitting
-  the exact usage error the check exists to prevent.
+  the exact usage error the check exists to prevent. A second Codex pass on
+  the same round found the check still only ever inspected
+  `$PWD/.abicheck.yml`/`.abicheck.yaml` -- an explicit `build-config`/
+  `--config FILE` selects a TRUSTED project config (cwd auto-discovery
+  applies only when it's omitted, per `scan --help-all`), so a
+  `source.method` living in a `build-config`-named file elsewhere went
+  undetected. The check now inspects the effective config (`build-config`
+  when given, else cwd auto-discovery) rather than always the latter.

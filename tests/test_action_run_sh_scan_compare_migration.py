@@ -511,6 +511,15 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
     just the one value known to hard-fail; parametrized across both to
     prove the widened check covers the class, not just the originally
     reported value.
+
+    A sixth review round (two Codex passes plus a CodeRabbit pass) found two
+    more gaps in the same check: it only ever looked at
+    `$PWD/.abicheck.yml`/`.abicheck.yaml`, missing a `source.method` living
+    in a `build-config`-named config file elsewhere (`--config FILE`
+    selects a TRUSTED project config explicitly, per `scan --help-all`; cwd
+    auto-discovery applies only when it's omitted) -- and it required
+    `method` to start a line, missing YAML's flow-style spelling
+    (`source: {method: auto}`, on one line).
     """
 
     def _run_cmd_in(self, cwd: Path, env_extra: dict[str, str]) -> list[str]:
@@ -571,6 +580,50 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
         )
         cmd = self._run_cmd_in(tmp_path, _base_env(INPUT_DEPTH="source"))
         assert cmd[1] == "scan", cmd
+
+    def test_build_config_source_method_stays_on_scan(self, tmp_path: Path) -> None:
+        # Second Codex review round, P1 (fresh evidence): `build-config`/
+        # `--config FILE` selects a TRUSTED project config explicitly
+        # (`scan --help-all`) -- cwd auto-discovery applies only when it's
+        # omitted. The earlier fix only ever looked at `$PWD/.abicheck.yml`,
+        # so a `source.method` living in a `build-config`-named file
+        # elsewhere (not at the checkout root, and not named
+        # `.abicheck.yml`/`.abicheck.yaml` at all) went undetected.
+        config_dir = tmp_path / "config_elsewhere"
+        config_dir.mkdir()
+        config_file = config_dir / "my-abicheck-config.yml"
+        config_file.write_text("source:\n  method: auto\n", encoding="utf-8")
+        cmd = self._run_cmd_in(
+            tmp_path, _base_env(INPUT_BUILD_CONFIG=str(config_file))
+        )
+        assert cmd[1] == "scan", cmd
+
+    def test_build_config_overrides_unrelated_cwd_config(
+        self, tmp_path: Path
+    ) -> None:
+        # An explicit --config means abicheck never falls back to cwd
+        # auto-discovery at all -- a `.abicheck.yml` that happens to also
+        # sit at $PWD (with no source.method of its own) must not be
+        # consulted once `build-config` names a different file.
+        (tmp_path / ".abicheck.yml").write_text(
+            "scope:\n  public: true\n", encoding="utf-8"
+        )
+        config_file = tmp_path / "explicit-config.yml"
+        config_file.write_text("scope:\n  public: true\n", encoding="utf-8")
+        cmd = self._run_cmd_in(
+            tmp_path, _base_env(INPUT_BUILD_CONFIG=str(config_file))
+        )
+        assert cmd[1] == "compare", cmd
+
+    def test_missing_build_config_file_does_not_crash(self, tmp_path: Path) -> None:
+        # A build-config path that doesn't exist (a real usage error the
+        # actual CLI invocation will itself surface) must not crash this
+        # bash-side heuristic -- it simply finds no source.method to detect.
+        cmd = self._run_cmd_in(
+            tmp_path,
+            _base_env(INPUT_BUILD_CONFIG=str(tmp_path / "does-not-exist.yml")),
+        )
+        assert cmd[1] == "compare", cmd
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
