@@ -478,7 +478,9 @@
   },
   "shared": {
     "harness": {
-      "affects": [],
+      "affects": [
+        "check-abi-compatibility"
+      ],
       "digest": "sha256:d38064b08f005cb58f6d577cba8827cedbc97f41ed5dd7ba93be614ed620be01",
       "roots": [
         "agent-evals/skills/grade_bundle.py",
@@ -489,7 +491,9 @@
       ]
     },
     "trigger_corpus": {
-      "affects": [],
+      "affects": [
+        "check-abi-compatibility"
+      ],
       "digest": "sha256:f004b71312cb6cc223c82138eb2fab0aaf892b589a981cae684a6711c4fea722",
       "prompt_ids": [
         "positive-0",
@@ -510,5 +514,15 @@
       ]
     }
   },
-  "skills": {}
+  "skills": {
+    "check-abi-compatibility": {
+      "affects": [
+        "check-abi-compatibility"
+      ],
+      "roots": [
+        ".agents/skills/check-abi-compatibility"
+      ],
+      "tree": "sha256:858c78797ded9e7b2ec71cd55dcb52a4e794069c32504f5c0a6e4bc92de95659"
+    }
+  }
 }

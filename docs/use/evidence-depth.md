@@ -571,10 +571,13 @@ reproducibility.
 abicheck scan new.so -H include/ --since origin/main
 ```
 
-**`compare --depth` has no risk-driven `auto` rung yet** — omitting it
-defaults deterministically to `headers`, not a risk-based choice (plan §3
-row 13, not yet landed). For a fixed, reproducible CI depth, pin it
-explicitly on `compare` the same way you would on `scan`.
+**`compare --depth` has no risk-driven `auto` rung yet** (plan §3 row 13, not
+yet landed). Omitting `--depth` is never a risk-based choice on `compare`:
+with `--sources`/`--build-info` given it infers `source`/`build` from them
+(see [above](#what-input-each-depth-needs-and-how-to-get-it)); only with
+neither does it bottom out at `headers`. For a fixed, reproducible CI depth
+regardless of what other inputs are present, pin it explicitly on `compare`
+the same way you would on `scan`.
 
 ### Reading the coverage block
 
