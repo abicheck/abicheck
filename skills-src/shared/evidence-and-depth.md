@@ -9,8 +9,8 @@ summarizes:
 # Evidence depth: what each layer can and cannot see
 
 Compatibility findings are only as good as the evidence they were derived
-from. abicheck exposes one dial, `--depth`, shared by `dump`, `compare`, and
-`scan`, named by what you get rather than by an internal tier number:
+from. abicheck exposes one dial, `--depth`, shared by `compare` and `dump`,
+named by what you get rather than by an internal tier number:
 
 | `--depth` | Adds | Newly answerable | Still blind to |
 |---|---|---|---|

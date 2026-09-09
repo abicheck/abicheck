@@ -38,11 +38,16 @@ Ways to obtain a baseline side:
   later `abicheck compare baseline.abi.json new/libfoo.so`
 - the released binary itself: `abicheck compare old/libfoo.so new/libfoo.so`
 - no baseline at all yet — an audit of the candidate build alone (never an
-  addition/removal/verdict): `abicheck scan libfoo.so` (no `--against`).
-  `compare --no-baseline libfoo.so` (ADR-068 D2) exists too, but is not yet
-  safe for this: it crashes instead of reporting when the candidate
-  actually has a hygiene problem, so it only "works" on an already-clean
-  build — see [Scenario S5](../../docs/integration/scenarios/single-build-audit.md).
+  addition/removal/verdict). `compare --no-baseline libfoo.so` (ADR-068 D2)
+  is the declared spelling and the flag exists, but it does **not** report
+  the audit's cross-source hygiene findings yet: against a stored snapshot
+  it crashes, and against a live binary it renders an empty result. Use the
+  legacy `abicheck scan libfoo.so -H include/` (no `--against`) until that
+  closes — see
+  [Scenario S5](../../docs/integration/scenarios/single-build-audit.md) and
+  the [known gap](../../docs/contribute/known-gaps.md). `scan` itself is
+  retired by ADR-068 D8 with no deprecation window, so do not recommend it
+  for anything else.
 
 Baseline storage, refresh cadence, and CI publication are owned by
 [the baseline management page](../../docs/use/baseline-management.md).

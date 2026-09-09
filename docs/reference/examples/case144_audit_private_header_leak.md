@@ -46,6 +46,17 @@ provenance of the type it returns:
 abicheck scan snapshot.abi.json
 ```
 
+!!! note "Why `scan` and not `compare --no-baseline`"
+    [ADR-068](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+    D2 makes `abicheck compare --no-baseline snapshot.abi.json` the declared
+    spelling for a single-build audit, and retires `scan` outright. This case
+    is **blocked on that migration**: run against this fixture today,
+    `compare --no-baseline` aborts with an unhandled `AssertionError` from
+    `workflows/no_baseline_compare.py`'s `assert not diff.changes` instead of
+    reporting the finding below. The command above is what actually
+    reproduces this case until the
+    [known gap](../../contribute/known-gaps.md) closes.
+
 ## Expected abicheck finding
 
 ```text

@@ -45,6 +45,16 @@ python3 build_shared_lib.py -fPIC -g -Iinclude greet.c -o libgreet.so
 abicheck scan libgreet.so --header include
 ```
 
+> **`scan` is being retired, and this is the one workflow still on it.**
+> [ADR-068](../../../docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+> D2 makes `abicheck compare --no-baseline libgreet.so --header include` the
+> spelling for this workflow. Run today against this very fixture, that
+> command exits `0` with an empty `changes` list and no cross-source block —
+> it never reports the `exported_not_public` finding below, which is the
+> whole point of the walkthrough. Every other workflow example here is
+> already `compare`-based; this one moves when the
+> [known gap](../../../docs/contribute/known-gaps.md) closes.
+
 ## What you get
 
 ```text
