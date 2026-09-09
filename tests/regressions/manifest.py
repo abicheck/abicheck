@@ -629,6 +629,36 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="ci.unrelated_apt_source_gates_the_job",
+        invariant=(
+            "A CI lane never fails because of a package repository none "
+            "of its packages come from. `apt-get update` fails as a whole "
+            "when any configured source fails -- including the "
+            "third-party vendor repositories pre-baked into GitHub's "
+            "runner images -- so its exit status must never gate a step; "
+            "`apt-get install` is the gate, and a post-install check "
+            "confirms the packages are actually present so relaxing the "
+            "first gate cannot turn into a silent false success."
+        ),
+        fixed_by=(1182,),
+        seed_tests=("tests/test_apt_install_hardening.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The workflow-wide half of the invariant is "
+                    "structural (parsed YAML), not executed: a step's own "
+                    "wiring needs a real GitHub Actions runner. The "
+                    "script's behaviour is executed against a simulated "
+                    "apt; that a given lane calls the script is asserted "
+                    "over the workflow files only. A lane could still "
+                    "install packages through a mechanism this scan does "
+                    "not model (a Makefile, a setup script it invokes)."
+                ),
+                reference="tests/test_apt_install_hardening.py",
+            ),
+        ),
+    ),
+    BugClass(
         id="scoping.aggregate_view_starvation",
         invariant=(
             "A detector that reasons across multiple already-scoped "

@@ -60,12 +60,16 @@ jobs:
           python-version: "3.13"
           cache: "pip"
 
+      - name: Install system tools
+        # zstd: extract .conda archives; binutils: readelf for symbol counts.
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: zstd binutils
+
       - name: Install abicheck + tools
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]" pyyaml
-          # zstd: extract .conda archives; binutils: readelf for symbol counts.
-          sudo apt-get update -qq && sudo apt-get install -y zstd binutils
 
       - name: Run binary tier (fail on verdict drift)
         # workflow_dispatch's `only` input is attacker-shapeable free text --
@@ -123,12 +127,17 @@ jobs:
           python-version: "3.13"
           cache: "pip"
 
+      - name: Install source-tier system toolchain
+        # git+cmake produce the compile DB; clang makes L4 decls/types
+        # non-partial. zstd extracts .conda archives; binutils gives readelf.
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: zstd binutils git cmake clang
+
       - name: Install abicheck + source-tier toolchain
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]" pyyaml
-          # git+cmake produce the compile DB; clang makes L4 decls/types non-partial.
-          sudo apt-get update -qq && sudo apt-get install -y zstd binutils git cmake clang
 
       - name: Run source tier (coverage; gated only against systemic breakage)
         # See the binary-tier step's identical comment on why `only` is

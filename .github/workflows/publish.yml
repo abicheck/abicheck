@@ -69,9 +69,16 @@ jobs:
           persist-credentials: false
 
       - name: Install system deps (oracles + toolchain)
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake curl ca-certificates
+
+      - name: Install comparison oracles
+        # Both are best-effort here (the benchmark reports whichever oracles
+        # it found): `abigail-tools` is spelled `libabigail-tools` on some
+        # releases, and abi-compliance-checker may be absent entirely. Kept
+        # out of the package list above, which cannot express either.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ cmake curl ca-certificates
           sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
           sudo apt-get install -y abi-compliance-checker || true
 
