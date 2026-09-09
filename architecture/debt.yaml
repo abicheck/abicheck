@@ -1292,6 +1292,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "tests/test_confidence_evidence.py",
+      "baseline_lines": 1211,
+      "target": "keep with confidence.py's own tests; no split warranted at this size",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "First crossing the 1200-line test-size cap: abicheck code-review report round's Item 4 fix (note_if_same_binary_compared's snapshot-content-digest fallback) needed regression coverage for two independently-broken paths a Codex review found across two rounds -- the typed-API path (service_compare_pipeline.classify_compare_pair) and, separately, the native compare CLI path (frontends.cli.runtime._finalize_compare_result, found still missing the fallback entirely), plus the mixed live-binary-vs-stored-snapshot false-positive fix and the digest-priority/negative-control cases. Each test is already trimmed to its minimal docstring; no smaller diff documents this many independently-necessary regression cases for one fix landing across two files.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "tests/test_action_check_target.py",
       "baseline_lines": 1225,
       "target": "tests/unit-or-contract ownership matching production migration",

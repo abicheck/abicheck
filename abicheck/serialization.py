@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import asdict
@@ -527,6 +528,21 @@ def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
         ),
         indent=indent,
     )
+
+
+def snapshot_content_digest(snap: AbiSnapshot) -> str:
+    """A canonical sha256 of *snap*'s serialized content.
+
+    Shared by every caller of ``confidence.note_if_same_binary_compared``'s
+    ``old_snapshot_digest``/``new_snapshot_digest`` fallback (Item 4 fix) --
+    the typed-API path (``service_compare_pipeline.classify_compare_pair``)
+    and the native CLI path (``frontends.cli.runtime._finalize_compare_
+    result``) both need the identical digest for two snapshots to ever
+    compare equal, so this is the one place that computation lives rather
+    than being inlined at each call site (Codex review, fresh evidence:
+    the CLI path was found to still be missing this fallback entirely).
+    """
+    return hashlib.sha256(snapshot_to_json(snap).encode()).hexdigest()
 
 
 _T = TypeVar("_T")

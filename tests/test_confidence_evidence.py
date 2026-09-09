@@ -764,11 +764,10 @@ class TestNoteIfSameBinaryCompared:
     def test_mixed_live_binary_vs_stored_snapshot_never_triggers_the_fallback(
         self, tmp_path, monkeypatch
     ):
-        """Codex review: the digest fallback needs *both* sides missing
-        live-binary metadata -- a mixed live-binary-vs-stored-snapshot
-        compare has exactly one side absent by design, and matching ABI
-        facts there is the ordinary baseline-vs-current success case, not
-        a duplicated-input mistake."""
+        """Codex review: the fallback needs *both* sides missing metadata --
+        a mixed live-binary-vs-snapshot compare has one side absent by
+        design, and matching ABI facts there is ordinary success, not a
+        duplicated-input mistake."""
         from unittest.mock import MagicMock
 
         from abicheck import dumper as dumper_mod
@@ -813,6 +812,27 @@ class TestNoteIfSameBinaryCompared:
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(so_path), str(so_path)])
         assert "byte-identical" in result.stdout, result.stdout
+
+    def test_end_to_end_native_cli_compare_of_two_json_snapshots(self, tmp_path):
+        """Codex review: the native `compare` CLI entry point was found
+        still missing the Item 4 fallback -- the exact scenario the
+        original bug report was about."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_to_json
+
+        snap = _snap(functions=[_pub_func("foo", "_Z3foov")])
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["compare", str(old_p), str(new_p)])
+        assert "byte-identical" in result.stdout and "abi snapshots" in result.stdout, (
+            result.stdout
+        )
 
     def test_oneline_profile_still_surfaces_the_warning_on_stderr(
         self, tmp_path, monkeypatch

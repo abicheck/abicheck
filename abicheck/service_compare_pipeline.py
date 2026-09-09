@@ -594,12 +594,10 @@ def classify_compare_pair(
     # live-binary-vs-snapshot compare has one side absent by design.
     old_digest = new_digest = None
     if result.old_metadata is None and result.new_metadata is None:
-        import hashlib
+        from .serialization import snapshot_content_digest
 
-        from .serialization import snapshot_to_json
-
-        old_digest = hashlib.sha256(snapshot_to_json(old).encode()).hexdigest()
-        new_digest = hashlib.sha256(snapshot_to_json(new).encode()).hexdigest()
+        old_digest = snapshot_content_digest(old)
+        new_digest = snapshot_content_digest(new)
     note_if_same_binary_compared(
         result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
     )

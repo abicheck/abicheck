@@ -1080,6 +1080,7 @@ def _report_compare_result(
         show_redundant=show_redundant, show_filtered=show_filtered,
         severity_config=report_severity,
         contract_evaluation=contract_evaluation,
+        old_snapshot=old, new_snapshot=new,
     )
 
     # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
