@@ -670,22 +670,39 @@ else:
                     file=sys.stderr,
                 )
                 sys.exit(1)
+            # Codex review, fresh evidence: an empty (or non-mapping,
+            # e.g. a bare YAML list) --sources-root .abicheck.yml is not
+            # "no config found" -- yaml.safe_load returns None/a non-dict
+            # for one, but the file still EXISTS, so discover_build_config()
+            # still selects it, and load_build_config()'s own `if not
+            # isinstance(raw, dict): return BuildConfig()` treats that as an
+            # empty (all-default) BuildConfig, not a fallback to whatever
+            # else might otherwise apply. Gating this whole replacement on
+            # `isinstance(sources_loaded, dict)` skipped it entirely for
+            # that case, silently leaving the checkout-root document's own
+            # build:/sources:/compile:/source:/debug: (if any) in place --
+            # exactly the settings the native path would NOT have applied,
+            # since discover_build_config()'s selection is exclusive.
+            # `sources_loaded if isinstance(..., dict) else {}` makes an
+            # empty/non-mapping file clear all five blocks instead, matching
+            # `load_build_config`'s own empty-BuildConfig outcome exactly.
             if isinstance(sources_loaded, dict):
                 _validate_or_exit(sources_loaded, sources_found)
-                # "sources" (plural -- public_headers/exclude/graph) is a
-                # DISTINCT top-level block from "source" (singular,
-                # BuildConfig's own build.source_replay-facing settings) --
-                # both are read by embed_build_source()'s BuildConfig and
-                # both belong to whichever ONE file backs it (Codex review,
-                # fresh evidence: a source-root sources.graph: full silently
-                # narrowing to the checkout-root's/default summary before
-                # collect_inline_pack() reads cfg.graph_detail).
-                for _blk_key in ("build", "sources", "compile", "source", "debug"):
-                    if _blk_key in sources_loaded:
-                        base[_blk_key] = sources_loaded[_blk_key]
-                    else:
-                        base.pop(_blk_key, None)
-                found_path = sources_found
+            _sources_doc = sources_loaded if isinstance(sources_loaded, dict) else {}
+            # "sources" (plural -- public_headers/exclude/graph) is a
+            # DISTINCT top-level block from "source" (singular,
+            # BuildConfig's own build.source_replay-facing settings) --
+            # both are read by embed_build_source()'s BuildConfig and
+            # both belong to whichever ONE file backs it (Codex review,
+            # fresh evidence: a source-root sources.graph: full silently
+            # narrowing to the checkout-root's/default summary before
+            # collect_inline_pack() reads cfg.graph_detail).
+            for _blk_key in ("build", "sources", "compile", "source", "debug"):
+                if _blk_key in _sources_doc:
+                    base[_blk_key] = _sources_doc[_blk_key]
+                else:
+                    base.pop(_blk_key, None)
+            found_path = sources_found
 
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip the two executable-authorizing keys before merging (see

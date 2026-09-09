@@ -1462,6 +1462,52 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         assert doc["sources"] == {"graph": "full", "exclude": ["vendor/**"]}
         assert doc["severity"] == {"abi_breaking": "error"}
 
+    def test_empty_sources_root_config_clears_the_checkout_root_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1159 (P1, third round, fresh evidence): an
+        EMPTY (or non-mapping) --sources-root ``.abicheck.yml`` is not "no
+        config found" -- the file still exists, so ``discover_build_config``
+        still selects it, and ``load_build_config``'s own ``if not
+        isinstance(raw, dict): return BuildConfig()`` treats that as an
+        empty (all-default) ``BuildConfig`` -- never a fallback to the
+        checkout-root document's own ``build:``/``compile:``/``source:``/
+        ``debug:`` blocks, since ``discover_build_config``'s selection is
+        exclusive. Gating the whole replacement on ``isinstance(...,
+        dict)`` skipped it entirely for this case, silently leaving the
+        checkout-root's own settings in place instead of clearing them."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n"
+            "build:\n  system: make\n"
+            "compile:\n  sysroot: /opt/checkout-sysroot\n",
+            encoding="utf-8",
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        # An empty file -- yaml.safe_load returns None for it.
+        (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # The checkout-root's own build:/compile.sysroot must NOT survive --
+        # the empty sources-root config clears them, exactly as the native
+        # CLI's own embed_build_source() would (an empty BuildConfig, not
+        # the checkout-root's settings).
+        assert "build" not in doc
+        assert "sysroot" not in doc.get("compile", {})
+        # This Action's own synthesized compile.compiler still applies --
+        # the overlay is merged in afterward, on top of the (now-empty)
+        # sources-root base.
+        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
+        # Unrelated checkout-root-only keys (severity:) still survive.
+        assert doc["severity"] == {"abi_breaking": "error"}
+
 
 class TestCompileContextOverlayGenerationIsIsolated:
     """Codex review, PR #1159 (P1, fourth round): confirmed
