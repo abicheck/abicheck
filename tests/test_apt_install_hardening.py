@@ -474,6 +474,58 @@ def update_failure_is_absorbed(line: str) -> bool:
     return False
 
 
+def comment_start(line: str) -> int | None:
+    """Index where an unquoted `#` starts a comment, or None.
+
+    A `#` opens a comment only at the start of a word and only outside
+    quotes: `echo a#b` and `echo "# x"` contain no comment. Checking merely
+    whether a *line* starts with `#` is not enough -- an inline comment hides
+    a continuation just as well, and everything after it is text bash never
+    runs (Codex review, PR #1183).
+    """
+    quote: str | None = None
+    at_word_start = True
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+            i += 1
+            continue
+        if quote == '"':
+            # Inside double quotes a backslash escapes the next character.
+            i += 2 if ch == "\\" and i + 1 < len(line) else 1
+            if ch == '"':
+                quote = None
+            continue
+        if ch == "\\":
+            i += 2
+            at_word_start = False
+            continue
+        if ch in "'\"":
+            quote = ch
+            at_word_start = False
+            i += 1
+            continue
+        if ch == "#" and at_word_start:
+            return i
+        # A word can begin after whitespace or after a shell operator.
+        at_word_start = ch.isspace() or ch in "|&;()"
+        i += 1
+    return None
+
+
+def _continues(line: str) -> bool:
+    """True when `line` ends in an *unescaped* backslash.
+
+    Parity, not `endswith("\\\\")`: `a\\\\\\` is an escaped backslash followed
+    by a continuation, so an odd count continues and an even count does not.
+    """
+    trailing = len(line) - len(line.rstrip("\\"))
+    return trailing % 2 == 1
+
+
 def logical_lines(script: str) -> list[str]:
     """Split a shell script into *logical* lines, splicing continuations.
 
@@ -489,49 +541,50 @@ def logical_lines(script: str) -> list[str]:
     therefore runs over what the shell actually executes, not over how the
     YAML happens to be wrapped.
 
-    Two rules, both of which an earlier revision got wrong (CodeRabbit and
-    Codex, independently, on PR #1183 -- each verified against real bash):
+    Getting that right took four corrections, every one of them a way this
+    helper could hide the very command it exists to find, and every one
+    verified against real bash (CodeRabbit and Codex on PR #1183):
 
     1. A backslash continues a line only when it is *immediately* before the
-       newline. Testing that after `rstrip()` makes `# note \\ ` look like a
-       continuation, which splices the next line into a comment and hides it
-       from the scan entirely -- a bypass, not a cosmetic slip.
-    2. Splicing removes the backslash-newline pair and adds **nothing**.
-       Inserting a space breaks a token split across lines: bash reads
-       `apt-get upda\\` + `te` as `apt-get update`, while a space yields
-       `apt-get upda te`, which the scan's regex does not match. The
-       indentation the continued line carries is likewise real -- bash keeps
-       it, word splitting absorbs it, and `\\s+` in the scan's pattern
-       matches it.
+       newline -- testing that after `rstrip()` let `# note \\ ` splice.
+    2. Splicing removes the backslash-newline pair and adds **nothing**:
+       bash reads `apt-get upda\\` + `te` as `apt-get update`, and an
+       invented space yields `apt-get upda te`, which the scan cannot match.
+    3. A comment runs to the end of the *physical* line, so a backslash
+       inside one is comment text and bash executes the next line.
+    4. That is true of an *inline* comment too, not only a whole-line one:
+       `true || true # note \\` leaves the next line to run on its own, while
+       splicing produced a line whose `|| true` the absorption predicate
+       accepted -- the comment having swallowed the gating chain that
+       followed it.
 
-    ``TestLogicalLines`` differential-tests this against bash rather than
-    against my reading of it, for the same reason the absorption predicate
-    is tested that way.
+    So comments are found lexically (`comment_start`) and dropped, exactly as
+    bash drops them, and a continuation is recognised only outside one.
+    ``TestLogicalLines`` differential-tests all of this against bash rather
+    than against my reading of it.
     """
     lines: list[str] = []
     pending = ""
     for raw in script.splitlines():
-        # A comment runs to the end of the *physical* line: a backslash
-        # inside one is comment text, not a continuation, so bash goes on
-        # to execute the next line. Splicing it would bury that line inside
-        # a string starting with `#`, which the scan skips as a comment --
-        # hiding a real gating command (Codex review, PR #1183; verified
-        # against bash, which really does run the following line).
-        # Only a line that starts a command can be a comment: while
-        # `pending` is open, a `#` arrives mid-command and bash splices
-        # first, so the comment applies to the joined line instead.
-        if not pending and raw.lstrip().startswith("#"):
-            lines.append(raw.strip())
+        cut = comment_start(raw)
+        if cut is not None:
+            # bash runs the code before the comment and never sees the rest;
+            # a continuation inside the comment is text, so nothing carries on.
+            # While `pending` is open the splice already happened, which is why
+            # this joins first and only then drops the comment.
+            joined = (pending + raw[:cut]).strip()
+            if joined:
+                lines.append(joined)
+            pending = ""
             continue
-        # Checked on the raw line: trailing whitespace after the backslash
-        # means it is not adjacent to the newline, so bash does not splice.
-        # An escaped backslash (`\\\\`) ends the line; a single one continues it.
-        if raw.endswith("\\") and not raw.endswith("\\\\"):
+        if _continues(raw):
             pending += raw[:-1]
             continue
-        lines.append((pending + raw).strip())
+        joined = (pending + raw).strip()
+        if joined:
+            lines.append(joined)
         pending = ""
-    if pending:
+    if pending.strip():
         lines.append(pending.strip())
     return lines
 
@@ -816,8 +869,9 @@ class TestLogicalLines:
         a real gating command (CodeRabbit, PR #1183).
         """
         script = "# note \\ \nsudo apt-get update -qq && sudo apt-get install -y gcc\n"
+        # The comment itself is dropped, as bash drops it; what matters is
+        # that the command below it survives as its own logical line.
         assert logical_lines(script) == [
-            "# note \\",
             "sudo apt-get update -qq && sudo apt-get install -y gcc",
         ]
 
@@ -852,6 +906,15 @@ class TestLogicalLines:
         "# note \\\nprobe update\n",
         "# plain comment\nprobe update\n",
         "  # indented \\\nprobe update\n",
+        # An inline comment hides a continuation exactly as a whole-line one
+        # does -- and the spliced form fooled the absorption predicate, since
+        # shlex drops everything after `#` (Codex, PR #1183).
+        "true || true # note \\\nprobe update\n",
+        "probe one # trailing\nprobe two\n",
+        # ...but a `#` inside quotes, or mid-word, is not a comment at all.
+        'probe "# quoted" \\\n  update\n',
+        "probe a#b\n",
+        "probe one \\\n# two\n",
     )
 
     @requires_apt_harness
