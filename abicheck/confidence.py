@@ -281,7 +281,12 @@ _compute_confidence = compute_confidence
 SAME_BINARY_WARNING_MARKER = "byte-identical"
 
 
-def note_if_same_binary_compared(result: DiffResult) -> None:
+def note_if_same_binary_compared(
+    result: DiffResult,
+    *,
+    old_snapshot_digest: str | None = None,
+    new_snapshot_digest: str | None = None,
+) -> None:
     """Append an L0 coverage warning when *result*'s two compared binaries
     are byte-for-byte identical.
 
@@ -305,9 +310,31 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
     is the only signal available that is unconditionally exact regardless
     of binary format (ELF/PE/Mach-O) or whether the snapshot carries ELF
     metadata at all, and it needs no new model field or extraction work.
-    A no-op whenever either side's metadata is absent (a pure two-snapshot
-    Python-API comparison never populates ``old_metadata``/
-    ``new_metadata`` at all) or the two digests differ.
+
+    *old_snapshot_digest*/*new_snapshot_digest* are the fallback signal for
+    a run with no live binary at all -- a snapshot-input comparison
+    (``--old-snapshot``/``--new-snapshot``) never populates
+    ``old_metadata``/``new_metadata`` (``collect_metadata`` deliberately
+    returns ``None`` for a JSON/text snapshot path -- its own docstring:
+    "not a binary, so a same-binary comparison must never claim it"), so
+    without this fallback the guard could never fire on that pattern even
+    when the two snapshots are content-identical. A caller with real
+    ``AbiSnapshot`` objects in scope (``service_compare_pipeline.
+    classify_compare_pair``) passes a canonical content digest of each
+    (e.g. a sha256 of ``serialization.snapshot_to_json``); this function
+    only ever compares the two strings it is given -- it never computes one
+    itself, keeping this module's own "depends only on the snapshot model
+    and the policy enums" dependency-direction invariant (module docstring)
+    intact. Consulted only when ``old_metadata``/``new_metadata`` did not
+    already resolve an answer, so a run with a real binary on either side
+    keeps the stronger, binary-level claim.
+
+    A no-op whenever neither signal (metadata sha256, snapshot digest) is
+    available on both sides, or the two available digests differ -- the
+    "weaker evidence narrows conclusions" rule (root ``AGENTS.md``): a run
+    genuinely built from two hand-loaded snapshots with no provenance at
+    all (a pure two-snapshot Python-API comparison, per the caller not
+    supplying a digest) still gets no claim either way.
 
     Idempotent and additive: appends to the existing
     ``DiffResult.coverage_warnings`` list already surfaced by every
@@ -315,9 +342,22 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
     field on the ADR-061 no-growth-baselined ``DiffResult``/``checker.py``.
     """
     old_meta, new_meta = result.old_metadata, result.new_metadata
-    if old_meta is None or new_meta is None:
-        return
-    if old_meta.sha256 != new_meta.sha256:
+    if old_meta is not None and new_meta is not None:
+        if old_meta.sha256 != new_meta.sha256:
+            return
+        subject = "binaries"
+        digest_prefix = old_meta.sha256[:12]
+    elif old_snapshot_digest is not None and new_snapshot_digest is not None:
+        if old_snapshot_digest != new_snapshot_digest:
+            return
+        # A snapshot-content match is a weaker claim than a binary-bytes
+        # match (two distinct binaries could in principle serialize to the
+        # same snapshot facts) but is still the correct signal for this
+        # harness's own dominant pattern -- both sides resolved from the
+        # very same cached snapshot file.
+        subject = "abi snapshots"
+        digest_prefix = old_snapshot_digest[:12]
+    else:
         return
     # The two *binaries* being byte-identical says nothing about whether a
     # real change could still be caught: a comparison that also analyzed
@@ -349,6 +389,6 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
             "intended -- verify the correct build artifacts were provided"
         )
     result.coverage_warnings.append(
-        f"old and new binaries are {SAME_BINARY_WARNING_MARKER} (sha256 "
-        f"{old_meta.sha256[:12]}...); {detection_note}"
+        f"old and new {subject} are {SAME_BINARY_WARNING_MARKER} (sha256 "
+        f"{digest_prefix}...); {detection_note}"
     )

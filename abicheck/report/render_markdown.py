@@ -731,12 +731,10 @@ class ReviewDigest:
     bump_value: str
     soname_value: str
     impacted: tuple[ImpactedSymbol, ...]
-    #: ADR-067 D3 / workstream G's report invariant: the raw-versus-effective
-    #: counts every view must carry. Optional only so a caller constructing a
-    #: digest by hand (several tests do) is not forced to build one; a real
-    #: ``compute_review_digest`` always supplies it.
+    #: ADR-067 D3: raw-vs-effective counts (optional for a hand-built digest).
     disposition_audit: DispositionAudit | None = None
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
+    quality_issues_count: int = 0  #: non-addition subset of additions_count
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -767,6 +765,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
         f"| ⚠️ Risk findings | {digest.risk_count} |",
         f"| ✅ {digest.additions_label} | {digest.additions_count} |",
     ]
+    if digest.quality_issues_count:  # non-additive subset of the row above
+        lines.append(f"| ℹ️ Quality issues | {digest.quality_issues_count} |")
     if digest.scoped:
         lines.append(
             f"| 🔒 Filtered (internal/private) | {digest.out_of_surface_count} |"

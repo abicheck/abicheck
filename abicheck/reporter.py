@@ -200,6 +200,7 @@ def to_stat_json(
             "source_breaks": summary.source_breaks,
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
+            "quality_issues": summary.quality_issues,
             "total_changes": summary.total_changes,
             "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
             "affected_pct": round(summary.affected_pct, 1),
@@ -538,6 +539,7 @@ def _to_json_leaf(
             "source_breaks": summary.source_breaks,
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
+            "quality_issues": summary.quality_issues,
             "total_changes": summary.total_changes,
         },
         "leaf_changes": leaf_changes_list,
@@ -895,6 +897,7 @@ def _build_json_base(result: DiffResult) -> dict[str, object]:
         "source_breaks": summary.source_breaks,
         "risk_changes": summary.risk_count,
         "compatible_additions": summary.compatible_additions,
+        "quality_issues": summary.quality_issues,
         "total_changes": summary.total_changes,
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
@@ -1542,9 +1545,12 @@ def _change_to_dict(
             d["reviewer_action"] = reviewer_action
     if evidence_status is not None:
         d["evidence_status"] = evidence_status.value
-    # Impact explanation
+    # Impact explanation. Finding C(ii): pass the already-computed
+    # evidence_status so a downgraded (UNATTRIBUTED) finding's impact text
+    # gets its evidence caveat rather than the same unconditional claim an
+    # ARTIFACT_PROVEN finding of the same kind carries.
     if kind:
-        impact = impact_for(kind)
+        impact = impact_for(kind, evidence_status)
         if impact:
             d["impact"] = impact
     d.update(_change_annotation_fields(c))

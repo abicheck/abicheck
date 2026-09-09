@@ -513,9 +513,38 @@ def policy_for(kind: ChangeKind) -> PolicyEntry:
     return POLICY_REGISTRY.get(kind, PolicyEntry(Verdict.BREAKING, "error", kind.value))
 
 
-def impact_for(kind: ChangeKind) -> str:
-    """Return human-readable impact explanation for a ChangeKind, or empty string."""
-    return IMPACT_TEXT.get(kind, "")
+#: Appended to a kind's static ``impact`` text when the finding's own
+#: ``EvidenceStatus`` is ``UNATTRIBUTED`` (Finding C(ii)) -- several
+#: ``BREAKING_KINDS`` impact strings assert an unconditional consequence
+#: ("dynamic linker will refuse to load or crash at call site") that is
+#: only true when a real symbol-table entry actually backs the finding
+#: (see :func:`evidence_status_for_result`'s per-finding downgrade). An
+#: ``UNATTRIBUTED`` finding of the same kind rests on weaker evidence (an
+#: `"elf"`-tiered run examined a real symbol table but found no matching
+#: entry for *this* finding), so the unconditional claim would overstate
+#: what this run actually proved.
+_UNATTRIBUTED_IMPACT_CAVEAT = (
+    " (Evidence note: no matching symbol-table entry was found for this "
+    "specific finding in this run -- treat the consequence above as "
+    "plausible, not confirmed.)"
+)
+
+
+def impact_for(
+    kind: ChangeKind, evidence_status: EvidenceStatus | None = None
+) -> str:
+    """Return human-readable impact explanation for a ChangeKind, or empty string.
+
+    *evidence_status*, when given as :attr:`EvidenceStatus.UNATTRIBUTED`,
+    appends :data:`_UNATTRIBUTED_IMPACT_CAVEAT` -- see that constant's
+    docstring. Optional and keyword-compatible with every pre-existing
+    call site: omitting it (or passing ``None``/any other status) leaves
+    the returned text byte-identical to before this parameter existed.
+    """
+    text = IMPACT_TEXT.get(kind, "")
+    if text and evidence_status is EvidenceStatus.UNATTRIBUTED:
+        text += _UNATTRIBUTED_IMPACT_CAVEAT
+    return text
 
 
 def policy_registry_markdown() -> str:

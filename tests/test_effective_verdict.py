@@ -225,6 +225,52 @@ def test_evidence_status_for_result_downgrades_unattributed_finding_despite_elf_
     )
 
 
+def test_impact_for_unattributed_appends_evidence_caveat() -> None:
+    """Finding C(ii): FUNC_REMOVED's static impact text unconditionally
+    asserts the dynamic linker will refuse to load/crash -- true only when
+    a real symbol-table entry backs the finding. An UNATTRIBUTED finding
+    (evidence_status_for_result's own downgrade, tested above) must get a
+    caveat, not the same unconditional claim an ARTIFACT_PROVEN finding of
+    the same kind carries."""
+    from abicheck.checker_policy import impact_for
+
+    base = impact_for(ChangeKind.FUNC_REMOVED)
+    assert "refuse to load or crash" in base
+    hedged = impact_for(ChangeKind.FUNC_REMOVED, EvidenceStatus.UNATTRIBUTED)
+    assert hedged.startswith(base)
+    assert hedged != base
+    assert "no matching symbol-table entry" in hedged
+
+
+def test_impact_for_artifact_proven_is_unchanged() -> None:
+    from abicheck.checker_policy import impact_for
+
+    base = impact_for(ChangeKind.FUNC_REMOVED)
+    assert impact_for(ChangeKind.FUNC_REMOVED, EvidenceStatus.ARTIFACT_PROVEN) == base
+    assert impact_for(ChangeKind.FUNC_REMOVED, None) == base
+    assert impact_for(ChangeKind.FUNC_REMOVED) == base
+
+
+def test_reporter_json_impact_carries_the_unattributed_caveat() -> None:
+    """End-to-end: a downgraded finding's rendered JSON `impact` field
+    carries the evidence caveat, not the bare unconditional claim."""
+    from abicheck.reporter import _change_to_dict
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    d = _change_to_dict(c, evidence_tiers=["header", "elf"])
+    assert d["evidence_status"] == EvidenceStatus.UNATTRIBUTED.value
+    assert "no matching symbol-table entry" in d["impact"]
+
+
+def test_reporter_json_impact_stays_bare_when_artifact_proven() -> None:
+    from abicheck.reporter import _change_to_dict
+
+    c = _change(ChangeKind.FUNC_REMOVED, symbol_binding="global")
+    d = _change_to_dict(c, evidence_tiers=["header", "elf"])
+    assert d["evidence_status"] == EvidenceStatus.ARTIFACT_PROVEN.value
+    assert "no matching symbol-table entry" not in d["impact"]
+
+
 def test_evidence_status_for_result_symbol_binding_check_is_elf_only() -> None:
     # symbol_binding mirrors Function.elf_binding/Variable.elf_binding and is
     # never populated on a PE/Mach-O run regardless of evidence quality --

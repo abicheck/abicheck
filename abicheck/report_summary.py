@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
-from .checker_policy import HasKind
+from .checker_policy import ADDITION_KINDS, HasKind
 
 if TYPE_CHECKING:
     from .severity import KindSets
@@ -71,7 +71,21 @@ class ReportSummary:
     breaking: int
     source_breaks: int
     risk_count: int
+    #: All ``COMPATIBLE``-verdict changes, additions and quality issues alike
+    #: -- the historical, back-compat meaning of this field (mirrors
+    #: ``cli_compare_release_pairwise.py``'s per-library
+    #: ``"compatible_additions"`` entry). A caller wanting *only* real API
+    #: growth should subtract :attr:`quality_issues`, the same derivation
+    #: ``pr_comment.py``'s ``_per_library_counts`` already performs for the
+    #: release path -- do not read this field alone as "additions occurred".
     compatible_additions: int
+    #: The subset of :attr:`compatible_additions` that is not a genuine
+    #: addition (``ADDITION_KINDS``) -- e.g. ``public_surface_shrank``,
+    #: which is ``COMPATIBLE`` but reports a *decrease*. Exists so a
+    #: consumer reading ``compatible_additions`` alone cannot mistake a
+    #: quality/informational finding (net surface shrink included) for real
+    #: API growth. Additive field; see ``report_schema_version`` 3.13.
+    quality_issues: int
     total_changes: int
     binary_compatibility_pct: float
     affected_pct: float
@@ -162,11 +176,13 @@ def build_summary(result: DiffResult) -> ReportSummary:
         kind_sets=result._effective_kind_sets(),
         policy_file=result.policy_file,
     )
+    compatible = result.compatible
     return ReportSummary(
         breaking=len(result.breaking),
         source_breaks=len(result.source_breaks),
         risk_count=len(result.risk),
-        compatible_additions=len(result.compatible),
+        compatible_additions=len(compatible),
+        quality_issues=sum(1 for c in compatible if c.kind not in ADDITION_KINDS),
         total_changes=len(result.changes),
         binary_compatibility_pct=metrics.binary_compatibility_pct,
         affected_pct=metrics.affected_pct,

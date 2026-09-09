@@ -573,6 +573,124 @@ class TestNoteIfSameBinaryCompared:
         note_if_same_binary_compared(result)
         assert result.coverage_warnings == []
 
+    def test_snapshot_digest_fallback_fires_when_metadata_is_absent(self):
+        """Item 4 fix: a snapshot-input compare never populates
+        old_metadata/new_metadata (collect_metadata is a no-op for a JSON
+        snapshot path), so without this fallback the guard could never
+        fire on that pattern -- even when the two snapshots are content-
+        identical. Uses "abi snapshots" wording, not "binaries" -- a
+        snapshot-content match is a weaker claim than a binary-bytes
+        match."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result()
+        note_if_same_binary_compared(
+            result,
+            old_snapshot_digest="d" * 64,
+            new_snapshot_digest="d" * 64,
+        )
+        assert any(
+            "byte-identical" in w and "abi snapshots" in w
+            for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_snapshot_digest_fallback_is_a_noop_when_digests_differ(self):
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result()
+        note_if_same_binary_compared(
+            result,
+            old_snapshot_digest="d" * 64,
+            new_snapshot_digest="e" * 64,
+        )
+        assert result.coverage_warnings == []
+
+    def test_real_binary_metadata_takes_priority_over_snapshot_digest(self):
+        """When both signals are available and disagree, the stronger
+        binary-level claim wins (and is the one actually asked about) --
+        the snapshot digest is only ever a fallback for when metadata
+        could not be collected at all, never a second opinion overriding
+        real binary evidence."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(old_sha="a" * 64, new_sha="a" * 64)
+        note_if_same_binary_compared(
+            result,
+            old_snapshot_digest="d" * 64,
+            new_snapshot_digest="e" * 64,
+        )
+        assert any(
+            "byte-identical" in w and "binaries" in w
+            for w in result.coverage_warnings
+        ), result.coverage_warnings
+
+    def test_end_to_end_snapshot_input_compare_now_warns_on_identical_content(
+        self, tmp_path
+    ):
+        """Public-surface regression test for Item 4: two JSON snapshot
+        files with byte-identical content, compared through the real typed
+        ``CompareRequest``/``run_compare_request`` path (the shape a
+        snapshot-input CLI compare and any other Tier-2 caller actually
+        go through) -- previously produced no warning at all because
+        collect_metadata() never populates old_metadata/new_metadata for a
+        JSON path."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.serialization import snapshot_to_json
+        from abicheck.service_compare_pipeline import run_compare_request
+
+        snap = AbiSnapshot(
+            library="libfoo.so", version="1.0",
+            functions=[
+                Function(
+                    name="foo", mangled="_Z3foov", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(snap), encoding="utf-8")
+
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result = run_compare_request(request)
+        assert result.diff.old_metadata is None
+        assert result.diff.new_metadata is None
+        assert any(
+            "byte-identical" in w and "abi snapshots" in w
+            for w in result.diff.coverage_warnings
+        ), result.diff.coverage_warnings
+
+    def test_end_to_end_snapshot_input_compare_stays_quiet_on_real_diff(
+        self, tmp_path
+    ):
+        """Negative counterpart: two genuinely different snapshots must not
+        trigger the fallback."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.serialization import snapshot_to_json
+        from abicheck.service_compare_pipeline import run_compare_request
+
+        old_snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        new_snap = AbiSnapshot(
+            library="libfoo.so", version="2.0",
+            functions=[
+                Function(
+                    name="foo", mangled="_Z3foov", return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+        )
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        old_p.write_text(snapshot_to_json(old_snap), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new_snap), encoding="utf-8")
+
+        request = CompareRequest(old=InputSpec.of(old_p), new=InputSpec.of(new_p))
+        result = run_compare_request(request)
+        assert not any(
+            "byte-identical" in w for w in result.diff.coverage_warnings
+        ), result.diff.coverage_warnings
+
     def test_end_to_end_through_the_real_cli_compare_command(
         self, tmp_path, monkeypatch
     ):
@@ -748,9 +866,21 @@ class TestNoteIfSameBinaryCompared:
 
         request = CompareRequest(old=InputSpec.of(old_path), new=InputSpec.of(new_path))
         result = run_compare_request(request)
-        assert not any(
-            "byte-identical" in w for w in result.diff.coverage_warnings
-        ), result.diff.coverage_warnings
+        # The regression this guards is misclassification-as-linker-script,
+        # not "no warning at all" -- since the Item 4 fix, two genuinely
+        # content-identical JSON snapshots correctly warn on their own
+        # (see TestNoteIfSameBinaryCompared's snapshot-digest-fallback
+        # tests). What must never happen is *this* snapshot being resolved
+        # as a linker script pointing at `real_so` -- which would populate
+        # real ELF metadata and produce a "binaries are byte-identical"
+        # claim instead of the correct "abi snapshots are byte-identical"
+        # one, plus (the original regression) real ELF-tier detector
+        # activity neither side's evidence actually supports.
+        assert result.diff.old_metadata is None
+        assert result.diff.new_metadata is None
+        for w in result.diff.coverage_warnings:
+            if "byte-identical" in w:
+                assert "abi snapshots" in w and "binaries" not in w, w
 
     def test_native_compare_cli_hashes_the_pre_embed_paths(
         self, tmp_path, monkeypatch

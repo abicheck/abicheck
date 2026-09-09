@@ -587,7 +587,22 @@ def classify_compare_pair(
     result.new_metadata = service.collect_metadata(
         _hashable_path(required_path(request.new, "new"))
     )
-    note_if_same_binary_compared(result)
+    # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot
+    # path, so a snapshot-input compare left note_if_same_binary_compared
+    # unable to fire even on content-identical snapshots. Fall back to a
+    # digest of `old`/`new`'s (already-loaded) canonical serialization --
+    # only consulted when the metadata sha256 above didn't already answer.
+    old_digest = new_digest = None
+    if result.old_metadata is None or result.new_metadata is None:
+        import hashlib
+
+        from .serialization import snapshot_to_json
+
+        old_digest = hashlib.sha256(snapshot_to_json(old).encode()).hexdigest()
+        new_digest = hashlib.sha256(snapshot_to_json(new).encode()).hexdigest()
+    note_if_same_binary_compared(
+        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
+    )
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): stamps
     # `DiffResult.requested_depth` for `analysis_assurance` below, preferring

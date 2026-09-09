@@ -113,3 +113,59 @@ def test_build_summary_risk_count_zero_for_compatible() -> None:
     summary = build_summary(result)
     assert summary.risk_count == 0
     assert summary.compatible_additions == 1
+    assert summary.quality_issues == 0
+
+
+def test_build_summary_quality_issues_splits_out_public_surface_shrank() -> None:
+    """A net public-surface *shrink* is COMPATIBLE (informational, not a
+    break) but is not a genuine addition -- it must be visible in
+    quality_issues, not silently folded into "additions" with nothing to
+    distinguish it from real API growth (the field-name mislabel a CI
+    dashboard reading compatible_additions alone would otherwise hit once
+    surface metrics became unconditional -- ADR-027 Phase 5).
+    """
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[
+            Change(
+                ChangeKind.PUBLIC_SURFACE_SHRANK,
+                symbol=None,
+                description="public surface shrank: 439 -> 425 declarations (-14)",
+            )
+        ],
+        verdict=Verdict.COMPATIBLE,
+    )
+    summary = build_summary(result)
+    assert summary.risk_count == 0
+    assert summary.compatible_additions == 1
+    assert summary.quality_issues == 1
+
+
+def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
+    """A mixed compatible batch (one real addition, one surface-shrink
+    roll-up) reports both counts independently: compatible_additions stays
+    the historical total, quality_issues names only the non-addition
+    subset -- so `compatible_additions - quality_issues` recovers the real
+    addition count, mirroring cli_compare_release_pairwise.py's
+    ADDITION_KINDS-based `quality_issues` derivation for the release path.
+    """
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[
+            Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added"),
+            Change(
+                ChangeKind.PUBLIC_SURFACE_SHRANK,
+                symbol=None,
+                description="public surface shrank: 439 -> 425 declarations (-14)",
+            ),
+        ],
+        verdict=Verdict.COMPATIBLE,
+    )
+    summary = build_summary(result)
+    assert summary.compatible_additions == 2
+    assert summary.quality_issues == 1
+    assert summary.compatible_additions - summary.quality_issues == 1

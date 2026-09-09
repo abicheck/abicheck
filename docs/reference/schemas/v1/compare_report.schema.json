@@ -1847,6 +1847,11 @@
           "type": "integer",
           "minimum": 0
         },
+        "quality_issues": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Additive (report_schema_version 3.13): the subset of compatible_additions that is not a genuine addition (e.g. public_surface_shrank, which is COMPATIBLE but reports a decrease). Read compatible_additions minus quality_issues for real API growth alone."
+        },
         "total_changes": {
           "type": "integer",
           "minimum": 0
