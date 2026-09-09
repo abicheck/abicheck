@@ -1002,36 +1002,31 @@ _rm_overlay_on_early_exit() {
   rm -f "${1:-}"
 }
 
-# Codex review, fresh evidence, PR #1171 (seventh round): whether
+# Codex review, fresh evidence, PR #1171 (eighth round): whether
 # $INPUT_OLD_LIBRARY, as resolved by the time this runs (a direct operand,
 # or an --abi-baseline auto-fetch's $BASELINE_FILE already folded into it
 # above), is a stored snapshot rather than a live binary -- a stored
-# *.abicheck.json[.gz|.zst] snapshot (whether the caller named one
-# directly, or it's what an auto-fetched baseline always resolves to) does
-# no header/debug extraction at all, so it has nothing for a --sources
-# tree's own compile:/source:/debug: settings to reach.
+# snapshot/dump (whether the caller named one directly, or it's what an
+# auto-fetched baseline always resolves to) does no header/debug extraction
+# at all, so it has nothing for a --sources tree's own compile:/source:/
+# debug: settings to reach.
 #
-# Content-sniffed, in the SAME order resolve_input() itself uses
-# (abicheck/workflows/input_resolution.py): native-binary magic bytes are
-# checked FIRST, before any JSON/compression sniffing. An earlier version
-# of this check was extension-only (matching this script's existing
-# `[[ "${INPUT_AGAINST:-}" == *.json ]]` snapshot check and its
-# `*.abicheck.json`/`.gz`/`.zst` glob triple used for baseline-asset
-# discovery) -- a live ELF/PE/Mach-O binary literally named e.g. "old.json"
-# was misclassified as a stored snapshot by that check, even though
-# resolve_input() itself would still parse it as the live binary it
-# actually is (extension never overrides magic bytes there). Reusing
+# resolve_input()'s own dispatch order (abicheck/workflows/
+# input_resolution.py) checks native-binary magic bytes FIRST, before any
+# text/JSON sniffing -- and *every* non-binary shape it goes on to accept
+# (a JSON snapshot, with or without leading whitespace before compression
+# or the `{`; an ABICC Perl dump; a raw BTF/CTF blob; a symvers file) is
+# equally extraction-free for this decision's purposes: none of them are
+# parsed via -H/-I/ast-frontend/a compile: block at all. So rather than
+# re-deriving each of those formats' own sniffing rules one at a time here
+# (this function had two prior, narrower rounds: extension-only, then
+# JSON/gzip/zstd-magic-only -- each fixed one Codex-reported gap and left
+# the next one for the round after), the two prior rounds are collapsed
+# into their actual invariant: NOT a recognized live-binary format IS a
+# stored operand, full stop. Native-binary magic bytes only, mirroring
 # `_is_release_style_operand`'s own `od -An -tx1` idiom for the same
 # reason it uses one: a bash string can't hold an embedded NUL, so the
 # magic bytes must be read as hex, not as text.
-#
-# Deliberately narrower than resolve_input()'s own dispatch in one way: an
-# ABICC Perl dump ($VAR1 prefix) is also stored/live-extraction-free, but
-# is not distinguished from arbitrary non-JSON text here, so it is not
-# detected and stays on the prior, safe-by-construction "pairwise" side --
-# not a generalized live/stored classifier, just enough to cover the two
-# concrete shapes $INPUT_OLD_LIBRARY actually takes in this Action (a
-# native binary, or a JSON/compressed-JSON snapshot).
 _old_library_is_stored_snapshot() {
   local path="$1"
   [[ -f "$path" ]] || return 1
@@ -1043,19 +1038,16 @@ _old_library_is_stored_snapshot() {
     feedface | feedfacf | cefaedfe | cffaedfe | \
     cafebabe | bebafeca | cafebabf | bfbafeca)
       # ELF / PE ("MZ") / Mach-O (32-bit, 64-bit, universal, universal-64,
-      # either byte order) -- a live binary regardless of its own filename.
+      # either byte order) -- a live binary regardless of its own filename
+      # or of anything the content that follows this magic might resemble.
       return 1
       ;;
   esac
-  case "$magic4" in
-    1f8b*) return 0 ;;      # gzip (a compressed *.json.gz snapshot)
-    28b52ffd) return 0 ;;   # zstd (a compressed *.json.zst snapshot)
-  esac
-  # Bare JSON snapshot: first byte is '{' (mirrors sniff_text_format()'s
-  # own `head.startswith("{")` for the uncompressed case).
-  local first_byte
-  first_byte=$(od -An -c -N 1 "$path" 2>/dev/null | tr -d ' \n')
-  [[ "$first_byte" == "{" ]]
+  # Anything else this Action can plausibly receive as old-library (JSON,
+  # compressed JSON, an ABICC Perl dump, a raw BTF/CTF blob, symvers, or
+  # simply unrecognized content) performs no live header/debug extraction
+  # of its own -- stored, from this decision's point of view.
+  return 0
 }
 
 # Whether the caller's own $MODE resolves a --sources tree's compile:/
