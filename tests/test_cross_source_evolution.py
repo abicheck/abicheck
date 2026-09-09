@@ -566,6 +566,76 @@ class TestResolvedExcludedFromTheGate:
         assert result.verdict != Verdict.COMPATIBLE
 
 
+def _phl_isolated_snapshot_with_addition(*, leaked: bool) -> AbiSnapshot:
+    """Same as :func:`_phl_isolated_snapshot`, plus one extra public function
+    on top -- present on *both* sides, so it is never itself an added/removed
+    finding, but its presence lets ``compute_surface_metrics`` count a
+    nonzero public-function total on both sides (``_public_decl_count``
+    reads the raw count, not a delta) while the isolated leak fixture keeps
+    the OLD/NEW *delta* attributable to the leak alone.
+    """
+    snap = _phl_isolated_snapshot(leaked=leaked)
+    snap.functions.append(
+        Function(
+            name="other",
+            mangled="_Z5otherv",
+            return_type="int",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        )
+    )
+    snap.elf.symbols.append(ElfSymbol(name="_Z5otherv"))
+    return snap
+
+
+class TestResolvedExcludedFromEveryVerdictRecompute:
+    """Round-13 Codex review, PR #1172: the round-12 fix
+    (``TestResolvedExcludedFromTheGate`` above) only covered the *first*
+    ``all_unsuppressed`` computation in ``compare()``. The two opt-in
+    recomputation steps -- ``--surface-metrics`` (``_apply_surface_metrics``)
+    and ``--pattern-verdicts`` (``_apply_pattern_verdicts_step``) -- each
+    independently rebuilt ``kept + verdict_redundant`` from scratch when they
+    had a visible finding/modulation of their own, silently letting a
+    RESOLVED cross-source finding back into the verdict. Fixing a
+    pre-existing cross-source issue while a public function was also added
+    in the same release (a very ordinary combination) could therefore still
+    report a nonzero exit code under ``--surface-metrics`` alone.
+    """
+
+    def test_surface_metrics_recompute_still_excludes_a_resolved_leak(self) -> None:
+        from abicheck.checker_policy import Verdict
+
+        old = _phl_isolated_snapshot_with_addition(leaked=True)
+        new = _phl_isolated_snapshot_with_addition(leaked=False)
+        # Sanity: the extra function's own count is identical on both sides,
+        # so `_apply_surface_metrics` must find nothing on that axis alone --
+        # confirming any recompute happening at all is attributable to
+        # something else, not a real surface-growth finding leaking in.
+        result_no_metrics = compare(old, new, scope_to_public_surface=False)
+        assert result_no_metrics.verdict == Verdict.NO_CHANGE
+
+        result = compare(old, new, scope_to_public_surface=False, surface_metrics=True)
+        leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+        assert len(leaks) == 1
+        assert leaks[0].cross_source_evolution == CrossSourceEvolution.RESOLVED
+        assert leaks[0] in result.changes
+        # The crux: turning `--surface-metrics` on must not resurrect the
+        # already-fixed leak into the verdict just because the recompute ran.
+        assert result.verdict == Verdict.NO_CHANGE
+
+    def test_surface_metrics_recompute_still_gates_a_persistent_leak(self) -> None:
+        # Negative control: the exclusion is RESOLVED-specific, not a side
+        # effect of `--surface-metrics` recomputing at all.
+        from abicheck.checker_policy import Verdict
+
+        old = _phl_isolated_snapshot_with_addition(leaked=True)
+        new = _phl_isolated_snapshot_with_addition(leaked=True)
+        result = compare(old, new, scope_to_public_surface=False, surface_metrics=True)
+        leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
+        assert len(leaks) == 1
+        assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
+        assert result.verdict != Verdict.COMPATIBLE
+
+
 # --------------------------------------------------------------------------- #
 # The four checks this PR migrates onto compute_cross_source_evolution:
 # exported_not_public, public_not_exported, rtti_for_internal_type, and

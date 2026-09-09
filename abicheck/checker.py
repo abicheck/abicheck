@@ -206,6 +206,28 @@ def _compute_verdict_for(
     return compute_verdict(all_unsuppressed, policy=policy)
 
 
+def _verdict_scored_population(
+    kept: list[Change], verdict_redundant: list[Change]
+) -> list[Change]:
+    """The population every verdict computation in this module must score
+    (Codex review, PR #1172, round 13): *kept* minus any
+    ``CrossSourceEvolution.RESOLVED`` finding (plan F-9 -- it stays fully
+    visible in the report but must never drive the verdict), plus
+    *verdict_redundant*.
+
+    A single shared helper, not a filter re-applied ad hoc at each call
+    site: the first ``all_unsuppressed`` computation applied this exclusion,
+    but the two opt-in recomputations below it
+    (:func:`_apply_surface_metrics`, :func:`_apply_pattern_verdicts_step`)
+    independently rebuilt ``kept + verdict_redundant`` from scratch and
+    silently let a RESOLVED finding back into the verdict -- the same class
+    of omission ``cli_scan_baseline.py``'s own crosscheck-off recompute had
+    (see that module's ``verdict_scored_changes``, its sibling for the same
+    plan-F-9 obligation at a different chokepoint).
+    """
+    return [c for c in kept if not is_cross_source_resolved(c)] + verdict_redundant
+
+
 def _filter_suppressed_changes(
     changes: list[Change],
     suppression: SuppressionList | None,
@@ -313,9 +335,15 @@ def _apply_surface_metrics(
     # a NO_CHANGE verdict alongside e.g. a `public_surface_grew` finding,
     # making the CLI/JSON summary inconsistent with the finding set. Recompute
     # so NO_CHANGE flips to COMPATIBLE when the only findings are these
-    # roll-ups (ADR-027 review).
+    # roll-ups (ADR-027 review). ADR-068 plan F-9 (Codex review, PR #1172,
+    # round 13): must exclude a RESOLVED cross-source finding the same way
+    # the first `all_unsuppressed` computation in `compare()` does -- see
+    # `_verdict_scored_population`'s own docstring.
     return kept, _compute_verdict_for(
-        kept + verdict_redundant, policy, policy_file, stage
+        _verdict_scored_population(kept, verdict_redundant),
+        policy,
+        policy_file,
+        stage,
     )
 
 
@@ -451,9 +479,17 @@ def _apply_pattern_verdicts_step(
         )
 
     if pattern_modulations:
+        # ADR-068 plan F-9 (Codex review, PR #1172, round 13): same RESOLVED
+        # exclusion as `_apply_surface_metrics` -- see
+        # `_verdict_scored_population`'s own docstring.
         return (
             kept,
-            _compute_verdict_for(kept + verdict_redundant, policy, policy_file, stage),
+            _compute_verdict_for(
+                _verdict_scored_population(kept, verdict_redundant),
+                policy,
+                policy_file,
+                stage,
+            ),
             pattern_modulations,
         )
     return kept, current_verdict, pattern_modulations
@@ -1113,8 +1149,7 @@ def compare(
     # ADR-068 plan F-9 (Codex review, PR #1172, round 12): a RESOLVED
     # finding must stay visible in `kept` but never drive the verdict --
     # excluded here only, the same shape opaque_filtered/rename above use.
-    all_unsuppressed = [c for c in kept if not is_cross_source_resolved(c)]
-    all_unsuppressed += verdict_redundant
+    all_unsuppressed = _verdict_scored_population(kept, verdict_redundant)
     verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file, stage)
     effective_policy = policy_file.base_policy if policy_file is not None else policy
 

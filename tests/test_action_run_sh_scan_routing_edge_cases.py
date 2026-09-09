@@ -575,3 +575,88 @@ class TestUnsupportedExtraArgsFormatStaysOnLegacyCli:
             }
         )
         assert cmd[1] == "scan"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestCompareOnlyExtraArgsFlagsStayOnLegacyCli:
+    """A `compare`-only flag reaching a baseline scan through `extra-args`
+    (Codex review, PR #1172, round 13): `scan --help-all` accepts none of
+    these -- diffed programmatically against `compare --help-all`'s own
+    flag table (`comm -13` over the two sorted flag lists), not
+    hand-guessed, since a per-flag allowlist is exactly how
+    `--surface-metrics`/`--used-by`/`--diagnostic-comparison` slipped
+    through the round-12 fix unnoticed. Before this predicate widened, such
+    a flag reached the translated `compare` command silently instead of
+    reproducing the real scan usage error Click would have raised, and for
+    the consumer-scoping/surface-metrics flags specifically `compare` would
+    not merely error but silently *succeed* with different findings/gate
+    scope than a `mode: scan` caller's workflow was written against."""
+
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            "--surface-metrics",
+            "--used-by consumer.so",
+            "--used-by-manifest consumers.json",
+            "--required-symbol _Zfoo",
+            "--diagnostic-comparison",
+            "--report-mode compact",
+            "--show-only breaking",
+            "--show-filtered",
+            "--select foo",
+            "--select-required",
+            "--support-promise stable",
+            "--use-cases uc.yaml",
+            "--new-variant x",
+            "--old-variant y",
+            "--no-baseline",
+            "--no-bundle-analysis",
+            "--bundle-facts-out out.json",
+            "--bundle-facts-library-manifest m.json",
+            "--follow-deps",
+            "--debug-info dwarf",
+            "--debug-root /root",
+            "--pdb-path x.pdb",
+            "--probe-matrix old=m1",
+            "--include-system-declarations",
+            "--search-path /p",
+            "--ld-library-path /l",
+            "--keep-extracted",
+            "--devel-pkg pkg",
+            "--demangle",
+            "--no-demangle",
+            "--dump-manifest",
+            "--post-manifest m.json",
+            "--instantiation-manifest i.json",
+            "--reconcile-build-context",
+            "--explain-patterns",
+            "--audit-suppressions",
+            "--max-json-object-nodes 1000",
+            "--name-only",
+            "--output-dir out/",
+            "--require-complete-analysis",
+            "--version old=1.0",
+        ],
+    )
+    def test_compare_only_flag_stays_on_legacy_cli(self, flag: str) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": flag,
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_no_compare_only_flag_still_routes_to_compare(self) -> None:
+        # Negative control: this predicate change must not catch every
+        # extra-args flag, only the compare-only ones above. `--severity-
+        # preset` is genuinely shared by both `scan` and `compare`.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--severity-preset strict",
+            }
+        )
+        assert cmd[1] == "compare"

@@ -11,7 +11,19 @@
   finding now stays fully visible in the report and every disposition
   ledger, but no longer contributes to the verdict, the severity-preset
   exit code, or its own per-finding `gate_contribution` field. This
-  exclusion also applies to `scan --against`'s own `--crosscheck KEY=off`
-  post-removal verdict recompute, which previously could resurrect an
+  exclusion applies at every verdict-computing chokepoint: `scan
+  --against`'s own `--crosscheck KEY=off` post-removal verdict recompute,
+  and `compare`'s own opt-in `--surface-metrics`/`--pattern-verdicts`
+  verdict recomputations — each previously could resurrect an
   already-`RESOLVED` cross-source finding into a failing verdict when an
-  unrelated check was disabled on the same run.
+  unrelated check was disabled, or an unrelated public-surface/pattern
+  finding also fired, on the same run.
+- **`mode: scan` Action requests carrying a `compare`-only flag through
+  `extra-args` (`--surface-metrics`, `--used-by`, `--diagnostic-comparison`,
+  and about three dozen others `scan --help-all` doesn't accept) now stay
+  on the legacy `scan` CLI instead of silently routing to `compare`.**
+  Previously such a request either reproduced a `compare`-only usage error
+  a `mode: scan` caller should never see, or — for the consumer-scoping and
+  surface-metrics flags specifically — silently *succeeded* against a
+  different finding set/gate scope than the caller's `scan`-shaped workflow
+  was written against.

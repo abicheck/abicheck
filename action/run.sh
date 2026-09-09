@@ -1646,6 +1646,32 @@ _extra_args_has_scan_only_flag() {
     -o | --output | -o*)
       return 0
       ;;
+    # `compare`-only flags reaching a baseline scan through `extra-args`
+    # (Codex review, PR #1172, round 13): `scan --help-all` accepts none of
+    # these -- diffed programmatically against `compare --help-all`'s own
+    # flag table, not hand-guessed, since a per-flag allowlist is exactly
+    # how `--surface-metrics`/`--used-by`/`--diagnostic-comparison` slipped
+    # through the round-12 fix unnoticed. Before this predicate widened,
+    # such a flag reached the translated `compare` command silently instead
+    # of reproducing the real scan usage error Click would have raised
+    # (the same class of bug the `--format` fix above closes) -- and for the
+    # consumer-scoping/surface-metrics flags specifically, `compare` would
+    # not merely error but silently *succeed* with different findings/gate
+    # scope than a `mode: scan` caller's workflow was written against.
+    --surface-metrics | --used-by | --used-by-manifest | --required-symbol | \
+      --diagnostic-comparison | --report-mode | --show-only | --show-filtered | \
+      --select | --select-required | --support-promise | --use-cases | \
+      --new-variant | --old-variant | --no-baseline | --no-bundle-analysis | \
+      --bundle-facts-out | --bundle-facts-library-manifest | --follow-deps | \
+      --debug-info | --debug-root | --pdb-path | --probe-matrix | \
+      --include-system-declarations | \
+      --search-path | --ld-library-path | --keep-extracted | --devel-pkg | \
+      --demangle | --no-demangle | --dump-manifest | --post-manifest | \
+      --instantiation-manifest | --reconcile-build-context | \
+      --explain-patterns | --audit-suppressions | --max-json-object-nodes | \
+      --name-only | --output-dir | --require-complete-analysis | --version)
+      return 0
+      ;;
     esac
   done <<<"$(_extra_args_options)"
   return 1
