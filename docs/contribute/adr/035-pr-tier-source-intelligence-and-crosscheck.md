@@ -138,7 +138,7 @@ do not run are a **missing toolchain** or an explicit **budget/scope** exclusion
 A new cheap tier runs on every PR over **changed + public** files. It has two
 parts with different requirements:
 
-- **Pattern pre-scan** (new `buildsource/pattern_scan.py`): the **compiler-free**
+- **Pattern pre-scan** (new `buildsource/pattern_facts.py`): the **compiler-free**
   part — needs no compile DB and no compiler. A regex/lexical scan
   for ABI-risk constructs — `#pragma pack`, `alignas`, `__attribute__((packed|
   visibility))`, `__declspec(dllexport|dllimport)`, `extern "C"`, calling-
@@ -184,7 +184,7 @@ same scan for the same inputs:
 
 ### D4. Cross-source validation engine (new findings, RISK/API_BREAK tier)
 
-New `buildsource/crosscheck.py` consumes one merged snapshot and diffs its
+New `buildsource/cross_source_checks.py` consumes one merged snapshot and diffs its
 evidence sources against each other *within a single version*. Each check is a
 named `ChangeKind` (added per the four-step procedure in `/CLAUDE.md`,
 partitioned into `RISK_KINDS` or `API_BREAK_KINDS` — never `BREAKING_KINDS`,

@@ -4,7 +4,7 @@
 """Cross-source hygiene checks, stated as OLD -> NEW evolution.
 
 ADR-068 D3 / ``docs/contribute/plans/one-comparison-product.md`` P2 and §3
-row 3: :mod:`abicheck.buildsource.crosscheck` diffs one snapshot's evidence
+row 3: :mod:`abicheck.buildsource.cross_source_checks` diffs one snapshot's evidence
 sources against each other -- it carries no baseline of its own. Before this
 module existed it ran only from ``scan_engine.py`` against the candidate
 binary alone, unreachable from ``compare()``; this module moves that class
@@ -18,7 +18,7 @@ analysis" as REMOVE: the stage is evidence-gated per check, per side, not
 opt-in.
 
 **Scope: all eleven checks, fully migrated.** ``unversioned_exported_symbol``
-(``buildsource.crosscheck.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first
+(``buildsource.cross_source_checks.CHECK_UNVERSIONED_EXPORTED_SYMBOL`` -- chosen first
 because it needs no public/internal boundary evidence; only the ELF export
 table + version-definition section already present in every ELF
 ``AbiSnapshot``) and ``private_header_leak`` (``CHECK_PRIVATE_HEADER_LEAK``)
@@ -162,7 +162,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Hashable
 
-from ..buildsource.crosscheck import (
+from ..buildsource.cross_source_checks import (
     CHECK_COMPILE_CONTEXT_CONFLICT,
     CHECK_EXPORTED_NOT_PUBLIC,
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,

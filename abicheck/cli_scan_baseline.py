@@ -40,9 +40,9 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 from .checker_policy import ADDITION_KINDS
 from .errors import SnapshotError
+from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
 from .workflows.scan_config import RiskRules
 
 if TYPE_CHECKING:

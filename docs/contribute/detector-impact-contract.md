@@ -16,7 +16,7 @@ generated: false
 # Detector Impact Contract
 
 A detector that reads the optional [L5 source graph](../reference/source-graph-schema.md)
-— today's `source_graph_findings.py`/`internal_leak.py`/`crosscheck.py`, and
+— today's `source_graph_findings.py`/`internal_leak.py`/`cross_source_checks.py`, and
 every future [G29](plans/g29-impact-analysis-layer.md) Phase 5/6 family
 (template instantiation, macro/config, virtual dispatch, callback/
 function-pointer, object/link provenance) — has more evidence available to

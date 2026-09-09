@@ -235,7 +235,7 @@ def _cmake_configure(src_dir: Path, build_dir: Path, extra_args: list[str]) -> N
 def _dump_sources(tree: Path, build_dir: Path, out: Path) -> tuple[float, subprocess.CompletedProcess]:
     # "full" was retired from the public --depth ladder (ADR-043 D2): it
     # collapsed into "source" — replay *scope*, not a deeper depth, used to
-    # distinguish them (abicheck/buildsource/scan_levels.py's own
+    # distinguish them (abicheck/model/evidence_depth_levels.py's own
     # EvidenceDepth.FULL docstring). "--depth full" is now a hard
     # click.BadParameter, which for a while made *every* source-tier scan in
     # this runner fail identically and silently (the scheduled workflow's

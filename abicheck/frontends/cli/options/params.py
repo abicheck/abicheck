@@ -99,7 +99,7 @@ class DepthParam(click.ParamType):
     name = "depth"
 
     def convert(self, value: Any, param: Any, ctx: Any) -> str:
-        from ....buildsource.scan_levels import USER_DEPTHS
+        from ....model.evidence_depth_levels import USER_DEPTHS
 
         v = str(value).lower()
         user_values = [d.value for d in USER_DEPTHS]
@@ -111,7 +111,7 @@ class DepthParam(click.ParamType):
         )
 
     def get_metavar(self, param: Any, ctx: Any = None) -> str:
-        from ....buildsource.scan_levels import USER_DEPTHS
+        from ....model.evidence_depth_levels import USER_DEPTHS
 
         return "[" + "|".join(d.value for d in USER_DEPTHS) + "]"
 

@@ -104,9 +104,9 @@ from ..buildsource.pack_io import (
 )
 from ..buildsource.pack_load import load_inputs_pack_or_raise, load_pack_or_raise
 from ..buildsource.pack_shape import purge_external_outputs
-from ..buildsource.pattern_scan import scan_files
+from ..buildsource.pattern_facts import find_pattern_facts
 from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
-from ..buildsource.preprocessor_scan import run_preprocessor_scan
+from ..buildsource.preprocessor_facts import collect_preprocessor_facts
 from ..buildsource.redaction import DEFAULT_REDACTION
 from ..buildsource.snapshot_exports import exported_symbols_from_snapshot
 from ..buildsource.source_graph_build import build_source_graph
@@ -267,8 +267,8 @@ __all__ = [
     "resolve_source_frontend_clang_bin",
     "resolve_symbol_tus",
     "run_external_extractor",
-    "run_preprocessor_scan",
-    "scan_files",
+    "collect_preprocessor_facts",
+    "find_pattern_facts",
     "seed_includes_and_fold_compile_context",
     "show_data_sources",
     "sniff_build_info_format",

@@ -350,7 +350,7 @@ def test_parse_functions_mangled_field_strips_darwin_underscore_for_real_cxx_nam
     Darwin-linker-decorated one -- otherwise it disagrees with castxml's
     identical declaration (breaking cross-backend/hybrid reconciliation)
     and with the binary's own already-normalized export table (breaking
-    ``crosscheck.py``'s ``exported_not_public``/``public_not_exported``
+    ``cross_source_checks.py``'s ``exported_not_public``/``public_not_exported``
     symbol correlation, the originally reported macOS CI failure)."""
     root = _tu(
         {

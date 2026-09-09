@@ -13,7 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Deterministic level resolution for the ``scan`` orchestrator (ADR-035, G19.3).
+"""Deterministic evidence-depth/source-method level resolution (ADR-035,
+G19.3; renamed and moved here from ``buildsource/scan_levels.py`` in the
+Phase 6 rename off the ``scan`` identity, ADR-068 §3 #34 —
+``docs/contribute/plans/one-comparison-product.md``).
+
+This is the shared depth/method vocabulary both ``compare`` (via
+``cli_compare_helpers.py``, ``service_compare_evidence.py``,
+``workflows/compare_cost_preview.py``, ``workflows/plan.py``) and ``scan``
+resolve through — not scan-only machinery, hence the move out of
+``buildsource/`` (a value-type vocabulary is a ``model/`` responsibility per
+ADR-061's task-routing table, not build-source evidence reading).
 
 Two internal axes drive resolution (ADR-035 D1), but only one is public:
 
@@ -201,7 +211,7 @@ _METHOD_TO_COLLECT_MODE: dict[SourceMethod, str] = {
     SourceMethod.S0: "off",
     SourceMethod.S1: "build",
     SourceMethod.S2: "build",  # L3 build context; the S2 preprocessor pre-scan
-    # (preprocessor_scan.run_preprocessor_scan) then runs over that L3 evidence
+    # (preprocessor_scan.collect_preprocessor_facts) then runs over that L3 evidence
     SourceMethod.S3: "off",
     SourceMethod.S4: "graph-build",  # L3+L5 graph only — no costly L4 replay
     SourceMethod.S5: "source-changed",

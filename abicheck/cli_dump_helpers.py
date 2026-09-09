@@ -52,7 +52,7 @@ import click
 # module-level `__getattr__` is opaque to mypy at a *call* site, unlike the
 # four names in that shim, which nothing outside this module calls as a
 # function. No cycle risk: `cli_dump_depth.py` imports only
-# `.buildsource.scan_levels`/`click`.
+# `.model.evidence_depth_levels`/`click`.
 from .cli_dump_depth import (
     resolve_dump_collect_context as resolve_dump_collect_context,
     resolve_dump_depth as resolve_dump_depth,
@@ -159,7 +159,7 @@ def evidence_depth_label(
 
 
 #: Compatibility alias. The ladder is owned by ``evidence_depth.DEPTH_RANK``,
-#: which derives it from ``buildsource.scan_levels.USER_DEPTHS`` so the
+#: which derives it from ``model.evidence_depth_levels.USER_DEPTHS`` so the
 #: ordering has one definition rather than a copy per consumer.
 _DEPTH_RANK = DEPTH_RANK
 

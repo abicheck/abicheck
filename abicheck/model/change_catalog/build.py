@@ -30,7 +30,7 @@ against the real ``ChangeKind.X`` construction sites in
 ``diff_wheel_deployment.py``, ``diff_numpy_capi.py``, ``bundle.py``
 (bundle_* kinds only -- that module also references many unrelated kinds
 incidentally for its own cross-library rollup, which this categorization
-does not follow), and ``buildsource/crosscheck.py``'s two build-context-
+does not follow), and ``buildsource/cross_source_checks.py``'s two build-context-
 reconciliation kinds specifically -- not by which flat
 ``change_registry_*.py`` sibling an entry happened to live in for pure
 line-count reasons before this migration.

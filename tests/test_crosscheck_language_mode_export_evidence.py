@@ -42,7 +42,7 @@ a real ABI difference. Root cause: the wrongly-C-mode header AST parse
 computed ``main_op``'s ``Function.mangled`` as the bare name ``"main_op"``
 (``is_extern_c=True``) instead of the real ``"_Z7main_opi"`` castxml/clang
 actually emit for a genuine, unmangled, un-namespaced C++ function when
-parsed in the correct C++ mode -- so neither of ``crosscheck.py``'s two
+parsed in the correct C++ mode -- so neither of ``cross_source_checks.py``'s two
 independent correlation checks (``_check_exported_not_public``/
 ``_check_public_not_exported``) could match the header-derived candidate
 against the binary's real export, each accusing the other side of being

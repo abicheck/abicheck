@@ -60,7 +60,7 @@ def test_scoping_case_matches_ground_truth(case):
 def test_crosscheck_case_matches_ground_truth(case):
     """ADR-035 D4 promotion gate: each cross-check fires on a real hygiene issue
     and stays silent on a clean snapshot (both polarities, baseline 0/0)."""
-    from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
 
     result = run_crosschecks(case.build())
     fired = any(c.kind == case.kind for c in result.findings)

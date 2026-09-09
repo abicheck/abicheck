@@ -143,7 +143,7 @@ EDGE_KINDS: frozenset[str] = frozenset(
 
 #: L5 edge kinds that express a decl/type dependency (ADR-041 P0): a call, a
 #: non-call reference to a global/constant, a parameter/field type, or a base
-#: class. ``crosscheck.py``'s intra-version ``public_to_internal_dependency``
+#: class. ``cross_source_checks.py``'s intra-version ``public_to_internal_dependency``
 #: check and ``buildsource/source_graph.py``'s version-over-version internal-
 #: dependency diff both read exactly this set, so the two stay in lockstep on
 #: what "a public entity reaches an internal one" means — a struct's private

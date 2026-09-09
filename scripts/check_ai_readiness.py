@@ -196,7 +196,7 @@ LARGE_FILE_ALLOWLIST: frozenset[str] = frozenset(
         "tests/test_build_source_cli.py",
         "tests/test_cov95_cli.py",
         "tests/test_service_unit.py",
-        "tests/test_crosscheck.py",
+        "tests/test_cross_source_checks.py",
         "tests/test_dwarf_coverage_gaps.py",
         "tests/test_package.py",
     }

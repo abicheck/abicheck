@@ -27,14 +27,14 @@ would churn every import for no reader benefit.)
 
 Split out of ``service.py`` rather than inlined there: that module sits at the
 2000-line AI-readiness hard cap. Deliberately kept a *leaf* module (only
-``compile_context``/``buildsource.scan_levels``, both stdlib-deps-only) rather
+``compile_context``/``model.evidence_depth_levels``, both stdlib-deps-only) rather
 than reusing ``cli_dump_helpers.resolve_dump_depth`` -- that module is a member
 of the CLI/service import-cycle-allowlisted cluster (CLAUDE.md "M1-3"), and
 this module is called from ``service.py`` (also a cluster member), so
 importing a cluster module here would fold this module into that cluster too
 (AGENTS.md "What NOT to do": prefer a leaf module over extending
 ``IMPORT_CYCLE_ALLOWLIST``). The depth->collect-mode mapping is small enough
-to inline directly against ``buildsource.scan_levels`` instead.
+to inline directly against ``model.evidence_depth_levels`` instead.
 """
 
 from __future__ import annotations
@@ -43,13 +43,13 @@ import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .buildsource.scan_levels import (
+from .compile_context import CompileContext
+from .model.evidence_depth_levels import (
     EvidenceDepth,
     SourceScope,
     depth_to_method,
     level_to_collect_mode,
 )
-from .compile_context import CompileContext
 from .workflows.changed_paths import localized_collect_mode
 
 if TYPE_CHECKING:

@@ -25,9 +25,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
 from abicheck.dry_run import DryRunResult
 from abicheck.frontends.cli.compare_dry_run import add_compare_cost_preview_section
+from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
 from abicheck.workflows.compare_cost_preview import (
     _resolve_compare_estimate_level,
     estimate_compare_dry_run_cost,

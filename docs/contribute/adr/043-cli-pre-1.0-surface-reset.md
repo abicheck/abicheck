@@ -527,7 +527,7 @@ Explicitly out of scope for this reset (recorded so a future PR does not
 - `scripts/dump_cli_surface.py`, `scripts/diff_cli_surface.py`,
   `.github/workflows/cli-interface-check.yml` — the D12 CI gate.
 - `abicheck/dry_run.py` — the D9 shared model.
-- `abicheck/buildsource/scan_levels.py` (`SourceScope`,
+- `abicheck/model/evidence_depth_levels.py` (`SourceScope`,
   `level_to_collect_mode`) — the D6/D7 depth/scope model.
 - `abicheck/appcompat.py` (`scope_diff_to_app`,
   `scope_diff_to_required_symbols`) — the D2 shared-diff scoping core.

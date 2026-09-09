@@ -2,7 +2,7 @@
 
 - **`compare` now runs the lexical pattern pre-scan and the preprocessor
   pre-scan automatically.** `checker.compare()` runs
-  `buildsource/pattern_scan.py` and `buildsource/preprocessor_scan.py`
+  `buildsource/pattern_facts.py` and `buildsource/preprocessor_facts.py`
   independently on OLD and NEW (evidence-gated per side, derived from each
   snapshot's own declared header provenance and embedded L3 build
   evidence) and folds the result into a new, always-present

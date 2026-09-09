@@ -17,7 +17,7 @@
 
 Before this module, at least nine call sites each kept their own copy of
 "read a snapshot's/binary's platform export table" (``policy.depth_projection.
-_exported_symbol_names``, ``buildsource.crosscheck_base._exported_symbol_names``
+_exported_symbol_names``, ``buildsource.cross_source_checks_base._exported_symbol_names``
 /``_linked_export_symbols``, ``buildsource.snapshot_exports.
 exported_symbols_from_snapshot``, ``post_manifest._exported_symbol_names``/
 ``_snapshot_contract_symbols``, ``diff_unnamed_types._exported_symbol_names``,
@@ -241,7 +241,7 @@ def default_versioned_names(
     its own ``"_Z"`` prefix's leading underscore.
 
     Formerly ``policy.depth_projection._exported_symbol_names`` /
-    ``buildsource.crosscheck_base._exported_symbol_names``.
+    ``buildsource.cross_source_checks_base._exported_symbol_names``.
     """
     if index.platform == "elf":
         return frozenset(e.name for e in index.entries if e.name and e.is_default)
@@ -256,7 +256,7 @@ def linked_export_names(index: RawExportIndex) -> frozenset[str]:
     distinct, separately-named function since the two answer conceptually
     different questions (this repo's own convention: a shared *value* does
     not mean a shared *concept*), and to preserve
-    ``buildsource.crosscheck_base._linked_export_symbols``'s own historical
+    ``buildsource.cross_source_checks_base._linked_export_symbols``'s own historical
     name and call sites unchanged.
     """
     return default_versioned_names(index, normalize_macho=False)

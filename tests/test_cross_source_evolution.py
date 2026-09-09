@@ -307,11 +307,11 @@ _PHL_LEAK = "evidence_leaked"
 
 def _phl_snapshot(state: str) -> AbiSnapshot:
     """A minimal, compiler-free ``AbiSnapshot`` for one evidence/finding
-    state of ``private_header_leak`` (mirrors ``tests/test_crosscheck.py``'s
+    state of ``private_header_leak`` (mirrors ``tests/test_cross_source_checks.py``'s
     own ``test_private_header_leak_flags_public_api_exposing_private_type``
     fixture shape)."""
     if state == _PHL_NONE:
-        # No header evidence at all -- crosscheck._origin_resolvable is
+        # No header evidence at all -- cross_source_checks._origin_resolvable is
         # False regardless of any decl present (a stripped/no-headers dump).
         return AbiSnapshot(
             library="libfoo.so",
@@ -482,7 +482,7 @@ _ENP_FLAG = "evidence_flagged"
 
 def _enp_snapshot(state: str) -> AbiSnapshot:
     """``exported_not_public``: an exported symbol with no public-header
-    declaration (mirrors ``test_crosscheck.py``'s own
+    declaration (mirrors ``test_cross_source_checks.py``'s own
     ``test_exported_not_public_flags_export_only_symbol`` fixture shape)."""
     if state == _ENP_NONE:
         return AbiSnapshot(
@@ -565,7 +565,7 @@ _PNE_FLAG = "evidence_flagged"
 
 def _pne_snapshot(state: str) -> AbiSnapshot:
     """``public_not_exported``: a public declaration whose export the
-    binary is missing (mirrors ``test_crosscheck.py``'s own
+    binary is missing (mirrors ``test_cross_source_checks.py``'s own
     ``test_public_not_exported_flags_missing_symbol`` fixture shape)."""
     if state == _PNE_NONE:
         return AbiSnapshot(
@@ -658,7 +658,7 @@ _RTTI_FLAG = "evidence_flagged"
 
 def _rtti_snapshot(state: str) -> AbiSnapshot:
     """``rtti_for_internal_type``: exported RTTI for a private-header type
-    (mirrors ``test_crosscheck.py``'s own RTTI fixture shape)."""
+    (mirrors ``test_cross_source_checks.py``'s own RTTI fixture shape)."""
     if state == _RTTI_NONE:
         return AbiSnapshot(
             library="libfoo.so",
@@ -741,7 +741,7 @@ def test_rtti_for_internal_type_identity_distinguishes_two_types_same_symbol() -
     # here (mangled RTTI names are not spelling-stable across a rename in
     # this fixture's simplified model) -- the identity function itself is
     # exercised directly instead, mirroring private_header_leak's own test.
-    from abicheck.buildsource.crosscheck import CHECK_RTTI_FOR_INTERNAL_TYPE
+    from abicheck.buildsource.cross_source_checks import CHECK_RTTI_FOR_INTERNAL_TYPE
     from abicheck.workflows.cross_source_evolution import _IDENTITY_FUNCS
 
     identity = _IDENTITY_FUNCS[CHECK_RTTI_FOR_INTERNAL_TYPE]
@@ -769,7 +769,7 @@ def test_rtti_for_internal_type_wired_into_compare_by_default() -> None:
     passes it -- the minimal test snapshot here has no header-derived
     surface data richer than the bare origin tags -- the real end-to-end
     default-scoping behavior is exercised by ``tests/parity/
-    test_crosscheck_parity.py::test_rtti_for_internal_type_reaches_compare``
+    test_cross_source_checks_parity.py::test_rtti_for_internal_type_reaches_compare``
     against a real G20 fixture instead."""
     old = _rtti_snapshot(_RTTI_NONE)
     new = _rtti_snapshot(_RTTI_FLAG)
@@ -786,7 +786,7 @@ _PID_FLAG = "evidence_flagged"
 
 def _pid_snapshot(state: str) -> AbiSnapshot:
     """``public_to_internal_dependency``: a public decl reaching an internal
-    one via the L5 graph (mirrors ``test_crosscheck.py``'s own
+    one via the L5 graph (mirrors ``test_cross_source_checks.py``'s own
     ``test_public_to_internal_dependency_flags_public_reaching_internal``
     fixture shape)."""
     if state == _PID_NONE:

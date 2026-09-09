@@ -313,7 +313,7 @@ def _debug_format_errors(debug_format: str | None) -> list[str]:
 def _depth_errors(depth: str | None) -> list[str]:
     if depth is None:
         return []
-    from .buildsource.scan_levels import USER_DEPTHS
+    from .model.evidence_depth_levels import USER_DEPTHS
 
     if depth.lower() in USER_DEPTHS:
         return []

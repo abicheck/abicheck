@@ -63,7 +63,7 @@ def test_depth_user_rung_passes_through(depth_value: str) -> None:
 
 def test_user_depths_match_ladder() -> None:
     """The parametrized ladder above stays in lock-step with ``USER_DEPTHS``."""
-    from abicheck.buildsource.scan_levels import USER_DEPTHS
+    from abicheck.model.evidence_depth_levels import USER_DEPTHS
 
     assert [d.value for d in USER_DEPTHS] == ["binary", "headers", "build", "source"]
 
@@ -127,13 +127,13 @@ def test_depth_monotone() -> None:
     Maps each user depth through the same resolution `dump`/`compare` use and
     asserts the collected evidence layers only ever grow.
     """
-    from abicheck.buildsource.scan_levels import (
+    from abicheck.buildsource.source_replay import collection_for_ci_mode
+    from abicheck.model.evidence_depth_levels import (
         USER_DEPTHS,
         EvidenceDepth,
         depth_to_method,
         method_to_collect_mode,
     )
-    from abicheck.buildsource.source_replay import collection_for_ci_mode
 
     def layers_for(depth: EvidenceDepth) -> set[str]:
         method = depth_to_method(depth)
@@ -153,7 +153,7 @@ def test_depth_monotone() -> None:
 def test_graph_excluded_from_user_ladder_but_kept_internal() -> None:
     """``graph`` is dropped from the user dial (D6) yet survives internally for
     the scan ``pr-deep`` mode / S4 — removing it would break determinism."""
-    from abicheck.buildsource.scan_levels import (
+    from abicheck.model.evidence_depth_levels import (
         USER_DEPTHS,
         EvidenceDepth,
         ScanMode,
@@ -171,12 +171,12 @@ def test_graph_excluded_from_user_ladder_but_kept_internal() -> None:
 def test_graph_built_at_source_depth() -> None:
     """``--depth source`` resolves to a collect mode whose layers include L5 —
     the graph is built automatically, with no user ``graph`` mode."""
-    from abicheck.buildsource.scan_levels import (
+    from abicheck.buildsource.source_replay import collection_for_ci_mode
+    from abicheck.model.evidence_depth_levels import (
         EvidenceDepth,
         depth_to_method,
         method_to_collect_mode,
     )
-    from abicheck.buildsource.source_replay import collection_for_ci_mode
 
     method = depth_to_method(EvidenceDepth.SOURCE)
     assert method is not None

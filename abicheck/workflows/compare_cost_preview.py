@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from ..model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from ..service_scan import CostEstimate
 
 
@@ -71,7 +71,7 @@ def _resolve_compare_estimate_level(
     re-derive a level from ``ScanRequest.mode``'s own preset default, which
     has no notion of compare's --sources/--build-info inference rule (or of
     compare having no PR change seed for ``auto`` to escalate against)."""
-    from ..buildsource.scan_levels import (
+    from ..model.evidence_depth_levels import (
         EvidenceDepth,
         SourceMethod,
         depth_to_method,

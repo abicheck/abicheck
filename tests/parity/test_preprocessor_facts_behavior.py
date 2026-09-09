@@ -2,7 +2,7 @@
 """Behavioral half of the (now closed) preprocessor_scan gap (plan §3 #8,
 Phase 2b).
 
-``test_engine_primitive_call_sites.py`` proves ``run_preprocessor_scan``
+``test_engine_primitive_call_sites.py`` proves ``collect_preprocessor_facts``
 has exactly two production callers now: ``scan_engine.py`` and
 ``workflows/pattern_preprocessor_scan.py``. This module proves the positive
 side concretely: it really does capture a private-header leak via a real
@@ -19,9 +19,9 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
-from abicheck.buildsource.preprocessor_scan import (
+from abicheck.buildsource.preprocessor_facts import (
     ClangPreprocessorExtractor,
-    run_preprocessor_scan,
+    collect_preprocessor_facts,
 )
 
 from .gaps import EXPECTED_GAPS
@@ -51,7 +51,7 @@ def test_run_preprocessor_scan_finds_a_private_header_leak(tmp_path: Path) -> No
         argv=["cc", "-c", str(src)],
         language="C",
     )
-    result = run_preprocessor_scan(
+    result = collect_preprocessor_facts(
         BuildEvidence(compile_units=[unit]), public_headers=[str(public)]
     )
     assert result.ran, result.skipped_reason
@@ -118,7 +118,7 @@ def _widget_build_source(
 def test_compare_surfaces_a_preprocessor_scan_leak_introduced_in_new(
     tmp_path: Path,
 ) -> None:
-    """The same leak the direct `run_preprocessor_scan` test above proves,
+    """The same leak the direct `collect_preprocessor_facts` test above proves,
     now reached through `compare()`'s own automatic pipeline stage: OLD's
     header does not leak, NEW's does, and both sides carry real, evaluable
     build evidence -- so the fold reads `introduced`, not `not_evaluated`."""

@@ -123,7 +123,7 @@ case. **Still open, not silently dropped:**
   declared in a common header but only implemented/exported by
   `libcore.so`, not `libalgo.so`), the `public_not_exported` crosscheck ran
   independently per member and had no notion of "this symbol is satisfied
-  by a sibling, not this binary" — `abicheck/buildsource/crosscheck.py`'s
+  by a sibling, not this binary" — `abicheck/buildsource/cross_source_checks.py`'s
   `_check_public_not_exported` takes a single `AbiSnapshot` with no
   cross-snapshot context at all. With the check at its default advisory
   severity this was silent (RISK-only, doesn't change the verdict/exit

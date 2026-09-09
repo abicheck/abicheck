@@ -23,7 +23,7 @@ if str(_REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
-from abicheck.buildsource.crosscheck import (  # noqa: E402
+from abicheck.buildsource.cross_source_checks import (  # noqa: E402
     CrosscheckConfig,
     run_crosschecks,
 )

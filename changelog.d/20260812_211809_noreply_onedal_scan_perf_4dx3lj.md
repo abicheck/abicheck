@@ -11,7 +11,7 @@ it should read in CHANGELOG.md. Delete the other sections.
 - **`scan --depth build`'s S2 preprocessor pre-scan now runs its
   `clang -E`/`clang -M` probes in parallel, with new cap and disable
   knobs.** `capture_macros`/`capture_header_includes`
-  (`buildsource/preprocessor_scan.py`) used to shell out to `clang -E`
+  (`buildsource/preprocessor_facts.py`) used to shell out to `clang -E`
   once per compile unit, serially, with no cap — on a real-world build
   with thousands of translation units, this dominated `scan` wall time
   (a reported 4-minute-to-20-minute jump at `--depth build`, ~920s in

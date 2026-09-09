@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Intra-version cross-source validation engine (ADR-035 D4, phase 2 / G19.2).
-
-Unlike every other diff in abicheck, this engine consumes **one** merged
+"""Intra-version cross-source validation engine (ADR-035 D4; a compare-pipeline
+stage since ADR-068 Phase 2a). Unlike every other diff in abicheck, this
+engine consumes **one** merged
 :class:`~abicheck.model.AbiSnapshot` and diffs its evidence *sources against
 each other within a single version* — no baseline compare. It surfaces a class
 of "bad ABI hygiene" findings that only become visible when the binary export
@@ -34,9 +34,11 @@ Check                             Inputs                                  Tier
 ``rtti_for_internal_type``        typeinfo exports ↔ header provenance     RISK
 ================================  =====================================  ==========
 
-The last two are the ADR-035 D8 single-release hygiene audit: intra-version "bad
-ABI hygiene" surfaced from one build (no baseline), exposed through ``scan
---audit`` / ``surface-report --audit``.
+All eleven checks (this table's eight plus the three in
+:mod:`cross_source_checks_coherence`) now run automatically inside every
+:func:`abicheck.checker.compare` call (``cross_source_checks=True`` by
+default, ADR-068 D3/D4/D5, via :mod:`abicheck.workflows.cross_source_evolution`),
+as well as from ``scan --audit``'s ADR-035 D8 single-release hygiene case.
 
 Per ADR-035 D1/D4 the findings are **never** ``BREAKING`` on their own (an
 artifact diff still proves a shipped break); they default to ``RISK`` or
@@ -137,11 +139,11 @@ ALL_CHECKS: tuple[str, ...] = (
 )
 
 # The finding/coverage primitives and the §6.8 provider-agreement vocabulary
-# (ADR-035 D4) live in the leaf ``crosscheck_base`` so a split-out check module
-# (``crosscheck_coherence``) can share them without forming an import cycle back
-# to this engine. Re-exported so existing ``from .crosscheck import _change``
-# call sites and the tests keep resolving these names here.
-from .crosscheck_base import (  # noqa: E402
+# (ADR-035 D4) live in the leaf ``cross_source_checks_base`` so a split-out
+# check module (``cross_source_checks_coherence``) can share them without a
+# cycle back to this engine. Re-exported for existing
+# ``from .cross_source_checks import _change`` call sites and tests.
+from .cross_source_checks_base import (  # noqa: E402
     PROVIDER_BINARY_EXPORTS,
     PROVIDER_BUILD_CONFIG,
     PROVIDER_PUBLIC_HEADER_AST,
@@ -151,11 +153,10 @@ from .crosscheck_base import (  # noqa: E402
     _exported_symbol_names,
 )
 
-# The two evidence-coherence checks (AC-008/AC-009) live in their own module to
-# keep this file under the 2000-line cap. That module depends only on the leaf
-# ``crosscheck_base`` (never on this engine), so this is a one-directional edge
-# — no import cycle (CLAUDE.md "M1-3").
-from .crosscheck_coherence import (  # noqa: E402
+# The two evidence-coherence checks (AC-008/AC-009) live in their own module
+# to keep this file under the 2000-line cap; depends only on the leaf
+# ``cross_source_checks_base`` (never this engine) — no import cycle.
+from .cross_source_checks_coherence import (  # noqa: E402
     _check_compile_context_conflict,
     _check_source_surface_dso_mismatch,
 )
@@ -165,13 +166,10 @@ from .crosscheck_coherence import (  # noqa: E402
 class CrosscheckConfig:
     """Which cross-checks run, and the per-check finding cap.
 
-    ``enabled`` defaults to every check; the orchestrator (Phase 3 ``scan``)
-    narrows it from the ``crosschecks:`` config block. ``max_per_check`` caps a
-    single check's findings so a pathological library cannot flood the report;
-    0 disables the cap. ``changed_paths`` is the optional PR/revision changed-file
-    set: ``public_to_internal_dependency`` elevates a finding whose internal
-    target was changed (ADR-035 D4 "L5 reachability ↔ PR changed files"). It only
-    refines the message/confidence — the base finding fires regardless.
+    ``enabled`` defaults to every check; the calling orchestrator (``compare``'s automatic stage, or ``scan``'s ``crosschecks:`` config block) narrows it.
+    ``max_per_check`` caps a single check's findings so a pathological library cannot flood the report; 0 disables the cap. ``changed_paths`` is the
+    optional PR/revision changed-file set: ``public_to_internal_dependency`` elevates a finding whose internal target was changed (ADR-035 D4 "L5
+    reachability ↔ PR changed files") — it only refines the message/confidence, the base finding fires regardless.
     """
 
     enabled: frozenset[str] = frozenset(ALL_CHECKS)

@@ -800,8 +800,8 @@ class DiffResult(ReportSideFacts):
     # and NEW, fold via ``CrossSourceEvolution``" shape ``cross_source_
     # evolution.py`` already established for the cross-source checks, reused
     # here for the two other scan-only primitives ADR-068 §1 named
-    # (``buildsource.pattern_scan.scan_files`` /
-    # ``buildsource.preprocessor_scan.run_preprocessor_scan``). Always
+    # (``buildsource.pattern_facts.find_pattern_facts`` /
+    # ``buildsource.preprocessor_facts.collect_preprocessor_facts``). Always
     # populated by `checker.compare()` (`pattern_preprocessor_scan` defaults
     # to `True`, no front end exposes a way to disable it -- D5 rejects "a
     # flag that merely enables useful analysis"). Typed ``object`` for the
@@ -811,7 +811,7 @@ class DiffResult(ReportSideFacts):
     # annotation itself is not what forces this, but keeping the same
     # convention as every other late-appended block here avoids a special
     # case. Advisory only -- pattern/preprocessor facts are never a verdict
-    # on their own (``pattern_scan.py``/``preprocessor_scan.py``'s own
+    # on their own (``pattern_facts.py``/``preprocessor_facts.py``'s own
     # docstrings), so this field never reaches the verdict, severity, or
     # exit code. Appended at the true end, same positional-field-safety
     # convention as every other block above.
