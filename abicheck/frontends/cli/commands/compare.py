@@ -595,13 +595,18 @@ def _embed_inline_source_side(
     metavar="TOKEN",
     help="Repeatable rendering selector (ADR-068 D4): never changes the "
          "verdict, findings, or exit code. Replaces --report-mode/"
-         "--show-only/--demangle/--no-demangle/--explain-patterns. TOKEN: "
+         "--show-only/--demangle/--no-demangle/--explain-patterns/"
+         "--show-filtered/--audit-suppressions. TOKEN: "
          "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
          "'show=<tokens>' (severity/element/action filter, same vocabulary "
          "as the old --show-only, repeatable to OR groups together); "
          "'demangle'/'no-demangle' (C++ demangling, default ON for "
          "markdown/review/html); 'patterns' (explain pattern-verdict "
-         "modulation, which always runs where evidence exists). Example: "
+         "modulation, which always runs where evidence exists); 'filtered' "
+         "(echo the scope/disposition ledger of findings excluded from the "
+         "verdict, always computed and always in --format json); "
+         "'suppressions' (echo the --suppress rule audit, likewise always "
+         "computed -- a no-op without --suppress, never an error). Example: "
          "--view leaf --view demangle --view show=breaking,functions.",
 )
 # Policy + suppression family (ADR-037 D3). The strict/justification pair

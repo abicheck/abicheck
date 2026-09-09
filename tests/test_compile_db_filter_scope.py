@@ -387,16 +387,18 @@ class TestDumpCliHonorsTheFilterInTheFold:
         return so_path, header, compile_db
 
     @staticmethod
-    def _dump(so_path: Path, header: Path, compile_db: Path, out: Path, *extra: str):
+    def _dump(so_path: Path, header: Path, compile_db: Path, out: Path, *extra: str, db_filter: str | None = None):
         from click.testing import CliRunner
 
         from abicheck.cli import main
 
         # Phase 7 (one-comparison-product.md §4.1/§4.2): `dump` no longer
-        # accepts `--ast-frontend` -- `compile.frontend` in `.abicheck.yml`
-        # is the only spelling now.
+        # accepts `--ast-frontend` or `--compile-db-filter` --
+        # `compile.frontend` and `build.compile_db_filter` in `.abicheck.yml`
+        # are the only spellings now.
         cfg = out.parent / f"{out.stem}.abicheck.yml"
-        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+        _filter = f"build:\n  compile_db_filter: '{db_filter}'\n" if db_filter else ""
+        cfg.write_text("compile:\n  frontend: clang\n" + _filter, encoding="utf-8")
         return CliRunner().invoke(
             main,
             [
@@ -439,9 +441,7 @@ class TestDumpCliHonorsTheFilterInTheFold:
     ) -> None:
         so_path, header, compile_db = self._project(tmp_path)
         out = tmp_path / f"{pick}.json"
-        result = self._dump(
-            so_path, header, compile_db, out, "--compile-db-filter", pick
-        )
+        result = self._dump(so_path, header, compile_db, out, db_filter=pick)
         assert result.exit_code == 0, result.output
         from abicheck.serialization import load_snapshot_document
 
@@ -672,7 +672,7 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
             tmp_path
         )
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+        cfg.write_text("compile:\n  frontend: clang\nbuild:\n  compile_db_filter: 'a.cpp'\n", encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -686,8 +686,6 @@ class TestScopeGuardCoversSourcesOnlyAutoDiscovery:
                 "build",
                 "--config",
                 str(cfg),
-                "--compile-db-filter",
-                "a.cpp",
                 "-o",
                 str(tmp_path / "out.json"),
             ],
@@ -808,7 +806,7 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
 
         so_path, header, build_info = self._project_with_nested_build_info(tmp_path)
         cfg = tmp_path / "nested-build-info.abicheck.yml"
-        cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+        cfg.write_text("compile:\n  frontend: clang\nbuild:\n  compile_db_filter: 'a.cpp'\n", encoding="utf-8")
         result = CliRunner().invoke(
             main,
             [
@@ -822,8 +820,6 @@ class TestScopeGuardCoversNestedBuildInfoDatabases:
                 "build",
                 "--config",
                 str(cfg),
-                "--compile-db-filter",
-                "a.cpp",
                 "-o",
                 str(tmp_path / "out.json"),
             ],
@@ -999,7 +995,7 @@ class TestScopeGuardCoversPackAndBazelBuildInfo:
         resolved = compile_db_for_filter_scope_check(pack, None, (tmp_path / "api.h",))
         error = compile_db_filter_scope_error("foo.cpp", resolved, "build")
         assert error is not None
-        assert "--compile-db-filter" in error
+        assert "build.compile_db_filter" in error
 
     def test_bazel_jsonproto_triggers_the_scope_error(self, tmp_path: Path) -> None:
         from abicheck.header_conditionals import (

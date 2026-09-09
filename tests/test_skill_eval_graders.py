@@ -1317,12 +1317,11 @@ class TestSelfComparisonDetection:
             # an operand — `--verbose` is `is_flag=True` in cli_options.py.
             ["compare", "x.so", "--verbose", "x.so"],
             ["compare", "x.so", "-v", "x.so"],
-            # Phase 7d (one-comparison-product.md §4.1) removed --dso-only
-            # from `compare`'s CLI, and Phase 5 removed the
-            # --audit-suppressions that replaced it here -- --no-baseline is
-            # the real `is_flag=True` boolean option that plays the same role
-            # in this list now (a valueless flag sitting between the two
-            # operands, which is what makes an adjacency test walk past them).
+            # Phase 7d removed --dso-only from `compare`'s CLI and Phase 5
+            # removed the --audit-suppressions that replaced it here;
+            # --no-baseline is the `is_flag=True` boolean that plays the same
+            # role now (a valueless flag between the two operands, which is
+            # what makes an adjacency test walk past them).
             ["compare", "x.so", "--no-baseline", "x.so"],
             # Only `compare` names both sides positionally.
             ["scan", "lib.so", "--against", "lib.so"],

@@ -823,18 +823,9 @@ def _release_summary_effective_config_block(
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
         on_incomplete_scope=on_incomplete_scope,  # ADR-065 D6: warn/block exit differently
-        # ADR-068 D4/Phase 5: modulation/surface-metrics are unconditional
-        # now -- this stand-in must agree, not default to the old "off".
+        # ADR-068 D4/Phase 5 + §4.1's AUTO rows: modulation, surface metrics and ADR-039 reconciliation are unconditional now (forced on at the Tier-2 chokepoint every library here routes through), so this stand-in must agree rather than default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,
-        # §4.1's AUTO row (Phase 7i): ADR-039 build-context reconciliation is
-        # unconditional too, forced on at the Tier-2 `compare_snapshots`
-        # chokepoint every per-library comparison in this fan-out routes
-        # through -- so this stand-in agrees for the same reason the two
-        # above do. Without it the release summary reported
-        # `policy.reconcile_build_context: False` while every one of its own
-        # per-library reports said `True`, which is exactly the
-        # release-vs-single-pair divergence this block exists to prevent.
         reconcile_build_context_enabled=True,
     )
     ec_scheme = gate_exit_code_scheme(severity_config is not None)
