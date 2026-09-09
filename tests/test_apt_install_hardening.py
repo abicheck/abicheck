@@ -52,6 +52,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 import yaml
@@ -474,6 +475,177 @@ def update_failure_is_absorbed(line: str) -> bool:
     return False
 
 
+class LineScan(NamedTuple):
+    """What one physical line does to the shell's lexical state."""
+
+    comment_at: int | None
+    quote: str | None
+    at_word_start: bool
+    continues: bool
+    uncertain: bool = False
+
+
+def scan_line(line: str, quote: str | None, at_word_start: bool) -> LineScan:
+    """Walk one physical line, carrying lexical state in and out.
+
+    State is threaded rather than restarted per line because a continuation
+    splices *inside* the shell's lexer, not around it: after `echo "x \\`,
+    the next line begins inside a double quote, so its `#` is quoted text,
+    not a comment (Codex review, PR #1183 -- verified against bash, which
+    prints the `#` and then runs the following command). Restarting the
+    state per line dropped the rest of the line, taking a gating command with it.
+
+    A `#` opens a comment only at the start of a word and only outside
+    quotes: `echo a#b` and `echo "# x"` contain none.
+
+    `continues` covers both ways a logical line runs on: an unescaped
+    trailing backslash, and an unterminated quote (where the newline is
+    literal text inside the string).
+    """
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if quote == "'":
+            # Nothing escapes inside single quotes -- not even a backslash.
+            if ch == "'":
+                quote = None
+            i += 1
+            continue
+        if quote == '"':
+            if ch == "\\":
+                if i + 1 >= n:
+                    return LineScan(None, quote, at_word_start, True)
+                i += 2
+                continue
+            # Command substitution is live inside double quotes too, and
+            # opens a fresh lexical context there -- the exact shape that
+            # defeated the previous revision.
+            if ch == "`" or (ch == "$" and i + 1 < n and line[i + 1] == "("):
+                return LineScan(None, None, True, False, uncertain=True)
+            if ch == '"':
+                quote = None
+            i += 1
+            continue
+        if ch == "\\":
+            if i + 1 >= n:
+                return LineScan(None, quote, at_word_start, True)
+            i += 2
+            at_word_start = False
+            continue
+        if ch == "`" or (ch == "$" and i + 1 < n and line[i + 1] == "("):
+            # A command substitution opens its own lexical context, with its
+            # own quoting, nested arbitrarily. Rather than half-model that --
+            # every previous revision of this helper lost a command by
+            # guessing at grammar it did not implement -- say so and let the
+            # caller fall back to keeping the text intact.
+            return LineScan(None, None, True, False, uncertain=True)
+        if ch in "'\"":
+            quote = ch
+            at_word_start = False
+            i += 1
+            continue
+        if ch == "#" and at_word_start:
+            # The comment ends the line outright, so nothing carries over.
+            return LineScan(i, None, True, False)
+        at_word_start = ch.isspace() or ch in "|&;()"
+        i += 1
+    return LineScan(None, quote, at_word_start, quote is not None)
+
+
+def logical_lines(script: str) -> list[str]:
+    """Split a shell script into *logical* lines, as the shell would.
+
+    A workflow can spell the gating chain across physical lines:
+
+        sudo apt-get \\
+          update -qq && sudo apt-get install -y gcc
+
+    Neither physical line matches `apt-get\\s+update`, so a per-line scan
+    reports no offender while bash runs exactly the chain the guard exists
+    to forbid (Codex review, fifth P2 on PR #1182 -- verified by injecting
+    that form into a real workflow and watching the scan pass). The scan
+    therefore runs over what the shell actually executes, not over how the
+    YAML happens to be wrapped.
+
+    Getting that right took five corrections, every one of them a way this
+    helper could hide the very command it exists to find, and every one
+    verified against real bash (CodeRabbit and Codex on PR #1183):
+
+    1. A backslash continues a line only when it is *immediately* before the
+       newline -- testing that after `rstrip()` let `# note \\ ` splice.
+    2. Splicing removes the backslash-newline pair and adds **nothing**:
+       bash reads `apt-get upda\\` + `te` as `apt-get update`, and an
+       invented space yields `apt-get upda te`, which the scan cannot match.
+    3. A comment runs to the end of the *physical* line, so a backslash
+       inside one is comment text and bash executes the next line.
+    4. That holds for an *inline* comment too: `true || true # note \\` left
+       the next line to run alone, while splicing produced a line whose
+       `|| true` the absorption predicate accepted -- laundering a gating
+       chain into a pass rather than merely hiding it.
+    5. Lexical state crosses a splice: after `echo "x \\`, the next line
+       starts inside a quote, so its `#` is text. Restarting state per line
+       discarded the remainder -- and the gating command that followed it.
+
+    So the walk is a small stateful lexer (`scan_line`), and comments are
+    dropped exactly as bash drops them. ``TestLogicalLines``
+    differential-tests all of it against bash rather than my reading of it.
+    """
+    lines: list[str] = []
+    pending = ""
+    quote: str | None = None
+    at_word_start = True
+    unsure = False
+
+    def flush(text: str) -> None:
+        stripped = text.strip()
+        if stripped:
+            lines.append(stripped)
+
+    for raw in script.splitlines():
+        scan = scan_line(raw, quote, at_word_start)
+        quote, at_word_start = scan.quote, scan.at_word_start
+        if scan.uncertain:
+            # Fail closed: emit the line verbatim, strip no comment, splice
+            # nothing across it, and start clean. Keeping too much text can
+            # only make the scan look at more; dropping text is what hid a
+            # command in every bug this helper has had.
+            unsure = True
+            flush(pending + raw)
+            pending, quote, at_word_start = "", None, True
+            continue
+        if scan.comment_at is not None:
+            # bash runs the code before the comment and never sees the rest.
+            # While a splice is open this joins first, exactly as bash does.
+            flush(pending + raw[: scan.comment_at])
+            pending, quote, at_word_start = "", None, True
+            continue
+        if scan.continues:
+            if raw.endswith("\\") and quote != "'":
+                pending += raw[:-1]  # backslash-newline is removed entirely
+            else:
+                pending += raw + "\n"  # inside a quote the newline is literal
+            continue
+        flush(pending + raw)
+        pending, quote, at_word_start = "", None, True
+    flush(pending)
+    if unsure:
+        # Once a construct we cannot model appears, the lexical state of every
+        # *later* line is guesswork too -- the nested case proved it, since the
+        # line after the substitution opened with a `#` that was really inside
+        # a quote. So the raw physical lines are added alongside the parsed
+        # view: the union can only give the scan more to look at, and a
+        # spurious flag asks a human to look where a dropped command asks
+        # nobody anything.
+        seen = set(lines)
+        for raw in script.splitlines():
+            stripped = raw.strip()
+            if stripped and stripped not in seen:
+                lines.append(stripped)
+                seen.add(stripped)
+    return lines
+
+
 class TestNoWorkflowGatesInstallOnUpdate:
     """The class invariant, over every workflow at once.
 
@@ -498,11 +670,9 @@ class TestNoWorkflowGatesInstallOnUpdate:
     def test_no_step_lets_apt_get_update_abort_it(self) -> None:
         offenders: list[str] = []
         for name, script in self._run_scripts():
-            for line in script.splitlines():
+            for line in logical_lines(script):
                 stripped = line.strip()
                 if not re.search(r"\bapt-get\s+update\b", stripped):
-                    continue
-                if stripped.lstrip().startswith("#"):
                     continue
                 if not update_failure_is_absorbed(stripped):
                     offenders.append(f"{name}: {stripped}")
@@ -691,3 +861,199 @@ class TestUpdateFailureAbsorptionPredicate:
                 f"{form!r}: predicate says the failure is absorbed, but bash "
                 f"exits {real_exit} -- the guard would pass a gating line"
             )
+
+
+class TestLogicalLines:
+    """The scanner's other primitive: what the shell actually runs.
+
+    A guard is only as good as the text it looks at. This one silently
+    reported "no offender" for a genuinely gating workflow purely because
+    the YAML wrapped the command, so the joiner gets the same
+    stated-as-invariants treatment as the absorption predicate -- and, after
+    two independent reviewers found two more holes in it, the same
+    differential-against-bash treatment too.
+    """
+
+    def test_a_continued_command_becomes_one_line(self) -> None:
+        """The reported bypass: two physical lines, one shell command.
+
+        The continued line's indentation is preserved because bash preserves
+        it; `\\s+` in the scan's pattern is what absorbs it.
+        """
+        script = "sudo apt-get \\\n  update -qq && sudo apt-get install -y gcc\n"
+        assert logical_lines(script) == [
+            "sudo apt-get   update -qq && sudo apt-get install -y gcc"
+        ]
+
+    def test_a_token_split_across_lines_rejoins_exactly(self) -> None:
+        """Splicing adds nothing: `upda\\` + `te` is `update`, not `upda te`.
+
+        Inserting a space here was a real bypass -- the scan's regex needs
+        `apt-get update` as one token pair, and an invented space hid it
+        (Codex, PR #1183).
+        """
+        assert logical_lines("apt-get upda\\\nte\n") == ["apt-get update"]
+
+    def test_multiple_continuations_join(self) -> None:
+        """Joining is not a one-shot: a command may wrap several times."""
+        assert logical_lines("sudo apt-get \\\n  update \\\n  -qq\n") == [
+            "sudo apt-get   update   -qq"
+        ]
+
+    def test_uncontinued_lines_are_untouched(self) -> None:
+        """Ordinary scripts must survive the rewrite unchanged -- the scan
+        sees every other line through this function too."""
+        script = "sudo apt-get update -qq || true\necho done\n"
+        assert logical_lines(script) == ["sudo apt-get update -qq || true", "echo done"]
+
+    def test_an_escaped_backslash_does_not_continue(self) -> None:
+        """`\\\\` is a literal backslash, not a continuation.
+
+        Getting this wrong would swallow the *following* line into the
+        current one and hide whatever command it holds -- the same blind
+        spot as the bug this function exists to close, in reverse.
+        """
+        script = "echo 'a\\\\'\nsudo apt-get update || true\n"
+        assert logical_lines(script) == ["echo 'a\\\\'", "sudo apt-get update || true"]
+
+    def test_a_backslash_before_trailing_space_does_not_continue(self) -> None:
+        """A backslash continues a line only when it touches the newline.
+
+        Testing that after `rstrip()` let a comment ending in `\\ ` swallow the
+        next line; the scan then skipped the whole thing as a comment, hiding
+        a real gating command (CodeRabbit, PR #1183).
+        """
+        script = "# note \\ \nsudo apt-get update -qq && sudo apt-get install -y gcc\n"
+        # The comment itself is dropped, as bash drops it; what matters is
+        # that the command below it survives as its own logical line.
+        assert logical_lines(script) == [
+            "sudo apt-get update -qq && sudo apt-get install -y gcc",
+        ]
+
+    def test_a_trailing_continuation_still_yields_its_line(self) -> None:
+        """A script ending mid-continuation must not drop its last command."""
+        assert logical_lines("sudo apt-get update \\\n") == ["sudo apt-get update"]
+
+    def test_the_scan_catches_a_continued_gating_chain(self) -> None:
+        """End-to-end: the joined form is what the offender check sees."""
+        script = "sudo apt-get \\\n  update -qq && sudo apt-get install -y gcc\n"
+        (joined,) = logical_lines(script)
+        assert re.search(r"\bapt-get\s+update\b", joined)
+        assert not update_failure_is_absorbed(joined)
+
+    # Every wrapping shape reviewers have raised, plus the ones they have
+    # not: a split token, a split flag, a backslash before trailing space, an
+    # escaped backslash, several continuations in a row. Checked against bash
+    # rather than against my reading of it -- both holes above came from
+    # reasoning about continuations instead of asking the shell.
+    _SCRIPTS = (
+        "probe update\n",
+        "probe \\\n  update\n",
+        "probe upda\\\nte\n",
+        "probe update \\\n  -qq\n",
+        "probe --op\\\ntion\n",
+        "probe \\\n  upda\\\nte \\\n  -qq\n",
+        "probe a\\\\\nprobe b\n",
+        "probe one\nprobe two\n",
+        "probe x \\\n\nprobe y\n",
+        # A backslash inside a comment is comment text: bash runs the
+        # NEXT line, so the helper must not swallow it (Codex, PR #1183).
+        "# note \\\nprobe update\n",
+        "# plain comment\nprobe update\n",
+        "  # indented \\\nprobe update\n",
+        # An inline comment hides a continuation exactly as a whole-line one
+        # does -- and the spliced form fooled the absorption predicate, since
+        # shlex drops everything after `#` (Codex, PR #1183).
+        "true || true # note \\\nprobe update\n",
+        "probe one # trailing\nprobe two\n",
+        # ...but a `#` inside quotes, or mid-word, is not a comment at all.
+        'probe "# quoted" \\\n  update\n',
+        "probe a#b\n",
+        "probe one \\\n# two\n",
+        # Lexical state crosses the splice: the `#` here is inside the quote
+        # opened on the previous line, so bash prints it and then runs the
+        # next command (Codex, PR #1183).
+        'echo "x \\\n# still quoted"; probe update\n',
+        'echo "open\nstill open"; probe update\n',
+        "echo 'single \\\nliteral backslash'; probe update\n",
+    )
+
+    # Scripts holding a construct the lexer refuses to model. These are NOT
+    # in the bash-equality matrix on purpose: the fallback deliberately keeps
+    # more text than bash runs (comments included), so argv equality is the
+    # wrong claim. The right one is below -- nothing is dropped.
+    _UNPARSEABLE = (
+        'echo "$(printf "%s" "x \\\n# nested")"; sudo apt-get update -qq && sudo apt-get install -y gcc\n',
+        "echo `printf x` \\\n# c\nsudo apt-get update -qq && sudo apt-get install -y gcc\n",
+        "X=$(date) # c \\\nsudo apt-get update -qq && sudo apt-get install -y gcc\n",
+        'echo "${x:-$(true)}" \\\n# c\nsudo apt-get update -qq && sudo apt-get install -y gcc\n',
+    )
+
+    @pytest.mark.parametrize("script", _UNPARSEABLE)
+    def test_nothing_is_dropped_when_the_lexer_is_unsure(self, script: str) -> None:
+        """The invariant that replaces guessing at the rest of shell grammar.
+
+        Six review rounds each found one more corner of the grammar this
+        helper modelled wrongly, and every single one failed the same way:
+        text was *dropped*, so a gating command stopped being visible to the
+        scan. Modelling the next corner would only invite a seventh.
+
+        So the helper now declares defeat on command substitution rather than
+        half-parsing it, and this states what that guarantees: whatever it
+        cannot parse, it does not discard. A spurious flag asks a human to
+        look; a dropped command asks nobody anything.
+        """
+        assert any("apt-get update" in line for line in logical_lines(script)), (
+            "a gating command vanished from an unparseable script"
+        )
+
+    def test_the_scan_flags_an_unparseable_gating_script(self) -> None:
+        """And the kept text really does reach the offender check."""
+        script = self._UNPARSEABLE[0]
+        offenders = [
+            line
+            for line in logical_lines(script)
+            if re.search(r"\bapt-get\s+update\b", line)
+            and not update_failure_is_absorbed(line)
+        ]
+        assert offenders
+
+    @requires_apt_harness
+    @pytest.mark.parametrize("script", _SCRIPTS)
+    def test_splicing_matches_bash(self, script: str, tmp_path: Path) -> None:
+        """The oracle is bash's own line splicing, not this module's.
+
+        A stub `probe` on PATH records the argv of every invocation bash
+        actually makes; the same scripts are run through `logical_lines` and
+        tokenized. The two must agree -- which is the whole claim this
+        function makes about itself.
+        """
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        log = tmp_path / "argv.log"
+        probe = bindir / "probe"
+        probe.write_text(
+            f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> {log}\n', encoding="utf-8"
+        )
+        probe.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
+        subprocess.run(["bash", "-c", script], env=env, capture_output=True, check=True)
+        from_bash = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+        # A logical line can hold several commands (`echo ...; probe x`), so
+        # split on the separators before looking for invocations. A wrong
+        # split can only produce a mismatch, never a silent pass, which is
+        # the right direction for a test harness to be imprecise in.
+        # `probe` logs "$*" -- its arguments without argv[0] -- so the command
+        # name is dropped on this side too.
+        from_helper = []
+        for line in logical_lines(script):
+            for segment in re.split(r"\s*(?:;|&&|\|\|)\s*", line):
+                segment = segment.strip()
+                if segment.startswith("probe"):
+                    from_helper.append(" ".join(shlex.split(segment)[1:]))
+        assert from_helper == from_bash, (
+            f"{script!r}: helper produced {from_helper}, bash ran {from_bash}"
+        )
