@@ -262,3 +262,40 @@ class TestCompileContextFlagsViaExtraArgs:
             }
         )
         assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAbi3FlagStaysOnLegacyCli:
+    """``--abi3 FLOOR`` (Codex review, PR #1172, round 6): supported on both
+    `scan` and `compare`, but with different gating for the stable-ABI-
+    violation finding it produces. `scan`'s own audit
+    (`scan_engine._run_abi3_audit`) only ever lands in the advisory
+    crosscheck report, including on a baseline `scan --against` run, which
+    never folds it into the real diff -- while `compare --abi3` (ADR-068
+    Phase 2d) rides the same `extra_changes` channel every other finding
+    uses, scored by policy/suppression/verdict like any other root finding.
+    Translating a baseline `--abi3` scan onto `compare` would silently
+    change an existing `mode: scan` workflow's own verdict/exit code."""
+
+    @pytest.mark.parametrize("flag", ["--abi3 3.9", "--abi3=3.9", "--abi3 3.12"])
+    def test_abi3_flag_stays_on_legacy_cli(self, flag: str) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": flag,
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_no_abi3_flag_still_routes_to_compare(self) -> None:
+        # Negative control: extra-args with no --abi3 at all is the
+        # already-tested compare-translation shape.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--verbose",
+            }
+        )
+        assert cmd[1] == "compare"

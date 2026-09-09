@@ -1553,7 +1553,12 @@ _extra_args_has_dry_run_flag() {
 # has no such flags at all, so routing that run onto `compare` would fail
 # it with an unknown-option usage error instead of running the scan it
 # asked for. Checked the same way `_extra_args_has_write_flag`/
-# `_extra_args_has_dry_run_flag` already are.
+# `_extra_args_has_dry_run_flag` already are. Not every case below is a
+# flag `compare` genuinely lacks, despite the name -- `--depth build`/
+# `--depth source` and `--abi3` are both flags `compare` *does* accept, but
+# with different-enough gating semantics that translating would silently
+# change the run's result rather than fail outright (see each case's own
+# comment).
 _extra_args_has_scan_only_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
@@ -1593,6 +1598,24 @@ _extra_args_has_scan_only_flag() {
       case "$(printf '%s' "$_value" | tr '[:upper:]' '[:lower:]')" in
       build | source) return 0 ;;
       esac
+      ;;
+    # `--abi3 FLOOR` (Codex review, PR #1172, round 6): supported on both
+    # `scan` and `compare`, but with genuinely different gating for the
+    # stable-ABI-violation finding it produces -- `scan`'s own audit
+    # (`scan_engine._run_abi3_audit`) only ever lands in the advisory
+    # crosscheck report (`cc.findings`, gated solely via
+    # `--crosscheck python_stable_abi_violation=error`), including on a
+    # baseline `scan --against` run, which never folds it into the real
+    # diff. `compare --abi3` (ADR-068 Phase 2d,
+    # `cli_compare_helpers.fold_abi3_into_extra_changes`) instead rides the
+    # same `extra_changes` channel every other finding uses, so policy/
+    # suppression/verdict score it like any other root finding. Translating
+    # a baseline `--abi3` scan onto `compare` would silently change an
+    # existing `mode: scan` workflow's verdict/exit code for this finding --
+    # any value forces the legacy CLI, not just a specific one (unlike
+    # `--depth` above, there is no "safe" `--abi3` value here).
+    --abi3)
+      return 0
       ;;
     esac
   done <<<"$(_extra_args_options)"
