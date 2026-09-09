@@ -20,17 +20,23 @@ recording verdict / coverage / DWARF presence / SONAME / wall time to
 ``data/oneapi_scan_2026-06.json``. Network + ``abicheck`` on PATH required; this
 is a slow real-world lane, not a unit test.
 
-Deliberately stays on `scan --against`, not `compare` (ADR-068 D2 / plan
+Historically stayed on `scan --against`, not `compare` (ADR-068 D2 / plan
 Phase 4 commit 4 originally migrated this, then reverted it -- Codex review,
-fresh evidence): `compare`'s automatic cross-source-checks stage has no
+fresh evidence): `compare`'s automatic cross-source-checks stage had no
 opt-out and no advisory-only stripping for a baseline comparison, unlike
-`scan`'s own `_strip_automatic_cross_source_findings()` -- the identical gap
-documented in `action/run.sh`'s own `_SCAN_NEEDS_LEGACY_CLI` routing
-comment. Reproduced directly: `compare --depth binary` on an identical
-snapshot pair (`catalog/cases/case145_audit_unversioned_export`) reports
-`COMPATIBLE_WITH_RISK`/`unversioned_exported_symbol`, where the equivalent
-`scan --against --depth binary` reports `NO_CHANGE` with an empty diff --
-not depth-gated, so a plain binary-depth comparison is not exempt either.
+`scan`'s own (now-deleted) `_strip_automatic_cross_source_findings()` -- the
+identical gap `action/run.sh`'s own `_SCAN_NEEDS_LEGACY_CLI` routing comment
+used to document. Reproduced at the time: `compare --depth binary` on an
+identical snapshot pair (`catalog/cases/case145_audit_unversioned_export`)
+reported `COMPATIBLE_WITH_RISK`/`unversioned_exported_symbol`, where the
+equivalent `scan --against --depth binary` reported `NO_CHANGE` with an
+empty diff. **That divergence is closed** (ADR-068's 2026-09-09 amendment:
+`scan --against` no longer strips cross-source findings, so it now agrees
+with `compare` on this exact case) -- this script still invokes `scan`
+rather than `compare`, since re-driving it through `compare` and
+re-validating the recorded `data/oneapi_scan_2026-06.json` history needs a
+real network run this change did not perform; tracked as the "Examples/
+eval/validation: corpora re-driven through `compare`" row of plan Phase 4.
 
 Reproducibility: each pair pins the exact ``old_file``/``new_file`` build
 basename (like ``data/manifest.json``), so a rebuild publishing a higher build

@@ -100,7 +100,7 @@ def _run_compare_raw(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
         'args=("$@")\n'
-        'for ((_i = 0; _i < ${#args[@]}; _i++)); do\n'
+        "for ((_i = 0; _i < ${#args[@]}; _i++)); do\n"
         '  if [[ "${args[_i]}" == "--config" ]]; then\n'
         f'    cp "${{args[$((_i + 1))]}}" "{captured_config}" 2>/dev/null || true\n'
         "    break\n"
@@ -505,3 +505,164 @@ class TestCompareModeDirectoryDepthAsymmetry:
         assert "--depth headers" in result.stdout
         cmd = captured.read_text(encoding="utf-8").strip()
         assert "--depth" not in cmd
+
+
+def _run_scan_against_raw(
+    env_extra: dict[str, str], tmp_path: Path
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """Like ``_run_compare_raw``, but drives ``run.sh``'s baseline
+    ``mode: scan`` branch (an ``against`` operand supplied) instead of a
+    native ``mode: compare`` request -- the scan->compare CLI-translation
+    route re-enabled by the 2026-09-09 ADR-068 amendment. Returns the raw
+    result, the captured-argv path, and the captured-config path (mirrors
+    ``_compile_overlay_from_cmd``'s own "snapshot the overlay file's
+    content while run.sh is still running" rationale)."""
+    fake_bin = tmp_path / "fakebin"
+    fake_bin.mkdir()
+    captured = tmp_path / "captured_argv.txt"
+    captured_config = tmp_path / "captured_config.json"
+    abicheck_stub = fake_bin / "abicheck"
+    abicheck_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        'args=("$@")\n'
+        "for ((_i = 0; _i < ${#args[@]}; _i++)); do\n"
+        '  if [[ "${args[_i]}" == "--config" ]]; then\n'
+        f'    cp "${{args[$((_i + 1))]}}" "{captured_config}" 2>/dev/null || true\n'
+        "    break\n"
+        "  fi\n"
+        "done\n"
+        'echo \'{"verdict":"COMPATIBLE"}\'\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    abicheck_stub.chmod(0o755)
+
+    new_json = tmp_path / "new.json"
+    against_json = tmp_path / "baseline.so"
+    new_json.write_text("{}", encoding="utf-8")
+    against_json.write_text("", encoding="utf-8")
+
+    github_output = tmp_path / "github_output"
+    github_output.write_text("")
+    github_step_summary = tmp_path / "github_step_summary"
+    github_step_summary.write_text("")
+
+    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env = {
+        **base_env,
+        "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+        "INPUT_MODE": "scan",
+        "INPUT_NEW_LIBRARY": str(new_json),
+        "INPUT_AGAINST": str(against_json),
+        # A default baseline scan (no --pattern-verdicts) now stays on the
+        # legacy CLI (Codex review, PR #1172, round 17) -- this test is
+        # about --config collision, not that routing axis, so opt in
+        # explicitly to keep exercising the compare-translation branch.
+        "INPUT_DEPTH": "headers",
+        "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+        "INPUT_ADD_JOB_SUMMARY": "false",
+        "INPUT_PR_COMMENT": "false",
+        "GITHUB_OUTPUT": str(github_output),
+        "GITHUB_STEP_SUMMARY": str(github_step_summary),
+        **env_extra,
+    }
+    result = subprocess.run(
+        [_bash_executable(), str(RUN_SH)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
+    )
+    return result, captured, captured_config
+
+
+class TestScanBaselineCompareTranslationPreservesMergedConfig:
+    """Codex review, PR #1172, round 21, fresh evidence: a baseline
+    ``mode: scan`` request eligible for the scan->compare translation
+    route that ALSO supplies both ``build-config`` and a dedicated
+    compile-context input (``gcc-path`` here) used to emit two conflicting
+    ``--config`` tokens on the translated ``compare`` command line --
+    ``add_compile_context_flags`` above already merges ``build-config``
+    into its own synthesized ``compile:`` overlay and appends ``--config``
+    itself, but the branch's own unconditional
+    ``add_single_flag "--config" "$INPUT_BUILD_CONFIG"`` right after it
+    appended a second, raw ``--config $INPUT_BUILD_CONFIG`` -- Click keeps
+    only the last occurrence, so the synthesized compiler/sysroot/macros
+    overlay was silently discarded in favor of the operator's *original*,
+    unmerged file. Same guard (``_cmd_has_config_flag``) the native
+    ``dump``/``compare`` branches already carry around their own identical
+    ``add_single_flag "--config"`` call."""
+
+    def test_compile_context_overlay_survives_the_translated_command_line(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "cfg.yml"
+        build_config.write_text("release:\n  dso_only: true\n", encoding="utf-8")
+        result, captured, captured_config = _run_scan_against_raw(
+            {
+                "INPUT_BUILD_CONFIG": str(build_config),
+                "INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++",
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert captured.is_file(), "abicheck stub was never invoked"
+        cmd = captured.read_text(encoding="utf-8").strip()
+        assert "compare" in cmd.split()
+        # Exactly one --config token reaches the translated command line --
+        # a second, conflicting one is exactly the bug this test guards.
+        assert cmd.count("--config") == 1, cmd
+        assert str(build_config) not in cmd, (
+            "the raw, unmerged build-config path must not reach the CLI "
+            "directly once a compile-context input also applies -- only "
+            f"the synthesized overlay that already merged it should: {cmd}"
+        )
+        assert captured_config.is_file(), (
+            "the fake abicheck stub never captured a --config file's content"
+        )
+        with open(captured_config, encoding="utf-8") as f:
+            overlay = json.load(f)
+        # The synthesized compile: block reached the CLI (proves
+        # add_compile_context_flags's own --config, not a second one that
+        # clobbered it, is what survived)...
+        assert overlay["compile"]["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        # ...merged with (not replacing) the operator's own build-config
+        # content, per add_compile_context_flags's explicit-build-config
+        # merge branch.
+        assert overlay.get("release", {}).get("dso_only") is True
+
+    def test_compile_context_alone_still_forwards_config(self, tmp_path: Path) -> None:
+        """Negative control: no build-config given, only a compile-context
+        input -- still exactly one --config (the synthesized overlay),
+        confirming the guard doesn't newly suppress the no-collision case.
+        """
+        result, captured, captured_config = _run_scan_against_raw(
+            {"INPUT_GCC_PATH": "/opt/cross/bin/aarch64-linux-gnu-g++"}, tmp_path
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        cmd = captured.read_text(encoding="utf-8").strip()
+        assert cmd.count("--config") == 1, cmd
+        assert captured_config.is_file()
+        with open(captured_config, encoding="utf-8") as f:
+            overlay = json.load(f)
+        assert overlay["compile"]["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
+
+    def test_build_config_alone_still_forwards_it_unmerged(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: no compile-context input, only build-config --
+        add_compile_context_flags's early-return means no synthesized
+        overlay is created at all, so the guarded append must still fire
+        and forward the raw build-config path directly (this branch's
+        pre-existing, correct behavior for the no-collision case)."""
+        build_config = tmp_path / "cfg.yml"
+        build_config.write_text("release:\n  dso_only: true\n", encoding="utf-8")
+        result, captured, _captured_config = _run_scan_against_raw(
+            {"INPUT_BUILD_CONFIG": str(build_config)}, tmp_path
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        cmd = captured.read_text(encoding="utf-8").strip()
+        assert f"--config {build_config}" in cmd
+        assert cmd.count("--config") == 1, cmd

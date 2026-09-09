@@ -1389,6 +1389,15 @@ def run_scan_core(
                     requested_depth=(
                         public_depth_value(eff_depth_enum) if pinned_explicit else None
                     ),
+                    enabled_checks=frozenset(enabled_checks),
+                    # Codex review, PR #1172, round 16: `severities` was
+                    # already threaded this far (this function's own
+                    # parameter, used by the dedicated single-snapshot
+                    # `crosscheck` mechanism below) but silently dropped at
+                    # this call site, so an explicit `--crosscheck
+                    # KEY=info`/`=warning` had no effect on the automatic
+                    # cross-source-checks stage's own finding.
+                    severities=severities,
                 )
         except deadline.DeadlineExceeded as exc:
             elapsed = time.monotonic() - start

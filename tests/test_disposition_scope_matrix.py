@@ -1083,6 +1083,63 @@ def test_a_stale_pre_stamped_verdict_does_not_survive_a_contract_exclusion() -> 
         )
 
 
+def test_a_stale_pre_stamped_verdict_does_not_survive_a_resolved_cross_source() -> None:
+    """Plan-F-9 sibling of the contract-exclusion test above (Codex review,
+    PR #1172, round 15): a suppressed RESOLVED cross-source finding must not
+    reach `recommend_release` as a waived major break either."""
+    from abicheck.checker import Verdict
+    from abicheck.checker_policy import CrossSourceEvolution
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = _empty_result()
+    resolved = Change(
+        kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
+        symbol="gone",
+        description="resolved",
+    )
+    resolved.effective_verdict = Verdict.BREAKING
+    resolved.cross_source_evolution = CrossSourceEvolution.RESOLVED
+
+    ledger = DispositionLedger()
+    record_suppressed_change(
+        ledger, resolved, rule=None, application_point="matrix_suppression"
+    )
+    assert ledger.record_for(resolved).verdict_class == Verdict.BREAKING.value, (
+        "the precondition: the record really does arrive pre-stamped"
+    )
+    ledger.resolve_verdict_classes(result)
+    assert ledger.record_for(resolved).verdict_class is None
+    assert ledger.suppressed_gating_records() == (), (
+        "a suppressed, already-fixed cross-source finding is not a waived major break"
+    )
+
+
+def test_a_persistent_pre_stamped_cross_source_verdict_is_left_alone() -> None:
+    """Negative control: only RESOLVED is excluded -- a suppressed
+    PERSISTENT cross-source finding keeps its class, same as any other
+    ordinary waived break."""
+    from abicheck.checker import Verdict
+    from abicheck.checker_policy import CrossSourceEvolution
+    from abicheck.policy.disposition_ledger import record_suppressed_change
+
+    result = _empty_result()
+    persistent = Change(
+        kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
+        symbol="gone",
+        description="still broken",
+    )
+    persistent.effective_verdict = Verdict.BREAKING
+    persistent.cross_source_evolution = CrossSourceEvolution.PERSISTENT
+
+    ledger = DispositionLedger()
+    record_suppressed_change(
+        ledger, persistent, rule=None, application_point="matrix_suppression"
+    )
+    ledger.resolve_verdict_classes(result)
+    assert ledger.record_for(persistent).verdict_class == Verdict.BREAKING.value
+    assert len(ledger.suppressed_gating_records()) == 1
+
+
 def test_an_evaluated_pre_stamped_verdict_is_left_alone() -> None:
     """The negative control for the clear above: an ordinary suppressed
     break that *was* evaluated must keep its class, or the conserved delta

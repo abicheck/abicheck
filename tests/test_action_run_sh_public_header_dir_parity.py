@@ -111,23 +111,51 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanPublicHeaderDirAlsoForwardedAsDashH:
-    def test_public_header_dir_forwarded_as_both_flags(self) -> None:
-        # A baseline (against) is present, which now unconditionally keeps
-        # this request on the legacy `scan` CLI (Codex review, PR #1160,
-        # fifth round): directly verified that `compare`'s automatic
-        # cross-source-checks stage has no way to reproduce `scan`'s own
-        # advisory-only stripping of single-version hygiene findings for a
-        # baseline comparison, at *any* depth/evidence combination -- not a
-        # narrow case, since a baseline comparison always runs cross-source
-        # checks on both CLIs and only `scan`'s strips them. See the
-        # routing comment above `_SCAN_NEEDS_LEGACY_CLI` in run.sh for the
-        # full account; every earlier narrower condition in that predicate
-        # is now dead code, kept as the shape a future capability gap fix
-        # would relax. So "scan", not "compare", is the real CLI verb this
-        # test now exercises -- the legacy branch forwards
-        # `--public-header-dir` unconditionally *and* folds it into `-H`
-        # (both flags, unlike the now-unreachable `compare`-translation
-        # behavior a superseded revision of this test asserted) -- see
+    def test_public_header_dir_forwarded_as_dash_h_via_compare_translation(
+        self,
+    ) -> None:
+        # A baseline (against), an explicit --depth headers, and no other
+        # still-legacy-only capability requested: this now routes through
+        # the `compare` translation (ADR-068's 2026-09-09 amendment closed
+        # the baseline cross-source-authority divergence that used to keep
+        # every baseline scan on the legacy CLI unconditionally -- see the
+        # routing comment above `_SCAN_NEEDS_LEGACY_CLI` in run.sh). The
+        # `compare`-translation branch has no `--public-header-dir` flag at
+        # all (`compare` derives provenance and extraction scope from `-H`
+        # alone), so this only forwards it as a sided `-H new=` root; see
+        # `TestScanForcedLegacyPublicHeaderDirStillForwardsBothFlags` below
+        # for the still-reachable legacy-CLI shape of this same input.
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_AGAINST": "baseline.so",
+                "INPUT_PUBLIC_HEADER_DIR": "include",
+                "INPUT_DEPTH": "headers",
+                # Codex review, PR #1172, round 17: a default baseline scan
+                # (no --pattern-verdicts) now stays on the legacy CLI (see
+                # TestPatternVerdictsDefaultStaysOnLegacyCli in
+                # test_action_run_sh_scan_routing_edge_cases.py) -- this
+                # test is about -H/--public-header-dir forwarding, not that
+                # axis, so opt in explicitly to keep exercising the
+                # compare-translation branch.
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            }
+        )
+        assert "compare" in cmd
+        assert "scan" not in cmd
+        assert "--public-header-dir" not in cmd
+        h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
+        assert "new=include" in h_pairs, cmd
+
+    def test_forced_legacy_scan_still_forwards_both_flags(self) -> None:
+        # The same inputs, plus `--risk-rules` -- a still-open,
+        # `compare`-flag-equivalent-free capability gap (ADR-068 amendment,
+        # `docs/contribute/known-gaps.md`) that keeps this request on the
+        # legacy `scan` CLI regardless of the cross-source-authority fix.
+        # The legacy branch's own forwarding is unchanged by that fix: it
+        # still forwards `--public-header-dir` unconditionally *and* folds
+        # it into `-H` (both flags) -- see
         # `test_action_compile_context_parity.py`'s own marker note for
         # that still-unconditional, still-both-flags behavior.
         cmd = _run_cmd(
@@ -137,6 +165,7 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
                 "INPUT_DEPTH": "headers",
+                "INPUT_RISK_RULES": "rules.yaml",
             }
         )
         assert "scan" in cmd

@@ -32,12 +32,13 @@ invocation (`cross_source_checks` defaults to `True`, no front end exposes a
 way to disable it — ADR-068 D4/D5 reject "a flag that merely enables useful
 analysis"), so all eleven checks' `tests/parity/gaps.py` rows are deleted —
 the scan-vs-compare parity harness confirms `compare` now finds them too.
-`scan --against`'s own older, separate advisory mechanism for these checks
-(the `crosscheck` report block + `--crosscheck KEY=error` promotion) is
-preserved: `cli_scan_baseline._strip_automatic_cross_source_findings` strips
-the automatic stage's findings back out of that one baseline diff before
-scoring it, so a clean, unpromoted `scan --against` baseline still exits 0
-even though `compare()` itself now finds these checks unconditionally. An
+`scan --against`'s baseline-compare path scores a cross-source finding
+exactly as `compare` does — same verdict, same severity, same exit-code
+contribution (2026-09-09, Phase 4 commit 1, ADR-068 amendment; see §3 #3
+below for the full account of why the earlier stripping behavior was itself
+the bug). `scan`'s own dedicated `crosscheck` report block and
+`--crosscheck KEY=error` promotion remain a separate, scan-only surface,
+unaffected by this. An
 earlier slice also solved §5 P4 for its two directory/config sources: a
 project's `.abicheck.yml` `scope.public_header_dirs` list (a new key,
 distinct from the pre-existing boolean `scope.public`) is folded,
@@ -201,7 +202,7 @@ identity; **DELETE** — leaves the product.
 |---|---|---|---|---|---|
 | 1 | Baseline comparison (`--against`) | `cli_scan_baseline.py`, `scan_engine.run_scan_core` | `compare OLD NEW` | DELETE (it *is* `compare`) | Parity suite (Phase 3) |
 | 2 | Audit-only mode (no `--against`) | `scan_engine._audit_exit_code` | `compare --no-baseline` | COMPARE-STAGE | ADR-065 `declared_absent` acquisition state (Phase 1) |
-| 3 | Cross-source checks (11) | `buildsource/cross_source_checks.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). `scan --against`'s own baseline-compare path strips the automatically-produced findings back out of its diff (`cli_scan_baseline._strip_automatic_cross_source_findings`), preserving its pre-existing, documented invariant that a single-version hygiene finding stays advisory unless explicitly promoted via `--crosscheck KEY=error` |
+| 3 | Cross-source checks (11) | `buildsource/cross_source_checks.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). **Update (2026-09-09, Phase 4 commit 1, ADR-068 amendment):** `scan --against`'s own baseline-compare path no longer strips these findings back out of its diff — the stripping was itself the bug (D3's own authority rule: these findings stay `RISK`/`API_BREAK`, never advisory-only), not a preserved invariant; `cli_scan_baseline._strip_automatic_cross_source_findings` is deleted. A baseline `scan` now gates a cross-source finding exactly as `compare` does — same verdict, same severity, same exit-code contribution; `scan`'s dedicated `crosscheck` report block and `--crosscheck KEY=error` promotion are unaffected (still scan-only surface). This is a documented breaking change to `scan --against`'s baseline-comparison result, not merely an internal refactor |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | **Landed.** Public/internal boundary from `-H` provenance + `.abicheck.yml` `scope.public_header_dirs` (#22, now solved for both sources) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | **Landed.** As #4 |
 | 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_facts.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — `checker.compare`'s `pattern_preprocessor_scan` keyword, default `True`, no flag (ADR-068 D4/D5), via `workflows/pattern_preprocessor_scan.py`; folded through `CrossSourceEvolution`, surfaced as the new `pattern_preprocessor_scan` report block (advisory, no `ChangeKind`, since the primitive never produced one under `scan` either) |
@@ -425,7 +426,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
 | P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
-| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — now covering all **eleven** checks: `unversioned_exported_symbol` and `private_header_leak` landed first (the latter generalized the matching primitive's per-finding identity — a symbol-only key silently collapsed two distinct leaked types flagged on the same function; identity is now a per-check function, defaulting to `symbol` for a check without that ambiguity), `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, `public_to_internal_dependency` joined next (two more, `rtti_for_internal_type` and `public_to_internal_dependency`, also needed the per-check identity generalization), and `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` close out the row in this PR (`odr_type_variant`, `identity_collision_detected`, and `compile_context_conflict` also needed their own composite identity). All eleven checks are now reachable by every front end: `compare()` runs the whole stage automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test for all eleven checks. `scan --against`'s own separate, pre-existing advisory mechanism for these checks (the dedicated `crosscheck` report block + `--crosscheck KEY=error` promotion) is preserved by stripping the automatic stage's findings back out of its own baseline diff before scoring it (`cli_scan_baseline._strip_automatic_cross_source_findings`) — the one place this migration needed a production-code change outside `workflows/cross_source_evolution.py` itself, since an `API_BREAK`-severity check folding into that diff by default would otherwise turn a clean, unpromoted baseline into a false-positive exit |
+| P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — now covering all **eleven** checks: `unversioned_exported_symbol` and `private_header_leak` landed first (the latter generalized the matching primitive's per-finding identity — a symbol-only key silently collapsed two distinct leaked types flagged on the same function; identity is now a per-check function, defaulting to `symbol` for a check without that ambiguity), `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, `public_to_internal_dependency` joined next (two more, `rtti_for_internal_type` and `public_to_internal_dependency`, also needed the per-check identity generalization), and `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` close out the row in this PR (`odr_type_variant`, `identity_collision_detected`, and `compile_context_conflict` also needed their own composite identity). All eleven checks are now reachable by every front end: `compare()` runs the whole stage automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test for all eleven checks. **Update (2026-09-09, Phase 4 commit 1, ADR-068 amendment):** the stripping behavior described above was itself the bug — a cross-source finding is `RISK`/`API_BREAK`-severity by design (D3's authority rule), never advisory-only, so `scan --against`'s baseline-compare path no longer strips it back out; `cli_scan_baseline._strip_automatic_cross_source_findings` is deleted, and a baseline `scan` now gates a cross-source finding exactly as `compare` does — same verdict, same severity, same exit-code contribution. `scan`'s own dedicated `crosscheck` report block and `--crosscheck KEY=error` promotion remain a separate, scan-only surface, unaffected. See §3 #3 above for the full account |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | ADR-064 already models the precedence; `compare` does not emit them |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | **Solved** for both named sources: `-H` directory provenance already fed `provenance.apply_provenance` (unchanged, file-vs-directory asymmetry preserved verbatim — a lone `-H` *file* still does not, on its own, establish a boundary the same way `scan --public-header-dir` requires a directory; note `compare`'s own pre-existing `-H` handling was already slightly looser than that rule before this PR and is left as it was found, see `workflows/cross_source_evolution.py`'s module docstring); this PR adds `.abicheck.yml`'s `scope.public_header_dirs` (a new key, distinct from the pre-existing `scope.public` boolean the plan's own shorthand risked conflating it with) as a second, additive source, threaded through `cli_compare_helpers.run_compare` → `cli_resolve._resolve_compare_snapshots`'s `config_public_header_dirs` parameter into the same `InputSpec.public_header_dirs`/`apply_provenance` machinery. No new CLI flag. `scan --public-header-dir` itself is untouched |
 | P5 | ADR-065 S3's package component inventories | Folding `--artifact-set`'s members into the one selection model (§3 #16, #17) | Not started — workstream A's next slice |
@@ -604,73 +605,61 @@ same or a strictly richer finding set than `scan`, with no finding lost and
 no finding manufactured (the `not_evaluated` cases in F-7/F-8). This phase
 lands **no** feature; it lands the proof and the fixtures.
 
-### Phase 4 — Migrate the consumers
+### Phase 4 — Migrate the consumers — commit 1 landed, rest not started
 
-**Status (re-verified against `main` on 2026-09-09): started, not complete.**
-None of this phase's four items is done; the Action item is actively blocked
-on a real capability gap, not merely unstarted.
+**Status note (2026-09-09):** an earlier revision of this section described
+the Action/typed-API bullets below as already landed. They were not: a
+parity audit (`tests/parity/test_baseline_gate_parity.py`) found the
+Action's scan-to-compare translation had been disabled entirely
+(`9f2166e5c`) because of a real baseline cross-source authority divergence
+between `scan --against` and `compare` — see ADR-068's 2026-09-09 amendment
+for the full account. That divergence is now closed (`scan --against`'s
+baseline path no longer strips cross-source findings to advisory-only), and
+the Action's translation is re-enabled for every request shape that
+divergence used to force onto the legacy CLI. What follows is this
+section's *actual* state, not the target it originally described:
 
-- **Action:** `mode: scan` re-implemented internally as `mode: compare`
-  (+ `baseline-channel: none` for S5, per ADR-047 §8), keeping every
-  documented Action input working; ~40 `run.sh` branches collapse.
-  **Attempted and reverted.** `7f8109a1` built the `mode: scan` →
-  `mode: compare` translation; `9f2166e5c` (`fix(action): disable
-  scan-to-compare translation entirely`) unconditionally disabled it the same
-  day — `_SCAN_NEEDS_LEGACY_CLI` is now always `true`, so every `mode: scan`
-  request still runs the unmodified legacy `scan` CLI, and the translation
-  branches this added are dead code (left in place, not deleted, per that
-  commit's own comment). The blocking reason: `compare` has no way today to
-  make an automatic cross-source finding advisory-only the way `scan
-  --against`'s `_strip_automatic_cross_source_findings` does for a baseline
-  comparison, and `compare --no-baseline` (§3 #2/Phase 2e) still crashes
-  (`AssertionError`) on a candidate carrying one of these problems instead of
-  reporting it — see `docs/start/choose-your-workflow.md`'s own comparison
-  table for the verified repro. Zero `run.sh` branches have collapsed as a
-  result; the file grew, not shrank, from the reverted attempt. Re-attempt
-  only after those two gaps close.
-- **Typed API:** `ScanRequest`/`ScanResult` fields absorbed into
-  `CompareRequest`/`CompareResult`; ADR-055's schema registry updated.
-  **Not started**, beyond one field (`collapse_versioned_symbols`,
-  generalized onto `CompareRequest`) and one result field mentioned in
-  `api_types.py`'s own docstrings as precedent. `ScanRequest`/`ScanResult`/
-  `ScanSetResult` (`service_scan.py`) remain the full, live public typed API
-  — `service.py` still re-exports them, `SCAN_SCHEMA_VERSION` is still
-  emitted, and `docs/reference/python-api-reference.md` still documents them
-  as current, not deprecated.
-- **Docs:** every page that presents `scan` as a supported user workflow is
-  rewritten. **Partial.** `docs/use/scan-levels.md` and
-  `docs/use/github-action-source-scans.md` are already compare-first, with
-  `scan` correctly scoped to the cases `compare` genuinely can't cover yet
-  (single-build audit, `--budget`, `--crosscheck KEY=error` promotion,
-  `--build-target`). `docs/start/choose-your-workflow.md` and
-  `docs/integration/scenarios/single-build-audit.md` still recommend `scan`
-  for those same narrow cases, but each states *why* (the same `compare
-  --no-baseline` crash above) rather than presenting it as unmigrated —
-  accurate, not stale. `docs/reference/exit-codes.md` documents `scan`'s
-  exit codes as a still-live command's contract and is correctly unchanged.
-  What actually needs fixing: `docs/start/getting-started.md`'s workflow
-  table and `docs/start/real-world-example.md`'s CI-gate walkthrough both
-  still recommend `abicheck scan ... --against ...` for an ordinary
-  **baseline** comparison — the case `compare` already owns per every other
-  page above — and `docs/learn/where-in-the-pipeline.md`'s PR-gate snippet
-  does the same; these three are genuine drift, not defensible scoping, and
-  are fixed in this same sweep (see below). The example catalog rows
-  (`catalog/cases/case14x-151/README.md`, `case181`) and the
-  `skills-src/` skill body were not rewritten — the ten audit-catalog cases
-  still reproduce with `abicheck scan`, which is accurate today (they are
-  single-build audits, `compare`'s still-blocked case), so this is not drift
-  to fix, only work this phase has not reached.
-- **Examples/eval/validation:** corpora re-driven through `compare`.
-  **Not started.**
-
-Coordinating note: this status was re-verified by reading the actual code
-(`action/run.sh`, `service_scan.py`, `docs/reference/python-api-reference.md`)
-and git history (`7f8109a1`, `9f2166e5c`), not by trusting this section's own
-prior prose — the prior text described the phase's intended *content*, not
-its landed state, and had drifted since `9f2166e5c` reverted the one piece
-that had shipped. If another change is landing new Phase 4 work concurrently,
-re-verify this status against the code rather than assuming it's still
-accurate.
+- **Action — commit 1, landed.** `mode: scan` re-implemented internally as
+  `mode: compare` for a baseline comparison, *except* for the specific,
+  narrower request shapes `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI`
+  predicate documents and `docs/contribute/known-gaps.md` tracks: `--budget`,
+  `--risk-rules`, `--crosscheck`, `--build-target` (no `compare` flag
+  equivalent yet), no explicit `--depth` (risk-driven `auto` depth selection
+  has no `compare` equivalent), `--depth build`/`--depth source` (`scan`'s
+  own hard evidence-contract floor, exit 7, has no `compare` equivalent),
+  a shared `header`/`include` root combined with a side-specific one, a
+  `.json`-extension (compressed or content-detected JSON snapshot included)
+  baseline, `--output-file`, an effective non-JSON/text `--format` (from the
+  dedicated Action input or an `extra-args` override), a `-o`/`--output`
+  path via `extra-args`, any other `--write`/scan-only `extra-args`
+  flag (`--abi3`, the compile-context-option family included), and a default
+  (or explicit `--no-pattern-verdicts`) baseline scan — `compare`'s pattern-
+  verdict modulation has been unconditional since D4 with no flag left to
+  turn it off, but `scan --against` still defaults it off, so only an
+  explicit bare `--pattern-verdicts` in `extra-args` is safe to route.
+  Audit-only
+  (no baseline) is unchanged and still stays
+  on the legacy CLI entirely (a separate, larger gap — see the predicate's
+  own comment in `run.sh`). The ~40-branch collapse this bullet originally
+  promised does **not** happen until every one of those rows closes too;
+  each is its own, still-open migration item in the table above (`--budget`
+  #19, `--risk-rules` #14, `--crosscheck` #23, `--build-target`'s own row).
+- **Typed API — not started.** `ScanRequest`/`ScanResult` still define every
+  field they did before this commit (`service_scan.py`); only
+  `collapse_versioned_symbols` has been absorbed into `CompareRequest`
+  (`b94fccd6d`). Absorbing the rest and updating ADR-055's schema registry
+  is real, substantial work against `abicheck/api_types.py` — out of this
+  commit's file ownership (concurrent CLI-flag-consolidation work also
+  touches that file) and deferred to its own PR rather than attempted
+  piecemeal here.
+- **Docs:** not started — every page listed below still needs the rewrite.
+  `docs/start/choose-your-workflow.md`,
+  `docs/integration/scenarios/single-build-audit.md`,
+  `docs/use/scan-levels.md`, `docs/use/github-action-source-scans.md`,
+  `docs/reference/exit-codes.md`, the example catalog rows, and the
+  `skills-src/` skill body.
+- **Examples/eval/validation:** not started — corpora still run through
+  `scan`, not re-driven through `compare`.
 
 ### Phase 5 — Presentation/analysis separation
 

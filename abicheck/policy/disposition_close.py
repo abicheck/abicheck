@@ -45,11 +45,15 @@ from .disposition_ledger import (
     DispositionLedger,
     _GateContext,
     _kept_disposition,
+    _source_file_for,
+    _verdict_class_of,
     record_suppressed_change,
 )
+from .rule_provenance import RuleProvenance, rule_provenance
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..checker_types import Change, DiffResult
+    from ..suppression import Suppression
 
 
 def record_kept_change(
@@ -685,3 +689,112 @@ def scope_reasons(ledger: DispositionLedger) -> tuple[tuple[str, int], ...]:
             tally[record.reason_code] = 0
         tally[record.reason_code] += 1
     return tuple((reason, tally[reason]) for reason in ordered)
+
+
+def override_suppression(
+    ledger: DispositionLedger,
+    change: Change,
+    *,
+    rule: Suppression | RuleProvenance | None,
+    application_point: str,
+    source_file: str | None = None,
+) -> None:
+    """Rewrite an already-recorded change's terminal disposition to
+    ``SUPPRESSED`` (Codex review, PR #1172).
+
+    ``record``/``record_suppression`` (``disposition_ledger.py``) are
+    deliberately first-write-wins -- the disposition a change receives at
+    its first pipeline stage is the one that actually applied to it, for
+    every existing recording call site (all of them run *before* the ledger
+    is handed back to anything downstream). This is the one documented
+    exception: a caller applying a policy *after* ``compare_snapshots()``
+    already finalized the ledger (``scan --against``'s baseline path
+    dropping a ``--crosscheck KEY=off`` finding that the automatic
+    cross-source stage already recorded as gating/kept) is genuinely
+    revising an already-terminal record, not racing another pipeline stage
+    for who gets to record first -- ``record``'s no-op guard would silently
+    discard the correction, leaving the ledger disagreeing with the
+    finding's real, reported disposition (the bug this function closes).
+
+    *rule* is normally a real :class:`~abicheck.suppression.Suppression`,
+    projected through :func:`~abicheck.policy.rule_provenance.rule_provenance`
+    like every other disposition. A caller with no such rule object -- a
+    scan-only policy like ``--crosscheck KEY=off``, not a suppression-file
+    entry at all -- passes an already-built
+    :class:`~abicheck.policy.rule_provenance.RuleProvenance` directly instead
+    (Codex review, fourth round: bare ``rule=None`` recorded a correct
+    disposition with no rule/reason a structured ledger consumer could read
+    back, even though ``Change.suppression_rule`` carried the string).
+
+    A no-op if *change* was never recorded -- nothing to override. Leaves
+    every field ``record_suppression`` would not have set
+    (``reclassified_by``, ``reason_code``, ``scope_decided``,
+    ``policy_overlay``) untouched.
+
+    ``verdict_class`` is recomputed from ``_verdict_class_of(change)``, but
+    only *replaces* the existing one when that finds a stamped verdict
+    (Codex review, PR #1172, round 7): it reads only what is stamped
+    directly on *change*, while the record here may already carry a class
+    ``resolve_verdict_classes`` resolved earlier against full ``DiffResult``
+    context bare *change* lacks. Unconditionally overwriting would silently
+    erase an already-correct class for every finding never separately
+    stamped -- the common case -- hiding a real break from
+    ``suppressed_gating_records``'s conserved delta the moment it suppresses.
+
+    Lives here, not on ``DispositionLedger`` itself, for the same reason
+    ``close_consumer_scope``/``apply_scope`` do: this module owns closing an
+    already-recorded ledger, reaching into ``ledger._records`` directly the
+    same way those do (see this module's own docstring).
+    """
+    index = ledger.index_for(change)
+    if index is None:
+        return
+    provenance: RuleProvenance | None
+    if isinstance(rule, RuleProvenance):
+        provenance = (
+            rule if source_file is None else replace(rule, source_file=source_file)
+        )
+    else:
+        provenance = rule_provenance(rule, source_file=source_file)
+    record = ledger._records[index]  # noqa: SLF001
+    fresh_class = _verdict_class_of(change)
+    ledger._records[index] = replace(  # noqa: SLF001
+        record,
+        disposition=Disposition.SUPPRESSED,
+        application_point=application_point,
+        rule=provenance,
+        verdict_class=fresh_class if fresh_class is not None else record.verdict_class,
+        gate_excluded=True,
+    )
+
+
+def override_suppressed_change(
+    ledger: DispositionLedger | None,
+    change: Change,
+    *,
+    rule: Suppression | RuleProvenance | None,
+    application_point: str,
+    suppression: object | None = None,
+) -> None:
+    """The single call a caller *revising* an already-finalized ledger makes.
+
+    ``record_suppressed_change``'s sibling for :func:`override_suppression`
+    above -- see that function's own docstring for why this is a distinct
+    primitive rather than a second call to ``record_suppressed_change``
+    (first-write-wins would silently no-op it). Same ``None`` ledger
+    handling; *source_file* resolution is skipped for an already-built
+    ``RuleProvenance`` (it carries its own, or deliberately none).
+    """
+    if ledger is None:
+        return
+    override_suppression(
+        ledger,
+        change,
+        rule=rule,
+        application_point=application_point,
+        source_file=(
+            None
+            if isinstance(rule, RuleProvenance)
+            else _source_file_for(suppression, rule)
+        ),
+    )

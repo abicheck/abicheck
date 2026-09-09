@@ -40,8 +40,8 @@ _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
 _FINAL_EXIT_START = "if [[ \"$VERDICT\" == \"ERROR\" ]]; then\n"
 _FINAL_EXIT_SCAN_START = (
-    'elif [[ "$_CLI_MODE" == "scan" ]]; then\n'
-    "  # Keyed on `$_CLI_MODE`, not `$MODE`"
+    'elif [[ "$MODE" == "scan" ]]; then\n'
+    "  # Keyed on the raw `$MODE` input, not `$_CLI_MODE`"
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
@@ -186,6 +186,66 @@ def test_not_comparable_still_fails_the_step():
     result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
     assert "FINAL_EXIT=1" in result.stdout
+
+
+def test_scan_severity_error_still_fails_the_step_when_routed_through_compare():
+    """Codex review, PR #1172, round 19, fresh evidence: a baseline
+    ``mode: scan`` request routed through ``compare`` (a
+    ``--pattern-verdicts``-enabled request, ADR-068 D2/Phase 4 commit 1 --
+    ``_CLI_MODE="compare"`` while ``MODE`` is still ``"scan"``) with
+    ``severity-preset: strict`` making a risk/API finding an error must
+    still unconditionally fail the step, matching ``scan``'s own
+    "severity policy bypasses fail-on-* flags" contract -- exactly the
+    scenario ``test_not_comparable_still_fails_the_step`` above proves for
+    the un-routed case. Before this fix, this final-exit dispatch was keyed
+    on ``$_CLI_MODE`` (not ``$MODE``), so a routed request fell through to
+    the generic ``compare`` branch instead, which lets ``fail-on-api-break``
+    (default ``false``) swallow the very severity error the caller's own
+    ``severity-preset`` explicitly asked to be an error -- a false green
+    a ``mode: scan`` caller's workflow never expected, even though the
+    underlying ``compare`` CLI invocation itself already exited non-zero.
+    """
+    script = _final_exit_scan_fragment() + "fi\necho \"FINAL_EXIT=$FINAL_EXIT\"\n"
+    script = (
+        'MODE="scan"\n'
+        '_CLI_MODE="compare"\n'  # the routed case this fix targets
+        'VERDICT="API_BREAK"\n'
+        'GATE_TIER="API_BREAK"\n'
+        'ADVISORY_BREAK="false"\n'
+        'INPUT_FAIL_ON_BREAKING="true"\n'
+        'INPUT_FAIL_ON_API_BREAK="false"\n'  # the flag that would wrongly swallow it
+        '_severity_gate_categories() { echo "potential_breaking"; }\n'
+        "_coverage_gated() { return 1; }\n"
+        "FINAL_EXIT=0\n" + script
+    )
+    result = _run_bash_script(script)
+    assert result.returncode == 0, result.stderr
+    assert "FINAL_EXIT=1" in result.stdout
+
+
+def test_compare_mode_api_break_with_fail_on_api_break_false_passes() -> None:
+    """Negative control for the test above: a *real* ``mode: compare``
+    request (never routed from ``scan``) with the identical API_BREAK
+    tier and ``fail-on-api-break: false`` must still pass -- confirming
+    this fix didn't make every API_BREAK fail unconditionally, only the
+    severity-policy-driven case ``mode: scan`` itself always fails on."""
+    script = _final_exit_compare_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
+    script = (
+        'MODE="compare"\n'
+        '_CLI_MODE="compare"\n'
+        'VERDICT="API_BREAK"\n'
+        'GATE_TIER="API_BREAK"\n'
+        'ADVISORY_BREAK="false"\n'
+        'INPUT_FAIL_ON_BREAKING="true"\n'
+        'INPUT_FAIL_ON_API_BREAK="false"\n'
+        "_coverage_gated() { return 1; }\n"
+        "_assurance_gated() { return 1; }\n"
+        "_scope_gated() { return 1; }\n"
+        "FINAL_EXIT=0\n" + script
+    )
+    result = _run_bash_script(script)
+    assert result.returncode == 0, result.stderr
+    assert "FINAL_EXIT=0" in result.stdout
 
 
 def _final_exit_compare_fragment() -> str:

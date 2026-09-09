@@ -17,109 +17,9 @@ import pytest
 
 from abicheck import cli_scan_baseline as csb, cli_scan_helpers as csh
 from abicheck.buildsource.risk import RiskRules
-from abicheck.checker_policy import ChangeKind, CrossSourceEvolution, Verdict
+from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
-
-
-class TestStripAutomaticCrossSourceFindings:
-    """``_strip_automatic_cross_source_findings`` (ADR-068 D3/D4/D5 follow-up):
-    ``scan --against`` must undo ``compare_snapshots``'s automatic
-    ``cross_source_checks`` stage so its own, older, dedicated ``crosscheck``
-    advisory mechanism stays the sole source of these findings -- see the
-    function's own docstring and the five-more-crosschecks migration slice's
-    changelog entry for the regression this closes."""
-
-    def test_no_changes_attribute_is_a_no_op(self) -> None:
-        """A test double (or any caller not carrying a real ``DiffResult``)
-        with no ``changes`` list at all -- nothing to strip, nothing raised."""
-        diff = types.SimpleNamespace(verdict=Verdict.NO_CHANGE)
-        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
-        assert diff.verdict == Verdict.NO_CHANGE
-        assert not hasattr(diff, "changes")
-
-    def test_empty_changes_is_a_no_op(self) -> None:
-        diff = types.SimpleNamespace(changes=[], verdict=Verdict.NO_CHANGE)
-        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
-        assert diff.changes == []
-        assert diff.verdict == Verdict.NO_CHANGE
-
-    def test_ordinary_findings_with_no_cross_source_evolution_are_untouched(
-        self,
-    ) -> None:
-        """The common case: a real old/new diff with genuine ABI findings,
-        none of them produced by the automatic cross-source-check stage
-        (``cross_source_evolution`` is ``None`` on every one). Nothing is
-        stripped and the verdict is left exactly as ``compare_snapshots``
-        computed it -- this function must never touch an ordinary finding
-        set just because it happens to be non-empty."""
-        removed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
-        assert removed.cross_source_evolution is None
-        diff = types.SimpleNamespace(changes=[removed], verdict=Verdict.BREAKING)
-        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
-        assert diff.changes == [removed]
-        assert diff.verdict == Verdict.BREAKING
-
-    def test_automatic_cross_source_finding_is_stripped_and_verdict_recomputed(
-        self,
-    ) -> None:
-        """The regression case: an automatic-stage finding (carrying a real
-        ``cross_source_evolution``) is removed, and the verdict drops back to
-        what the remaining (ordinary) findings alone would produce -- here,
-        no ordinary findings at all, so the verdict falls all the way to
-        NO_CHANGE, never staying stuck at the stripped finding's own
-        API_BREAK severity."""
-        auto = Change(
-            kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
-            symbol="",
-            description="x",
-        )
-        auto.cross_source_evolution = CrossSourceEvolution.PERSISTENT
-        diff = types.SimpleNamespace(changes=[auto], verdict=Verdict.API_BREAK)
-        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
-        assert diff.changes == []
-        assert diff.verdict == Verdict.NO_CHANGE
-
-    def test_mixed_findings_keep_only_the_ordinary_one(self) -> None:
-        """A real old/new diff can carry both an ordinary finding and an
-        automatic-stage one at once -- only the latter is stripped, and the
-        verdict is recomputed from the surviving ordinary finding alone."""
-        removed = Change(kind=ChangeKind.FUNC_REMOVED, symbol="foo", description="x")
-        auto = Change(
-            kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
-            symbol="",
-            description="x",
-        )
-        auto.cross_source_evolution = CrossSourceEvolution.INTRODUCED
-        diff = types.SimpleNamespace(changes=[removed, auto], verdict=Verdict.API_BREAK)
-        csb._strip_automatic_cross_source_findings(diff, "strict_abi", None)
-        assert diff.changes == [removed]
-        assert diff.verdict == Verdict.BREAKING
-
-    def test_policy_file_recomputes_verdict_when_given(self) -> None:
-        """When a ``PolicyFile`` is in effect, the recompute routes through
-        its own ``compute_verdict`` rather than the bare-policy-name path."""
-
-        class _FakePolicyFile:
-            def __init__(self) -> None:
-                self.calls: list[list[Change]] = []
-
-            def compute_verdict(self, changes: list[Change]) -> Verdict:
-                self.calls.append(list(changes))
-                return Verdict.COMPATIBLE_WITH_RISK
-
-        auto = Change(
-            kind=ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
-            symbol="",
-            description="x",
-        )
-        auto.cross_source_evolution = CrossSourceEvolution.PERSISTENT
-        diff = types.SimpleNamespace(changes=[auto], verdict=Verdict.API_BREAK)
-        policy_file = _FakePolicyFile()
-        csb._strip_automatic_cross_source_findings(diff, "strict_abi", policy_file)
-        assert diff.changes == []
-        assert diff.verdict == Verdict.COMPATIBLE_WITH_RISK
-        assert policy_file.calls == [[]]
 
 
 class TestPackCoverage:
@@ -159,8 +59,7 @@ class TestSeverityBlockingCompatibleFindings:
 
     @staticmethod
     def _diff(n_adds: int = 3, n_breaks: int = 0):
-        from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
 
         adds = [
             Change(kind=ChangeKind.FUNC_ADDED, symbol=f"_Z3n{i:02d}v", description="add")
@@ -328,8 +227,7 @@ class TestBaselineSummaryTruncationKinds:
 
     @staticmethod
     def _diff(kinds: list[str]):
-        from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change, DiffResult
+        from abicheck.checker_types import DiffResult
 
         kind_map = {
             "func_removed": ChangeKind.FUNC_REMOVED,
@@ -420,8 +318,6 @@ class TestBaselineSummaryKeysArePinned:
     )
 
     def _diff_exercising_every_optional_key(self):
-        from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
 
         breaking = [
             Change(kind=ChangeKind.FUNC_REMOVED, symbol=f"_Zb{i:02d}v", description="d")
@@ -534,8 +430,6 @@ class TestBaselinePolicyDisclosure:
 
     @staticmethod
     def _diff_with_policy_file(policy_file):
-        from abicheck.checker_policy import ChangeKind
-        from abicheck.checker_types import Change
 
         change = Change(
             kind=ChangeKind.FUNC_REMOVED, symbol="_Z1fv", description="d", symbol_binding="weak"
@@ -563,7 +457,7 @@ class TestBaselinePolicyDisclosure:
     def test_kind_global_override_is_disclosed(self) -> None:
         from pathlib import Path
 
-        from abicheck.checker_policy import ChangeKind, Verdict
+        from abicheck.checker_policy import Verdict
         from abicheck.policy_file import PolicyFile
 
         policy_file = PolicyFile(
@@ -735,3 +629,437 @@ class TestEmitEstimate:
         data = json.loads(out_p.read_text(encoding="utf-8"))
         assert data["mode"] == "pr"
         assert data["estimate"][0]["layer"] == "L2_header"
+
+
+class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
+    """``--crosscheck KEY=off`` (Codex review, PR #1172): since ADR-068's
+    2026-09-09 amendment stopped stripping ``compare_snapshots``'s automatic
+    cross-source findings from a baseline scan (``_run_baseline_compare``
+    no longer calls the deleted ``_strip_automatic_cross_source_findings``),
+    an explicitly *disabled* check's finding could still reach the diff
+    through that automatic stage even though ``scan``'s own dedicated
+    single-snapshot ``crosscheck`` mechanism already honored ``off`` --
+    the automatic stage has no per-check disable of its own (ADR-068
+    D4/D5), so nothing filtered it out post-migration. Regression test for
+    ``_run_baseline_compare``'s own ``enabled_checks`` parameter, which
+    restores that.
+    """
+
+    def _self_compared_export_case(self, tmp_path: Path) -> Path:
+        import sys
+
+        repo = Path(__file__).resolve().parent.parent
+        if str(repo / "scripts") not in sys.path:
+            sys.path.insert(0, str(repo / "scripts"))
+        import example_catalog
+
+        from abicheck.serialization import load_snapshot, snapshot_to_json
+
+        snap = load_snapshot(
+            example_catalog.case_dir("case143_audit_accidental_export")
+            / "snapshot.abi.json"
+        )
+        p = tmp_path / "snap.abi.json"
+        p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return p
+
+    def _self_compared_header_mismatch_case(self, tmp_path: Path) -> Path:
+        """An API_BREAK-kind cross-source check (unlike the RISK-kind
+        ``exported_not_public`` case above), so the *legacy* verdict->exit
+        mapping alone (COMPATIBLE=0/API_BREAK=2/BREAKING=4, no severity
+        preset needed) already gates it -- the case the round-16 report's
+        own repro used."""
+        import sys
+
+        repo = Path(__file__).resolve().parent.parent
+        if str(repo / "scripts") not in sys.path:
+            sys.path.insert(0, str(repo / "scripts"))
+        import example_catalog
+
+        from abicheck.serialization import load_snapshot, snapshot_to_json
+
+        snap = load_snapshot(
+            example_catalog.case_dir("case148_xcheck_header_build_mismatch")
+            / "snapshot.abi.json"
+        )
+        p = tmp_path / "snap.abi.json"
+        p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return p
+
+    @pytest.mark.parametrize("level", ["info", "warning"])
+    def test_info_and_warning_levels_never_gate_under_legacy_scheme(
+        self, tmp_path: Path, level: str
+    ) -> None:
+        # Codex review, PR #1172, round 16, second review round (fresh
+        # evidence): the legacy exit-code scheme has no separate gate
+        # computation to filter the way the severity-preset scheme does --
+        # its exit code *is* `_verdict_exit_code(diff.verdict)` -- so this
+        # is the one path where honoring "info/warning never gate" without
+        # corrupting the real technical verdict needed its own, second
+        # gate-only verdict computation (`_gate_verdict`).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_header_mismatch_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(p),
+                "--against",
+                str(p),
+                "--crosscheck",
+                f"header_build_context_mismatch={level}",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        diff_block = payload.get("diff") or {}
+        kinds = [f["kind"] for f in diff_block.get("findings", [])]
+        assert "header_build_context_mismatch" in kinds, "finding stays fully visible"
+        # The real, observed compatibility fact must survive -- only the
+        # exit code the caller demoted may change.
+        assert payload.get("verdict") == "API_BREAK"
+        assert diff_block["exit"]["code"] == 0, diff_block["exit"]
+
+    def test_no_crosscheck_flag_still_gates_under_legacy_scheme(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control for the test above.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_header_mismatch_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(p), "--against", str(p), "--format", "json"],
+        )
+        assert result.exit_code == 2, result.output
+
+    def test_off_drops_the_automatic_stage_finding_too(
+        self, tmp_path: Path
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(p), "--against", str(p),
+                "--crosscheck", "exported_not_public=off",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["verdict"] == "NO_CHANGE"
+        assert not (payload.get("diff") or {}).get("findings")
+        # AGENTS.md's "record before disposing" rule (Codex review, second
+        # round): the finding is not silently erased -- it stays in the
+        # audit trail, disposed under its own recorded rule/reason.
+        suppressed = (payload.get("diff") or {}).get("suppressed") or []
+        assert len(suppressed) == 1
+        assert suppressed[0]["kind"] == "exported_not_public"
+        assert suppressed[0]["suppression_rule"] == "crosscheck:exported_not_public=off"
+
+    def test_no_crosscheck_flag_still_gates_by_default(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: with no `--crosscheck` override at all, the
+        # finding must still gate (this is the ADR-068 amendment's own
+        # behavior, not something the `off` fix should quietly undo).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(p), "--against", str(p), "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output  # RISK stays exit 0 by default
+        payload = json.loads(result.stdout)
+        assert payload["verdict"] == "COMPATIBLE_WITH_RISK"
+        kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
+        assert "exported_not_public" in kinds
+
+    def test_off_on_an_unrelated_check_leaves_this_one_gating(
+        self, tmp_path: Path
+    ) -> None:
+        # Only the disabled check's own findings are dropped -- disabling a
+        # different check must not accidentally suppress this one.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan", str(p), "--against", str(p),
+                "--crosscheck", "private_header_leak=off",
+                "--format", "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["verdict"] == "COMPATIBLE_WITH_RISK"
+        kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
+        assert "exported_not_public" in kinds
+
+    @pytest.mark.parametrize("level", ["info", "warning"])
+    def test_info_and_warning_levels_never_gate(
+        self, tmp_path: Path, level: str
+    ) -> None:
+        # Codex review, PR #1172, round 16: `--crosscheck KEY=info`/`=warning`
+        # kept the check enabled (finding stays in `diff.findings`) but had
+        # zero effect on the automatic-stage finding's own gating -- it
+        # still scored at its ChangeKind's default severity. `--severity-
+        # preset strict` (potential_breaking: error) is what actually
+        # proves the fix: `exported_not_public` is a RISK-kind check, so
+        # its default COMPATIBLE_WITH_RISK verdict *would* gate under
+        # strict (exit 2) if the demotion had no effect -- the same way
+        # the reported bug's own repro used an API_BREAK-kind check under
+        # the legacy scheme.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(p),
+                "--against",
+                str(p),
+                "--crosscheck",
+                f"exported_not_public={level}",
+                "--severity-preset",
+                "strict",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
+        assert "exported_not_public" in kinds, "finding stays fully visible"
+        # Codex review, PR #1172, round 16, second review round (fresh
+        # evidence): the first attempt at this fix filtered the demoted
+        # finding out of the *technical verdict* recompute too, not just
+        # the gate/exit code -- so this same request reported root
+        # `NO_CHANGE` even while still listing the `exported_not_public`
+        # risk finding above. AGENTS.md's "Policy decides acceptance, not
+        # facts": an info/warning demotion is a gating-only knob, and must
+        # never launder the real, observed compatibility classification.
+        assert payload.get("verdict") == "COMPATIBLE_WITH_RISK", (
+            "the technical verdict must still reflect the real observation "
+            "-- only gating/exit code may be demoted"
+        )
+        # Codex review, same round, P2 finding: the persisted `diff.exit`
+        # block was resolved before the gate-filtering logic ran, so it
+        # could disagree with the real exit code / `diff.severity.exit_code`
+        # for the identical run.
+        diff_block = payload.get("diff") or {}
+        assert diff_block["exit"]["code"] == 0, diff_block["exit"]
+        assert diff_block["severity"]["exit_code"] == 0, diff_block["severity"]
+        # CodeRabbit review, round 17, fresh evidence: `_build_severity_json`
+        # was handed the same gate-filtered change list `compute_gate_
+        # decision` uses, but its own `changes` parameter is explicitly the
+        # *display* set (`severity.categories.*.count`), separate from the
+        # gate decision itself -- so the demoted finding vanished from its
+        # category's count while still present in `diff.findings`,
+        # contradicting this fix's own "stays fully visible in the report"
+        # contract.
+        severity_block = diff_block.get("severity") or {}
+        total_count = sum(
+            c.get("count", 0) for c in severity_block.get("categories", {}).values()
+        )
+        assert total_count >= len(kinds), (
+            "a demoted finding must still count in its severity category, "
+            "not just stay listed in diff.findings"
+        )
+
+    def test_no_crosscheck_flag_still_gates_under_strict(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: without an explicit info/warning demotion, the
+        # same finding under --severity-preset strict genuinely gates --
+        # confirming the parametrized test above isn't passing for some
+        # unrelated reason (e.g. strict not actually applying here).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(p),
+                "--against",
+                str(p),
+                "--severity-preset",
+                "strict",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+
+
+class TestGatingRedundantChanges:
+    """``gating_redundant_changes()`` (CodeRabbit review, PR #1172):
+    ``checker.compare()`` scores the verdict over ``kept + verdict_redundant``
+    -- ``redundant`` minus the rename-collapsed halves -- but
+    ``verdict_redundant`` is a private local never exposed on ``DiffResult``.
+    The ``--crosscheck KEY=off`` post-removal verdict recompute needs that
+    exact population back; this reconstructs it from the already-finalized
+    disposition ledger's own per-change disposition rather than
+    re-deriving the ``caused_by_type`` rule a second time.
+    """
+
+    def _change(self, symbol: str = "_Zfoo") -> Change:
+        return Change(kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="x")
+
+    def test_returns_empty_list_when_ledger_is_none(self) -> None:
+        assert csb.gating_redundant_changes([self._change()], None) == []
+
+    def test_returns_only_the_gating_disposed_changes(self) -> None:
+        from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
+
+        gating = self._change("_Zgating")
+        deduplicated = self._change("_Zdeduplicated")
+        ledger = DispositionLedger()
+        ledger.record(gating, Disposition.GATING, application_point="p", from_gate=True)
+        ledger.record(deduplicated, Disposition.DEDUPLICATED, application_point="p")
+
+        result = csb.gating_redundant_changes([gating, deduplicated], ledger)
+
+        assert result == [gating]
+
+    def test_skips_a_change_the_ledger_never_recorded(self) -> None:
+        # A redundant_changes entry the ledger has no record for at all
+        # (e.g. a hand-built DiffResult from a caller other than
+        # checker.compare) must not raise -- the same "unrecorded means
+        # nothing to say" contract record_for() itself documents.
+        from abicheck.policy.disposition_ledger import DispositionLedger
+
+        ledger = DispositionLedger()
+        unrecorded = self._change("_Zunrecorded")
+
+        assert csb.gating_redundant_changes([unrecorded], ledger) == []
+
+    def test_empty_redundant_changes_returns_empty_list(self) -> None:
+        from abicheck.policy.disposition_ledger import DispositionLedger
+
+        assert csb.gating_redundant_changes([], DispositionLedger()) == []
+
+
+class TestVerdictScoredChanges:
+    """``verdict_scored_changes()`` (Codex review, PR #1172, round 12): the
+    ``--crosscheck KEY=off`` post-removal verdict recompute must exclude a
+    ``CrossSourceEvolution.RESOLVED`` finding from ``diff.changes`` the same
+    way `checker.compare()`'s own ``all_unsuppressed`` already does (plan
+    F-9) -- otherwise disabling one unrelated check here can resurrect an
+    already-fixed cross-source issue into a failing verdict.
+    """
+
+    def _change(self, symbol: str = "_Zfoo", **kwargs: object) -> Change:
+        return Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="x", **kwargs
+        )
+
+    def test_excludes_a_resolved_cross_source_finding(self) -> None:
+        from abicheck.checker_policy import CrossSourceEvolution
+
+        resolved = self._change(
+            "_Zresolved", cross_source_evolution=CrossSourceEvolution.RESOLVED
+        )
+        ordinary = self._change("_Zordinary")
+
+        result = csb.verdict_scored_changes([resolved, ordinary], [], None)
+
+        assert result == [ordinary]
+
+    def test_persistent_cross_source_finding_still_scores(self) -> None:
+        # Negative control: only RESOLVED is excluded -- PERSISTENT (still
+        # broken on both sides) and a plain, non-cross-source Change must
+        # keep gating normally.
+        from abicheck.checker_policy import CrossSourceEvolution
+
+        persistent = self._change(
+            "_Zpersistent", cross_source_evolution=CrossSourceEvolution.PERSISTENT
+        )
+        ordinary = self._change("_Zordinary")
+
+        result = csb.verdict_scored_changes([persistent, ordinary], [], None)
+
+        assert result == [persistent, ordinary]
+
+    def test_combines_with_gating_redundant_changes(self) -> None:
+        from abicheck.checker_policy import CrossSourceEvolution
+        from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
+
+        resolved = self._change(
+            "_Zresolved", cross_source_evolution=CrossSourceEvolution.RESOLVED
+        )
+        kept = self._change("_Zkept")
+        gating_redundant = self._change("_Zgating")
+        deduplicated_redundant = self._change("_Zdeduplicated")
+        ledger = DispositionLedger()
+        ledger.record(
+            gating_redundant, Disposition.GATING, application_point="p", from_gate=True
+        )
+        ledger.record(
+            deduplicated_redundant, Disposition.DEDUPLICATED, application_point="p"
+        )
+
+        result = csb.verdict_scored_changes(
+            [resolved, kept], [gating_redundant, deduplicated_redundant], ledger
+        )
+
+        assert result == [kept, gating_redundant]
+
+    def test_excludes_a_not_evaluated_finding(self) -> None:
+        # Codex review, PR #1172, round 15: contract_gating.is_evaluated()
+        # must be applied here too, the same exclusion checker.py's own
+        # first all_unsuppressed computation applies via evaluated_for_policy
+        # -- a PROVEN_OUT_OF_CONTRACT finding must not resurrect into the
+        # verdict just because an unrelated crosscheck was disabled.
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        not_evaluated = self._change(
+            "_Znoteval",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        ordinary = self._change("_Zordinary")
+
+        result = csb.verdict_scored_changes([not_evaluated, ordinary], [], None)
+
+        assert result == [ordinary]
+
+    def test_evaluated_finding_still_scores(self) -> None:
+        # Negative control: only NOT_EVALUATED is excluded.
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        evaluated = self._change(
+            "_Zevaluated",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.EVALUATED,
+        )
+
+        result = csb.verdict_scored_changes([evaluated], [], None)
+
+        assert result == [evaluated]
+
+    def test_no_resolved_findings_and_no_ledger_is_a_no_op(self) -> None:
+        kept = self._change("_Zkept")
+
+        assert csb.verdict_scored_changes([kept], [], None) == [kept]
