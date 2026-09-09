@@ -28,3 +28,8 @@ Uncomment the section that is right (remove the HTML comment wrapper).
 - Case 34's (`access_level`) example command referenced a `.abicheck.yml`
   it never created, so copying it verbatim exited with a usage error
   instead of producing the documented finding.
+- `compare --no-baseline SNAP --view ...` now rejects the `--view` flag
+  with a usage error instead of silently ignoring it — a `--no-baseline`
+  audit reports an empty change set by construction, so it has no
+  root-cause graph, findings list, or pattern-modulation ledger for
+  `--view` to act on.

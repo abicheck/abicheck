@@ -216,3 +216,55 @@ class TestNoBaselineCli:
 
         result = CliRunner().invoke(main, ["compare", str(path), *extra_args])
         assert result.exit_code == 64
+
+
+class TestNoBaselineRejectsViewTokens:
+    """Codex review, fresh evidence ("Reject unsupported views for
+    no-baseline audits"): a `--no-baseline` audit reports an empty change
+    set by construction -- no root-cause graph, no findings list, no
+    symbol table, no pattern-modulation ledger -- so every `--view` token
+    used to silently do nothing (`_run_no_baseline_compare_cmd` never read
+    the resolved report_mode/show_only/demangle/explain_patterns values at
+    all) instead of being rejected the way `_dispatch_release_compare`
+    already rejects its own unsupported view modes."""
+
+    @staticmethod
+    def _snapshot_path(tmp_path: Path) -> Path:
+        from abicheck.serialization import snapshot_to_json
+
+        snap = AbiSnapshot(library="libfoo.so", version="1.0")
+        path = tmp_path / "libfoo.so.abi.json"
+        path.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return path
+
+    @pytest.mark.parametrize(
+        "view_token",
+        ["leaf", "root-cause", "impact", "show=breaking", "demangle", "patterns"],
+    )
+    def test_any_view_token_is_rejected(
+        self, tmp_path: Path, view_token: str
+    ) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        path = self._snapshot_path(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["compare", "--no-baseline", str(path), "--view", view_token],
+        )
+        assert result.exit_code == 64, result.output
+        assert "--view is not available together with --no-baseline" in (
+            result.output
+        )
+
+    def test_no_view_flag_still_succeeds(self, tmp_path: Path) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        path = self._snapshot_path(tmp_path)
+        result = CliRunner().invoke(
+            main, ["compare", "--no-baseline", str(path), "--format", "json"]
+        )
+        assert result.exit_code == 0, result.output
