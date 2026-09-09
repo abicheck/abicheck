@@ -322,15 +322,16 @@ below.
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
-| `7` | Evidence-contract error (ADR-037 D5) — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable today through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module** (ADR-068 plan Phase 2d). **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. |
+| `5` | Budget overflow — the run's wall-clock `--budget` guard was exceeded. `compare` has its own `--budget` flag now (ADR-068 §3 #19, `frontends/cli/commands/compare.py`); exit `5` applies to both `compare` and `scan` on overflow. |
+| `7` | Evidence-contract error (ADR-037 D5) — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module** (ADR-068 plan Phase 2d), and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (ADR-068 plan §3 row 28, closed — `compare` shares this floor with `scan`/`dump` now, verified live). **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
 | `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `--format json`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
 
-> **Not yet reachable on `compare`: a pinned `--depth build`/`--depth source`
-> with no evidence to satisfy it.** `scan` raises exit `7` for that;
-> `compare` prints a `Note:` and exits on the verdict alone. Closing that is
-> ADR-068 plan §3 row 28 — see
-> [Evidence Depth](../use/evidence-depth.md#what-each-depth-reaches).
+> **`compare --dry-run` does not preview the exit-`7` depth floor.** Pinning
+> an unsatisfiable `--depth build`/`--depth source` under `--dry-run` still
+> exits `0` and reports `0 TU(s)` for the affected layers, where the
+> equivalent real run now exits `7` — see [Evidence
+> Depth](../use/evidence-depth.md#what-each-depth-reaches).
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
 > to distinguish them (e.g. warn on deployment risk), use `--format json` and

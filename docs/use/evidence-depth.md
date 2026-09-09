@@ -33,7 +33,7 @@ are capturing a reusable snapshot instead of comparing.
     invocation only where `compare` has **no equivalent today** — each such
     place says so explicitly and links to the tracking gap.
 
-**Three capabilities on this page are still `scan`-only** (verified live
+**Two capabilities on this page are still `scan`-only** (verified live
 against the current build, not read off `--help`), and each is an open
 migration item in
 [`plans/one-comparison-product.md`](../contribute/plans/one-comparison-product.md)
@@ -46,18 +46,17 @@ migration item in
   rung does — `scan`'s risk-scored `auto` rung has no `compare`/`dump`
   equivalent (§3 row 13) — see [Let risk pick the
   depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now).
-- **The fail-loud evidence-contract floor, on `compare` alone.** A *pinned*
-  `--depth build`/`--depth source` with nothing to collect from is a hard
-  error under `scan` (evidence-contract exit `7`) and under `dump`
-  (`DumpDepthNotSatisfiedError`, exit `1`, no snapshot written) — but
-  `compare --depth source` on a pair with zero build/source evidence exits
-  `0`/`NO_CHANGE` instead (§3 row 28, `compare`-only gap). Read [the
-  fail-loud warning](#what-each-depth-reaches) below as `scan`-and-`dump`
-  only, never `compare`.
 - **The single-build audit.** `compare --no-baseline` (ADR-068 D2) exists
   but does not yet reproduce the audit's findings — see [Single-build
   audit](#single-build-audit-no-baseline) below and
   [Scenario S5](../integration/scenarios/single-build-audit.md).
+
+**§3 row 28 is closed**: `compare` now shares `scan`/`dump`'s fail-loud
+evidence-contract floor — a *pinned* `--depth build`/`--depth source` that
+the collected evidence doesn't reach exits `7` (`exit.reasons:
+["evidence_contract_error"]`) on `compare` too, verified live. See the
+warning below for the one remaining difference between the three commands
+(what each writes when it fires).
 
 `--budget` no longer belongs on that list: `compare` gained its own
 `--budget` wall-clock guard (ADR-068 §3 #19) — exit `5` on overflow applies
@@ -107,30 +106,38 @@ one-build audit — `scan` is required for every no-baseline audit until the
   now-removed `--depth full` rung used to require explicitly) — so a replay
   that runs is never silently empty, just potentially more expensive
   unseeded. This guarantee is about the replay *itself*, not about whether
-  `compare` reaches it: with no usable `--sources`/`--build-info` at all,
-  `compare --depth source` never runs L4 replay in the first place and
-  exits on the shallow (binary/headers-only) verdict — see the fail-loud
-  warning above for `dump`/`scan`'s different handling of that same case.
+  the replay runs at all: with no usable `--sources`/`--build-info` at all,
+  `--depth source` never reaches L4 replay in the first place — a *pinned*
+  `--depth source` in that state fails loud (see the warning above), never
+  silently exiting on a shallow verdict.
 - A single-build, no-baseline audit is `compare --no-baseline CANDIDATE`
   (ADR-068 D2), or legacy `scan CANDIDATE` with no `--against`. There is no
   separate `--audit` flag on either.
 
-!!! warning "A pinned depth is a contract (fail-loud) — `scan` and `dump`"
-    Under legacy `scan`, pinning a deep depth (`--depth build|source`) with
-    **no source input** (`--sources`/`--build-info`) is a hard
-    evidence-contract error (exit `7`), not a silent shallow run: there is
-    nothing to collect L3/L4/L5 from. `dump` has its own, separately
-    implemented fail-loud floor for the identical case
-    (`cli_dump_helpers.check_requested_depth_satisfied`): an explicit
-    `--depth build|source` that the collected evidence doesn't reach raises
-    `DumpDepthNotSatisfiedError` and exits `1` — no snapshot is written.
-    **`compare` alone has no equivalent floor** — the same pinned depth with
-    nothing to collect prints a `Note: --depth collected evidence mode '…'
-    was requested but no build-info/source facts were embedded or supplied`
-    line, leaves the L3/L4/L5 coverage rows uncollected, and still exits on
-    the verdict alone (`0` for an otherwise-clean pair). Read the coverage
-    block (below) rather than trusting the pin on `compare`. Closing this
-    gap for `compare` is plan §3 row 28.
+!!! warning "A pinned depth is a contract (fail-loud) — all three commands"
+    Pinning a deep depth (`--depth build|source`) with **no source input**
+    (`--sources`/`--build-info`), or with input that doesn't actually reach
+    the requested depth, is a hard evidence-contract error on `scan`,
+    `dump`, and `compare` alike — not a silent shallow run. They differ only
+    in what each one *writes* when it fires:
+
+    - **`scan`** exits `7`, its own dedicated evidence-contract exit code.
+    - **`dump`** raises `DumpDepthNotSatisfiedError`
+      (`cli_dump_helpers.check_requested_depth_satisfied`) and exits `1` —
+      **no snapshot is written**.
+    - **`compare`** exits `7` too (`exit.reasons:
+      ["evidence_contract_error"]`, folded through the same `ExitDecision`
+      precedence rule `scan` uses) — but it still writes a full report, with
+      the top-level `verdict` left at whatever the (unaffected)
+      compatibility comparison produced. Check `exit`, not `verdict`, to
+      detect this on `compare` — see [Exit
+      Codes](../reference/exit-codes.md) for the same caveat on `--abi3`'s
+      identical axis.
+
+    `compare --dry-run` does not preview this failure, though: pinning an
+    unsatisfiable depth under `--dry-run` still exits `0` and reports `0
+    TU(s)` for the affected layers — see [Estimate before you
+    spend](#estimate-before-you-spend-dry-run) below.
 
 !!! note "`--mode`/`--source-method` are gone"
     Earlier releases exposed a precise `--source-method s0…s6` axis and
@@ -271,6 +278,19 @@ bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
 abicheck compare old/libonedal_core.abi.json new/libonedal_core.so -H include/ \
   --build-info new=aq.json --depth build
 ```
+
+!!! warning "A stored baseline needs matching evidence on both sides"
+    Every example on this page that compares a stored `.abi.json` baseline
+    against a live NEW build and supplies build/source evidence for NEW
+    alone (the CMake and Bazel commands above, and the `.abicheck.yml`
+    `build.query` example below) only works when that stored baseline was
+    itself `dump`ped with matching `--sources`/`--build-info` at bake time.
+    A baseline with no embedded L3/L4 facts paired with a NEW side that has
+    them gives the two sides different extraction profiles, which can stop
+    the run with exit `16` `NOT_COMPARABLE` instead of performing the
+    advertised comparison. Either bake the same evidence into the baseline
+    at `dump` time, or pass matching `--sources old=`/`--build-info old=`
+    alongside the `new=` one shown.
 
 !!! tip "`--build-info` auto-detects the format (ADR-037 D5)"
     `--build-info` sniffs its argument by content, so each kind "just works":
@@ -529,11 +549,13 @@ scope, tool availability) and prints the projected per-layer cost for *this*
 project without comparing anything or writing output. On `scan`, exits 0 for a
 resolvable preview; an invalid invocation or an unsatisfiable requested depth
 still exits nonzero, the same as the real run would (`scan`'s evidence-contract
-floor, see the warning above). **`compare` has no equivalent floor to preview**
-(the earlier qualification on `compare`'s `--depth` applies here too, verified
-live): `compare --dry-run --depth source` with no build/source evidence
-resolvable still exits 0 and simply reports `0 TU(s)` for the L3/L4/L5 rows,
-rather than failing the way `scan`'s own preview would.
+floor, see the warning above). **`compare --dry-run` does not preview its own
+real run's floor** (verified live, still true even now that `compare`'s
+real-run floor is closed — see the warning above): `compare --dry-run --depth
+source` with no build/source evidence resolvable still exits `0` and simply
+reports `0 TU(s)` for the L3/L4/L5 rows, where the equivalent real run would
+now exit `7`. Don't trust a clean `--dry-run` as proof the real run will
+succeed on a pinned deep depth.
 
 ```bash
 abicheck compare old.abi.json libfoo.so --sources new=. --depth source --dry-run
@@ -596,12 +618,14 @@ the same way you would on `scan`.
 
 `--depth` requests a level but `L` is *evidence*, so a run can request a deep
 level and only reach a shallow one (clang missing, no sources, a parse error).
-On `compare` this is never reported as "failed" — the run states the depth it
-**actually reached** and, for each disabled check, the input or tool to add.
-(This best-effort behavior does not apply to a *pinned* `dump --depth
-build|source` or `scan --depth build|source` whose evidence can't reach that
-depth — both fail loud instead, per the warning above: no coverage block is
-printed because no output is written at all.)
+On `compare` **with no `--depth` pinned**, this is never reported as
+"failed" — the run states the depth it **actually reached** and, for each
+disabled check, the input or tool to add. (This best-effort behavior does
+not apply once `--depth build|source` is *pinned* and the evidence can't
+reach it: `scan` and `compare` both fail loud there — exit `7` — and `dump`
+raises `DumpDepthNotSatisfiedError` and exits `1` with no snapshot written;
+see the warning above. `compare` is the one exception that still prints a
+coverage block alongside its exit `7`, since it writes a report either way.)
 
 ```text
 Checks enabled for this scan (and why others are not):
