@@ -1223,9 +1223,17 @@ def _run_baseline_compare(
     # (ADR-067) applies here the same as any other suppression, so the
     # observed finding stays in the audit trail with its own rule/reason
     # (Codex review, second round) instead of silently vanishing.
+    #
+    # `override_suppressed_change`, not `record_suppressed_change` (Codex
+    # review, third round): `compare_snapshots()` above already finalized
+    # `diff.disposition_ledger` for every change it produced, so the plain,
+    # first-write-wins recorder would silently no-op here -- this call site
+    # is genuinely revising an already-terminal ledger entry, which is
+    # exactly what `override_suppressed_change` is for (see its own
+    # docstring).
     if enabled_checks is not None:
         from .buildsource.crosscheck import ALL_CHECKS
-        from .workflows.disposition import record_suppressed_change
+        from .workflows.disposition import override_suppressed_change
 
         _disabled = frozenset(ALL_CHECKS) - enabled_checks
         if _disabled:
@@ -1240,7 +1248,7 @@ def _run_baseline_compare(
                 diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
                 for c in _dropped:
                     c.suppression_rule = f"crosscheck:{c.kind.value}=off"
-                    record_suppressed_change(
+                    override_suppressed_change(
                         getattr(diff, "disposition_ledger", None),
                         c,
                         rule=None,

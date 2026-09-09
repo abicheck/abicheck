@@ -28,15 +28,21 @@ of relevant findings across every ``--used-by`` consumer, and
 ``close_consumer_scope`` has to be called once with that union rather than
 once per consumer (``apply_scope`` only demotes, so per-consumer calls would
 intersect the consumers' sets). See that function's own docstring.
-``record_suppressed_change`` joined it for a second: ``cli_scan_baseline.
-_run_baseline_compare`` records a baseline scan's ``--crosscheck KEY=off``
-disposition the same way ``checker._filter_suppressed_changes`` records an
-ordinary ``--suppress`` rule (AGENTS.md's "record before disposing" rule) --
-the observed finding moves to ``suppressed_changes`` with its own rule/reason
-rather than being silently dropped from ``diff.changes``.
+``record_suppressed_change``/``override_suppressed_change`` joined it for a
+second and third reason: ``cli_scan_baseline._run_baseline_compare`` records
+a baseline scan's ``--crosscheck KEY=off`` disposition the same way
+``checker._filter_suppressed_changes`` records an ordinary ``--suppress``
+rule (AGENTS.md's "record before disposing" rule) -- the observed finding
+moves to ``suppressed_changes`` with its own rule/reason rather than being
+silently dropped from ``diff.changes``. Because that call happens *after*
+``compare_snapshots()`` already finalized the ledger, the plain (first-write-
+wins) recorder is a no-op there -- ``override_suppressed_change`` is the
+dedicated, explicitly-a-revision primitive that call site actually needs;
+see ``disposition_close.override_suppression``'s own docstring (that module,
+not ``disposition_ledger.py``: the 800-line production-file seam).
 
-Re-export only, deliberately: ``policy/disposition_ledger.py`` remains the
-one module to read and to change.
+Re-export only, deliberately: ``policy/disposition_ledger.py``/
+``disposition_close.py`` remain the modules to read and to change.
 """
 
 from __future__ import annotations
@@ -44,9 +50,15 @@ from __future__ import annotations
 from ..policy.disposition_close import (
     close_consumer_scope as close_consumer_scope,
     ledger_for as ledger_for,
+    override_suppressed_change as override_suppressed_change,
 )
 from ..policy.disposition_ledger import (
     record_suppressed_change as record_suppressed_change,
 )
 
-__all__ = ["close_consumer_scope", "ledger_for", "record_suppressed_change"]
+__all__ = [
+    "close_consumer_scope",
+    "ledger_for",
+    "override_suppressed_change",
+    "record_suppressed_change",
+]
