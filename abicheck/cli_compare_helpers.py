@@ -1742,7 +1742,7 @@ def run_compare(
             _exit_on_budget_overflow(
                 exc, budget, f"'{old_input}'/'{new_input}'",
                 old_input.stem, str(old_input), str(new_input),
-                fmt=fmt, output=output,
+                fmt=fmt, output=output, secondary_writes=secondary_writes,
             )
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
@@ -1775,16 +1775,15 @@ def run_compare(
 
     # ADR-068 §3 #19: `--budget`'s deadline is already ambient (entered once,
     # early, by `enter_budget_scope` above) -- `deadline.check()`/
-    # `bounded_timeout()` consult it however deep the call stack (castxml/
-    # clang extraction, the preprocessor scan, source replay) without this
-    # call threading `budget_s` through explicitly. Only a fresh try/except
-    # is needed here, not a second `deadline_scope` entry (which would reset
-    # the deadline to a full budget again instead of using what's left).
+    # `bounded_timeout()` consult it however deep the call stack; the explicit
+    # `deadline.check()` below closes the gap for a stored-snapshot-only pair,
+    # which touches neither (Codex review, PR #1178). Only a fresh try/except
+    # is needed, not a second `deadline_scope` entry (which would reset it).
     try:
+        deadline.check()
         old, new = _resolve_compare_snapshots(
             old_input, new_input, old_fmt, new_fmt,
-            old_h, new_h, old_inc, new_inc,
-            old_version, new_version, lang,
+            old_h, new_h, old_inc, new_inc, old_version, new_version, lang,
             pdb_path, old_pdb_path, new_pdb_path,
             dwarf_only, effective_debug_format,
             follow_deps, search_paths, ld_library_path,
@@ -1807,7 +1806,7 @@ def run_compare(
         _exit_on_budget_overflow(
             exc, budget, f"'{old_input}'/'{new_input}'",
             old_input.stem, str(old_input), str(new_input),
-            fmt=fmt, output=output,
+            fmt=fmt, output=output, secondary_writes=secondary_writes,
         )
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
@@ -1936,6 +1935,7 @@ def run_compare(
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
     try:
+        deadline.check()  # same boundary check as the resolve stage above
         result = compare_snapshots(
             old, new, suppression=suppression, policy=policy, policy_file=pf,
             env_matrix=env_matrix,
@@ -1963,7 +1963,7 @@ def run_compare(
         # above cannot see this call.
         _exit_on_budget_overflow(
             exc, budget, f"'{old.library}'", old.library, old.version, new.version,
-            fmt=fmt, output=output,
+            fmt=fmt, output=output, secondary_writes=secondary_writes,
         )
     _enrichment.report_abi3_evidence_contract_error(result, _abi3_failure)  # ADR-068 exit-7 axis
     # ADR-068 §3 #28: closes the native CLI's own `enforce_requested_depth`

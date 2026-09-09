@@ -142,7 +142,9 @@ def report_depth_evidence_contract_error(
     ``frontends``-legal bind of the ``workflows`` re-export of the
     ``policy``-layer check (ADR-061 dependency direction:
     ``frontends -> workflows``, never ``frontends -> policy`` directly)."""
-    from ...workflows.depth_evidence_contract import record_depth_evidence_contract_error
+    from ...workflows.depth_evidence_contract import (
+        record_depth_evidence_contract_error,
+    )
 
     record_depth_evidence_contract_error(
         result, depth, old, new, old_is_live=old_is_live, new_is_live=new_is_live

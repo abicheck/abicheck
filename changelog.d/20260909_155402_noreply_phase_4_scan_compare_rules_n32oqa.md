@@ -25,3 +25,20 @@
   quietly fell back to symbols-only evidence and reported `NO_CHANGE`/exit
   `0` instead of failing loudly. See `docs/contribute/known-gaps.md` and
   ADR-068's 2026-09-09 amendment for the full account.
+- **`compare --budget 0s` (or an already-exhausted budget) on a
+  stored-snapshot-only comparison now correctly aborts at exit `5`** instead
+  of silently completing (Codex review, fresh evidence): neither resolution
+  nor classification needs any subprocess/extraction work for a pair of
+  pre-serialized snapshots, so nothing previously called `deadline.check()`
+  on that path. Both the native `compare` CLI and the typed
+  `run_compare_request` now check the deadline explicitly at the
+  resolve/classify boundaries.
+- **A `--budget` abort now renders its structured refusal document to every
+  `--write` target, not just the primary `--format`/`-o`** (Codex review,
+  fresh evidence) — `compare --budget 0s ... --write json=out.json` used to
+  leave the secondary target unwritten on exit `5`.
+- **`CompareRequest.budget_s` (typed API) now rejects a non-finite
+  (`nan`/`inf`/`-inf`) or negative value**, mirroring the native CLI's own
+  `--budget` parser (Codex review, fresh evidence) — a typed caller reaches
+  the identical deadline scope with no CLI in between, so the same floor
+  belongs on the request's own validator.

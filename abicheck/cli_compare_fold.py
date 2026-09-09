@@ -663,6 +663,7 @@ def _report_run_aborted(
     fmt: str,
     output: Path | None,
     operational: Any,
+    secondary_writes: tuple[tuple[str, Path], ...] = (),
 ) -> None:
     """Render an aborted-run refusal report -- generalizes :func:`_report_not_comparable`.
 
@@ -682,30 +683,47 @@ def _report_run_aborted(
     generic SARIF/JUnit "run did not complete" renderers apply verbatim,
     just with a different *kind*/*operational* pair. Split out so a second
     abort axis does not have to duplicate the format dispatch.
+
+    *secondary_writes* (Codex review, fresh evidence, PR #1178): ``compare
+    --write fmt=path`` is repeatable and, on a normal run, every one of them
+    renders the same already-computed result -- an abort must do the same
+    for every configured target, not just the primary ``fmt``/``output``,
+    or a ``--write json=report.json`` consumer silently gets no file at all
+    on exit 5 instead of the same structured refusal the primary format got.
     """
     refusal = (library, old_version, new_version, kind, message)
-    if fmt == "json":
-        from .report.not_comparable import render_not_comparable_json
-        from .schemas import REPORT_SCHEMA_VERSION
 
-        _write_or_echo(
-            output,
-            render_not_comparable_json(
-                *refusal,
-                report_schema_version=REPORT_SCHEMA_VERSION,
-                operational=operational,
-            ),
-        )
-    elif fmt == "sarif":
-        from .report.render_json import render_mapping_as_json
-        from .sarif import to_sarif_not_comparable
+    def _render_one(target_fmt: str, target_output: Path | None) -> None:
+        if target_fmt == "json":
+            from .report.not_comparable import render_not_comparable_json
+            from .schemas import REPORT_SCHEMA_VERSION
 
-        _write_or_echo(output, render_mapping_as_json(to_sarif_not_comparable(*refusal)))
-    elif fmt == "junit":
-        from .junit_report import to_junit_xml_not_comparable
+            _write_or_echo(
+                target_output,
+                render_not_comparable_json(
+                    *refusal,
+                    report_schema_version=REPORT_SCHEMA_VERSION,
+                    operational=operational,
+                ),
+            )
+        elif target_fmt == "sarif":
+            from .report.render_json import render_mapping_as_json
+            from .sarif import to_sarif_not_comparable
 
-        xml = to_junit_xml_not_comparable(library, old_version, new_version, kind, message)
-        _write_or_echo(output, xml)
+            _write_or_echo(
+                target_output, render_mapping_as_json(to_sarif_not_comparable(*refusal))
+            )
+        elif target_fmt == "junit":
+            from .junit_report import to_junit_xml_not_comparable
+
+            xml = to_junit_xml_not_comparable(
+                library, old_version, new_version, kind, message
+            )
+            _write_or_echo(target_output, xml)
+
+    _render_one(fmt, output)
+    for secondary_fmt, secondary_output in secondary_writes:
+        _render_one(secondary_fmt, secondary_output)
 
 
 def _exit_on_budget_overflow(
@@ -718,6 +736,7 @@ def _exit_on_budget_overflow(
     *,
     fmt: str,
     output: Path | None,
+    secondary_writes: tuple[tuple[str, Path], ...] = (),
 ) -> None:
     """Render ADR-068 §3 #19's budget-overflow abort (exit 5) and exit.
 
@@ -729,7 +748,10 @@ def _exit_on_budget_overflow(
     comparability-gate refusal). *label* is just the stderr message's own
     naming of what was being compared (raw operand paths before resolution,
     or the resolved library name after); *library*/*old_version*/
-    *new_version* feed the structured report the same way.
+    *new_version* feed the structured report the same way. *secondary_writes*
+    (Codex review, fresh evidence, PR #1178) is ``--write``'s own repeatable
+    fmt/path pairs, forwarded so an abort renders to every configured target,
+    not just the primary one.
     """
     click.echo(
         f"Error: --budget {budget!r} exceeded while comparing {label}: {exc}. "
@@ -742,5 +764,6 @@ def _exit_on_budget_overflow(
     _report_run_aborted(
         "budget_overflow", str(exc), library, old_version, new_version,
         fmt=fmt, output=output, operational=OperationalStatus.BUDGET_OVERFLOW,
+        secondary_writes=secondary_writes,
     )
     sys.exit(5)

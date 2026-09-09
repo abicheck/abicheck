@@ -319,6 +319,13 @@ def resolve_compare_request(
     from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # Codex review (fresh evidence, PR #1178): a stored-snapshot-only pair
+    # needs no subprocess/extraction work at all, so nothing inside this
+    # resolution would otherwise ever call `deadline.check()` -- an
+    # already-expired `budget_s` (0, or exhausted by an earlier phase) would
+    # silently resolve instead of raising here. `run_compare_request`'s
+    # `deadline_scope` is already active by the time this runs.
+    deadline.check()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
     # combination can satisfy before any extraction runs (PlanningError),
     # rather than discovering the gap mid-run or not at all. See
@@ -480,11 +487,16 @@ def classify_compare_pair(
     instead of calling this; everything else composes the two through
     :func:`abicheck.service.run_compare_request`.
     """
-    from . import service
+    from . import deadline, service
     from .buildsource.evidence_report import (
         attach_evidence_metrics,
         prepare_embedded_build_source,
     )
+
+    # Same classify-stage boundary check as `resolve_compare_request`'s own
+    # (Codex review, fresh evidence, PR #1178): `compare_snapshots` below can
+    # complete with no subprocess/extraction work at all.
+    deadline.check()
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
     # request`'s own `enforce_requested_depth` call already confirmed both

@@ -54,6 +54,7 @@ D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -903,6 +904,24 @@ class CompareRequest:
                     f"invalid severity_preset {self.severity_preset!r}; "
                     f"must be one of {sorted(SEVERITY_PRESETS)} or None"
                 )
+        # Codex review (fresh evidence, PR #1178): the CLI's `--budget` parser
+        # (`cli_compare_helpers._parse_budget`) already rejects non-finite
+        # (`nan`/`inf`/`-inf`) and negative values via `math.isfinite` before
+        # ever calling `deadline.deadline_scope`, because `deadline.check()`/
+        # `bounded_timeout()` both test `left <= 0` -- a value that is never
+        # `<= 0` (an infinite deadline) or never compares meaningfully at all
+        # (`nan`) makes the promised wall-clock guard silently inert. A typed
+        # caller reaches the identical `deadline_scope(request.budget_s)` call
+        # in `run_compare_request` with no CLI in between, so the same floor
+        # belongs here too -- otherwise this documented public field could
+        # disable its own guard.
+        if self.budget_s is not None and (
+            not math.isfinite(self.budget_s) or self.budget_s < 0
+        ):
+            errors.append(
+                f"budget_s must be a finite, non-negative number of seconds "
+                f"or None; got {self.budget_s!r}"
+            )
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)
