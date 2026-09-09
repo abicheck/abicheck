@@ -591,6 +591,37 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        # one-comparison-product.md Phase 7i: a proven inventory change is a
+        # stable project promise, not a per-invocation operand (ADR-065 D1).
+        "compare --support-promise (release.support_promise in .abicheck.yml)",
+        ("--support-promise",),
+        frozenset(
+            {
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/vision-api-abi-evolution.md",
+                "contribute/adr/065-comparison-scope-selection-and-completeness.md",
+                "contribute/adr/index.md",
+                "reference/exit-codes.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md §4.2 / Phase 7i: the L2 header-parse
+        # scoping glob is a stable project property beside `build.compile_db`,
+        # not a per-invocation flag.
+        "dump --compile-db-filter (build.compile_db_filter in .abicheck.yml)",
+        ("--compile-db-filter",),
+        frozenset(
+            {
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/one-semantic-pipeline.md",
+                "contribute/plans/g41-baseline-consumer-context-and-declarative-assurance.md",
+                "contribute/known-gaps.md",
+                "contribute/adr/020-build-context-capture.md",
+            }
+        ),
+    ),
+    (
         # one-comparison-product.md §4.2 / Phase 7f: three spellings of
         # "stamp this snapshot with where it came from" collapse into one
         # repeatable `dump --provenance KEY=VALUE`.

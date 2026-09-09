@@ -372,7 +372,8 @@ def build_source_dump_options(func: F) -> F:
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted. When it resolves to a compile database and -H/--header is "
         "given, that database also parameterizes the header parse with the "
-        "build's exact flags (scope it with --compile-db-filter).",
+        "build's exact flags (scope it with build.compile_db_filter in "
+        ".abicheck.yml).",
     )(func)
     return func
 
