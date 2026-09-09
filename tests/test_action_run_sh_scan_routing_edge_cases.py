@@ -461,3 +461,57 @@ class TestBaselineSniffFallsBackToLegacyWhenPythonUnavailable:
             region=_region_with_py_bin_forced_unavailable(),
         )
         assert cmd[1] == "scan"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestEffectiveJsonFormatStaysOnLegacyCli:
+    """`format: json` with no output file at all (Codex review, PR #1172,
+    round 10): `compare`'s report carries `report_schema_version`/root
+    `changes`; `scan`'s carries `scan_schema_version`/nested
+    `diff.findings` -- different, incompatible shapes. The prior fix only
+    kept a *written file* (`-o`/`--output`/`output-file`) on the legacy
+    CLI, but the run's raw JSON stdout is also echoed verbatim into
+    `$GITHUB_STEP_SUMMARY` (a real, durable file a later job step can
+    read) whenever no file is requested at all -- so the dedicated
+    `format` input, and an `extra-args --format` override in either
+    direction, must both stay on the legacy CLI too."""
+
+    def test_dedicated_format_json_input_stays_on_legacy_cli(self) -> None:
+        cmd = _run_cmd(
+            {**_BASE_INPUTS, "INPUT_DEPTH": "headers", "INPUT_FORMAT": "json"}
+        )
+        assert cmd[1] == "scan"
+
+    def test_extra_args_format_json_override_stays_on_legacy_cli(self) -> None:
+        # The dedicated `format` input says `text`, but `extra-args
+        # --format json` overrides it at the real CLI (Click keeps the
+        # last occurrence) -- the routing decision must see that override.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_FORMAT": "text",
+                "INPUT_EXTRA_ARGS": "--format json",
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_extra_args_format_text_override_still_routes_to_compare(self) -> None:
+        # Negative control, the reverse override: the dedicated `format`
+        # input says `json`, but `extra-args --format text` overrides it
+        # back -- the *effective* format decides, not the nominal one.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_FORMAT": "json",
+                "INPUT_EXTRA_ARGS": "--format markdown",
+            }
+        )
+        assert cmd[1] == "compare"
+
+    def test_no_format_input_at_all_still_routes_to_compare(self) -> None:
+        # Negative control: the default format (text) must not itself
+        # force the legacy CLI -- only an effective json format does.
+        cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
+        assert cmd[1] == "compare"

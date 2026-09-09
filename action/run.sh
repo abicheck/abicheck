@@ -2345,8 +2345,16 @@ fi
 #   handed and renders correctly either way, so that path is unaffected --
 #   but a workflow's own downstream step parsing the raw JSON this Action
 #   writes to `-o`/`output-file` (or a secondary `--write`) would silently
-#   receive the wrong shape. So a baseline scan requesting `output-file` or
-#   a JSON `--write` via `extra-args` stays on the legacy CLI, and the
+#   receive the wrong shape. Bare `format: json` with no file at all
+#   (Codex review, PR #1172, round 10) is the same exposure: the run's own
+#   raw JSON stdout is echoed into `$GITHUB_STEP_SUMMARY` verbatim (a real,
+#   durable file a later step in the same job can read), not just this
+#   Action's internal auto-detecting PR-comment renderer. So any effective
+#   `format: json` (the dedicated input, or an `extra-args --format json`
+#   override in either direction, same precedence `_effective_format()`
+#   itself uses) stays on the legacy CLI too -- not only the file-writing
+#   cases. A baseline scan requesting `output-file` or a JSON `--write` via
+#   `extra-args` stays on the legacy CLI, and the
 #   baseline is checked by its resolved `--against`/`abi-baseline` value's
 #   own `.json` extension too: a stored snapshot can carry a
 #   `dependency_scope: full` tag from `dump --include-system-declarations`
@@ -2429,6 +2437,21 @@ fi
 # shape it names as the reason to make this best-effort at all. A
 # nonexistent path (or no baseline at all) is a real, definitive "no" --
 # not a classification failure -- so that case alone still answers false.
+# The effective `--format` value this baseline scan would run with, before
+# `$FORMAT` itself is set (that happens later, inside scan mode's own
+# command-assembly section, well after this routing decision) -- so this
+# duplicates `_effective_format()`'s own extra-args-overrides-the-dedicated-
+# input precedence rather than being able to call it directly. Used only to
+# decide `_SCAN_NEEDS_LEGACY_CLI`; `_effective_format()` remains the one
+# real assembly-time answer once `$FORMAT` exists.
+_effective_format_for_routing() {
+  local _name _value _found="${INPUT_FORMAT:-text}"
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--format" ]] && _found="$_value"
+  done <<<"$(_extra_args_options)"
+  printf '%s' "$_found"
+}
+
 _against_is_json_snapshot_by_content() {
   [[ -z "${INPUT_AGAINST:-}" ]] && return 1
   [[ -f "${INPUT_AGAINST}" ]] || return 1
@@ -2478,6 +2501,7 @@ if [[ "$MODE" == "scan" ]]; then
      || [[ "${INPUT_AGAINST:-}" == *.json || "${INPUT_AGAINST:-}" == *.json.gz || "${INPUT_AGAINST:-}" == *.json.zst ]] \
      || _against_is_json_snapshot_by_content \
      || [[ -n "${INPUT_OUTPUT_FILE:-}" ]] \
+     || [[ "$(_effective_format_for_routing)" == "json" ]] \
      || _extra_args_has_write_flag \
      || _extra_args_has_scan_only_flag; then
     _SCAN_NEEDS_LEGACY_CLI=true
