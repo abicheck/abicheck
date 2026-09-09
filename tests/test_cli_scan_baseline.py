@@ -870,6 +870,22 @@ class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
         diff_block = payload.get("diff") or {}
         assert diff_block["exit"]["code"] == 0, diff_block["exit"]
         assert diff_block["severity"]["exit_code"] == 0, diff_block["severity"]
+        # CodeRabbit review, round 17, fresh evidence: `_build_severity_json`
+        # was handed the same gate-filtered change list `compute_gate_
+        # decision` uses, but its own `changes` parameter is explicitly the
+        # *display* set (`severity.categories.*.count`), separate from the
+        # gate decision itself -- so the demoted finding vanished from its
+        # category's count while still present in `diff.findings`,
+        # contradicting this fix's own "stays fully visible in the report"
+        # contract.
+        severity_block = diff_block.get("severity") or {}
+        total_count = sum(
+            c.get("count", 0) for c in severity_block.get("categories", {}).values()
+        )
+        assert total_count >= len(kinds), (
+            "a demoted finding must still count in its severity category, "
+            "not just stay listed in diff.findings"
+        )
 
     def test_no_crosscheck_flag_still_gates_under_strict(
         self, tmp_path: Path

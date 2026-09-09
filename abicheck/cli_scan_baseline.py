@@ -1559,24 +1559,34 @@ def _run_baseline_compare(
         # per-run exclusion has to route around it via the same
         # `compute_gate_decision` primitive it calls internally, called
         # directly with the filtered list instead.
+        #
+        # That filtered list is for `compute_gate_decision` only (CodeRabbit
+        # review, round 17, fresh evidence): `_build_severity_json`'s own
+        # `changes` parameter is explicitly the *display* set --
+        # `severity.categories.*.count` -- separate from `gate` (its own
+        # docstring: "*changes* are the (possibly filtered) changes for
+        # display counts"). Handing it the same gate-filtered list made a
+        # demoted finding vanish from its category's count while it stayed
+        # present in `diff.findings`, contradicting this block's own "stays
+        # fully visible in the report" contract one field over. `gate`
+        # itself is unaffected -- it is already the correct, filtered
+        # decision computed below.
         computed_gate: GateDecision | None
         if _non_gating:
             from .workflows.gate import compute_gate_decision
 
-            _sev_changes = [c for c in diff.changes if not _crosscheck_non_gating(c)]
             computed_gate = compute_gate_decision(
-                _sev_changes,
+                [c for c in diff.changes if not _crosscheck_non_gating(c)],
                 sev_config,
                 policy=diff.policy,
                 kind_sets=diff._effective_kind_sets(),
                 policy_file=diff.policy_file,
             )
         else:
-            _sev_changes = list(diff.changes)
             computed_gate = gate_decision_for_result(diff, sev_config)
         assert computed_gate is not None  # sev_config is not None here
         gate = _build_severity_json(
-            _sev_changes,
+            list(diff.changes),
             sev_config,
             gate=computed_gate,
             policy=diff.policy,

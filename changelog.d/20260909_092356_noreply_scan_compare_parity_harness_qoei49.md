@@ -57,7 +57,12 @@
   info/warning override is a gating-only knob and must never launder the
   real, observed compatibility classification), and the persisted
   `diff.exit` block could disagree with the actual exit code/
-  `diff.severity.exit_code` for the identical run.
+  `diff.severity.exit_code` for the identical run. A second fix attempt
+  also made the demoted finding's own `severity.categories.*.count` (a
+  separate, display-only field from the exit code) silently drop to one
+  less than `diff.findings` actually lists — that count now includes the
+  demoted finding too, matching this fix's own "stays fully visible"
+  contract.
 - **A one-sided `scan`/`scan --artifact-set` audit request with an explicit
   `--crosscheck KEY=warning`/`=info` override no longer raises a usage
   error (exit 64).** A first attempt at the fix above mistakenly treated
