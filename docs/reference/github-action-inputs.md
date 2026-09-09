@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (84)
+## Inputs (83)
 
 | Input | Required | Default | Description |
 |---|:--:|---|---|
@@ -18,7 +18,6 @@ Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../us
 | `devel-pkg2` | no | — | Development package with headers for new side. compare mode, directory/package operands only. |
 | `dso-only` | no | — | Only compare shared objects, skip executables. compare mode, directory/package operands only. Deliberately no declared default (Codex review, fresh evidence): the synthesized release:/gate: config overlay needs to tell "omitted" apart from an explicit "false" (which must override a discovered/explicit .abicheck.yml's own release.dso_only: true) -- a declared default would make every omitted invocation indistinguishable from an explicit false, silently losing that override. |
 | `include-private-dso` | no | — | Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only's own description for why. |
-| `keep-extracted` | no | false | Keep extracted temporary files for debugging. compare mode, directory/package operands only. |
 | `fail-on-removed-library` | no | — | Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full (ADR-065 D2/S3); a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only's own description for why. |
 | `header` | no | — | Public header file(s) applied to both sides (space-separated). Required when input is an ELF binary; ignored for JSON snapshots. If old and new actually declare different header sets (e.g. a new release added a header), set `old-header`/`new-header` instead -- a bare `header` parses BOTH snapshots against the same files, which silently hides the removed/added declarations you're trying to check. |
 | `old-header` | no | — | Public header(s) for the old side only (overrides header for old). Space-separated. |

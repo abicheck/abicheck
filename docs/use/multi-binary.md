@@ -192,10 +192,13 @@ of any kind, upstream or direct.
 For the remaining, **graph-native** kinds
 (`bundle_intra_dep_removed`, `bundle_library_removed`/`_added`, version
 drift, SONAME skew, manifest enforcement), there is no per-library `Change`
-to suppress upstream of them at all, so the only levers are
-`--no-bundle-analysis` (turns off bundle analysis for the whole run — see
-below) and, for a symbol that genuinely comes from outside the release,
-`.abicheck.yml`'s `bundle.system_providers:` (see below).
+to suppress upstream of them at all, so the only lever is, for a symbol
+that genuinely comes from outside the release, `.abicheck.yml`'s
+`bundle.system_providers:` (see below). `--no-bundle-analysis` (which used
+to turn off bundle analysis for the whole run) is gone — bundle-level
+analysis always runs now (Phase 7d, one-comparison-product.md §4.1,
+ADR-068 D5): a run-wide analysis opt-out was exactly the "escape hatch that
+disables real analysis" D5 rules out.
 
 **The sibling-consumption gate covers most, but not all, kinds — and even
 those are gated only inside `compare_bundle()` itself.** Within
@@ -462,20 +465,6 @@ project — a stable, reviewed-in-a-PR property of the release, not a
 per-invocation flag (CLI cleanup phase two, PR J; formerly
 `--bundle-system-providers libfoo,libbar`, one run at a time).
 
-### `--no-bundle-analysis`
-
-Skip bundle analysis entirely. Use this when:
-
-- You're debugging a per-library issue and want to suppress the noise.
-- You want **parity output** with the pre-ADR-023 behaviour of a bundle
-  `compare` (for instance, comparing a CI run from before the
-  bundle layer landed).
-- The bundle layer raised a warning ("bundle analysis skipped: ..."),
-  you want a clean run, and you've already filed a bug.
-
-This flag is the explicit opt-out. There is no environment variable
-equivalent; the flag must appear in the command line.
-
 ### `--bundle-facts-out PATH`
 
 Persist the OLD side's bundle facts (per-library snapshots plus the
@@ -483,7 +472,11 @@ instantiation manifest, if any) to `PATH` for a later stored-baseline bundle
 comparison (G38 Phase 2). See
 [Comparing against a stored bundle baseline](#comparing-against-a-stored-bundle-baseline-g38-phase-2)
 above. Additive output — it does not change this invocation's own findings
-or exit code, and is a no-op when combined with `--no-bundle-analysis`.
+or exit code.
+
+`--no-bundle-analysis` (the whole-run bundle-analysis opt-out this used to
+be a no-op alongside) is gone: bundle-level analysis always runs now
+(Phase 7d, one-comparison-product.md §4.1, ADR-068 D5).
 
 ## JSON output schema additions
 
@@ -515,11 +508,10 @@ analysis ran:
 }
 ```
 
-`bundle_findings` is `[]` (empty list) when bundle analysis ran and
-found nothing. The keys are **omitted entirely** when
-`--no-bundle-analysis` is passed — downstream consumers that need to
-distinguish "no findings" from "didn't run" should check for key
-presence.
+`bundle_findings` is `[]` (empty list) when bundle analysis found nothing.
+Bundle analysis always runs on a directory/package `compare` (Phase 7d,
+one-comparison-product.md §4.1) — there is no run that omits these keys any
+more.
 
 Each finding has:
 
@@ -551,8 +543,8 @@ flips it red, the finding section in the markdown / JSON tells you what
 changed and which consumer is affected. The bisect path depends on which
 finding fired: a per-library finding (something in `libraries[].changes`)
 can be silenced with a [suppression](suppressions.md) if it's expected; a
-`bundle_*` finding cannot be suppressed today (see above) — your options are
-to fix the intra-bundle contract, or fall back to `--no-bundle-analysis` /
+`bundle_*` finding cannot be suppressed today (see above) — your option is
+to fix the intra-bundle contract, or (for a genuinely external provider)
 `.abicheck.yml`'s `bundle.system_providers:` as described below.
 
 ## Comparison scope and completeness (ADR-065)

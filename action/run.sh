@@ -1318,7 +1318,7 @@ _extra_args_is_value_option() {
     --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
     --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
     --frontend-context | --header | --include | --instantiation-manifest | \
-    --lang | --ld-library-path | --manifest | --max-findings | --max-json-object-nodes | \
+    --lang | --ld-library-path | --manifest | --max-findings | \
     --new-variant | --old-variant | --output | --output-dir | --pack | \
     --pdb-path | --policy | --post-manifest | --probe-matrix | \
     --public-header-dir | --report-mode | --required-symbol | --risk-rules | \
@@ -2785,11 +2785,10 @@ elif [[ "$MODE" == "compare" ]]; then
     # Phase 7d: --dso-only/--include-private-dso/--fail-on-removed-library
     # are gone from the CLI -- synthesized into a --config overlay instead
     # (see add_release_topology_config_flags's own docstring for why this
-    # can't just call add_single_flag the way --keep-extracted does).
+    # can't just call add_single_flag). --keep-extracted is gone outright
+    # (one-comparison-product.md §4.1, ADR-068 D5) -- extraction cleanup is
+    # now unconditional, so there is no Action input for it any more.
     add_release_topology_config_flags
-    if [[ "${INPUT_KEEP_EXTRACTED:-false}" == "true" ]]; then
-      CMD+=(--keep-extracted)
-    fi
   fi
 
 elif [[ "$MODE" == "deps-tree" ]]; then

@@ -54,6 +54,8 @@ from .build_config_schema import (
     STR_SUBKEYS as _STR_SUBKEYS,
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
+    int_subkey_findings as _int_subkey_findings,
+    opt_int as _opt_int,
 )
 from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf module)
     reject_plugin_loading_options as _reject_plugin_loading_options,
@@ -325,6 +327,8 @@ class BuildConfig:
     #: default to the removed flags' own ``False``).
     release_dso_only: bool | None = None
     release_include_private_dso: bool | None = None
+    #: ``resource_limits:`` — Phase 7g: former ``--max-json-object-nodes``.
+    resource_limits_max_bundle_facts_decode_nodes: int | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -352,6 +356,7 @@ class BuildConfig:
             "python",
             "gate",
             "release",
+            "resource_limits",
             "version",
             "risk_rules",
             "crosschecks",
@@ -418,6 +423,7 @@ class BuildConfig:
         # directory/package release topology demoted off the CLI.
         "gate": frozenset({"fail_on_removed_library"}),
         "release": frozenset({"dso_only", "include_private_dso"}),
+        "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
     }
 
     @classmethod
@@ -452,6 +458,8 @@ class BuildConfig:
                 f"{key}.{sub} must be a string, got "
                 f"{type(sub_value).__name__}: {sub_value!r}"
             ]
+        if int_findings := _int_subkey_findings(key, sub, sub_value):
+            return int_findings
         if sub not in _LIST_SUBKEYS.get(key, ()):
             return []
         if not isinstance(sub_value, (list, str)):
@@ -531,6 +539,7 @@ class BuildConfig:
         python_blk = _block(top, "python")
         gate = _block(top, "gate")
         release = _block(top, "release")
+        resource_limits = _block(top, "resource_limits")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -636,6 +645,7 @@ class BuildConfig:
             gate_fail_on_removed_library=_opt_bool(gate, "fail_on_removed_library"),
             release_dso_only=_opt_bool(release, "dso_only"),
             release_include_private_dso=_opt_bool(release, "include_private_dso"),
+            resource_limits_max_bundle_facts_decode_nodes=_opt_int(resource_limits, "max_bundle_facts_decode_nodes"),
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -813,6 +823,7 @@ class BuildConfig:
             ("python", self._python_block()),
             ("gate", self._gate_block()),
             ("release", self._release_block()),
+            ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
         ):
             if block:
                 out[key] = block

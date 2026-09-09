@@ -32,6 +32,34 @@ automatically.
 
 from __future__ import annotations
 
+#: Phase 7g (one-comparison-product.md §4.1/§3 #21): the calibrated JSON
+#: decode resource limit, demoted off the CLI (`--max-json-object-nodes`).
+#: See `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`'s own docstring for the
+#: real measurement this default and this config key's unit are calibrated
+#: from, and for why the unit stays node-based rather than a memory size.
+INT_SUBKEYS: dict[str, frozenset[str]] = {
+    "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),
+}
+
+
+def opt_int(d: dict[str, object], key: str) -> int | None:
+    """``BuildConfig``'s ``_opt_int`` -- an int-or-``None`` subkey read,
+    same shape as its ``_opt_bool``/``_opt_str`` siblings. Lives here (not
+    ``build_config.py``, at its own line-count cap) purely for that
+    reason -- it has no dependency on anything else in this module."""
+    v = d.get(key)
+    return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+
+def int_subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
+    """Type findings for one ``<block>.<subkey>`` entry registered in
+    `INT_SUBKEYS` -- split out so `BuildConfig._subkey_findings` (already
+    at its own line-count cap) only pays one call-site line for this."""
+    if sub in INT_SUBKEYS.get(key, ()) and (
+        not isinstance(sub_value, int) or isinstance(sub_value, bool)
+    ):
+        return [f"{key}.{sub} must be an integer, got {type(sub_value).__name__}: {sub_value!r}"]
+    return []
 BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
     "suppression": frozenset({"strict", "require_justification"}),

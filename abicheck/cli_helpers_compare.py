@@ -536,6 +536,7 @@ class ResolvedCompareConfig:
     fail_on_removed_library: bool = False
     release_dso_only: bool = False
     release_include_private_dso: bool = False
+    resource_limits_max_bundle_facts_decode_nodes: int | None = None
 
     @property
     def exit_code_scheme(self) -> str:
@@ -648,6 +649,7 @@ def resolve_compare_config(
     fail_on_removed_library = bool(cfg.gate_fail_on_removed_library) if cfg else False
     release_dso_only = bool(cfg.release_dso_only) if cfg else False
     release_include_private_dso = bool(cfg.release_include_private_dso) if cfg else False
+    res_limit_nodes = cfg.resource_limits_max_bundle_facts_decode_nodes if cfg else None
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -675,6 +677,7 @@ def resolve_compare_config(
         fail_on_removed_library=fail_on_removed_library,
         release_dso_only=release_dso_only,
         release_include_private_dso=release_include_private_dso,
+        resource_limits_max_bundle_facts_decode_nodes=res_limit_nodes,
     )
 
 

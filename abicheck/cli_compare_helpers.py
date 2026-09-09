@@ -1294,9 +1294,8 @@ def run_compare(
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
     debug_info1: Path | None, debug_info2: Path | None,
     devel_pkg1: Path | None, devel_pkg2: Path | None,
-    keep_extracted: bool,
     manifest_path: Path | None,  # bundle_system_providers/cohorts: PR J, see resolved_cfg
-    no_bundle_analysis: bool, bundle_facts_out: Path | None,
+    bundle_facts_out: Path | None,
     headers: tuple[Path, ...], includes: tuple[Path, ...],
     # Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1): `lang`/
     # `header_backend`/`sysroot`/`nostdinc`/`compiler_path`/
@@ -1642,10 +1641,10 @@ def run_compare(
             select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
-            include_private_dso=resolved_cfg.release_include_private_dso, keep_extracted=keep_extracted,
+            include_private_dso=resolved_cfg.release_include_private_dso,
             manifest_path=manifest_path,
             bundle_system_providers=resolved_cfg.bundle_system_providers,
-            bundle_cohorts=resolved_cfg.bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
+            bundle_cohorts=resolved_cfg.bundle_cohorts,
             bundle_facts_out=bundle_facts_out, scope_public_headers=scope_public_headers,
             include_dependencies=include_dependencies,
             severity_preset=resolved_cfg.merged_severity_preset,

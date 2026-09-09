@@ -1,0 +1,3 @@
+### Removed
+
+- **`compare --keep-extracted`/`--no-bundle-analysis`/`--max-json-object-nodes` are gone** (Phase 7d remainder + 7g, `docs/contribute/plans/one-comparison-product.md` §4.1). `--keep-extracted` and `--no-bundle-analysis` have no replacement — extraction cleanup on a directory/package `compare` is now unconditional, and bundle-level cross-library analysis always runs. `--max-json-object-nodes` is replaced by `.abicheck.yml`'s `resource_limits.max_bundle_facts_decode_nodes`; its default (`bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`) is recalibrated from `1_000_000` to `20_000_000`, based on a real measurement against a synthetic oneDAL-scale corpus rather than the previous, never-measured value. The GitHub Action's `keep-extracted` input is removed too.

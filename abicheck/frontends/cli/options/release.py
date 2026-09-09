@@ -57,13 +57,12 @@ def release_options(func: F) -> F:
     """Directory/package (release) comparison knobs, folded onto ``compare``.
 
     The release-only options the removed ``compare-release`` command exposed:
-    package extraction (``--debug-info*``/``--devel-pkg*``), DSO selection
-    (``--keep-extracted``), and the ADR-023 instantiation-manifest analysis.
-    They bite only when ``compare``'s operands are directories or packages
-    (the per-library fan-out); on single-file inputs they are inert. Declared
-    once here so ``compare`` and the internal release engine share one
-    surface (ADR-037 D7). Applied bottom-up, so listed in reverse of
-    displayed order.
+    package extraction (``--debug-info*``/``--devel-pkg*``) and the ADR-023
+    instantiation-manifest analysis. They bite only when ``compare``'s
+    operands are directories or packages (the per-library fan-out); on
+    single-file inputs they are inert. Declared once here so ``compare`` and
+    the internal release engine share one surface (ADR-037 D7). Applied
+    bottom-up, so listed in reverse of displayed order.
 
     CLI cleanup phase two, PR J: ``--bundle-system-providers``/
     ``--bundle-cohort`` are gone from this group -- topology, not a per-run
@@ -82,20 +81,25 @@ def release_options(func: F) -> F:
     resolved the same way onto :class:`abicheck.cli_helpers_compare.
     ResolvedCompareConfig`. ``--dso-only`` (the fourth Phase 7d topology
     flag, ``release.dso_only``) lived in ``cli_options.set_input_options``
-    instead, not here. ``--instantiation-manifest``/``--bundle-facts-out``/
-    ``--bundle-facts-library-manifest`` stay CLI flags this phase -- see
-    each option's own docstring below for why.
+    instead, not here.
+
+    Phase 7d remainder (one-comparison-product.md §4.1, ADR-068 D5, ruled on
+    explicitly rather than left "pending"): ``--keep-extracted`` and
+    ``--no-bundle-analysis`` are gone from this group too. Neither survives
+    D5's three guards -- ``--keep-extracted`` is a local-debug retention
+    knob with no per-run evidence content and no stable-property home
+    either (guard 2, "no escape hatch": it doesn't disable a decision, it
+    just leaves a tempdir on disk); ``--no-bundle-analysis`` is exactly the
+    "escape hatch that disables real analysis" D4 rules out -- a bundle
+    finding a user wants gone is a suppression-policy decision
+    (``--suppress``/``.abicheck.yml`` overrides), not a flag that silently
+    drops a whole analysis stage. Both are removed outright, with no config
+    replacement -- extraction is now always cleaned up, and bundle analysis
+    always runs. ``--instantiation-manifest``/``--bundle-facts-out``/
+    ``--bundle-facts-library-manifest`` are ruled the other way -- see each
+    option's own docstring below for the explicit per-run-operand-vs-
+    config-property call and why.
     """
-    func = click.option(
-        "--no-bundle-analysis",
-        "no_bundle_analysis",
-        is_flag=True,
-        default=False,
-        help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
-        "Bundle findings catch intra-bundle symbol removals, signature drift "
-        "across DSO boundaries, type drift across siblings, provider migration, "
-        "and manifest mismatches. (directory/package inputs only)",
-    )(func)
     func = click.option(
         "--instantiation-manifest",
         "manifest_path",
@@ -108,7 +112,7 @@ def release_options(func: F) -> F:
         "(dump manifest, run plan, bundle facts, project config). "
         "(directory/package inputs only)\n\n"
         "Phase 7d (one-comparison-product.md §4.1) classes this CONFIG ("
-        "\"a declared contract is a project property\") with no stated "
+        '"a declared contract is a project property") with no stated '
         "prerequisite, but its natural home -- a project-config document "
         "-- already has an owner: ADR-049's CompatibilityEvaluationConfig "
         "resolves a whole `contract.*` namespace through its own D7 "
@@ -129,25 +133,27 @@ def release_options(func: F) -> F:
         help="Persist this run's OLD-side bundle facts (per-library snapshots "
         "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
         "ADR-023 amendment) for a later stored-baseline bundle comparison. "
-        "Additive output alongside the ordinary live-vs-live comparison; "
-        "no-op with --no-bundle-analysis. (directory/package inputs only)\n\n"
-        "Phase 7d (one-comparison-product.md §4.1) classes this REMOVE "
-        "(\"evidence capture belongs to dump (D2)\"), but `dump` has no "
-        "directory/package fan-out at all today -- its operand is a single "
-        "binary/header input, with no equivalent that walks a release tree "
-        "and writes a multi-library BundleFacts document. Removing this "
-        "flag now would be a real capability loss (there is no other way "
+        "Additive output alongside the ordinary live-vs-live comparison. "
+        "(directory/package inputs only)\n\n"
+        "Phase 7d (one-comparison-product.md §4.1) originally classed this "
+        'REMOVE ("evidence capture belongs to dump (D2)"). Ruled '
+        "explicitly, not left pending: `dump` has no directory/package "
+        "fan-out at all today -- its operand is a single binary/header "
+        "input, with no equivalent that walks a release tree and writes a "
+        "multi-library BundleFacts document -- so this is not a duplicate "
+        "spelling of a `dump` capability to collapse, it is the only way "
         "to produce a stored-baseline bundle-facts document for a later "
-        "`compare OLD_FACTS NEW_INPUT` bundle comparison), so it stays a "
-        "`compare` flag pending that `dump` capability actually landing.",
-    )(func)
-    func = click.option(
-        "--keep-extracted",
-        "keep_extracted",
-        is_flag=True,
-        default=False,
-        help="Keep extracted temporary files for debugging. "
-        "(directory/package inputs only)",
+        "`compare OLD_FACTS NEW_INPUT` bundle comparison. Under D5's own "
+        "test it is a per-run operand exactly like `-o/--output`: PATH "
+        "names where *this invocation's* evidence capture lands, which is "
+        "not a stable project property (it varies by run/CI job, e.g. by "
+        "date or build id) and has no config vocabulary to merge into "
+        "(guard 1) without inventing one purely to move a path string "
+        '(guard 2\'s "no escape hatch" cuts the other way here -- a fixed '
+        "config path would make the flag's own PATH argument the escape "
+        "hatch). Stays a `compare` CLI flag; revisit only if `dump` grows "
+        "a real release fan-out, at which point this becomes a duplicate "
+        "spelling of that capability rather than the only one.",
     )(func)
     func = click.option(
         "--devel-pkg",

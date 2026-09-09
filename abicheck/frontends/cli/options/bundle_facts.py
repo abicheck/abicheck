@@ -47,19 +47,26 @@ import click
 #: comparison's own per-library needs are unrelated to this
 #: stored-facts-specific gap.
 #:
-#: Phase 7d (one-comparison-product.md §4.1) classes this CONFIG ("cli-
-#: cleanup PR J, unchanged intent"), prerequisite G42 (named deployment
-#: environments and environment-aware provider resolution --
+#: Phase 7d (one-comparison-product.md §4.1) originally classed this CONFIG
+#: ("cli-cleanup PR J, unchanged intent"), prerequisite G42 (named
+#: deployment environments and environment-aware provider resolution --
 #: docs/contribute/plans/g42-check-identity-environments-and-provider-
-#: resolution.md). G42 has not landed, and today's only per-library-header
-#: ``.abicheck.yml`` surface is the unrelated ``bundle: {system_providers,
-#: cohorts}`` block (a system-provider allow-list and co-versioned-library
-#: cohort prefixes, not per-library header/include/compile-context
-#: overrides) -- there is no existing config home this flag's per-library
-#: manifest shape can move into without inventing new plumbing G42 is
-#: meant to design properly. Kept as a CLI flag pending G42, same
-#: treatment Phase 7b gave ``--lang`` before its own inference check
-#: landed.
+#: resolution.md). Ruled explicitly here rather than left "pending": G42
+#: has not landed, and today's only per-library-header ``.abicheck.yml``
+#: surface is the unrelated ``bundle: {system_providers, cohorts}`` block
+#: (a system-provider allow-list and co-versioned-library cohort prefixes,
+#: not per-library header/include/compile-context overrides) -- there is
+#: no existing config home this flag's per-library manifest shape can move
+#: into without inventing new plumbing G42 is meant to design properly
+#: (the same "ad hoc config plumbing" this workstream's own instructions
+#: warn against, echoing ``--instantiation-manifest``'s sibling call
+#: above). Under D5's own guard 1 ("not one-for-one"), collapsing this into
+#: `.abicheck.yml` today would be exactly a one-for-one field rename with
+#: no real merge target, not the kind of migration D5 asks for. Stays a
+#: CLI flag naming a document -- the same class as `--policy`/`--suppress`,
+#: which stay CLI even though what they name is itself a stable project
+#: artifact -- pending G42, same treatment Phase 7b gave ``--lang`` before
+#: its own inference check landed.
 bundle_facts_manifest_options = click.option(
     "--bundle-facts-library-manifest",
     "bundle_facts_library_manifest",

@@ -837,16 +837,15 @@ def _collect_bundle_result(
     return bundle_result, worst_verdict
 
 
-def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
-    """Remove or report temporary directories created during package extraction."""
+def _cleanup_temp_dirs(temp_dir_paths: list[str]) -> None:
+    """Remove temporary directories created during package extraction.
+
+    Always cleans up now -- ``--keep-extracted`` is gone (Phase 7d,
+    ADR-068 D5), no replacement."""
     import shutil as _shutil
 
-    if not keep_extracted:
-        for td_path in temp_dir_paths:
-            _shutil.rmtree(td_path, ignore_errors=True)
-    elif temp_dir_paths:
-        kept_paths = ", ".join(temp_dir_paths)
-        click.echo(f"Extracted files kept in: {kept_paths}", err=True)
+    for td_path in temp_dir_paths:
+        _shutil.rmtree(td_path, ignore_errors=True)
 
 
 def _compute_release_severity_exit_code(

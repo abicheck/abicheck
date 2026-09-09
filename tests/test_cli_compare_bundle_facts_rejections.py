@@ -563,10 +563,9 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert "--depth" in out
 
     def test_no_bundle_analysis_is_rejected(self, tmp_path: Path) -> None:
-        # Codex review: compare_release_against_bundle_facts() has no
-        # parameter to skip compare_bundle_from_facts's cross-library
-        # analysis, so --no-bundle-analysis was silently accepted and
-        # ignored.
+        # --no-bundle-analysis is gone outright (Phase 7d,
+        # one-comparison-product.md §4.1, ADR-068 D5) -- rejected as an
+        # unknown option now, same as everywhere else on `compare`.
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         new_dir = tmp_path / "new"
@@ -717,7 +716,9 @@ class TestCompareOldBundleFactsEarlyRejections:
         # bad content) raised from inside _extract_if_package *after*
         # make_temp_dir() had already recorded the directory -- when
         # extraction sat outside the try/finally, that directory was never
-        # cleaned up even without --keep-extracted.
+        # cleaned up (extraction cleanup is unconditional now that
+        # --keep-extracted is gone -- Phase 7d, one-comparison-product.md
+        # §4.1, ADR-068 D5).
         facts_path = tmp_path / "old.bundlefacts.json"
         facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
         malformed_archive = tmp_path / "release.tar.gz"

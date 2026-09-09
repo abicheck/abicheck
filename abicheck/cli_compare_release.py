@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .bundle import BundleDiffResult
 from .cli import _setup_verbosity, _write_or_echo
 from .cli_compare_release_helpers import (  # noqa: F401
     _RELEASE_VERDICT_ORDER,
@@ -231,12 +230,6 @@ if TYPE_CHECKING:
     default=False,
     help="Include private (non-public) shared objects from non-standard paths.",
 )
-@click.option(
-    "--keep-extracted",
-    is_flag=True,
-    default=False,
-    help="Keep extracted temporary files for debugging.",
-)
 @verbose_option
 @click.option(
     "--instantiation-manifest",
@@ -251,16 +244,6 @@ if TYPE_CHECKING:
     "purely for reader consistency.",
 )
 @click.option(
-    "--no-bundle-analysis",
-    "no_bundle_analysis",
-    is_flag=True,
-    default=False,
-    help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
-    "Bundle findings catch intra-bundle symbol removals, signature drift "
-    "across DSO boundaries, type drift across siblings, provider "
-    "migration, and manifest mismatches.",
-)
-@click.option(
     "--bundle-facts-out",
     "bundle_facts_out",
     type=click.Path(path_type=Path),
@@ -273,7 +256,7 @@ if TYPE_CHECKING:
     "baseline without reopening the old .so files. This is an additive "
     "output alongside the ordinary live-vs-live comparison this "
     "invocation already performs -- it does not change any finding or "
-    "exit code. No-op combined with --no-bundle-analysis.",
+    "exit code.",
 )
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 @include_dependencies_option
@@ -343,12 +326,10 @@ def compare_release_cmd(
     devel_pkg2: Path | None,
     dso_only: bool,
     include_private_dso: bool,
-    keep_extracted: bool,
     verbose: bool,
     manifest_path: Path | None,
     bundle_system_providers: tuple[str, ...],
     bundle_cohorts: tuple[str, ...],
-    no_bundle_analysis: bool,
     bundle_facts_out: Path | None,
     scope_public_headers: bool,
     include_dependencies: bool,
@@ -730,13 +711,13 @@ def compare_release_cmd(
                 policy,
                 policy_file_path,
                 output_dir,
-                collect_diff_results=(
-                    fmt == "junit"
-                    or secondary_fmt == "junit"
-                    or bundle_facts_out is not None
-                    # G38 Phase 4 (_compare_one_library's docstring):
-                    or not no_bundle_analysis
-                ),
+                # Phase 7d (one-comparison-product.md §4.1): bundle-level
+                # cross-library analysis always runs now (--no-bundle-analysis
+                # is gone), and it needs each library's own diff results
+                # (G38 Phase 4, _compare_one_library's docstring) -- so this
+                # is unconditionally True rather than only for JUnit/
+                # --bundle-facts-out.
+                collect_diff_results=True,
                 # Phase 9: only JUnit/--bundle-facts-out need AbiSnapshot.
                 need_full_snapshots=(
                     fmt == "junit"
@@ -874,7 +855,7 @@ def compare_release_cmd(
                 ) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
                     worst_verdict = entry_verdict
 
-            if bundle_facts_out is not None and not no_bundle_analysis:
+            if bundle_facts_out is not None:
                 # Resolved here, not in the leaf write_bundle_facts_out() (see its docstring).
                 #
                 # ADR-063 D1's second named exception: this used to call
@@ -1048,35 +1029,39 @@ def compare_release_cmd(
                 else _compute_release_severity_exit_code(library_results, gate)
             )
 
-            bundle_result: BundleDiffResult | None = None
-            if not no_bundle_analysis:
-                # ADR-065 D2: the bundle graph sees matched members and
-                # *proven* removals/additions only -- an unchecked member
-                # is absent from it, not a deleted provider (Codex review).
-                bundle_old_map, bundle_new_map = scoped_bundle_maps(
-                    old_map, new_map, scope_record
-                )
-                bundle_result, worst_verdict = _collect_bundle_result(
-                    library_results,
-                    bundle_old_map,
-                    bundle_new_map,
-                    worst_verdict,
-                    manifest_path=manifest_path,
-                    bundle_system_providers=(
-                        *bundle_system_providers,
-                        *out_of_scope_provider_names(scope_record),
-                    ),
-                    bundle_cohorts=bundle_cohorts,
-                    policy=policy,
-                    policy_file=resolve_bundle_policy_file(
-                        suppress, policy, policy_file_path, pack_application
-                    ),
-                    old_root=old_dir,
-                    new_root=new_dir,
-                    old_variant=old_variant,
-                    new_variant=new_variant,
-                    scope_record=scope_record,
-                )
+            # Phase 7d (one-comparison-product.md §4.1): bundle-level
+            # cross-library analysis always runs now -- --no-bundle-analysis
+            # was the "escape hatch that disables real analysis" D4/D5 rule
+            # out; a suppression-policy override is the supported route for
+            # a bundle finding a user doesn't want.
+            #
+            # ADR-065 D2: the bundle graph sees matched members and
+            # *proven* removals/additions only -- an unchecked member
+            # is absent from it, not a deleted provider (Codex review).
+            bundle_old_map, bundle_new_map = scoped_bundle_maps(
+                old_map, new_map, scope_record
+            )
+            bundle_result, worst_verdict = _collect_bundle_result(
+                library_results,
+                bundle_old_map,
+                bundle_new_map,
+                worst_verdict,
+                manifest_path=manifest_path,
+                bundle_system_providers=(
+                    *bundle_system_providers,
+                    *out_of_scope_provider_names(scope_record),
+                ),
+                bundle_cohorts=bundle_cohorts,
+                policy=policy,
+                policy_file=resolve_bundle_policy_file(
+                    suppress, policy, policy_file_path, pack_application
+                ),
+                old_root=old_dir,
+                new_root=new_dir,
+                old_variant=old_variant,
+                new_variant=new_variant,
+                scope_record=scope_record,
+            )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
             worst_verdict = _strip_diff_results_and_adjust_verdict(
@@ -1179,4 +1164,4 @@ def compare_release_cmd(
                 scope_terms=scope_terms,
             )
         finally:
-            _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
+            _cleanup_temp_dirs(_temp_dir_paths)

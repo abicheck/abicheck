@@ -78,10 +78,6 @@ inputs:
   include-private-dso:
     description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
-  keep-extracted:
-    description: 'Keep extracted temporary files for debugging. compare mode, directory/package operands only.'
-    required: false
-    default: 'false'
   fail-on-removed-library:
     description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full (ADR-065 D2/S3); a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
@@ -980,7 +976,6 @@ runs:
         INPUT_DEVEL_PKG2: ${{ inputs.devel-pkg2 }}
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
-        INPUT_KEEP_EXTRACTED: ${{ inputs.keep-extracted }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_ABI_BASELINE: ${{ inputs.abi-baseline }}
         INPUT_BASELINE_PROFILE: ${{ inputs.baseline-profile }}
@@ -1191,7 +1186,6 @@ runs:
         INPUT_DEVEL_PKG2: ${{ inputs.devel-pkg2 }}
         INPUT_DSO_ONLY: ${{ inputs.dso-only }}
         INPUT_INCLUDE_PRIVATE_DSO: ${{ inputs.include-private-dso }}
-        INPUT_KEEP_EXTRACTED: ${{ inputs.keep-extracted }}
         INPUT_FAIL_ON_REMOVED_LIBRARY: ${{ inputs.fail-on-removed-library }}
         INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}

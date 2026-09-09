@@ -192,7 +192,6 @@ class TestCompareReleaseErrorPaths:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_dir), str(new_dir),
-            "--no-bundle-analysis",
         ])
         assert result.exit_code != 0
         assert "No supported ABI inputs" in result.output

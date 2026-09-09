@@ -74,7 +74,6 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_DEVEL_PKG2",
     "INPUT_DSO_ONLY",
     "INPUT_INCLUDE_PRIVATE_DSO",
-    "INPUT_KEEP_EXTRACTED",
     "INPUT_FAIL_ON_REMOVED_LIBRARY",
     "INPUT_ABI_BASELINE",
     "INPUT_ESTIMATE",
@@ -938,8 +937,7 @@ class TestModeScopedInputWarnings:
         [
             "INPUT_DSO_ONLY",
             "INPUT_INCLUDE_PRIVATE_DSO",
-            "INPUT_KEEP_EXTRACTED",
-            "INPUT_FAIL_ON_REMOVED_LIBRARY",
+                    "INPUT_FAIL_ON_REMOVED_LIBRARY",
         ],
     )
     def test_bool_input_warns_when_true_on_non_compare_mode(
@@ -954,8 +952,7 @@ class TestModeScopedInputWarnings:
         [
             "INPUT_DSO_ONLY",
             "INPUT_INCLUDE_PRIVATE_DSO",
-            "INPUT_KEEP_EXTRACTED",
-            "INPUT_FAIL_ON_REMOVED_LIBRARY",
+                    "INPUT_FAIL_ON_REMOVED_LIBRARY",
         ],
     )
     def test_bool_input_silent_when_false_default(self, env_name: str) -> None:

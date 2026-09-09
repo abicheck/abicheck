@@ -68,6 +68,12 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `dso_only` | bool |
 | `include_private_dso` | bool |
 
+### `resource_limits:`
+
+| Sub-key | Type |
+|---|---|
+| `max_bundle_facts_decode_nodes` | unspecified |
+
 ### `scope:`
 
 | Sub-key | Type |

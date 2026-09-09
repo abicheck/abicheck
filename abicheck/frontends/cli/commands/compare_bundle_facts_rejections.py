@@ -387,16 +387,11 @@ def reject_unsupported_options(
             "--report-mode/--show-filtered are not supported together "
             "with a stored-bundle-facts OLD_INPUT."
         )
-    if kwargs.get("no_bundle_analysis"):
-        # Codex review: compare_release_against_bundle_facts() has no
-        # parameter to skip the cross-library BUNDLE_* analysis
-        # (compare_bundle_from_facts always runs), so --no-bundle-analysis
-        # was silently accepted and ignored -- the run could report a
-        # different verdict/exit code than requested (bundle_verdict folds
-        # into result.verdict). Rejected rather than silently unscoped.
-        raise click.UsageError(
-            "--no-bundle-analysis is not supported together with a stored-bundle-facts OLD_INPUT."
-        )
+    # --no-bundle-analysis is gone (Phase 7d, one-comparison-product.md
+    # §4.1, ADR-068 D5) -- bundle-level analysis always runs now, matching
+    # what this stored-bundle-facts path already did unconditionally
+    # (compare_release_against_bundle_facts()/compare_bundle_from_facts()
+    # have no parameter to skip it), so there is nothing left to reject here.
     # Codex review: kwargs["config"] is compare.py's own resolved value --
     # an explicit --config, or (since a later review round) the same
     # cwd-upward auto-discovered .abicheck.yml run_compare's own cfg_path
@@ -640,12 +635,8 @@ def _reject_new_side_extraction_options_for_stored_pair(
             "are stored BundleFacts documents: a persisted document carries "
             "no per-library executable/library distinction to filter by."
         )
-    if kwargs.get("keep_extracted"):
-        raise click.UsageError(
-            "--keep-extracted is not supported when both OLD_INPUT and "
-            "NEW_INPUT are stored BundleFacts documents: neither side is "
-            "ever extracted to a temporary directory."
-        )
+    # --keep-extracted is gone (Phase 7d, one-comparison-product.md §4.1,
+    # ADR-068 D5) -- nothing left to reject here.
     if kwargs.get("new_version") not in (None, "", "new"):
         raise click.UsageError(
             "--version new=... is not supported when both OLD_INPUT and "

@@ -398,14 +398,20 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     include_private_dso_cfg = (
         bool(_bundle_cfg.release_include_private_dso) if _bundle_cfg else False
     )
+    # Phase 7g: --max-json-object-nodes is gone -- resource_limits.
+    # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now.
+    max_json_object_nodes_cfg = (
+        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes if _bundle_cfg else None
+    )
 
     if new_is_stored:
         # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
         # document too -- no extraction, no header AST, no live NEW-side
         # resolution (compare_stored_bundle_facts_pair() is a pure in-memory
         # diff of both sides' already-persisted per-library AbiSnapshots).
-        # --max-json-object-nodes applies to *both* sides' load here (one
-        # unscoped flag), unlike the stored/live branch below.
+        # resource_limits.max_bundle_facts_decode_nodes applies to *both*
+        # sides' load here (one unscoped config key), unlike the
+        # stored/live branch below.
         from ....errors import SnapshotError
 
         try:
@@ -418,8 +424,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 policy=kwargs["policy"],
                 policy_file=policy_file,
                 suppress=suppression,
-                old_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
-                new_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                old_max_json_object_nodes=max_json_object_nodes_cfg,
+                new_max_json_object_nodes=max_json_object_nodes_cfg,
                 depth=kwargs.get("depth"),
             )
         # Same translation the stored/live branch below applies (its own
@@ -551,7 +557,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     policy_file=policy_file,
                     suppress=suppression,
                     include_dependencies=bool(kwargs.get("include_dependencies", False)),
-                    max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                    max_json_object_nodes=max_json_object_nodes_cfg,
                 )
             except BundleFactsLibraryOverridesError as exc:
                 # Codex review, fresh evidence: compare_release_against_bundle_
@@ -590,18 +596,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 # to be a directory or otherwise unreadable file.
                 raise click.ClickException(str(exc)) from exc
         finally:
-            # Mirrors the live release fan-out's own --keep-extracted handling
-            # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
-            # the caller asked to keep it for debugging.
+            # Mirrors _cleanup_temp_dirs: always remove the tempdir now --
+            # --keep-extracted is gone (Phase 7d, ADR-068 D5).
             import shutil as _shutil
 
-            if not kwargs.get("keep_extracted"):
-                for _td in _temp_dir_paths:
-                    _shutil.rmtree(_td, ignore_errors=True)
-            elif _temp_dir_paths:
-                click.echo(
-                    f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
-                )
+            for _td in _temp_dir_paths:
+                _shutil.rmtree(_td, ignore_errors=True)
 
     scope_terms = scope_terms_for(
         result,

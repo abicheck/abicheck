@@ -501,21 +501,13 @@ def _embed_inline_source_side(
 # `--old-bundle-facts` flag is gone; see
 # workflows/bundle_compare_operand.py for the classifier and
 # compare_bundle_facts.py for the dispatch it still routes to.
-@click.option(
-    "--max-json-object-nodes",
-    "max_json_object_nodes",
-    type=int,
-    default=None,
-    help="Override the JSON container-node budget "
-    "(bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES, 1,000,000) "
-    "when decoding OLD_INPUT, if it is a stored BundleFacts "
-    "document (see workflows/bundle_compare_operand.py). A real "
-    "per-library facts blob for a large, template-heavy "
-    "library (e.g. SYCL/DPC++) can legitimately need well "
-    "over the default to decode; this is the supported way "
-    "to raise it, instead of patching the budget in code. "
-    "Meaningless (and a no-op) otherwise.",
-)
+#
+# Phase 7g (one-comparison-product.md §4.1/§3 #21): --max-json-object-nodes
+# is gone from here too -- resource_limits.max_bundle_facts_decode_nodes in
+# .abicheck.yml is its only source now (compare_bundle_facts.py's dispatch()
+# reads it off the same BuildConfig already loaded there for
+# bundle_system_providers/cohorts), calibrated against a real oneDAL-scale
+# corpus (see bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES's own docstring).
 @bundle_facts_manifest_options  # G38 Phase 17
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
 # Two-sided header/include/version family (ADR-037 D3). Phase 7 (ADR-037
@@ -789,6 +781,5 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         )
         dispatch_bundle_facts(compile_context=_compile_context, new_is_stored=_bundle_operands.new_is_stored, **kwargs)
         return
-    kwargs.pop("max_json_object_nodes", None)
     reject_bundle_facts_manifest_without_old_bundle_facts(kwargs)
     run_compare(ctx, **kwargs)

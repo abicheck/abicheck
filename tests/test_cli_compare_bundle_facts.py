@@ -218,6 +218,40 @@ class TestCompareOldBundleFacts:
         assert lib["suppression"]["suppressed_count"] == 1
 
     def test_max_json_object_nodes_override_is_honored(self, tmp_path: Path) -> None:
+        """Phase 7g (one-comparison-product.md §4.1/§3 #21): the former
+        ``--max-json-object-nodes`` is gone -- ``.abicheck.yml``'s
+        ``resource_limits.max_bundle_facts_decode_nodes`` is its only
+        source now."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("resource_limits:\n  max_bundle_facts_decode_nodes: 1\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        # A real facts document has more than one JSON container; a budget
+        # of 1 must reject it with a clean CLI error, not a raw traceback.
+        assert code != 0
+        assert "JSON containers" in out
+        assert "Traceback" not in out
+
+    def test_max_json_object_nodes_flag_removed(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -239,11 +273,8 @@ class TestCompareOldBundleFacts:
             "json",
         )
 
-        # A real facts document has more than one JSON container; a budget
-        # of 1 must reject it with a clean CLI error, not a raw traceback.
-        assert code != 0
-        assert "JSON containers" in out
-        assert "Traceback" not in out
+        assert code == 64
+        assert "--max-json-object-nodes" in out
 
     def test_format_sarif_is_rejected(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
