@@ -3567,8 +3567,33 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
     echo "::error::extra-args passes its own --config, which conflicts with the --config this Action already synthesized from a dso-only/fail-on-removed-library/include-private-dso/compile-context input (both cannot be honored -- Click keeps only the last one, silently dropping the other). Use the 'build-config' input instead of 'extra-args: --config ...' when combining a synthesized setting with a project config file; it merges with, rather than replaces, the synthesized overlay."
     exit 1
   fi
-  # shellcheck disable=SC2206
-  CMD+=($INPUT_EXTRA_ARGS)
+  if [[ "$MODE" == "scan" && "$_CLI_MODE" == "compare" ]]; then
+    # `--pattern-verdicts` (Codex review, PR #1172, round 18, fresh
+    # evidence): the one extra-args flag `_extra_args_has_pattern_verdicts_
+    # flag` above lets reach the compare-translation branch at all is
+    # exactly the one flag `compare` itself has no such option for -- its
+    # own pattern-verdict modulation has been unconditional since ADR-068
+    # D4, so the flag exists purely to *gate the routing decision*, not to
+    # be forwarded. Appending it verbatim (the plain `CMD+=($INPUT_EXTRA_
+    # ARGS)` the `else` branch below still uses) would fail the translated
+    # `compare` invocation with a real "no such option" usage error on the
+    # one request shape this predicate was supposed to let through safely
+    # -- the only case reaching this branch at all. Filtered here rather
+    # than from `_extra_args_has_scan_only_flag`'s own always-legacy list
+    # (that list forces legacy; this flag's whole point is the opposite)
+    # and only in the scan->compare translation branch, so a native `mode:
+    # compare` request passing this flag directly still gets the real,
+    # correct Click usage error.
+    # shellcheck disable=SC2086  # word-splitting is the point; matches the
+    # plain-append `else` branch's own already-disabled SC2206 above.
+    for _extra_arg in $INPUT_EXTRA_ARGS; do
+      [[ "$_extra_arg" == "--pattern-verdicts" ]] && continue
+      CMD+=("$_extra_arg")
+    done
+  else
+    # shellcheck disable=SC2206
+    CMD+=($INPUT_EXTRA_ARGS)
+  fi
 fi
 
 # Recomputed here (idempotently -- compare/scan mode already computed it

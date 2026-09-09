@@ -894,7 +894,16 @@ class TestExtraArgsHasConfigFlag:
 
 
 _EXTRA_ARGS_CONFIG_GUARD_START = "# Append extra-args (pass-through CLI arguments)"
-_EXTRA_ARGS_CONFIG_GUARD_END = "\nfi\n"
+# A trailing, unindented "\nfi\n" used to be unique to this block's own
+# closing `fi` -- but the round-18 `--pattern-verdicts`-stripping fix
+# (Codex review, PR #1172, fresh evidence) nested a second `if/else/fi`
+# *inside* it, so the naive first-match search now cuts the block off at
+# that inner `fi` instead, truncating the sourced script mid-statement.
+# Anchored on the next block's own distinctive comment instead, which is
+# unique in the file and immediately follows this block's real end.
+_EXTRA_ARGS_CONFIG_GUARD_END = (
+    "# Recomputed here (idempotently -- compare/scan mode already computed it"
+)
 
 
 def _extra_args_config_guard_source() -> str:
@@ -904,9 +913,7 @@ def _extra_args_config_guard_source() -> str:
     below)."""
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_EXTRA_ARGS_CONFIG_GUARD_START)
-    end = text.index(_EXTRA_ARGS_CONFIG_GUARD_END, start) + len(
-        _EXTRA_ARGS_CONFIG_GUARD_END
-    )
+    end = text.index(_EXTRA_ARGS_CONFIG_GUARD_END, start)
     return text[start:end]
 
 
@@ -920,7 +927,18 @@ class TestExtraArgsConfigCollisionGuard:
     def _run(
         self, cmd_has_config: bool, extra_args: str
     ) -> subprocess.CompletedProcess[str]:
-        cmd_seed = (
+        # `MODE`/`_CLI_MODE` (round 18, fresh evidence): the extra-args
+        # append block now branches on both to decide whether to strip
+        # `--pattern-verdicts` (see `TestPatternVerdictsFlagStrippedBefore
+        # CompareTranslation` in test_action_run_sh_scan_routing_edge_
+        # cases.py for that behavior itself) -- this narrower harness
+        # sources only the block, never the full mode-dispatch chain that
+        # normally sets both, so under the real script's own `set -u` they
+        # would be unbound here. Seeded to "compare" -- consistent with
+        # this test's own `CMD=(compare ...)` seed -- so the new branch
+        # deterministically takes the plain-append `else` path, which is
+        # what this collision-guard test class is actually about.
+        cmd_seed = "MODE=compare\n_CLI_MODE=compare\n" + (
             "CMD=(compare --config /tmp/overlay.yml)"
             if cmd_has_config
             else "CMD=(compare)"

@@ -753,3 +753,81 @@ class TestPatternVerdictsDefaultStaysOnLegacyCli:
             }
         )
         assert cmd[1] == "compare"
+
+
+#: One line past the extra-args-append block (Codex review, PR #1172,
+#: round 18, fresh evidence): the default `_mode_branches_region()` cuts
+#: off *before* this block (`_END_MARKER` sits right before it), so no
+#: existing routing test actually exercises what lands in `$CMD` from
+#: `extra-args` itself -- only the routing *decision*. That gap is exactly
+#: how the round-17 fix shipped with `--pattern-verdicts` reaching the
+#: translated `compare` invocation unstripped, a real "no such option"
+#: usage error on the one request shape that predicate was meant to let
+#: through safely.
+_EXTRA_ARGS_APPEND_END_MARKER = (
+    "# Recomputed here (idempotently -- compare/scan mode already computed it"
+)
+
+
+def _region_through_extra_args_append() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    return text[: text.index(_EXTRA_ARGS_APPEND_END_MARKER)]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestPatternVerdictsFlagStrippedBeforeCompareTranslation:
+    """`--pattern-verdicts` (Codex review, PR #1172, round 18, fresh
+    evidence): the routing predicate above only decides *whether* to route
+    to `compare` -- it does nothing about what `extra-args` itself still
+    hands to the final `$CMD` a few hundred lines later. `compare` has no
+    `--pattern-verdicts` option at all (ADR-068 D4 made its own modulation
+    unconditional and removed the flag), so the one request shape the round-
+    17 fix let through onto `compare` failed outright with a real Click
+    usage error -- passing verbatim, unstripped, straight through the
+    generic `extra-args` append."""
+
+    def test_pattern_verdicts_flag_stripped_when_routing_to_compare(self) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            },
+            region=_region_through_extra_args_append(),
+        )
+        assert cmd[1] == "compare"
+        assert "--pattern-verdicts" not in cmd, cmd
+
+    def test_no_pattern_verdicts_flag_left_on_legacy_cli_is_not_stripped(
+        self,
+    ) -> None:
+        # Negative control: `--no-pattern-verdicts` stays on the legacy
+        # `scan` CLI (it genuinely accepts the flag), so it must NOT be
+        # stripped there -- only the compare-translation branch strips
+        # anything.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--no-pattern-verdicts",
+            },
+            region=_region_through_extra_args_append(),
+        )
+        assert cmd[1] == "scan"
+        assert "--no-pattern-verdicts" in cmd, cmd
+
+    def test_other_extra_args_survive_alongside_the_stripped_flag(self) -> None:
+        # The stripping must be scoped to exactly one token, not swallow
+        # neighboring extra-args.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--verbose --pattern-verdicts --severity-preset strict",
+            },
+            region=_region_through_extra_args_append(),
+        )
+        assert cmd[1] == "compare"
+        assert "--pattern-verdicts" not in cmd, cmd
+        assert "--verbose" in cmd, cmd
+        assert "--severity-preset" in cmd, cmd

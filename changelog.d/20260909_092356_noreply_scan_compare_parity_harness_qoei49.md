@@ -84,4 +84,9 @@
   guarantee — that a `mode: scan` caller's workflow was never written
   against, purely because the Action picked a different internal CLI. An
   explicit bare `--pattern-verdicts` (matching `compare`'s forced-on
-  behavior exactly) is the one case that is safe to route.
+  behavior exactly) is the one case that is safe to route. A first fix
+  attempt only fixed the routing *decision* — the flag itself still reached
+  the translated `compare` invocation unstripped, on the one request shape
+  the fix was meant to let through, failing it with a real "no such option"
+  usage error (`compare` has no `--pattern-verdicts` flag at all). It is
+  now stripped before the translated command runs.
