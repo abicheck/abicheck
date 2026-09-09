@@ -449,6 +449,15 @@ _merge_config_overlay_with_discovered_project_config() {
     # reintroduce the exact config-dropping bug this function exists to fix,
     # on precisely the runners least able to detect it.
     echo "::error::mode: ${MODE} needs a working Python interpreter with abicheck importable to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (resolved interpreter: '${_PY_BIN:-<none found on PATH>}'). Refusing to silently drop the project's own config."
+    # $out_path (the caller's already-created overlay, e.g.
+    # $_COMPILE_CONTEXT_CONFIG_OVERLAY/$_RELEASE_TOPOLOGY_CONFIG_OVERLAY) is
+    # named directly here rather than through a global -- this function is
+    # shared by both callers, so cleaning up "whichever global just got set"
+    # would need to guess which one, while $out_path always names the right
+    # file regardless of caller (Codex review, fresh evidence: this exit
+    # happens after the caller's own mktemp, before the main EXIT trap
+    # further down is installed).
+    _rm_overlay_on_early_exit "$out_path"
     exit 1
   fi
   (cd "$_PY_SAFE_DIR" \
@@ -630,8 +639,18 @@ if merge_mode != "explicit":
         _compile_db_resolves = False
         if _sources_root:
             try:
+                # match.is_file() (not just "any match at all"): mirrors
+                # inline.py's own `for match in sorted(sources.glob(cfg.
+                # compile_db)): if match.is_file():` exactly -- a glob that
+                # only matches a directory is not usable evidence there
+                # either, and treating it as "resolves" here would still
+                # promote a dead-end path to explicit, must-not-be-missing
+                # status (Codex review, fresh evidence).
                 _compile_db_resolves = any(
-                    Path(_sources_root).glob(base["build"]["compile_db"])
+                    match.is_file()
+                    for match in Path(_sources_root).glob(
+                        base["build"]["compile_db"]
+                    )
                 )
             except (OSError, ValueError):
                 _compile_db_resolves = False
@@ -714,6 +733,32 @@ _COMPILE_CONTEXT_CONFIG_OVERLAY=""
 # under $RUNNER_TEMP but never reached the main EXIT trap further down,
 # leaking one file per run on a persistent self-hosted runner.
 _RELEASE_TOPOLOGY_CONFIG_OVERLAY=""
+
+# Codex review, fresh evidence: the main EXIT trap that cleans up both
+# overlays above (further down, once STDERR_FILE etc. are also in scope)
+# is installed well after either overlay's own mktemp. On the SUCCESS path
+# that is harmless -- the script keeps running until it reaches (and is
+# replaced by) that later trap, well before the real exit. But a handful of
+# `exit 1` calls between an overlay's own mktemp and that later trap
+# installation (missing-interpreter, `_mktemp_canonical` failure) terminate
+# the whole script from exactly that window, with only the earlier,
+# overlay-unaware `rm -rf "$_PY_SAFE_DIR"' EXIT` trap active -- leaking the
+# just-created overlay. An earlier revision tried re-arming a broad EXIT
+# trap immediately after each mktemp instead of this per-site cleanup; that
+# also cleans up on the *success* path's own early exit (this function
+# returning to a caller that itself exits right after CMD assembly, without
+# ever invoking the real command that reads the file) which is exactly the
+# shape every test harness here uses, so it was reverted -- an unconditional
+# early trap cannot distinguish "the process is exiting because of a
+# failure in this window" from "the process's caller simply hasn't gotten
+# around to consuming the file yet". Removing the file explicitly at each
+# known early-`exit 1` site (matching Codex's own suggested alternative)
+# only fires on the actual failure paths, leaving the success path
+# untouched.
+_rm_overlay_on_early_exit() {
+  rm -f "${1:-}"
+}
+
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
   # (dump and single-pair compare take --lang here; scan keeps its own
@@ -860,6 +905,7 @@ PYEOF
     rm -f "$_compile_context_helper_py"
     _COMPILE_CONTEXT_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-compile-context.XXXXXX")
     if ! _COMPILE_CONTEXT_CONFIG_OVERLAY=$(_mktemp_canonical "$_COMPILE_CONTEXT_CONFIG_OVERLAY"); then
+      _rm_overlay_on_early_exit "$_COMPILE_CONTEXT_CONFIG_OVERLAY"
       exit 1
     fi
     if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
@@ -991,6 +1037,7 @@ PYEOF
   # further down can actually clean it up (Codex review, fresh evidence).
   _RELEASE_TOPOLOGY_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-release-topology.XXXXXX")
   if ! _RELEASE_TOPOLOGY_CONFIG_OVERLAY=$(_mktemp_canonical "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY"); then
+    _rm_overlay_on_early_exit "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY"
     exit 1
   fi
   if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then

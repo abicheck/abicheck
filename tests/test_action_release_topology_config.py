@@ -204,6 +204,31 @@ def _mktemp_canonical_source() -> str:
     return text[start:end]
 
 
+# add_release_topology_config_flags's own extraction (_FN_START/_FN_END
+# below) starts right at its own `add_release_topology_config_flags() {`
+# opening, so it does NOT include this sibling helper -- unlike
+# add_compile_context_flags's own extraction (test_action_compile_context_
+# parity.py), which starts earlier and picks it up incidentally. Extracted
+# explicitly here so this harness doesn't depend on that incidental
+# ordering (Codex review, fresh evidence: both add_release_topology_config_
+# flags and _merge_config_overlay_with_discovered_project_config now call
+# this on their respective early-`exit 1` paths, to remove the just-created
+# overlay before a missing-interpreter/`_mktemp_canonical` failure
+# terminates the script from the window before the main EXIT trap, further
+# down, is installed).
+_RM_OVERLAY_ON_EARLY_EXIT_START = "_rm_overlay_on_early_exit() {"
+_RM_OVERLAY_ON_EARLY_EXIT_END = "\n}\n"
+
+
+def _rm_overlay_on_early_exit_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_RM_OVERLAY_ON_EARLY_EXIT_START)
+    end = text.index(_RM_OVERLAY_ON_EARLY_EXIT_END, start) + len(
+        _RM_OVERLAY_ON_EARLY_EXIT_END
+    )
+    return text[start:end]
+
+
 def _bash_executable() -> str:
     if os.name != "nt":
         return "bash"
@@ -294,6 +319,7 @@ _PY_BIN="{sys.executable}"
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
 {_mktemp_canonical_source()}
+{_rm_overlay_on_early_exit_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -397,6 +423,7 @@ _PY_BIN="{sys.executable}"
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
 {_mktemp_canonical_source()}
+{_rm_overlay_on_early_exit_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -439,6 +466,7 @@ _PY_BIN="{sys.executable}"
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
 {_mktemp_canonical_source()}
+{_rm_overlay_on_early_exit_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -472,6 +500,7 @@ _PY_BIN="{sys.executable}"
 {_py_bin_has_abicheck_source()}
 {_path_qualified_helper_source()}
 {_mktemp_canonical_source()}
+{_rm_overlay_on_early_exit_source()}
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
@@ -485,6 +514,69 @@ printf '%s\\n' "$_overlay_path"
         overlay_path = result.stdout.strip().splitlines()[-1]
         assert not Path(overlay_path).exists(), (
             f"the real EXIT trap should have removed {overlay_path}"
+        )
+
+
+class TestReleaseTopologyOverlayCleansUpOnEarlyExit:
+    """Codex review, PR #1159 (P2, fresh evidence, second round): the main
+    EXIT trap covered by ``TestReleaseTopologyOverlayCleansUpOnExit`` above
+    is installed well after the overlay's own ``mktemp`` -- so a script
+    termination that happens in that window (missing-interpreter,
+    ``_mktemp_canonical`` failure) still leaked the just-created overlay,
+    since the only trap active at that point is the earlier,
+    overlay-unaware ``rm -rf "$_PY_SAFE_DIR"`` one. Fixed by explicitly
+    removing the overlay at each such early-``exit 1`` site
+    (``_rm_overlay_on_early_exit``) rather than installing a broader trap
+    right after the ``mktemp`` -- an earlier revision of this fix tried
+    that and it also fired on the *success* path's own early exit (every
+    harness here calls the function and exits right after, without ever
+    running the real command that reads the file back), which would have
+    made every other test in this module fail.
+    """
+
+    def test_missing_interpreter_in_the_merge_step_removes_the_overlay(
+        self, tmp_path: Path
+    ) -> None:
+        fn_source = _add_release_topology_config_flags_source()
+        merge_fn_source = _merge_config_overlay_fn_source()
+        script = f"""#!/usr/bin/env bash
+set -uo pipefail
+MODE="compare"
+CMD=(compare)
+_PY_BIN="{sys.executable}"
+{_py_safe_dir_source()}
+{_py_bin_has_abicheck_source()}
+{_path_qualified_helper_source()}
+{_mktemp_canonical_source()}
+{_rm_overlay_on_early_exit_source()}
+{merge_fn_source}
+{fn_source}
+# Force the merge helper's own missing-interpreter guard to fire -- this
+# runs AFTER the overlay's own mktemp inside add_release_topology_config_flags,
+# exactly the window this fix closes.
+_PY_BIN_HAS_ABICHECK="false"
+add_release_topology_config_flags
+printf '%s\\n' "${{CMD[@]}}"
+"""
+        # RUNNER_TEMP is redirected to a private tmp_path so this test can
+        # tell "the overlay this run created is gone" apart from every other
+        # test in this module's own long-standing leaked overlays under the
+        # real /tmp (those tests never invoke the real trap either -- they
+        # just print CMD and exit, matching this module's own
+        # _read_config_overlay pattern of reading the file back afterward).
+        result = _run_bash_script(
+            script,
+            {"INPUT_DSO_ONLY": "true", "RUNNER_TEMP": str(tmp_path)},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 1
+        assert "needs a working Python interpreter" in result.stdout
+        # The overlay path was never printed (the script exited before
+        # CMD+=(--config ...)), so look for it by its known mktemp prefix
+        # instead.
+        leftover = list(tmp_path.glob("abicheck-release-topology.*"))
+        assert leftover == [], (
+            f"the overlay should have been removed on the early exit, found: {leftover}"
         )
 
 
