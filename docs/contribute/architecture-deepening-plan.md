@@ -644,8 +644,8 @@ driven through one uniform, cost-estimable interface. In the current code:
 - **The real orchestrator bypasses it.** `scan_engine.run_scan_core()` (the
   shared engine core PR #536 extracted from `cli_scan.py`) imports and calls
   the concrete collector functions directly —
-  `buildsource.crosscheck.run_crosschecks`, `buildsource.pattern_scan.
-  scan_files`, `buildsource.preprocessor_scan.run_preprocessor_scan`, etc.
+  `buildsource.cross_source_checks.run_crosschecks`, `buildsource.pattern_facts.
+  scan_files`, `buildsource.preprocessor_facts.run_preprocessor_scan`, etc.
   (`scan_engine.py:53-57`) — never touching `providers.py`.
 - **The typed half of the same ADR section shipped, the protocol half
   didn't.** `service_scan.py`'s `ScanRequest`/`ScanResult`/`run_scan()`/

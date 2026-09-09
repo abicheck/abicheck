@@ -5,7 +5,7 @@ Diffs happen on structured *finding sets* — kind, resolved identity,
 severity, evidence refs — never on rendered report text (Phase 0's own
 requirement, plan §6). ``compare``/``scan`` are invoked through their real
 public CLI entry point (Click's in-process ``CliRunner``, no subprocess);
-``run_crosschecks``/``scan_files``/``audit_stable_abi_imports`` are invoked
+``run_crosschecks``/``find_pattern_facts``/``audit_stable_abi_imports`` are invoked
 directly for the ``scan``-only side because they are themselves the
 production functions ADR-068 §1 named as scan-only by call site — calling
 them here *is* exercising "what scan has", not a reimplementation of it.
@@ -64,10 +64,10 @@ def severity_for_kind(kind_value: str) -> str:
 def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
     """The finding set ``scan``'s cross-source checks produce for *snapshot*.
 
-    Calls :func:`abicheck.buildsource.crosscheck.run_crosschecks` directly —
+    Calls :func:`abicheck.buildsource.cross_source_checks.run_crosschecks` directly —
     the same production function ``scan_engine.py`` is the sole caller of.
     """
-    from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
 
     result = run_crosschecks(snapshot, config)
     findings = set()

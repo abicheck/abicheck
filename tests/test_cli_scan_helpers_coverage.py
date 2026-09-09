@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from abicheck.buildsource.scan_levels import SourceMethod
 from abicheck.cli_scan_helpers import (
     l4_coverage_advisories,
     render_baseline_lines,
@@ -31,6 +30,7 @@ from abicheck.cli_scan_helpers import (
     resolve_effective_allow_query,
     scan_pattern_roots,
 )
+from abicheck.model.evidence_depth_levels import SourceMethod
 
 # --- l4_coverage_advisories --------------------------------------------------
 
@@ -163,7 +163,7 @@ def test_resolve_query_config_without_query_is_noop(tmp_path) -> None:
 
 def test_scan_pattern_roots_excludes_sources_for_shallow_depth(tmp_path) -> None:
     """BINARY/HEADERS depth never walks the --sources tree."""
-    from abicheck.buildsource.scan_levels import EvidenceDepth
+    from abicheck.model.evidence_depth_levels import EvidenceDepth
 
     h = tmp_path / "inc"
     src = tmp_path / "src"
@@ -173,7 +173,7 @@ def test_scan_pattern_roots_excludes_sources_for_shallow_depth(tmp_path) -> None
 
 def test_scan_pattern_roots_adds_sources_for_deep_depth(tmp_path) -> None:
     """SOURCE depth adds the --sources tree to the pattern roots."""
-    from abicheck.buildsource.scan_levels import EvidenceDepth
+    from abicheck.model.evidence_depth_levels import EvidenceDepth
 
     h = tmp_path / "inc"
     src = tmp_path / "src"

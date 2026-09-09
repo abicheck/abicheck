@@ -529,7 +529,7 @@ def _debian_symbols_warning(
     context but not on its own proof of an ABI break (ADR-028 D3's "evidence
     may add context, never silently delete/invent a break" principle,
     applied here to a cross-source packaging check the same way
-    crosscheck.py's D4 checks apply it to build/source evidence).
+    cross_source_checks.py's D4 checks apply it to build/source evidence).
     """
     if old_symbols_file is None or new_symbols_file is None:
         return None

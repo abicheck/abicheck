@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""S2 preprocessor pre-scan — macro values + private-header leaks (ADR-035 D2).
+"""S2 preprocessor facts — macro values + private-header leaks (ADR-035 D2;
+renamed off the ``scan`` identity in the Phase 6 rename, ADR-068 §3 #34 —
+``docs/contribute/plans/one-comparison-product.md``).
 
-The **conditional** half of the D2 always-on tier (the compiler-free lexical part
-is :mod:`pattern_scan`). It runs *only when a compile DB and a preprocessor
-(``clang -E``) are available* and reports a coverage row naming what to enable
-otherwise — it is never counted as clean when it could not run (ADR-035 D2
-coverage honesty). Two signals:
+The **conditional** half of the D2 always-on tier (the compiler-free lexical part is :mod:`pattern_facts`). It runs *only when a compile DB and a preprocessor
+(``clang -E``) are available* and reports a coverage row naming what to enable otherwise — never counted as clean when it could not run (ADR-035 D2 coverage
+honesty). Reached automatically from both ``compare()``'s pipeline (``workflows/pattern_preprocessor_scan.py``, ADR-068 Phase 2b) and ``scan``. Two signals:
 
 - **per-TU ABI-macro-value capture** (``clang -E -dM``): the value each
   ABI-affecting macro (``_GLIBCXX_USE_CXX11_ABI``, ``NDEBUG``,
@@ -71,7 +71,7 @@ _log = logging.getLogger(__name__)
 #:     ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap. ``0`` (the default,
 #:     same as an unset field) when nothing was truncated, so an ordinary
 #:     scan's payload is unchanged from version 1 (Codex review).
-PREPROCESSOR_SCAN_VERSION: int = 2
+PREPROCESSOR_FACTS_VERSION: int = 2
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +382,7 @@ class HeaderLeak:
 
 
 @dataclass
-class PreprocessorScanResult:
+class PreprocessorFactsResult:
     """Outcome of the S2 preprocessor pre-scan (ADR-035 D2).
 
     ``ran`` distinguishes "scanned and clean" from "could not run" (no compile DB
@@ -403,7 +403,7 @@ class PreprocessorScanResult:
     )  # tu → {macro: value}
     divergences: list[MacroDivergence] = field(default_factory=list)
     leaks: list[HeaderLeak] = field(default_factory=list)
-    version: int = PREPROCESSOR_SCAN_VERSION
+    version: int = PREPROCESSOR_FACTS_VERSION
 
     @property
     def all_failed(self) -> bool:
@@ -556,7 +556,7 @@ class ClangPreprocessorExtractor:
     runs_ok: int = 0
     #: Distinct compile-context probes skipped by the
     #: ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`` cap (never silent — folded
-    #: into the coverage detail by ``PreprocessorScanResult.coverage()``).
+    #: into the coverage detail by ``PreprocessorFactsResult.coverage()``).
     probes_truncated: int = 0
     #: Set once an active scan --budget deadline is found already exhausted
     #: (P0 SVS follow-up). Read by capture_macros/capture_header_includes to
@@ -824,12 +824,12 @@ def _context_flags(args: list[str]) -> list[str]:
     return [a for a in args if not a.lower().endswith(_SOURCE_EXTS)]
 
 
-def run_preprocessor_scan(
+def collect_preprocessor_facts(
     build: BuildEvidence | None,
     public_headers: list[str] | None = None,
     *,
     clang_bin: str = "clang++",
-) -> PreprocessorScanResult:
+) -> PreprocessorFactsResult:
     """Run the S2 preprocessor pre-scan, honestly reporting when it cannot (D2).
 
     Needs **both** an L3 build (compile context) and a working preprocessor
@@ -839,7 +839,7 @@ def run_preprocessor_scan(
     per-TU ABI-macro values (→ divergence findings) and, when public headers are
     given, their resolved includes (→ private/generated-header leaks).
     """
-    result = PreprocessorScanResult()
+    result = PreprocessorFactsResult()
     if build is None or not build.compile_units:
         result.skipped_reason = (
             "no L3 build evidence (pass --sources/--build-info so the "

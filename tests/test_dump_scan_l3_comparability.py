@@ -319,7 +319,7 @@ def _build_library(
         # Declared here (not just defined in widget.cpp below): `compute` is
         # a genuine, exported, external-linkage free function -- undeclared
         # in any public header, it is exactly the "accidental ABI" shape
-        # `exported_not_public` (abicheck/buildsource/crosscheck.py) exists
+        # `exported_not_public` (abicheck/buildsource/cross_source_checks.py) exists
         # to catch, and since Phase 2a (`workflows/cross_source_evolution.py`)
         # wired that check into `compare`'s/`scan`'s automatic pipeline
         # whenever a public-header set is supplied, an undeclared export now

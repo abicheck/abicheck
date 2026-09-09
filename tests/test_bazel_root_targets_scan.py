@@ -417,8 +417,8 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
     root(s) from the preview, and the TU-count estimate looked scoped when
     it's actually a workspace-wide probe. Fixed by stating the requested
     target(s) and flagging the estimate as unscoped."""
-    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
     from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
+    from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from abicheck.service_scan import ScanRequest, estimate_scan
 
     estimates = estimate_scan(
@@ -454,8 +454,8 @@ def test_dry_run_preview_mentions_requested_build_target_and_flags_estimate(
 
 
 def test_dry_run_preview_omits_build_target_note_when_unset(tmp_path: Path) -> None:
-    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
     from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
+    from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from abicheck.service_scan import ScanRequest, estimate_scan
 
     estimates = estimate_scan(
@@ -905,11 +905,11 @@ def test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work(
 
     def _fail_if_called(*_a, **_kw):
         raise AssertionError(
-            "scan_files() (S3 pattern scan) ran before the Bazel-scoping "
+            "find_pattern_facts() (S3 pattern scan) ran before the Bazel-scoping "
             "pre-flight check rejected the request"
         )
 
-    monkeypatch.setattr(scan_engine_mod, "scan_files", _fail_if_called)
+    monkeypatch.setattr(scan_engine_mod, "find_pattern_facts", _fail_if_called)
 
     aquery = _write_bazel_aquery(tmp_path)
     req = ScanRequest(

@@ -134,7 +134,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.DECLARATION_RENAMED,
     ChangeKind.DECLARATION_MOVED,
     ChangeKind.DECLARATION_IDENTITY_RECONCILED,
-    # Intra-version cross-source validation (tests/test_crosscheck.py).
+    # Intra-version cross-source validation (tests/test_cross_source_checks.py).
     ChangeKind.EXPORTED_NOT_PUBLIC,
     ChangeKind.PUBLIC_NOT_EXPORTED,
     ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
@@ -144,7 +144,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
     ChangeKind.RTTI_FOR_INTERNAL_TYPE,
     ChangeKind.IDENTITY_COLLISION_DETECTED,
-    # Evidence-coherence cross-checks (tests/test_crosscheck.py, AC-008/AC-009).
+    # Evidence-coherence cross-checks (tests/test_cross_source_checks.py, AC-008/AC-009).
     ChangeKind.COMPILE_CONTEXT_CONFLICT,
     ChangeKind.SOURCE_SURFACE_DSO_MISMATCH,
     # P0 evidence-coherence audit follow-up — DWARF-vs-header-AST layout

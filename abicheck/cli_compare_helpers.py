@@ -193,7 +193,7 @@ def _resolve_compare_collect_mode(
     if depth is not None:
         return resolve_dump_depth(depth, "off"), f"--depth {depth}"
     if source_method:
-        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
+        from .model.evidence_depth_levels import SourceMethod, method_to_collect_mode
         try:
             mode = method_to_collect_mode(SourceMethod(source_method))
         except ValueError:

@@ -28,13 +28,13 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from abicheck.buildsource.pattern_scan import (
+from abicheck.buildsource.pattern_facts import (
     PatternCategory,
     PatternFact,
+    PatternFactsResult,
     PatternKind,
-    PatternScanResult,
 )
-from abicheck.buildsource.preprocessor_scan import PreprocessorScanResult
+from abicheck.buildsource.preprocessor_facts import PreprocessorFactsResult
 from abicheck.model import AbiSnapshot
 from abicheck.workflows.pattern_preprocessor_scan import (
     _fold_evolution,
@@ -46,47 +46,47 @@ from abicheck.workflows.pattern_preprocessor_scan import (
 
 class TestPatternScanFullyCovered:
     def test_no_files_scanned_is_not_covered(self) -> None:
-        assert _pattern_scan_fully_covered(PatternScanResult()) is False
+        assert _pattern_scan_fully_covered(PatternFactsResult()) is False
 
     def test_all_scanned_no_skips_is_covered(self) -> None:
-        result = PatternScanResult(files_scanned=3, files_skipped=0)
+        result = PatternFactsResult(files_scanned=3, files_skipped=0)
         assert _pattern_scan_fully_covered(result) is True
 
     def test_any_skipped_file_is_not_covered(self) -> None:
         """Even a single unreadable file alongside otherwise-successful
         scans means the result could be hiding a real hit -- not full
         coverage, per the CodeRabbit finding."""
-        result = PatternScanResult(files_scanned=3, files_skipped=1)
+        result = PatternFactsResult(files_scanned=3, files_skipped=1)
         assert _pattern_scan_fully_covered(result) is False
 
     def test_all_skipped_is_not_covered(self) -> None:
-        result = PatternScanResult(files_scanned=0, files_skipped=2)
+        result = PatternFactsResult(files_scanned=0, files_skipped=2)
         assert _pattern_scan_fully_covered(result) is False
 
 
 class TestPreprocessorScanFullyCovered:
     def test_did_not_run_is_not_covered(self) -> None:
-        assert _preprocessor_scan_fully_covered(PreprocessorScanResult()) is False
+        assert _preprocessor_scan_fully_covered(PreprocessorFactsResult()) is False
 
     def test_all_succeeded_is_covered(self) -> None:
-        result = PreprocessorScanResult(ran=True, attempted=3, succeeded=3)
+        result = PreprocessorFactsResult(ran=True, attempted=3, succeeded=3)
         assert _preprocessor_scan_fully_covered(result) is True
 
     def test_partial_failure_is_not_covered(self) -> None:
         """Some (not all) clang -E invocations failing means ``all_failed``
         is False, but coverage is still incomplete -- the CodeRabbit gap."""
-        result = PreprocessorScanResult(ran=True, attempted=3, succeeded=2)
+        result = PreprocessorFactsResult(ran=True, attempted=3, succeeded=2)
         assert _preprocessor_scan_fully_covered(result) is False
 
     def test_all_failed_is_not_covered(self) -> None:
-        result = PreprocessorScanResult(ran=True, attempted=3, succeeded=0)
+        result = PreprocessorFactsResult(ran=True, attempted=3, succeeded=0)
         assert _preprocessor_scan_fully_covered(result) is False
 
     def test_truncated_probes_is_not_covered(self) -> None:
         """The probe-count cap silently dropping units is exactly the same
         "real coverage gap" shape as a partial failure, even when every
         attempted probe itself succeeded."""
-        result = PreprocessorScanResult(
+        result = PreprocessorFactsResult(
             ran=True, attempted=3, succeeded=3, probes_truncated=1
         )
         assert _preprocessor_scan_fully_covered(result) is False
@@ -162,7 +162,7 @@ class TestComputePatternPreprocessorScanCoverageFold:
         old = _empty_snapshot("libfoo.so", "1.0")
         new = _empty_snapshot("libfoo.so", "2.0")
 
-        old_pattern = PatternScanResult(
+        old_pattern = PatternFactsResult(
             facts=[
                 PatternFact(
                     kind=PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION,
@@ -177,7 +177,7 @@ class TestComputePatternPreprocessorScanCoverageFold:
             files_scanned=1,
             files_skipped=0,
         )
-        new_pattern = PatternScanResult(
+        new_pattern = PatternFactsResult(
             files_scanned=1,
             files_skipped=1,  # partial: one unreadable file alongside it
         )
@@ -189,7 +189,7 @@ class TestComputePatternPreprocessorScanCoverageFold:
             ),
             patch(
                 "abicheck.workflows.pattern_preprocessor_scan._run_preprocessor_scan_for",
-                return_value=PreprocessorScanResult(),
+                return_value=PreprocessorFactsResult(),
             ),
         ):
             result = compute_pattern_preprocessor_scan(old, new)
@@ -204,12 +204,12 @@ class TestComputePatternPreprocessorScanCoverageFold:
     def test_partial_preprocessor_scan_folds_not_evaluated_instead_of_resolved(
         self,
     ) -> None:
-        from abicheck.buildsource.preprocessor_scan import MacroDivergence
+        from abicheck.buildsource.preprocessor_facts import MacroDivergence
 
         old = _empty_snapshot("libfoo.so", "1.0")
         new = _empty_snapshot("libfoo.so", "2.0")
 
-        old_preproc = PreprocessorScanResult(
+        old_preproc = PreprocessorFactsResult(
             ran=True,
             attempted=2,
             succeeded=2,
@@ -217,7 +217,7 @@ class TestComputePatternPreprocessorScanCoverageFold:
                 MacroDivergence(macro="FOO_VERSION", values={"1": ["tu1"]}),
             ],
         )
-        new_preproc = PreprocessorScanResult(
+        new_preproc = PreprocessorFactsResult(
             ran=True,
             attempted=2,
             succeeded=1,  # partial: one clang -E invocation failed
@@ -226,7 +226,7 @@ class TestComputePatternPreprocessorScanCoverageFold:
         with (
             patch(
                 "abicheck.workflows.pattern_preprocessor_scan._run_pattern_scan",
-                return_value=PatternScanResult(),
+                return_value=PatternFactsResult(),
             ),
             patch(
                 "abicheck.workflows.pattern_preprocessor_scan._run_preprocessor_scan_for",
@@ -252,8 +252,8 @@ class TestComputePatternPreprocessorScanCoverageFold:
         old = _empty_snapshot("libfoo.so", "1.0")
         new = _empty_snapshot("libfoo.so", "2.0")
 
-        old_pattern = PatternScanResult(files_scanned=1, files_skipped=0)
-        new_pattern = PatternScanResult(
+        old_pattern = PatternFactsResult(files_scanned=1, files_skipped=0)
+        new_pattern = PatternFactsResult(
             facts=[
                 PatternFact(
                     kind=PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION,
@@ -276,7 +276,7 @@ class TestComputePatternPreprocessorScanCoverageFold:
             ),
             patch(
                 "abicheck.workflows.pattern_preprocessor_scan._run_preprocessor_scan_for",
-                return_value=PreprocessorScanResult(),
+                return_value=PreprocessorFactsResult(),
             ),
         ):
             result = compute_pattern_preprocessor_scan(old, new)

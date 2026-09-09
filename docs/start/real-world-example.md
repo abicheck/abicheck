@@ -138,18 +138,19 @@ abicheck dump libfoo-2.3.0/lib/libfoo.so -H libfoo-2.3.0/include \
 
 # 2) Run from the NEW source checkout (where .abicheck.yml lives, so its relative
 #    include_dirs resolve), and gate the new build against that snapshot:
-abicheck scan build/libfoo.so -H include/ \
-  --against baselines/libfoo-2.3.0.abi.json --config .abicheck.yml
+abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so -H include/ \
+  --config .abicheck.yml
 ```
 
-Run the scan from the project root so the config's `include_dirs` (relative to
+Run the compare from the project root so the config's `include_dirs` (relative to
 `.abicheck.yml`) point at the checked-out tree. Each side is parsed with **its
 own** headers — the baseline is a snapshot dumped from the old headers, not the
-raw old `.so` (a raw `--against` library would be re-parsed with the *new* `-H`,
-fine only when the headers didn't change). Give the baseline `dump` the same
-include roots, dialect, and macros as the scan side so the comparison isn't noisy
-— point its own `--config` at the old checkout's `.abicheck.yml` (or a small
-overlay naming just `compile.std`/`compile.defines`) so both sides agree.
+raw old `.so` (a raw old `.so` passed as the OLD operand would be re-parsed with
+the *new* `-H`, fine only when the headers didn't change). Give the baseline
+`dump` the same include roots, dialect, and macros as the NEW side so the
+comparison isn't noisy — point its own `--config` at the old checkout's
+`.abicheck.yml` (or a small overlay naming just `compile.std`/`compile.defines`)
+so both sides agree.
 
 !!! warning "Match the build's dialect and macros"
     A wrong `-std` or missing `-D` changes which declarations are visible and
@@ -161,9 +162,9 @@ Every field and the CLI-vs-config precedence are in
 
 ---
 
-## 5. Going deeper: the source scan (recommended)
+## 5. Going deeper: source-level replay (recommended)
 
-Headers give a reliable verdict; the source scan goes further and is
+Headers give a reliable verdict; a source-level compare goes further and is
 **recommended** for thorough checking — it replays your code to catch
 *source-level* ABI changes (inline/template/macro/default-argument body changes)
 that neither the binary nor the headers reveal. The simple model: give it your
@@ -172,8 +173,8 @@ that neither the binary nor the headers reveal. The simple model: give it your
 ```bash
 # run from the new checkout (as in §4), with a diff seed so the source replay
 # (--depth source) only re-parses the changed TUs
-abicheck scan build/libfoo.so -H include/ --sources . --since origin/main \
-  --against baselines/libfoo-2.3.0.abi.json --config .abicheck.yml --depth source
+abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so -H include/ \
+  --sources . --since origin/main --config .abicheck.yml --depth source
 ```
 
 - `--sources .` — your checkout.
@@ -190,9 +191,10 @@ abicheck scan build/libfoo.so -H include/ --sources . --since origin/main \
 !!! note "Cross-release body-change diff needs a source-aware baseline"
     The inline/template/macro/default-argument **body**-change comparison runs
     only when *both* sides carry source evidence. The [§4](#4-configure-once-abicheckyml)
-    baseline is a headers-only (L2) snapshot, so a `--depth source` scan against
-    it adds the **new** build's source checks; to diff body changes *across
-    releases*, dump the baseline with source evidence too (`abicheck dump … --sources …`).
+    baseline is a headers-only (L2) snapshot, so a `--depth source` compare
+    against it adds only the **new** build's source checks; to diff body changes
+    *across releases*, dump the baseline with source evidence too
+    (`abicheck dump … --sources …`).
 
 The depth knob is `--depth {binary,headers,build,source}` (`binary` =
 binary-only, up to `source` = source-ABI replay — unseeded, it replays the
@@ -313,9 +315,9 @@ Other formats — **HTML**, SARIF, JUnit — are in [Output Formats](../use/outp
 
 1. **Collect** the old + new library, and — for a reliable verdict — the public
    headers and their include root; pin `-std`/`-D` in a `.abicheck.yml`.
-2. **Run** the header-aware compare (or `abicheck scan … --config .abicheck.yml`
+2. **Run** the header-aware compare (`abicheck compare OLD NEW … --config .abicheck.yml`
    as a CI gate).
-3. **Go deeper** (recommended) with `abicheck scan --sources . --since … --depth source`
+3. **Go deeper** (recommended) with `abicheck compare OLD NEW --sources . --since … --depth source`
    when you can give it your sources and build command — see
    [Source-Scan Depth](../use/scan-levels.md).
 4. **Read** the verdict + confidence: headers give a high-confidence,

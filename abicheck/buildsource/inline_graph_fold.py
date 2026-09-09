@@ -277,7 +277,7 @@ def fold_type_graph(
     graceful degradation on a missing ``clang++``) but folds
     ``TYPE_INHERITS``/``TYPE_HAS_FIELD_TYPE``/``DECL_HAS_TYPE``/
     ``DECL_REFERENCES_DECL`` edges instead of ``DECL_CALLS_DECL`` — the
-    dependency kinds ``crosscheck.py``'s ``public_to_internal_dependency``
+    dependency kinds ``cross_source_checks.py``'s ``public_to_internal_dependency``
     already reads but that, before this module, no extractor populated. Run
     only when the caller also runs the call graph (``with_call_graph``), so
     the two passes share one scoping decision and one clang-availability

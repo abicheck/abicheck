@@ -51,13 +51,13 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 ## Design (phases)
 
 ### Phase 1 — Compiler-free PR pre-scan (G19.1)
-- **DONE** — New `abicheck/buildsource/pattern_scan.py`: stdlib-regex scanner over
+- **DONE** — New `abicheck/buildsource/pattern_facts.py`: stdlib-regex scanner over
   changed + public files for the ADR-035 D2 construct list; emits normalized
   advisory facts + per-kind escalation triggers (`PatternFact`/
   `PatternScanResult`/`EscalationTrigger`), with mandatory coverage reporting and
   no compile DB / compiler. Tree-sitter is a pluggable later backend.
-  Tests: `tests/test_pattern_scan.py`.
-- **DONE** — New `abicheck/buildsource/preprocessor_scan.py` (S2 conditional
+  Tests: `tests/test_pattern_facts.py`.
+- **DONE** — New `abicheck/buildsource/preprocessor_facts.py` (S2 conditional
   tier): `run_preprocessor_scan` runs over the collected L3 build evidence **only**
   when a compile DB + `clang -E` are present (else an honest skipped coverage row).
   Captures per-TU ABI-macro values (`clang -E -dM`) → `find_macro_divergence`, and
@@ -68,14 +68,14 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   own coverage row + advisory facts. Tests: `tests/test_preprocessor_scan.py`.
 
 ### Phase 2 — Cross-source validation engine (G19.2)
-- **DONE** — New `abicheck/buildsource/crosscheck.py` (`run_crosschecks`) consumes
+- **DONE** — New `abicheck/buildsource/cross_source_checks.py` (`run_crosschecks`) consumes
   one merged snapshot and diffs its evidence sources against each other
   intra-version. Adds the four ADR-035 D4 `ChangeKind`s — `exported_not_public`
   (RISK), `public_not_exported` (RISK), `header_build_context_mismatch`
   (API_BREAK), `private_header_leak` (RISK) — partitioned per the four-step
   procedure, with per-check coverage rows and the §6.8 provider-agreement matrix.
   Every check skips (never false-positives) when its evidence is absent and is
-  never BREAKING (authority rule). Tests: `tests/test_crosscheck.py`.
+  never BREAKING (authority rule). Tests: `tests/test_cross_source_checks.py`.
 - **DONE** — `odr_type_variant` (API_BREAK, reads the L4 surface's recorded ODR
   conflicts) and `public_to_internal_dependency` (RISK, reads the L5 graph's
   decl-dependency edges; skips with a soft advisory when an S4/S5 pass did not
@@ -84,7 +84,7 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   run via `ALL_CHECKS`, accept `--crosscheck KEY=LEVEL`, and `odr_type_variant`
   gates audit exit 2 via `API_BREAK_KINDS`). `scan` threads the resolved
   changed-path set into `CrosscheckConfig.changed_paths`. Tests:
-  `tests/test_crosscheck.py`.
+  `tests/test_cross_source_checks.py`.
 - **DONE** — FP-rate-gate corpus for the cross-checks: `CROSSCHECK_CORPUS` in
   `scripts/check_fp_rate.py` carries both polarities (fire on a real hygiene
   issue / stay silent on a clean snapshot) for all six D4 checks, baselines 0/0,
@@ -96,7 +96,7 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   `/CLAUDE.md`): `scan` classifies the changed paths → runs the always-on tier
   (compiler-free `pattern_scan` S3 + intra-version `crosscheck` D4) → runs the
   **pinned** level (`--mode` preset or explicit `--source-method`/`--depth`,
-  resolved by `buildsource/scan_levels.py`) by collecting L3/L4/L5 inline at the
+  resolved by `model/evidence_depth_levels.py`) by collecting L3/L4/L5 inline at the
   matching ADR-033 D2 evidence mode → (if `--baseline`) `compare`s, folding the
   cross-source findings in as `extra_changes` → emits one coverage-annotated
   report (text/JSON) stating, per L-layer/S-method, collected vs. skipped. Modes
@@ -107,7 +107,7 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   (`--risk-rules` YAML) scores the changed paths (strongest-signal-present, D3
   ordering) → an S-method, used **only** for `--source-method auto` (opt-in),
   never to change a pinned/deterministic CI run.
-  Tests: `tests/test_risk.py`, `tests/test_scan_levels.py`, `tests/test_cli_scan.py`.
+  Tests: `tests/test_risk.py`, `tests/test_evidence_depth_levels.py`, `tests/test_cli_scan.py`.
 - **DONE** — the baseline compare folds embedded L3/L4/L5 evidence in via
   `prepare_embedded_build_source` (the same path `compare` uses), and an
   explicit `--changed-path`/`--since` set is threaded through
@@ -154,7 +154,7 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   `odr_type_variant` (L4 ODR), `unversioned_exported_symbol` (export with no
   version under a `.gnu.version_d` scheme), `rtti_for_internal_type` (`_ZTI`/`_ZTV`
   for a private-header type), each with FP-rate-gate corpus coverage. Tests:
-  `tests/test_crosscheck.py`, `tests/test_surface_graph.py`.
+  `tests/test_cross_source_checks.py`, `tests/test_surface_graph.py`.
 
 ### Phase 4 — Build-integrated extraction (G19.4)
 - **DONE** — `abicheck/buildsource/inputs_pack.py` defines the Flow-2
@@ -181,7 +181,7 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 
 ## Files & surfaces
 
-- New: `buildsource/pattern_scan.py`, `buildsource/crosscheck.py`,
+- New: `buildsource/pattern_facts.py`, `buildsource/cross_source_checks.py`,
   `buildsource/poi.py` (evidence-directed work-list), `cli_scan.py`; new
   `ChangeKind`s in `checker_policy.py`.
 - Extend: `service.py` (`ScanRequest`/`ScanResult`/`run_scan`/`estimate_scan` +

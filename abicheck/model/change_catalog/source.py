@@ -27,7 +27,7 @@ diff directly.
 Categorized by which detector module actually produces each kind (verified
 against the real ``ChangeKind.X`` construction sites in
 ``buildsource/source_diff.py``, ``buildsource/source_graph_findings.py``,
-and ``buildsource/crosscheck.py``/``crosscheck_coherence.py`` (excluding
+and ``buildsource/cross_source_checks.py``/``cross_source_checks_coherence.py`` (excluding
 that pair's two build-context-reconciliation kinds, which are ``build.py``'s
 -- see that module's own docstring) -- not by which flat
 ``change_registry_*.py`` sibling an entry happened to live in for pure

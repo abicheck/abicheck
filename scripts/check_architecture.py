@@ -435,6 +435,37 @@ def _git_file_line_count(root: Path, revision: str, relative: str) -> int | None
     return len(proc.stdout.splitlines())
 
 
+def _git_pending_renames(root: Path, revision: str) -> dict[str, str]:
+    """New-path -> old-path for every rename git detects between *revision*
+    and the working tree.
+
+    A ``git mv`` (or an edit-plus-rename git's similarity heuristic still
+    recognizes) makes a debt-tracked file's path *change* without the file
+    being new -- a plain ``git show revision:new_path`` lookup can't see
+    that, since ``new_path`` never existed at ``revision``. Without this, a
+    legitimate rename of a debt-baselined file is indistinguishable from
+    adding a brand-new one, which would either wrongly refuse the rename
+    (``debt-exemption``) or wrongly compare its unchanged line count against
+    no baseline at all (``debt-no-growth`` comparing against nothing).
+    Best-effort: any git failure yields an empty map, falling back to the
+    exact-path behavior."""
+    proc = subprocess.run(
+        ["git", "diff", "-M", "--diff-filter=R", "--name-status", revision],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return {}
+    renames: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0].startswith("R"):
+            _status, old_path, new_path = parts
+            renames[new_path] = old_path
+    return renames
+
+
 def _base_has_architecture_contract(root: Path, revision: str) -> bool | None:
     revision_check = subprocess.run(
         ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
@@ -832,6 +863,11 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         "parser_or_catalog_roots",
         findings,
     )
+    pending_renames = (
+        _git_pending_renames(root, base_revision)
+        if base_revision and not adopting_contract
+        else {}
+    )
     for relative, baseline in baselines.items():
         path = root / relative
         if not path.is_file():
@@ -848,6 +884,14 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
             if base_revision and not adopting_contract
             else None
         )
+        if base_lines is None and relative in pending_renames:
+            # Not a new file -- git itself recognizes this path as a rename
+            # of a debt-tracked file. Compare against the renamed-from
+            # path's own baseline content instead of treating this as a
+            # from-scratch addition.
+            base_lines = _git_file_line_count(
+                root, base_revision, pending_renames[relative]
+            )
         if (
             base_revision
             and base_has_contract

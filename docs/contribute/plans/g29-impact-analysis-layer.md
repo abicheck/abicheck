@@ -1763,7 +1763,7 @@ the existing `type_graph.py` walk.
      build-source-collection or directory/package `compare` that only has
      the L4-attached wrapper node public, with no L2 header graph also
      attached, cannot reach the L5 field/role edges from it —
-     `public_to_internal_dependency` (`crosscheck.py`) misses exactly the
+     `public_to_internal_dependency` (`cross_source_checks.py`) misses exactly the
      template-parameterized private-type dependency this item's new roles
      exist to detect, for that one collection shape. **Confirmed
      pre-existing, not introduced by this item**: checked against real

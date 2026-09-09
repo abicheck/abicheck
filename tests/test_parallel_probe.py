@@ -28,7 +28,7 @@ copy-pasted across SIX ``Clang*GraphExtractor`` classes
 ``macro_graph.py``, ``type_graph.py``, ``template_graph_extractor.py``) --
 confirming this is a systemic pattern, not a one-off, which is why the fix
 lives here as a reusable primitive rather than staying local to
-``preprocessor_scan.py``. These tests exercise the primitive directly,
+``preprocessor_facts.py``. These tests exercise the primitive directly,
 decoupled from any one caller's domain logic, per this repo's own
 "primitive-level property tests" convention (AGENTS.md).
 """

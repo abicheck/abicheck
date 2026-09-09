@@ -773,7 +773,7 @@ below), never guessed. Authority is unaffected either way: a finding's
 
 `private_header_leak` (§3 rows 3-4 of
 `docs/contribute/plans/one-comparison-product.md`) is the first cross-source
-check (`abicheck/buildsource/crosscheck.py`) migrated onto this model: run
+check (`abicheck/buildsource/cross_source_checks.py`) migrated onto this model: run
 per side inside `compare`'s own pipeline rather than only under the
 now-retiring `scan --against`
 (`docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md`

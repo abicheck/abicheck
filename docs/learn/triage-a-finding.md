@@ -11,7 +11,7 @@ summarizes:
 depends_on:
   - abicheck/comparability.py
   - abicheck/elf_symbol_filter.py
-  - abicheck/buildsource/crosscheck.py
+  - abicheck/buildsource/cross_source_checks.py
 lifecycle: active
 generated: false
 ---

@@ -896,32 +896,32 @@ use_cases:
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     evidence:
       modules:
-        - abicheck/buildsource/pattern_scan.py
-        - abicheck/buildsource/preprocessor_scan.py
+        - abicheck/buildsource/pattern_facts.py
+        - abicheck/buildsource/preprocessor_facts.py
         - abicheck/buildsource/risk.py
-        - abicheck/buildsource/scan_levels.py
+        - abicheck/model/evidence_depth_levels.py
         - abicheck/cli_scan.py
       tests:
-        - tests/test_pattern_scan.py
+        - tests/test_pattern_facts.py
         - tests/test_preprocessor_scan.py
         - tests/test_risk.py
-        - tests/test_scan_levels.py
+        - tests/test_evidence_depth_levels.py
         - tests/test_cli_scan.py
         - tests/test_perf_binary_scan.py
         - tests/test_scenarios.py
     next_steps: >
       ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
-      (`buildsource/pattern_scan.py`); and the deterministic `scan` orchestrator
+      (`buildsource/pattern_facts.py`); and the deterministic `scan` orchestrator
       (`cli_scan.py`) — classify → always-on tier (pattern S3 + crosscheck D4) →
       the pinned level (`--mode` preset or explicit `--source-method`/`--depth`,
-      resolved by `buildsource/scan_levels.py`) → one coverage-annotated report,
+      resolved by `model/evidence_depth_levels.py`) → one coverage-annotated report,
       with `--baseline` comparison and a `--budget` failure guard (exit 5 on
       overflow, never shrinks scope). The numeric risk score (`buildsource/risk.py`,
       tunable `risk_rules`) changes depth ONLY under `--source-method auto`
       (opt-in). Reuses the existing collect-mode/replay-scope machinery; emits
       RISK/API_BREAK only (authority rule). The D7 POI work-list
       (`buildsource/poi.py`) focuses the expensive scan (Phase 3b, done). The S2
-      preprocessor pre-scan (`buildsource/preprocessor_scan.py`) — per-TU ABI
+      preprocessor pre-scan (`buildsource/preprocessor_facts.py`) — per-TU ABI
       macro-value capture + divergence and public-header private/generated-header
       leak detection, conditional on a compile DB + `clang -E` — is done and wired
       into `scan` with honest coverage. Depth semantics are tracked end-to-end:
@@ -938,12 +938,12 @@ use_cases:
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
     evidence:
       modules:
-        - abicheck/buildsource/crosscheck.py
+        - abicheck/buildsource/cross_source_checks.py
       tests:
-        - tests/test_crosscheck.py
+        - tests/test_cross_source_checks.py
     next_steps: >
       ADR-035 D4. DONE: the intra-version cross-source engine
-      (`buildsource/crosscheck.py`, `run_crosschecks`) and its four
+      (`buildsource/cross_source_checks.py`, `run_crosschecks`) and its four
       correctly-partitioned ChangeKinds — exported_not_public (RISK),
       public_not_exported (RISK), header_build_context_mismatch (API_BREAK),
       private_header_leak (RISK) — which diff ONE merged snapshot's evidence
@@ -963,10 +963,10 @@ use_cases:
     evidence:
       modules:
         - abicheck/cli_scan.py
-        - abicheck/buildsource/crosscheck.py
+        - abicheck/buildsource/cross_source_checks.py
       tests:
         - tests/test_scan_estimate.py
-        - tests/test_crosscheck.py
+        - tests/test_cross_source_checks.py
     next_steps: >
       ADR-035 D8. DONE: `scan --audit` runs the D2 pattern facts + D4 cross-checks
       intra-version with no baseline and renders the hygiene catalog (accidental
@@ -1065,7 +1065,7 @@ use_cases:
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
     evidence:
-      modules: [abicheck/buildsource/crosscheck.py, scripts/gen_g20_fixtures.py]
+      modules: [abicheck/buildsource/cross_source_checks.py, scripts/gen_g20_fixtures.py]
       tests: [tests/test_g20_catalog.py]
       examples:
         - catalog/cases/case143_audit_accidental_export
@@ -1098,7 +1098,7 @@ use_cases:
     gap: G20
     plan: docs/contribute/plans/g20-source-scan-example-catalog.md
     evidence:
-      modules: [abicheck/buildsource/crosscheck.py]
+      modules: [abicheck/buildsource/cross_source_checks.py]
       tests: [tests/test_xcheck_scenarios.py, tests/test_g20_catalog.py]
       examples:
         - catalog/cases/case148_xcheck_header_build_mismatch

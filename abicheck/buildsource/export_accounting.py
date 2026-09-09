@@ -14,14 +14,14 @@
 
 """Export accounting (ADR-035 D4) — classify every exported symbol with a reason.
 
-Pure Itanium/MSVC mangled-name classification split out of :mod:`crosscheck` (it
+Pure Itanium/MSVC mangled-name classification split out of :mod:`abicheck.buildsource.cross_source_checks` (it
 grew past the 2000-line file cap). Given the binary's export table and its public
 declarations, ``_check_exported_not_public`` partitions every export into one of
 the ``ACCOUNT_*`` buckets — documented API, a compiler artifact, an external
 dependency leak (libstdc++/{fmt}/…), an internal-namespace escape, a template
 instantiation, or a bare undeclared export — so a report can state "100 %
 accounted". These helpers are free of any ``Change``/``ChangeKind`` concern;
-:mod:`crosscheck` turns the undocumented buckets into findings.
+:mod:`abicheck.buildsource.cross_source_checks` turns the undocumented buckets into findings.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from .source_link import (
 )
 
 #: The exported symbol marking a library as an allocator-interposition proxy.
-#: Re-exported for :mod:`crosscheck`'s ``_check_exported_not_public`` loop.
+#: Re-exported for :mod:`abicheck.buildsource.cross_source_checks`'s ``_check_exported_not_public`` loop.
 _ALLOCATOR_INTERPOSER_MARKER = _TBB_MALLOC_PROXY_MARKER
 
 #: Symbols an allocator-interposition library (a malloc proxy such as

@@ -4,7 +4,7 @@
 
 Each projection function here states the exact contract one of the retired
 sibling implementations used to hand-roll on its own
-(``policy.depth_projection``, ``buildsource.crosscheck_base``,
+(``policy.depth_projection``, ``buildsource.cross_source_checks_base``,
 ``buildsource.snapshot_exports``, ``post_manifest``, ``diff_unnamed_types``,
 ``buildsource.poi``, ``python_ext``, ``diff_cpp_patterns``) — these are the
 primitive-level property/contract tests the root ``AGENTS.md`` calls for on a

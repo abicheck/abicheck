@@ -189,7 +189,7 @@ same resolution for a template *label* (as opposed to a plain field/param
 type spelling) is a genuinely new, unverified problem, not a one-line
 join. Left as a known, real gap: a class instantiation's own node has no
 inbound edge from a public declaration today, so :data:`EDGE_TEMPLATE_USES_TYPE`
-is not (yet) reachable from ``crosscheck.py``'s ``public_to_internal_dependency``
+is not (yet) reachable from ``cross_source_checks.py``'s ``public_to_internal_dependency``
 or ``poi.py``'s reachability walk — the *argument* nodes it points at
 (``_type_node_id(arg.target_qname)``, keyed off the argument's own
 declaration-scope qualified name from ``id_to_qname``, not a print-context

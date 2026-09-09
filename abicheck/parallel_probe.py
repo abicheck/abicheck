@@ -15,7 +15,7 @@
 
 """Deterministic parallel probing + ordered-diagnostics primitives.
 
-Factored out of :mod:`abicheck.buildsource.preprocessor_scan`'s S2 parallel
+Factored out of :mod:`abicheck.buildsource.preprocessor_facts`'s S2 parallel
 probe pool after a PR review caught **two independent bug classes** in a
 hand-rolled ``ThreadPoolExecutor`` probe loop there — both generic footguns
 of "read a bounded number of external resources (subprocess output, files,
@@ -39,7 +39,7 @@ extractor:
 
 This module packages the two fixes as reusable primitives instead of
 leaving each caller to rediscover and hand-roll them independently — see
-``buildsource/preprocessor_scan.py`` for the worked example (its own
+``buildsource/preprocessor_facts.py`` for the worked example (its own
 ``_run_probes``/``_note_diagnostic``/``_reorder_batch_diagnostics`` were the
 original, since-generalized fix). A leaf module: no imports from elsewhere
 in this package except :mod:`abicheck.deadline` (itself a leaf), so any
