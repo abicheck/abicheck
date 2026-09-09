@@ -52,6 +52,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 import yaml
@@ -474,32 +475,55 @@ def update_failure_is_absorbed(line: str) -> bool:
     return False
 
 
-def comment_start(line: str) -> int | None:
-    """Index where an unquoted `#` starts a comment, or None.
+class LineScan(NamedTuple):
+    """What one physical line does to the shell's lexical state."""
+
+    comment_at: int | None
+    quote: str | None
+    at_word_start: bool
+    continues: bool
+
+
+def scan_line(line: str, quote: str | None, at_word_start: bool) -> LineScan:
+    """Walk one physical line, carrying lexical state in and out.
+
+    State is threaded rather than restarted per line because a continuation
+    splices *inside* the shell's lexer, not around it: after `echo "x \\`,
+    the next line begins inside a double quote, so its `#` is quoted text,
+    not a comment (Codex review, PR #1183 -- verified against bash, which
+    prints the `#` and then runs the following command). Restarting the
+    state per line dropped the rest of the line, taking a gating command with it.
 
     A `#` opens a comment only at the start of a word and only outside
-    quotes: `echo a#b` and `echo "# x"` contain no comment. Checking merely
-    whether a *line* starts with `#` is not enough -- an inline comment hides
-    a continuation just as well, and everything after it is text bash never
-    runs (Codex review, PR #1183).
+    quotes: `echo a#b` and `echo "# x"` contain none.
+
+    `continues` covers both ways a logical line runs on: an unescaped
+    trailing backslash, and an unterminated quote (where the newline is
+    literal text inside the string).
     """
-    quote: str | None = None
-    at_word_start = True
     i = 0
-    while i < len(line):
+    n = len(line)
+    while i < n:
         ch = line[i]
         if quote == "'":
+            # Nothing escapes inside single quotes -- not even a backslash.
             if ch == "'":
                 quote = None
             i += 1
             continue
         if quote == '"':
-            # Inside double quotes a backslash escapes the next character.
-            i += 2 if ch == "\\" and i + 1 < len(line) else 1
+            if ch == "\\":
+                if i + 1 >= n:
+                    return LineScan(None, quote, at_word_start, True)
+                i += 2
+                continue
             if ch == '"':
                 quote = None
+            i += 1
             continue
         if ch == "\\":
+            if i + 1 >= n:
+                return LineScan(None, quote, at_word_start, True)
             i += 2
             at_word_start = False
             continue
@@ -509,25 +533,15 @@ def comment_start(line: str) -> int | None:
             i += 1
             continue
         if ch == "#" and at_word_start:
-            return i
-        # A word can begin after whitespace or after a shell operator.
+            # The comment ends the line outright, so nothing carries over.
+            return LineScan(i, None, True, False)
         at_word_start = ch.isspace() or ch in "|&;()"
         i += 1
-    return None
-
-
-def _continues(line: str) -> bool:
-    """True when `line` ends in an *unescaped* backslash.
-
-    Parity, not `endswith("\\\\")`: `a\\\\\\` is an escaped backslash followed
-    by a continuation, so an odd count continues and an even count does not.
-    """
-    trailing = len(line) - len(line.rstrip("\\"))
-    return trailing % 2 == 1
+    return LineScan(None, quote, at_word_start, quote is not None)
 
 
 def logical_lines(script: str) -> list[str]:
-    """Split a shell script into *logical* lines, splicing continuations.
+    """Split a shell script into *logical* lines, as the shell would.
 
     A workflow can spell the gating chain across physical lines:
 
@@ -541,7 +555,7 @@ def logical_lines(script: str) -> list[str]:
     therefore runs over what the shell actually executes, not over how the
     YAML happens to be wrapped.
 
-    Getting that right took four corrections, every one of them a way this
+    Getting that right took five corrections, every one of them a way this
     helper could hide the very command it exists to find, and every one
     verified against real bash (CodeRabbit and Codex on PR #1183):
 
@@ -552,40 +566,46 @@ def logical_lines(script: str) -> list[str]:
        invented space yields `apt-get upda te`, which the scan cannot match.
     3. A comment runs to the end of the *physical* line, so a backslash
        inside one is comment text and bash executes the next line.
-    4. That is true of an *inline* comment too, not only a whole-line one:
-       `true || true # note \\` leaves the next line to run on its own, while
-       splicing produced a line whose `|| true` the absorption predicate
-       accepted -- the comment having swallowed the gating chain that
-       followed it.
+    4. That holds for an *inline* comment too: `true || true # note \\` left
+       the next line to run alone, while splicing produced a line whose
+       `|| true` the absorption predicate accepted -- laundering a gating
+       chain into a pass rather than merely hiding it.
+    5. Lexical state crosses a splice: after `echo "x \\`, the next line
+       starts inside a quote, so its `#` is text. Restarting state per line
+       discarded the remainder -- and the gating command that followed it.
 
-    So comments are found lexically (`comment_start`) and dropped, exactly as
-    bash drops them, and a continuation is recognised only outside one.
-    ``TestLogicalLines`` differential-tests all of this against bash rather
-    than against my reading of it.
+    So the walk is a small stateful lexer (`scan_line`), and comments are
+    dropped exactly as bash drops them. ``TestLogicalLines``
+    differential-tests all of it against bash rather than my reading of it.
     """
     lines: list[str] = []
     pending = ""
+    quote: str | None = None
+    at_word_start = True
+
+    def flush(text: str) -> None:
+        stripped = text.strip()
+        if stripped:
+            lines.append(stripped)
+
     for raw in script.splitlines():
-        cut = comment_start(raw)
-        if cut is not None:
-            # bash runs the code before the comment and never sees the rest;
-            # a continuation inside the comment is text, so nothing carries on.
-            # While `pending` is open the splice already happened, which is why
-            # this joins first and only then drops the comment.
-            joined = (pending + raw[:cut]).strip()
-            if joined:
-                lines.append(joined)
-            pending = ""
+        scan = scan_line(raw, quote, at_word_start)
+        quote, at_word_start = scan.quote, scan.at_word_start
+        if scan.comment_at is not None:
+            # bash runs the code before the comment and never sees the rest.
+            # While a splice is open this joins first, exactly as bash does.
+            flush(pending + raw[: scan.comment_at])
+            pending, quote, at_word_start = "", None, True
             continue
-        if _continues(raw):
-            pending += raw[:-1]
+        if scan.continues:
+            if raw.endswith("\\") and quote != "'":
+                pending += raw[:-1]  # backslash-newline is removed entirely
+            else:
+                pending += raw + "\n"  # inside a quote the newline is literal
             continue
-        joined = (pending + raw).strip()
-        if joined:
-            lines.append(joined)
-        pending = ""
-    if pending.strip():
-        lines.append(pending.strip())
+        flush(pending + raw)
+        pending, quote, at_word_start = "", None, True
+    flush(pending)
     return lines
 
 
@@ -915,6 +935,12 @@ class TestLogicalLines:
         'probe "# quoted" \\\n  update\n',
         "probe a#b\n",
         "probe one \\\n# two\n",
+        # Lexical state crosses the splice: the `#` here is inside the quote
+        # opened on the previous line, so bash prints it and then runs the
+        # next command (Codex, PR #1183).
+        'echo "x \\\n# still quoted"; probe update\n',
+        'echo "open\nstill open"; probe update\n',
+        "echo 'single \\\nliteral backslash'; probe update\n",
     )
 
     @requires_apt_harness
@@ -941,13 +967,18 @@ class TestLogicalLines:
         subprocess.run(["bash", "-c", script], env=env, capture_output=True, check=True)
         from_bash = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
-        # `probe` logs "$*", i.e. its arguments without argv[0], so drop the
-        # command name on this side too.
-        from_helper = [
-            " ".join(shlex.split(line)[1:])
-            for line in logical_lines(script)
-            if line.startswith("probe")
-        ]
+        # A logical line can hold several commands (`echo ...; probe x`), so
+        # split on the separators before looking for invocations. A wrong
+        # split can only produce a mismatch, never a silent pass, which is
+        # the right direction for a test harness to be imprecise in.
+        # `probe` logs "$*" -- its arguments without argv[0] -- so the command
+        # name is dropped on this side too.
+        from_helper = []
+        for line in logical_lines(script):
+            for segment in re.split(r"\s*(?:;|&&|\|\|)\s*", line):
+                segment = segment.strip()
+                if segment.startswith("probe"):
+                    from_helper.append(" ".join(shlex.split(segment)[1:]))
         assert from_helper == from_bash, (
             f"{script!r}: helper produced {from_helper}, bash ran {from_bash}"
         )
