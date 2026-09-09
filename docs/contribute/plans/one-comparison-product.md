@@ -626,8 +626,13 @@ section's *actual* state, not the target it originally described:
   `.json`-extension (compressed or content-detected JSON snapshot included)
   baseline, `--output-file`, an effective non-JSON/text `--format` (from the
   dedicated Action input or an `extra-args` override), a `-o`/`--output`
-  path via `extra-args`, and any other `--write`/scan-only `extra-args`
-  flag (`--abi3`, the compile-context-option family included). Audit-only
+  path via `extra-args`, any other `--write`/scan-only `extra-args`
+  flag (`--abi3`, the compile-context-option family included), and a default
+  (or explicit `--no-pattern-verdicts`) baseline scan — `compare`'s pattern-
+  verdict modulation has been unconditional since D4 with no flag left to
+  turn it off, but `scan --against` still defaults it off, so only an
+  explicit bare `--pattern-verdicts` in `extra-args` is safe to route.
+  Audit-only
   (no baseline) is unchanged and still stays
   on the legacy CLI entirely (a separate, larger gap — see the predicate's
   own comment in `run.sh`). The ~40-branch collapse this bullet originally

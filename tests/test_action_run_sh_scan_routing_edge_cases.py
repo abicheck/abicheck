@@ -141,8 +141,17 @@ class TestDepthCaseSensitivity:
 
     def test_shallow_depth_still_routes_to_compare(self) -> None:
         # Sanity control: this predicate change must not accidentally catch
-        # every depth value, only build/source.
-        cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
+        # every depth value, only build/source. --pattern-verdicts opts
+        # into the compare-translation branch (round 17: a default scan now
+        # stays on the legacy CLI on that axis alone -- see
+        # TestPatternVerdictsDefaultStaysOnLegacyCli below).
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            }
+        )
         assert cmd[1] == "compare"
 
     def test_extra_args_depth_override_stays_on_legacy_cli(self) -> None:
@@ -165,7 +174,7 @@ class TestDepthCaseSensitivity:
             {
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
-                "INPUT_EXTRA_ARGS": "--depth headers",
+                "INPUT_EXTRA_ARGS": "--depth headers --pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"
@@ -201,6 +210,7 @@ class TestPublicHeaderDirSharedHeaderConflict:
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
                 "INPUT_PUBLIC_HEADER_DIR": "pub_inc",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"
@@ -228,7 +238,13 @@ class TestCompressedBaselineSuffix:
     def test_native_library_baseline_still_routes_to_compare(self) -> None:
         # Negative control: a real .so baseline (this module's own
         # _BASE_INPUTS) is the already-tested compare-translation shape.
-        cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            }
+        )
         assert cmd[1] == "compare"
 
 
@@ -278,7 +294,7 @@ class TestCompileContextFlagsViaExtraArgs:
             {
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
-                "INPUT_EXTRA_ARGS": "--verbose",
+                "INPUT_EXTRA_ARGS": "--verbose --pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"
@@ -315,7 +331,7 @@ class TestAbi3FlagStaysOnLegacyCli:
             {
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
-                "INPUT_EXTRA_ARGS": "--verbose",
+                "INPUT_EXTRA_ARGS": "--verbose --pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"
@@ -361,7 +377,7 @@ class TestExtraArgsOutputFlagStaysOnLegacyCli:
             {
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
-                "INPUT_EXTRA_ARGS": "--verbose",
+                "INPUT_EXTRA_ARGS": "--verbose --pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"
@@ -406,6 +422,7 @@ class TestBaselineDetectedByContentStaysOnLegacyCli:
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
                 "INPUT_AGAINST": str(baseline),
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"
@@ -415,7 +432,13 @@ class TestBaselineDetectedByContentStaysOnLegacyCli:
         # the legacy CLI for a baseline path that doesn't exist on disk
         # (e.g. this harness's own fixture strings like "baseline.so" in
         # _BASE_INPUTS) -- only a real, readable JSON file does.
-        cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            }
+        )
         assert cmd[1] == "compare"
 
 
@@ -454,7 +477,11 @@ class TestBaselineSniffFallsBackToLegacyWhenPythonUnavailable:
         # -- not a classification failure -- so it must not itself force
         # the legacy CLI even with sniffing unavailable.
         cmd = _run_cmd(
-            {**_BASE_INPUTS, "INPUT_DEPTH": "headers"},
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            },
             region=_region_with_py_bin_forced_unavailable(),
         )
         assert cmd[1] == "compare"
@@ -509,7 +536,13 @@ class TestEffectiveJsonFormatStaysOnLegacyCli:
     def test_no_format_input_at_all_still_routes_to_compare(self) -> None:
         # Negative control: the default format (text) must not itself
         # force the legacy CLI -- only an effective json format does.
-        cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
+            }
+        )
         assert cmd[1] == "compare"
 
 
@@ -669,7 +702,54 @@ class TestCompareOnlyExtraArgsFlagsStayOnLegacyCli:
             {
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
-                "INPUT_EXTRA_ARGS": flag,
+                "INPUT_EXTRA_ARGS": f"{flag} --pattern-verdicts",
+            }
+        )
+        assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestPatternVerdictsDefaultStaysOnLegacyCli:
+    """``--pattern-verdicts`` (Codex review, PR #1172, round 17, fresh
+    evidence): `scan --against` defaults `pattern_verdicts` to `false`
+    (`abicheck/cli_scan.py`'s own option), while `compare`'s pattern-verdict
+    modulation has been unconditional since ADR-068 D4 -- there is no flag
+    left on that side to turn it off at all. A default baseline scan (no
+    `--pattern-verdicts` in `extra-args`) would silently gain that
+    evidence-gated modulation axis the moment it routes onto `compare`,
+    changing the verdict/exit code purely from which CLI the Action picked.
+    The one safe case is an explicit bare `--pattern-verdicts`, which
+    matches `compare`'s forced-on behavior exactly."""
+
+    def test_default_no_pattern_verdicts_flag_stays_on_legacy_cli(self) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_explicit_no_pattern_verdicts_stays_on_legacy_cli(self) -> None:
+        # `compare` has nothing to translate `--no-pattern-verdicts` onto
+        # either -- it's in `_extra_args_has_scan_only_flag`'s own
+        # always-legacy list, unlike the bare positive form below.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--no-pattern-verdicts",
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_explicit_bare_pattern_verdicts_routes_to_compare(self) -> None:
+        # The one case that actually matches compare's forced-on behavior.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
             }
         )
         assert cmd[1] == "compare"

@@ -398,9 +398,14 @@ equivalent), risk-driven `auto` depth selection (no `compare` equivalent),
 compressed (`.gz`/`.zst`)/content-detected JSON snapshot baseline file,
 `--output-file`, an effective (dedicated- or `extra-args`-supplied)
 non-JSON/text `--format`, a `-o`/`--output` output path via `extra-args`,
-and a `--write`/scan-only `extra-args` flag (`--abi3`,
+a `--write`/scan-only `extra-args` flag (`--abi3`,
 `--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the
-compile-context-option family included) —
+compile-context-option family included), and a default (or explicit
+`--no-pattern-verdicts`) baseline scan reaching `compare`'s own pattern-
+verdict modulation, which has been unconditional since D4 with no flag left
+to turn it off (`scan --against` still defaults it off; only an explicit
+bare `--pattern-verdicts` in `extra-args` — matching `compare`'s forced-on
+behavior exactly — is safe to route) —
 are **independent, still-open capability gaps**, not instances of this
 divergence; `_SCAN_NEEDS_LEGACY_CLI` keeps routing those cases to the legacy
 CLI until each grows its own `compare` equivalent (tracked in

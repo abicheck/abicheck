@@ -132,6 +132,14 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
                 "INPUT_DEPTH": "headers",
+                # Codex review, PR #1172, round 17: a default baseline scan
+                # (no --pattern-verdicts) now stays on the legacy CLI (see
+                # TestPatternVerdictsDefaultStaysOnLegacyCli in
+                # test_action_run_sh_scan_routing_edge_cases.py) -- this
+                # test is about -H/--public-header-dir forwarding, not that
+                # axis, so opt in explicitly to keep exercising the
+                # compare-translation branch.
+                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
             }
         )
         assert "compare" in cmd

@@ -1565,7 +1565,7 @@ _extra_args_has_scan_only_flag() {
     case "$_name" in
     --crosscheck | --risk-rules | --budget | --build-target | --artifact-set | \
       --max-findings | --show-suppressed | --manifest | --public-header-dir | \
-      --against | --pattern-verdicts | --no-pattern-verdicts | \
+      --against | --no-pattern-verdicts | \
       --lang | --ast-frontend | --compiler | --compiler-prefix | \
       --compiler-option | --sysroot | --nostdinc | --no-nostdinc | \
       --frontend-context | --allow-ast-frontend-fallback | \
@@ -1673,6 +1673,36 @@ _extra_args_has_scan_only_flag() {
       return 0
       ;;
     esac
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
+# `--pattern-verdicts` via the general extra-args passthrough (Codex review,
+# PR #1172, round 17, fresh evidence): `scan --against` defaults
+# `pattern_verdicts` to `false` (`abicheck/cli_scan.py`'s own
+# `--pattern-verdicts/--no-pattern-verdicts` option), while `compare`'s own
+# pattern-verdict modulation has been unconditional since ADR-068 D4 --
+# there is no flag left to turn it off on that side at all
+# (`--no-pattern-verdicts`/`--explain-patterns` both stay in
+# `_extra_args_has_scan_only_flag`'s always-legacy list above for exactly
+# that reason: neither has anything on `compare` to translate onto). A
+# default baseline scan (no `--pattern-verdicts` in extra-args at all) would
+# therefore silently gain pattern-based verdict modulation the moment it
+# routes onto `compare`, an idiom/anti-pattern-evidence-gated axis that can
+# demote an opaque-pointer/PIMPL layout change or raise a break for a lost
+# opacity guarantee -- a real, if evidence-gated, verdict/exit-code
+# divergence purely from which CLI the Action happened to pick, not from
+# anything the request asked for differently. The one case that *is* safe
+# to route is the caller explicitly passing bare `--pattern-verdicts`
+# (turning scan's own default on): that matches `compare`'s forced-on
+# behavior exactly, so it is intentionally excluded from
+# `_extra_args_has_scan_only_flag`'s always-legacy list above and checked
+# here instead, gating the routing decision the other way around --
+# `_SCAN_NEEDS_LEGACY_CLI` forces legacy unless this returns true.
+_extra_args_has_pattern_verdicts_flag() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--pattern-verdicts" ]] && return 0
   done <<<"$(_extra_args_options)"
   return 1
 }
@@ -2547,7 +2577,8 @@ if [[ "$MODE" == "scan" ]]; then
      || [[ -n "${INPUT_OUTPUT_FILE:-}" ]] \
      || [[ "$(_effective_format_for_routing)" == "json" ]] \
      || _extra_args_has_write_flag \
-     || _extra_args_has_scan_only_flag; then
+     || _extra_args_has_scan_only_flag \
+     || ! _extra_args_has_pattern_verdicts_flag; then
     _SCAN_NEEDS_LEGACY_CLI=true
   fi
 fi

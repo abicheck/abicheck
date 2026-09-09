@@ -6673,6 +6673,14 @@ severity divergence the amendment closed:
   `--ast-frontend`, `--compiler*`, `--sysroot`, `--nostdinc`) reaching
   through `extra-args`, are the same underlying gaps as the two rows
   above, just via the passthrough rather than a dedicated Action input.
+- A default (or explicit `--no-pattern-verdicts`) baseline scan — `compare`'s
+  pattern-verdict modulation has been unconditional since ADR-068 D4, with
+  no flag left on that side to turn it off at all, while `scan --against`
+  still defaults `--pattern-verdicts` off. Only an explicit bare
+  `--pattern-verdicts` in `extra-args` (matching `compare`'s forced-on
+  behavior exactly) is safe to route; every other case — the default, or
+  an explicit `--no-pattern-verdicts` (which `compare` has nothing to
+  translate onto) — stays on the legacy CLI.
 
 Not fixed here: closing each of these needs a new `compare` CLI flag (or an
 equivalent `.abicheck.yml` key plus Action wiring), which is Click-surface

@@ -66,3 +66,17 @@
   crosscheck mechanism's own input — exactly the documented, pre-existing
   shape a plain `scan --crosscheck KEY=warning` (no baseline at all)
   builds.
+- **A `mode: scan` Action request with a live baseline (native `.so`, an
+  explicit `headers`/`binary` depth, no other still-legacy-only capability)
+  now stays on the legacy `scan` CLI unless the workflow explicitly opts
+  into `extra-args: --pattern-verdicts`, instead of always routing to
+  `compare`.** `scan --against` defaults pattern-verdict modulation off;
+  `compare`'s own modulation has been unconditional since ADR-068 D4, with
+  no flag left on that side to turn it off at all. Routing a default
+  baseline scan onto `compare` therefore silently applied an
+  idiom/anti-pattern-evidence-gated modulation axis — able to demote an
+  opaque-pointer/PIMPL layout change or raise a break for a lost opacity
+  guarantee — that a `mode: scan` caller's workflow was never written
+  against, purely because the Action picked a different internal CLI. An
+  explicit bare `--pattern-verdicts` (matching `compare`'s forced-on
+  behavior exactly) is the one case that is safe to route.
