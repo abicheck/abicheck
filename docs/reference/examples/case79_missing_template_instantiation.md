@@ -39,7 +39,11 @@ combination only" build trims when a header isn't updated to match.
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -73,7 +77,7 @@ dumper's bare `Function.name` never carries, and scopes the check to
 `Visibility.PUBLIC` functions so a stale `extern template` cross-reference
 entry isn't mistaken for a surviving instantiation. castxml is the
 documented default backend for this evidence layer; clang
-(`--ast-frontend clang`) is a supported alternative AST frontend used
+(`compile.frontend: clang` (via `.abicheck.yml`)) is a supported alternative AST frontend used
 above.
 
 ## Why abicheck catches it

@@ -550,7 +550,7 @@ def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
     # applies precedence and collapses to plain S5 — source-target here since the
     # request carries no diff seed (ADR-043 D2/D3: unseeded S5 scopes to TARGET,
     # never silently to a zero-TU "source-changed" default) — Codex review.
-    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from abicheck.service_scan import estimate_scan
 
     req = ScanRequest(

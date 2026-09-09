@@ -1703,7 +1703,7 @@ def test_collect_evidence_source_graph_alone_does_not_fold_call_graph(
     # layers and "L4" in layers, inline.collect_inline_pack). The public
     # `--depth` ladder has no rung that requests L5 without L4 (that internal
     # "graph-build" CI mode is not user-reachable per
-    # abicheck.buildsource.scan_levels.EvidenceDepth/USER_DEPTHS), so this
+    # abicheck.model.evidence_depth_levels.EvidenceDepth/USER_DEPTHS), so this
     # drives collect_inline_pack directly with layers=("L3", "L5") instead of
     # going through a CLI invocation that cannot express this state.
     from abicheck.buildsource.inline import collect_inline_pack

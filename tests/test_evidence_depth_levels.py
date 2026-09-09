@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.scan_levels import (
+from abicheck.model.evidence_depth_levels import (
     USER_DEPTHS,
     EvidenceDepth,
     ScanMode,

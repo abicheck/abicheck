@@ -228,6 +228,12 @@ def reject_unsupported_options(
         use_cases_manifest=kwargs.get("use_cases_manifest"),
         diagnostic_comparison=bool(kwargs.get("diagnostic_comparison", False)),
         audit_suppressions=bool(kwargs.get("audit_suppressions", False)),
+        # CodeRabbit/Codex review on PR #1154: --audit-suppressions with no
+        # --suppress is a harmless no-op on every other `compare` path now
+        # (nothing to audit) -- only a real --suppress alongside it is a
+        # genuine conflict this driver's per-library fan-out can't honor
+        # (see _reject_set_input_flags's own comment for the full reasoning).
+        suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
         require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
     )
@@ -361,15 +367,13 @@ def reject_unsupported_options(
     # unconditional everywhere else on `compare` now) -- nothing left to
     # reject a user for asking for; --explain-patterns is likewise harmless
     # here (it only echoes result.pattern_modulations, empty on this path).
-    # --surface-metrics is still a real flag, though, and this dispatcher
-    # still never wires it into compare_release_against_bundle_facts() (a
-    # pre-existing internal limitation of that engine call) -- so a
-    # requested metric-drift finding would still silently never happen.
-    if kwargs.get("surface_metrics"):
-        raise click.UsageError(
-            "--surface-metrics is not supported together with a "
-            "stored-bundle-facts OLD_INPUT."
-        )
+    # --surface-metrics used to be rejected here because
+    # compare_release_against_bundle_facts() never wired it into its
+    # per-library service.compare_snapshots() call -- CodeRabbit/Codex
+    # review on PR #1154 closed that gap (surface_metrics=True is now
+    # unconditional there too, matching every other path that reaches the
+    # Tier-2 chokepoint), so the (now vestigial, accepted-everywhere-else)
+    # flag is a harmless no-op here as well, not a usage error.
     depth = kwargs.get("depth")
     if depth in ("build", "source"):
         # Codex review: run_compare's own --depth build/source dial collects
@@ -398,7 +402,8 @@ def reject_unsupported_options(
         # release-shaped comparison path. Rejected rather than partially
         # honored ahead of that pre-existing gap.
         raise click.UsageError(
-            "--show-only is not supported together with a stored-bundle-facts OLD_INPUT."
+            "--view show=... is not supported together with a "
+            "stored-bundle-facts OLD_INPUT (was --show-only)."
         )
     if kwargs.get("report_mode") not in (None, "full") or kwargs.get("show_filtered"):
         # Codex review: same root cause as --show-only above -- report_mode
@@ -407,8 +412,9 @@ def reject_unsupported_options(
         # dispatcher never calls. Same identical pre-existing gap on the
         # live release fan-out's own per-library to_json() calls.
         raise click.UsageError(
-            "--report-mode/--show-filtered are not supported together "
-            "with a stored-bundle-facts OLD_INPUT."
+            "--view <mode>/--show-filtered are not supported together "
+            "with a stored-bundle-facts OLD_INPUT (was --report-mode/"
+            "--show-filtered)."
         )
     # --no-bundle-analysis is gone (Phase 7d, one-comparison-product.md
     # §4.1, ADR-068 D5) -- bundle-level analysis always runs now, matching
@@ -564,8 +570,32 @@ def reject_unsupported_options(
         # symbol at all -- only a rare bundle_* finding on a C++ symbol
         # would show one.
         raise click.UsageError(
-            "--demangle/--no-demangle is not supported together with "
-            "a stored-bundle-facts OLD_INPUT."
+            "--view demangle/--view no-demangle is not supported together "
+            "with a stored-bundle-facts OLD_INPUT (was --demangle/"
+            "--no-demangle)."
+        )
+    if kwargs.get("explain_patterns"):
+        # Codex review, fresh evidence ("Honor pattern views for stored-
+        # bundle comparisons"): a per-library stored-BundleFacts comparison
+        # now genuinely can populate DiffResult.pattern_modulations (ADR-068
+        # D4's pattern-verdict modulation is unconditional as of the Tier-2
+        # fix above), but `--view patterns`'s own stderr-echo side channel
+        # (cli_audit.echo_pattern_modulations) is only wired for the live
+        # single-pair/release-fan-out paths -- this dispatcher's own
+        # `_render` never calls it, so the flag was silently accepted and
+        # did nothing. Same "no channel here" class of gap `demangle` above
+        # already has, and the same fix: reject explicitly rather than
+        # silently no-op. The ledger itself is unaffected -- `pattern_
+        # modulations` still appears in this comparison's own JSON output
+        # unconditionally (reporter.to_json's existing, flag-independent
+        # behavior), so no information is lost -- only the diagnostic
+        # stderr echo is unavailable here.
+        raise click.UsageError(
+            "--view patterns is not supported together with a "
+            "stored-bundle-facts OLD_INPUT: there is no per-library stderr "
+            "echo channel for this comparison shape. The pattern-"
+            "modulation ledger itself still appears in this comparison's "
+            "own JSON output unconditionally."
         )
     if new_is_single_file and (dso_only or include_private_dso):
         raise click.UsageError(

@@ -5,8 +5,8 @@ one production caller: ``scan_engine.py``.
 ADR-068 §1 states the capability-loss defect by call site, not by import:
 
     Verified by call site, not by import: the only production callers of
-    ``buildsource.crosscheck.run_crosschecks``, ``buildsource.pattern_scan.
-    scan_files`` and ``buildsource.preprocessor_scan.run_preprocessor_scan``
+    ``buildsource.cross_source_checks.run_crosschecks``, ``buildsource.pattern_facts.
+    find_pattern_facts`` and ``buildsource.preprocessor_facts.collect_preprocessor_facts``
     anywhere under ``abicheck/`` are ``scan_engine.py``... Check by call
     site, not import: ``workflows/extraction.py`` imports two of the three
     and calls neither.
@@ -15,7 +15,7 @@ This module makes that claim executable instead of only a prose citation --
 a real AST scan over every ``abicheck/**/*.py`` module, not a grep that a
 comment or an unrelated identifier could fool. It is the parity harness's
 proof, for ``pattern_scan``/``preprocessor_scan`` (and a second angle on
-``crosscheck``, alongside ``test_crosscheck_parity.py``'s behavioral one),
+``crosscheck``, alongside ``test_cross_source_checks_parity.py``'s behavioral one),
 that ``compare``'s pipeline *cannot* reach them today -- not merely that it
 happens not to in the fixtures exercised elsewhere.
 
@@ -29,7 +29,7 @@ compare's real, user-facing entry point*.
 **Documented, now-complete exception (ADR-068 D3/D4/D5 / plan P2):**
 ``abicheck/workflows/cross_source_evolution.py`` is a second, legitimate
 caller of ``run_crosschecks`` -- the migration folds all eleven
-``crosscheck.ALL_CHECKS`` entries into evolution-stated findings via
+``cross_source_checks.ALL_CHECKS`` entries into evolution-stated findings via
 ``compare()``'s own ``cross_source_checks`` keyword (``unversioned_exported_
 symbol``/``private_header_leak`` first, then ``exported_not_public``/
 ``public_not_exported``/``rtti_for_internal_type``/``public_to_internal_
@@ -38,14 +38,14 @@ and is reached automatically by every real front end (CLI, typed API,
 Action) with no opt-in flag of any kind (D5 rejects "a flag that merely
 enables useful analysis") -- which is exactly why none of the eleven checks
 is registered in ``tests/parity/gaps.py`` any more; see
-``test_crosscheck_parity.py``'s own positive coverage for all eleven.
+``test_cross_source_checks_parity.py``'s own positive coverage for all eleven.
 ``run_crosschecks`` therefore backs no remaining scan-only gap at all (its
 entry below carries no ``gap_key``). Only the raw structural claim this
 module checks -- "nothing but scan_engine.py (and, for `run_crosschecks`,
 `cross_source_evolution.py`) calls the primitive at all" -- needed updating
 to admit that one caller.
 
-**``scan_files``/``run_preprocessor_scan`` closed outright (Phase 2b,
+**``find_pattern_facts``/``collect_preprocessor_facts`` closed outright (Phase 2b,
 plan §3 #6/#8):** unlike ``run_crosschecks``, neither primitive backs more
 than one gap key, and this slice migrates the whole capability -- both are
 now called from ``abicheck/workflows/pattern_preprocessor_scan.py``
@@ -77,7 +77,7 @@ _ABICHECK_ROOT = Path(__file__).resolve().parent.parent.parent / "abicheck"
 #: gap is closed (nothing left in `EXPECTED_GAPS` for it to name).
 _ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "run_crosschecks": (
-        "buildsource/crosscheck.py",
+        "buildsource/cross_source_checks.py",
         ("scan_engine.py", "workflows/cross_source_evolution.py"),
         None,  # fully migrated -- no scan-only crosscheck gap remains
     ),
@@ -92,7 +92,7 @@ def _posix(path: Path) -> str:
 
 def _module_dotted_name(path: Path) -> str:
     """Dotted module name for a file under the repo root, e.g.
-    ``abicheck/buildsource/crosscheck.py`` -> ``abicheck.buildsource.crosscheck``."""
+    ``abicheck/buildsource/cross_source_checks.py`` -> ``abicheck.buildsource.cross_source_checks``."""
     parts = list(path.relative_to(_ABICHECK_ROOT.parent).with_suffix("").parts)
     if parts[-1] == "__init__":
         parts = parts[:-1]
@@ -151,7 +151,7 @@ def _bindings_for(
 def _call_sites(function_name: str, defining_module: str) -> dict[Path, int]:
     """Repo-relative module -> number of *call expressions* resolving to
     ``function_name`` from *defining_module* (a repo-relative path, e.g.
-    ``buildsource/crosscheck.py``) -- ``foo()`` after a direct import,
+    ``buildsource/cross_source_checks.py``) -- ``foo()`` after a direct import,
     ``mod.foo()``/``alias.foo()`` after a module import, an aliased import
     of either shape, or a relative import. Not a bare textual mention (a
     docstring, a comment, an unrelated ``foo`` in a different module)."""
@@ -223,12 +223,12 @@ def test_only_scan_engine_calls_it(function_name: str) -> None:
 #: table's own job is narrower: pin the caller set so a *third* caller
 #: (or the loss of either expected one) is still caught structurally.
 _CLOSED_ENGINE_PRIMITIVES: dict[str, tuple[str, tuple[str, ...]]] = {
-    "scan_files": (
-        "buildsource/pattern_scan.py",
+    "find_pattern_facts": (
+        "buildsource/pattern_facts.py",
         ("scan_engine.py", "workflows/pattern_preprocessor_scan.py"),
     ),
-    "run_preprocessor_scan": (
-        "buildsource/preprocessor_scan.py",
+    "collect_preprocessor_facts": (
+        "buildsource/preprocessor_facts.py",
         ("scan_engine.py", "workflows/pattern_preprocessor_scan.py"),
     ),
 }
@@ -260,36 +260,34 @@ def test_pattern_scan_and_preprocessor_scan_are_no_longer_registered_gaps() -> N
 @pytest.mark.parametrize(
     "source",
     [
-        "from abicheck.buildsource.crosscheck import run_crosschecks\n"
+        "from abicheck.buildsource.cross_source_checks import run_crosschecks\n"
         "run_crosschecks(snap)\n",
-        "from abicheck.buildsource.crosscheck import run_crosschecks as check\n"
+        "from abicheck.buildsource.cross_source_checks import run_crosschecks as check\n"
         "check(snap)\n",
-        "from abicheck.buildsource import crosscheck\n"
-        "crosscheck.run_crosschecks(snap)\n",
-        "from abicheck.buildsource import crosscheck as cc\ncc.run_crosschecks(snap)\n",
-        "import abicheck.buildsource.crosscheck as cc\ncc.run_crosschecks(snap)\n",
-        "from .crosscheck import run_crosschecks\n"  # relative, as scan_engine.py itself uses
+        "from abicheck.buildsource import cross_source_checks\n"
+        "cross_source_checks.run_crosschecks(snap)\n",
+        "from abicheck.buildsource import cross_source_checks as cc\ncc.run_crosschecks(snap)\n",
+        "import abicheck.buildsource.cross_source_checks as cc\ncc.run_crosschecks(snap)\n",
+        "from .buildsource.cross_source_checks import run_crosschecks\n"  # relative,
+        # exactly the shape scan_engine.py itself uses (it lives at
+        # abicheck/scan_engine.py, one level above the buildsource/ package)
         "run_crosschecks(snap)\n",
     ],
 )
 def test_bindings_for_resolves_every_aliasing_and_qualified_call_shape(
     source: str,
 ) -> None:
-    """Codex review: a bare ``ast.Name`` match alone misses ``crosscheck.
+    """Codex review: a bare ``ast.Name`` match alone misses ``cross_source_checks.
     run_crosschecks()`` and an aliased import -- both real Python a new
     caller could legitimately write. Exercises every shape ``_bindings_for``
     claims to resolve, each as its own module so a caller written from
-    ``abicheck.buildsource`` (the relative-import case, matching
-    ``scan_engine.py``'s own real import site) and one written from
-    ``abicheck`` itself are both covered."""
+    ``abicheck`` itself (the relative-import-into-a-subpackage case, matching
+    ``scan_engine.py``'s own real import site) and every other shape are both
+    covered."""
     tree = ast.parse(source)
-    current_module = (
-        "abicheck.buildsource.scan_engine"
-        if source.lstrip().startswith("from .")
-        else "abicheck.scan_engine"
-    )
+    current_module = "abicheck.scan_engine"
     direct, module_aliases = _bindings_for(
-        tree, current_module, "abicheck.buildsource.crosscheck", "run_crosschecks"
+        tree, current_module, "abicheck.buildsource.cross_source_checks", "run_crosschecks"
     )
     calls = 0
     for node in ast.walk(tree):

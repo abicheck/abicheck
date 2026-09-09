@@ -14,22 +14,22 @@
 
 """Evidence-coherence cross-checks (AC-008 / AC-009).
 
-Split out of ``crosscheck.py`` to keep that module under the AI-readiness
-2000-line hard cap, the same pattern as ``export_accounting.py``. Holds the two
-checks that validate the *coherence* of the merged evidence sources — that a
-build target's L3 compile units agree on their ABI-relevant compile context
-(``compile_context_conflict``) and that the linked L4 source surface actually
-describes the analyzed binary (``source_surface_dso_mismatch``).
+Split out of ``cross_source_checks.py`` to keep that module under the
+AI-readiness 2000-line hard cap, the same pattern as ``export_accounting.py``.
+Holds the two checks that validate the *coherence* of the merged evidence
+sources — that a build target's L3 compile units agree on their ABI-relevant
+compile context (``compile_context_conflict``) and that the linked L4 source
+surface actually describes the analyzed binary (``source_surface_dso_mismatch``).
 
-These are ordinary ``run_crosschecks`` runners; ``crosscheck.py`` imports them
-inside ``run_crosschecks`` when assembling the runner table. The shared
-finding/coverage plumbing (``_change``, ``_CheckOutput``,
+These are ordinary ``run_crosschecks`` runners; ``cross_source_checks.py``
+imports them inside ``run_crosschecks`` when assembling the runner table. The
+shared finding/coverage plumbing (``_change``, ``_CheckOutput``,
 ``_exported_symbol_names``, the provider constants) comes from the leaf
-``crosscheck_base`` — **not** from ``crosscheck`` — so this module never depends
-on the engine and the ``crosscheck`` → check-module dependency stays
-one-directional (no import cycle; CLAUDE.md "M1-3"). Neither check reads the
-``CrosscheckConfig`` argument, so it is typed loosely to avoid importing the
-config type from ``crosscheck``.
+``cross_source_checks_base`` — **not** from ``cross_source_checks`` — so this
+module never depends on the engine and the ``cross_source_checks`` →
+check-module dependency stays one-directional (no import cycle; CLAUDE.md
+"M1-3"). Neither check reads the ``CrosscheckConfig`` argument, so it is typed
+loosely to avoid importing the config type from ``cross_source_checks``.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ from typing import Any
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
 from ..model import AbiSnapshot
-from .crosscheck_base import (
+from .cross_source_checks_base import (
     PROVIDER_BINARY_EXPORTS,
     PROVIDER_BUILD_CONFIG,
     PROVIDER_SOURCE_INDEX,

@@ -1001,7 +1001,7 @@ def compute_call_graph_leak_paths(
             decl_to_symbol[e.src] = e.dst[len(symbol_prefix) :]
     exported_decls = set(decl_to_symbol)
     # is_consumer_compiled_public_entry (not the broader is_public_dependency_node
-    # crosscheck.py's advisory RISK-only check uses) -- an ordinary out-of-line
+    # cross_source_checks.py's advisory RISK-only check uses) -- an ordinary out-of-line
     # exported function's own internal calls never reach consumer-compiled code
     # at all, so seeding the walk from it would treat a purely internal
     # implementation-detail dependency as public-reachable (Codex review).

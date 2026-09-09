@@ -131,10 +131,13 @@ def test_changed_path_promotes_public_to_internal_dependency_confidence() -> Non
     file is a changed path, the finding is promoted from MEDIUM to HIGH
     confidence and gains that file as `source_location` (ADR-035 D4's
     "L5 reachability <-> PR changed files" note in `crosscheck.py`)."""
-    from abicheck.buildsource.crosscheck import CrosscheckConfig, run_crosschecks
+    from abicheck.buildsource.cross_source_checks import (
+        CrosscheckConfig,
+        run_crosschecks,
+    )
     from abicheck.checker_policy import Confidence
 
-    from .test_crosscheck_parity import _g20_snapshot
+    from .test_cross_source_checks_parity import _g20_snapshot
 
     snapshot = _g20_snapshot("case181_xcheck_public_to_internal_dependency")
     internal_file = "src/json_internal.cc"

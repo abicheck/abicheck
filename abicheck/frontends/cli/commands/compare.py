@@ -91,11 +91,38 @@ if TYPE_CHECKING:
 
 from ....cli import main
 from ..runtime import (
-    _validate_show_only,
+    _validate_view,
 )
 from .dump import dump_cmd
 
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
+
+
+def reject_release_incompatible_view_mode(report_mode: str) -> None:
+    """Reject a ``--view`` mode a directory/package release fan-out can't
+    honor: ``leaf``/``root-cause`` restructure a single comparison's own
+    root-cause graph, and the release summary is an aggregate report across
+    every library with no single such graph to restructure. ``full`` and
+    ``impact`` (each library already has its own ``DiffResult`` to compute
+    an impact table from) are the only accepted values here.
+
+    Shared by ``_dispatch_release_compare``'s own check below and
+    ``cli_compare_helpers.py``'s pre-``--dry-run`` rejection point (Codex
+    review, fresh evidence: without the latter, ``compare --dry-run --view
+    leaf`` on a directory/package operand exited 0 while the identical
+    non-dry-run invocation exited 64 -- the one thing ``--dry-run`` promises
+    not to do, per the sibling checks it already sits next to) -- one
+    predicate, so the two call sites cannot silently drift apart.
+    """
+    if report_mode not in ("full", "impact"):
+        raise click.UsageError(
+            f"--view {report_mode} is not available when comparing directories "
+            "or packages: 'leaf'/'root-cause' restructure a single comparison's "
+            "own root-cause graph, and the release summary is an aggregate "
+            "report across every library with no single such graph to "
+            "restructure. Compare one library at a time (a single old/new "
+            f".so pair) to use --view {report_mode}."
+        )
 
 
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
@@ -123,6 +150,36 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     identically to before.
     """
     fmt = kwargs.get("fmt", "markdown")
+    # Codex review (PR #1154 follow-up): --view's derived values used to be
+    # silently dropped here. show_only/demangle/explain_patterns are threaded
+    # through the release engine below (cli_compare_release.py); demangle
+    # stays an unresolved tri-state since --write can name a different
+    # secondary format, resolved per-format inside compare_release_cmd.
+    # report_mode's "leaf"/"root-cause" restructure a single DiffResult's own
+    # root-cause graph -- the release report has no such graph to
+    # restructure (the same mismatch --format sarif/html/review hits below),
+    # so those two are rejected. "impact" (Codex review, PR #1154 second
+    # follow-up: "Reject unsupported impact views instead of silently
+    # dropping them") is neither implemented as a real aggregate nor
+    # rejected here as a usage error -- it is threaded through as
+    # show_impact, since (unlike leaf/root-cause) an impact summary is
+    # naturally per-library: each library already has its own DiffResult,
+    # so `_strip_diff_results_and_adjust_verdict` computes one impact table
+    # per library from it, the same way it already computes one findings
+    # list per library. See that function's own docstring for the full
+    # account.
+    report_mode = kwargs.pop("report_mode", "full")
+    kwargs["show_only"] = kwargs.pop("show_only", None)
+    kwargs["demangle"] = kwargs.pop("demangle", None)
+    kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
+    # Already validated ahead of the --dry-run emit (cli_compare_helpers.py's
+    # pre-dry-run block) -- re-checked here too since _dispatch_release_
+    # compare has its own direct callers/tests and must reject on its own,
+    # not merely rely on an upstream caller having done so.
+    reject_release_incompatible_view_mode(report_mode)
+    kwargs["show_impact"] = report_mode == "impact"
+    if report_mode == "impact":
+        report_mode = "full"
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"--format {fmt} is not available when comparing directories or "
@@ -531,14 +588,24 @@ def _embed_inline_source_side(
                 "--format markdown for a human alongside --write json=abi.json "
                 "for tooling). FORMAT is one of {formats}; PATH must differ from "
                 "--output/-o. Always renders the full, unfiltered report "
-                "(ignores --show-only). For a directory/package (release) "
+                "(ignores --view show=...). For a directory/package (release) "
                 "comparison, only json/markdown/junit are available, and only "
                 "one --write is supported there.",
 )
-@click.option("--demangle/--no-demangle", default=None,
-              help="Demangle C++ symbol names in markdown/review/html output "
-                   "(default ON; use --no-demangle to turn off). json/sarif/junit "
-                   "always keep raw mangled names for downstream tooling to match on.")
+@click.option(
+    "--view", "view", multiple=True, callback=_validate_view, expose_value=True,
+    metavar="TOKEN",
+    help="Repeatable rendering selector (ADR-068 D4): never changes the "
+         "verdict, findings, or exit code. Replaces --report-mode/"
+         "--show-only/--demangle/--no-demangle/--explain-patterns. TOKEN: "
+         "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
+         "'show=<tokens>' (severity/element/action filter, same vocabulary "
+         "as the old --show-only, repeatable to OR groups together); "
+         "'demangle'/'no-demangle' (C++ demangling, default ON for "
+         "markdown/review/html); 'patterns' (explain pattern-verdict "
+         "modulation, which always runs where evidence exists). Example: "
+         "--view leaf --view demangle --view show=breaking,functions.",
+)
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options
@@ -590,26 +657,6 @@ def _embed_inline_source_side(
                    "findings (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
                    "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this comparison's "
                    "verdict and report (G2: probe -> compare; ADR-040).")
-@click.option("--show-only", "show_only", default=None,
-              callback=_validate_show_only, expose_value=True, is_eager=False,
-              help="Comma-separated filter tokens to limit displayed changes. "
-                   "Severity: breaking, api-break, risk, compatible. "
-                   "Element: functions, variables, types, enums, elf. "
-                   "Action: added, removed, changed. "
-                   "AND across dimensions, OR within. Does not affect exit codes.")
-@click.option("--report-mode", "report_mode",
-              type=click.Choice(["full", "leaf", "impact", "root-cause"], case_sensitive=True),
-              default="full", show_default=True,
-              help="Report mode: 'full' lists all changes individually (default), "
-                   "'leaf' groups by root type changes with impact lists, "
-                   "'impact' behaves as 'full' plus an impact summary table "
-                   "listing root changes and the interfaces they affect, "
-                   "'root-cause' groups findings sharing a root cause "
-                   "(Change.caused_by_type) under one entry for "
-                   "--format json/markdown (the default rendered text output); "
-                   "--format sarif keeps its normal one-result-per-finding "
-                   "shape but adds properties.rootCauseId/rootCause to each "
-                   "result; --format junit still renders as 'full'.")
 # ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
 # --debug-root{,1,2}: the shared local-ELF debug-resolution family. The
 # dwarf-only/debuginfod[-url]/debug-format hidden flags are gone (ADR-068 D5,
@@ -746,6 +793,14 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # ADR-040 Lever 1: translate the side-aware --header/--include/--sources/
     # --build-info tuples back into the per-side kwargs run_compare consumes.
     normalize_sided_options(kwargs)
+
+    # ADR-068 D4/Phase 5: resolve --view (frontends.cli.options.view) into
+    # the same report_mode/show_only/demangle/explain_patterns dest names
+    # those retired flags used to populate, so every downstream consumer
+    # needs no change of its own. No profile injects those dests.
+    from ..options.view import parse_view_tokens
+
+    kwargs.update(parse_view_tokens(kwargs.pop("view", ())))
 
     # ADR-068 D2 / plan §6 Phase 2e: `--no-baseline` is an explicit
     # declaration, never inferred from arity -- branch before the two-sided

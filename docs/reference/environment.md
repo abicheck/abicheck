@@ -57,7 +57,7 @@ and [Build & source data](../learn/build-source-data.md).
 
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
-| `ABICHECK_PATTERN_SCAN_JOBS` | `auto`, `0`, `1`, or a positive integer | unset / `auto` → `min(cpu, 8)` above a 256-file floor, else serial | Worker count for the lexical (compiler-free) ABI-risk pattern pre-scan. `0`/`1` force serial (CI/test determinism, constrained sandboxes); `N` caps at `N` (still serial below the file floor). Always serial inside a daemonic process. | `buildsource/pattern_scan.py` (`_resolve_scan_jobs`) |
+| `ABICHECK_PATTERN_SCAN_JOBS` | `auto`, `0`, `1`, or a positive integer | unset / `auto` → `min(cpu, 8)` above a 256-file floor, else serial | Worker count for the lexical (compiler-free) ABI-risk pattern pre-scan. `0`/`1` force serial (CI/test determinism, constrained sandboxes); `N` caps at `N` (still serial below the file floor). Always serial inside a daemonic process. | `buildsource/pattern_facts.py` (`_resolve_scan_jobs`) |
 | `ABICHECK_CALL_GRAPH_JOBS` | positive integer | unset → `min(n_units, cpu, 8)` | Overrides the CPU-derived worker count for the best-effort L5 clang call-graph pass. Capped by `min(n_units, N, max(8, 2×cpu))` and by the shared L4 memory cap (`ABICHECK_L4_JOB_MEM_GIB`). An unparsable value falls back to `1`. | `buildsource/call_graph.py` (`_call_graph_jobs`) |
 
 ---
@@ -87,7 +87,7 @@ therefore configured entirely by environment. See
 
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
-| `DEBUGINFOD_URLS` | space-separated server URLs | `""` (no servers) | The standard debuginfod server list. abicheck consults it **only** when network resolution is enabled with `--debuginfod` and `--debuginfod-url` is not given. `--debuginfod-url` overrides `DEBUGINFOD_URLS`. Only `http`/`https` URLs are used. | `debug_resolver.py` (`DebuginfodResolver._default_urls`) |
+| `DEBUGINFOD_URLS` | space-separated server URLs | `""` (no servers) | The standard debuginfod server list. abicheck consults it **only** when network resolution is enabled with `.abicheck.yml`'s `debug.debuginfod: true` and `debug.debuginfod_url` is not given. `debug.debuginfod_url` overrides `DEBUGINFOD_URLS`. Only `http`/`https` URLs are used. | `debug_resolver.py` (`DebuginfodResolver._default_urls`) |
 
 ---
 

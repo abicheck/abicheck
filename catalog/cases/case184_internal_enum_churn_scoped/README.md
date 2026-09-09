@@ -28,8 +28,11 @@ are byte-identical between versions.
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-    --header old=v1.h --header new=v2.h --ast-frontend clang --show-filtered
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --show-filtered --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -48,7 +51,7 @@ public-header enum requires header/AST evidence: the header-AST provenance
 classifier has to see which file (`v1_internal.h`, not `v1.h`) actually
 declared the enum. castxml is abicheck's documented default AST backend for
 this evidence level; clang is a supported alternative frontend
-(`--ast-frontend clang`) used for the run above.
+(`compile.frontend: clang` (via `.abicheck.yml`)) used for the run above.
 
 ## Why abicheck catches it
 

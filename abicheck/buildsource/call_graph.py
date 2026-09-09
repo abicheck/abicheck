@@ -1064,7 +1064,7 @@ def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str
     ``include_graph`` pass (which already un-redacts its own argv, see
     ``include_graph.ClangIncludeExtractor.extract_from_build``) succeeded.
     Un-redact every token here, the same pattern already used by
-    ``include_graph.py``/``preprocessor_scan.py``/``archive_graph.py``, so
+    ``include_graph.py``/``preprocessor_facts.py``/``archive_graph.py``, so
     every clang-backed L5 pass replays a real, resolvable path.
 
     This blanket-expands every token, ``-D``/``-U`` macro values included,

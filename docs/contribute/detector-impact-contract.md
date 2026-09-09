@@ -16,7 +16,7 @@ generated: false
 # Detector Impact Contract
 
 A detector that reads the optional [L5 source graph](../reference/source-graph-schema.md)
-— today's `source_graph_findings.py`/`internal_leak.py`/`crosscheck.py`, and
+— today's `source_graph_findings.py`/`internal_leak.py`/`cross_source_checks.py`, and
 every future [G29](plans/g29-impact-analysis-layer.md) Phase 5/6 family
 (template instantiation, macro/config, virtual dispatch, callback/
 function-pointer, object/link provenance) — has more evidence available to
@@ -122,14 +122,14 @@ A new detector should:
   (`reporter_markdown.root_cause_lookup_for_changes`) resolves them and
   passes the value into `assess_change`, not the detector. A new detector
   should participate by setting the existing `caused_by_type` field where
-  it applies (the same signal `--report-mode root-cause` groups on) rather
+  it applies (the same signal `--view root-cause` groups on) rather
   than inventing a parallel correlation mechanism; the full
   `RootCauseCorrelator` correlating findings with no `caused_by_type` link
   at all is still
   [Phase 6](plans/g29-impact-analysis-layer.md#phase-6-new-detectors-examples-fp-gates).
 - **A new report format restructuring.** Every new field this contract asks
   for is additive to the existing JSON/SARIF/JUnit shapes (mirrors how
-  [`--report-mode root-cause` reached JUnit](../learn/impact-analysis.md)
+  [`--view root-cause` reached JUnit](../learn/impact-analysis.md)
   without restructuring its per-symbol `<testcase>` tree) — don't propose a
   breaking schema change to accommodate a new detector's output.
 

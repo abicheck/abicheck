@@ -426,7 +426,7 @@ class TestEvidenceView:
         assert evidence.depth_satisfied is None
 
     def test_available_depths_is_the_public_depth_ladder(self):
-        from abicheck.buildsource.scan_levels import USER_DEPTHS
+        from abicheck.model.evidence_depth_levels import USER_DEPTHS
 
         evidence = EvidenceView()
         assert evidence.available_depths == tuple(d.value for d in USER_DEPTHS)

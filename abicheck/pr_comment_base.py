@@ -17,7 +17,7 @@
 its 2000-line hard cap once scan-report support was added).
 
 Dependency-free of both sibling modules -- the same "leaf module" pattern
-``buildsource/crosscheck_base.py`` already uses for the identical reason
+``buildsource/cross_source_checks_base.py`` already uses for the identical reason
 (see its own module docstring): either sibling can import from here without
 forming an import cycle, since nothing here imports either of them back.
 

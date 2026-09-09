@@ -92,10 +92,15 @@ don't exactly match what was compiled, results will be unreliable.
 
 **Mitigation:**
 - Always use the exact same headers that were used to build the `.so`
-- Pass the build's include roots, dialect, and defines to the header frontend:
-  `abicheck dump libfoo.so -H foo.h -I include/ --compiler-option -std=c++20 --compiler-option -DFEATURE_X`
-  (the same flags work on `abicheck scan`; persist them in a `.abicheck.yml`
-  `compile:` block so every run is reproducible — see
+- Pass the build's include roots, dialect, and defines to the header frontend
+  via `.abicheck.yml`'s `compile:` block so every run is reproducible:
+  ```yaml
+  compile:
+    options:
+      - -std=c++20
+      - -DFEATURE_X
+  ```
+  (`abicheck dump libfoo.so -H foo.h -I include/ --config .abicheck.yml`; see
   [Compile context for header parsing](../use/scan-levels.md#compile-context-for-header-parsing-l2))
 - For `abicheck compat`, use `-s` (strict mode) to promote `COMPATIBLE`/`API_BREAK` to BREAKING:
   `abicheck compat check -lib foo -old OLD.xml -new NEW.xml -s`
@@ -139,8 +144,9 @@ case:
 **Mitigation:** Use `--debug-root` to point abicheck at separate debug files
 (distro debuginfo packages, build-id trees, or dSYM bundles). abicheck
 automatically searches for debug artifacts via a resolver chain. For
-Fedora/RHEL, use `--debuginfod` to fetch debug info by build-id from
-debuginfod servers. See the [CLI usage guide](../use/cli-usage.md) for
+Fedora/RHEL, set `.abicheck.yml`'s `debug.debuginfod: true` to fetch debug
+info by build-id from debuginfod servers. See the
+[CLI usage guide](../use/cli-usage.md) for
 details. For production binaries without debug info, `L0`+`L2` analysis covers
 the majority of real-world ABI breaks. See
 [Evidence & Detectability](evidence-and-detectability.md) for the full evidence

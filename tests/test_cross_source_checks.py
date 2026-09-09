@@ -26,7 +26,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
-from abicheck.buildsource.crosscheck import (
+from abicheck.buildsource.cross_source_checks import (
     ALL_CHECKS,
     CHECK_COMPILE_CONTEXT_CONFLICT,
     CHECK_EXPORTED_NOT_PUBLIC,
@@ -520,7 +520,7 @@ def test_exported_not_public_leaked_dependency_rtti_is_external_not_artifact():
     ],
 )
 def test_external_dependency_origin_owner_based(symbol, expected):
-    from abicheck.buildsource.crosscheck import _external_dependency_origin
+    from abicheck.buildsource.cross_source_checks import _external_dependency_origin
 
     assert _external_dependency_origin(symbol, ["libstdc++.so.6"]) == expected
 
@@ -599,7 +599,7 @@ def test_external_dependency_origin_owner_based(symbol, expected):
 def test_external_dependency_origin_runtime_and_covariant_thunk(
     symbol, needed, expected
 ):
-    from abicheck.buildsource.crosscheck import _external_dependency_origin
+    from abicheck.buildsource.cross_source_checks import _external_dependency_origin
 
     assert _external_dependency_origin(symbol, needed) == expected
 
@@ -608,7 +608,7 @@ def test_linked_library_names_across_platforms():
     # The linked-library list is gathered from whichever binary format the snapshot
     # carries (ELF DT_NEEDED / Mach-O LC_LOAD_DYLIB / PE imports) so the C++-runtime
     # picker can name the real dependency on each platform.
-    from abicheck.buildsource.crosscheck import _linked_library_names
+    from abicheck.buildsource.cross_source_checks import _linked_library_names
 
     elf_snap = _snap(elf=ElfMetadata(symbols=[], needed=["libstdc++.so.6"]))
     assert _linked_library_names(elf_snap) == ["libstdc++.so.6"]
@@ -626,7 +626,7 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
     # Auditing a vendored library itself (libfmt): its own ``fmt::detail`` symbols
     # are native, not a leaked dependency — the vendored-namespace fallback is gated
     # on the audited library's identity (Codex review).
-    from abicheck.buildsource.crosscheck import (
+    from abicheck.buildsource.cross_source_checks import (
         _external_dependency_origin,
         _library_self_names,
     )
@@ -772,7 +772,7 @@ def test_external_dependency_origin_ignores_audited_library_own_namespace():
     ],
 )
 def test_external_dependency_origin_msvc_scopes(symbol, self_names, expected):
-    from abicheck.buildsource.crosscheck import _external_dependency_origin
+    from abicheck.buildsource.cross_source_checks import _external_dependency_origin
 
     assert _external_dependency_origin(symbol, [], self_names) == expected
 
@@ -849,7 +849,7 @@ def test_nested_component(symbol, index, expected):
     ],
 )
 def test_account_undocumented_export_categories(symbol, expected):
-    from abicheck.buildsource.crosscheck import _account_undocumented_export
+    from abicheck.buildsource.cross_source_checks import _account_undocumented_export
 
     assert _account_undocumented_export(symbol) == expected
 
@@ -1063,7 +1063,7 @@ def test_public_not_exported_reconciles_macho_underscore_variant():
     snap.build_source = BuildSourcePack(root="", source_abi=surface)
     # (This symbol IS exported here, so it would not flag anyway; the point is the
     # normalized key builds without error and is present in the reconciled set.)
-    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+    from abicheck.buildsource.cross_source_checks import _l4_reconciled_symbols
 
     assert "_ZN1A3fooEv" in _l4_reconciled_symbols(snap, {"_ZN1A3fooEv"})
 
@@ -1091,13 +1091,13 @@ def test_public_not_exported_reconciliation_ignores_stale_mapping():
     # The stale mapping must NOT suppress the finding — `stale` is genuinely gone.
     assert hits == ["_Z5stalev"]
     # And the direct helper drops the stale key (its target is not in exports).
-    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+    from abicheck.buildsource.cross_source_checks import _l4_reconciled_symbols
 
     assert _l4_reconciled_symbols(snap, {"_Z4livev"}) == set()
 
 
 def test_reconciliation_underscore_strip_is_macho_only():
-    from abicheck.buildsource.crosscheck import _l4_reconciled_symbols
+    from abicheck.buildsource.cross_source_checks import _l4_reconciled_symbols
 
     # ELF: the single-underscore strip must NOT apply. A stale mapping to a
     # leading-underscore C symbol `_bar` (no longer exported) must NOT be

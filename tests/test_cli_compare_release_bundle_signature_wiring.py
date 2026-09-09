@@ -479,7 +479,7 @@ class TestBundleAnalysisErrorsAreStructural:
             new_root=Path("/new"),
             analysis_errors=["synthetic failure"],
         )
-        lines = _release_md_bundle_findings(degraded_result)
+        lines = _release_md_bundle_findings(degraded_result, degraded_result.bundle_findings)
         text = "\n".join(lines)
         assert "Bundle Analysis Warnings" in text
         assert "synthetic failure" in text

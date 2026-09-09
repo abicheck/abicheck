@@ -208,8 +208,12 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         )
     if d["show_only_note"] is not None:
         note = d["show_only_note"]
+        # Codex review (PR #1154 second follow-up: "Render repeated show
+        # groups as repeated view options") -- render each `;`-joined
+        # internal group as its own `--view show=...` token.
+        cli_hint = _reporter_markdown().render_show_only_cli_hint(note["show_only"])
         lines.append(
-            f"> Filtered by: `--show-only {note['show_only']}` "
+            f"> Filtered by: `{cli_hint}` "
             f"({note['shown']} of {note['total']} changes shown)"
         )
         lines.append("")

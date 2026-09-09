@@ -1115,7 +1115,7 @@ class TestRootCauseMarkdown:
         md = to_markdown(r, report_mode="root-cause", show_only="breaking")
         assert "ns::internal::helper" in md
         assert "ns::pub_new" not in md
-        assert "Filtered by: `--show-only breaking`" in md
+        assert "Filtered by: `--view show=breaking`" in md
 
     def test_no_changes_reports_no_abi_changes(self):
         md = to_markdown(_result(Verdict.NO_CHANGE), report_mode="root-cause")

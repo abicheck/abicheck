@@ -5,8 +5,8 @@
 ``compare()``'s own pipeline (ADR-068 D3/D4/D5; ``docs/contribute/plans/
 one-comparison-product.md`` §3 rows #6/#8, Phase 2b).
 
-Before this module existed, ``buildsource.pattern_scan.scan_files`` and
-``buildsource.preprocessor_scan.run_preprocessor_scan`` had exactly one
+Before this module existed, ``buildsource.pattern_facts.find_pattern_facts`` and
+``buildsource.preprocessor_facts.collect_preprocessor_facts`` had exactly one
 production caller anywhere under ``abicheck/``: ``scan_engine.py`` (ADR-068
 §1). This module gives them a second, ``compare()``-reachable caller,
 mirroring ``workflows/cross_source_evolution.py``'s own shape for the
@@ -18,15 +18,15 @@ scope, not just cross-source checks specifically). ``checker.compare()``
 runs this automatically, on every invocation with resolvable evidence, via
 its own ``pattern_preprocessor_scan`` keyword (default ``True``) -- no CLI
 flag exposes a way to disable it (D5 rejects "a flag that merely enables
-useful analysis"; ``preprocessor_scan.py``'s own
+useful analysis"; ``preprocessor_facts.py``'s own
 ``ABICHECK_PREPROCESSOR_SCAN=0`` kill switch, read inside
-``run_preprocessor_scan`` itself, still applies unchanged).
+``collect_preprocessor_facts`` itself, still applies unchanged).
 
 **Why this is a report field, not a set of ``ChangeKind`` findings.**
 Unlike the six migrated cross-source checks, neither primitive here ever
 produces a verdict-bearing finding: both are explicitly documented as
-"advisory facts and escalation triggers only" (``pattern_scan.py``) /
-"advisory facts... never a verdict on their own" (``preprocessor_scan.py``),
+"advisory facts and escalation triggers only" (``pattern_facts.py``) /
+"advisory facts... never a verdict on their own" (``preprocessor_facts.py``),
 even under ``scan`` today (``scan``'s own JSON report carries them as plain
 ``pattern_scan``/``preprocessor_scan`` top-level keys, never folded into
 ``diff.findings``). So the compare-side migration keeps that same shape:
@@ -48,10 +48,10 @@ entirely from what each snapshot already recorded:
   from an embedded ``build_source.build_evidence`` (ADR-029 L3), if any. A
   path that no longer exists on disk (a stored baseline snapshot dumped
   elsewhere, or one the working tree has since restructured) is silently
-  skipped by ``scan_files``/``iter_source_files`` itself, not raised.
+  skipped by ``find_pattern_facts``/``iter_source_files`` itself, not raised.
 - **Preprocessor-scan build context**: the same embedded
   ``build_source.build_evidence``, verbatim -- ``None`` when the snapshot
-  carries no L3 evidence, which ``run_preprocessor_scan`` already reports
+  carries no L3 evidence, which ``collect_preprocessor_facts`` already reports
   as its own honest ``ran=False``/``skipped_reason`` coverage row rather
   than a fabricated clean scan.
 - **Preprocessor-scan public headers**: the subset of the same declared
@@ -71,10 +71,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..buildsource.pattern_scan import PatternScanResult, scan_files
-from ..buildsource.preprocessor_scan import (
-    PreprocessorScanResult,
-    run_preprocessor_scan,
+from ..buildsource.pattern_facts import PatternFactsResult, find_pattern_facts
+from ..buildsource.preprocessor_facts import (
+    PreprocessorFactsResult,
+    collect_preprocessor_facts,
 )
 from ..checker_policy import CrossSourceEvolution
 from ..model import AbiSnapshot, ScopeOrigin
@@ -91,7 +91,7 @@ class PatternPreprocessorScanResult:
 
     ``pattern_old``/``pattern_new`` and ``preprocessor_old``/
     ``preprocessor_new`` are each side's raw
-    ``PatternScanResult.to_dict()``/``PreprocessorScanResult.to_dict()`` --
+    ``PatternFactsResult.to_dict()``/``PreprocessorFactsResult.to_dict()`` --
     the exact same shape ``scan``'s own report carries under its
     ``pattern_scan``/``preprocessor_scan`` keys, so a reader already
     familiar with one recognizes the other. The ``*_evolution`` maps are
@@ -172,15 +172,15 @@ def _pattern_scan_roots(snapshot: AbiSnapshot) -> list[str]:
     return sorted(roots)
 
 
-def _run_pattern_scan(snapshot: AbiSnapshot) -> PatternScanResult:
-    return scan_files(_pattern_scan_roots(snapshot))
+def _run_pattern_scan(snapshot: AbiSnapshot) -> PatternFactsResult:
+    return find_pattern_facts(_pattern_scan_roots(snapshot))
 
 
-def _run_preprocessor_scan_for(snapshot: AbiSnapshot) -> PreprocessorScanResult:
+def _run_preprocessor_scan_for(snapshot: AbiSnapshot) -> PreprocessorFactsResult:
     build_source = snapshot.build_source
     build = build_source.build_evidence if build_source is not None else None
     public_headers = sorted(_declared_source_headers(snapshot, public_only=True))
-    return run_preprocessor_scan(build, public_headers)
+    return collect_preprocessor_facts(build, public_headers)
 
 
 def _fold_evolution(
@@ -232,7 +232,7 @@ def _fold_evolution(
     return result
 
 
-def _pattern_scan_fully_covered(result: PatternScanResult) -> bool:
+def _pattern_scan_fully_covered(result: PatternFactsResult) -> bool:
     """True only when *result* scanned at least one file and skipped none.
 
     ``files_scanned > 0`` alone (the pre-CodeRabbit-review check) also holds
@@ -247,7 +247,7 @@ def _pattern_scan_fully_covered(result: PatternScanResult) -> bool:
     return result.files_scanned > 0 and result.files_skipped == 0
 
 
-def _preprocessor_scan_fully_covered(result: PreprocessorScanResult) -> bool:
+def _preprocessor_scan_fully_covered(result: PreprocessorFactsResult) -> bool:
     """True only when *result* ran with every probe attempted, succeeding,
     and none truncated by the probe-count cap.
 

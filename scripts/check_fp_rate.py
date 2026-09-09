@@ -43,7 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from abicheck.build_mode import BuildMode, StdlibFamily  # noqa: E402
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption  # noqa: E402
-from abicheck.buildsource.crosscheck import run_crosschecks  # noqa: E402
+from abicheck.buildsource.cross_source_checks import run_crosschecks  # noqa: E402
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
 from abicheck.buildsource.source_abi import SourceAbiSurface  # noqa: E402
 from abicheck.buildsource.source_graph import (  # noqa: E402
@@ -1156,7 +1156,7 @@ CORPUS: list[Case] = [
 # --------------------------------------------------------------------------- #
 # Cross-source validation corpus (ADR-035 D4 / G19.2 promotion gate).
 #
-# The intra-version cross-checks (buildsource/crosscheck.py) stay advisory until
+# The intra-version cross-checks (buildsource/cross_source_checks.py) stay advisory until
 # a check earns its FP-rate-gate corpus (ADR-035 D4 / plan Phase 2 tail). This is
 # that corpus: each labelled *single merged snapshot* is run through
 # ``run_crosschecks`` and the target check must

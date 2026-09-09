@@ -20,10 +20,10 @@ wires together the three ADR-035 pieces into one coverage-annotated report:
 
 1. **classify** the PR's changed paths into a numeric risk score (``risk.py``);
 2. run the **always-on tier** — the compiler-free lexical pattern pre-scan
-   (``pattern_scan.py``, S3) and the intra-version cross-source checks
-   (``crosscheck.py``, D4) — every time;
+   (``pattern_facts.py``, S3) and the intra-version cross-source checks
+   (``cross_source_checks.py``, D4) — every time;
 3. run the **pinned** evidence level (the ``--depth`` dial, resolved by
-   ``scan_levels.py``; the deprecated ``--mode``/``--source-method`` aliases map
+   ``evidence_depth_levels.py``; the deprecated ``--mode``/``--source-method`` aliases map
    onto it), POI-scoped to the changed paths, by collecting L3/L4/L5 inline at the
    matching ADR-033 D2 evidence mode;
 4. if a ``--baseline`` is given, ``compare`` against it while keeping
@@ -56,18 +56,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.crosscheck import (  # noqa: F401 - CrosscheckConfig/run_crosschecks re-exported for tests
+from .buildsource.cross_source_checks import (  # noqa: F401 - CrosscheckConfig/run_crosschecks re-exported for tests
     ALL_CHECKS,
     CrosscheckConfig,
     run_crosschecks,
-)
-from .buildsource.scan_levels import (
-    EvidenceDepth,
-    ScanMode,
-    SourceMethod,
-    SourceScope,
-    level_to_collect_mode,
-    resolve_level,
 )
 from .checker_policy import (  # noqa: F401 - re-export for tests
     API_BREAK_KINDS,
@@ -128,6 +120,14 @@ from .frontends.cli.options.params import (
     SIDED_PATH_PARAM,
     _load_suppression_and_policy,
 )
+from .model.evidence_depth_levels import (
+    EvidenceDepth,
+    ScanMode,
+    SourceMethod,
+    SourceScope,
+    level_to_collect_mode,
+    resolve_level,
+)
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
 # scan_engine.py, not here — this module is a thin Click front-end over it
@@ -150,9 +150,9 @@ from .scan_engine import (  # noqa: F401 - several re-exported for tests/service
 from .workflows.changed_paths import git_changed_paths, resolve_changed_seed
 from .workflows.extraction import (  # noqa: F401 - re-exported for tests
     build_points_of_interest,
+    collect_preprocessor_facts,
+    find_pattern_facts,
     resolve_symbol_tus,
-    run_preprocessor_scan,
-    scan_files,
 )
 from .workflows.scan_config import RiskScore, score_changed_paths
 
@@ -1530,6 +1530,12 @@ def scan_cmd(
         compiler_path=compiler_path,
         compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        # `cfg_path` is `_discover_scan_project_config`'s resolved result --
+        # `build_config` (explicit --build-config) OR the auto-discovered
+        # .abicheck.yml -- not necessarily the raw explicit CLI value
+        # merge_compile_config's own inference expects (Codex review, fresh
+        # evidence -- real finding on PR #1154).
+        config_explicit=(build_config is not None),
     )
     includes = includes_tuple
     binary = artifact
@@ -1721,7 +1727,7 @@ def scan_cmd(
     # --abi3: the target Py_LIMITED_API floor for the stable-ABI audit; None off.
     abi3_floor = _parse_abi3_floor(abi3)
     # S2 (preprocessor macro/include capture) is collected by the conditional S2
-    # tier (`preprocessor_scan.run_preprocessor_scan`) over the L3 build evidence;
+    # tier (`preprocessor_scan.collect_preprocessor_facts`) over the L3 build evidence;
     # it maps to the L3 `build` collect mode and the always-on tier runs the
     # preprocessor pass when a compile DB + `clang -E` are available (else the
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).

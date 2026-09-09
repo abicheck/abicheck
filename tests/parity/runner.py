@@ -5,7 +5,7 @@ Diffs happen on structured *finding sets* — kind, resolved identity,
 severity, evidence refs — never on rendered report text (Phase 0's own
 requirement, plan §6). ``compare``/``scan`` are invoked through their real
 public CLI entry point (Click's in-process ``CliRunner``, no subprocess);
-``run_crosschecks``/``scan_files``/``audit_stable_abi_imports`` are invoked
+``run_crosschecks``/``find_pattern_facts``/``audit_stable_abi_imports`` are invoked
 directly for the ``scan``-only side because they are themselves the
 production functions ADR-068 §1 named as scan-only by call site — calling
 them here *is* exercising "what scan has", not a reimplementation of it.
@@ -64,10 +64,10 @@ def severity_for_kind(kind_value: str) -> str:
 def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
     """The finding set ``scan``'s cross-source checks produce for *snapshot*.
 
-    Calls :func:`abicheck.buildsource.crosscheck.run_crosschecks` directly —
+    Calls :func:`abicheck.buildsource.cross_source_checks.run_crosschecks` directly —
     the same production function ``scan_engine.py`` is the sole caller of.
     """
-    from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
 
     result = run_crosschecks(snapshot, config)
     findings = set()
@@ -152,6 +152,26 @@ def scan_finding_set(artifact: Path | str, *extra_args: str) -> FindingSet:
 
 def kinds_of(finding_set: FindingSet) -> frozenset[str]:
     return frozenset(f.kind for f in finding_set)
+
+
+#: ADR-068 D4/Phase 5: --surface-metrics computation is unconditional on
+#: `compare` now (ADR-027 A1/D1.2's aggregate roll-ups); `scan` has no
+#: equivalent concept at all, so these are expected, permanent compare-only
+#: "richer" noise for any scenario whose public-surface count changes --
+#: never a real scan capability compare is missing. Excluded from the
+#: source-depth (F-3/F-4) exact-identity checks the same way
+#: `assert_no_capability_loss` already treats every compare-only finding.
+SURFACE_METRIC_KINDS = frozenset(
+    {
+        ChangeKind.PUBLIC_SURFACE_GREW.value,
+        ChangeKind.PUBLIC_SURFACE_SHRANK.value,
+        ChangeKind.UNDOCUMENTED_EXPORT_RATIO_INCREASED.value,
+    }
+)
+
+
+def without_surface_metrics(finding_set: FindingSet) -> FindingSet:
+    return frozenset(f for f in finding_set if f.kind not in SURFACE_METRIC_KINDS)
 
 
 def write_snapshot(snapshot: Any, path: Path) -> Path:

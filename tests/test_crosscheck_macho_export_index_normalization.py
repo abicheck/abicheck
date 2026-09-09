@@ -23,7 +23,7 @@ though ``Function.mangled`` itself is now correctly, singly-stripped at
 the point of origin (``extract.headers.clang.context.
 strip_darwin_itanium_decoration``, PR #1140's first two commits).
 
-Split out of ``tests/test_crosscheck.py`` (that file is already at its
+Split out of ``tests/test_cross_source_checks.py`` (that file is already at its
 recorded ``architecture/debt.yaml`` no-growth baseline) rather than
 growing it further -- see this repo's root ``AGENTS.md`` "Files that are
 large — edit carefully": move responsibility to a properly-owned module
@@ -43,7 +43,7 @@ Mach-O output (a Linux ELF build never exercises this code path at all).
 
 from __future__ import annotations
 
-from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.buildsource.cross_source_checks import run_crosschecks
 from abicheck.checker_policy import ChangeKind
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin

@@ -269,7 +269,7 @@ _NON_ABI_LTO_TUNING_PREFIXES: tuple[str, ...] = (
 #: valid, the reason the ``-D``/``-U`` handling below concatenates the raw
 #: tokens directly), it is a purely-internal, round-trippable encoding.
 #: Every other reader of ``CompileUnit.abi_relevant_flags``
-#: (``derive_build_options``, ``crosscheck_coherence.py``,
+#: (``derive_build_options``, ``cross_source_checks_coherence.py``,
 #: ``source_graph.py``, ``call_graph.py``'s safe-replay allowlist, which does
 #: not include any of these four prefixes at all) already treats "one list
 #: entry = one flag" -- keeping that invariant means none of them need any

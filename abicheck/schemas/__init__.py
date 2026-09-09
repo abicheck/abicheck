@@ -1004,8 +1004,8 @@ REPORT_SCHEMA_VERSION = "3.12"  #: 3.12 -- see the comment immediately above.
 #:        binding-scoped suppression's match/no-match needs to be auditable
 #:        here too. Additive optional key, present only when captured.
 #: 1.12 -- the top-level ``preprocessor_scan`` block gained an additive
-#:        ``probes_truncated`` int (``PreprocessorScanResult``'s own
-#:        ``PREPROCESSOR_SCAN_VERSION`` bumped 1 -> 2 in lockstep — see that
+#:        ``probes_truncated`` int (``PreprocessorFactsResult``'s own
+#:        ``PREPROCESSOR_FACTS_VERSION`` bumped 1 -> 2 in lockstep — see that
 #:        module for the fact-shape rationale): compile units / public
 #:        headers skipped by the new ``ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES``
 #:        cap (perf fix for ``scan --depth build``'s S2 preprocessor

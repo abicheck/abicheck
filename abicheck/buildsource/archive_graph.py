@@ -1028,7 +1028,7 @@ def _resolve_archive_path(label: str, search_roots: tuple[Path, ...]) -> _Archiv
     redacted ``cu.directory``) would never contain a literal ``~``
     subdirectory either way. The same reversal every other replay path in
     this package already applies (``source_replay.py``,
-    ``include_graph.py``, ``preprocessor_scan.py``) before touching disk.
+    ``include_graph.py``, ``preprocessor_facts.py``) before touching disk.
 
     **Ambiguity is a "no answer", not a coin flip** (Codex review, fresh
     evidence): a *relative* archive label is resolved against every search

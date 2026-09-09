@@ -426,8 +426,8 @@ def scan_bazel_scoping_failure(
     Both default ``None``, reproducing the prior, request-level-flag-only
     behavior for any caller that doesn't pass them.
     """
-    from ..buildsource.scan_levels import EvidenceDepth
     from ..buildsource.source_replay import collection_for_ci_mode
+    from ..model.evidence_depth_levels import EvidenceDepth
 
     effective_headers = [] if eff_depth is EvidenceDepth.BINARY else headers
     if not effective_headers and not collection_for_ci_mode(collect_mode)[1]:
@@ -454,7 +454,7 @@ def _depth_implied_collect_mode(depth: str) -> str:
     both resolve to ``"off"``; only ``"binary"`` additionally clears headers
     (see :func:`_check_bazel_target_scoping`'s own comment).
     """
-    from ..buildsource.scan_levels import (
+    from ..model.evidence_depth_levels import (
         EvidenceDepth,
         SourceScope,
         depth_to_method,

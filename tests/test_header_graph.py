@@ -277,7 +277,7 @@ def test_public_struct_with_private_field_type_classifies_correctly() -> None:
         for e in graph.edges
     )
 
-    # The exact classification crosscheck.py's public_to_internal_dependency
+    # The exact classification cross_source_checks.py's public_to_internal_dependency
     # and source_graph_findings' version diff both rely on.
     exported: set[str] = set()
     assert is_public_dependency_node(public_id, node_by_id, exported)

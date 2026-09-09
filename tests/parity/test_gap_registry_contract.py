@@ -71,7 +71,7 @@ def test_crosscheck_keys_match_all_checks() -> None:
     ``crosscheck.ALL_CHECKS`` name survives in ``EXPECTED_GAPS`` at all --
     which, alongside pattern_scan/preprocessor_scan's own closure (Phase
     2b), is exactly why ``EXPECTED_GAPS`` is empty."""
-    from abicheck.buildsource.crosscheck import ALL_CHECKS
+    from abicheck.buildsource.cross_source_checks import ALL_CHECKS
 
     assert set(EXPECTED_GAPS) == set()
     assert set(ALL_CHECKS) & set(EXPECTED_GAPS) == set()

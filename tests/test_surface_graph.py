@@ -499,10 +499,10 @@ def test_metrics_json_round_trips_through_snapshot() -> None:
 def test_surface_report_audit_lists_hygiene_findings() -> None:
     # `surface-report --audit` (deleted CLI command) ran the ADR-035 D8
     # single-release hygiene audit (cross-source checks) via
-    # `buildsource.crosscheck.run_crosschecks`, unchanged and still used by
+    # `buildsource.cross_source_checks.run_crosschecks`, unchanged and still used by
     # `scan`'s audit tier — exported_not_public fires for the EXPORT_ONLY
     # symbol once an export table is present.
-    from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 
     snap = _snap()

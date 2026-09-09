@@ -719,7 +719,7 @@ def test_html_show_only_filter_excluding_everything() -> None:
     )
     html_out = generate_html_report(result, lib_name="libfoo.so", show_only="enums")
     assert "No changes match the current filter" in html_out
-    assert "--show-only enums" in html_out
+    assert "--view show=enums" in html_out
     assert "1 change(s) exist but are excluded by the filter" in html_out
 
 

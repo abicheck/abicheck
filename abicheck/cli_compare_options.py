@@ -65,6 +65,7 @@ def _reject_set_input_flags(
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
     audit_suppressions: bool = False,
+    suppress: Path | None = None,
     include_labels: dict[Path, str] | None = None,
     require_complete_analysis: bool = False,
 ) -> None:
@@ -143,12 +144,22 @@ def _reject_set_input_flags(
     # gate` pack (gate.exit_code_scheme/gate.severity.*) is still rejected,
     # by that resolution itself, since the release fan-out has no resolved
     # gate-options wiring to apply one to yet.
-    if audit_suppressions:
+    # ADR-068 D4/Phase 5, CodeRabbit/Codex review on PR #1154: the scalar
+    # `compare` path's own preflight (``_preflight_manifests_and_audit``)
+    # made ``--audit-suppressions`` with no ``--suppress`` a no-op rather
+    # than a hard rejection -- there is genuinely nothing to audit without a
+    # suppression file, so the release fan-out must not reject that same
+    # harmless combination just because the operand is a directory/package.
+    # A real conflict remains: ``--suppress`` *with* ``--audit-suppressions``
+    # asks for a genuine per-finding audit result, and the per-library
+    # fan-out still has no single audit result to attach across N libraries
+    # -- that combination is still rejected.
+    if audit_suppressions and suppress is not None:
         raise click.UsageError(
-            "--audit-suppressions is not supported for directory/package "
-            "(release) comparisons yet: the per-library fan-out has no "
-            "single suppression-audit result to attach. Compare the "
-            "specific library individually to use it."
+            "--audit-suppressions is not supported together with --suppress "
+            "for directory/package (release) comparisons yet: the "
+            "per-library fan-out has no single suppression-audit result to "
+            "attach. Compare the specific library individually to use it."
         )
     if include_labels:
         raise click.UsageError(

@@ -389,6 +389,34 @@ def compare_release_cmd(
     # rung outright. `None` (the default) is a true no-op, matching every
     # pre-existing caller.
     depth: str | None = None,
+    # Codex review (PR #1154 follow-up): `compare`'s directory/package
+    # fan-out forwards --view's derived show_only/demangle/explain_patterns
+    # here too -- `report_mode` is not accepted: `_dispatch_release_compare`
+    # already rejects every value but "full" before this is ever called, so
+    # there is nothing left for this engine itself to branch on. `None`/
+    # `False` (the defaults) are true no-ops, matching every pre-existing
+    # caller (this command has no `--view`/`--show-only`/`--demangle` Click
+    # option of its own; only `compare`'s directory/package dispatch above
+    # ever supplies a non-default value). *demangle* stays the raw tri-state
+    # (unresolved against any one format) -- this command's own body
+    # resolves it separately against `fmt`/`secondary_fmt`, mirroring
+    # single-pair `compare`'s own `demangle_explicit` split for its
+    # `--write` render.
+    show_only: str | None = None,
+    demangle: bool | None = None,
+    explain_patterns: bool = False,
+    # Codex review (PR #1154 follow-up): "Reject unsupported impact views
+    # instead of silently dropping them" -- `compare --view impact`'s
+    # aggregate counterpart. Unlike `report_mode`'s "leaf"/"root-cause"
+    # (rejected outright above `_dispatch_release_compare`), the impact
+    # summary is naturally per-library (each library's own DiffResult
+    # already yields its own table), so it is threaded through rather than
+    # dropped or rejected -- see `_strip_diff_results_and_adjust_verdict`'s
+    # own docstring for how each library's table is computed. `False` (the
+    # default) is a true no-op, matching every pre-existing caller (this
+    # command has no `--view` option of its own; only `compare`'s
+    # directory/package dispatch supplies a non-default value).
+    show_impact: bool = False,
     # CodeRabbit review, PR #1138: a project's `.abicheck.yml`
     # `scope.public_header_dirs` (`workflows.public_header_boundary.
     # project_config_public_header_dirs`), resolved once by the caller
@@ -736,6 +764,8 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 compile_context=compile_context,
                 depth=depth,
+                show_only=show_only,
+                explain_patterns=explain_patterns,
                 public_header_dirs=public_header_dirs,
                 collapse_versioned_symbols=collapse_versioned_symbols,
             )
@@ -1070,6 +1100,8 @@ def compare_release_cmd(
                 worst_verdict,
                 severity_config,
                 needs_annotations=(fmt == "json" or secondary_fmt == "json"),
+                show_only=show_only,
+                show_impact=show_impact,
             )
 
             # Build-configuration matrix findings (G2: probe -> compare-release).
@@ -1097,6 +1129,8 @@ def compare_release_cmd(
                     gate,
                 )
 
+            from .cli_compare_options import _resolve_demangle
+
             if secondary_output is not None:
                 # CLI cleanup phase two, PR E: --write, now supported for a
                 # directory/package (release) compare. Renders the second
@@ -1106,6 +1140,14 @@ def compare_release_cmd(
                 # single-pair `compare`'s own --write reuses its one already-
                 # computed DiffResult (see run_compare's own secondary
                 # _write_or_echo call).
+                #
+                # `show_only` is deliberately NOT forwarded here (Codex
+                # review, PR #1154 second follow-up: "Apply release show
+                # filters inside each renderer") -- a secondary `--write`
+                # report is always full/unfiltered, the same contract
+                # single-pair `compare`'s own `--write` already honours; only
+                # the primary `--format` render below (`_finalize_release_
+                # output`) receives the release's `--view show=` selection.
                 assert secondary_fmt is not None  # guaranteed by Click's callback
                 secondary_text = _format_release_summary(
                     secondary_fmt,
@@ -1132,6 +1174,7 @@ def compare_release_cmd(
                     pack_application=pack_application,
                     scope_public_headers=scope_public_headers,
                     scope_terms=scope_terms,
+                    demangle=_resolve_demangle(secondary_fmt, demangle),
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1162,6 +1205,8 @@ def compare_release_cmd(
                 pack_application=pack_application,
                 scope_public_headers=scope_public_headers,
                 scope_terms=scope_terms,
+                demangle=_resolve_demangle(fmt, demangle),
+                show_only=show_only,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)

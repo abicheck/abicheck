@@ -508,3 +508,39 @@ def test_the_real_root_readme_and_agents_md_are_in_the_target_set(
     keys = {rel for _, rel in dc._retired_surface_scan_targets()}
     assert "README.md" in keys
     assert "AGENTS.md" in keys
+
+
+def test_retired_surfaces_scans_tool_readmes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A first-party companion tool's own README (``tools/<tool>/
+    README.md``) documents real invocations of the main CLI too --
+    ``tools/clang-layout-tool/README.md`` kept advertising a retired
+    flag after removal from ``compare``, invisible to every check above
+    because this sweep previously stopped at the repository root and
+    never descended into ``tools/`` (Codex review, fresh evidence)."""
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    tool_dir = tmp_path / "tools" / "some-tool"
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "README.md").write_text(
+        "Run `abicheck compare old.so new.so --on-incomplete-scope block`.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "tools/some-tool/README.md" in f.warnings[0][1]
+
+
+def test_the_real_tools_readmes_are_in_the_target_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring half: the real ``tools/`` tree is actually reached, not
+    just the autouse fixture's empty stand-in ``ROOT``."""
+    monkeypatch.undo()
+    keys = {rel for _, rel in dc._retired_surface_scan_targets()}
+    tool_keys = {k for k in keys if k.startswith("tools/")}
+    assert tool_keys, sorted(keys)[:5]
+    assert "tools/clang-layout-tool/README.md" in tool_keys

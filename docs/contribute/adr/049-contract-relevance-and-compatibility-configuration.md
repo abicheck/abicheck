@@ -44,7 +44,19 @@ every run — see `docs/contribute/plans/public-contract-default.md`'s
 "Work breakdown" for per-phase detail. Without `--contract`,
 `contract_evaluation` stays `False` and `compare()`'s behavior is
 unchanged, same as before Phase 7.
-**Verified:** main@12a5c927 on 2026-09-05
+**Verified:** main@3930cfce on 2026-09-09
+
+Re-read against the seven commits `check_ai_readiness.py`'s
+`adr-status-sync` flagged since the prior receipt (a24d6745, 29d8d8a8,
+cb2ba6fe, 97766656, 578c2264, 280f5d3b, d101661d): all are additive work
+layered on the Phases 0-7 machinery this Status paragraph already describes
+(a versioning-policy model, ADR-067's disposition ledger extended past
+scalar `compare`, three new multi-source contract-conflict cases reusing
+`export_surface.ExportSurface`, CLI-flag consolidation) — none contradicts a
+claim above. The prior receipt's own sha (`12a5c927`) was itself the defect
+this entry fixes: it named a commit on the branch that added it, which is
+not reachable from `origin/main` after that branch merged — record the
+actual `origin/main` commit you verified against, never a branch-local one.
 **Decision maker:** napetrov
 
 ## Context

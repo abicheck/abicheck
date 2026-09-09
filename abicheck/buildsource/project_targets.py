@@ -95,9 +95,9 @@ from pathlib import Path
 from typing import Any
 
 from ..api_types import HEADER_AST_FRONTENDS
+from ..model.evidence_depth_levels import USER_DEPTHS, EvidenceDepth
 from .analysis_assurance_gate import analysis_assurance_issues
 from .build_config import KNOWN_TOP_LEVEL_KEYS
-from .scan_levels import USER_DEPTHS, EvidenceDepth
 
 #: The identifier charset every target/bundle/profile/channel id must satisfy
 #: — matches the per-component pattern the report-identity envelope (ADR-047

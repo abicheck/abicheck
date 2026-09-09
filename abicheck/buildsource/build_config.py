@@ -338,7 +338,7 @@ class BuildConfig:
     #: newer schema read by an older abicheck) **warns**, never errors, so a
     #: project can adopt a future key without breaking older installs. Keys parsed
     #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
-    #: ``crosscheck.py``, ``targets``/``bundles``/``profiles``/``baseline``/
+    #: ``cross_source_checks.py``, ``targets``/``bundles``/``profiles``/``baseline``/
     #: ``aggregate`` → ``project_targets.py``, ADR-047 §3/G30 P1.5; CLI cleanup
     #: phase two, PR 2 follow-up for ``aggregate``) are listed so they don't
     #: trip the warning.
@@ -432,7 +432,7 @@ class BuildConfig:
 
         ``risk_rules``/``crosschecks`` are deliberately excluded:
         :meth:`from_dict` never parses them at all (they are consumed by
-        ``risk.py``/``crosscheck.py`` instead), so there is no from_dict-level
+        ``risk.py``/``cross_source_checks.py`` instead), so there is no from_dict-level
         type contract to enforce for them here.
         """
         if value is None:

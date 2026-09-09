@@ -3,9 +3,9 @@
 
 ``docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md``
 identifies the capabilities ``compare`` cannot reach today: the eleven
-cross-source checks (``abicheck/buildsource/crosscheck.py``), the lexical
-pattern pre-scan (``pattern_scan.py``), the preprocessor scan
-(``preprocessor_scan.py``), changed-path localization, and the ``abi3``
+cross-source checks (``abicheck/buildsource/cross_source_checks.py``), the lexical
+pattern pre-scan (``pattern_facts.py``), the preprocessor scan
+(``preprocessor_facts.py``), changed-path localization, and the ``abi3``
 audit. Every one of those is registered here, each with the plan phase
 that is expected to close it (``docs/contribute/plans/one-comparison-product.md``
 §6) — never a bare ``xfail``, so a reader always has a name and a phase to
@@ -29,8 +29,8 @@ the remaining five -- ``header_build_context_mismatch``, ``odr_type_variant``,
 ``compare()``'s ordinary path with no opt-in flag (ADR-068 D4/D5).
 
 Phase 2b is **closed** too: the lexical pattern pre-scan
-(``buildsource/pattern_scan.py``) and the preprocessor pre-scan
-(``buildsource/preprocessor_scan.py``) now run automatically inside
+(``buildsource/pattern_facts.py``) and the preprocessor pre-scan
+(``buildsource/preprocessor_facts.py``) now run automatically inside
 ``checker.compare()`` (``pattern_preprocessor_scan``, default ``True`` --
 see ``workflows/pattern_preprocessor_scan.py``), folded the same
 "run independently on OLD and NEW, evolution-state the result" way the

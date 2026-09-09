@@ -2142,7 +2142,7 @@ context.
 
 ### D4. Compatible merge across translation units
 
-New `abicheck/tu_merge.py`, deliberately reusing `buildsource/crosscheck.py`
+New `abicheck/tu_merge.py`, deliberately reusing `buildsource/cross_source_checks.py`
 (`:215`, `run_crosschecks`)'s existing merge/cross-validate shape rather
 than a new algorithm: for each `entity_key` seen in more than one TU's
 fragment, merge is only trivial (union provenance, keep the richer
@@ -2488,7 +2488,7 @@ this split, if picked up, would be sequenced.
   `not_comparable` state must update alongside the reporters
 - `abicheck/sycl_metadata.py:234,238` — current binary-only SYCL/PI
   classification
-- `abicheck/buildsource/crosscheck.py:215` — `run_crosschecks`, the merge
+- `abicheck/buildsource/cross_source_checks.py:215` — `run_crosschecks`, the merge
   shape D4 reuses
 - `abicheck/buildsource/source_replay.py` — RAM-aware scheduling D6 factors
   out (see `abicheck/buildsource/CLAUDE.md`)

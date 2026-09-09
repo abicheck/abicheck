@@ -56,7 +56,7 @@ The underlying edge, read directly off the loaded snapshot via
 python3 - <<'EOF'
 import json
 from abicheck.serialization import load_snapshot
-from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.buildsource.cross_source_checks import run_crosschecks
 
 snap = load_snapshot("snapshot.abi.json")
 res = run_crosschecks(snap)

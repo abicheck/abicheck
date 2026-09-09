@@ -37,10 +37,12 @@ so no existing binary that uses only the public surface is affected.
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --compiler "$(command -v clang)" \
-  --scope-public-headers --show-filtered
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  compiler: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --show-filtered --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -56,7 +58,7 @@ either (`--show-filtered` shows nothing to filter). Two things compound
 here: `InternalStats` is never instantiated or referenced anywhere in
 `v1.c`/`v2.c`, so it emits no DWARF debug info at all (DWARF only describes
 types the compiler actually used); and the Clang AST frontend used for
-header evidence in this environment (`--ast-frontend clang`, since castxml
+header evidence in this environment (`compile.frontend: clang` (via `.abicheck.yml`), since castxml
 isn't installed here) records each field's name and type but not its
 computed byte offset. With no concrete offset evidence on either side,
 comparing the two field lists by name finds no difference to report or

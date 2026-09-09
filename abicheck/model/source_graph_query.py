@@ -22,7 +22,7 @@ dependency-free logic over ``model``'s own data (:class:`~abicheck.model.
 graph_facts.GraphNode`, :class:`~abicheck.model.source_graph.
 SourceGraphSummary`) needed by ``extract`` (``buildsource/poi.py``'s
 changed-path public-impact walk) as well as by ``compare``/``policy``
-callers (``crosscheck.py``, ``graph_reconcile.py``, ``internal_leak.py``,
+callers (``cross_source_checks.py``, ``graph_reconcile.py``, ``internal_leak.py``,
 ``impact/*``, ``surface.py``, ``post_processing_reachability.py``) --
 ``extract`` may not import ``compare``, but every layer may import
 ``model``. ``buildsource/source_graph_query.py`` re-exports every name here
@@ -50,7 +50,7 @@ from .source_graph import SourceGraphSummary
 _TYPE_ENTITY_KINDS: frozenset[str] = frozenset({"record_type", "enum_type", "typedef"})
 
 #: Graph node kinds that carry a declaration/type visibility we can classify as
-#: public or internal. Shared with ``crosscheck.py``'s intra-version
+#: public or internal. Shared with ``cross_source_checks.py``'s intra-version
 #: ``public_to_internal_dependency`` check (ADR-041 P0 slice 2, fourth Codex
 #: review) so the two never classify a node differently.
 DECL_NODE_KINDS: frozenset[str] = frozenset({"source_decl"}) | _TYPE_ENTITY_KINDS
@@ -125,11 +125,11 @@ def is_public_dependency_node(
 ) -> bool:
     """Whether *node_id* is public: exported-symbol-mapped or public-header visible.
 
-    Shared with ``crosscheck.py``'s ``_is_public_decl`` (ADR-041 P0 slice 2).
+    Shared with ``cross_source_checks.py``'s ``_is_public_decl`` (ADR-041 P0 slice 2).
     Deliberately does not consider whether the node's own body is compiled
     into consumer code (see :func:`is_consumer_compiled_public_entry`) -- an
     exported-or-header-visible declaration is exactly the "public API
-    surface" question ``crosscheck.py``'s advisory
+    surface" question ``cross_source_checks.py``'s advisory
     ``public_to_internal_dependency`` check (RISK-only, never gates
     suppression) wants to ask, regardless of where the declaration's body
     lives.
@@ -257,7 +257,7 @@ def is_internal_dependency_node(
     positive evidence instead: an explicit ``private_header``/``source``
     visibility, or -- for an unannotated node -- project-file provenance
     (``decl_to_file``/``defined_in_project``) plus a non-system-looking name.
-    Shared with ``crosscheck.py``'s ``_is_internal_decl`` (same algorithm, same
+    Shared with ``cross_source_checks.py``'s ``_is_internal_decl`` (same algorithm, same
     source of truth) so the intra-version and inter-version checks classify a
     node identically.
     """

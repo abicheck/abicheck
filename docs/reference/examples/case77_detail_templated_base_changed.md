@@ -65,7 +65,8 @@ change (a new specialization, a new overload) was a real false positive
 against Intel oneDAL and must not itself be flagged breaking; the field
 addition's real break is caught by the type-layout kinds above instead,
 straight from DWARF debug info — no header AST needed. Passing headers
-(`-H old=v1.h -H new=v2.h --ast-frontend clang`) additionally surfaces
+(`-H old=v1.h -H new=v2.h --config .abicheck.yml` with `compile.frontend:
+clang` in `.abicheck.yml`) additionally surfaces
 `internal_type_leaks_via_public_api` (L2: descriptor_base<Task> is an
 internal-namespace type reachable from the public `knn_descriptor<Task>`
 via a nominal base-class edge), but that finding is corroborating, not

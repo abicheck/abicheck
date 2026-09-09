@@ -17,7 +17,6 @@ from abicheck.cli import (
     main,
 )
 from abicheck.cli_compare_release import (
-    _compare_release_parallel,
     _discover_include_roots,
     _extract_if_package,
     _format_release_json,
@@ -671,8 +670,17 @@ class TestDirVsDir:
         lib = data["libraries"][0]
         assert data["severity"]["exit_code"] == 1
         assert "findings" in lib
-        assert lib["findings"][0]["symbol"] == "_Z6new_apiv"
-        assert lib["findings"][0]["bucket"] == "addition"
+        # Two findings now, not one: `_release_display_buckets` (Codex
+        # review, PR #1154 follow-up: "Filter the complete release finding
+        # set") walks every category (not only the ones actually blocking),
+        # so the unconditional surface-metrics `public_surface_grew`
+        # quality-issue finding is present alongside the addition that
+        # actually promotes the severity exit code -- matching what a
+        # single-pair `compare` on the identical pair displays.
+        findings_by_kind = {f["kind"]: f for f in lib["findings"]}
+        assert findings_by_kind["func_added"]["symbol"] == "_Z6new_apiv"
+        assert findings_by_kind["func_added"]["bucket"] == "addition"
+        assert findings_by_kind["public_surface_grew"]["bucket"] == "quality_issues"
 
     def test_breaking_overrides_api_break(self, tmp_path: Path) -> None:
         """Aggregate verdict is BREAKING even when another lib has API_BREAK."""
@@ -1717,110 +1725,6 @@ class TestCompareReleaseIncludes:
         assert config_dir in new_inc
 
 
-class TestLockstepSonameCoupling:
-    """A coordinated lockstep SONAME bump across a multi-library release should
-    not be flagged 'unnecessary' on members that had no break of their own when
-    a sibling/dependency genuinely broke (real-world: oneDAL bumps every
-    libonedal* SONAME together because libonedal_core breaks)."""
-
-    @staticmethod
-    def _entry(lib, changes, verdict):
-        from abicheck.checker import DiffResult
-
-        result = DiffResult(
-            old_version="1",
-            new_version="2",
-            library=lib,
-            changes=changes,
-            verdict=verdict,
-        )
-        return {
-            "library": lib,
-            "verdict": verdict.value,
-            "breaking": len(result.breaking),
-            "source_breaks": len(result.source_breaks),
-            "risk_changes": len(result.risk),
-            "compatible_additions": len(result.compatible),
-            "_diff_result": result,
-        }
-
-    def test_suppressed_when_sibling_breaks(self):
-        from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
-        umbrella = self._entry(
-            "libonedal.so",
-            [
-                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ],
-            Verdict.COMPATIBLE,
-        )
-        core = self._entry(
-            "libonedal_core.so",
-            [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
-            Verdict.BREAKING,
-        )
-        n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
-        assert n == 1
-        kinds = [c.kind for c in umbrella["_diff_result"].changes]
-        assert ChangeKind.SONAME_BUMP_UNNECESSARY not in kinds
-        assert umbrella["compatible_additions"] == 0
-
-    def test_kept_when_no_real_break_in_release(self):
-        from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
-        umbrella = self._entry(
-            "libonedal.so",
-            [
-                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ],
-            Verdict.COMPATIBLE,
-        )
-        n = _suppress_lockstep_soname_findings([umbrella], "COMPATIBLE", None)
-        assert n == 0
-        kinds = [c.kind for c in umbrella["_diff_result"].changes]
-        assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
-
-    def test_kept_when_release_worst_is_source_only_api_break(self):
-        # A SONAME bump is only justified by a *binary* ABI break; a source-only
-        # API_BREAK elsewhere must NOT suppress the relink-forcing warning.
-        from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
-        umbrella = self._entry(
-            "libonedal.so",
-            [
-                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ],
-            Verdict.COMPATIBLE,
-        )
-        n = _suppress_lockstep_soname_findings([umbrella], "API_BREAK", None)
-        assert n == 0
-        kinds = [c.kind for c in umbrella["_diff_result"].changes]
-        assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
-
-    def test_rewrites_per_library_json(self, tmp_path):
-        from abicheck.checker import Change, ChangeKind, Verdict
-        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
-
-        umbrella = self._entry(
-            "libonedal.so.3",
-            [
-                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
-            ],
-            Verdict.COMPATIBLE,
-        )
-        core = self._entry(
-            "libonedal_core.so.3",
-            [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
-            Verdict.BREAKING,
-        )
-        _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", tmp_path)
-        data = json.loads((tmp_path / "libonedal.so.json").read_text())
-        assert all(c["kind"] != "soname_bump_unnecessary" for c in data["changes"])
-
-
 def test_release_json_emits_severity_block() -> None:
     """compare-release JSON carries a severity config block when --severity-* is
     active, so the PR-comment renderer can mirror the gate (issue #342 follow-up).
@@ -1863,137 +1767,3 @@ def test_release_json_omits_severity_block_without_config() -> None:
         None,
     )
     assert "severity" not in json.loads(out)
-
-
-class TestParallelFanOutDedupPropagation:
-    """`_compare_release_parallel` -- the ThreadPoolExecutor path `--jobs 0`
-    (the CLI default, auto-detecting CPU count) actually dispatches to for
-    any multi-library release -- must propagate an active `policy_file.
-    dedup_validate_overrides_warnings()` scope into each worker thread
-    (Codex review: a `ContextVar` set in the calling thread is not
-    automatically visible to a new `ThreadPoolExecutor` worker thread)."""
-
-    def _common_args(
-        self, tmp_path: Path, pf: Path, keys: tuple[str, ...] = ("a", "b")
-    ) -> tuple:
-        old_map = {k: tmp_path / f"{k}_old" for k in keys}
-        return (
-            old_map,
-            {k: tmp_path / f"{k}_new" for k in keys},
-            None,
-            None,
-            lambda _o, _n: None,
-            [],
-            [],
-            [],
-            [],
-            "1.0",
-            "2.0",
-            "c++",
-            None,
-            "strict_abi",
-            pf,
-            True,
-            True,
-            False,
-            None,
-        )
-
-    def test_dedup_scope_propagates_into_worker_threads(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
-    ) -> None:
-        import logging
-
-        from abicheck.policy_file import dedup_validate_overrides_warnings
-        from abicheck.service import load_suppression_and_policy
-
-        pf = tmp_path / "policy.yaml"
-        pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
-
-        def _fake_compare_one_library(key: str, *_args: object) -> dict[str, object]:
-            # Every worker loads the exact same policy file, mirroring what
-            # the real per-library comparison does through service.run_compare.
-            load_suppression_and_policy(None, policy_file_path=pf)
-            return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
-
-        monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
-            _fake_compare_one_library,
-        )
-
-        common_args = self._common_args(tmp_path, pf)
-        with caplog.at_level(logging.WARNING, logger="abicheck.service"):
-            with dedup_validate_overrides_warnings():
-                results = _compare_release_parallel(
-                    ["a", "b"], common_args, common_args[0], max_workers=4
-                )
-        assert len(results) == 2
-        # Deduped across both worker threads -- not one warning per library.
-        assert caplog.text.count("HIGH RISK") == 1
-
-    def test_without_dedup_scope_each_worker_still_warns(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
-    ) -> None:
-        """Outside any dedup scope, behaviour is unchanged: every worker's
-        own load still warns independently."""
-        import logging
-
-        from abicheck.service import load_suppression_and_policy
-
-        pf = tmp_path / "policy.yaml"
-        pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
-
-        def _fake_compare_one_library(key: str, *_args: object) -> dict[str, object]:
-            load_suppression_and_policy(None, policy_file_path=pf)
-            return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
-
-        monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
-            _fake_compare_one_library,
-        )
-
-        common_args = self._common_args(tmp_path, pf)
-        with caplog.at_level(logging.WARNING, logger="abicheck.service"):
-            results = _compare_release_parallel(
-                ["a", "b"], common_args, common_args[0], max_workers=4
-            )
-        assert len(results) == 2
-        assert caplog.text.count("HIGH RISK") == 2
-
-    def test_dedup_scope_survives_many_concurrent_workers(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
-    ) -> None:
-        """Stress the check-then-add race directly: many workers, all
-        starting on the identical first load, all racing to be first past
-        `dedup_validate_overrides_warnings()`'s dedup set -- exactly the
-        shape that reproduced the race this test guards against before
-        `policy_file._warning_dedup_lock` was added (Codex review: the
-        initial fix propagated the dedup scope into worker threads but left
-        the shared set's check-then-add unguarded, reproducing on ~100% of
-        real runs with as few as 2 concurrent workers)."""
-        import logging
-
-        from abicheck.policy_file import dedup_validate_overrides_warnings
-        from abicheck.service import load_suppression_and_policy
-
-        pf = tmp_path / "policy.yaml"
-        pf.write_text("base_policy: strict_abi\noverrides:\n  func_removed: ignore\n")
-
-        def _fake_compare_one_library(key: str, *_args: object) -> dict[str, object]:
-            load_suppression_and_policy(None, policy_file_path=pf)
-            return {"library": f"{key}.so", "verdict": "NO_CHANGE"}
-
-        monkeypatch.setattr(
-            "abicheck.cli_compare_release_pairwise._compare_one_library",
-            _fake_compare_one_library,
-        )
-
-        keys = tuple(f"lib{i}" for i in range(40))
-        common_args = self._common_args(tmp_path, pf, keys)
-        with caplog.at_level(logging.WARNING, logger="abicheck.service"):
-            with dedup_validate_overrides_warnings():
-                results = _compare_release_parallel(
-                    list(keys), common_args, common_args[0], max_workers=16
-                )
-        assert len(results) == 40
-        assert caplog.text.count("HIGH RISK") == 1
