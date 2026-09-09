@@ -159,7 +159,19 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
             # inconsistency surfaced (Codex review); with the ceiling
             # expressed this way both branches read exactly `n` and there
             # is no rule left for either to violate.
-            ceiling = max(n, _BOUNDED_PREFIX_MAX_RAW_BYTES)
+            ceiling = _BOUNDED_PREFIX_MAX_RAW_BYTES
+            if n > ceiling:
+                # Above the cap the request itself is the floor, and it needs
+                # *headroom* on top: producing `n` decoded bytes can take more
+                # than `n` stored bytes (an incompressible payload, or a
+                # level-0 gzip stream, where stored exceeds raw). A ceiling
+                # sitting exactly on `n` gives the escalation loop nowhere to
+                # go -- the first read comes up short, `raw_size >= ceiling`
+                # fires immediately, and a serveable request answers `None`
+                # (Codex review; reproduced with `compresslevel=0`). One cap
+                # of slack keeps the amplification bounded by the same
+                # constant the sub-cap path uses.
+                ceiling = n + _BOUNDED_PREFIX_MAX_RAW_BYTES
             raw_size = max(n, len(probe))
             while True:
                 f.seek(0)
