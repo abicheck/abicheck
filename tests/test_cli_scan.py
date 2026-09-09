@@ -1358,35 +1358,19 @@ def _header_context_mismatch_snap(tmp_path: Path, name: str) -> Path:
 
 
 def test_baseline_compare_gates_crosschecks_by_default(runner, tmp_path):
-    # Was `test_baseline_compare_keeps_crosschecks_advisory_by_default`:
-    # `scan --against`'s baseline path used to strip every automatic
-    # cross-source finding back out of the diff before scoring it
-    # (`_strip_automatic_cross_source_findings`), so an unpromoted
-    # crosscheck never gated a baseline scan on its own. ADR-068's
-    # 2026-09-09 amendment closed that divergence (D3's own authority
-    # rule: these findings stay RISK/API_BREAK, never advisory-only) --
-    # a baseline scan now gates a cross-source finding exactly as
-    # `compare` does, with no `--crosscheck KEY=error` promotion needed.
+    # Was `test_baseline_compare_keeps_crosschecks_advisory_by_default`;
+    # ADR-068's 2026-09-09 amendment stopped stripping cross-source findings
+    # from a baseline diff, so an unpromoted crosscheck now gates too.
     old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
     new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
     res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new),
-            "--against",
-            str(old),
-            "--format",
-            "json",
-        ],
+        main, ["scan", str(new), "--against", str(old), "--format", "json"]
     )
     assert res.exit_code == 2, res.output
     payload = _payload(res)
     assert payload["verdict"] == "API_BREAK"
     assert payload["diff"]["api_break"] == 1
-    # The dedicated `crosscheck` report block (scan's own older, separate
-    # advisory mechanism -- still real surface, `--crosscheck KEY=error`
-    # promotion included) still reports the check independently.
+    # The dedicated `crosscheck` block still reports the check too.
     assert (
         payload["crosscheck"]["counts_by_check"]["header_build_context_mismatch"] == 1
     )
@@ -1532,14 +1516,9 @@ def test_a_promoted_crosscheck_updates_the_persisted_exit_block(runner, tmp_path
     # (the way it already patches `diff.severity`), a clean baseline would
     # publish `exit.code: 0` while the process exited 2.
     #
-    # Since ADR-068's 2026-09-09 amendment (`scan --against`'s baseline path
-    # no longer strips automatic cross-source findings -- see
-    # `test_baseline_compare_gates_crosschecks_by_default`), this finding
-    # now gates the diff on its own too: `reasons` carries both
-    # `compatibility_gate` (the ordinary API_BREAK-kind scoring) and
-    # `promoted_crosscheck` (this test's own explicit `--crosscheck`
-    # promotion) -- two independent mechanisms agreeing, not one replacing
-    # the other.
+    # Since ADR-068's 2026-09-09 amendment this finding also gates on its
+    # own, so `reasons` carries both `compatibility_gate` and
+    # `promoted_crosscheck`.
     old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
     new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
     res = runner.invoke(
