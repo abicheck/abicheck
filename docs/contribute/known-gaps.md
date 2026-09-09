@@ -6634,6 +6634,93 @@ dependency's code is ABI-compatible with what consumers already linked is a
 question about a third artifact abicheck was not given, which is
 `dependency-abi.transitive-break`'s territory, not this leaf's.
 
+### `compare --no-baseline` does not yet reproduce `scan`'s audit-mode findings
+
+Found while migrating the Phase 4 documentation and corpora of
+[`plans/one-comparison-product.md`](plans/one-comparison-product.md)
+(ADR-068 D2, §3 row 2). `abicheck compare --no-baseline CANDIDATE` exists,
+takes one operand, and correctly records the OLD side with ADR-065's
+`declared_absent` acquisition state — but it does **not** report the
+intra-version cross-source hygiene findings that are the entire reason the
+single-build audit exists. It fails in two different ways depending on the
+candidate's shape, both verified live against `main` at `fd6ba681`:
+
+- **A stored `.abi.json` candidate crashes.** All eleven G20 audit fixtures
+  (`catalog/cases/case14{3,4,5,6,7,8,9}_*`, `case15{0,1}_*`, `case181_*`,
+  plus `case151`'s second `thin.abi.json` variant) abort with an unhandled
+  `AssertionError` from `workflows/no_baseline_compare.py`'s
+  `assert not diff.changes, "a snapshot compared against itself must never
+  produce a change -- if this fires, a detector is reading non-identity
+  state"`. `scan <same fixture>` reports its documented verdict and hygiene
+  finding on every one of them.
+- **A live binary plus `-H` renders an empty report.** Against
+  `examples/workflows/audit-release`'s own built `libgreet.so`,
+  `scan libgreet.so --header include` reports
+  `crosscheck:exported_not_public present … undeclared_export=1` and
+  `[warning] exported_not_public: 1`, while
+  `compare --no-baseline libgreet.so --header include --format json`
+  exits 0 with `"changes": []`, no `verdict`, and no cross-source or
+  `pattern_preprocessor_scan` block in the document at all.
+
+The root cause is structural, not a stray bug in one detector:
+`run_no_baseline_compare` implements the audit as a *self-diff* (`_diff_pair(new,
+new, …)`) and then asserts the diff is empty. That assertion was correct
+when `compare()` had no per-side stages, but Phase 2a/2b moved all eleven
+cross-source checks and the pattern/preprocessor pre-scan *into*
+`compare()`, where they legitimately emit `persistent` findings on a
+self-compared snapshot. So the audit path either trips its own invariant or,
+where the checks stay dormant, yields a document with nothing in it — and
+either way `--no-baseline` cannot express what ADR-068 D2 promises it
+replaces.
+
+Not fixed here: this documentation/corpora slice owns `docs/`, `examples/`,
+`eval/`, `validation/`, `catalog/`, and `skills-src/` only, and the fix is
+in `abicheck/workflows/no_baseline_compare.py` plus whatever
+`report/`-side projection has to carry a one-sided finding set. Consequences
+recorded rather than papered over: `docs/integration/scenarios/single-build-audit.md`,
+`docs/use/evidence-depth.md`, and `docs/start/choose-your-workflow.md` all
+still name `scan` as the working spelling for a no-baseline audit, and every
+G20 audit case's README keeps its `abicheck scan` reproduce command with an
+explicit "blocked on this gap" note rather than being re-driven onto
+`compare --no-baseline` or quietly dropped from the catalog.
+
+Tractable when picked up: replace the `assert not diff.changes` invariant
+with an explicit partition — identity-diff findings (which genuinely must be
+empty, and where the assertion's original intent still holds) versus
+per-side `CrossSourceEvolution`/`pattern_preprocessor_scan` output (which
+must survive into the rendered document, marked `persistent`, with no
+addition/removal/compatibility verdict per D2). ADR-068 D3's
+`not_evaluated` rule is the constraint on the second half: with OLD
+`declared_absent` there is no baseline evidence, so nothing may ever be
+reported as `introduced`. The parity harness (`tests/parity/`) already has
+the scan-vs-compare shape needed to gate it, and the eleven fixtures above
+are a ready-made acceptance corpus.
+
+### `compare --no-baseline` accepts `--contract` but never wires it through
+
+Found in the same Phase 4 documentation slice, verified by reading
+`frontends/cli/commands/compare_no_baseline.py` against `main` at the same
+commit above (fd6ba681). `compare --no-baseline` accepts `--contract
+public|exports|all|auto` — Click parses it, `--help` documents it — but
+`_run_no_baseline_compare_cmd` never reads `kwargs.get("contract")` (or a
+resolved `contract_mode`) and never passes anything contract-related to
+`run_no_baseline_compare`. The contract-coverage ledger this axis's exit
+contribution folds from is therefore never populated on this path: a
+`compare --no-baseline NEW --contract public` run against a headerless
+candidate exits `0`, where the equivalent two-sided `compare OLD NEW
+--contract public` exits `1` for missing public-header coverage. The flag
+is accepted but silently inert, not merely undocumented — a CI job relying
+on it as a gate gets no warning that it never ran.
+
+Not fixed here, same file-ownership boundary as the gap above. The fix is
+threading the resolved `contract_mode`/`contract_evaluation` config through
+`_run_no_baseline_compare_cmd` into `run_no_baseline_compare`, the same way
+the two-sided `compare` path already does via
+`compatibility_evaluation_frontend`/`contract_pipeline`. Recorded in
+[`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact)
+rather than left as a silent behavioral gap in the doc that would otherwise
+claim the axis "applies exactly as it would for a two-sided run."
+
 ### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
 
 Found while closing ADR-068's baseline cross-source authority divergence

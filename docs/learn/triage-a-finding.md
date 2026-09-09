@@ -114,7 +114,7 @@ change the checker reports there may be a change in something it cannot
 fully see. [Limitations & Known Boundaries](limitations.md) lists them;
 where the source tier has an answer — templates, inline functions and
 macros are exactly what L4 replays — re-run at that depth
-([Source-Scan Depth](../use/scan-levels.md)) before concluding. A finding
+([Evidence Depth](../use/evidence-depth.md)) before concluding. A finding
 that is neither a limitation nor answered by more evidence goes to 6.
 
 ### 6. Then it is real

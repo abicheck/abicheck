@@ -51,12 +51,12 @@ nav:
       - Understand Your First Report: start/first-report.md
       - Choose Your Workflow: start/choose-your-workflow.md
       - 'Worked Example: Real Library': start/real-world-example.md
-      - 'Scanning a Conda-Forge Package': start/scanning-conda-packages.md
+      - 'Checking a Conda-Forge Package': start/scanning-conda-packages.md
       - Upgrading to 0.6: start/upgrading-to-0.6.md
     - Everyday Use:
       - CLI Usage: use/cli-usage.md
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
-      - Source-Scan Depth: use/scan-levels.md
+      - Evidence Depth: use/evidence-depth.md
       - Producing Source Facts: use/producing-source-facts.md
       - Output Formats: use/output-formats.md
       - Baseline Management: use/baseline-management.md
@@ -726,7 +726,8 @@ plugins:
         user-guide/python-api.md: use/python-api.md
         user-guide/python-extensions.md: use/python-extensions.md
         user-guide/real-world-example.md: start/real-world-example.md
-        user-guide/scan-levels.md: use/scan-levels.md
+        user-guide/scan-levels.md: use/evidence-depth.md
+        use/scan-levels.md: use/evidence-depth.md
         user-guide/scanning-conda-packages.md: start/scanning-conda-packages.md
         user-guide/security-hardening.md: use/security-hardening.md
         user-guide/severity.md: use/severity.md

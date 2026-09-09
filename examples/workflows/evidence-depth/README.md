@@ -8,7 +8,7 @@ runs the *same* comparison three times, each time with more evidence, and
 shows a real problem appear at each step that the step before it missed
 completely. See [Evidence & Detectability](../../../docs/learn/evidence-and-detectability.md)
 for the full `L0`-`L5` model this walks through in miniature, and
-[Source-scan depth](../../../docs/use/scan-levels.md) for the `--depth` dial
+[Evidence depth](../../../docs/use/evidence-depth.md) for the `--depth` dial
 this uses (`compare`'s own evidence inputs — `--header`/`--sources`/
 `--build-info` — drive the same depth ladder `scan --depth` names).
 

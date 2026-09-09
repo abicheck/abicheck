@@ -1,4 +1,4 @@
-# Scanning a Conda-Forge Package
+# Checking a Conda-Forge Package
 
 This runbook covers the specific friction of pointing `abicheck` at a library
 you got from **conda-forge** (or any binary-distribution channel): finding the
@@ -12,7 +12,7 @@ A conda package is usually split, and `abicheck` needs parts from more than one:
 
 | You need | Typically in | Example |
 |----------|--------------|---------|
-| the runtime `.so` (the **binary** to scan) | the **runtime** package | `tbb`, `onednn`, `dal` |
+| the runtime `.so` (the **binary** to check) | the **runtime** package | `tbb`, `onednn`, `dal` |
 | the **public headers** | the `*-devel` package | `tbb-devel` |
 | headers in a **third** package (some recipes) | a dedicated `*-include` | `dal-include` (oneDAL) |
 
@@ -49,31 +49,62 @@ header's include root (the umbrella's directory and any ancestor named
 layout no separate `-I` is needed. A non-standard layout still needs `-I`, and
 any `-I`/`--include` you pass takes precedence over the auto-added roots:
 
+The everyday case is comparing two conda versions of the same library, which
+is a plain `compare`:
+
 ```bash
 export ABICHECK_AST_FRONTEND=clang        # on a clang-only host (no castxml)
-abicheck scan --binary lib/libtbb.so.12.18 \
-  -H include/oneapi/tbb.h \
-  --public-header-dir include \
-  --lang c++ --audit --depth headers
+abicheck compare old/lib/libtbb.so.12.17 new/lib/libtbb.so.12.18 \
+  --header old=old/include/oneapi/tbb.h \
+  --header new=new/include/oneapi/tbb.h \
+  --depth headers
 ```
 
-`--public-header-dir` establishes the public/internal boundary so the
-single-release hygiene cross-checks run (it is what lets abicheck classify
-which declarations are public).
+The umbrella header shown above already establishes the public/internal
+boundary — a lone `-H` **file** enters the same public-header set as a
+directory would, so the cross-source hygiene checks (which `compare` runs
+automatically on every invocation) already have a "public" side to
+reconcile against with no extra flag. A project can declare the same
+boundary once in `.abicheck.yml` instead:
+
+```yaml
+# .abicheck.yml
+scope:
+  public_header_dirs: [include]
+compile:
+  lang: c++
+```
+
+!!! note "The single-release audit still needs `scan`"
+    Auditing **one** conda build with no previous version — an accidental
+    export, a private-header leak, an unversioned symbol — is
+    [Scenario S5](../integration/scenarios/single-build-audit.md). Its
+    declared spelling is `compare --no-baseline`, which does not report
+    those findings yet ([known
+    gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)),
+    so `abicheck scan lib/libtbb.so.12.18 -H include --public-header-dir
+    include --depth headers` is still the working command for that one case.
+    `scan` is being retired with no deprecation window (ADR-068 D8) — don't
+    build anything else on it.
 
 !!! tip "Prefer the umbrella over the include *directory*"
     Passing `-H <include-dir>` makes abicheck parse **every** header in the
     tree as one translation unit — which pulls in *optional backend* headers
     (OpenCL/SYCL: `dnnl_ocl.h` → `CL/cl.h`) and *preview* headers gated by
     `#error` macros (oneTBB's `blocked_rangeNd.h`). Those need their SDK or a
-    `--compiler-option=-DXXX_PREVIEW` to parse. The umbrella header includes only the
-    library's curated, default-public surface, so it sidesteps both. Use the
-    umbrella unless you specifically want a preview/backend header analysed.
+    a `compile.options: [-DXXX_PREVIEW]` entry to parse. The umbrella header
+    includes only the library's curated, default-public surface, so it
+    sidesteps both. Use the umbrella unless you specifically want a
+    preview/backend header analysed — a `-H` header *file* establishes the
+    public-header boundary just as a directory does (both are split into
+    the same public-header set that feeds provenance classification), so
+    the umbrella alone is enough for the cross-source checks to have a
+    public side.
 
 ## 4. Going deeper needs a build
 
 `--depth headers` (L2) works from the binary + headers alone. The deeper levels
-(`build`/`source`/`full` → L3/L4/L5) read a **`compile_commands.json`**:
+(`build`/`source` → L3/L4/L5) read a **`compile_commands.json`**:
 
 - abicheck auto-discovers one under the source tree (`.`, `build/`, `builddir/`,
   `out/`, `_build/`, `cmake-build-debug/`, **or any immediate subdirectory**);
@@ -89,12 +120,12 @@ pre-scan runs. On a large tree, scope that pre-scan with `--since <ref>` /
 
 | Shape | Symptom | What to do |
 |-------|---------|------------|
-| **Static-only** (e.g. oneCCL on conda-forge ships `libccl.a`, no `.so`) | `scan` rejects the `.a`: "static/import library archive … not analysed" | extract members (`ar x lib.a`) and scan the resulting objects, or scan a shared library built from them |
+| **Static-only** (e.g. oneCCL on conda-forge ships `libccl.a`, no `.so`) | abicheck rejects the `.a`: "static/import library archive … not analysed" | extract members (`ar x lib.a`) and compare the resulting objects, or compare a shared library built from them |
 | **Headers in a third package** | `-H` dir has no headers | fetch the `*-include` package (see [§1](#1-the-pieces-live-in-different-packages)) |
 | **Stripped release `.so`, no DWARF** | header-aware L2 still works; DWARF cross-checks skip | pass `-H` headers (recommended anyway) |
 
 ## See also
 
 - [Worked Example: Scanning a Library](real-world-example.md) — the full flow and reports
-- [Source-Scan Depth](../use/scan-levels.md) — what L0–L5 collect and cost
+- [Evidence Depth](../use/evidence-depth.md) — what L0–L5 collect and cost
 - [CLI Usage](../use/cli-usage.md) — every flag

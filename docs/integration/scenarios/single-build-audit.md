@@ -8,7 +8,23 @@ yet: no prior release, no `accepted-main` history, nothing. This is
 comparison — advisory by default, since there is no baseline-drift verdict
 to gate CI on in the first place.
 
-## The recommended CLI path: `scan` (no `--against`)
+## The declared target: `compare --no-baseline` (ADR-068 D2)
+
+[ADR-068](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+D2 makes this scenario a *scope* of the one comparison product rather than a
+second command: `abicheck compare --no-baseline CANDIDATE`, with OLD
+recorded in
+[ADR-065](../../contribute/adr/065-comparison-scope-selection-and-completeness.md)'s
+`declared_absent` acquisition state. `scan` is retired with **no deprecation
+window** (ADR-068 D8) once that migration completes, so treat
+`compare --no-baseline` as where this scenario is going.
+
+**It does not get you there yet.** See the section below for the CLI path
+that actually works today, and the
+[known gap](../../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)
+for the exact defect and what closing it requires.
+
+## The working CLI path today: `scan` (no `--against`)
 
 `abicheck scan CANDIDATE` with no `--against` is the way to run a
 single-build audit from the CLI today — it runs the same ADR-035
@@ -23,24 +39,29 @@ candidate is clean or not:
 abicheck scan build/libfoo.so -H include/
 ```
 
-**`compare --no-baseline` (ADR-068 D2) is not yet a safe replacement for
-this scenario — verified broken, not just incomplete.** It takes one
-operand and records the OLD side with
-[ADR-065](../../contribute/adr/065-comparison-scope-selection-and-completeness.md)'s
-`declared_absent` acquisition state, self-diffing the candidate through the
-same cross-source-check pipeline in principle — but when the candidate
-actually *has* one of the hygiene problems this scenario exists to catch
-(confirmed live against `catalog/cases/case143_audit_accidental_export`'s
-own accidental-export fixture), `workflows/no_baseline_compare.py`'s
-`run_no_baseline_compare()` hits its own internal
-`assert not diff.changes` guard and crashes with an unhandled
-`AssertionError` instead of rendering the finding. It only ever "worked" for
-a clean candidate — i.e. a self-diff that legitimately produces zero
-changes, which never exercises the code path the assertion protects. This
-CLI slice also doesn't yet accept `--sources`/`--build-info`/`--depth`/
-cross-toolchain flags, a secondary `--write`, or `--dry-run`, and only
-`--format json`/`markdown` render at all — but the crash is the reason to
-avoid it here, not those. Use `scan` (above) until this is fixed.
+**`compare --no-baseline` is verified broken for this scenario, not merely
+incomplete**, in two distinct ways depending on the candidate's shape:
+
+- **A stored `.abi.json` candidate crashes.** All eleven G20 audit fixtures
+  (`catalog/cases/case14{3,4,5,6,7,8,9}_*`, `case15{0,1}_*`, `case181_*`)
+  abort with an unhandled `AssertionError` from
+  `workflows/no_baseline_compare.py`'s `assert not diff.changes` guard
+  instead of rendering the finding, while `scan` reports each one's
+  documented verdict.
+- **A live binary plus `-H` renders an empty result.** Against
+  `examples/workflows/audit-release`'s `libgreet.so`, `scan libgreet.so
+  --header include` reports `exported_not_public`, while
+  `compare --no-baseline libgreet.so --header include --format json` exits 0
+  with `"changes": []` and no cross-source block at all.
+
+The cause is structural: the audit is implemented as a self-diff that then
+asserts the diff is empty, an invariant the per-side cross-source stages
+`compare()` gained in ADR-068 Phase 2a/2b legitimately violate. This CLI
+slice also doesn't yet accept `--sources`/`--build-info`/`--depth`,
+a secondary `--write`, or `--dry-run` — but the missing findings are the
+reason to avoid it here, not those. Use `scan` (above) until the
+[known gap](../../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)
+is closed.
 
 ## The Action: `mode: scan`, no `against`
 
@@ -86,7 +107,7 @@ for the equivalent one-step `mode: scan` (no `against:`) wiring.
 
 - **You now have something to compare against** → any other scenario; a
   no-baseline audit (`scan CANDIDATE` with no `--against` on the CLI,
-  `baseline-channel: none` on the Action — see "The recommended CLI path"
+  `baseline-channel: none` on the Action — see "The working CLI path today"
   above for why `compare --no-baseline` is not the safe spelling here) is a
   starting point, not a permanent choice for a project that will eventually
   publish a release or track `main`.

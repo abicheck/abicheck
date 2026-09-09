@@ -114,7 +114,11 @@ scenarios:
       inputs, skip the source pattern scan and L3 collection, and return the same
       binary verdict quickly.
     flow:
-      - abicheck scan --binary new.json --baseline old.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
+      # `scan` here, not `compare`, because this scenario's whole point is the
+      # coverage block's `skipped`/`not_collected` rows and `scan`'s pinned-depth
+      # contract -- neither of which `compare` reproduces yet (ADR-068 plan §3
+      # row 28). It moves onto `compare` when that row closes.
+      - abicheck scan new.json --against old.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
     expected:
       exit_code: 4
       verdict: BREAKING

@@ -38,7 +38,7 @@ One semantic model serves every scope below; picking one never makes the others 
 | Two releases of a multi-library product or package | [Multi-Binary & Release Comparison](use/multi-binary.md) and [Choose Your Workflow](start/choose-your-workflow.md) |
 | One local build to check against a multi-profile baseline | [Aggregate Reports](use/aggregate-reports.md) for the per-profile story today; explicit selected-member matching against a multi-variant baseline is *planned* (ADR-065) |
 | A CI pipeline to gate | [GitHub Action](use/github-action.md) or [CI Gating](use/ci-gating.md) — equivalent *resolved* requests decide the same way through the Action, CLI, and Python API (the Action and CLI also fold in `.abicheck.yml` and `--pack`; see [Python API](use/python-api.md) for the parity table) |
-| Sources, build data, or known consumer binaries for deeper assurance | [Scan Levels](use/scan-levels.md), [Application Compatibility](use/appcompat.md); a prebuilt-consumer lifecycle beyond a single supplied application is *planned* |
+| Sources, build data, or known consumer binaries for deeper assurance | [Evidence Depth](use/evidence-depth.md), [Application Compatibility](use/appcompat.md); a prebuilt-consumer lifecycle beyond a single supplied application is *planned* |
 
 ## How the documentation is organized
 

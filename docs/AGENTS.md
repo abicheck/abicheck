@@ -23,7 +23,7 @@ out of sync with each other and with the code:
 |---|---|---|
 | **Fact owner** | Where the exact, machine-checked value lives | `ChangeKind` registry, CLI `help=` text, JSON Schema, `catalog/ground_truth.json` |
 | **Narrative owner** | Where a topic is explained in full, for a human | `learn/evidence-and-detectability.md` |
-| **Task owner** | Where one practical user workflow is described | `use/scan-levels.md` |
+| **Task owner** | Where one practical user workflow is described | `use/evidence-depth.md` |
 | **View owner** | Where a fact is shown again in a different shape | a generated reference table, a one-paragraph quickstart summary, a case-index row |
 
 For evidence, this split is already real (and predates this file):
@@ -31,7 +31,7 @@ For evidence, this split is already real (and predates this file):
 values; `learn/evidence-and-detectability.md` owns the full mental model
 (including the `--depth` dial and the deprecated-axes appendix);
 `learn/what-each-level-sees.md` owns one worked example walking the same
-model level-by-level; `use/scan-levels.md` owns the practical `--depth`
+model level-by-level; `use/evidence-depth.md` owns the practical `--depth`
 choice. `getting-started.md`, `start/first-check.md`, and
 `start/choose-your-workflow.md` may each carry a short summary that links
 back — not a second explanation.
@@ -138,7 +138,7 @@ path, not the nav position.
   The evidence model is deliberately a three-page trio with one role each —
   model (`learn/evidence-and-detectability.md`), worked example
   (`learn/what-each-level-sees.md`), and flag reference
-  (`use/scan-levels.md`) — don't add a fourth page to that topic. Verdict
+  (`use/evidence-depth.md`) — don't add a fourth page to that topic. Verdict
   semantics live on one page (`learn/verdicts.md`, including the
   verdict→exit-code chain); `reference/exit-codes.md` stays the exhaustive
   per-command authority.
