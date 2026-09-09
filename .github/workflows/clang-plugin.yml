@@ -109,7 +109,15 @@ jobs:
           codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
           echo "deb http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${{ matrix.llvm }} main" \
             | sudo tee /etc/apt/sources.list.d/llvm.list >/dev/null
-          sudo apt-get update
+          # `update`'s exit status is deliberately not a gate: it fails as a
+          # whole when *any* configured source fails, including the runner
+          # image's pre-baked third-party repos (dl.google.com, packages.
+          # microsoft.com) that none of these packages come from. The
+          # `install` below is the gate -- if the llvm.list repo just added
+          # above did not fetch, it fails there, loudly and specifically.
+          # Same rule the shared install-system-deps action applies; kept
+          # inline here because this step must add its repo first.
+          sudo apt-get update || echo "::warning::apt-get update reported an error; continuing with the existing package index"
           sudo apt-get install -y \
             llvm-${{ matrix.llvm }}-dev \
             libclang-${{ matrix.llvm }}-dev \

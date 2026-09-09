@@ -110,6 +110,27 @@ never be surprised by a required CI job it had no way to reproduce.
   `Step`, then call `python scripts/verify.py --profile <profile> --only
   <name>` from the job) over inlining a fresh raw command — see
   `scripts/CLAUDE.md`'s "Adding a new script" section.
+- **Installing apt packages goes through
+  `./.github/actions/install-system-deps`**, never a hand-written
+  `sudo apt-get update && sudo apt-get install`. `apt-get update` fails as a
+  *whole* when any configured source fails, and GitHub's runner images ship
+  third-party vendor repositories (dl.google.com/linux/chrome-stable,
+  packages.microsoft.com) that nothing in this repo installs from -- so an
+  `update && install` chain aborts before `install` runs, and a Chrome index
+  serving a stale `Packages.gz` takes out lanes that only wanted gcc. The
+  shared action makes `update` advisory and `install` the gate, bounds and
+  retries each attempt, and verifies afterwards that the packages really are
+  installed. `tests/test_apt_install_hardening.py` executes that behaviour
+  against a simulated apt and asserts the invariant over every workflow, so
+  a re-hand-rolled `update && install` fails CI. A job that must add its own
+  repository first (`clang-plugin.yml`) keeps its inline `apt-get`, but
+  still absorbs `update`'s exit status with `||`.
+- A job that checks the repo out into a subdirectory (`base/`, `head/`) has
+  no repo at the workspace root for a `uses: ./...` path to resolve against;
+  run the shared script directly instead (`bash
+  head/.github/actions/install-system-deps/install.sh` with
+  `INPUT_PACKAGES`), the same way those jobs already run
+  `head/action/install-castxml.sh`.
 - Action pins are inconsistent across workflows: some steps pin by commit SHA
   (e.g. `actions/upload-artifact@ea165f8d...`), most use a floating major tag
   (`actions/checkout@v6`). If you're touching a workflow that executes

@@ -155,12 +155,16 @@ jobs:
           python-version: "3.14"
           cache: "pip"
 
+      - name: Install system tools
+        # c++filt for the ELF-only / namespace demangling scenario.
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: binutils
+
       - name: Install package
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          # c++filt for the ELF-only / namespace demangling scenario.
-          sudo apt-get update -qq && sudo apt-get install -y binutils
 
       - name: Run scaling benchmark
         # workflow_dispatch inputs are attacker-shapeable free text (unlike
@@ -283,10 +287,18 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Install system tools
+        # This job checks the repo out into base/ and head/ rather than the
+        # workspace root, so a `uses: ./.github/actions/...` path would not
+        # resolve; run head's copy of the same script directly, exactly as
+        # the castxml step below runs `head/action/install-castxml.sh`.
+        env:
+          INPUT_PACKAGES: binutils
+        run: bash head/.github/actions/install-system-deps/install.sh
+
       - name: Measure base branch
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y binutils
           python -m venv base_env
           ./base_env/bin/pip install -q --upgrade pip
           ./base_env/bin/pip install -q -e "./base[dev]"
@@ -392,11 +404,15 @@ jobs:
           python-version: "3.14"
           cache: "pip"
 
-      - name: Install package + toolchain
+      - name: Install system toolchain
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: clang g++
+
+      - name: Install package
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-          sudo apt-get update -qq && sudo apt-get install -y clang g++
 
       - uses: ./.github/actions/setup-castxml
 
@@ -470,7 +486,11 @@ jobs:
           python-version: "3.14"
 
       - name: Install toolchain
-        run: sudo apt-get update -qq && sudo apt-get install -y clang g++
+        # base/ + head/ checkouts, no repo at the workspace root -- see the
+        # identical note on the other split-checkout job above.
+        env:
+          INPUT_PACKAGES: clang g++
+        run: bash head/.github/actions/install-system-deps/install.sh
 
       - name: Set up pinned CastXML
         # A system binary, not a per-venv package -- installing it once

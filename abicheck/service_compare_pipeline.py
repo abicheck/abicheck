@@ -153,6 +153,23 @@ def resolve_sides_sequentially(request: CompareRequest) -> bool:
     )
 
 
+def _deadline_bound_side_worker(
+    deadline_ts: float | None, worker: Callable[[], SideResolution]
+) -> SideResolution:
+    """Re-establish a captured ``--budget`` deadline inside a side-resolution worker.
+
+    ``contextvars`` don't cross a ``ThreadPoolExecutor`` boundary, so without
+    this a worker submitted from :func:`resolve_compare_request`'s parallel
+    branch would silently ignore ``CompareRequest.budget_s``. Mirrors
+    ``buildsource.source_replay._deadline_bound_worker`` (Codex review,
+    PR #591) -- its own copy, since that module is unrelated to `compare`.
+    """
+    from . import deadline
+
+    with deadline.with_deadline_ts(deadline_ts):
+        return worker()
+
+
 def _manifest_forced_includes(dump_manifest: object) -> list[Path]:
     """Forced includes declared by a ``--dump-manifest``'s translation units.
 
@@ -298,10 +315,17 @@ def resolve_compare_request(
             combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
         SnapshotError: If either input cannot be loaded.
     """
-    from . import service, service_compare_evidence as _sce
+    from . import deadline, service, service_compare_evidence as _sce
     from .workflows.plan import AnalysisPlanner
 
     request.validate()
+    # Codex review (fresh evidence, PR #1178): a stored-snapshot-only pair
+    # needs no subprocess/extraction work at all, so nothing inside this
+    # resolution would otherwise ever call `deadline.check()` -- an
+    # already-expired `budget_s` (0, or exhausted by an earlier phase) would
+    # silently resolve instead of raising here. `run_compare_request`'s
+    # `deadline_scope` is already active by the time this runs.
+    deadline.check()
     # ADR-063 Phase 4: reject a request no resolved collector/backend
     # combination can satisfy before any extraction runs (PlanningError),
     # rather than discovering the gap mid-run or not at all. See
@@ -396,9 +420,16 @@ def resolve_compare_request(
         old_res = _resolve_old_side()
         new_res = _resolve_new_side()
     else:
+        # ADR-068 §3 #19 (Codex review): re-enter the captured deadline in
+        # each worker -- see `_deadline_bound_side_worker`'s own docstring.
+        _deadline_ts = deadline.current_deadline_ts()
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            old_future = pool.submit(_resolve_old_side)
-            new_future = pool.submit(_resolve_new_side)
+            old_future = pool.submit(
+                _deadline_bound_side_worker, _deadline_ts, _resolve_old_side
+            )
+            new_future = pool.submit(
+                _deadline_bound_side_worker, _deadline_ts, _resolve_new_side
+            )
             old_res = old_future.result()
             new_res = new_future.result()
     old, new = old_res.snapshot, new_res.snapshot
@@ -456,11 +487,16 @@ def classify_compare_pair(
     instead of calling this; everything else composes the two through
     :func:`abicheck.service.run_compare_request`.
     """
-    from . import service
+    from . import deadline, service
     from .buildsource.evidence_report import (
         attach_evidence_metrics,
         prepare_embedded_build_source,
     )
+
+    # Same classify-stage boundary check as `resolve_compare_request`'s own
+    # (Codex review, fresh evidence, PR #1178): `compare_snapshots` below can
+    # complete with no subprocess/extraction work at all.
+    deadline.check()
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
     # request`'s own `enforce_requested_depth` call already confirmed both
@@ -564,6 +600,16 @@ def classify_compare_pair(
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
+    # ADR-068 §3 #28: defense-in-depth alongside `resolve_compare_request`'s
+    # own hard `enforce_requested_depth` fail. `pair.old_fmt`/`.new_fmt`
+    # (CodeRabbit review) come straight from the request's own operand
+    # path, so a stored-snapshot request correctly reads as non-live too.
+    from .policy.depth_evidence_contract import record_depth_evidence_contract_error
+
+    record_depth_evidence_contract_error(
+        result, request.depth, old, new,
+        old_is_live=pair.old_fmt is not None, new_is_live=pair.new_fmt is not None,
+    )
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -695,8 +741,17 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     parameters pushed that file over the AI-readiness file-size cap --
     re-exported from ``service.py`` unchanged, the same pattern
     ``resolve_compare_request``/``classify_compare_pair`` already use.
+
+    ADR-068 §3 #19: ``request.budget_s`` (``None`` = unbounded) bounds both
+    phases under one ``deadline.deadline_scope``. A typed caller gets a
+    clear :class:`~abicheck.deadline.DeadlineExceeded` rather than a partial
+    result -- ``cli_compare_helpers.run_compare`` is what maps this axis
+    onto exit 5 for the CLI, which needs an exit code instead.
     """
-    return classify_compare_pair(request, resolve_compare_request(request))
+    from . import deadline
+
+    with deadline.deadline_scope(request.budget_s):
+        return classify_compare_pair(request, resolve_compare_request(request))
 
 
 def run_compare(

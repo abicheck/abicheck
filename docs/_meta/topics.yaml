@@ -247,9 +247,18 @@ topics:
       - abicheck/cli_options.py
       - abicheck/frontends/cli/help.py
       - abicheck/frontends/cli/options/contract.py
+      # ADR-068 §3 #19/#28: `compare --budget` and the `--depth
+      # build`/`--depth source` evidence-contract floor, absorbed from
+      # `scan` in the same PR (Codex review: new public surface needs a
+      # registered fact source even without a dedicated new page --
+      # `use/scan-levels.md` already narrates both under the existing
+      # `cli-surface` topic).
+      - abicheck/deadline.py
+      - abicheck/policy/depth_evidence_contract.py
     reference_page: reference/cli-reference.md
     task_pages:
       - use/dump-compare-flags.md
+      - use/scan-levels.md
 
   python-api:
     canonical_page: use/python-api.md
@@ -259,6 +268,10 @@ topics:
       - abicheck/service_dump_pipeline.py
       - abicheck/service_compare_pipeline.py
       - abicheck/service_scan.py
+      # ADR-068 §3 #19: CompareRequest.budget_s, same absorbed surface as
+      # cli-surface's own entry above.
+      - abicheck/deadline.py
+      - abicheck/policy/depth_evidence_contract.py
     reference_page: reference/python-api-reference.md
 
   config-keys:

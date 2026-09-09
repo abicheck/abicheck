@@ -42,9 +42,10 @@ they come up: a single-build audit (`compare --no-baseline` is not a safe
 replacement for this yet — verified it crashes with an unhandled
 `AssertionError` instead of reporting when the candidate actually has a
 hygiene problem, at any depth including binary/header-only; see
-[Scenario S5](../integration/scenarios/single-build-audit.md)), a
-`--budget` wall-clock guard, `--crosscheck KEY=error` promotion syntax, or
-`--build-target` scoping (`compare` has no equivalent flag yet). Where this
+[Scenario S5](../integration/scenarios/single-build-audit.md)),
+`--crosscheck KEY=error` promotion syntax, or `--build-target` scoping
+(`compare` has no equivalent flag yet). `compare` gained its own `--budget`
+wall-clock guard (ADR-068 §3 #19), so that reason no longer applies. Where this
 page shows a `scan` command below, that's why. `abicheck scan ARTIFACT
 [OPTIONS]` takes the scanned binary/snapshot as a **positional** argument
 (not a flag); `--against OLD` is the previous dump/library/directory/package
@@ -375,8 +376,8 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   regardless of a diff seed) — on `scan`, by contrast, omitting `--depth`
   with a diff seed present resolves to `auto`'s risk-driven `source`.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
-  break. `--budget` overflow (exit `5`) is `scan`-only for now — see
-  [Exit Codes](../reference/exit-codes.md).
+  break. `--budget` overflow (exit `5`) applies to both `compare` and `scan`
+  — see [Exit Codes](../reference/exit-codes.md).
 - `--depth source` folds the L5 reachability **edges scoped to the changed TUs**
   for cross-symbol impact in the report. The *whole-library* reachability graph
   is an internal level (`GRAPH`, D6) with no user-facing `--depth` rung.

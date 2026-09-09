@@ -532,6 +532,11 @@ class TestUseCaseImpactOnCompare:
             "--depth", "source",
             "--write", f"json={secondary}",
         )
+        # ADR-068 §3 #28's evidence-contract floor (exit 7) does not apply
+        # here: `old`/`new` are pre-serialized JSON snapshots this run never
+        # live-extracted (see `policy.depth_evidence_contract`'s "Live
+        # extraction only" note), so this stays the ordinary BREAKING
+        # verdict it always was.
         assert res.exit_code == 4, res.output
         assert "use_case_impact" in json.loads(secondary.read_text(encoding="utf-8"))
         # The primary one-line render carries no JSON at all to check for the
