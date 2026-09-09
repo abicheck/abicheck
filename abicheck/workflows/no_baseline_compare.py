@@ -276,10 +276,19 @@ def candidate_is_live_artifact(path: Path) -> bool:
     specific error about it moments later, and claiming "stored" would
     silently *suppress* the exit-7 axis.
     """
-    from ..binary_utils import detect_binary_format
+    from ..binary_utils import detect_binary_format, resolve_linker_script_chain
 
     try:
-        return detect_binary_format(path) is not None
+        # Follow a GNU ld INPUT()/GROUP() script to its target first: the
+        # script itself is text, so `detect_binary_format` answers `None` for
+        # it -- but the resolver *does* follow it and extracts the DSO it
+        # names, so treating the operand as stored exempted a genuinely live
+        # extraction from the depth floor. `compare --no-baseline alias.so
+        # --depth build` exited 0 where the very same library, named
+        # directly, exited 7 (Codex review, P1). Chain-resolving matches what
+        # `resolve_input` does with the same operand, so the two agree by
+        # construction rather than by coincidence.
+        return detect_binary_format(resolve_linker_script_chain(path)) is not None
     except OSError:
         return True
 

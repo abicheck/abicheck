@@ -475,3 +475,32 @@ def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) 
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["new_version"] == "9.9"
+
+
+def test_a_linker_script_operand_counts_as_live(tmp_path: Path) -> None:
+    """A GNU ld script that resolves to a DSO is a live artifact.
+
+    The depth floor's live/stored carve-out asked ``detect_binary_format``
+    about the operand *as written*. A linker script is text, so it answered
+    "stored" and exempted the run — while the resolver happily followed
+    ``INPUT(...)`` and performed a real extraction. The same library named
+    directly exited 7; named through its script, 0.
+
+    Asserted as *agreement between the two spellings* rather than as a fixed
+    exit code, so the pair cannot drift apart again.
+    """
+    from abicheck.workflows.no_baseline_compare import candidate_is_live_artifact
+
+    real = tmp_path / "real.so"
+    real.write_bytes(b"\x7fELF\x02\x01\x01\x00" + bytes(56))
+    script = tmp_path / "alias.so"
+    script.write_text(f"INPUT({real})\n")
+
+    assert candidate_is_live_artifact(real) is True
+    assert candidate_is_live_artifact(script) is True, (
+        "a linker script resolving to a native artifact is a live extraction, "
+        "so it must not be exempted from the pinned-depth floor"
+    )
+    stored = tmp_path / "snap.abi.json"
+    stored.write_text('{"library": "x"}')
+    assert candidate_is_live_artifact(stored) is False

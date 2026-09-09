@@ -83,6 +83,10 @@
 - **A failed evidence contract is now visible on `run_outcome.operational`.**
   The exit code was already `7`, but the structured outcome still read `none`,
   telling a report consumer the run was operationally fine.
+- **A linker-script candidate is held to the pinned-depth floor.** A GNU ld
+  `INPUT(...)` script resolving to a real library was treated as a stored
+  snapshot and exempted, so `--depth build` exited 0 where the same library
+  named directly exited 7.
 - **An unreadable candidate reports a clean error instead of a traceback.**
   Extraction failures are now translated at the CLI boundary the same way the
   two-sided path already translates them.

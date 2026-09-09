@@ -7030,6 +7030,16 @@ of them are again the same class this entry is about, and one is that class
   never apply to an audit, but *operational* is a different axis, and
   `OperationalStatus.EVIDENCE_CONTRACT_ERROR` is its canonical state. Now
   read off the same flag the exit code folds, so the two cannot disagree.
+- **A linker-script operand was misclassified as stored (P1).** The depth
+  floor's live/stored carve-out asked `detect_binary_format` about the
+  operand *as written*. A GNU ld `INPUT(...)`/`GROUP(...)` script is text, so
+  it answered "stored" and exempted the run -- while `resolve_input` happily
+  followed the script and performed a real extraction. Verified live: the
+  same library named directly exited `7` under `--depth build`, and named
+  through its script exited `0`. Now chain-resolved with
+  `binary_utils.resolve_linker_script_chain` first, which is what the
+  resolver itself does with the same operand, so the two agree by
+  construction rather than by coincidence.
 - **Extraction failure escaped as a traceback (P2).** A corrupt candidate
   printed a full stack trace where the two-sided path printed
   `Error: Failed to dump '...'` for the identical input. Now translated at
