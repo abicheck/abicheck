@@ -29,6 +29,16 @@ from .header_utils import (
     iter_cache_header_files,
 )
 
+#: Bumped once (Codex review, fresh evidence, P2): a pre-existing on-disk
+#: entry an OLDER binary wrote for a self-healed C-to-C++ dump was stored
+#: under the pre-retry (C-mode) key -- exactly the key this hash still
+#: computes for the identical input -- so it would otherwise stay silently
+#: reachable and reintroduce the stale `resolved_force_cpp=False` bug the
+#: write-side key fix (see `dumper._clang_header_dump`) closes only for
+#: entries written from here on. Bump again if the clang cache format ever
+#: changes in some other incompatible way.
+_CLANG_CACHE_SCHEMA_VERSION = 2
+
 
 def _cache_key(
     headers: list[Path],
@@ -53,6 +63,8 @@ def _cache_key(
 ) -> str:
     h = hashlib.sha256()
     h.update(f"backend={backend}".encode())
+    if backend == "clang":
+        h.update(f"clang_cache_schema={_CLANG_CACHE_SCHEMA_VERSION}".encode())
     # `force_cpp` is `None` only for a handful of call sites (e.g.
     # `_ast_compile_provenance`'s own probing helpers) that never resolve a
     # real language-mode decision at all; every real dump-producing call site

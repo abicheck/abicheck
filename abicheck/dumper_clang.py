@@ -674,12 +674,27 @@ class _ClangAstParser:
         public_dir_paths: list[str] | None = None,
         target_triple: str | None = None,
         no_binary_evidence: bool = False,
+        is_cxx: bool = True,
     ) -> None:
         self._root = root
         # May be unavailable for synthetic/unit ASTs or an unprobeable
         # compiler.  In that case attribute spelling remains evidence rather
         # than being normalized against an assumed host ABI.
         self._target_triple = target_triple
+        # Defaults True for direct/unit-test construction (which never
+        # exercises plain-C mode): whether the TU that produced this AST was
+        # actually compiled as C++ (`dumper._clang_header_dump`'s own
+        # `resolved_force_cpp`) -- an explicit `asm(...)` label's mangled
+        # spelling is trustworthy evidence of a deliberate C++-linkage
+        # override ONLY in C++ mode. In genuinely plain-C code an asm label
+        # is routine (glibc/POSIX-style symbol versioning) and carries no
+        # such implication -- C has no mangling to override in the first
+        # place, so an asm-labeled plain-C declaration must resolve to the
+        # identical extern-C-style identity as its unlabeled sibling, the
+        # same one castxml assigns it (Codex review, fresh evidence: an
+        # unconditional gate broke self-comparison of unchanged plain-C
+        # headers, reporting a spurious FUNC_LANGUAGE_LINKAGE_CHANGED).
+        self._is_cxx = is_cxx
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
         # Workstream F S1 ("Header-only comparison"): see
@@ -1247,6 +1262,7 @@ class _ClangAstParser:
             target_triple=self._target_triple,
             default_value=lambda p: _initializer_value(p, self._id_index),
             no_binary_evidence=self._no_binary_evidence,
+            is_cxx=self._is_cxx,
         )
 
     def parse_variables(self) -> list[Variable]:
@@ -1294,7 +1310,19 @@ class _ClangAstParser:
             # also preserves a genuine, distinct `asm("_foo")` label's
             # own identity: see `functions.parse_functions`'s comment for
             # the full multi-round account of why each gate is load-
-            # bearing.
+            # bearing. ALSO gated on NOT (`has_asm_label` AND `self._is_cxx`)
+            # (Codex review, fresh evidence, two rounds, mirroring the
+            # identical fix in `functions.parse_functions`): a single-
+            # underscore explicit `asm("_foo")` label is exactly as
+            # `symbol_candidates`-matchable as genuine extern-C decoration,
+            # and in C++ mode it still reached `entity_id_for_variable`'s
+            # `is_extern_c` branch even though the mangled name itself
+            # stays preserved -- but a plain-C `asm(...)` label carries no
+            # such implication (C has no mangling to override), so an
+            # unconditional gate wrongly forced a genuinely plain-C
+            # declaration down the mangled-identity path, breaking
+            # self-comparison of an unchanged plain-C header.
+            has_asm_label = _clang_context.has_explicit_asm_label(node)
             is_extern_c = (
                 entry.extern_c
                 or raw_mangled == name
@@ -1302,6 +1330,7 @@ class _ClangAstParser:
                     raw_mangled is not None
                     and not entry.scope
                     and _clang_context.is_darwin_target(self._target_triple)
+                    and not (has_asm_label and self._is_cxx)
                     and name in _clang_context.symbol_candidates(raw_mangled)
                 )
             )
@@ -1312,7 +1341,7 @@ class _ClangAstParser:
                 self._target_triple,
                 name=name,
                 is_extern_c=is_extern_c,
-                has_asm_label=_clang_context.has_explicit_asm_label(node),
+                has_asm_label=has_asm_label,
             )
             if not mangled:
                 continue

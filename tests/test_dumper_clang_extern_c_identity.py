@@ -456,6 +456,115 @@ def test_parse_variables_explicit_asm_label_unstripped_on_darwin() -> None:
     assert var.entity_id.extra == ("mangled", "__Zfake_g")
 
 
+def test_parse_functions_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install (``void foo() asm("_foo");`` under
+    ``--target=x86_64-apple-darwin`` reports both a literal ``mangledName``
+    of ``"_foo"`` AND an ``AsmLabelAttr`` child): a single-underscore
+    explicit asm label is exactly as ``symbol_candidates``-matchable as
+    genuine Darwin extern-C bare-name decoration, so ``is_extern_c``'s
+    Darwin-gated ``symbol_candidates`` fallback wrongly classified it as
+    extern "C" even though the two tests above already keep the mangled
+    name itself preserved (``"_foo"``, not stripped to ``"foo"``) -- the
+    resulting ``EntityId`` still took the signature-free ``("extern_c",)``
+    branch instead of ``("mangled", "_foo")``, diverging from castxml's own
+    mangled-name identity for the identical declaration and risking a
+    manufactured remove/add pair in a castxml/clang or hybrid comparison."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "foo",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "_foo",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_functions()
+    assert fn.mangled == "_foo"
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("mangled", "_foo")
+
+
+def test_parse_variables_explicit_single_underscore_asm_label_not_treated_as_extern_c() -> None:
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "VarDecl",
+            "name": "bar",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int"},
+            "mangledName": "_bar",
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE
+    ).parse_variables()
+    assert var.mangled == "_bar"
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("mangled", "_bar")
+
+
+def test_parse_functions_asm_label_in_c_mode_still_treated_as_extern_c() -> None:
+    """Codex review, fresh evidence, empirically verified against a real
+    Clang 18 install: ``void foo(void) asm("_foo"); void foo(void) {}``
+    compiled with ``clang -x c ... --target=x86_64-apple-darwin`` produces
+    the IDENTICAL AST shape as the C++ case above (a literal ``mangledName``
+    of ``"_foo"`` plus an ``AsmLabelAttr`` child, no ``LinkageSpecDecl``) --
+    there is no per-declaration structural signal distinguishing "genuinely
+    C" from "C++ with an explicit asm override" once an asm label is
+    present. But C has no mangling to override in the first place: an
+    asm-labeled plain-C declaration is routine (glibc/POSIX-style symbol
+    versioning), not evidence of a deliberate identity override, and must
+    resolve to the SAME extern-C-style identity as its unlabeled sibling --
+    exactly what castxml assigns the identical plain-C declaration.
+    Unconditionally excluding every asm-labeled declaration from the
+    `is_extern_c` fallback (the fix above) wrongly forced this genuinely
+    plain-C declaration down the mangled-identity path too, which would
+    make a self-comparison of an unchanged plain-C header spuriously report
+    FUNC_LANGUAGE_LINKAGE_CHANGED. Passing `is_cxx=False` (the caller's own
+    resolved compile-language mode, `dumper._clang_header_dump`'s
+    `resolved_force_cpp`) restores the pre-fix `is_extern_c=True` behavior
+    for this case, matching castxml."""
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "foo",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "_foo",
+            "type": {"qualType": "void ()"},
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (fn,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE, is_cxx=False
+    ).parse_functions()
+    assert fn.entity_id is not None
+    assert fn.entity_id.extra == ("extern_c",)
+
+
+def test_parse_variables_asm_label_in_c_mode_still_treated_as_extern_c() -> None:
+    """The variable-level sibling of the function case above."""
+    root = _tu(
+        {
+            "kind": "VarDecl",
+            "name": "bar",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int"},
+            "mangledName": "_bar",
+            "inner": [{"kind": "AsmLabelAttr"}],
+        }
+    )
+    (var,) = _ClangAstParser(
+        root, set(), set(), target_triple=_DARWIN_TRIPLE, is_cxx=False
+    ).parse_variables()
+    assert var.entity_id is not None
+    assert var.entity_id.extra == ("extern_c",)
+
+
 def test_parse_functions_mangled_field_unaffected_off_darwin() -> None:
     """Control for the two tests above: the SAME doubly-underscored input
     is never stripped off Darwin -- there is no such linker convention to
