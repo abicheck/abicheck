@@ -470,14 +470,17 @@ def test_pattern_prescan_review_warnings_none_when_never_folded():
     assert pattern_prescan_review_warnings(None) == []
 
 
-def test_pattern_prescan_review_warnings_silent_for_by_design_scopes():
-    """`no_inputs`/`empty_seed` are the ordinary "nothing to scan" cases
-    every other report view already covers via each side's own `coverage`
-    block -- the review digest must not repeat them as a warning."""
+def test_pattern_prescan_review_warnings_silent_only_for_no_inputs():
+    """`no_inputs` is the ordinary, structural "this evidence tier does not
+    apply" case every binary-only comparison hits -- the review digest must
+    not repeat it as a warning. `empty_seed` (Codex review, second round,
+    fresh evidence) is NOT silent: even though it's a real, valid,
+    by-design scope, a reviewer approving this PR still benefits from
+    knowing the lexical scan didn't see the diff's changes."""
     summary = compute_pattern_prescan_summary(
         {
             "old": {"files_scanned": 0, "scope_reason": "no_inputs"},
-            "new": {"files_scanned": 0, "scope_reason": "empty_seed"},
+            "new": {"files_scanned": 3, "scope_reason": None},
         }
     )
     assert pattern_prescan_review_warnings(summary) == []
@@ -500,6 +503,49 @@ def test_pattern_prescan_review_warnings_surfaces_unreadable_inputs():
     assert "unreadable" in warnings[0]
 
 
+def test_pattern_prescan_review_warnings_surfaces_empty_seed():
+    """Codex review, PR #1169, second round, fresh evidence: a valid
+    `empty_seed` scope previously produced no warning at all -- the digest
+    could still read as an unqualified "safe to merge" despite the lexical
+    scan having covered none of this diff's own changes."""
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {"files_scanned": 2, "scope_reason": None},
+            "new": {"files_scanned": 0, "scope_reason": "empty_seed"},
+        }
+    )
+    warnings = pattern_prescan_review_warnings(summary)
+    assert len(warnings) == 1
+    assert warnings[0].startswith("NEW pattern pre-scan:")
+    assert "0 files" in warnings[0]
+
+
+def test_pattern_prescan_review_warnings_surfaces_partial_coverage():
+    """Codex review, PR #1169, second round, fresh evidence: a side with
+    `files_scanned > 0` AND `files_skipped > 0` has `scope_reason is None`
+    (real coverage exists) but `coverage.status == "partial"` -- previously
+    unexamined by this helper entirely."""
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {"files_scanned": 2, "scope_reason": None},
+            "new": {
+                "files_scanned": 2,
+                "scope_reason": None,
+                "coverage": {
+                    "status": "partial",
+                    "detail": "2 file(s), 1 unreadable skipped",
+                },
+            },
+        }
+    )
+    warnings = pattern_prescan_review_warnings(summary)
+    assert len(warnings) == 1
+    assert (
+        warnings[0]
+        == "NEW pattern pre-scan: partial coverage (2 file(s), 1 unreadable skipped)"
+    )
+
+
 def test_preprocessor_prescan_review_warnings_none_when_never_folded():
     assert preprocessor_prescan_review_warnings(None) == []
 
@@ -508,6 +554,19 @@ def test_preprocessor_prescan_review_warnings_silent_when_fully_covered():
     summary = compute_preprocessor_prescan_summary(
         {
             "old": {"ran": True, "coverage": {"status": "present"}},
+            "new": {"ran": True, "coverage": {"status": "present"}},
+        }
+    )
+    assert preprocessor_prescan_review_warnings(summary) == []
+
+
+def test_preprocessor_prescan_review_warnings_silent_when_never_attempted():
+    """The ordinary `ran: False` skip (no L3 build evidence / no clang at
+    all) is `not_collected` but never attempted -- must stay silent, same
+    as `pattern_prescan`'s `no_inputs`."""
+    summary = compute_preprocessor_prescan_summary(
+        {
+            "old": {"ran": False, "coverage": {"status": "not_collected"}},
             "new": {"ran": True, "coverage": {"status": "present"}},
         }
     )
@@ -533,6 +592,31 @@ def test_preprocessor_prescan_review_warnings_surfaces_partial_coverage():
     assert (
         warnings[0] == "NEW preprocessor pre-scan: partial coverage (3/5 probes failed)"
     )
+
+
+def test_preprocessor_prescan_review_warnings_surfaces_all_failed():
+    """Codex review, PR #1169, second round, fresh evidence: when clang and
+    build evidence are both available but every `clang -E` invocation
+    failed, `PreprocessorScanResult.coverage()` returns `status:
+    "not_collected"` with `ran: True` -- this condition previously only
+    recognized `partial`, so an all-failed scan (0 divergences/leaks,
+    because nothing was actually inspected) emitted no warning at all."""
+    summary = compute_preprocessor_prescan_summary(
+        {
+            "old": {"ran": True, "coverage": {"status": "present"}},
+            "new": {
+                "ran": True,
+                "coverage": {
+                    "status": "not_collected",
+                    "detail": "clang -E ran but every invocation failed (2 attempt(s))",
+                },
+            },
+        }
+    )
+    warnings = preprocessor_prescan_review_warnings(summary)
+    assert len(warnings) == 1
+    assert warnings[0].startswith("NEW preprocessor pre-scan:")
+    assert "every invocation failed" in warnings[0]
 
 
 def test_compute_review_digest_surfaces_pattern_prescan_scope_warning():

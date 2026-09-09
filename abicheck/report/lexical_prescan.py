@@ -201,27 +201,50 @@ def render_preprocessor_prescan_markdown(
 def pattern_prescan_review_warnings(summary: PatternPrescanSummary | None) -> list[str]:
     """Coverage-warning strings for the ``--format review`` digest (Codex
     review, fresh evidence): ``build_review_digest_document`` never called
-    :func:`render_pattern_prescan_markdown` at all, so an ``unreadable_
-    inputs`` side -- headers/``--sources`` were supplied but nothing could
-    actually be scanned -- silently vanished from the one GitHub-facing
+    :func:`render_pattern_prescan_markdown` at all, so a scope-limited or
+    partially-covered side silently vanished from the one GitHub-facing
     summary a reviewer approves a merge from, which could still read as an
-    unqualified "safe to merge". Only ``unreadable_inputs`` is surfaced
-    here: ``no_inputs``/``empty_seed`` are the ordinary, by-design "nothing
-    to scan" cases every other report view already covers via each side's
-    own ``coverage`` block, and repeating them in the digest would just be
-    noise for the common case of a headerless/sourceless comparison.
+    unqualified "safe to merge".
+
+    Only ``no_inputs`` stays silent here: no headers/``--sources`` were ever
+    supplied, the ordinary, structural "this evidence tier does not apply"
+    case every binary-only comparison hits, and repeating it in the digest
+    would just be noise. The other three all mean this diff's *own* header/
+    source surface has less lexical coverage than a naive "0 findings" read
+    would suggest, so each gets a warning (Codex review, second round, fresh
+    evidence): ``unreadable_inputs`` (a genuine acquisition failure --
+    inputs were supplied but nothing could be read), ``empty_seed`` (a
+    ``--since``/``--changed-path`` seed narrowed this side to 0 files by
+    design -- still worth a reviewer knowing the scan didn't see this PR's
+    changes), and ``coverage.status == "partial"`` (some, but not all,
+    candidate files were scanned -- ``files_scanned > 0`` so ``scope_reason``
+    itself is ``None``, but the side is still not fully covered).
     """
     if summary is None:
         return []
     warnings = []
     for label, side in (("OLD", summary.old), ("NEW", summary.new)):
-        if side.get("scope_reason") == "unreadable_inputs":
+        reason = side.get("scope_reason")
+        if reason == "unreadable_inputs":
             warnings.append(
                 f"{label} pattern pre-scan: headers/--sources were supplied "
                 "but every candidate file was unreadable or matched no "
                 "scannable extension -- lexical ABI-risk coverage is 0 "
                 "files, not a by-design empty scope"
             )
+        elif reason == "empty_seed":
+            warnings.append(
+                f"{label} pattern pre-scan: --since/--changed-path narrowed "
+                "this side's scope to 0 files -- lexical ABI-risk coverage "
+                "does not include this diff's full header/source surface"
+            )
+        else:
+            coverage = side.get("coverage") or {}
+            if coverage.get("status") == "partial":
+                detail = coverage.get("detail") or "incomplete coverage"
+                warnings.append(
+                    f"{label} pattern pre-scan: partial coverage ({detail})"
+                )
     return warnings
 
 
@@ -229,22 +252,31 @@ def preprocessor_prescan_review_warnings(
     summary: PreprocessorPrescanSummary | None,
 ) -> list[str]:
     """Same rationale as :func:`pattern_prescan_review_warnings`, for the S2
-    preprocessor pre-scan's own ``partial`` coverage case (some ``clang -E``
-    probes failed, or the scan's own probe cap truncated it) -- without this
-    a partially-inspected build reports its (possibly incomplete) divergence/
-    leak counts in the review digest exactly like a clean, fully-scanned
-    one.
+    preprocessor pre-scan's own two "ran, but not fully covered" cases: a
+    ``partial`` coverage row (some ``clang -E`` probes failed, or the scan's
+    own probe cap truncated it) and a ``not_collected`` row where ``ran`` is
+    still ``True`` (``PreprocessorScanResult.all_failed`` -- clang and build
+    evidence were both available, but *every* invocation failed) -- without
+    either, a partially- or entirely-failed scan reports its divergence/leak
+    counts (0, in the ``all_failed`` case) in the review digest exactly like
+    a clean, fully-scanned one. The ordinary ``ran: False`` skip (no L3
+    build evidence / no clang at all -- also ``not_collected``, but never
+    attempted) stays silent, same as ``pattern_prescan``'s ``no_inputs``.
     """
     if summary is None:
         return []
     warnings = []
     for label, side in (("OLD", summary.old), ("NEW", summary.new)):
         coverage = side.get("coverage") or {}
-        if coverage.get("status") == "partial":
+        status = coverage.get("status")
+        if status == "partial":
             detail = coverage.get("detail") or "incomplete coverage"
             warnings.append(
                 f"{label} preprocessor pre-scan: partial coverage ({detail})"
             )
+        elif side.get("ran") and status == "not_collected":
+            detail = coverage.get("detail") or "every clang -E invocation failed"
+            warnings.append(f"{label} preprocessor pre-scan: {detail}")
     return warnings
 
 
