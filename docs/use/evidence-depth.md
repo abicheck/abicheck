@@ -67,8 +67,10 @@ carry its own `--build-target`; `compare` does not).
 `abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
 **positional** argument (not a flag); `--against OLD` is the previous
 dump/library/directory/package to compare against, and omitting it means a
-one-build audit — `scan` is required for every no-baseline audit until the
-`compare --no-baseline` crash above is fixed.
+one-build audit — `scan` is required for every no-baseline audit until
+`compare --no-baseline` reproduces the audit's findings in full: both the
+stored-snapshot crash *and* the live-binary empty-`changes` result above
+have to close, not just one of the two.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -245,7 +247,7 @@ results are structural diagnostics only in that matrix; only the dedicated
 bundle lane scores the single canonical case-level verdict and proves
 findings such as dangling intra-bundle imports and provider drift.
 
-## What input each depth needs — and how to get it
+## What input each depth needs, and how to get it
 
 Every depth needs a specific **input**; without it the matching coverage row is
 `not_collected` (the scan never silently pretends it ran). Pick the row that
