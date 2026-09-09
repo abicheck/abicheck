@@ -1023,16 +1023,40 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
     """
 
     def _absolutize(self, base_source: str, cwd: Path, *, windows: bool) -> str:
+        result, _pwd = self._absolutize_with_pwd(base_source, cwd, windows=windows)
+        return result
+
+    def _absolutize_with_pwd(
+        self, base_source: str, cwd: Path, *, windows: bool
+    ) -> tuple[str, str]:
+        # Emits both the absolutized result AND bash's own real, observed
+        # `$PWD` for `cwd` -- forcing `$OSTYPE` (see class docstring)
+        # controls which branch of the CODE UNDER TEST runs, but it cannot
+        # make a real host's own `$PWD` builtin render any differently: on
+        # a genuine Windows runner, `bash` is Git Bash/MSYS, whose `$PWD`
+        # is ALWAYS its own POSIX-style rendering (e.g. `/c/Users/...`)
+        # regardless of a forced `$OSTYPE=linux-gnu`, never the native
+        # `C:\Users\...` string `pathlib.Path` (and this test's own `cwd`
+        # fixture) would print -- unlike on a real Linux/macOS host, where
+        # the two happen to coincide. A caller building its expected value
+        # from `str(cwd)` instead of this real, observed `$PWD` silently
+        # assumes that coincidence holds everywhere, which is exactly what
+        # broke this class's own two `$PWD`-prefix assertions on Windows
+        # CI (fresh evidence, PR #1171) despite passing everywhere else.
         script = (
             "#!/usr/bin/env bash\nset -uo pipefail\n"
             + _path_qualified_helper_source()
             + '\nbase_source="$TEST_BASE_SOURCE"\n'
             + _base_source_absolutize_source()
-            + 'printf "%s" "$base_source"\n'
+            + 'printf "%s\\n%s" "$_TEST_OBSERVED_PWD" "$base_source"\n'
         )
         # `$OSTYPE` is forced explicitly (see class docstring) so both
         # branches are exercised regardless of the host actually running
         # this test.
+        script = script.replace(
+            'base_source="$TEST_BASE_SOURCE"\n',
+            'base_source="$TEST_BASE_SOURCE"\n_TEST_OBSERVED_PWD="$PWD"\n',
+        )
         result = _run_bash_script(
             script,
             {
@@ -1042,7 +1066,8 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
             cwd=cwd,
         )
         assert result.returncode == 0, result.stderr
-        return result.stdout
+        observed_pwd, _, absolutized = result.stdout.partition("\n")
+        return absolutized, observed_pwd
 
     def test_windows_drive_path_is_not_prefixed_with_pwd(self, tmp_path: Path) -> None:
         windows_path = "C:/Users/runner/work/repo/config.yml"
@@ -1067,10 +1092,18 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
         """The identical text is a genuine POSIX-relative filename on a
         non-Windows host (e.g. a file literally named ``C:`` is unusual but
         legal on Linux/macOS) -- ``$OSTYPE`` gating means it still gets the
-        ``$PWD/`` prefix there, unlike the Windows-forced case above."""
+        ``$PWD/`` prefix there, unlike the Windows-forced case above.
+
+        Built against bash's own observed ``$PWD``, not ``str(tmp_path)``
+        (fresh evidence, PR #1171): on a real Windows runner, ``bash`` is
+        Git Bash/MSYS, whose ``$PWD`` is always its own POSIX-style
+        rendering regardless of the forced ``$OSTYPE`` here -- the two only
+        happen to be textually identical on a genuine Linux/macOS host."""
         posix_like = "C:/Users/runner/work/repo/config.yml"
-        result = self._absolutize(posix_like, tmp_path, windows=False)
-        assert result == f"{tmp_path}/{posix_like}"
+        result, observed_pwd = self._absolutize_with_pwd(
+            posix_like, tmp_path, windows=False
+        )
+        assert result == f"{observed_pwd}/{posix_like}"
 
     def test_ordinary_relative_path_still_gets_pwd_prefix_on_windows(
         self, tmp_path: Path
@@ -1078,10 +1111,15 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
         """A genuinely relative path (no drive/UNC/root-relative form) must
         still be absolutized even when ``$OSTYPE`` is Windows -- the fix
         must not accidentally widen "already qualified" beyond the real
-        Windows-qualified forms."""
+        Windows-qualified forms.
+
+        Built against bash's own observed ``$PWD``, not ``str(tmp_path)``
+        -- see the sibling test above for why."""
         relative = ".abicheck.yml"
-        result = self._absolutize(relative, tmp_path, windows=True)
-        assert result == f"{tmp_path}/{relative}"
+        result, observed_pwd = self._absolutize_with_pwd(
+            relative, tmp_path, windows=True
+        )
+        assert result == f"{observed_pwd}/{relative}"
 
 
 class TestReleaseTopologyOverlayGenerationIsIsolated:

@@ -1302,6 +1302,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "tests/test_action_release_topology_config.py",
+      "baseline_lines": 1219,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "New entry (PR #1171, fresh evidence): this file was one line under the 1200-line test-file cap until TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath's two $PWD-prefix assertions (added for Phase 7d's release-topology overlay work) were found to fail on a real Windows CI runner -- they built their expected value from Python's own `str(tmp_path)`, silently assuming that always matches bash's own `$PWD` builtin, which coincidentally holds on Linux/macOS but not on Windows: there, `bash` is Git Bash/MSYS, whose `$PWD` is always its own POSIX-style rendering (e.g. `/c/Users/...`) regardless of this test's forced `$OSTYPE=linux-gnu` (that variable only steers the CODE UNDER TEST's own branch, not bash's own real `$PWD`). Fixed by having `_absolutize` also emit bash's own observed `$PWD` for the given `cwd` (a new `_absolutize_with_pwd` variant) and building both tests' expected values from that real, observed value instead of `str(tmp_path)` -- portable by construction rather than by coincidence of which host runs it.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "tests/test_action_resolve_baseline.py",
       "baseline_lines": 1218,
       "target": "tests/unit-or-contract ownership matching production migration",
