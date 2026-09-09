@@ -59,6 +59,7 @@ rather than pinned to the one reported oneDAL file.
 
 from __future__ import annotations
 
+import functools
 import io
 import json
 import random
@@ -375,6 +376,117 @@ def test_a_payload_inside_the_raw_cap_still_resolves(tmp_path):
     full = read_snapshot_bytes(path)
     assert full == data
     assert bounded_decoded_prefix(path) == full[:4096]
+
+
+@pytest.mark.parametrize("offset", [-4096, -1, 0])
+def test_a_file_ending_at_or_before_the_cap_is_recognized_as_exhausted(
+    tmp_path, offset
+):
+    """A file whose length lands exactly on the raw cap is at EOF, and must
+    be read as such.
+
+    `read(raw_size)` cannot distinguish "the file is exactly this long" from
+    "there is more past the window" -- it returns a full buffer either way.
+    That made a snapshot sitting exactly on the cap report "not exhausted"
+    and fall into the past-budget branch, which answers `None` for content
+    that was entirely in hand (Codex review, a regression introduced by the
+    past-budget branch itself). `offset=0` is that case; the other two are
+    its neighbours, which never had the bug and must not acquire one.
+    """
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _payload(entries=1, entropy_bits=8, seed=13)
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    core = cctx.compress(data)
+    target = _BOUNDED_PREFIX_MAX_RAW_BYTES + offset
+    blob = core + _skippable_frame(target - len(core) - 8)
+    assert len(blob) == target
+
+    path = tmp_path / f"boundary_{offset}.json.zst"
+    path.write_bytes(blob)
+
+    full = read_snapshot_bytes(path)
+    assert full == data
+    assert bounded_decoded_prefix(path) == full[:4096]
+
+
+def test_a_file_one_byte_past_the_cap_still_answers_none(tmp_path):
+    """The complement, pinning where the boundary actually is: one byte more
+    and the reader genuinely cannot know whether that byte begins another
+    frame, so the documented past-budget answer applies. Without this the
+    EOF fix above could drift into reading unboundedly."""
+    zstandard = pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _payload(entries=1, entropy_bits=8, seed=14)
+    cctx = zstandard.ZstdCompressor(write_checksum=False, write_content_size=True)
+    core = cctx.compress(data)
+    target = _BOUNDED_PREFIX_MAX_RAW_BYTES + 1
+    blob = core + _skippable_frame(target - len(core) - 8)
+    assert len(blob) == target
+
+    path = tmp_path / "boundary_plus_one.json.zst"
+    path.write_bytes(blob)
+
+    assert read_snapshot_bytes(path) == data
+    assert bounded_decoded_prefix(path) is None
+
+
+@functools.lru_cache(maxsize=1)
+def _over_cap_payload() -> bytes:
+    """Low-ratio JSON whose *stored* form exceeds the raw cap -- the regime
+    where clamping to the cap changed the answer. Cached: the three
+    envelope parametrizations below share identical, deterministic content,
+    so regenerating ~1.4 MB of it per case was pure repeated cost."""
+    return _payload(entries=70000, entropy_bits=60, seed=21)
+
+
+@pytest.mark.parametrize("compression", [None, *_ALGORITHMS])
+def test_a_request_larger_than_the_cap_is_still_served(tmp_path, compression):
+    """A prefix request above the raw-input cap must still be answered.
+
+    The cap bounds *amplification* -- raw input read per decoded byte asked
+    for -- not how much a caller may ask for. Clamping the first read to the
+    cap outright refuses prefixes the function can produce: one cap-sized
+    raw read cannot yield `n` decoded bytes once `n` exceeds
+    `cap x compression ratio`, so the request came back `None` while
+    `read_snapshot_bytes` returned the whole document.
+
+    `n` is deliberately 16x the cap rather than 4x: this fixture compresses
+    about 7.5:1, so at 4x a single cap-sized read *already* satisfies the
+    request and the failing regime is never entered -- the first version of
+    this test made exactly that mistake and passed against the bug it was
+    written for.
+
+    Covers plain, gzip and zstd, because the clamp lived on the compressed
+    path only and the plain branch returns before it -- a zstd-only test
+    said nothing about either of the other two (Codex review).
+    """
+    if compression is SnapshotCompression.ZSTD:
+        pytest.importorskip("zstandard")
+
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _over_cap_payload()
+    if compression is None:
+        path = tmp_path / "big.json"
+        path.write_bytes(data)
+    else:
+        suffix = ".json.zst" if compression is SnapshotCompression.ZSTD else ".json.gz"
+        path, encoded = _write(tmp_path, f"big{suffix}", data, compression)
+        assert len(encoded) > _BOUNDED_PREFIX_MAX_RAW_BYTES, (
+            "fixture no longer exceeds the cap in stored form, so one "
+            "cap-sized read would reach EOF and the regime this test "
+            "exists for is never entered"
+        )
+
+    n = _BOUNDED_PREFIX_MAX_RAW_BYTES * 16
+    assert n > len(data), "n must exceed the payload so the whole of it is the answer"
+
+    assert bounded_decoded_prefix(path, n) == read_snapshot_bytes(path)[:n]
 
 
 # ── The reported symptom, through the real public surface ───────────────────
