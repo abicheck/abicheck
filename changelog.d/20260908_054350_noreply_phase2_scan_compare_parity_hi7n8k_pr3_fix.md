@@ -47,4 +47,20 @@
   sentence ("An all-zero side means nothing was in scope to scan, not a
   failure") directly contradicted `unreadable_inputs`'s own documented
   meaning a few sentences earlier -- qualified to state both directions
-  (both schema copies).
+  (both schema copies). Fourth follow-up round (Codex review, PR #1169,
+  third round, fresh evidence), two more gaps: (a) `pattern_scan.
+  iter_source_files` silently drops a supplied root that is neither a file
+  nor a directory *before* ever incrementing `files_skipped`, so a seeded
+  run whose selected header/source path is missing/deleted read
+  `files_scanned == 0, files_skipped == 0` -- indistinguishable from a real
+  empty diff by the third round's own `files_skipped`-based check.
+  `_pattern_scan_scope_reason` now also checks each supplied root's own
+  `Path.exists()` independently, before consulting `files_skipped`. (b) the
+  `pattern_prescan`/`preprocessor_prescan` per-side objects were still
+  typed as unconstrained `additionalProperties: true` objects in the
+  schema despite the description documenting a `coverage` block and a
+  `scope_reason` enum -- a consumer validating against the 3.13 schema
+  could not actually catch a malformed value on either field. Added
+  `$defs/pattern_prescan_side`/`preprocessor_prescan_side` typing every
+  public field (still `additionalProperties: true` for forward
+  compatibility).

@@ -724,6 +724,69 @@ class TestReportValidatesAgainstSchema:
 
 
 @_requires_jsonschema
+class TestPrescanSideSchemaTyping:
+    """Codex review (PR #1169, third round): pattern_prescan/preprocessor_
+    prescan sides were unconstrained free-form objects despite the schema
+    description documenting a `coverage` block and `scope_reason` enum.
+    `$defs/pattern_prescan_side`/`preprocessor_prescan_side` now type the
+    public fields; these tests exercise both directions."""
+
+    def _payload(self, block: str, side: dict) -> dict:
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        payload[block] = {"old": side, "new": side}
+        return payload
+
+    def test_valid_pattern_prescan_side_validates(self):
+        side = {
+            "files_scanned": 2,
+            "files_skipped": 0,
+            "coverage": {
+                "layer": "pattern_scan",
+                "status": "present",
+                "confidence": "reduced",
+                "detail": "x",
+            },
+            "scope_reason": None,
+        }
+        jsonschema.validate(
+            instance=self._payload("pattern_prescan", side),
+            schema=load_compare_report_schema(),
+        )
+
+    @pytest.mark.parametrize(
+        "side",
+        [
+            {"files_scanned": 0, "scope_reason": 42},
+            {"files_scanned": 0, "scope_reason": "made_up_reason"},
+            {"files_scanned": 0, "coverage": 1},
+            {"files_scanned": 0, "coverage": {"status": "made_up_status"}},
+        ],
+    )
+    def test_pattern_prescan_side_rejects_malformed_field(self, side):
+        payload = self._payload("pattern_prescan", side)
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+
+    def test_valid_preprocessor_prescan_side_validates(self):
+        side = {
+            "ran": True,
+            "all_failed": False,
+            "coverage": {"status": "present", "confidence": "high", "detail": "x"},
+        }
+        jsonschema.validate(
+            instance=self._payload("preprocessor_prescan", side),
+            schema=load_compare_report_schema(),
+        )
+
+    def test_preprocessor_prescan_side_rejects_non_boolean_ran(self):
+        payload = self._payload("preprocessor_prescan", {"ran": "yes"})
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=payload, schema=load_compare_report_schema())
+
+
+@_requires_jsonschema
 class TestNotComparableReportSchema:
     """Schema 2.17 (ADR-050 D2): the `verdict: null` / `reason` shape a
     not_comparable compare report uses, distinct from the ordinary

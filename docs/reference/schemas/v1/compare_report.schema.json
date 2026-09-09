@@ -652,8 +652,8 @@
       "required": ["old", "new"],
       "additionalProperties": true,
       "properties": {
-        "old": {"type": "object", "additionalProperties": true},
-        "new": {"type": "object", "additionalProperties": true}
+        "old": {"$ref": "#/$defs/pattern_prescan_side"},
+        "new": {"$ref": "#/$defs/pattern_prescan_side"}
       }
     },
     "preprocessor_prescan": {
@@ -662,8 +662,8 @@
       "required": ["old", "new"],
       "additionalProperties": true,
       "properties": {
-        "old": {"type": "object", "additionalProperties": true},
-        "new": {"type": "object", "additionalProperties": true}
+        "old": {"$ref": "#/$defs/preprocessor_prescan_side"},
+        "new": {"$ref": "#/$defs/preprocessor_prescan_side"}
       }
     },
     "surface_changes": {
@@ -1792,6 +1792,109 @@
     }
   },
   "$defs": {
+    "prescan_layer_coverage": {
+      "type": "object",
+      "description": "Schema 3.13: the mandatory ADR-033 D6 coverage row both pre-scan sides carry (LayerCoverage.to_dict() -- pattern_scan.PatternScanResult.coverage() / preprocessor_scan.PreprocessorScanResult.coverage()).",
+      "additionalProperties": true,
+      "properties": {
+        "layer": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["present", "partial", "not_collected"]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "reduced", "unknown"]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "pattern_prescan_side": {
+      "type": "object",
+      "description": "Schema 3.13 (Codex review, PR #1169, third round, fresh evidence): one side of `pattern_prescan` -- PatternScanResult.to_dict() plus the coverage/scope_reason additions workflows.lexical_prescan._pattern_side_dict attaches. Typed here so a report claiming schema 3.13 can actually be validated on these public fields, not merely tolerated via additionalProperties.",
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "files_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "facts": {
+          "type": "array"
+        },
+        "escalation_triggers": {
+          "type": "array"
+        },
+        "counts_by_kind": {
+          "type": "object"
+        },
+        "coverage": {
+          "$ref": "#/$defs/prescan_layer_coverage"
+        },
+        "scope_reason": {
+          "type": ["string", "null"],
+          "enum": ["no_inputs", "empty_seed", "unreadable_inputs", null]
+        }
+      }
+    },
+    "preprocessor_prescan_side": {
+      "type": "object",
+      "description": "Schema 3.13 (Codex review, PR #1169, third round, fresh evidence): one side of `preprocessor_prescan` -- PreprocessorScanResult.to_dict() plus the same coverage addition pattern_prescan_side gained. Typed here for the same reason.",
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "ran": {
+          "type": "boolean"
+        },
+        "skipped_reason": {
+          "type": "string"
+        },
+        "tus_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "headers_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probes_truncated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "all_failed": {
+          "type": "boolean"
+        },
+        "divergences": {
+          "type": "array"
+        },
+        "leaks": {
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/prescan_layer_coverage"
+        }
+      }
+    },
     "surface_change_entry": {
       "type": "object",
       "description": "One reviewable surface change (workstream G slice S1, schema 3.9).",

@@ -460,6 +460,26 @@ def test_workflows_pattern_scan_scope_reason_distinguishes_all_three_cases(
         == "unreadable_inputs"
     )
 
+    # (d) a seeded run whose selected root doesn't exist on disk at all --
+    # Codex review, third round, fresh evidence:
+    # `pattern_scan.iter_source_files` silently drops a root that is
+    # neither a file nor a directory *before* ever incrementing
+    # `files_skipped`, so `files_scanned == 0, files_skipped == 0` here is
+    # indistinguishable from a real empty diff by `files_skipped` alone --
+    # exercised through the REAL `compute_pattern_prescan_side` producer
+    # (not a hand-built `PatternScanResult`), proving `files_skipped`
+    # really does stay 0 for a missing root.
+    missing_root = tmp_path / "deleted-header.hpp"
+    seeded_missing_root_result = compute_pattern_prescan_side(
+        [missing_root], None, None, (), seeded=True
+    )
+    assert seeded_missing_root_result.files_scanned == 0
+    assert seeded_missing_root_result.files_skipped == 0
+    assert (
+        _pattern_scan_scope_reason([missing_root], True, seeded_missing_root_result)
+        == "unreadable_inputs"
+    )
+
     # A side that actually scanned something needs no reason at all.
     scanned_result = compute_pattern_prescan_side([header], None, None, None)
     assert scanned_result.files_scanned == 1
