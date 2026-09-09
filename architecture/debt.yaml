@@ -2043,12 +2043,12 @@
     },
     {
       "path": "tests/test_pr_comment.py",
-      "baseline_lines": 1678,
+      "baseline_lines": 1715,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1671 -> 1678 (workstream D-S1, vision-api-abi-evolution.md \"D. Optional prebuilt-consumer lifecycle\"): new/rewritten regression tests asserting a --used-by/--required-symbol(s) consumer's own result enriches rather than replaces the full-library verdict/exit code (the gate-replacement design this reverts).",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1671 -> 1678 (workstream D-S1, vision-api-abi-evolution.md \"D. Optional prebuilt-consumer lifecycle\"): new/rewritten regression tests asserting a --used-by/--required-symbol(s) consumer's own result enriches rather than replaces the full-library verdict/exit code (the gate-replacement design this reverts). Raised 1678 -> 1715 (Codex review, PR #1160, round 12): a new regression test proving `_from_compare`'s ADR-050 D2 NOT_COMPARABLE fix, built from the real production `not_comparable_document`/`render_not_comparable_json` report builder rather than a hand-rolled dict.",
       "review_by": "2026-11-30"
     },
     {
