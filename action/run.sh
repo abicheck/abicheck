@@ -1625,7 +1625,17 @@ _extra_args_has_scan_only_flag() {
     # dedicated `INPUT_OUTPUT_FILE`/`--write` checks below already guard
     # against for their own inputs. A caller reaching the same destination
     # through `extra-args` instead must not slip past that guard.
-    -o | --output)
+    #
+    # `-o*` (round 11, fresh evidence): Click's attached short-option form
+    # (`-oreport.txt`, no separating space) is one of the shapes
+    # `_extra_args_expand_short_clusters`/`_extra_args_options` deliberately
+    # leave opaque (see that function's own docstring) -- `_name` here is
+    # then the whole raw token, not just `-o`, so the exact-match arm above
+    # never fires for it. Safe as a glob: no other short option starts with
+    # `o` (`_extra_args_is_value_option`'s own `-H`/`-I`/`-o` list), so
+    # `-o*` cannot collide with an unrelated flag the way a hypothetical
+    # `--output*` would with `--output-dir`.
+    -o | --output | -o*)
       return 0
       ;;
     esac

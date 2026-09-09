@@ -332,7 +332,17 @@ class TestExtraArgsOutputFlagStaysOnLegacyCli:
     for their own inputs."""
 
     @pytest.mark.parametrize(
-        "flag", ["-o report.json", "--output report.json", "--output=report.json"]
+        "flag",
+        [
+            "-o report.json",
+            "--output report.json",
+            "--output=report.json",
+            # Round 11: Click's attached short-option form (`-oPATH`, no
+            # separating space) -- `_extra_args_options()` deliberately
+            # leaves this opaque, so `_name` is the whole raw token, not
+            # just `-o`.
+            "-oreport.json",
+        ],
     )
     def test_output_flag_stays_on_legacy_cli(self, flag: str) -> None:
         cmd = _run_cmd(
