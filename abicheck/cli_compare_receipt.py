@@ -872,6 +872,8 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
     three-function neighborhood together, once its memory-lifecycle
     constraint has a place in that package's own model), not a same-PR fix.
     """
+    from .reporter import release_finding_detail_lines
+
     lines: list[str] = []
     for lib in library_results:
         findings = lib.get("findings")
@@ -891,9 +893,7 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
             lines.append(
                 f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
             )
-            description = f.get("description")
-            if description:
-                lines.append(f"  - {description}")
+            lines.extend(release_finding_detail_lines(f))
         if lib.get("findings_truncated"):
             # `--format json` is *not* a complete-list source (Codex review,
             # PR #1016): the release JSON's own `findings` field is this

@@ -563,7 +563,14 @@ def _release_finding_dicts(
     show) -- applied before the cap, so a filtered-out finding never
     occupies one of the ``_MAX_RELEASE_FINDINGS_PER_LIBRARY`` slots a
     displayed one needed.
+
+    Each dict also carries ``reclassified_by`` (schema 2.31) when a
+    ``reclassify:`` rule decided the change's effective verdict, via
+    :func:`abicheck.reporter.release_finding_entry` -- the identical
+    resolution `compare`'s ``changes[]``/``scan --against`` use, so the
+    three can't drift on which rule fired for a shared finding.
     """
+    from .reporter import release_finding_entry
     from .reporter_markdown import apply_show_only
 
     findings: list[dict[str, object]] = []
@@ -580,15 +587,7 @@ def _release_finding_dicts(
         if remaining <= 0:
             break
         for c in bucket_changes[:remaining]:
-            findings.append(
-                {
-                    "bucket": bucket_name,
-                    "kind": c.kind.value,
-                    "symbol": c.symbol,
-                    "description": c.description,
-                    "source_location": c.source_location,
-                }
-            )
+            findings.append(release_finding_entry(c, bucket_name, diff.policy_file))
     return findings
 
 

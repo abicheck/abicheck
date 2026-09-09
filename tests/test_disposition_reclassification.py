@@ -159,3 +159,89 @@ def test_reclassification_is_read_not_recomputed_by_the_ledger(
     )
     audit = compute_disposition_audit(diff)
     assert audit.reclassified_total == 1
+
+
+@pytest.mark.parametrize(
+    ("kind", "symbol", "to"),
+    [
+        (ChangeKind.FUNC_REMOVED, "inline_foo", "ignore"),
+        (ChangeKind.VAR_REMOVED, "inline_bar", "risk"),
+    ],
+)
+def test_every_finding_dict_builder_agrees_on_reclassified_by(
+    tmp_path: Path, kind: ChangeKind, symbol: str, to: str
+) -> None:
+    """The oneDAL-release bug: the release fan-out's own finding projection
+    (``cli_compare_release_matrix._release_finding_dicts``) never computed
+    ``reclassified_by`` at all -- 0/10 emitted findings ever carried it, even
+    though the aggregate disposition-audit ledger (the *same* policy file, the
+    *same* change) tallied the reclassification correctly. The gap was a
+    missing field in one entry-builder, not a wrong ``policy_file`` -- so the
+    general invariant is *parity*: every per-finding entry-builder that
+    exists to report a shared ``Change`` must resolve the same
+    ``reclassified_by`` value for it, via the one canonical helper
+    (``reporter._reclassified_by_for_change``), rather than some builders
+    computing it and a sibling silently omitting it.
+
+    Covers all three of this codebase's finding-dict builders (`compare`'s
+    full/leaf JSON entries, `scan --against`'s baseline dicts, and the
+    release fan-out's own capped dicts) against two different reclassify
+    kinds/targets, not just the one input the original report reproduced.
+    """
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        f"reclassify:\n  - kind: {kind.value}\n    symbol: {symbol}\n"
+        f'    to: {to}\n    reason: "inlines-hidden-demotion"\n',
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    change = Change(kind=kind, symbol=symbol, description="x")
+    diff = DiffResult(
+        changes=[change],
+        old_version="1",
+        new_version="2",
+        library="l",
+        policy_file=pf,
+    )
+
+    # Precondition, asserted rather than assumed (AGENTS.md's "assert your
+    # fixture's preconditions" trap): this change really is in the failing
+    # regime the bug report described -- the ledger must see a real
+    # reclassification, or every assertion below would pass vacuously.
+    ledger = ledger_for(diff)
+    assert reclassified_total(ledger) == 1
+    assert reclassifications(ledger) == (("inlines-hidden-demotion", 1),)
+
+    from abicheck.reporter import _change_to_dict, _reclassified_by_for_change
+
+    expected = _reclassified_by_for_change(change, pf)
+    assert expected == "inlines-hidden-demotion"
+
+    # 1. `compare`'s own full-mode JSON entry (`_change_to_dict`) -- needs
+    # real `kind_sets` (as a live `compare()` run always supplies) for the
+    # reclassify resolution branch to run at all.
+    full_entry = _change_to_dict(
+        change, policy_file=pf, kind_sets=diff._effective_kind_sets()
+    )
+    assert full_entry["reclassified_by"] == expected
+
+    # 2. `scan --against`'s baseline finding dict.
+    from abicheck.cli_scan_baseline import _baseline_finding_dicts
+
+    scan_dicts = _baseline_finding_dicts([change], "compatible", policy_file=pf)
+    assert scan_dicts[0]["reclassified_by"] == expected
+
+    # 3. The release fan-out's own capped per-library finding dict -- the
+    # one builder that regressed.
+    from abicheck.cli_compare_release_matrix import _release_finding_dicts
+
+    release_dicts = _release_finding_dicts(diff, None, None)
+    assert release_dicts[0]["reclassified_by"] == expected
+
+    # 4. The release fan-out's Markdown rendering of that same dict (Codex
+    # review, PR #1176 follow-up): fixing the JSON dict alone left the
+    # Markdown report discarding the field a second time.
+    from abicheck.reporter import release_finding_detail_lines
+
+    md_lines = release_finding_detail_lines(release_dicts[0])
+    assert any(expected in line for line in md_lines)
