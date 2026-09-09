@@ -413,7 +413,8 @@ _merge_config_overlay_with_discovered_project_config() {
   #     own `build_config or discover_build_config(raw_sources)` selection
   #     (Codex review, fresh evidence): when --sources names a directory
   #     with its own config, the native CLI would use THAT file exclusively
-  #     for build:/compile:/source:/debug: whenever no explicit --config is
+  #     for build:/sources: (dump/scan) or build:/sources:/compile:/source:/
+  #     debug: (dump/scan only -- see $6) whenever no explicit --config is
   #     given -- but this Action always ends up passing an explicit --config
   #     once any compile-context input is set, which permanently short-
   #     circuits that discovery (`build_config is not None`), silently
@@ -423,11 +424,33 @@ _merge_config_overlay_with_discovered_project_config() {
   #     reads build.compile_db and never resolves a --sources tree at all, so
   #     there is no root to check against and the field is always stripped
   #     there, same as before).
+  # $6: optional; "pairwise" when the caller's own MODE resolves compile:/
+  #     source:(singular)/debug: PAIR-WIDE, applying the single shared
+  #     --config to two independently-parsed operands (single-pair `compare
+  #     OLD NEW` only -- resolve_compile_context() applies compile: "to
+  #     both sides", cli_helpers_compare.py's resolved_cfg.source_method/
+  #     debug_format are each resolved once for the whole comparison).
+  #     Omitted (or any other value) means the caller's MODE resolves them
+  #     SINGLE-SIDED (dump, scan --against -- neither has an "other side"
+  #     these could leak into: dump has one operand, and scan's own -H/-I
+  #     have always applied only to the scanned ARTIFACT, never to
+  #     --against). Only "pairwise" excludes compile:/source:/debug: from
+  #     the sources-root block-replacement below -- everywhere else, a
+  #     --sources tree's own config is the ONLY document those three blocks
+  #     can meaningfully come from for that one operand, exactly matching
+  #     embed_build_source()'s/merge_compile_config()'s own single-sided
+  #     `build_config or discover_build_config(sources)` selection (Codex
+  #     review, fresh evidence, PR #1171: the prior fix excluded all three
+  #     unconditionally, which was correct for pairwise compare but silently
+  #     regressed dump's own single-sided use of a --sources tree's
+  #     compile:/debug: settings the moment any compile-context input was
+  #     also set).
   local overlay_json="$1"
   local out_path="$2"
   local base_source="$3"
   local merge_mode="${4:-discover}"
   local sources_root="${5:-}"
+  local sources_pairwise="${6:-}"
   # Codex review, PR #1159, third round: in "explicit" mode base_source is
   # the caller-supplied build-config input, which is very often a
   # checkout-relative path (e.g. `build-config: .abicheck.yml`) -- exactly
@@ -477,6 +500,7 @@ _merge_config_overlay_with_discovered_project_config() {
       ABICHECK_BASE_CONFIG_SOURCE="$base_source" \
       ABICHECK_OVERLAY_JSON="$overlay_json" \
       ABICHECK_SOURCES_ROOT="$sources_root" \
+      ABICHECK_SOURCES_PAIRWISE="$sources_pairwise" \
       PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
 # Discovers the real project .abicheck.yml (if any) the same way
 # discover_project_config() does -- config_paths.find_config_in_dir(),
@@ -674,21 +698,34 @@ else:
     # (not merge into) the checkout-root document's own such blocks --
     # exactly as if no explicit --config had been in the way.
     #
-    # Deliberately NOT compile:/source:(singular)/debug: -- a second Codex
-    # review (fresh evidence, PR #1159) caught that those three blocks are
-    # pair-wide, not per-side: compile: flows through resolve_compile_context
-    # ("It applies to both sides", cli_compare_helpers.py), source:(singular)
-    # .method resolves resolved_cfg.source_method (also pair-wide,
+    # compile:/source:(singular)/debug: are conditionally included too --
+    # gated on ABICHECK_SOURCES_PAIRWISE (see this shell function's own $6
+    # docstring). A second Codex review (fresh evidence, PR #1159) caught
+    # that those three blocks are pair-wide for single-pair `compare`, not
+    # per-side: compile: flows through resolve_compile_context ("It applies
+    # to both sides", cli_compare_helpers.py), source:(singular).method
+    # resolves resolved_cfg.source_method (also pair-wide,
     # cli_helpers_compare.py), and debug: resolves resolved_cfg.debug_format
-    # for both operands. embed_build_source()'s own call site never reads
-    # any of the three (confirmed by tracing collect_inline_pack() and
-    # build_config.py: only build.query/compile_db/targets and
-    # sources.public_headers/exclude/graph are consumed inside that
-    # NEW-side-only call). Promoting them from a NEW-only sources-root
-    # config into this single shared --config would silently apply
-    # NEW-only compile/debug/source-method settings to OLD's own parsing
-    # too -- exactly the class of bug the earlier (incorrect) five-block
-    # version of this comment invited.
+    # for both operands -- promoting them from a NEW-only sources-root
+    # config there would silently apply NEW-only settings to OLD's own
+    # parsing too. But a THIRD review round (fresh evidence, PR #1171) found
+    # that blanket exclusion regressed `dump`/`scan --against`, which have
+    # no "other side" for these to leak into (dump has one operand; scan's
+    # own -H/-I have always applied only to the scanned ARTIFACT) -- for
+    # those, `merge_compile_config()`'s own docstring states the --sources
+    # tree's config IS the intended, ONLY source of compile: for that one
+    # operand, exactly like embed_build_source()'s build_config or
+    # discover_build_config(sources) selection already is for build:/
+    # sources:. So only "pairwise" callers (single-pair `compare`) exclude
+    # the three; every other caller (dump, scan) keeps promoting them,
+    # matching the ORIGINAL five-block version of this fix before the
+    # second review round overcorrected it for every mode at once.
+    sources_pairwise = os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
+    _sources_root_blocks = (
+        ("build", "sources")
+        if sources_pairwise
+        else ("build", "sources", "compile", "source", "debug")
+    )
     sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
     if sources_root_env:
         sources_found = discover_build_config(Path(sources_root_env))
@@ -726,20 +763,23 @@ else:
                 _validate_or_exit(sources_loaded, sources_found)
             _sources_doc = sources_loaded if isinstance(sources_loaded, dict) else {}
             # "sources" (plural -- public_headers/exclude/graph) is a
-            # DISTINCT top-level block from "source" (singular, pair-wide
-            # source.method -- deliberately excluded, see above). Only the
-            # two genuinely NEW-side-scoped blocks are replaced here.
-            for _blk_key in ("build", "sources"):
+            # DISTINCT top-level block from "source" (singular). Which
+            # blocks get replaced depends on sources_pairwise, computed
+            # above.
+            for _blk_key in _sources_root_blocks:
                 if _blk_key in _sources_doc:
                     base[_blk_key] = _sources_doc[_blk_key]
                 else:
                     base.pop(_blk_key, None)
-            # found_path is NOT reassigned to sources_found: it anchors
-            # compile.include_dirs resolution below, and compile: is a
-            # pair-wide block that (per above) is never sourced from the
-            # sources-root config -- it must keep resolving against
-            # whichever document actually supplied base["compile"]
-            # (the checkout-root config, if any).
+            # found_path is reassigned to sources_found ONLY when compile:
+            # was actually sourced from it (single-sided callers) -- it
+            # anchors compile.include_dirs resolution below, and a pairwise
+            # caller's compile: block (never sourced from the sources root,
+            # per above) must keep resolving against whichever document
+            # actually supplied base["compile"] (the checkout-root config,
+            # if any).
+            if not sources_pairwise:
+                found_path = sources_found
 
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip the two executable-authorizing keys before merging (see
@@ -916,6 +956,25 @@ _RELEASE_TOPOLOGY_CONFIG_OVERLAY=""
 # untouched.
 _rm_overlay_on_early_exit() {
   rm -f "${1:-}"
+}
+
+# Codex review, fresh evidence, PR #1171: whether the caller's own $MODE
+# resolves a --sources tree's compile:/source:(singular)/debug: blocks
+# PAIR-WIDE (echoes "pairwise") or SINGLE-SIDED (echoes ""), for
+# _merge_config_overlay_with_discovered_project_config's own $6 -- see that
+# function's docstring. Only single-pair `compare OLD NEW` is pairwise:
+# both operands are independently-parsed live headers under the SAME
+# resolved compile context. `dump` has one operand; `scan --against`'s own
+# -H/-I have always applied only to the scanned ARTIFACT, never to
+# --against (never live headers on that side at all) -- neither has an
+# "other side" a --sources tree's own compile:/debug: could leak into, so
+# both stay single-sided. The release-style directory/package `compare`
+# fan-out never calls add_compile_context_flags at all (it rejects every
+# compile-context input outright), so it never reaches this helper.
+_compile_context_sources_pairwise() {
+  if [[ "$MODE" == "compare" ]]; then
+    echo "pairwise"
+  fi
 }
 
 add_compile_context_flags() {
@@ -1095,11 +1154,12 @@ PYEOF
       # before Phase 7 demoted these flags to config).
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" \
-        "${INPUT_BUILD_CONFIG}" "explicit" "${INPUT_SOURCES:-}"
+        "${INPUT_BUILD_CONFIG}" "explicit" "${INPUT_SOURCES:-}" \
+        "$(_compile_context_sources_pairwise)"
     else
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD" \
-        "discover" "${INPUT_SOURCES:-}"
+        "discover" "${INPUT_SOURCES:-}" "$(_compile_context_sources_pairwise)"
     fi
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
