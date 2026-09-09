@@ -382,6 +382,14 @@ document (`OLD_INPUT`, from a prior `compare --bundle-facts-out`). A real
 per-library facts blob for a large, template-heavy library (e.g.
 SYCL/DPC++, or a release sized like oneDAL's own ~20k-25k-function public
 header surface) can legitimately need well over the default to decode.
+**Only an explicitly-supplied `--config` may *raise* this budget past the
+default** — an auto-discovered `.abicheck.yml` (found by walking up from
+the current directory) can come from the same checkout supplying the
+content being decoded, so honoring a raise from it would let that
+checkout pair a raised budget with a compact decode-bomb payload. An
+auto-discovered config may still *lower* the budget below the default,
+since narrowing a ceiling is never a decode-bomb risk (Codex review, PR
+#1174, second round).
 Deliberately node-based, not a memory size — see
 `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`'s own docstring for the real
 calibration measurement and why a memory-labelled dial would understate
