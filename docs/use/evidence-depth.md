@@ -96,11 +96,17 @@ one-build audit.
   `compare`/`dump` equivalent — see [Let risk pick the
   depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
   below.)
-- **`--depth source` always analyses *something* real, never a zero-TU no-op**
-  (ADR-043 D3): with a `--since`/`--changed-path` seed it replays the *changed*
-  TUs; without one it replays the **whole current library target** (what an
-  older, now-removed `--depth full` rung used to require explicitly) — so it is
-  never silently empty, just potentially more expensive unseeded.
+- **When `--depth source` actually replays source, it always analyses
+  *something* real, never a zero-TU no-op** (ADR-043 D3): with a
+  `--since`/`--changed-path` seed it replays the *changed* TUs; without one
+  it replays the **whole current library target** (what an older,
+  now-removed `--depth full` rung used to require explicitly) — so a replay
+  that runs is never silently empty, just potentially more expensive
+  unseeded. This guarantee is about the replay *itself*, not about whether
+  `compare` reaches it: with no usable `--sources`/`--build-info` at all,
+  `compare --depth source` never runs L4 replay in the first place and
+  exits on the shallow (binary/headers-only) verdict — see the fail-loud
+  warning above for `dump`/`scan`'s different handling of that same case.
 - A single-build, no-baseline audit is `compare --no-baseline CANDIDATE`
   (ADR-068 D2), or legacy `scan CANDIDATE` with no `--against`. There is no
   separate `--audit` flag on either.
