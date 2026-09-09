@@ -6887,7 +6887,7 @@ absent key silently reading as "no divergence".
 **Status:** one instance fixed (PR #1184), the repo-wide sweep deliberately
 not attempted. Bug class:
 `cli_surface.retired_spelling_in_remediation` in
-[`tests/regressions/manifest.py`](../../tests/regressions/manifest.py) —
+`tests/regressions/manifest.py` —
 check there first before restating the invariant.
 
 Codex review on PR #1184 caught
