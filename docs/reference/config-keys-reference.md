@@ -11,6 +11,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | Sub-key | Type |
 |---|---|
 | `compile_db` | str |
+| `compile_db_filter` | str |
 | `query` | str |
 | `system` | str |
 | `targets` | list[str] (or a single str) |
@@ -67,6 +68,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 |---|---|
 | `dso_only` | bool |
 | `include_private_dso` | bool |
+| `support_promise` | str |
 
 ### `resource_limits:`
 

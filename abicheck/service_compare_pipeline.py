@@ -548,13 +548,13 @@ def classify_compare_pair(
         # stored-BundleFacts drivers that call it) forwards the request's
         # own field again, so a bare `CompareRequest()`/`run_compare()` call
         # keeps the accepted opt-in default instead of a silent, un-reviewed
-        # flip. `surface_metrics=True` stays unconditional here (pre-existing,
-        # ADR-027 Phase 5's `--surface-metrics` findings; unaffected by this
-        # correction).
+        # flip. `surface_metrics` and `reconcile_build_context` are no longer
+        # parameters of that Tier-2 verb at all (one-comparison-product.md
+        # Phase 5 / §4.1's AUTO rows): `compare_snapshots` forces both on for
+        # every caller, so `CompareRequest` carries neither field any more --
+        # front-end parity with the CLI, where the two flags are gone too.
         pattern_verdicts=request.pattern_verdicts,
-        surface_metrics=True,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
-        reconcile_build_context=request.reconcile_build_context,
         env_matrix=service.load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
         contract_evaluation=request.contract_evaluation,

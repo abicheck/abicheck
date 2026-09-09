@@ -170,6 +170,9 @@ class BuildConfig:
     system: str = "auto"
     query: str = ""
     compile_db: str = ""
+    #: ``build.compile_db_filter`` -- §4.2's CONFIG row, the former
+    #: ``dump --compile-db-filter`` (``""`` = unset).
+    compile_db_filter: str = ""
     targets: list[str] = field(
         default_factory=list
     )  # build.targets (P0.2): root target(s) scoping L3 collection (Bazel only). Empty = unscoped.
@@ -320,13 +323,13 @@ class BuildConfig:
     gate_fail_on_removed_library: bool | None = None
     #: ``release:`` — Phase 7d: directory/package release topology demoted
     #: off the CLI, same shape as ``bundle:`` above (no surviving override).
-    #: ``release.dso_only`` is the former ``compare --dso-only`` (compare
-    #: only shared objects, skip executables); ``release.include_private_dso``
-    #: is the former ``compare --include-private-dso`` (include private
-    #: shared objects from non-standard paths). ``None`` = unset (both
-    #: default to the removed flags' own ``False``).
+    #: The former ``compare --dso-only`` / ``--include-private-dso``.
+    #: ``None`` = unset (both default to the removed flags' own ``False``).
     release_dso_only: bool | None = None
     release_include_private_dso: bool | None = None
+    #: ``release.support_promise`` -- Phase 7: the former
+    #: ``compare --support-promise`` (``off``/``declared``, ``None`` = unset).
+    release_support_promise: str | None = None
     #: ``resource_limits:`` — Phase 7g: former ``--max-json-object-nodes``.
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
@@ -368,7 +371,7 @@ class BuildConfig:
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
-        "build": frozenset({"system", "query", "compile_db", "targets"}),
+        "build": frozenset({"system", "query", "compile_db", "compile_db_filter", "targets"}),
         "sources": frozenset({"public_headers", "exclude", "graph"}),
         "severity": frozenset(
             {
@@ -422,7 +425,7 @@ class BuildConfig:
         # Phase 7d (one-comparison-product.md §4.1): CI gate policy and
         # directory/package release topology demoted off the CLI.
         "gate": frozenset({"fail_on_removed_library"}),
-        "release": frozenset({"dso_only", "include_private_dso"}),
+        "release": frozenset({"dso_only", "include_private_dso", "support_promise"}),
         "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
     }
 
@@ -555,6 +558,7 @@ class BuildConfig:
             system=_str(build, "system", "auto") or "auto",
             query=_str(build, "query"),
             compile_db=_str(build, "compile_db"),
+            compile_db_filter=_str(build, "compile_db_filter"),
             targets=_strs(build, "targets"),
             public_headers=_strs(sources, "public_headers"),
             exclude=_strs(sources, "exclude"),
@@ -645,6 +649,7 @@ class BuildConfig:
             gate_fail_on_removed_library=_opt_bool(gate, "fail_on_removed_library"),
             release_dso_only=_opt_bool(release, "dso_only"),
             release_include_private_dso=_opt_bool(release, "include_private_dso"),
+            release_support_promise=_opt_str(release, "support_promise"),
             resource_limits_max_bundle_facts_decode_nodes=_opt_int(resource_limits, "max_bundle_facts_decode_nodes"),
             version=(
                 version_raw
@@ -662,6 +667,8 @@ class BuildConfig:
             build["query"] = self.query
         if self.compile_db:
             build["compile_db"] = self.compile_db
+        if self.compile_db_filter:
+            build["compile_db_filter"] = self.compile_db_filter
         if self.targets:
             build["targets"] = list(self.targets)
         return build
@@ -798,6 +805,8 @@ class BuildConfig:
             release["dso_only"] = self.release_dso_only
         if self.release_include_private_dso is not None:
             release["include_private_dso"] = self.release_include_private_dso
+        if self.release_support_promise is not None:
+            release["support_promise"] = self.release_support_promise
         return release
 
     def to_dict(self) -> dict[str, Any]:

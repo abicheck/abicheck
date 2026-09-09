@@ -1317,12 +1317,13 @@ class TestSelfComparisonDetection:
             # an operand — `--verbose` is `is_flag=True` in cli_options.py.
             ["compare", "x.so", "--verbose", "x.so"],
             ["compare", "x.so", "-v", "x.so"],
-            # Phase 7d (one-comparison-product.md §4.1): --dso-only is gone
-            # from `compare`'s CLI (release.dso_only in .abicheck.yml is
-            # its only source now) -- --audit-suppressions is still a real
-            # `is_flag=True` boolean option, the same role --dso-only used
-            # to play in this list.
-            ["compare", "x.so", "--audit-suppressions", "x.so"],
+            # Phase 7d (one-comparison-product.md §4.1) removed --dso-only
+            # from `compare`'s CLI, and Phase 5 removed the
+            # --audit-suppressions that replaced it here -- --no-baseline is
+            # the real `is_flag=True` boolean option that plays the same role
+            # in this list now (a valueless flag sitting between the two
+            # operands, which is what makes an adjacency test walk past them).
+            ["compare", "x.so", "--no-baseline", "x.so"],
             # Only `compare` names both sides positionally.
             ["scan", "lib.so", "--against", "lib.so"],
             ["compat", "check", "-old", "a.xml", "-new", "a.xml"],

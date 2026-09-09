@@ -1212,12 +1212,12 @@ def compile_db_filter_scope_error(
     if not compile_db_filter or compile_db_path is None or collect_mode == "off":
         return None
     return (
-        "--compile-db-filter scopes the L2 header parse only; the L3 build "
-        "evidence embedded from the same --build-info source is collected "
-        "unfiltered, so the snapshot would carry build facts for "
+        "build.compile_db_filter scopes the L2 header parse only; the L3 "
+        "build evidence embedded from the same --build-info source is "
+        "collected unfiltered, so the snapshot would carry build facts for "
         "translation units the filter excludes. Pass a pre-filtered "
-        "compile_commands.json as --build-info (then --compile-db-filter is "
-        "unnecessary), or drop --compile-db-filter to accept the whole "
+        "compile_commands.json as --build-info (then build.compile_db_filter "
+        "is unnecessary), or drop build.compile_db_filter to accept the whole "
         "database on both layers."
     )
 

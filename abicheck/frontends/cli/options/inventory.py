@@ -189,7 +189,24 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: the G42 named-environments prerequisite respectively have not landed --
 #: see each option's own docstring in ``frontends/cli/options/release.py``/
 #: ``bundle_facts.py``).
-COMPARE_FLAG_BUDGET_BASE = 44
+#: Lowered 44→41 by one-comparison-product.md Phase 5's closing slice and
+#: Phase 7's ``--pdb-path`` row (§4.1). Three base-surface flags are gone
+#: from ``compare``'s CLI entirely, no escape hatch:
+#: ``--surface-metrics`` and ``--show-filtered`` (§4.1's AUTO rows -- the
+#: ADR-027 metric-drift findings and the ADR-067 S1 disposition ledger are
+#: both computed on every run, so neither flag gated analysis; the ledger's
+#: *rendering* moved to ``--view filtered``, and the metrics need no
+#: selector at all since every projection already renders them), and
+#: ``--pdb-path`` (§4.1's CONFIG row -- ``debug.pdb_path``, the key ``dump``
+#: has read since Phase 7c). Two ``COMPARE_FLAG_BUDGET_RAISES`` entries go
+#: with the same change rather than folding into ``BASE``:
+#: ``--audit-suppressions`` (AUTO -- the audit is computed on every run
+#: given ``--suppress``; ``--view suppressions`` renders it) and
+#: ``--reconcile-build-context`` (AUTO -- ADR-039's reconciliation is
+#: unconditional now, forced on at the Tier-2 ``compare_snapshots``
+#: chokepoint, since an evidence-gated step that can only ever *clear* a
+#: false positive has no legitimate off position).
+COMPARE_FLAG_BUDGET_BASE = 41
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable
@@ -202,11 +219,6 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "G23 / #492: scopes the comparison to a POST Python export manifest's "
         "committed ABI surface. A per-run scoping input (which manifest to hold "
         "the release to), not a stable project setting — like --instantiation-manifest."
-    ),
-    "--reconcile-build-context": (
-        "ADR-039: clears context-free header-parse false positives using the "
-        "build's active preprocessor defines. An invocation-time analysis toggle, "
-        "not a project setting demotable to .abicheck.yml."
     ),
     "--env-matrix": (
         "ADR-020b runtime_floors: declared deployment constraints that turn "
@@ -280,14 +292,6 @@ COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
         "`packs:` key lands: D7 already reserves the `project_config` tier "
         "below packs, so a permanent project-wide selection would belong "
         "there and this flag would become the per-run override of it."
-    ),
-    "--audit-suppressions": (
-        "Opts one invocation into an additional audit of the --suppress "
-        "rule file (stale/high-risk/expired/near-expiry rules) against this "
-        "run's findings. Whether a given run wants that extra hygiene check "
-        "varies per invocation (e.g. a periodic suppression-file review vs. "
-        "a routine CI gate), not a stable project default -- like "
-        "--contract above."
     ),
     "--require-complete-analysis": (
         "P0.4: opts one invocation into gating its exit code on "

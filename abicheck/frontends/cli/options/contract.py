@@ -101,21 +101,19 @@ def pack_option(f: F) -> F:
     return f
 
 
-#: ADR-049's contract-evaluation options, as one decorator -- see this
-#: module's docstring for why they live here rather than in ``cli.py``.
+#: ADR-049's contract-evaluation option -- see this module's docstring for
+#: why it lives here rather than in ``cli.py``.
 def contract_options(f: F) -> F:
-    """Attach ``--contract`` / ``--audit-suppressions``."""
-    f = click.option(
-        "--audit-suppressions",
-        "audit_suppressions",
-        is_flag=True,
-        default=False,
-        help="Audit the --suppress rule file against this run's findings: which "
-        "rules matched nothing (stale), matched a BREAKING change (high "
-        "risk), are expired, or expire soon. A no-op without --suppress "
-        "(nothing to audit). Adds a suppression_audit key in --format json, "
-        "a '## Suppression Audit' section in markdown/review. Advisory only.",
-    )(f)
+    """Attach ``--contract``.
+
+    ``--audit-suppressions`` used to live here too. ADR-068 D4 /
+    one-comparison-product.md Phase 5 (§4.1's AUTO row) removed it: the
+    audit is computed on every run that was given ``--suppress`` and
+    carried in ``--format json``/sarif/junit/html unconditionally, so the
+    flag only ever chose whether the markdown/text/review render echoed it
+    -- a rendering selector, which is what ``--view suppressions`` is for
+    (:mod:`abicheck.frontends.cli.options.view`).
+    """
     f = click.option(
         "--contract",
         "contract_mode",

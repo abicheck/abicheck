@@ -50,10 +50,11 @@ say both.
 
 ## Suppressions — hiding a known, accepted finding
 
-`--suppress FILE` applies a suppression file (abicheck YAML or ABICC format);
-`--audit-suppressions` (and a `.abicheck.yml` `suppression:` map's `strict`
-key) makes stale or overbroad rules visible, and the report's `suppression` / `suppression_audit` blocks
-record what was applied.
+`--suppress FILE` applies a suppression file (abicheck YAML or ABICC format).
+The audit of stale or overbroad rules is computed on every run that supplies
+one, and the report's `suppression` / `suppression_audit` blocks record what
+was applied; `--view suppressions` (and a `.abicheck.yml` `suppression:` map's
+`strict` key) makes it visible in the human-readable render.
 
 Owned by [the suppressions page](../../docs/use/suppressions.md).
 

@@ -21,8 +21,9 @@ evidence inputs, and policy/contract configuration, the canonical result --
 facts, compatibility verdict, assurance, disposition ledger, gate decision,
 and exit code -- is byte-identical regardless of ``--format``, ``--write``,
 ``--view`` (which collapses ``--report-mode``/``--show-only``/``--demangle``/
-``--no-demangle``/``--explain-patterns``), ``--audit-suppressions``, or
-``--show-filtered``.
+``--no-demangle``/``--explain-patterns``, and -- as of this phase's closing
+slice -- ``--show-filtered`` and ``--audit-suppressions`` too, as
+``--view filtered``/``--view suppressions``).
 
 F-19 covers the general invariant across rendering permutations. F-20 is
 the targeted regression: before Phase 5, ``cli_compare_helpers.run_compare``
@@ -37,23 +38,25 @@ modulation happened, only whether its evidence is *shown*.
 Also this phase (§4.1's AUTO classification, made unconditional here):
 ``--surface-metrics`` computation now always runs -- every comparison always
 computes the ADR-027 public-surface metric-drift findings and merges them
-into the canonical result, exactly as ``--surface-metrics`` always did. The
-flag is accepted for backward compatibility and is a no-op. Because this
-changes the *canonical* result itself (by design -- it is no longer
-presentation-gated, it is now always-on analysis), the F-19 fixture below is
-built so its own public-symbol count does not change (one function removed,
-one function of the same kind added elsewhere is avoided in favor of a pair
-that nets to a stable public count) -- see ``_write_pair``'s own docstring.
-This keeps the *remaining* rendering-only flags exercised here (--view
-tokens, --audit-suppressions, --show-filtered) provably inert on top of an
-already-fixed set of AUTO-computed findings, which is the post-Phase-5
-invariant this file states.
+into the canonical result, exactly as ``--surface-metrics`` always did -- and
+the flag itself is *gone*, not accepted-and-ignored (D5: an accepted spelling
+is still public surface). Because this changes the *canonical* result itself
+(by design -- it is no longer presentation-gated, it is now always-on
+analysis), the F-19 fixture below is built so its own public-symbol count does
+not change (one function removed, one function of the same kind added
+elsewhere is avoided in favor of a pair that nets to a stable public count) --
+see ``_write_pair``'s own docstring. This keeps the *remaining*
+rendering-only selectors exercised here (every ``--view`` token) provably
+inert on top of an already-fixed set of AUTO-computed findings, which is the
+post-Phase-5 invariant this file states.
 """
 
 from __future__ import annotations
 
 import itertools
 import json
+import os
+import random
 from pathlib import Path
 from typing import Any
 
@@ -190,7 +193,7 @@ class TestF19OutputFormatInvariance:
                 view_mode,
             ]
             if audit_flag:
-                args.append("--audit-suppressions")
+                args += ["--view", "suppressions"]
             if view_patterns:
                 args += ["--view", "patterns"]
             result = CliRunner().invoke(main, args)
@@ -227,7 +230,7 @@ class TestF19OutputFormatInvariance:
                 str(suppress),
             ]
             if audit_flag:
-                args.append("--audit-suppressions")
+                args += ["--view", "suppressions"]
             if view_patterns:
                 args += ["--view", "patterns"]
             result = CliRunner().invoke(main, args)
@@ -239,8 +242,9 @@ class TestF19OutputFormatInvariance:
             assert other == first
 
         # ADR-068 D4/Phase 5: suppression_audit is unconditional now -- it
-        # must be present (and identical) whether or not --audit-suppressions
-        # was passed, proving computation is no longer gated by the flag.
+        # must be present (and identical) whether or not `--view suppressions`
+        # was passed, proving computation is no longer gated by the request
+        # to render it.
         assert first["suppression_audit"] is not None
         assert first["suppression_audit"]["stale_rules"] == [
             "workaround (symbol=never_matches_anything)"
@@ -278,14 +282,15 @@ class TestF19OutputFormatInvariance:
         assert out_md.exists() and out_sarif.exists()
         assert "libfoo.so.1" in out_md.read_text(encoding="utf-8")
 
-    def test_show_filtered_flag_does_not_change_canonical_result(
+    def test_view_filtered_token_does_not_change_canonical_result(
         self, tmp_path: Path
     ) -> None:
         """ADR-067 S1: the disposition/out-of-surface ledger is already
-        unconditional -- --show-filtered only ever gates whether the
-        markdown/text rendering echoes it. Confirmed here at the JSON
-        boundary (which always carries out_of_surface_changes/
-        suppressed_changes) and at the exit-code boundary."""
+        unconditional -- the retired ``--show-filtered``, now ``--view
+        filtered``, only ever gates whether the markdown/text rendering
+        echoes it. Confirmed here at the JSON boundary (which always carries
+        out_of_surface_changes/suppressed_changes) and at the exit-code
+        boundary."""
         old_p, new_p = _write_pair(tmp_path)
 
         without = CliRunner().invoke(
@@ -293,7 +298,10 @@ class TestF19OutputFormatInvariance:
         )
         with_flag = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json", "--show-filtered"],
+            [
+                "compare", str(old_p), str(new_p), "--format", "json",
+                "--view", "filtered",
+            ],
         )
         assert without.exit_code == with_flag.exit_code == 4
         assert _canonical_facts(json.loads(without.stdout)) == _canonical_facts(
@@ -318,6 +326,12 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
             "--demangle",
             "--no-demangle",
             "--explain-patterns",
+            # This phase's three (one-comparison-product.md Phase 5's
+            # remaining AUTO rows), on the identical terms: removed
+            # outright, no hidden alias, no deprecation window (F-27).
+            "--surface-metrics",
+            "--show-filtered",
+            "--audit-suppressions",
         ):
             result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), flag])
             assert result.exit_code == 64, (flag, result.output)
@@ -360,8 +374,10 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         ``pattern_verdicts=apply_patterns`` -- the historically buggy
         ``pattern_verdicts or explain_patterns`` expression -- and asserts
         it is now called with ``pattern_verdicts=True`` (and
-        ``surface_metrics=True``, Phase 5's second AUTO flag) regardless of
-        whether ``--view patterns`` was given."""
+        without a `surface_metrics` keyword at all -- Phase 5's second AUTO
+        row went all the way to removing the parameter from the Tier-2 verb,
+        which forces it on for every caller) regardless of whether
+        ``--view patterns`` was given."""
         import abicheck.service as service_module
 
         old_p, new_p = _write_pair(tmp_path)
@@ -384,7 +400,15 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
         assert len(captured) == 2
         for kwargs in captured:
             assert kwargs["pattern_verdicts"] is True
-            assert kwargs["surface_metrics"] is True
+            # Phase 5's closing slice went one step further than the
+            # forced-`True` this line used to assert: `surface_metrics` (and
+            # ADR-039's `reconcile_build_context`) are not parameters of the
+            # Tier-2 verb at all any more -- `compare_snapshots` forces both
+            # on for every caller, so there is no keyword left for a caller
+            # to get wrong. Assert the *absence*, which is the stronger
+            # property: a re-introduced parameter would fail here.
+            assert "surface_metrics" not in kwargs
+            assert "reconcile_build_context" not in kwargs
 
 
 class TestViewGrammar:
@@ -624,15 +648,14 @@ class TestShowOnlyCliHintIsReRunnable:
         assert note_section.count("--view show=") == 2
 
 
-class TestSurfaceMetricsFlagIsVestigial:
-    """ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
-    now (§4.1's AUTO classification) -- the flag itself no longer gates
-    anything, so passing it or not must never change the canonical result.
-    Uses a fixture whose public-function count actually changes (unlike
-    ``_write_pair`` above, which is deliberately net-zero), so a
-    PUBLIC_SURFACE_SHRANK finding is already present in the baseline; the
-    flag's own presence/absence must not add, remove, or otherwise alter
-    it."""
+class TestSurfaceMetricsAreUnconditional:
+    """ADR-068 D4/Phase 5: ADR-027's public-surface metric drift is
+    unconditional (§4.1's AUTO classification), and ``--surface-metrics``
+    is now *gone* rather than accepted-and-ignored -- an accepted spelling
+    is still public surface (D5), so the closing slice of this phase
+    deleted it. Uses a fixture whose public-function count actually changes
+    (unlike ``_write_pair`` above, which is deliberately net-zero), so a
+    PUBLIC_SURFACE_SHRANK finding must be present with no flag at all."""
 
     @staticmethod
     def _shrinking_pair(tmp_path: Path) -> tuple[Path, Path]:
@@ -656,17 +679,16 @@ class TestSurfaceMetricsFlagIsVestigial:
         new_p.write_text(snapshot_to_json(new), encoding="utf-8")
         return old_p, new_p
 
-    def test_flag_present_or_absent_is_byte_identical(self, tmp_path: Path) -> None:
+    def test_removed_flag_is_a_usage_error_not_a_silent_no_op(
+        self, tmp_path: Path
+    ) -> None:
         old_p, new_p = self._shrinking_pair(tmp_path)
-        without = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--format", "json"]
-        )
-        with_flag = CliRunner().invoke(
+        result = CliRunner().invoke(
             main,
             ["compare", str(old_p), str(new_p), "--format", "json", "--surface-metrics"],
         )
-        assert without.exit_code == with_flag.exit_code == 4
-        assert without.stdout == with_flag.stdout
+        assert result.exit_code == 64, result.output
+        assert "No such option" in result.output
 
     def test_public_surface_shrank_is_present_without_the_flag(
         self, tmp_path: Path
@@ -681,9 +703,11 @@ class TestSurfaceMetricsFlagIsVestigial:
 
 
 class TestAuditSuppressionsNoOpWithoutSuppress:
-    """ADR-068 D4/Phase 5: --audit-suppressions with no --suppress is a
-    no-op (nothing to audit), not a usage error -- a rendering-only flag
-    must never reject an otherwise-valid invocation."""
+    """ADR-068 D4/Phase 5: asking for the suppression-audit *render* with no
+    --suppress is a no-op (nothing to audit), not a usage error -- a
+    rendering selector must never reject an otherwise-valid invocation.
+    ``--audit-suppressions`` is gone; ``--view suppressions`` is the
+    spelling, and it inherits the same rule."""
 
     def test_no_suppress_is_not_rejected(self, tmp_path: Path) -> None:
         old_p, new_p = _write_pair(tmp_path)
@@ -691,8 +715,212 @@ class TestAuditSuppressionsNoOpWithoutSuppress:
             main,
             [
                 "compare", str(old_p), str(new_p), "--format", "json",
-                "--audit-suppressions",
+                "--view", "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
         assert json.loads(result.stdout).get("suppression_audit") is None
+
+
+# ── F-19/F-16: the invariant, over the whole permutation space ───────────────
+#
+# one-comparison-product.md Phase 5's own definition of done ("the canonical
+# result block is byte-identical across every rendering permutation", which
+# that section numbers F-16 while §7's acceptance table numbers the same
+# requirement F-19). What the class below replaces mattered enough to record:
+# the original F-19 tests exercised a *sample* -- 6 formats x 2 demangle
+# states x 2 audit flags x 2 pattern flags x 4 report modes, for the exit code
+# only, plus 8 hand-listed combinations at `--format json` for the result
+# block -- and checked that block with `_canonical_facts`, a projection of the
+# very JSON report the implementation had just rendered. Neither half is an
+# invariant test: the axes were not fully crossed (no `--write` axis at all,
+# no `show=`, no format x view crossing for the *content*), and the oracle was
+# the implementation's own output compared against itself under a different
+# flag, which cannot catch a change that moves every rendering in the same
+# wrong direction.
+#
+# Both halves are fixed here (AGENTS.md, "A bug fix's regression test targets
+# the bug *class*, not the one reported input"):
+#
+# 1. **The space is the full product**, enumerated by `_permutations()`:
+#    7 `--format` values x 4 `--view` report modes x 3 demangle states
+#    (unset/demangle/no-demangle) x 2 `--view patterns` x 2 `--view filtered`
+#    x 2 `--view suppressions` x 3 `--view show=` states x 3 extra `--write`
+#    sets = **6048** invocations. The `slow`-marked test runs every one of
+#    them; the default-lane test runs a seeded *random* sample of that same
+#    space rather than a hand-picked list, so the fast suite still searches
+#    the space instead of re-checking one corner of it.
+# 2. **The oracle is not the report projection.** It is computed by calling
+#    the Tier-2 engine verb (`workflows.compare_policy.compare_snapshots`)
+#    directly on the two snapshots and reading the canonical facts off the
+#    returned `DiffResult` object -- a different code path from
+#    `report/render_json.py`, which is what every CLI invocation below goes
+#    through. A renderer that dropped, reordered or re-severitied a finding
+#    identically in all 6048 renderings would still fail against it.
+_FORMATS: tuple[str, ...] = (
+    "json", "markdown", "sarif", "html", "junit", "review", "oneline",
+)
+_REPORT_MODES: tuple[str, ...] = ("full", "leaf", "impact", "root-cause")
+_DEMANGLE: tuple[str | None, ...] = (None, "demangle", "no-demangle")
+_SHOW: tuple[str | None, ...] = (None, "show=breaking", "show=added")
+#: Extra `--write` artifacts *beyond* the json extractor every case adds.
+_EXTRA_WRITES: tuple[tuple[str, ...], ...] = ((), ("markdown",), ("sarif", "junit"))
+
+#: The full space, as a product of the axes above.
+_PERMUTATION_SPACE_SIZE = 6048
+
+
+def _permutations() -> list[tuple[Any, ...]]:
+    """The complete ``--format`` x ``--view`` x ``--write`` space."""
+    return list(
+        itertools.product(
+            _FORMATS,
+            _REPORT_MODES,
+            _DEMANGLE,
+            (False, True),   # --view patterns
+            (False, True),   # --view filtered
+            (False, True),   # --view suppressions
+            _SHOW,
+            _EXTRA_WRITES,
+        )
+    )
+
+
+def _engine_oracle(old_p: Path, new_p: Path, suppress: Path) -> dict[str, Any]:
+    """The canonical result, computed *without* the report projection.
+
+    Loads the same two snapshots the CLI will and runs the documented
+    Tier-2 verb over them, then reads the facts straight off the returned
+    ``DiffResult``. Deliberately not ``_canonical_facts`` over a rendered
+    report: an oracle that re-uses the code under test can only prove the
+    renderings agree with each other, never that they agree with what was
+    analyzed (AGENTS.md's "against a stated oracle that is not the same
+    formula/helper the implementation itself uses").
+    """
+    from abicheck.serialization import load_snapshot
+    from abicheck.workflows.compare_policy import compare_snapshots
+    from abicheck.workflows.suppression import SuppressionList
+
+    result = compare_snapshots(
+        load_snapshot(str(old_p)),
+        load_snapshot(str(new_p)),
+        suppression=SuppressionList.load(suppress),
+    )
+    return {
+        "verdict": result.verdict.value,
+        "changes": sorted((c.kind.value, c.symbol) for c in result.changes),
+        "changes_count": len(result.changes),
+        "suppressed_count": len(result.suppressed_changes),
+        "out_of_surface_count": len(result.out_of_surface_changes),
+        "assurance_status": result.analysis_assurance.status,
+    }
+
+
+def _facts_from_report(payload: dict[str, Any]) -> dict[str, Any]:
+    """The same six canonical facts, read off a rendered JSON report."""
+    return {
+        "verdict": payload.get("verdict"),
+        "changes": sorted((c["kind"], c.get("symbol")) for c in payload["changes"]),
+        "changes_count": len(payload["changes"]),
+        "suppressed_count": len(payload.get("suppressed_changes") or ()),
+        "out_of_surface_count": len(payload.get("out_of_surface_changes") or ()),
+        "assurance_status": (payload.get("analysis_assurance") or {}).get("status"),
+    }
+
+
+def _run_permutation(
+    case: tuple[Any, ...], old_p: Path, new_p: Path, suppress: Path, out_dir: Path
+) -> tuple[int, dict[str, Any]]:
+    """Run one point of the space; return ``(exit_code, canonical facts)``.
+
+    Every case adds its own ``--write json=<path>`` -- itself one of the
+    axes under test, and documented to always render the full, unfiltered
+    report -- so the canonical block can be read back even for a
+    ``--format`` (html/junit/oneline/...) whose primary output is not
+    structured. The extra ``--write`` artifacts on top of it are what vary
+    the ``--write`` axis itself.
+    """
+    fmt, mode, demangle, patterns, filtered, suppressions, show, extra = case
+    extractor = out_dir / "canonical.json"
+    args = [
+        "compare", str(old_p), str(new_p),
+        "--format", fmt,
+        "--suppress", str(suppress),
+        "--view", mode,
+        "--write", f"json={extractor}",
+    ]
+    for token, enabled in (
+        ("patterns", patterns), ("filtered", filtered), ("suppressions", suppressions),
+    ):
+        if enabled:
+            args += ["--view", token]
+    for optional in (demangle, show):
+        if optional is not None:
+            args += ["--view", optional]
+    for i, extra_fmt in enumerate(extra):
+        args += ["--write", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 4, (case, result.output, result.exception)
+    return result.exit_code, _facts_from_report(
+        json.loads(extractor.read_text(encoding="utf-8"))
+    )
+
+
+class TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace:
+    """F-19 (Phase 5 numbers the same row F-16): for a fixed set of operands,
+    evidence and policy, the canonical result and the exit code do not vary
+    with ``--format``, ``--view`` or ``--write`` -- checked over the entire
+    product of those axes, against an engine-computed oracle."""
+
+    def test_the_permutation_space_is_the_full_product(self) -> None:
+        """Guards the enumeration itself: a future axis added to one of the
+        tuples above must widen the space, and a silently-shrunk space (the
+        exact failure mode the sampled predecessor of this class had) fails
+        here rather than passing quietly with less coverage."""
+        assert len(_permutations()) == (
+            len(_FORMATS)
+            * len(_REPORT_MODES)
+            * len(_DEMANGLE)
+            * 2 * 2 * 2
+            * len(_SHOW)
+            * len(_EXTRA_WRITES)
+        )
+        assert len(_permutations()) == _PERMUTATION_SPACE_SIZE
+
+    def test_random_sample_of_the_space_agrees_with_the_engine_oracle(
+        self, tmp_path: Path
+    ) -> None:
+        """The default-lane half: a seeded random sample of the full space.
+
+        Random rather than hand-picked so the cases are chosen without the
+        author's own idea of which combinations matter; seeded so a failure
+        is reproducible. ``ABICHECK_F19_SEED`` re-seeds it for a soak run
+        without editing the test.
+        """
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(tmp_path)
+        oracle = _engine_oracle(old_p, new_p, suppress)
+
+        rng = random.Random(int(os.environ.get("ABICHECK_F19_SEED", "0xF19"), 0))
+        out_dir = tmp_path / "out"
+        out_dir.mkdir(exist_ok=True)
+        for case in rng.sample(_permutations(), 150):
+            exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
+            assert facts == oracle, case
+            assert exit_code == 4, case
+
+    @pytest.mark.slow
+    def test_every_point_of_the_space_agrees_with_the_engine_oracle(
+        self, tmp_path: Path
+    ) -> None:
+        """The exhaustive half (``slow``): all 6048 points, same oracle."""
+        old_p, new_p = _write_pair(tmp_path)
+        suppress = _write_suppression(tmp_path)
+        oracle = _engine_oracle(old_p, new_p, suppress)
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir(exist_ok=True)
+        for case in _permutations():
+            exit_code, facts = _run_permutation(case, old_p, new_p, suppress, out_dir)
+            assert facts == oracle, case
+            assert exit_code == 4, case

@@ -48,7 +48,6 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
 from ....cli_options import (
     LANG_DEFAULT,
     abi3_option,
-    adr027_compare_options,
     app_usage_scope_options,
     bundle_facts_manifest_options,
     changed_path_options,
@@ -81,7 +80,6 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
 from ..options.params import (
     SIDED_EXISTING_PATH_PARAM,
-    SIDED_PATH_PARAM,
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 
@@ -609,11 +607,10 @@ def _embed_inline_source_side(
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options
-@click.option("--pdb-path", "pdb", multiple=True, type=SIDED_PATH_PARAM,
-              help="Explicit PDB file path for Windows PE debug info. Applies to both "
-                   "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
-                   "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
-                   "automatic PDB discovery (ADR-040).")
+# Phase 7 (SS4.1's CONFIG row): --pdb-path is gone from `compare` too --
+# `debug.pdb_path` is its only spelling, `dump`'s own key since Phase 7c
+# (ADR-037 D8.1). A side needing its own PDB names the directory holding it
+# with `--debug-root old=`/`new=`, which the resolver already searches.
 # ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
 @app_usage_scope_options
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
@@ -641,15 +638,15 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
-@click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
-              help="List findings excluded by --scope-public-headers (audit trail).")
+@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
+# ADR-068 D4 / Phase 5: --show-filtered is gone; the ledger it echoed has
+# been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
 @click.option("--post-manifest", "post_manifest_path",
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
               help="Scope the comparison to a POST Python export manifest's committed ABI "
                    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
                    "private __pp_* kernel churn and other non-committed exports are demoted "
-                   "to the filtered ledger (see --show-filtered).")
+                   "to the filtered ledger (see --view filtered).")
 @click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
               help="Build-configuration matrix snapshot, "
                    "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
@@ -665,14 +662,16 @@ def _embed_inline_source_side(
 @evidence_options  # --depth, --sources, --build-info
 @changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
 @abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
-@adr027_compare_options  # ADR-027: --explain-patterns (rendering only, modulation is automatic, ADR-068 D4) / --surface-metrics (still opt-in)
+# ADR-068 D4 / Phase 5: --surface-metrics is gone -- ADR-027's metric-drift
+# findings are computed on every comparison and merged into result.changes,
+# so nothing was left for the flag to select, not even a rendering choice.
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
-@click.option("--reconcile-build-context", is_flag=True, default=False,
-              help="Clear context-free header-parse false positives using the build's "
-                   "active preprocessor defines (ADR-039): a conditional field's phantom "
-                   "add/remove/size change the build proves never happened is moved to an "
-                   "audit bucket instead of the verdict. No-op unless snapshots carry "
-                   "build_context_defines + per-field guards.")
+# §4.1's AUTO row: ADR-039 build-context reconciliation is unconditional now
+# and `--reconcile-build-context` is gone. It is strictly evidence-gated and
+# can only ever move a phantom finding out of the verdict, never manufacture
+# one, so an opt-in switch could only mean "leave a known false positive in
+# because you forgot a flag". Forced on at the Tier-2 chokepoint
+# (workflows/compare_policy.compare_snapshots): CLI, API and Action alike.
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, resolve "
                    "depth/scope, show tool/config resolution -- and print a report "
@@ -687,7 +686,7 @@ def _embed_inline_source_side(
                    "reader knows not to trust it the way an ordinary comparable "
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
-@contract_options  # ADR-049: --contract/--audit-suppressions
+@contract_options  # ADR-049: --contract (--audit-suppressions is gone -- `--view suppressions`)
 @pack_option  # ADR-049 D8: --pack
 @click.option("--use-cases", "use_cases_manifest",
               type=click.Path(exists=True, dir_okay=False, path_type=Path),

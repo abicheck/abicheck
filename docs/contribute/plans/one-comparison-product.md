@@ -396,6 +396,16 @@ Advanced integration surface; left as-is by this plan except that
 
 The number is a consequence of the model, not the goal.
 
+> **The "Today" column below is the original 2026-09-06 audit, not current
+> state.** Phase 7i re-derived both live counts by Click introspection and
+> itemized, per flag, every option standing between them and the targets —
+> see its own table in §6 Phase 7. Read that, not this, for where the
+> surface actually is: as of that slice `compare` is at **50** (from 78 at
+> the original audit, 56 at the start of the slice) and `dump` at **21**
+> (from 39 / 24). Both targets remain reachable, and every residual option
+> has a named owner and a named blocker; two of them are *deliberate keeps*
+> that the targets below predate.
+
 | Surface | Today | Target | Notes |
 |---|---|---|---|
 | Root commands | 7 | **6** | `scan` retired |
@@ -661,17 +671,98 @@ section's *actual* state, not the target it originally described:
 - **Examples/eval/validation:** not started — corpora still run through
   `scan`, not re-driven through `compare`.
 
-### Phase 5 — Presentation/analysis separation
+### Phase 5 — Presentation/analysis separation — **done**
 
 - `--explain-patterns` stops implying `--pattern-verdicts`; modulation
-  becomes automatic and explanation becomes rendering.
+  becomes automatic and explanation becomes rendering. **Done.**
 - `--report-mode`/`--show-only`/`--demangle`/`--explain-patterns` collapse
-  into `--view`.
+  into `--view`. **Done.**
 - `--show-filtered`/`--show-suppressed`/`--audit-suppressions`/
   `--surface-metrics` become always-computed, rendered on request.
-- `--write` becomes repeatable.
+  **Done — closing slice.** All three of `compare`'s own flags here are now
+  *removed*, not merely inert:
+  - **`--surface-metrics`** — removed outright, no replacement selector.
+    ADR-027's metric-drift findings (`public_surface_grew`/`_shrank`,
+    `undocumented_export_ratio_increased`) are ordinary `Change` entries in
+    `result.changes`, which every projection already renders, so there was
+    nothing left for the flag to select — not even a rendering choice. It had
+    already been reduced to an accepted no-op by an earlier slice; D5 counts
+    an accepted-but-ignored spelling as public surface, so it is gone.
+    `surface_metrics` is no longer a *parameter* of the Tier-2 verb either
+    (`workflows/compare_policy.compare_snapshots` forces it on for every
+    caller) — a keyword the documented public Python API accepts and then
+    ignores is the same dead surface, one layer down.
+  - **`--show-filtered` → `--view filtered`.** The scope/disposition ledger
+    has been unconditional since ADR-067 S1 and is always present in
+    `--format json`; the flag only ever chose whether the markdown/text
+    render echoed it. That is precisely what `--view` is for.
+  - **`--audit-suppressions` → `--view suppressions`.** The audit is computed
+    on every run given `--suppress` (`cli_compare_helpers._attach_suppression_
+    audit`, guarded only on `suppression is not None`) and carried in
+    `--format json`/SARIF/JUnit/HTML unconditionally; the flag only gated the
+    markdown/text/review section. `--view suppressions` inherits its
+    no-op-without-`--suppress` rule verbatim: a rendering selector never
+    rejects an otherwise-valid invocation. The one release-fan-out rejection
+    that remains (`--view suppressions` *with* `--suppress` on a
+    directory/package operand) is unchanged in substance — the per-library
+    fan-out still has no single audit result to attach — and now names the
+    `--view` spelling, matching `reject_release_incompatible_view_mode`.
+
+  ADR-068 D4 is satisfied in the strong form: **no surviving `compare` flag
+  decides whether a piece of the canonical result is computed.** What the
+  three retired flags gated is now either always rendered (metrics) or
+  selected through the one rendering mechanism (`--view`).
+- `--write` becomes repeatable. **Done.**
 - **Executable invariant test:** the canonical result block is byte-identical
-  across every rendering permutation (F-16).
+  across every rendering permutation (numbered F-16 here and F-19 in §7's
+  acceptance table — the same requirement; the two numbers are a
+  long-standing inconsistency in this document, recorded rather than
+  silently renumbered so a reader following either reference lands on this
+  paragraph).
+
+  **Verification finding (2026-09-09), stated explicitly because it was a
+  deliverable of its own:** the test that existed
+  (`tests/test_presentation_analysis_separation.py`) was **not** an
+  invariant test, and had to be generalized. Two independent defects:
+
+  1. *It sampled, it did not cross the axes.* The exit-code half enumerated
+     6 formats × 2 demangle states × 2 audit flags × 2 pattern flags × 4
+     report modes = 192 invocations but asserted **only the exit code**; the
+     result-block half asserted the canonical fields over just 8 hand-listed
+     combinations, all pinned at `--format json`. `--write` was not an axis
+     at all (one separate two-write example), `--view show=` was not an axis,
+     and format was never crossed with view for *content*.
+  2. *Its oracle was the code under test.* `_canonical_facts` projected the
+     JSON report the implementation had just rendered and compared it against
+     another rendering of the same report. That can only prove the renderings
+     agree with each other — a change moving every projection in the same
+     wrong direction passes.
+
+  Both are fixed in
+  `TestF19CanonicalResultIsInvariantOverTheWholeRenderingSpace`:
+
+  - **The space is the full product**, enumerated by `_permutations()`:
+    7 `--format` values × 4 `--view` report modes × 3 demangle states
+    (unset/`demangle`/`no-demangle`) × 2 `--view patterns` × 2
+    `--view filtered` × 2 `--view suppressions` × 3 `--view show=` states ×
+    3 extra `--write` artifact sets = **6048 invocations**. The `slow`-marked
+    test runs every one; the default-lane test runs a *seeded random sample*
+    (150 points, `ABICHECK_F19_SEED` to re-seed for a soak run) of that same
+    space rather than a hand-picked list, so the fast suite searches the
+    space instead of re-checking one corner of it. A third test pins the
+    space's own size against the product of the axis tuples, so a silently
+    shrunk space — exactly the failure mode the sampled predecessor had —
+    fails rather than passing with less coverage.
+  - **The oracle is not the report projection.** It is computed by calling
+    the Tier-2 engine verb (`workflows.compare_policy.compare_snapshots`)
+    directly on the two snapshots and reading verdict, finding identities,
+    finding count, suppressed/out-of-surface counts and assurance status off
+    the returned `DiffResult` — a different code path from
+    `report/render_json.py`, which every CLI invocation goes through. Each
+    case extracts its canonical block via its own `--write json=` (itself one
+    of the axes, and documented to always render the full unfiltered report),
+    so a `--format` whose primary output is unstructured (html/junit/oneline)
+    is covered on equal terms.
 
 ### Phase 6 — Remove `scan`
 
@@ -919,16 +1010,201 @@ worse than no memory framing at all, so the unit stays the one the
 underlying check already uses. Full measurement table and reasoning:
 `bundle_facts.py`'s own `DEFAULT_MAX_JSON_OBJECT_NODES` docstring.
 
+**7f: done.** `dump`'s `--git-tag`/`--build-id`/`--no-git` are collapsed into
+one repeatable `--provenance KEY=VALUE` (§4.2's MERGE row: "three spellings of
+'stamp this snapshot'"). Keys are `git-tag=<tag>`, `build-id=<id>` and
+`git=auto`/`git=off` (the latter being `--no-git`); a repeated key is
+last-one-wins, matching `--view`'s own report-mode and demangle tokens rather
+than inventing a second collision rule. Grammar and parsing live in
+`abicheck/frontends/cli/options/provenance.py` — a pure-parsing leaf, the
+identical shape `options/view.py` has for `compare --view`, validated eagerly
+by a Click callback (`frontends/cli/runtime._validate_provenance`) so a
+malformed token is a usage error before any extraction runs. Nothing is
+silently dropped: an unknown key, a missing `=`, an empty value and a bad
+`git=` value are each exit 64. No Action or typed-API change was needed —
+`action/run.sh` never passed any of the three, and neither `DumpRequest` nor
+`service_dump_pipeline` carries provenance (that layer is deliberately
+excluded from the shared pipeline, see its own module docstring).
+
+**7i: the per-flag audit against D5's three guards — every surviving
+`compare` and `dump` option, ruled.** 7d's four-flag ruling is the model:
+each flag below is decided explicitly, including the ones that stay, and a
+flag that stays names *why* it survives all three guards (a genuine per-run
+operand; not a one-for-one duplicate; not an escape hatch that disables real
+analysis). Counts are Click-introspected against this branch, not read off
+§4.5's own prose.
+
+**Removed by this slice (beyond Phase 5's three and 7f's merge):**
+
+- **`compare --reconcile-build-context` → AUTO, removed.** §4.1 already
+  classified it AUTO ("Clearing false positives should never be opt-in"), and
+  the measurement backs it: ADR-039's reconciliation is *strictly*
+  evidence-gated — a no-op unless both snapshots carry
+  `build_context_defines` and per-field guards — and it can only ever move a
+  phantom, context-free header-parse finding out of the verdict into the
+  audit bucket. It can never manufacture a finding, so an opt-in switch could
+  only ever mean "leave a known false positive in your verdict because you
+  forgot a flag". Forced on inside the Tier-2 chokepoint
+  (`compare_snapshots`) rather than at each front end, so CLI, typed API and
+  Action are changed by one edit; `CompareRequest.reconcile_build_context` is
+  removed with it (front-end parity — the typed API must not keep a knob the
+  CLI no longer has). Unlike `--pattern-verdicts`, no ADR gates this default:
+  ADR-039 shipped the reconciliation and never deferred its default. The
+  directory/package fan-out's old *rejection* of the flag is gone too — it
+  now simply gets the behavior it used to refuse a request for.
+- **`compare --pdb-path` → CONFIG `debug.pdb_path`.** §4.1's CONFIG row, and
+  the config key already existed: `dump --pdb-path` was demoted to it in
+  Phase 7c, and ADR-037 D8.1 forbids the two commands' debug context from
+  drifting. Documented capability reduction, stated rather than glossed: the
+  flag was side-scoped (`old=`/`new=`) and the config key is not. That case
+  is preserved by a different route rather than lost — `--debug-root
+  old=…`/`new=…` stays, and `debug_resolver` already searches a debug root
+  for a PDB (`pdb_in_root`), which is the per-side spelling now.
+- **`compare --support-promise` → CONFIG `release.support_promise`.** The
+  flag's own help text called it "a contract-policy field" (ADR-065 D1/D6) —
+  which is guard 1's definition of a stable project property, written down
+  by the flag itself. A project's declared support promise does not change
+  between two runs of the same gate. New key, scalar shape (`off`/`declared`),
+  resolved onto `ResolvedCompareConfig` beside Phase 7d's own
+  `release.dso_only`/`release.include_private_dso` siblings. The unregistered
+  release engine keeps its internal parameter, fed from the resolved config.
+- **`dump --compile-db-filter` → CONFIG `build.compile_db_filter`.** §4.2's
+  CONFIG row. Which subtree of a large shared `compile_commands.json` belongs
+  to *this* library is a property of the project's layout, and the key sits
+  next to the `build.compile_db` it scopes. No Action input existed for it, so
+  there is no front-end lifecycle question.
+
+**Kept, with the ruling that keeps them.** Grouped by why, rather than
+restated one line at a time where the reason is shared:
+
+- **Measured keep — the dependency-walk family: `--follow-deps`,
+  `--search-path`, `--ld-library-path` (both commands).** §4.1/§4.2
+  classified `--follow-deps` AUTO with a "cost check" prerequisite. The check
+  was run, and it **rejects** the AUTO classification (the 7g precedent: do
+  the measurement, then let it decide — including deciding against the row).
+  A real `dump` of a fixture `.so` with and without the flag differs by
+  exactly one snapshot field, `provenance.dependency_info`, and that field
+  embeds **absolute host paths** (`{"path": "/home/…/liblib.so",
+  "resolution_reason": "root", …}`) plus whatever the host's loader search
+  resolves. Making the walk unconditional would therefore (a) put
+  host-specific paths into every snapshot, breaking dump reproducibility and
+  the ADR-050 comparability contract that compares two snapshots' extraction
+  fingerprints, (b) add a filesystem walk of the host's library tree to every
+  dump and both sides of every compare, and (c) on `compare`, let findings
+  depend on which libraries happen to be installed on the runner — the exact
+  "never fabricate a break from missing/host evidence" rule this workstream
+  is subordinate to. So it is a genuine per-run evidence selector, not an
+  "enable a useful analysis" flag, and it keeps `--search-path`/
+  `--ld-library-path` alive with it: those two are that walk's only inputs,
+  and §4.3's own reasoning for `deps` ("*the environment is the operand*")
+  applies here whenever the walk is requested at all. `--follow-deps` also
+  has a dedicated Action input (`follow-deps`), so demoting it would leave a
+  documented input with nothing to drive — a capability loss, not a
+  simplification. **Revisit only** if the dependency graph is made
+  host-independent (recorded as sonames + resolution *reasons* with no
+  absolute paths), which is a snapshot-schema change, not a CLI one.
+- **Blocked by `scan`, which this workstream may not touch before Phase 6:
+  `--env-matrix`, `--require-complete-analysis`.** Both are §4.1 CONFIG rows
+  and both are *also* real `scan` options today. `action/run.sh`'s
+  scan-to-compare translation routes a request onto `compare` unless a
+  predicate says it must stay on the legacy CLI; removing either from
+  `compare` alone would silently break that translation for a `mode: scan`
+  caller, and widening the predicate is a change to `scan`'s own routing.
+  `--require-complete-analysis` additionally has a dedicated Action input.
+  Both demotions belong to the same PR that retires `scan` (Phase 6), not
+  before it.
+- **Blocked by Phase 9, which may not start early: `--scope-public-headers`,
+  `--post-manifest`.** Phase 9 owns the contract-mechanism collapse
+  (`--scope-public-headers` → `--contract public`, `--post-manifest` → a
+  contract overlay) and is blocked on `public-contract-default.md` Phase 6's
+  two open relevance defects. "Never trade a possible false negative for a
+  shorter CLI" is the governing rule; neither is touched here.
+- **Blocked by a named unlanded prerequisite: `--instantiation-manifest`,
+  `--bundle-facts-out`, `--bundle-facts-library-manifest`.** Ruled in 7d and
+  re-affirmed unchanged: `--instantiation-manifest`'s config home needs the
+  ADR-049 coordination that has not landed; `--bundle-facts-out` is
+  `-o/--output`'s shape for this invocation's evidence capture, with no `dump`
+  fan-out to hold it; `--bundle-facts-library-manifest`'s per-library override
+  shape has no `.abicheck.yml` home without inventing one (guard 1 —
+  "not one-for-one"), pending G42. `--use-cases` joins this group rather than
+  §4.1's CONFIG row: it is the same class — a flag naming a *document* whose
+  content is a project artifact — and 7d already ruled that class stays CLI
+  (`--policy`/`--suppress` are the precedent); a `use_cases:` block is worth
+  landing with the rest of the G29/ADR-057 attribution surface, not as a lone
+  path key.
+- **Blocked by an Action input, pending an ADR-047 input-lifecycle decision:
+  `dump --compression`, `dump --build-target`.** §4.2 classifies the first
+  AUTO and the second CONFIG (`build.targets`, a key that already exists).
+  Both are wired to documented Action inputs (`snapshot-compression`,
+  `build-target`), and `build-target` is additionally a live `scan` option.
+  Removing either flag without removing its input leaves a documented input
+  that silently does nothing — the one thing §Non-goals rules out ("not
+  shortening the CLI by hiding behavior or ignoring supplied input"). On
+  `--compression` there is also a substantive counter-argument to §4.2's own
+  AUTO row worth recording: the row assumes the `-o` suffix always encodes
+  the intent, and `-o build/abi.json --compression zstd` (a CI job publishing
+  a fixed artifact name) is a real case where it does not.
+- **Genuine per-run operands, no further argument needed** — each is a value
+  that differs invocation to invocation and has no project-level meaning:
+  the evidence inputs (`-H/--header`, `-I/--include`, `--sources`,
+  `--build-info`, `--depth`, `--debug-info`, `--devel-pkg`, `--probe-matrix`,
+  `--debug-root`, `--dump-manifest`, `--include-system-declarations`), the
+  operand/scope selectors (`--no-baseline`, `--select`, `--select-required`,
+  `--old-variant`/`--new-variant`, `--version`, `--since`, `--changed-path`,
+  `--abi3`), the consumer contracts (`--used-by`, `--used-by-manifest`,
+  `--required-symbol`), the document operands (`--config`, `--policy`,
+  `--suppress`, `--pack`), the gate/rendering surface (`--severity-preset`,
+  `--contract`, `--format`, `-o/--output`, `--write`, `--view`,
+  `--output-dir`, `--dry-run`, `-v/--verbose`, `--help`, `--help-all`), and
+  ADR-050 D2's sanctioned escape hatch `--diagnostic-comparison` (the
+  calibrated, bounded kind D5 explicitly permits: it never disables analysis,
+  it downgrades one hard comparability failure into a diff stamped
+  `assurance: "none"` everywhere). Fifteen of these already carry a per-flag
+  written rationale in `abicheck/frontends/cli/options/inventory.py`'s
+  `COMPARE_FLAG_BUDGET_RAISES` ledger, which is the executable half of this
+  ruling — `tests/test_config_rebalance.py` fails if an entry names a flag
+  that is no longer visible.
+- **One MERGE candidate examined and declined: `--old-variant`/
+  `--new-variant` → a side-scoped `--variant old=`/`new=`.** It would be a
+  net −1 and would match every other two-sided input's spelling. Not done
+  here, and recorded rather than left unmentioned: it is a rename of a
+  user-visible pair with no analysis consequence, which makes it the lowest-
+  value change in this list and the one most likely to churn unrelated tests
+  in a PR that is already changing the meaning of six flags. Left as a
+  standalone follow-up.
+
+**Where the counts land, re-derived by Click introspection on this branch
+rather than read off §4.5:**
+
+| Command | Before | After | Target | Residual, itemized |
+|---|---|---|---|---|
+| `compare` | 56 | **50** | ≤40 | `--scope-public-headers`, `--post-manifest` (Phase 9) · `--env-matrix`, `--require-complete-analysis` (`scan`, Phase 6) · `--instantiation-manifest`, `--use-cases` (prerequisite) · `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--old-variant`/`--new-variant` merge (−1, declined) = 10 |
+| `dump` | 24 | **21** | ≤16 | `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--compression`, `--build-target` (Action input) = 5 |
+
+`compare` reaches **40** and `dump` reaches **16** exactly once those two
+itemized residuals close — i.e. the targets are arithmetically reachable and
+every option still standing between here and them has a named owner and a
+named blocker, not an unexamined one. Three of `compare`'s ten and two of
+`dump`'s five are *deliberate keeps* rather than deferrals, so the honest
+reading of §4.5's numbers is that they were set before Phase 2 added five
+flags to `compare` and before the dependency-walk measurement existed;
+they are recorded here as still-useful pressure, not as arithmetic that
+survives contact with the per-flag rulings above.
+
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
 7a hidden flags (4) · 7b `compile.*` demotion (shared `compare`+`dump`) ·
 7c `debug.*` demotion · 7d release/bundle topology (absorbs cli-cleanup
 PR J; **done**, including the explicit four-flag ruling above) ·
-7e `--profile` removal · 7f `dump` provenance merge ·
+7e `--profile` removal · 7f `dump` provenance merge (**done**, see above) ·
 7g resource limits (**done**, see above) ·
 7h `--required-symbols` (**done**, folded into `--required-symbol @FILE`),
 `-j` (**done**, removed outright), `--keep-extracted`/
-`--no-bundle-analysis` (**done**, see 7d above).
+`--no-bundle-analysis` (**done**, see 7d above) ·
+7i the whole-surface per-flag audit (**done**, see above) — every surviving
+`compare` and `dump` option ruled against D5's three guards, with
+`--reconcile-build-context`, `--pdb-path`, `--support-promise` and
+`dump --compile-db-filter` removed and every keep or deferral named.
 
 Every PR in this phase meets the merge criteria recorded in
 `cli-cleanup-phase-two.md` — old spelling exits

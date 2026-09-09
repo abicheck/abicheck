@@ -486,7 +486,7 @@ class TestSurfaceMetricsReachesStoredStoredPair:
     validation, unlike ``surface_metrics`` which has its own separate,
     pre-existing precedent."""
 
-    def test_surface_metrics_true_is_forwarded_to_compare_snapshots(
+    def test_surface_metrics_is_not_an_opt_out_on_the_stored_pair_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         old_snapshot = AbiSnapshot(
@@ -507,11 +507,17 @@ class TestSurfaceMetricsReachesStoredStoredPair:
 
         import abicheck.workflows.compare_policy as compare_policy_module
 
-        seen_surface_metrics: list[object] = []
+        # one-comparison-product.md Phase 5: `surface_metrics` is no longer a
+        # parameter of this Tier-2 verb at all -- it forces the ADR-027
+        # metric-drift stage on for every caller -- so the spy asserts the
+        # keyword's *absence*, which is the stronger property: a
+        # re-introduced parameter (i.e. a way for this driver to opt out
+        # again) fails here.
+        seen_kwargs: list[dict[str, object]] = []
         real_compare_snapshots = compare_policy_module.compare_snapshots
 
         def _spy_compare_snapshots(old, new, *args, **kwargs):
-            seen_surface_metrics.append(kwargs.get("surface_metrics"))
+            seen_kwargs.append(dict(kwargs))
             return real_compare_snapshots(old, new, *args, **kwargs)
 
         monkeypatch.setattr(
@@ -519,7 +525,8 @@ class TestSurfaceMetricsReachesStoredStoredPair:
         )
 
         compare_stored_bundle_facts_pair(old_path, new_path)
-        assert seen_surface_metrics == [True]
+        assert len(seen_kwargs) == 1
+        assert "surface_metrics" not in seen_kwargs[0]
 
     def test_public_surface_growth_is_reported(self, tmp_path: Path) -> None:
         """End-to-end proof, not just the kwarg spy above: a stored/stored

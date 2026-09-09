@@ -614,11 +614,11 @@ class CompareRequest:
     # Override debuginfod server URL (only meaningful with enable_debuginfod);
     # None uses the resolver's default server list / DEBUGINFOD_URLS env var.
     debuginfod_url: str | None = None
-    # ADR-039: clear context-free header-parse false positives using the build's
-    # active preprocessor defines (a conditional field's phantom add/remove/size
-    # delta the build proves never changed). Opt-in; a no-op unless the snapshots
-    # carry ``build_context_defines`` + per-field ``guard`` annotations.
-    reconcile_build_context: bool = False
+    # No ``reconcile_build_context`` field: one-comparison-product.md §4.1's
+    # AUTO row made ADR-039's reconciliation unconditional, forced on in the
+    # Tier-2 ``compare_snapshots`` chokepoint, so neither this request nor
+    # the CLI carries a switch for it (still evidence-gated: a no-op without
+    # ``build_context_defines`` + per-field ``guard`` annotations).
     # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML). When
     # its ``runtime_floors`` are set, new symbol-version requirements classify
     # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)

@@ -152,7 +152,7 @@ class TestCompareHelpAllDisclosure:
             "--ast-frontend",
             "--write",
             "--probe-matrix",
-            "--pdb-path",
+            "--diagnostic-comparison",
         ):
             assert advanced_flag not in out, (
                 f"{advanced_flag} leaked into curated --help"
@@ -239,7 +239,7 @@ class TestCompareHelpAllDisclosure:
         for advanced_flag in (
             "--write",
             "--probe-matrix",
-            "--pdb-path",
+            "--diagnostic-comparison",
         ):
             assert advanced_flag in out
 
@@ -270,10 +270,12 @@ class TestCompareHelpAllDisclosure:
         snap_json = snapshot_to_json(AbiSnapshot(library="x", version="1"))
         old.write_text(snap_json, encoding="utf-8")
         new.write_text(snap_json, encoding="utf-8")
-        # CLI flag consolidation 5-7 removed -j/--jobs from compare entirely;
-        # --pdb-path is a still-real advanced/hidden flag to prove this with.
+        # CLI flag consolidation 5-7 removed -j/--jobs from compare entirely,
+        # and one-comparison-product.md Phase 7 removed --pdb-path too
+        # (debug.pdb_path config only); --diagnostic-comparison is a
+        # still-real advanced/hidden flag to prove this with.
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), "--pdb-path", "x.pdb"]
+            main, ["compare", str(old), str(new), "--diagnostic-comparison"]
         )
         assert result.exit_code == 0, result.output
 
@@ -435,19 +437,22 @@ class TestDumpAndScanHelpAllDisclosure:
     def test_dump_advanced_option_still_functional_after_curated_help_render(
         self, tmp_path
     ) -> None:
-        """--compile-db-filter is hidden from curated `dump --help` but must
-        still work (Phase 7c: --compiler itself is gone from dump's CLI
-        entirely -- compile.compiler config only -- so it can no longer
-        serve as this test's advanced-but-functional example)."""
+        """--dump-manifest is hidden from curated `dump --help` but must
+        still work (Phase 7c removed --compiler from dump's CLI entirely and
+        Phase 7i removed --compile-db-filter -- compile.compiler /
+        build.compile_db_filter config only -- so neither can serve as this
+        test's advanced-but-functional example any more)."""
         CliRunner().invoke(main, ["dump", "--help"])
         so_path = tmp_path / "lib.so"
         so_path.write_bytes(b"")
+        manifest = tmp_path / "m.yaml"
+        manifest.write_text("units: []\n", encoding="utf-8")
         result = CliRunner().invoke(
-            main, ["dump", str(so_path), "--compile-db-filter", "src/**"]
+            main, ["dump", str(so_path), "--dump-manifest", str(manifest)]
         )
-        # Not a valid ELF, so this is expected to fail downstream -- the point
-        # is that Click accepts the (curated-hidden) --compile-db-filter flag
-        # at all, rather than rejecting it as "no such option".
+        # Not a valid ELF/manifest, so this is expected to fail downstream --
+        # the point is that Click accepts the (curated-hidden)
+        # --dump-manifest flag at all, rather than "no such option".
         assert "no such option" not in result.output.lower()
 
     def test_scan_advanced_option_still_functional_after_curated_help_render(

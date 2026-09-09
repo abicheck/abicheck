@@ -99,6 +99,22 @@ def _report(*args: str) -> tuple[int, dict]:
     return code, json.loads(out)
 
 
+def _support_promise_config(tmp_path: Path, value: str) -> list[str]:
+    """``--config`` args selecting ``release.support_promise: <value>``.
+
+    one-comparison-product.md Phase 7i demoted ``compare --support-promise``
+    to this project-config key (ADR-065 D1/D6 already called it a
+    contract-policy field), so the CLI-boundary tests below drive it the one
+    way that is left.
+    """
+    cfg = tmp_path / f"abicheck-{value}.yml"
+    # Quoted deliberately: bare ``off`` is a YAML *boolean*, and the schema
+    # rejects a bool here rather than coercing it -- the same trap (and the
+    # same answer) as ``python.abi3_floor``'s bare ``3.9`` YAML float.
+    cfg.write_text(f'release:\n  support_promise: "{value}"\n', encoding="utf-8")
+    return ["--config", str(cfg)]
+
+
 class TestPackageArchiveInventoryProvesAbsence:
     def test_an_archive_pair_proves_the_removal_and_a_directory_pair_does_not(
         self, tmp_path: Path
@@ -167,13 +183,14 @@ class TestPackageArchiveInventoryProvesAbsence:
 
 
 class TestSupportPromiseFindingsCli:
-    @pytest.mark.parametrize("flag", [[], ["--support-promise", "off"]])
+    @pytest.mark.parametrize("configured", [False, True])
     def test_off_by_default_emits_no_finding(
-        self, tmp_path: Path, flag: list[str]
+        self, tmp_path: Path, configured: bool
     ) -> None:
         """D1: a support-promise change is emitted *under a policy*, never
         inferred -- so the proven removal above changes nothing on its own."""
         _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
+        flag = _support_promise_config(tmp_path, "off") if configured else []
         _code, report = _report("compare", str(old_pkg), str(new_pkg), *flag)
         assert all("support_promise" not in lib for lib in report["libraries"]), report[
             "libraries"
@@ -184,7 +201,8 @@ class TestSupportPromiseFindingsCli:
     ) -> None:
         _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
         code, report = _report(
-            "compare", str(old_pkg), str(new_pkg), "--support-promise", "declared"
+            "compare", str(old_pkg), str(new_pkg),
+            *_support_promise_config(tmp_path, "declared"),
         )
         entry = next(lib for lib in report["libraries"] if lib.get("support_promise"))
         assert entry["library"] == "libgone.json"
@@ -201,7 +219,8 @@ class TestSupportPromiseFindingsCli:
         same content, laid out as directories, invents no contract change."""
         old_dir, new_dir, _old_pkg, _new_pkg = _pair(tmp_path)
         code, report = _report(
-            "compare", str(old_dir), str(new_dir), "--support-promise", "declared"
+            "compare", str(old_dir), str(new_dir),
+            *_support_promise_config(tmp_path, "declared"),
         )
         assert all("support_promise" not in lib for lib in report["libraries"])
         assert code == 0
@@ -210,7 +229,8 @@ class TestSupportPromiseFindingsCli:
         """The symmetric rule, against a proven-complete OLD inventory."""
         _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
         code, report = _report(
-            "compare", str(new_pkg), str(old_pkg), "--support-promise", "declared"
+            "compare", str(new_pkg), str(old_pkg),
+            *_support_promise_config(tmp_path, "declared"),
         )
         entry = next(lib for lib in report["libraries"] if lib.get("support_promise"))
         assert entry["support_promise"] == "introduced"

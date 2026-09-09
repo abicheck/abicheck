@@ -560,7 +560,10 @@ class TestFlagBudget:
             and not getattr(p, "hidden", False)
             for opt in p.opts
         }
-        for flag in ("--severity-preset", "--show-filtered", "--depth",
+        # one-comparison-product.md Phase 5 removed --show-filtered (the
+        # ledger it echoed is unconditional; `--view filtered` renders it),
+        # so `--view` is the coarse rendering override that stays visible.
+        for flag in ("--severity-preset", "--view", "--depth",
                      "--scope-public-headers",
                      # ADR-040 Lever 2 carve-out: the coarse debug-root
                      # override stays visible.

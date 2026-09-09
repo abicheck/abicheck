@@ -112,7 +112,6 @@ class TestBuildQueryFlagsRemoved:
         survivors: list[list[str]] = [
             [],
             ["--build-target", "//:lib"],
-            ["--compile-db-filter", "*.cpp"],
             ["--depth", "build"],
             ["--depth", "source"],
         ]

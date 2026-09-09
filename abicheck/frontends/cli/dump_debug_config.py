@@ -98,6 +98,32 @@ def resolve_dump_debug_fields(
     return resolve_dump_debug_config(build_config, sources)
 
 
+def resolve_dump_build_compile_db_filter(
+    build_config: Path | None,
+    sources: Path | None,
+) -> str | None:
+    """Resolve ``build.compile_db_filter`` from ``.abicheck.yml``.
+
+    one-comparison-product.md §4.2's CONFIG row: the former
+    ``dump --compile-db-filter``. Same discovery precedence, and the same
+    deliberate leniency on a malformed auto-discovered config, as
+    :func:`resolve_dump_debug_config` right above -- one shape for every
+    Phase 7 config demotion on this command, rather than a second rule.
+    """
+    from ...workflows.extraction import discover_build_config, load_build_config
+
+    cfg_path = (
+        build_config if build_config is not None else discover_build_config(sources)
+    )
+    if cfg_path is None:
+        return None
+    try:
+        bc = load_build_config(cfg_path)
+    except ValueError:
+        return None
+    return bc.compile_db_filter or None
+
+
 def resolve_dump_lang_and_env_toggles(
     ctx: click.Context,
     *,

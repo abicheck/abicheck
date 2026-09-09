@@ -325,9 +325,14 @@ class TestDumpDryRun:
             "dump", str(so), "--dry-run", "-H", str(header),
             "--build-info", str(db), "--depth", "build",
         ]
-        refused = CliRunner().invoke(main, [*args, "--compile-db-filter", "src/**"])
+        # one-comparison-product.md Phase 7i: the filter is a project-config
+        # key now (`build.compile_db_filter`), not a CLI flag -- the refusal
+        # must reach the CLI from *that* source, which is the only one left.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("build:\n  compile_db_filter: 'src/**'\n", encoding="utf-8")
+        refused = CliRunner().invoke(main, [*args, "--config", str(cfg)])
         assert refused.exit_code == 64, refused.output
-        assert "--compile-db-filter scopes the L2 header parse only" in refused.output
+        assert "build.compile_db_filter scopes the L2 header parse only" in refused.output
         # Without the filter the identical invocation is accepted, so the
         # refusal is scoped to the combination and not to --build-info.
         allowed = CliRunner().invoke(main, args)

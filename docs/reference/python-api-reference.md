@@ -38,7 +38,6 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `pattern_verdicts` | `bool` | `False` |
 | `enable_debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
-| `reconcile_build_context` | `bool` | `False` |
 | `env_matrix_path` | `Path \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
@@ -326,10 +325,8 @@ Classify two already-resolved snapshots — the Tier-2 snapshot verb.
 | `force_public_symbols` | `set[str] \| None` | `None` |
 | `extra_changes` | `list[Change] \| None` | `None` |
 | `pattern_verdicts` | `bool` | `False` |
-| `surface_metrics` | `bool` | `False` |
 | `collapse_versioned_symbols` | `bool` | `False` |
 | `public_surface_allowlist` | `set[str] \| None` | `None` |
-| `reconcile_build_context` | `bool` | `False` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |

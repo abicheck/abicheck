@@ -108,7 +108,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Public-surface scoping",
             "options": [
                 "--scope-public-headers",
-                "--show-filtered",
             ],
         },
         {
@@ -135,14 +134,12 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Per-side overrides",
             "options": [
                 "--version",
-                "--pdb-path",
             ],
         },
         {
             "name": "Build-config matrix & idioms",
             "options": [
                 "--probe-matrix",
-                "--surface-metrics",
             ],
         },
         {
@@ -192,7 +189,6 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--depth",
                 "--build-info",
                 "--sources",
-                "--compile-db-filter",
                 "--config",
             ],
         },
@@ -202,7 +198,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         },
         {
             "name": "Provenance",
-            "options": ["--git-tag", "--build-id", "--no-git"],
+            "options": ["--provenance"],
         },
     ],
     "* scan": [
@@ -409,7 +405,7 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # outright in ADR-068 D5 / Phase 7a.
         "debug_root",
         # Per-side overrides -- version labelling is routine for bare .so
-        # inputs; --pdb-path stays in the advanced tier.
+        # inputs (--pdb-path is gone: debug.pdb_path config only, Phase 7).
         "version",
         # Universal
         "verbose",

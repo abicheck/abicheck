@@ -210,7 +210,6 @@ def reject_unsupported_options(
     from ....cli_compare_options import _reject_set_input_flags
 
     _reject_set_input_flags(
-        bool(kwargs.get("reconcile_build_context", False)),
         kwargs.get("env_matrix_path"),
         # Workstream D-S1: a --used-by-manifest-named consumer is exactly as
         # unsupported here as a bare --used-by one (this dispatch runs before
@@ -314,20 +313,14 @@ def reject_unsupported_options(
         raise click.UsageError(
             "--devel-pkg old=... is not supported together with a stored-bundle-facts OLD_INPUT."
         )
-    if (
-        kwargs.get("pdb_path") is not None
-        or kwargs.get("old_pdb_path") is not None
-        or kwargs.get("new_pdb_path") is not None
-    ):
-        # Codex review: same root cause as --debug-info just above --
-        # compare_release_against_bundle_facts()'s per-library
-        # service.resolve_input() call has no pdb_path parameter to receive
-        # any of these (this driver's own docstring: "no debug-info package
-        # resolution, no PDB"), so a NEW-side PE DLL would always fall back
-        # to binary-only extraction regardless of what was given here.
-        raise click.UsageError(
-            "--pdb-path is not supported together with a stored-bundle-facts OLD_INPUT."
-        )
+    # The `--pdb-path` CLI-flag rejection that used to sit here is gone with
+    # the flag itself (one-comparison-product.md Phase 7, §4.1's CONFIG row):
+    # `debug.pdb_path` is the only spelling left, and this dispatcher already
+    # rejects that config key below (`_unsupported_config_blocks`, "debug:")
+    # for the identical reason -- compare_release_against_bundle_facts()'s
+    # per-library service.resolve_input() call has no pdb_path parameter to
+    # receive it, so a NEW-side PE DLL would fall back to binary-only
+    # extraction regardless. One rejection, at the one surviving source.
     if (
         kwargs.get("follow_deps")
         or kwargs.get("search_paths")

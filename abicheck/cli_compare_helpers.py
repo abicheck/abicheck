@@ -943,7 +943,6 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context, *,
-    reconcile_build_context: bool,
     env_matrix_path: Path | None,
     used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
@@ -972,7 +971,7 @@ def _reject_flags_unsupported_for_set_inputs(
     everything else outright).
     """
     _reject_set_input_flags(
-        reconcile_build_context, env_matrix_path,
+        env_matrix_path,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
@@ -1187,7 +1186,6 @@ def run_compare(
     *,
     old_input: Path, new_input: Path,
     output_dir: Path | None,
-    support_promise: str = "off",
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
     debug_info1: Path | None, debug_info2: Path | None,
     devel_pkg1: Path | None, devel_pkg2: Path | None,
@@ -1222,7 +1220,6 @@ def run_compare(
     fmt: str, demangle: bool | None, output: Path | None,
     suppress: Path | None,
     policy: str, policy_file_path: Path | None,
-    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
     severity_preset: str | None,
     config: Path | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
@@ -1234,17 +1231,14 @@ def run_compare(
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
-    # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
-    # unconditionally now (see compare_snapshots() call site below).
-    # explain_patterns survives, now pure rendering of the always-on ledger
-    # (populated by --view patterns; see frontends.cli.options.view).
-    # surface_metrics is also unconditional now -- the CLI always passes
-    # True to compare_snapshots() below regardless of this parameter's
-    # value, matching pattern_verdicts' own precedent (see
-    # adr027_compare_options' docstring).
+    # ADR-068 D4/Phase 5: --pattern-verdicts and --surface-metrics are both
+    # gone -- each runs unconditionally now (see the compare_snapshots()
+    # call site below, which passes True for both). explain_patterns
+    # survives as pure rendering of the always-on modulation ledger, now
+    # populated by `--view patterns` (frontends.cli.options.view), the same
+    # way show_filtered/audit_suppressions below are populated by
+    # `--view filtered`/`--view suppressions`.
     explain_patterns: bool,
-    surface_metrics: bool,
-    reconcile_build_context: bool,
     env_matrix_path: Path | None,
     verbose: bool,
     use_cases_manifest: Path | None = None,
@@ -1361,6 +1355,18 @@ def run_compare(
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod
     debuginfod_url = resolved_cfg.debuginfod_url
+    # one-comparison-product.md Phase 7 (§4.1's CONFIG row): `--pdb-path` is
+    # gone from `compare` too now, joining the four above -- `debug.pdb_path`
+    # is its only source, exactly as it has been for `dump` since Phase 7c
+    # (ADR-037 D8.1: the two commands share one debug context and must not
+    # drift). The per-side `old=`/`new=` scoping the flag carried has no
+    # config spelling and is not reinvented as one: a side needing its own
+    # PDB names the directory holding it with `--debug-root old=`/`new=`,
+    # which `debug_resolver` already searches for a PDB (`pdb_in_root`).
+    _cfg_pdb = resolved_cfg.pdb_path
+    pdb_path = Path(_cfg_pdb) if _cfg_pdb else None
+    old_pdb_path: Path | None = None
+    new_pdb_path: Path | None = None
     show_redundant = resolved_cfg.show_redundant
     # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI flag
     # left either; `compile.lang` is its only source, defaulting to the
@@ -1417,7 +1423,6 @@ def run_compare(
     if {old_kind, new_kind} & {"directory", "package"}:
         release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
-            reconcile_build_context=reconcile_build_context,
             env_matrix_path=env_matrix_path,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
@@ -1575,7 +1580,7 @@ def run_compare(
             dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
             fail_on_removed=resolved_cfg.fail_on_removed_library,
             on_incomplete_scope=resolved_cfg.on_incomplete_scope,
-            support_promise=support_promise,
+            support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
             select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
@@ -1917,10 +1922,8 @@ def run_compare(
             force_public_symbols=force_public,
             extra_changes=extra_changes,
             pattern_verdicts=True,
-            surface_metrics=True,
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=post_manifest_allowlist,
-            reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
             contract_mode=resolved_contract_mode,

@@ -1604,7 +1604,6 @@ from .frontends.cli.options.inventory import (  # noqa: E402
     count_visible_options as count_visible_options,
 )
 from .frontends.cli.options.release import (  # noqa: E402
-    adr027_compare_options as adr027_compare_options,
     app_usage_scope_options as app_usage_scope_options,
     build_source_compare_options as build_source_compare_options,
     build_source_dump_options as build_source_dump_options,
