@@ -3479,7 +3479,21 @@ elif [[ "$MODE" == "scan" ]]; then
   # always this run's `new`/candidate operand.
   add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
   add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  # Codex review, PR #1172, round 21, fresh evidence: skipped when
+  # add_compile_context_flags above already merged build-config into a
+  # synthesized compile: overlay and added --config itself (the
+  # explicit-build-config-plus-compile-context case, e.g. build-config
+  # together with gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc/
+  # ast-frontend) -- adding it again here would emit a second, conflicting
+  # --config, and Click keeps only the last one, silently discarding the
+  # synthesized compiler/sysroot/macros overlay. Same guard the native
+  # dump and compare branches already carry around their own identical
+  # add_single_flag "--config" call, just missing here since this branch
+  # (the scan-baseline route re-enabled onto compare's CLI) was added
+  # later without it.
+  if ! _cmd_has_config_flag; then
+    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  fi
   # No `--build-target` here: `compare` has no such option at all yet
   # (unlike `dump`/`scan`) -- any request setting it routes to the legacy
   # `scan` CLI branch instead, unconditionally, see the `_CLI_MODE`

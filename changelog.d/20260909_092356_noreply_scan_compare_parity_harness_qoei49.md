@@ -115,3 +115,19 @@
   verdict computation now excludes a `RESOLVED` finding while leaving the
   returned list itself — and every other reader of it (the report, the
   uncovered-symbol scan, the disposition ledger) — unfiltered.
+- **A `mode: scan` Action request routed through `compare`'s translation
+  no longer silently discards a `build-config` input's own settings when a
+  cross-compilation input (`gcc-path`/`gcc-prefix`/`gcc-options`/`sysroot`/
+  `nostdinc`/`ast-frontend`) is also given.** `add_compile_context_flags`
+  already merges an explicit `build-config` into its own synthesized
+  `compile:` overlay and appends the merged result as `--config`, but the
+  scan→compare translation branch's own unconditional
+  `add_single_flag "--config" "$INPUT_BUILD_CONFIG"` right after it
+  appended a *second*, raw, unmerged `--config` — Click keeps only the
+  last occurrence on the command line, so the operator's own `release:`/
+  other `build-config` settings silently won over the synthesized
+  compiler/sysroot/macros overlay instead of being merged with it, the
+  opposite of what every other CLI-flag-consolidation branch that calls
+  `add_compile_context_flags` already guards against. Guarded with the
+  same `_cmd_has_config_flag` check the native `dump`/`compare` branches'
+  identical `--config` append already carries.
