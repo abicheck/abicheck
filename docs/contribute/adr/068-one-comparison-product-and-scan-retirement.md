@@ -341,6 +341,82 @@ both still exist. The second risk is the `not_evaluated` correctness
 question in D3: reporting a pre-existing hygiene problem as newly introduced
 would be a manufactured finding, which the vision forbids outright.
 
+## Amendment (2026-09-09): baseline cross-source authority divergence
+
+Phase 4 landed the migration this ADR's D3 requires (every cross-source
+check reaches `compare`'s automatic `cross_source_checks` stage, ADR-068
+D4/D5 — no opt-out), but a parity audit found the Action's scan-to-compare
+translation (`action/run.sh`) had to be disabled entirely
+(`9f2166e5c`) because of a divergence D3 does not leave any room for: on a
+**baseline** comparison, `scan --against`'s own baseline path
+(`cli_scan_baseline._strip_automatic_cross_source_findings`) removes every
+cross-source finding from `diff.findings` before computing its verdict,
+while `compare` leaves the same finding in `changes` as real, gating
+evidence. Directly verified: self-compared `case143_audit_accidental_export`
+(`exported_not_public`) reports `NO_CHANGE` under `scan --against` and
+`COMPATIBLE_WITH_RISK` under `compare`; under `--severity-preset strict`,
+`scan --against` still exits 0 while `compare` exits 2.
+
+**This is `scan`'s stripping that was wrong, not `compare`'s gating.** D3
+already states the answer this amendment makes explicit: "Authority is
+unchanged (ADR-028 D3 / ADR-035 D1): these findings stay `RISK`/`API_BREAK`
+and never become `BREAKING` on their own. Migrating them into `compare` does
+not promote them." A cross-source finding was never advisory-only under
+ADR-028/ADR-035's own authority rule — `scan`'s
+`_strip_automatic_cross_source_findings` (added when `scan`'s dedicated
+`crosscheck` report block and `--crosscheck KEY=error` promotion were its
+*only* mechanism for these checks, predating their migration onto
+`compare`'s pipeline) was a `scan`-specific accommodation for a
+single-version-only signal that no longer describes what these checks are:
+migrated, dual-sided, `RISK`/`API_BREAK`-bucketed findings like any other
+`compare` finding. Option (a) — giving `compare` an opt-out to match
+`scan`'s stripping — is rejected outright: D4/D5 ("no opt-out for a real
+front end") forbids exactly that, and D4's own invariant ("the canonical
+result ... is byte-identical regardless of `--format`, `--write`, `--view`
+...") would be violated by a second, parallel gating pipeline for the same
+finding kind.
+
+**Decision:** `scan --against`'s baseline path stops stripping cross-source
+findings to advisory-only. A baseline `scan` now reports and gates a
+cross-source finding exactly as `compare` does — same verdict, same
+severity, same exit-code contribution. **This is a documented breaking
+change to the Action's `mode: scan` contract and to the `scan --against` CLI
+command**: a baseline scan that previously reported `NO_CHANGE`/exit 0 for a
+library with an accidental export, an unversioned exported symbol, or any
+other cross-source-only issue now reports the finding as a real,
+policy-gated result, which can raise its verdict and (under a severity
+preset that treats `RISK`/`API_BREAK` as error-level) its exit code. No
+ADR-068 decision above changes as a result — this closes an implementation
+gap D3 already ruled on, it does not reopen D3 itself.
+
+`action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI` predicate's severity-divergence
+condition (the "unconditionally true" catch-all `9f2166e5c` added) is closed
+by this fix and removed. Its other, narrower conditions — `--budget`,
+`--risk-rules`, `--crosscheck`, `--build-target` (no `compare` flag
+equivalent), risk-driven `auto` depth selection (no `compare` equivalent),
+an explicit `--depth build`/`--depth source` (`compare`'s single-pair path
+has no equivalent evidence-contract floor — a pinned build/source depth with
+no evidence to satisfy it is a real, reported error under `scan`, not a
+silent downgrade, and `compare` has nothing that reproduces that contract),
+`--header`/`--include` vs. baseline-side duplicates, a `.json`-extension or
+compressed (`.gz`/`.zst`)/content-detected JSON snapshot baseline file,
+`--output-file`, an effective (dedicated- or `extra-args`-supplied)
+non-JSON/text `--format`, a `-o`/`--output` output path via `extra-args`,
+a `--write`/scan-only `extra-args` flag (`--abi3`,
+`--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the
+compile-context-option family included), and a default (or explicit
+`--no-pattern-verdicts`) baseline scan reaching `compare`'s own pattern-
+verdict modulation, which has been unconditional since D4 with no flag left
+to turn it off (`scan --against` still defaults it off; only an explicit
+bare `--pattern-verdicts` in `extra-args` — matching `compare`'s forced-on
+behavior exactly — is safe to route) —
+are **independent, still-open capability gaps**, not instances of this
+divergence; `_SCAN_NEEDS_LEGACY_CLI` keeps routing those cases to the legacy
+CLI until each grows its own `compare` equivalent (tracked in
+`docs/contribute/known-gaps.md`). This amendment closes exactly the D3
+authority gap it investigated; it does not claim the Action's `scan`
+translation is now unconditional.
+
 ## Alternatives considered
 
 **Keep `scan`, make `compare` call into it.** Rejected: it preserves two

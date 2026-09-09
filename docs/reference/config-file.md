@@ -125,9 +125,10 @@ an unknown-key error.
 ## Top-level keys
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
-`compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`, `version:`,
-`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
-`baseline:` are the recognized top-level keys. See the
+`compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
+`resource_limits:`, `version:`, `risk_rules:`, `crosschecks:`, `targets:`,
+`bundles:`, `profiles:`, and `baseline:` are the recognized top-level keys.
+See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
 cover what each block does, its effective defaults, and behavior that isn't
@@ -363,6 +364,36 @@ more**:
 - `include_private_dso:` (default `false`) — the former `compare
   --include-private-dso`: include private (non-public) shared objects from
   non-standard paths.
+
+---
+
+### `resource_limits:`
+
+The calibrated JSON decode resource limit, demoted off the CLI (Phase 7g,
+one-comparison-product.md §4.1/§3 #21) — **no CLI spelling any more**. One
+key today: `max_bundle_facts_decode_nodes:` (default unset, applying
+[`bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`](../reference/python-api-reference.md),
+`1,000,000` — deliberately kept conservative rather than raised to cover
+a real large-blob need, since raising the *default* would widen every
+unconfigured/untrusted run's own decode-bomb ceiling) — the former
+`compare --max-json-object-nodes`: overrides the
+JSON container/scalar-token budget when decoding a stored `BundleFacts`
+document (`OLD_INPUT`, from a prior `compare --bundle-facts-out`). A real
+per-library facts blob for a large, template-heavy library (e.g.
+SYCL/DPC++, or a release sized like oneDAL's own ~20k-25k-function public
+header surface) can legitimately need well over the default to decode.
+**Only an explicitly-supplied `--config` may *raise* this budget past the
+default** — an auto-discovered `.abicheck.yml` (found by walking up from
+the current directory) can come from the same checkout supplying the
+content being decoded, so honoring a raise from it would let that
+checkout pair a raised budget with a compact decode-bomb payload. An
+auto-discovered config may still *lower* the budget below the default,
+since narrowing a ceiling is never a decode-bomb risk (Codex review, PR
+#1174, second round).
+Deliberately node-based, not a memory size — see
+`bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`'s own docstring for the real
+calibration measurement and why a memory-labelled dial would understate
+the actual container-count defense this budget provides.
 
 ---
 

@@ -269,7 +269,7 @@ if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
   _RELEASE_STYLE_OPERAND=true
 fi
 
-# debug-info1/2, devel-pkg1/2, dso-only, include-private-dso, keep-extracted,
+# debug-info1/2, devel-pkg1/2, dso-only, include-private-dso,
 # fail-on-removed-library: compare mode, directory/package operands only
 # (action/run.sh's `_is_release_style_operand()` guard). Name/value kept as
 # separate parallel arrays (not a single colon-joined string) since these
@@ -287,11 +287,10 @@ for _i in "${!_pkg_input_names[@]}"; do
   fi
 done
 
-_bool_input_names=(dso-only include-private-dso keep-extracted fail-on-removed-library)
+_bool_input_names=(dso-only include-private-dso fail-on-removed-library)
 _bool_input_values=(
   "${INPUT_DSO_ONLY:-false}"
   "${INPUT_INCLUDE_PRIVATE_DSO:-false}"
-  "${INPUT_KEEP_EXTRACTED:-false}"
   "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}"
 )
 for _i in "${!_bool_input_names[@]}"; do

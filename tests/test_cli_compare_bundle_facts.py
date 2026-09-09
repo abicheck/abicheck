@@ -218,6 +218,121 @@ class TestCompareOldBundleFacts:
         assert lib["suppression"]["suppressed_count"] == 1
 
     def test_max_json_object_nodes_override_is_honored(self, tmp_path: Path) -> None:
+        """Phase 7g (one-comparison-product.md §4.1/§3 #21): the former
+        ``--max-json-object-nodes`` is gone -- ``.abicheck.yml``'s
+        ``resource_limits.max_bundle_facts_decode_nodes`` is its only
+        source now."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("resource_limits:\n  max_bundle_facts_decode_nodes: 1\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        # A real facts document has more than one JSON container; a budget
+        # of 1 must reject it with a clean CLI error, not a raw traceback.
+        assert code != 0
+        assert "JSON containers" in out
+        assert "Traceback" not in out
+
+    def test_max_json_object_nodes_lower_override_is_honored_when_auto_discovered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (PR #1174, second round): an auto-discovered
+        ``.abicheck.yml`` may still *lower* the decode-bomb budget below
+        the conservative default -- narrowing a ceiling is never a
+        decode-bomb risk, unlike raising one (the sibling test below)."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        # Same budget-of-1 as the explicit-config test above, but written
+        # where discover_project_config() finds it with no --config flag.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("resource_limits:\n  max_bundle_facts_decode_nodes: 1\n")
+        monkeypatch.chdir(tmp_path)
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--format",
+            "json",
+        )
+
+        assert code != 0
+        assert "JSON containers" in out
+        assert "Traceback" not in out
+
+    def test_max_json_object_nodes_raise_is_ignored_when_auto_discovered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (PR #1174): unlike an *explicit* ``--config``, a
+        ``.abicheck.yml`` auto-discovered by walking up from cwd may be
+        content the same untrusted checkout supplies (e.g. a PR's own
+        working tree in CI) -- so it must not be able to *raise* the
+        pre-``json.loads()`` decode-bomb budget past the conservative
+        default the way an explicit ``--config`` can. Mirrors
+        ``resolve_dispatch_compile_context``'s existing explicit-vs-
+        auto-discovered trust distinction for ``compile:``.
+
+        Exercised directly against ``resolve_max_json_object_nodes_cfg``
+        (see its own dedicated unit tests) rather than via the CLI here,
+        since demonstrating a raise being honored end to end would need a
+        real facts document with more containers than the real default
+        (1,000,000) -- infeasible to build in a unit test."""
+        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
+            resolve_max_json_object_nodes_cfg,
+        )
+
+        # An auto-discovered config asking for a *larger* budget than the
+        # conservative default must not raise it.
+        assert (
+            resolve_max_json_object_nodes_cfg(
+                50_000_000, config_explicit=False, default=1_000_000
+            )
+            == 1_000_000
+        )
+        # The identical value from an *explicit* --config is honored.
+        assert (
+            resolve_max_json_object_nodes_cfg(
+                50_000_000, config_explicit=True, default=1_000_000
+            )
+            == 50_000_000
+        )
+        # No configured value at all -- caller's own default applies (None
+        # regardless of config_explicit, matching the pre-existing default
+        # parameter threading through to bundle_facts.load_bundle_facts).
+        assert (
+            resolve_max_json_object_nodes_cfg(
+                None, config_explicit=False, default=1_000_000
+            )
+            is None
+        )
+
+    def test_max_json_object_nodes_flag_removed(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -239,11 +354,8 @@ class TestCompareOldBundleFacts:
             "json",
         )
 
-        # A real facts document has more than one JSON container; a budget
-        # of 1 must reject it with a clean CLI error, not a raw traceback.
-        assert code != 0
-        assert "JSON containers" in out
-        assert "Traceback" not in out
+        assert code == 64
+        assert "--max-json-object-nodes" in out
 
     def test_format_sarif_is_rejected(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

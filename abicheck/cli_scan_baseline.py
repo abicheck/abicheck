@@ -976,49 +976,74 @@ def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
     }
 
 
-def _strip_automatic_cross_source_findings(
-    diff: Any, policy: str, policy_file: PolicyFile | None
-) -> None:
-    """Undo ``compare_snapshots``'s automatic ``cross_source_checks`` stage
-    (ADR-068 D3/D4/D5) for a baseline comparison, in place.
+def gating_redundant_changes(redundant_changes: list[Any], ledger: Any) -> list[Any]:
+    """The subset of *redundant_changes* `checker.compare()` actually scored
+    (CodeRabbit review, PR #1172): it computes the verdict over
+    ``kept + verdict_redundant`` -- ``redundant`` minus the rename-collapsed
+    halves ``SuppressRenamedPairs`` tags ``"rename:…"`` -- but
+    ``verdict_redundant`` is a private local never exposed on ``DiffResult``.
+    A caller revising the verdict after ``compare()`` returned (this
+    module's own ``--crosscheck KEY=off`` post-removal recompute) needs that
+    same population back, not a naive ``compute_verdict(diff.changes, ...)``
+    that silently drops it -- one of these can independently drive a
+    breaking exit code (``checker.py``'s own example: a downgraded
+    ``TYPE_SIZE_CHANGED`` with its redundant, still-breaking
+    ``FUNC_PARAMS_CHANGED`` sibling).
 
-    ``compare_snapshots`` above runs that stage on every call, with no
-    opt-out for a real front end (ADR-068 D4/D5). But ``scan`` already has
-    its own, older, single-snapshot mechanism for cross-source checks (the
-    dedicated ``crosscheck`` report block + ``--crosscheck KEY=error``
-    promotion), and this function's own docstring states the invariant that
-    mechanism relies on: single-version findings stay advisory for a
-    baseline comparison unless explicitly promoted, never folded into the
-    old/new diff by default -- else a candidate-side evidence-hygiene
-    finding (e.g. ``header_build_context_mismatch``) could turn a clean
-    old/new diff into a false-positive API break. Every check migrated onto
-    the automatic stage silently reintroduces its finding into
-    ``diff.changes`` unless undone here.
-
-    Every ``Change`` the automatic stage adds carries a non-``None``
-    ``cross_source_evolution`` (only that stage sets it), so it is
-    identified and stripped without touching any other finding, and the
-    verdict is recomputed from what remains -- mirroring ``checker.
-    _compute_verdict_for``'s own policy dispatch, so removing findings can
-    only ever lower the verdict, never leave a stale, too-severe one behind.
+    Reconstructs it by asking the already-finalized disposition ledger which
+    of *redundant_changes* it disposed ``GATING``
+    (``disposition_close.finalize_ledger``'s own ``verdict_scored`` handling
+    already recorded exactly that distinction) rather than re-deriving the
+    ``caused_by_type`` rule a second time. Returns ``[]`` when *ledger* is
+    ``None`` -- the same "nothing to revise" answer the rest of this
+    call site's ledger-optional helpers give.
     """
-    changes = getattr(diff, "changes", None)
-    if not changes:
-        # A test double (or any other caller not carrying a real DiffResult)
-        # has no `changes` list at all -- nothing to strip.
-        return
-    stripped_ids = {
-        id(c) for c in changes if getattr(c, "cross_source_evolution", None)
-    }
-    if not stripped_ids:
-        return
-    diff.changes = [c for c in changes if id(c) not in stripped_ids]
-    if policy_file is not None:
-        diff.verdict = policy_file.compute_verdict(diff.changes)
-    else:
-        from .checker_policy import compute_verdict
+    if ledger is None:
+        return []
+    from .workflows.disposition import Disposition
 
-        diff.verdict = compute_verdict(diff.changes, policy=policy)
+    return [
+        c
+        for c in redundant_changes
+        if (record := ledger.record_for(c)) is not None
+        and record.disposition is Disposition.GATING
+    ]
+
+
+def verdict_scored_changes(
+    kept_changes: list[Any], redundant_changes: list[Any], ledger: Any
+) -> list[Any]:
+    """The population a baseline scan's post-removal verdict recompute must
+    score (Codex review, PR #1172, round 12) -- everything
+    ``checker.compare()``'s own ``all_unsuppressed`` excludes from the gate
+    must stay excluded here too, or a late, unrelated ``--crosscheck
+    KEY=off`` recompute silently resurrects what the first pass already
+    correctly dropped:
+
+    - a ``CrossSourceEvolution.RESOLVED`` finding (plan F-9,
+      ``checker_policy.is_cross_source_resolved`` -- the same predicate
+      ``checker.py``'s ``all_unsuppressed`` and ``policy/severity.py``'s
+      ``gate_eligible_changes``/``gate_contribution_for_change`` apply) stays
+      fully visible in *kept_changes* but must not drive the verdict;
+    - a ``NOT_EVALUATED`` finding (ADR-049 D1/D9, Codex review, PR #1172,
+      round 15) -- one already proven out of the run's ``--contract``
+      domain or whose required evidence is missing has no compatibility
+      decision, the same exclusion ``_compute_verdict_for``'s own
+      ``evaluated_for_policy`` step applies before the *first* verdict
+      computation. Without it here, disabling an unrelated crosscheck could
+      resurrect an already-excluded contract finding (e.g. a
+      ``PROVEN_OUT_OF_CONTRACT`` `FUNC_REMOVED`) into a failing verdict;
+    - the *redundant_changes* ``compare()`` itself scored, reconstructed via
+      :func:`gating_redundant_changes` (see its own docstring) since
+      ``verdict_redundant`` is a private local never exposed on
+      ``DiffResult``.
+    """
+    from .checker_policy import is_cross_source_resolved
+    from .contract_gating import is_evaluated
+
+    return [
+        c for c in kept_changes if not is_cross_source_resolved(c) and is_evaluated(c)
+    ] + gating_redundant_changes(redundant_changes, ledger)
 
 
 def _run_baseline_compare(
@@ -1053,17 +1078,33 @@ def _run_baseline_compare(
     max_findings: int | None = None,
     require_complete_analysis: bool = False,
     requested_depth: str | None = None,
+    enabled_checks: frozenset[str] | None = None,
+    severities: dict[str, str] | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
-    Single-version cross-source findings are reported in the scan's dedicated
-    ``crosscheck`` block and stay advisory for baseline comparisons unless the
-    maintainer explicitly promotes one with ``--crosscheck KEY=error``. They are
-    not folded into ``extra_changes`` by default: doing so lets a candidate-side
-    evidence hygiene finding such as ``header_build_context_mismatch`` turn a
-    clean old/new artifact diff into an ``API_BREAK`` false positive. Real
-    old/new embedded build/source drift is still diffed below via
-    ``prepare_embedded_build_source``.
+    Cross-source findings from `compare_snapshots`'s automatic
+    `cross_source_checks` stage are gated exactly like any other finding
+    (ADR-068 D3/amendment) -- *except* a check the caller explicitly
+    disabled via `--crosscheck KEY=off` (`enabled_checks` excludes it):
+    `scan`'s own `--crosscheck` contract predates the migration and still
+    applies to baseline comparisons, so an automatic-stage finding for a
+    disabled check is dropped below, same as `scan`'s dedicated
+    single-snapshot `crosscheck` mechanism already respects it (Codex
+    review). `enabled_checks=None` means every check stays enabled (`scan`'s
+    own default, matching `_parse_crosschecks`'s no-flags case).
+
+    *severities* is `_parse_crosschecks`'s other half: a check explicitly
+    given `--crosscheck KEY=info`/`=warning` (Codex review, PR #1172, round
+    16) stays enabled and its automatic-stage finding stays visible, but
+    must not gate -- `_crosscheck_severity_exit`'s own contract for `scan`'s
+    dedicated single-snapshot mechanism ("`info`/`warning` never gate")
+    applies here too, or the caller's explicit demotion is silently
+    overridden by the finding kind's own default verdict once it reaches
+    the automatic stage. `KEY=error` needs no special-casing here: it only
+    ever *promotes* a check that would otherwise stay advisory, which the
+    dedicated `crosscheck` report's own `_crosscheck_severity_exit` already
+    handles independently of this diff.
 
     *headers*/*includes* are the same scan header inputs used to build the
     candidate, threaded into the baseline parse so a native ``--baseline``
@@ -1243,14 +1284,153 @@ def _run_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
-    _strip_automatic_cross_source_findings(diff, policy, policy_file)
+    # ADR-068 D3/amendment (2026-09-09): `compare_snapshots`'s automatic
+    # `cross_source_checks` stage output is kept, not stripped -- a baseline
+    # `scan` now gates a cross-source finding exactly as `compare` does
+    # (same verdict, same severity, same exit-code contribution). This used
+    # to call `_strip_automatic_cross_source_findings` to fold it back into
+    # `scan`'s older, dedicated `crosscheck` advisory-only mechanism; that
+    # was the divergence the amendment closes (D3's own authority rule --
+    # these findings stay RISK/API_BREAK and were never advisory-only --
+    # scan's stripping just never caught up to the migration).
+    #
+    # `--crosscheck KEY=off` is a narrower, still-live exception (Codex
+    # review): the automatic stage itself has no per-check disable (ADR-068
+    # D4/D5, "no opt-out for a real front end" -- it is not one), but
+    # `scan`'s own `--crosscheck` flag predates that stage and its `off`
+    # level is a `scan`-specific contract, not an opt-out on `compare`.
+    # Move only the findings for checks the caller explicitly disabled into
+    # `suppressed_changes`, exactly like scan's dedicated single-snapshot
+    # `crosscheck` mechanism already does via `CrosscheckConfig.enabled` --
+    # never a bare delete: AGENTS.md's "record before disposing" rule
+    # (ADR-067) applies here the same as any other suppression, so the
+    # observed finding stays in the audit trail with its own rule/reason
+    # (Codex review, second round) instead of silently vanishing.
+    #
+    # `override_suppressed_change`, not `record_suppressed_change` (Codex
+    # review, third round): `compare_snapshots()` above already finalized
+    # `diff.disposition_ledger` for every change it produced, so the plain,
+    # first-write-wins recorder would silently no-op here -- this call site
+    # is genuinely revising an already-terminal ledger entry, which is
+    # exactly what `override_suppressed_change` is for (see its own
+    # docstring).
+    #
+    # `rule=RuleProvenance(...)`, not `rule=None` (Codex review, fourth
+    # round): `--crosscheck KEY=off` has no `Suppression` object to project,
+    # but `rule=None` also erased the provenance `DispositionLedger.rules()`
+    # needs, even though `Change.suppression_rule` carried the string.
+    # `rule_id` matches that string exactly.
+    # `--crosscheck KEY=info`/`=warning` (Codex review, PR #1172, round 16;
+    # corrected same PR, next round): the check stays enabled and its
+    # finding stays fully visible in `diff.changes`/the report -- it must
+    # not gate on *any* axis, the same unconditional "`info`/`warning`
+    # never gate" contract `scan_engine._crosscheck_severity_exit` already
+    # enforces for the dedicated single-snapshot `crosscheck` mechanism.
+    # Defined unconditionally (not nested under `if enabled_checks is not
+    # None:` below, as the first attempt had it) -- `enabled_checks=None`
+    # is a real, documented case ("every check stays enabled"), and this
+    # name is read again further down regardless of which branch of that
+    # `if` ran.
+    #
+    # **Deliberately never folded into `diff.verdict`** (round-16 second
+    # review round, fresh evidence): unlike `_dropped` below -- a check the
+    # caller genuinely disabled, so its finding is suppressed and rightly
+    # excluded from the technical verdict the same way any other
+    # suppression is -- `info`/`warning` is a *gating* demotion only, per
+    # AGENTS.md's "Policy decides acceptance, not facts": the finding is
+    # still a real, present observation, so `diff.verdict` (the technical
+    # compatibility classification every consumer reads as "what did
+    # compare/scan observe") must report it exactly as `compare()` itself
+    # would, unchanged. Only the exit-code/gate computation further down
+    # may exclude it -- see `_gate_verdict`/`_non_gating`'s other read
+    # sites below for where that exclusion actually happens.
+    _non_gating = frozenset(
+        k for k, level in (severities or {}).items() if level in ("info", "warning")
+    )
+
+    def _crosscheck_non_gating(c: Any) -> bool:
+        return bool(
+            getattr(c, "cross_source_evolution", None)
+            and getattr(c.kind, "value", None) in _non_gating
+        )
+
+    # Read unconditionally (not only inside the `if _dropped:` recompute
+    # below) -- `_gate_verdict` (legacy exit-code scheme, further down)
+    # needs the identical disposition-ledger/redundant-changes inputs
+    # `verdict_scored_changes` takes, whether or not a `--crosscheck
+    # KEY=off` also fired this run.
+    _ledger = getattr(diff, "disposition_ledger", None)
+    _redundant = getattr(diff, "redundant_changes", None) or []
+
+    if enabled_checks is not None:
+        from .buildsource.cross_source_checks import ALL_CHECKS
+        from .workflows.disposition import RuleProvenance, override_suppressed_change
+
+        _disabled = frozenset(ALL_CHECKS) - enabled_checks
+        _dropped = [
+            c
+            for c in diff.changes
+            if getattr(c, "cross_source_evolution", None)
+            and getattr(c.kind, "value", None) in _disabled
+        ]
+        if _dropped:
+            _dropped_ids = {id(c) for c in _dropped}
+            diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
+            _ledger = getattr(diff, "disposition_ledger", None)
+            for c in _dropped:
+                _rule_id = f"crosscheck:{c.kind.value}=off"
+                c.suppression_rule = _rule_id
+                override_suppressed_change(
+                    _ledger,
+                    c,
+                    rule=RuleProvenance(
+                        rule_id=_rule_id,
+                        reason=f"disabled via --crosscheck {c.kind.value}=off",
+                    ),
+                    application_point="scan_crosscheck_off",
+                )
+            diff.suppressed_changes = [*diff.suppressed_changes, *_dropped]
+            # CodeRabbit review: `suppressed_count` is a distinct scalar
+            # (set to `len(suppressed)` at construction time), not derived
+            # from `len(suppressed_changes)` -- must stay in sync.
+            diff.suppressed_count = len(diff.suppressed_changes)
+            # Codex review (PR #1172, round 12): `verdict_scored_changes`
+            # also excludes a `CrossSourceEvolution.RESOLVED` finding --
+            # it stays visible in `diff.changes` but must not drive this
+            # recompute, the same way `checker.compare()`'s own
+            # `all_unsuppressed` already excludes it (plan F-9); without
+            # that, disabling an unrelated crosscheck here could
+            # resurrect an already-fixed cross-source issue into a
+            # failing verdict. Deliberately *not* also filtered by
+            # `_crosscheck_non_gating` (round-16 second review round) --
+            # see this block's own `_non_gating` docstring above for why
+            # an info/warning demotion must never reach `diff.verdict`.
+            # (`_ledger`/`_redundant` computed once above this whole `if
+            # enabled_checks is not None:` block; `diff.changes` was just
+            # mutated above, but neither ledger nor redundant-changes
+            # reads off it, so the pre-computed values are still correct.)
+            _verdict_population = verdict_scored_changes(
+                diff.changes, _redundant, _ledger
+            )
+            if policy_file is not None:
+                diff.verdict = policy_file.compute_verdict(_verdict_population)
+            else:
+                from .checker_policy import compute_verdict
+
+                diff.verdict = compute_verdict(_verdict_population, policy=policy)
     # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 
-    def _hashable_path(p: Path) -> Path:  # skip linker-script resolution for a text snapshot/manifest, which can coincidentally match the INPUT()/GROUP() probe (Codex review)
+    def _hashable_path(
+        p: Path,
+    ) -> Path:  # skip linker-script resolution for a text snapshot/manifest, which can coincidentally match the INPUT()/GROUP() probe (Codex review)
         from .service import sniff_text_format
 
-        return p if sniff_text_format(p) in ("json", "perl", "symvers") else resolve_linker_script_chain(p)
+        return (
+            p
+            if sniff_text_format(p) in ("json", "perl", "symvers")
+            else resolve_linker_script_chain(p)
+        )
 
     try:
         old_meta = collect_metadata(_hashable_path(baseline))
@@ -1344,7 +1524,11 @@ def _run_baseline_compare(
     )
 
     from .cli_compare_helpers import _verdict_exit_code
-    from .workflows.gate import fold_coverage_exit, gate_decision_for_result
+    from .workflows.gate import (
+        GateDecision,
+        fold_coverage_exit,
+        gate_decision_for_result,
+    )
 
     verdict = diff.verdict.value
     # Mirrors `compare`'s own `_exit_with_severity_or_verdict` (cli.py):
@@ -1365,7 +1549,41 @@ def _run_baseline_compare(
         # `reporter._build_severity_json` via the shared
         # `gate_decision_for_result` chokepoint (ADR-061 D9), so the two
         # commands' gate receipts are comparable field-by-field.
-        computed_gate = gate_decision_for_result(diff, sev_config)
+        #
+        # `_non_gating` (round 16, see its own definition above): scored
+        # over a filtered list, not `diff.changes` directly, when a
+        # `--crosscheck KEY=info`/`=warning` demotion is in effect --
+        # `gate_decision_for_result` deliberately always reads
+        # `result.changes` in full (its own docstring: a *display-only*
+        # filter must never change the exit code), so this scan-specific,
+        # per-run exclusion has to route around it via the same
+        # `compute_gate_decision` primitive it calls internally, called
+        # directly with the filtered list instead.
+        #
+        # That filtered list is for `compute_gate_decision` only (CodeRabbit
+        # review, round 17, fresh evidence): `_build_severity_json`'s own
+        # `changes` parameter is explicitly the *display* set --
+        # `severity.categories.*.count` -- separate from `gate` (its own
+        # docstring: "*changes* are the (possibly filtered) changes for
+        # display counts"). Handing it the same gate-filtered list made a
+        # demoted finding vanish from its category's count while it stayed
+        # present in `diff.findings`, contradicting this block's own "stays
+        # fully visible in the report" contract one field over. `gate`
+        # itself is unaffected -- it is already the correct, filtered
+        # decision computed below.
+        computed_gate: GateDecision | None
+        if _non_gating:
+            from .workflows.gate import compute_gate_decision
+
+            computed_gate = compute_gate_decision(
+                [c for c in diff.changes if not _crosscheck_non_gating(c)],
+                sev_config,
+                policy=diff.policy,
+                kind_sets=diff._effective_kind_sets(),
+                policy_file=diff.policy_file,
+            )
+        else:
+            computed_gate = gate_decision_for_result(diff, sev_config)
         assert computed_gate is not None  # sev_config is not None here
         gate = _build_severity_json(
             list(diff.changes),
@@ -1393,7 +1611,61 @@ def _run_baseline_compare(
         assert isinstance(gate_exit, int)  # compute_gate_decision.exit_code
         base_exit = gate_exit
     else:
-        base_exit = _verdict_exit_code(diff.verdict)
+        # `--crosscheck KEY=info`/`=warning` under the *legacy* scheme
+        # (round-16 second review round): unlike the severity branch above,
+        # this scheme has no separate gate computation to filter -- the
+        # exit code *is* `_verdict_exit_code(diff.verdict)` -- so honoring
+        # "info/warning never gate" here without corrupting `diff.verdict`
+        # itself (see `_non_gating`'s own docstring above) means computing
+        # a second, gate-only verdict over the demoted population and
+        # deriving the exit code from *that*, instead of from the real,
+        # unfiltered technical verdict every other consumer reads.
+        if _non_gating:
+            _gate_population = [
+                c
+                for c in verdict_scored_changes(diff.changes, _redundant, _ledger)
+                if not _crosscheck_non_gating(c)
+            ]
+            if policy_file is not None:
+                _gate_verdict = policy_file.compute_verdict(_gate_population)
+            else:
+                from .checker_policy import compute_verdict
+
+                _gate_verdict = compute_verdict(_gate_population, policy=policy)
+        else:
+            _gate_verdict = diff.verdict
+        base_exit = _verdict_exit_code(_gate_verdict)
+    if _non_gating:
+        # Codex review (PR #1172, round 16, third round, P2 finding):
+        # `summary["exit"]` (`diff.exit`, the persisted `ExitDecision`) was
+        # already resolved above, from `resolve_compare_exit_decision`,
+        # before `base_exit` above ever applied the `_non_gating`
+        # demotion -- so a structured JSON consumer could see the process
+        # exit at 0 (or the `severity` block's own `exit_code` at 0) while
+        # `diff.exit.code` still named `COMPATIBILITY_GATE` at a nonzero
+        # value for the identical run. Rebuild it from the *same*
+        # `base_exit` this function's own process exit code is about to
+        # fold coverage/assurance onto, reusing `resolve_exit_decision`'s
+        # coverage/assurance defaults the exact same way
+        # `resolve_compare_exit_decision` computed them the first time (the
+        # two axes below are unaffected by `_non_gating`, so recomputing
+        # them again here is not a second, independently-drifting
+        # calculation -- it is the identical one, over the identical
+        # `diff`) so every structured consumer of `diff.exit` sees one
+        # decision, consistent with the actually-returned exit code.
+        from .workflows.gate import (
+            analysis_assurance_exit_contribution,
+            coverage_exit_floor,
+            resolve_exit_decision,
+        )
+
+        summary["exit"] = resolve_exit_decision(
+            compatibility_contribution=base_exit,
+            contract_coverage_contribution=coverage_exit_floor(diff),
+            analysis_assurance_contribution=analysis_assurance_exit_contribution(
+                diff, require_complete=require_complete_analysis
+            ),
+        ).to_dict()
     # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict/severity
     # exit code and is folded identically here and in `compare`. Parity is
     # the point -- a ledger that gated one command and not the other would be

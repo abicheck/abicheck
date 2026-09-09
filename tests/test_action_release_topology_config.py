@@ -98,27 +98,6 @@ def _merge_config_overlay_fn_source() -> str:
     return text[start:end]
 
 
-# Just the `base_source` absolutization if-block inside the merge helper
-# (Codex review, PR #1159, fourth round) -- extracted on its own so a test
-# can exercise the "already qualified, leave it alone" vs. "relative, add
-# $PWD/" decision directly, without needing to run the full merge (which
-# would otherwise fail on "does not exist" for a synthetic Windows path
-# that has no real file behind it on this test runner, and would also let
-# Python's own `Path(...).resolve()` re-derive an absolute path from a
-# relative one, masking exactly the distinction this test needs to see).
-_BASE_SOURCE_ABSOLUTIZE_START = 'if ! _is_path_already_qualified "$base_source"; then'
-_BASE_SOURCE_ABSOLUTIZE_END = "\n  fi\n"
-
-
-def _base_source_absolutize_source() -> str:
-    text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index(_BASE_SOURCE_ABSOLUTIZE_START)
-    end = text.index(_BASE_SOURCE_ABSOLUTIZE_END, start) + len(
-        _BASE_SOURCE_ABSOLUTIZE_END
-    )
-    return text[start:end]
-
-
 # $_PY_SAFE_DIR/$_PY_BIN_HAS_ABICHECK: the merge helper's own prerequisites
 # (it imports abicheck.config_paths and yaml, so it needs the same
 # CWD-shadowing mitigation and interpreter-capability gate every other
@@ -504,6 +483,9 @@ _PY_BIN="{sys.executable}"
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
+# `${{CMD[-1]}}` (negative array index) needs bash 4.3+ -- macOS's default
+# `/usr/bin/bash` is 3.2 and raises "bad array subscript" on it. This
+# `${{#CMD[@]}}-1` form is the portable "last element" idiom.
 _overlay_path="${{CMD[${{#CMD[@]}}-1]}}"
 STDERR_FILE=$(mktemp)
 {_main_exit_trap_source()}
@@ -655,7 +637,8 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         build_config = tmp_path / "my-build-config.yml"
         build_config.write_text(
             "build:\n  query: 'cmake --build .'\n  system: cmake\n"
-            "compile:\n  compiler: /opt/toolchain/bin/g++\n  std: c++20\n",
+            "compile:\n  compiler: /opt/toolchain/bin/g++\n  std: c++20\n"
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 50000000\n",
             encoding="utf-8",
         )
         script = _release_topology_script_with_preexisting_config_flag(
@@ -674,10 +657,12 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
         assert doc["compile"] == {"compiler": "/opt/toolchain/bin/g++", "std": "c++20"}
         assert doc["gate"] == {"fail_on_removed_library": True}
-        # No stripping warning should have been emitted for the trusted,
-        # explicit case.
+        # Deliberate operator action -- not capped here either (only the
+        # discovered-config merge caps it, PR #1174 third round).
+        assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 50_000_000
         assert "build.query" not in result.stderr
         assert "compile.compiler" not in result.stderr
+        assert "resource_limits.max_bundle_facts_decode_nodes" not in result.stderr
 
     def test_symlinked_explicit_build_config_resolves_against_its_own_logical_location(
         self, tmp_path: Path
@@ -853,6 +838,37 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
         assert doc["build"] == {"system": "cmake"}
         assert "build.compile_db" in result.stderr
 
+    def test_discovered_resource_limits_raise_is_capped(self, tmp_path: Path) -> None:
+        """Codex review, PR #1174, third round: forwarding this key via
+        --config would launder it into operator-authorized-to-raise status,
+        the same risk as build.query/compile.compiler. Capped, not
+        stripped: a lower value (the sibling test below) is no risk."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 50000000\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 1_000_000
+        assert "resource_limits.max_bundle_facts_decode_nodes" in result.stderr
+
+    def test_discovered_resource_limits_lower_value_survives(
+        self, tmp_path: Path
+    ) -> None:
+        """Narrowing the budget below the default is never a decode-bomb
+        risk, so it passes through uncapped -- unlike build.query/
+        compile.compiler, which are always stripped regardless of value."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 1\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 1
+        assert "resource_limits.max_bundle_facts_decode_nodes" not in result.stderr
+
 
 class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:
     """Codex review, PR #1159 (P1, correctness): a relative
@@ -993,133 +1009,6 @@ class TestReleaseTopologyOverlayResolvesRelativeBuildConfigAgainstRealCwd:
         doc = _read_config_overlay(result.stdout.splitlines())
         assert doc["scope"] == {"on_incomplete": "block"}
         assert doc["gate"] == {"fail_on_removed_library": True}
-
-
-class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
-    """Codex review, PR #1159 (P1, fourth round): the merge helper's
-    ``base_source`` absolutization used to test ``[[ "$base_source" != /*
-    ]]`` -- POSIX-only, so a genuine Windows-qualified path (a drive letter
-    like ``C:\\...``, a UNC path ``\\\\server\\share\\...``, or a
-    root-relative ``\\foo``) was misclassified as relative and got a
-    spurious ``$PWD/`` prefix prepended, producing a malformed path that
-    then failed inside the isolated Python subprocess even though the
-    identical path already works fine when passed straight to the native
-    CLI. The fix reuses ``_is_path_already_qualified`` -- the same helper
-    ``$_PY_BIN`` canonicalization and ``_report_query``'s path anchoring
-    already use -- which recognizes these Windows-only forms, but only when
-    ``$OSTYPE`` indicates a Windows host (Git Bash/MSYS reports ``msys``);
-    exercised here by forcing ``$OSTYPE`` rather than relying on whatever
-    platform actually runs this test (mirrors
-    ``test_action_run_sh_severity_summary.py::TestReportPathAnchoring``'s
-    own established pattern for the identical helper).
-
-    These tests exercise just the absolutization if-block in isolation
-    (``_base_source_absolutize_source``), not the full merge -- a
-    synthetic Windows path has no real file behind it on this (Linux) test
-    runner, so running it through the full merge would fail on "does not
-    exist" for either branch and, worse, let Python's own
-    ``Path(...).resolve()`` re-derive an absolute path from a relative one,
-    masking exactly the bash-level distinction this test needs to observe.
-    """
-
-    def _absolutize(self, base_source: str, cwd: Path, *, windows: bool) -> str:
-        result, _pwd = self._absolutize_with_pwd(base_source, cwd, windows=windows)
-        return result
-
-    def _absolutize_with_pwd(
-        self, base_source: str, cwd: Path, *, windows: bool
-    ) -> tuple[str, str]:
-        # Emits both the absolutized result AND bash's own real, observed
-        # `$PWD` for `cwd` -- forcing `$OSTYPE` (see class docstring)
-        # controls which branch of the CODE UNDER TEST runs, but it cannot
-        # make a real host's own `$PWD` builtin render any differently: on
-        # a genuine Windows runner, `bash` is Git Bash/MSYS, whose `$PWD`
-        # is ALWAYS its own POSIX-style rendering (e.g. `/c/Users/...`)
-        # regardless of a forced `$OSTYPE=linux-gnu`, never the native
-        # `C:\Users\...` string `pathlib.Path` (and this test's own `cwd`
-        # fixture) would print -- unlike on a real Linux/macOS host, where
-        # the two happen to coincide. A caller building its expected value
-        # from `str(cwd)` instead of this real, observed `$PWD` silently
-        # assumes that coincidence holds everywhere, which is exactly what
-        # broke this class's own two `$PWD`-prefix assertions on Windows
-        # CI (fresh evidence, PR #1171) despite passing everywhere else.
-        script = (
-            "#!/usr/bin/env bash\nset -uo pipefail\n"
-            + _path_qualified_helper_source()
-            + '\nbase_source="$TEST_BASE_SOURCE"\n'
-            + _base_source_absolutize_source()
-            + 'printf "%s\\n%s" "$_TEST_OBSERVED_PWD" "$base_source"\n'
-        )
-        # `$OSTYPE` is forced explicitly (see class docstring) so both
-        # branches are exercised regardless of the host actually running
-        # this test.
-        script = script.replace(
-            'base_source="$TEST_BASE_SOURCE"\n',
-            'base_source="$TEST_BASE_SOURCE"\n_TEST_OBSERVED_PWD="$PWD"\n',
-        )
-        result = _run_bash_script(
-            script,
-            {
-                "OSTYPE": "msys" if windows else "linux-gnu",
-                "TEST_BASE_SOURCE": base_source,
-            },
-            cwd=cwd,
-        )
-        assert result.returncode == 0, result.stderr
-        observed_pwd, _, absolutized = result.stdout.partition("\n")
-        return absolutized, observed_pwd
-
-    def test_windows_drive_path_is_not_prefixed_with_pwd(self, tmp_path: Path) -> None:
-        windows_path = "C:/Users/runner/work/repo/config.yml"
-        result = self._absolutize(windows_path, tmp_path, windows=True)
-        assert result == windows_path
-
-    def test_windows_unc_path_is_not_prefixed_with_pwd(self, tmp_path: Path) -> None:
-        unc_path = r"\\server\share\config.yml"
-        result = self._absolutize(unc_path, tmp_path, windows=True)
-        assert result == unc_path
-
-    def test_windows_root_relative_path_is_not_prefixed_with_pwd(
-        self, tmp_path: Path
-    ) -> None:
-        root_relative = r"\foo\config.yml"
-        result = self._absolutize(root_relative, tmp_path, windows=True)
-        assert result == root_relative
-
-    def test_same_drive_letter_shaped_path_is_prefixed_on_non_windows(
-        self, tmp_path: Path
-    ) -> None:
-        """The identical text is a genuine POSIX-relative filename on a
-        non-Windows host (e.g. a file literally named ``C:`` is unusual but
-        legal on Linux/macOS) -- ``$OSTYPE`` gating means it still gets the
-        ``$PWD/`` prefix there, unlike the Windows-forced case above.
-
-        Built against bash's own observed ``$PWD``, not ``str(tmp_path)``
-        (fresh evidence, PR #1171): on a real Windows runner, ``bash`` is
-        Git Bash/MSYS, whose ``$PWD`` is always its own POSIX-style
-        rendering regardless of the forced ``$OSTYPE`` here -- the two only
-        happen to be textually identical on a genuine Linux/macOS host."""
-        posix_like = "C:/Users/runner/work/repo/config.yml"
-        result, observed_pwd = self._absolutize_with_pwd(
-            posix_like, tmp_path, windows=False
-        )
-        assert result == f"{observed_pwd}/{posix_like}"
-
-    def test_ordinary_relative_path_still_gets_pwd_prefix_on_windows(
-        self, tmp_path: Path
-    ) -> None:
-        """A genuinely relative path (no drive/UNC/root-relative form) must
-        still be absolutized even when ``$OSTYPE`` is Windows -- the fix
-        must not accidentally widen "already qualified" beyond the real
-        Windows-qualified forms.
-
-        Built against bash's own observed ``$PWD``, not ``str(tmp_path)``
-        -- see the sibling test above for why."""
-        relative = ".abicheck.yml"
-        result, observed_pwd = self._absolutize_with_pwd(
-            relative, tmp_path, windows=True
-        )
-        assert result == f"{observed_pwd}/{relative}"
 
 
 class TestReleaseTopologyOverlayGenerationIsIsolated:

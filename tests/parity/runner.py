@@ -29,12 +29,29 @@ from .gaps import EXPECTED_GAPS
 
 @dataclass(frozen=True)
 class Finding:
-    """One finding, projected to the dimensions parity is judged on."""
+    """One finding, projected to the dimensions parity is judged on.
+
+    ``finding_id`` (Codex review, PR #1172, round 16, fresh evidence)
+    disambiguates two same-``kind``/same-``identity`` findings on the same
+    symbol -- a cross-source check like ``private_header_leak`` can
+    legitimately emit several findings for one function, one per leaked
+    type, and without this field they collapsed onto the same
+    ``Finding`` value: a partial capability loss (one of the two rows
+    missing on one side) still hashed identically to the other side's set
+    and silently read as full parity. ``report_finding_id``
+    (``finding_identity.py``) is the shared per-finding fingerprint both
+    ``compare``'s and `scan`'s own report dicts already carry (folding in
+    ``old_value``/``new_value``/``source_location``/``description``, the
+    exact per-instance detail that distinguishes two same-kind occurrences)
+    -- reusing it here means no second identity scheme to keep in sync with
+    the real one every report consumer already relies on.
+    """
 
     kind: str
     identity: str
     severity: str
     evidence_refs: tuple[str, ...] = ()
+    finding_id: str = ""
 
 
 FindingSet = frozenset[Finding]
@@ -68,6 +85,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
     the same production function ``scan_engine.py`` is the sole caller of.
     """
     from abicheck.buildsource.cross_source_checks import run_crosschecks
+    from abicheck.finding_identity import report_finding_id
 
     result = run_crosschecks(snapshot, config)
     findings = set()
@@ -79,6 +97,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
                 identity=c.symbol or "",
                 severity=severity_for_kind(kind),
                 evidence_refs=tuple(result.providers.get(kind, ())),
+                finding_id=report_finding_id(c),
             )
         )
     return frozenset(findings)
@@ -110,6 +129,7 @@ def compare_finding_set(
                 identity=c.get("symbol") or "",
                 severity=severity_for_kind(kind),
                 evidence_refs=tuple(c.get("contract_evidence_refs") or ()),
+                finding_id=c.get("finding_id") or "",
             )
         )
     return frozenset(findings)
@@ -145,6 +165,7 @@ def scan_finding_set(artifact: Path | str, *extra_args: str) -> FindingSet:
                 identity=c.get("symbol") or "",
                 severity=severity_for_kind(kind),
                 evidence_refs=(),
+                finding_id=c.get("finding_id") or "",
             )
         )
     return frozenset(findings)
@@ -152,6 +173,212 @@ def scan_finding_set(artifact: Path | str, *extra_args: str) -> FindingSet:
 
 def kinds_of(finding_set: FindingSet) -> frozenset[str]:
     return frozenset(f.kind for f in finding_set)
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    """The whole-invocation outcome of one real CLI run -- not just its
+    finding set.
+
+    A finding-set diff alone cannot see two tools disagree on the number
+    that actually governs CI: a finding can be present on *both* sides (or
+    silently missing from *both*, e.g. stripped before it ever reaches
+    ``diff.findings``/``changes``) while the two tools still compute a
+    different overall verdict, exit code, or per-finding gate contribution
+    -- because one tool demoted or removed the finding's *contribution*
+    to the gate rather than the finding's presence. ``scan --against``'s
+    baseline path has exactly this shape
+    (``cli_scan_baseline._strip_automatic_cross_source_findings``): the
+    finding disappears from ``diff.findings`` entirely, so a bare kind-set
+    diff reads it as "compare_only" (unconstrained, always allowed) and
+    never looks at the verdict/exit code the stripping produced.
+    """
+
+    verdict: str | None
+    exit_code: int
+    findings: FindingSet
+    #: (kind, identity, finding_id) -> the finding's *actually applied*
+    #: severity label for this run (``changes[]``/``diff.findings[]``'s own
+    #: ``severity`` field) -- unlike ``Finding.severity`` above (a static
+    #: per-kind registry default), this can and does vary by run context.
+    #: ``finding_id`` (Codex review, PR #1172, round 16, fresh evidence) is
+    #: part of the key, not just ``Finding``'s own dedup fields, for the
+    #: identical reason: a check like ``private_header_leak`` can emit
+    #: several same-``(kind, identity)`` findings for one function (one per
+    #: leaked type), and without it the second finding's severity/gate
+    #: entry silently overwrote the first's in this dict instead of the two
+    #: staying distinguishable.
+    severities: dict[tuple[str, str, str], str]
+    #: (kind, identity, finding_id) -> ADR-049 D1 ``gate_contribution`` for
+    #: this run, or ``None`` when the raw finding dict never carries the key
+    #: at all. `compare`'s `changes[]` entries always carry it
+    #: (``reporter.py``'s `_change_to_dict` stamps it unconditionally, `0`
+    #: included -- a real, computed "no contribution"). `scan`'s own
+    #: `diff.findings[]` entries (`cli_scan_baseline._baseline_finding_dicts`)
+    #: never carry the key at all -- a genuine, documented gap (CodeRabbit
+    #: review, PR #1172, round 12), not an intentional "not applicable"
+    #: omission the way the contract fields are. `None` here keeps that
+    #: distinction visible to :func:`assert_full_parity` instead of coercing
+    #: a *missing* value and a *real* `0` to the same thing, which would let
+    #: a genuine scan/compare gate_contribution divergence silently read as
+    #: parity whenever it happened to coincide with compare's own value
+    #: being `0`.
+    gate_contributions: dict[tuple[str, str, str], int | None]
+
+
+def _outcome_from_findings(
+    result: Any,
+    verdict: object,
+    raw_findings: list[dict[str, Any]],
+    *,
+    evidence_key: str | None,
+) -> RunOutcome:
+    findings = set()
+    severities: dict[tuple[str, str, str], str] = {}
+    gate: dict[tuple[str, str, str], int | None] = {}
+    for c in raw_findings:
+        kind = c["kind"]
+        identity = c.get("symbol") or ""
+        finding_id = c.get("finding_id") or ""
+        key = (kind, identity, finding_id)
+        findings.add(
+            Finding(
+                kind=kind,
+                identity=identity,
+                severity=severity_for_kind(kind),
+                evidence_refs=(
+                    tuple(c.get(evidence_key) or ()) if evidence_key else ()
+                ),
+                finding_id=finding_id,
+            )
+        )
+        # `compare`'s `changes[]` entries carry `severity`; `scan`'s own
+        # `diff.findings[]` entries carry the same per-run label under
+        # `bucket` instead (`_baseline_finding_dicts`) -- same value space
+        # ("risk"/"potential_breaking"/... per `_VERDICT_TO_SEVERITY_LABEL`),
+        # different key name. Prefer `severity` when both are present (a
+        # `compare`-shaped entry never carries `bucket`).
+        severities[key] = c.get("severity", c.get("bucket", "unknown"))
+        # `None` (not `0`) when the key is genuinely absent -- see
+        # RunOutcome.gate_contributions' own docstring for why the two must
+        # not be conflated.
+        gate[key] = c.get("gate_contribution")
+    return RunOutcome(
+        verdict=verdict if verdict is None else str(verdict),
+        exit_code=result.exit_code,
+        findings=frozenset(findings),
+        severities=severities,
+        gate_contributions=gate,
+    )
+
+
+def compare_outcome(old: Path | str, new: Path | str, *extra_args: str) -> RunOutcome:
+    """The full ``compare OLD NEW`` outcome: verdict, exit code, and every
+    finding's actually-applied severity/gate_contribution -- not just which
+    findings appeared."""
+    result = invoke_cli("compare", str(old), str(new), "--format", "json", *extra_args)
+    if result.exit_code not in (0, 1, 2, 4, 6, 64):
+        raise AssertionError(
+            f"compare failed unexpectedly (exit={result.exit_code}):\n{result.output}"
+        )
+    data = json.loads(result.stdout)
+    return _outcome_from_findings(
+        result,
+        data.get("verdict"),
+        list(data.get("changes", [])),
+        evidence_key="contract_evidence_refs",
+    )
+
+
+def scan_outcome(artifact: Path | str, *extra_args: str) -> RunOutcome:
+    """The full ``scan ARTIFACT ...`` outcome: verdict, exit code, and every
+    finding's actually-applied severity/gate_contribution -- not just which
+    findings appeared."""
+    result = invoke_cli("scan", str(artifact), "--format", "json", *extra_args)
+    if result.exit_code not in (0, 1, 2, 4, 5, 6, 7, 64):
+        raise AssertionError(
+            f"scan failed unexpectedly (exit={result.exit_code}):\n{result.output}"
+        )
+    data = json.loads(result.stdout)
+    diff = data.get("diff") or {}
+    return _outcome_from_findings(
+        result, data.get("verdict"), list(diff.get("findings", [])), evidence_key=None
+    )
+
+
+def assert_full_parity(
+    *, scan: RunOutcome, compare: RunOutcome, context: str
+) -> ParityReport:
+    """Everything :func:`assert_no_capability_loss` checks over the two
+    outcomes' finding sets, plus the axes a finding-set diff alone cannot
+    see: the overall verdict, the process exit code, and -- for a finding
+    present under both tools -- whether its actually-applied severity and
+    ADR-049 gate contribution agree. See :class:`RunOutcome` for why this is
+    a distinct check from a finding-set diff, not a superset expressible
+    through one.
+
+    Unlike :func:`assert_no_capability_loss` (a one-way check: `scan`
+    findings `compare` doesn't reproduce are a loss, but `compare` findings
+    `scan` lacks are always allowed -- "richer" is fine there), *this*
+    function requires the two finding sets to be exactly equal (Codex
+    review, PR #1172, round 5): every caller uses it to justify routing a
+    baseline `scan` through `compare`'s translation, so a `compare_only`
+    finding here would mean the translated request silently produces a
+    *different* report than the one it replaces, not just a richer one --
+    the same class of user-visible regression a `scan`-only loss is, just
+    facing the other direction.
+    """
+    report = assert_no_capability_loss(
+        scan_findings=scan.findings, compare_findings=compare.findings, context=context
+    )
+    if report.compare_only:
+        names = ", ".join(
+            f"{f.kind}({f.identity!r})"
+            for f in sorted(report.compare_only, key=lambda f: (f.kind, f.identity))
+        )
+        raise AssertionError(
+            f"{context}: `compare` reports finding(s) `scan` does not -- not "
+            "full parity, since this check is used to justify routing scan "
+            f"through compare's translation, not merely richer output: {names}"
+        )
+    mismatches: list[str] = []
+    if scan.verdict != compare.verdict:
+        mismatches.append(f"verdict: scan={scan.verdict!r} compare={compare.verdict!r}")
+    if scan.exit_code != compare.exit_code:
+        mismatches.append(
+            f"exit_code: scan={scan.exit_code!r} compare={compare.exit_code!r}"
+        )
+    shared_keys = sorted(set(scan.severities) & set(compare.severities))
+    for key in shared_keys:
+        if scan.severities[key] != compare.severities[key]:
+            mismatches.append(
+                f"{key}: severity scan={scan.severities[key]!r} "
+                f"compare={compare.severities[key]!r}"
+            )
+        # `None` means "this side's raw finding dict never carries the key"
+        # (see RunOutcome.gate_contributions), not "computed as 0" -- scan's
+        # own JSON structurally never carries it yet (a real, tracked gap,
+        # not something this harness can verify until that's fixed), so a
+        # `None` on either side skips the comparison rather than coercing
+        # it to 0 and risking a real divergence reading as parity by
+        # coincidence.
+        scan_gate = scan.gate_contributions.get(key)
+        compare_gate = compare.gate_contributions.get(key)
+        if (
+            scan_gate is not None
+            and compare_gate is not None
+            and scan_gate != compare_gate
+        ):
+            mismatches.append(
+                f"{key}: gate_contribution scan={scan_gate!r} compare={compare_gate!r}"
+            )
+    if mismatches:
+        raise AssertionError(
+            f"{context}: scan/compare parity mismatch beyond finding-set "
+            "presence (verdict/exit_code/severity/gate_contribution):\n  "
+            + "\n  ".join(mismatches)
+        )
+    return report
 
 
 #: ADR-068 D4/Phase 5: --surface-metrics computation is unconditional on

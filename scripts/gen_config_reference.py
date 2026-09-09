@@ -49,12 +49,14 @@ GENERATED_NOTE = (
 
 
 def _subkey_type(
-    block: str, subkey: str, bool_map: dict, str_map: dict, list_map: dict
+    block: str, subkey: str, bool_map: dict, str_map: dict, list_map: dict, int_map: dict
 ) -> str:
     if subkey in bool_map.get(block, frozenset()):
         return "bool"
     if subkey in str_map.get(block, frozenset()):
         return "str"
+    if subkey in int_map.get(block, frozenset()):
+        return "int"
     if subkey in list_map.get(block, frozenset()):
         return "list[str] (or a single str)"
     return "unspecified"
@@ -74,6 +76,11 @@ def render() -> str:
         _TOP_LEVEL_STR_KEYS,
         BuildConfig,
     )
+
+    # INT_SUBKEYS lives only in build_config_schema.py -- build_config.py
+    # itself never imports the raw table (it calls schema.int_subkey_findings
+    # instead), so this generator reads it straight from its own schema home.
+    from abicheck.buildsource.build_config_schema import INT_SUBKEYS as _INT_SUBKEYS
 
     known_top = BuildConfig._KNOWN_TOP_KEYS
     known_blocks = BuildConfig._KNOWN_BLOCK_KEYS
@@ -104,7 +111,7 @@ def render() -> str:
         lines += [f"### `{block}:`", "", "| Sub-key | Type |", "|---|---|"]
         for subkey in sorted(known_blocks[block]):
             type_str = _subkey_type(
-                block, subkey, _BOOL_SUBKEYS, _STR_SUBKEYS, _LIST_SUBKEYS
+                block, subkey, _BOOL_SUBKEYS, _STR_SUBKEYS, _LIST_SUBKEYS, _INT_SUBKEYS
             )
             lines.append(f"| `{subkey}` | {type_str} |")
         lines.append("")

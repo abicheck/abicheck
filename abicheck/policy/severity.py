@@ -67,6 +67,7 @@ from ..checker_policy import (
     ChangeKind as ChangeKind,
     HasKind as HasKind,
     Verdict as Verdict,
+    is_cross_source_resolved as is_cross_source_resolved,
 )
 from ..contract_gating import is_evaluated as is_evaluated
 from ..errors import PolicyError as PolicyError
@@ -95,8 +96,12 @@ def gate_eligible_changes(changes: Sequence[HasKind]) -> list[HasKind]:
     :func:`compute_gate_decision` so an exit code and the categories blamed
     for it are always derived from the same set -- the two disagreeing is the
     class of bug ``compute_gate_decision`` was introduced to close.
+
+    Also excludes a ``RESOLVED`` cross-source finding (plan F-9,
+    ``checker_policy.is_cross_source_resolved``): still in the report,
+    never in what the gate scores.
     """
-    return [c for c in changes if is_evaluated(c)]
+    return [c for c in changes if is_evaluated(c) and not is_cross_source_resolved(c)]
 
 
 class SeverityLevel(str, Enum):
@@ -580,6 +585,8 @@ def gate_contribution_for_change(
 
     - a ``NOT_EVALUATED`` finding contributes ``0`` -- it is not on the
       compatibility axis at all;
+    - a ``RESOLVED`` cross-source finding (plan F-9) contributes ``0``
+      too, same reason :func:`gate_eligible_changes` excludes it;
     - under the severity scheme, a finding contributes its category's exit
       code when that category is configured ``error``, and ``0`` otherwise --
       which is exactly what :func:`compute_exit_code` folds with ``max``;
@@ -593,7 +600,7 @@ def gate_contribution_for_change(
     :func:`compute_exit_code` or :func:`legacy_exit_code` would already have
     produced for the same finding.
     """
-    if not is_evaluated(change):
+    if not is_evaluated(change) or is_cross_source_resolved(change):
         return 0
     if config is None:
         return legacy_exit_code(

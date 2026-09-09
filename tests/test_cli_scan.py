@@ -1357,24 +1357,20 @@ def _header_context_mismatch_snap(tmp_path: Path, name: str) -> Path:
     return _write_snapshot(tmp_path / name, snap)
 
 
-def test_baseline_compare_keeps_crosschecks_advisory_by_default(runner, tmp_path):
+def test_baseline_compare_gates_crosschecks_by_default(runner, tmp_path):
+    # Was `test_baseline_compare_keeps_crosschecks_advisory_by_default`;
+    # ADR-068's 2026-09-09 amendment stopped stripping cross-source findings
+    # from a baseline diff, so an unpromoted crosscheck now gates too.
     old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
     new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
     res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new),
-            "--against",
-            str(old),
-            "--format",
-            "json",
-        ],
+        main, ["scan", str(new), "--against", str(old), "--format", "json"]
     )
-    assert res.exit_code == 0, res.output
+    assert res.exit_code == 2, res.output
     payload = _payload(res)
-    assert payload["verdict"] != "API_BREAK"
-    assert payload["diff"]["api_break"] == 0
+    assert payload["verdict"] == "API_BREAK"
+    assert payload["diff"]["api_break"] == 1
+    # The dedicated `crosscheck` block still reports the check too.
     assert (
         payload["crosscheck"]["counts_by_check"]["header_build_context_mismatch"] == 1
     )
@@ -1519,6 +1515,10 @@ def test_a_promoted_crosscheck_updates_the_persisted_exit_block(runner, tmp_path
     # runs -- so without `_promote_published_gate` also patching this block
     # (the way it already patches `diff.severity`), a clean baseline would
     # publish `exit.code: 0` while the process exited 2.
+    #
+    # Since ADR-068's 2026-09-09 amendment this finding also gates on its
+    # own, so `reasons` carries both `compatibility_gate` and
+    # `promoted_crosscheck`.
     old = _header_context_mismatch_snap(tmp_path, "old.abi.json")
     new = _header_context_mismatch_snap(tmp_path, "new.abi.json")
     res = runner.invoke(
@@ -1532,7 +1532,7 @@ def test_a_promoted_crosscheck_updates_the_persisted_exit_block(runner, tmp_path
     assert res.exit_code == 2, res.output
     exit_block = _payload(res)["diff"]["exit"]
     assert exit_block["code"] == 2, exit_block
-    assert exit_block["reasons"] == ["promoted_crosscheck"], exit_block
+    assert set(exit_block["reasons"]) == {"compatibility_gate", "promoted_crosscheck"}, exit_block
     # The invariant Codex flagged on an earlier revision: `code` must equal
     # `max()` over every contribution field, not just the two this function
     # used to hand-patch.

@@ -46,6 +46,11 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # --on-incomplete-scope (scope.on_incomplete).
         # ADR-068 D4/Phase 5 collapsed --report-mode/--show-only/--demangle/
         # --no-demangle/--explain-patterns into one repeatable --view option.
+        # Phase 7d remainder + 7g deleted 3 more, with no CLI spelling left
+        # at all: --keep-extracted/--no-bundle-analysis (no replacement --
+        # extraction cleanup and bundle analysis are unconditional now),
+        # --max-json-object-nodes (resource_limits.max_bundle_facts_decode_
+        # nodes in .abicheck.yml).
         # --instantiation-manifest, --bundle-facts-out, and
         # --bundle-facts-library-manifest stay CLI flags this phase (see
         # frontends/cli/options/release.py and bundle_facts.py's own
@@ -74,11 +79,8 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--include",
         "--include-system-declarations",
         "--instantiation-manifest",
-        "--keep-extracted",
         "--ld-library-path",
-        "--max-json-object-nodes",
         "--no-baseline",
-        "--no-bundle-analysis",
         "--no-scope-public-headers",
         "--new-variant",
         "--old-variant",

@@ -35,7 +35,13 @@ from .appcompat_consumer_impact import (
     enrich_covered_changes,
 )
 from .checker import Change, DiffResult
-from .checker_policy import ChangeKind, ReachabilityState, Verdict, compute_verdict
+from .checker_policy import (
+    ChangeKind,
+    ReachabilityState,
+    Verdict,
+    compute_verdict,
+    is_cross_source_resolved,
+)
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
@@ -763,13 +769,32 @@ def _compute_appcompat_verdict(
     policy: str,
     policy_file: PolicyFile | None,
 ) -> Verdict:
-    """Determine the app-specific compatibility verdict."""
+    """Determine the app-specific compatibility verdict.
+
+    Codex review, PR #1172, round 20, fresh evidence: ``breaking_for_app``/
+    ``breaking_for_host`` (the ``_partition_app_changes`` caller passes here)
+    is also this module's own display/audit list -- ``AppCompatResult.
+    breaking_for_app`` -- so a ``RESOLVED`` cross-source finding (present on
+    OLD, fixed on NEW; still visible in ``diff.changes`` per plan F-9) that
+    happens to name a symbol this consumer imports correctly stays in it for
+    that reason. But scoring the verdict from the *same*, unfiltered list
+    let that already-fixed issue keep reporting ``COMPATIBLE_WITH_RISK``/
+    counting the consumer as affected -- the identical class of bug
+    ``checker._verdict_scored_population`` (see its own docstring) and
+    ``cli_scan_baseline.verdict_scored_changes`` already close at their own
+    chokepoints, just reached here through the consumer-scoping path
+    instead. Filtered at the one place both call sites (app and host) score
+    a verdict from this list, leaving the list itself -- and every other
+    reader of it (the ledger finalize call, the uncovered-symbol scan, the
+    rendered report) -- untouched.
+    """
     if missing_symbols or missing_versions:
         return Verdict.BREAKING
-    if breaking_for_app:
+    verdict_scored = [c for c in breaking_for_app if not is_cross_source_resolved(c)]
+    if verdict_scored:
         if policy_file is not None:
-            return policy_file.compute_verdict(breaking_for_app)
-        return compute_verdict(breaking_for_app, policy=policy)
+            return policy_file.compute_verdict(verdict_scored)
+        return compute_verdict(verdict_scored, policy=policy)
     return Verdict.COMPATIBLE if required_count > 0 else Verdict.NO_CHANGE
 
 

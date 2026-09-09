@@ -480,22 +480,49 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         "--no-fail-on-removed-library/--dso-only/--include-private-dso"
         " (Phase 7d, ADR-068 D5: demoted to CONFIG-only -- scope."
         "on_incomplete/gate.fail_on_removed_library/release.dso_only/"
-        "release.include_private_dso in .abicheck.yml, no CLI override)",
+        "release.include_private_dso in .abicheck.yml, no CLI override)."
+        " --keep-extracted/--no-bundle-analysis (Phase 7d remainder): removed"
+        " outright instead, no config replacement.",
         (
             "--on-incomplete-scope",
             "--fail-on-removed-library",
             "--no-fail-on-removed-library",
             "--dso-only",
             "--include-private-dso",
+            "--keep-extracted",
+            "--no-bundle-analysis",
         ),
+        # reference/config-file.md/exit-codes.md#L99: each config-key section
+        # names the former `compare ...` flag it replaces, in its own
+        # historical-record capacity (exit-codes.md line-pinned so a later,
+        # live mention elsewhere still gets flagged). The rest are historical
+        # G38/ADR-023/ADR-056/ADR-068 design records for --keep-extracted/
+        # --no-bundle-analysis, plus multi-binary.md's own "gone now" prose.
         frozenset(
             {
-                # Each config-key section names "the former `compare ...`"
-                # flag it replaces, in its own historical-record capacity.
                 "reference/config-file.md",
-                # Historical migration note, line-pinned so a later, live
-                # mention added elsewhere in this file still gets flagged.
                 "reference/exit-codes.md#L99",
+                "contribute/plans/g35-multi-artifact-scan.md",
+                "contribute/adr/006-package-level-comparison.md",
+                "contribute/adr/023-bundle-aware-multi-binary-analysis.md",
+                "contribute/adr/056-multi-artifact-library-set-scan.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "contribute/plans/one-comparison-product.md",
+                "use/multi-binary.md",
+                "use/github-action.md",
+            }
+        ),
+    ),
+    (
+        # Removed outright (Phase 7g), replaced by resource_limits.max_bundle_facts_decode_nodes -- a different config key, not a same-name rename.
+        "compare --max-json-object-nodes",
+        ("--max-json-object-nodes",),
+        frozenset(
+            {
+                "contribute/plans/g38-bundle-facts-model-and-multibuild-comparability.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "reference/config-file.md",
             }
         ),
     ),
