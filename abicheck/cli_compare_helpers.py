@@ -1362,11 +1362,40 @@ def run_compare(
     # drift). The per-side `old=`/`new=` scoping the flag carried has no
     # config spelling and is not reinvented as one: a side needing its own
     # PDB names the directory holding it with `--debug-root old=`/`new=`,
-    # which `debug_resolver` already searches for a PDB (`pdb_in_root`).
+    # which `debug_resolver` already searches for a PDB (`pdb_in_root`,
+    # matched by that side's own binary stem -- unlike the scalar override
+    # below, a real per-side match).
     _cfg_pdb = resolved_cfg.pdb_path
     pdb_path = Path(_cfg_pdb) if _cfg_pdb else None
     old_pdb_path: Path | None = None
     new_pdb_path: Path | None = None
+    if pdb_path is not None:
+        # Codex review, PR #1180, fresh evidence ("Preserve per-side PDB
+        # selection"): with the per-side `old=`/`new=` override gone,
+        # `old_pdb_path`/`new_pdb_path` above are now permanently `None`,
+        # so every consumer's `old_pdb_path or pdb_path` /
+        # `new_pdb_path or pdb_path` fallback (locate_pdb's own
+        # pdb_path_override, honored unconditionally with no GUID/age
+        # check against the binary it's paired with) resolves to the
+        # *identical* file for both sides of every two-sided compare. Two
+        # different PE binaries silently reading the same PDB is not a
+        # degraded case -- `locate_pdb` reports it found a PDB either way
+        # -- it can hide a real type/layout change behind a false clean
+        # result, exactly the "manufacture a clean compatibility claim
+        # from evidence that doesn't support it" failure AGENTS.md's
+        # weaker-evidence rule exists to prevent. Rejected outright rather
+        # than silently shared; `--debug-root old=`/`new=` is the safe
+        # per-side alternative (a real per-binary-stem match, not a
+        # shared exact path).
+        raise click.UsageError(
+            "debug.pdb_path names one PDB file shared by both sides of a "
+            "two-operand compare: without a per-side old=/new= spelling "
+            "(removed from the CLI, and not reinvented as a config key), "
+            "applying it to two different binaries risks silently reading "
+            "the same debug info for both and reporting a false clean "
+            "result. Use --debug-root old=<dir>/new=<dir> instead -- it "
+            "resolves each side's own PDB by that side's binary name."
+        )
     show_redundant = resolved_cfg.show_redundant
     # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI flag
     # left either; `compile.lang` is its only source, defaulting to the

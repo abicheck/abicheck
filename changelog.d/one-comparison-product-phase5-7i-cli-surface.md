@@ -66,3 +66,17 @@
   stored-bundle-facts `OLD_INPUT`**: that driver builds no proven-inventory
   acquisition record to derive a support-promise finding from, so a
   declared policy there would previously have silently produced none.
+- **`--view filtered`/`--view suppressions` are rejected for `compare
+  --no-baseline`**, the same way every other unsupported view token
+  already is: a no-baseline audit reports an empty change set by
+  construction, with no scope/disposition ledger and no suppression audit
+  to render.
+- **`debug.pdb_path` (`.abicheck.yml`) is rejected for a two-operand
+  `compare`.** Losing `--pdb-path`'s per-side `old=`/`new=` spelling left
+  no way to give two different binaries two different PDBs through this
+  key — every consumer's fallback resolved the identical file for both
+  sides, and `locate_pdb` honors an explicit override with no check that
+  it actually matches the binary it's paired with. Silently sharing one
+  PDB across two different builds risks a false clean result. Use
+  `--debug-root old=<dir>/new=<dir>` instead — it resolves each side's own
+  PDB by that side's binary name.
