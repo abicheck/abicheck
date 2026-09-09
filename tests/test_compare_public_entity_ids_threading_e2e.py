@@ -122,7 +122,7 @@ def test_resolved_pair_reaches_both_boundaries_through_compare_snapshots(
         _compute_surface_metrics_spy,
     )
 
-    compare_snapshots(old, new, pattern_verdicts=True, surface_metrics=True)
+    compare_snapshots(old, new, pattern_verdicts=True)
 
     # Boundary (a): both steps received the resolved pair, never None/None.
     assert pv_calls == [(expected_old_ids, expected_new_ids)]
@@ -143,12 +143,13 @@ def test_pattern_verdicts_boundary_is_not_reached_when_off(
     "Obtain ADR approval before forcing verdict modulation") -- its own
     boundary is not reached when the caller leaves it off.
 
-    ``surface_metrics`` no longer has an equivalent test: ADR-027 Phase 5
-    later made it unconditional at this same ``compare_snapshots`` chokepoint
-    (`TestSurfaceMetricsIsUnconditionalAtTheTier2Verb` in
+    ``surface_metrics`` no longer has an equivalent test, and no longer has
+    a keyword here at all: ADR-027 Phase 5 made it unconditional at this
+    same ``compare_snapshots`` chokepoint, and
+    one-comparison-product.md Phase 5 then removed the accepted-but-ignored
+    parameter outright (`TestSurfaceMetricsIsUnconditionalAtTheTier2Verb` in
     ``test_typed_api_gate_options.py`` covers that contract directly), so
-    asserting its boundary stays unreached when ``surface_metrics=False`` is
-    passed would pin behavior this codebase no longer has."""
+    there is no ``surface_metrics=False`` left to pass."""
     old = _snap("old")
     new = _snap("new")
 
@@ -159,6 +160,6 @@ def test_pattern_verdicts_boundary_is_not_reached_when_off(
         lambda *a, **kw: calls.append(1),
     )
 
-    compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=True)
+    compare_snapshots(old, new, pattern_verdicts=False)
 
     assert calls == []

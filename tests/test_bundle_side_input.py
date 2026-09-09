@@ -898,7 +898,7 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
     validation, unlike ``surface_metrics`` which has its own separate,
     pre-existing precedent."""
 
-    def test_surface_metrics_true_is_forwarded_to_compare_snapshots(
+    def test_surface_metrics_is_not_an_opt_out_on_the_live_bundle_facts_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.package as package_mod
@@ -929,18 +929,24 @@ class TestSurfaceMetricsReachesLiveBundleFactsDriver:
             ),
         )
 
+        # one-comparison-product.md Phase 5: `surface_metrics` is no longer a
+        # parameter of the Tier-2 verb at all -- it forces the ADR-027
+        # metric-drift stage on for every caller -- so the spy asserts the
+        # keyword's *absence*, the stronger property: a re-introduced
+        # parameter (a way for this driver to opt out again) fails here.
         real_compare_snapshots = service_mod.compare_snapshots
-        seen_surface_metrics: list[object] = []
+        seen_kwargs: list[dict[str, object]] = []
 
         def _spy_compare_snapshots(old, new, *args, **kwargs):
-            seen_surface_metrics.append(kwargs.get("surface_metrics"))
+            seen_kwargs.append(dict(kwargs))
             return real_compare_snapshots(old, new, *args, **kwargs)
 
         monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
 
         compare_release_against_bundle_facts(facts_path, new_dir)
 
-        assert seen_surface_metrics == [True]
+        assert len(seen_kwargs) == 1
+        assert "surface_metrics" not in seen_kwargs[0]
 
     def test_public_surface_growth_is_reported(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

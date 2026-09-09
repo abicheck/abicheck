@@ -910,7 +910,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 64
         assert "--debug-root" in out
 
-    def test_surface_metrics_is_accepted_as_a_no_op(self, tmp_path: Path) -> None:
+    def test_no_surface_metrics_flag_is_needed_or_rejected(self, tmp_path: Path) -> None:
         # CodeRabbit/Codex review on PR #1154: compare_release_against_
         # bundle_facts() now forwards surface_metrics=True unconditionally
         # to every per-library service.compare_snapshots() call, the same
@@ -931,11 +931,15 @@ class TestCompareOldBundleFactsEarlyRejections:
         new_dir = tmp_path / "new"
         new_dir.mkdir()
 
+        # one-comparison-product.md Phase 5 removed the flag outright (the
+        # ADR-027 metric findings are unconditional), so the removed spelling
+        # is a usage error here like everywhere else -- what this test now
+        # pins is that its *absence* is not a rejection on this operand
+        # shape, which is what the no-op assertion was really protecting.
         code, out = _invoke(
             "compare",
             str(facts_path),
             str(new_dir),
-            "--surface-metrics",
             "--format",
             "json",
         )

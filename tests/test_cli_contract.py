@@ -1460,9 +1460,13 @@ def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> N
     assert "contract_mode" not in params
     # exit_code_scheme also no longer exists on this function at all (CLI
     # cleanup phase two PR G2 deleted the flag entirely, so there is
-    # nothing left to reject it against here either) -- the signature now
-    # starts at reconcile_build_context.
+    # nothing left to reject it against here either), and neither does
+    # reconcile_build_context (one-comparison-product.md §4.1's AUTO row:
+    # the reconciliation is unconditional now, so the release fan-out gets
+    # it rather than rejecting a request for it) -- the signature now starts
+    # at env_matrix_path.
     assert "exit_code_scheme" not in params
+    assert "reconcile_build_context" not in params
     # Passes through untouched -- none of these kwargs exist on this
     # function anymore, so there is nothing left here to reject.
-    _reject_set_input_flags(False, None)
+    _reject_set_input_flags(None)

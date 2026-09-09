@@ -55,8 +55,15 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # --bundle-facts-library-manifest stay CLI flags this phase (see
         # frontends/cli/options/release.py and bundle_facts.py's own
         # docstrings for why).
+        # Phase 5 + Phase 7i removed six more with no CLI spelling left:
+        # --surface-metrics/--show-filtered/--audit-suppressions (AUTO --
+        # all three data are computed unconditionally; `--view filtered`/
+        # `--view suppressions` render the two that have a rendering, and
+        # the metrics are ordinary findings needing no selector),
+        # --reconcile-build-context (AUTO -- ADR-039 reconciliation is
+        # unconditional), --pdb-path (debug.pdb_path) and
+        # --support-promise (release.support_promise).
         "--abi3",
-        "--audit-suppressions",
         "--bundle-facts-library-manifest",
         "--bundle-facts-out",
         "--changed-path",
@@ -87,11 +94,9 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--output",
         "--output-dir",
         "--pack",
-        "--pdb-path",
         "--policy",
         "--post-manifest",
         "--probe-matrix",
-        "--reconcile-build-context",
         "--require-complete-analysis",
         "--required-symbol",
         "--scope-public-headers",
@@ -99,12 +104,9 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--select",
         "--select-required",
         "--severity-preset",
-        "--show-filtered",
         "--since",
         "--sources",
-        "--support-promise",
         "--suppress",
-        "--surface-metrics",
         "--use-cases",
         "--used-by",
         "--used-by-manifest",

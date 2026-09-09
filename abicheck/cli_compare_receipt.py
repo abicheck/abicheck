@@ -827,6 +827,15 @@ def _release_summary_effective_config_block(
         # now -- this stand-in must agree, not default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,
+        # §4.1's AUTO row (Phase 7i): ADR-039 build-context reconciliation is
+        # unconditional too, forced on at the Tier-2 `compare_snapshots`
+        # chokepoint every per-library comparison in this fan-out routes
+        # through -- so this stand-in agrees for the same reason the two
+        # above do. Without it the release summary reported
+        # `policy.reconcile_build_context: False` while every one of its own
+        # per-library reports said `True`, which is exactly the
+        # release-vs-single-pair divergence this block exists to prevent.
+        reconcile_build_context_enabled=True,
     )
     ec_scheme = gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(

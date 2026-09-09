@@ -969,12 +969,17 @@ class TestSurfaceMetricsIsUnconditionalAtTheTier2Verb:
 
         assert seen == [True]
 
-    def test_explicit_false_is_still_overridden(
+    def test_the_off_switch_does_not_exist_at_all(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The parameter is accepted but ignored -- even an explicit
-        ``False`` cannot turn the analysis off, matching `cross_source_
-        checks`'s own "no legitimate off position" precedent."""
+        """The parameter is gone entirely -- one-comparison-product.md
+        Phase 5 took `surface_metrics` off this Tier-2 verb's signature
+        rather than leaving it accepted-and-ignored, matching
+        `cross_source_checks`'s own "no legitimate off position" precedent.
+        Asserting the keyword is *rejected* is the stronger property: an
+        accepted-but-ignored parameter is still public surface (ADR-068
+        D5), and it is what a caller would reasonably read as an off
+        switch."""
         import abicheck.workflows.compare_policy as compare_policy_module
         from abicheck.service import compare_snapshots
 
@@ -989,6 +994,11 @@ class TestSurfaceMetricsIsUnconditionalAtTheTier2Verb:
 
         monkeypatch.setattr(compare_policy_module, "compare", _spy_compare)
 
-        compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=False)
+        with pytest.raises(TypeError, match="surface_metrics"):
+            compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=False)
+        assert seen == []
 
+        # The analysis itself still runs unconditionally for the same call
+        # without the removed keyword.
+        compare_snapshots(old, new, pattern_verdicts=False)
         assert seen == [True]
