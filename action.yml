@@ -457,13 +457,19 @@ inputs:
     required: false
   since:
     description: >
-      scan mode only. Focus the scan on files changed vs a git ref
-      (e.g. origin/main). Maps to scan --since.
+      compare mode (single-pair operands) and scan mode. Focus the run's
+      source-evidence scope on files changed vs a git ref (e.g.
+      origin/main). Maps to compare --since / scan --since. Not forwarded
+      for a compare directory/package operand (the per-library release
+      fan-out collects no build/source evidence for either side to scope).
     required: false
   changed-path:
     description: >
-      scan mode only. Changed path(s) to focus the scan on (space-separated;
-      alternative to since). Maps to repeated scan --changed-path.
+      compare mode (single-pair operands) and scan mode. Changed path(s) to
+      focus the run's source-evidence scope on (space-separated; alternative
+      to since). Maps to repeated compare --changed-path / scan
+      --changed-path. Not forwarded for a compare directory/package operand,
+      same as since above.
     required: false
   budget:
     description: >
