@@ -36,6 +36,7 @@ reconciliation) rather than duplicating either.
 from __future__ import annotations
 
 import string
+import sys
 
 import pytest
 from hypothesis import given, strategies as st
@@ -154,42 +155,38 @@ class TestItaniumStripPrefixSharesTheSameShapeCheck:
         assert _itanium_strip_prefix("_foo") is None
 
 
-class TestIsDarwinTargetProbeFailureFallback:
-    """``is_darwin_target``'s ``sys.platform`` fallback when
-    *target_triple* is unavailable (empty/``None``) -- see that
-    function's own docstring and the bug class's third residual in
-    ``tests/regressions/manifest.py``. The parametrized fixed-triple
-    matrix in ``tests/test_dumper_clang_extern_c_identity.py`` already
-    covers every case where *target_triple* was itself successfully
-    probed; this covers the complementary "the probe came back empty"
-    case directly, independent of whichever OS actually runs this test.
-    """
+class TestIsDarwinTargetNeverGuessesFromBareNone:
+    """``is_darwin_target`` never guesses Darwin from a bare/empty
+    *target_triple* -- see that function's own docstring and the bug
+    class's third residual in ``tests/regressions/manifest.py``. An
+    earlier revision special-cased a bare ``None`` by the host's own
+    ``sys.platform``, but that shape is also what a direct,
+    no-pipeline-involved unit-test construction of ``_ClangAstParser``
+    produces (``tests/test_dumper_clang_extern_c_identity.py``), so
+    special-casing it here would flip THOSE tests' answer depending on
+    which OS runs the suite. The real dump pipeline's own probe-failure
+    recovery (a real ``sys.platform``-based fallback *string*, so it
+    reaches this function as an ordinary non-``None`` triple) lives one
+    layer up, in ``dumper._run_clang`` -- covered by
+    ``tests/test_dumper_target_triple_fallback.py``."""
 
-    @pytest.mark.parametrize(
-        "running_platform,expected",
-        [("darwin", True), ("linux", False), ("win32", False), ("", False)],
-    )
-    def test_falls_back_to_sys_platform_for_empty_triple(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        running_platform: str,
-        expected: bool,
+    @pytest.mark.parametrize("running_platform", ["darwin", "linux", "win32", ""])
+    def test_bare_none_or_empty_is_always_false(
+        self, monkeypatch: pytest.MonkeyPatch, running_platform: str
     ) -> None:
         import abicheck.extract.headers.clang.context as _context
 
-        monkeypatch.setattr(_context.sys, "platform", running_platform)
-        assert _context.is_darwin_target(None) is expected
-        assert _context.is_darwin_target("") is expected
+        monkeypatch.setattr(sys, "platform", running_platform)
+        assert _context.is_darwin_target(None) is False
+        assert _context.is_darwin_target("") is False
 
-    def test_explicit_non_darwin_triple_is_never_overridden_by_sys_platform(
+    def test_explicit_non_darwin_triple_is_never_overridden_by_host_platform(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The fallback only ever fires when *target_triple* itself is
-        unavailable -- a triple that was actually probed and says
-        "linux" must never be second-guessed by the host OS, even if
-        this test suite happened to be running on a real Darwin
-        machine."""
+        """A triple that was actually probed and says "linux" must never
+        be second-guessed by the host OS, even if this test suite
+        happened to be running on a real Darwin machine."""
         import abicheck.extract.headers.clang.context as _context
 
-        monkeypatch.setattr(_context.sys, "platform", "darwin")
+        monkeypatch.setattr(sys, "platform", "darwin")
         assert _context.is_darwin_target("x86_64-unknown-linux-gnu") is False

@@ -30,11 +30,27 @@ scripted intent looks right on paper.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
+
+
+def _compile_overlay_from_cmd(cmd: str) -> dict[str, Any]:
+    """Read back the synthesized ``compile:`` block a ``--config <path>``
+    token in *cmd* points at (Phase 7: dump/single-pair compare forward the
+    cross-compiler inputs via a synthesized config overlay now, not
+    individually-forwarded ``--compiler``/``--sysroot``/... flags -- see
+    ``add_compile_context_flags`` in ``action/run.sh``)."""
+    tokens = cmd.split()
+    assert "--config" in tokens, cmd
+    path = tokens[tokens.index("--config") + 1]
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    return doc.get("compile", {})
 
 
 def _bash_executable() -> str:
@@ -237,13 +253,16 @@ class TestCompareModeForwardsCrossCompilerFlags:
             },
             tmp_path,
         )
-        assert "--compiler /opt/cross/bin/aarch64-linux-gnu-g++" in cmd
-        assert "--compiler-prefix aarch64-linux-gnu-" in cmd
-        assert "--compiler-option -D__ARM_NEON" in cmd
-        assert "--sysroot /opt/sysroots/aarch64" in cmd
+        compile_blk = _compile_overlay_from_cmd(cmd)
+        # gcc_path wins over gcc_prefix when both are given (the merged
+        # compile.compiler field can only hold one).
+        assert compile_blk["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"
+        assert compile_blk["options"] == ["-D__ARM_NEON"]
+        assert compile_blk["sysroot"] == "/opt/sysroots/aarch64"
 
     def test_none_set_adds_no_flags(self, tmp_path: Path) -> None:
         cmd = _run_compare({}, tmp_path)
+        assert "--config" not in cmd
         assert "--compiler" not in cmd
         assert "--compiler-prefix" not in cmd
         assert "--compiler-option" not in cmd

@@ -39,7 +39,6 @@ from xml.etree.ElementTree import Element
 
 from ....model import AccessLevel, Fact, Function, Param, Visibility
 from ....model.identity import entity_id_for_function
-from ....model.mangled_name import strip_macho_itanium_decoration
 from .context import CastxmlParserContext
 from .location import (
     access_level,
@@ -433,18 +432,21 @@ def parse_function_element(
     # Skip compiler built-ins and command-line synthetic declarations
     if is_builtin_element(ctx, el):
         return None
-    # `strip_macho_itanium_decoration` is a defensive, unconditional no-op
-    # on every castxml build/version confirmed so far (its own XML
-    # `mangled` attribute is always the pure, undecorated Itanium spelling
-    # even under an explicit Darwin `--target=`, unlike clang's own
-    # `-ast-dump=json` `mangledName`, which genuinely does carry Darwin's
-    # extra linker-decoration underscore -- see `extract.headers.clang.
-    # context.strip_darwin_itanium_decoration`'s docstring). Applied here
-    # too anyway, at zero behavioral cost for the confirmed-safe case,
-    # since the "__Z..." shape can only ever be Darwin decoration and this
-    # module has no reliable way to rule out a differently-behaving
-    # castxml build on some other host/version doing the same thing.
-    raw_mangled = strip_macho_itanium_decoration(el.get("mangled", ""))
+    # castxml's own XML `mangled` attribute is always the pure, undecorated
+    # Itanium spelling even under an explicit Darwin `--target=` (unlike
+    # clang's own `-ast-dump=json` `mangledName`, which genuinely does
+    # carry Darwin's extra linker-decoration underscore -- see
+    # `extract.headers.clang.context.strip_darwin_itanium_decoration`'s
+    # docstring) -- confirmed by direct experimentation, not assumed.
+    # Deliberately NOT run through `strip_macho_itanium_decoration` here
+    # the way the clang backend is: unlike clang's decoration, a castxml
+    # `"__Z..."`-shaped mangled name is never platform decoration to begin
+    # with, so stripping it unconditionally would corrupt the one real
+    # case that shape CAN mean here -- an explicit, literal
+    # ``asm("__Zfake")`` assembler-label declaration, which castxml
+    # reports verbatim regardless of target (Codex review, fresh
+    # evidence).
+    raw_mangled = el.get("mangled", "")
     ret_id = el.get("returns", "")
     ret_type = type_name(ctx, ret_id) if ret_id else "void"
     ret_ptr_depth = pointer_depth(ctx, ret_id) if ret_id else 0

@@ -145,7 +145,6 @@ use_cases:
     axis: archetype
     name: CPython extension Python-level API surface
     status: complete
-    plan: docs/contribute/plans/g23-python-level-api-diff.md
     note: >
       G23 closed (static path). Beyond G14's native C-ABI contract, abicheck now
       recovers the Python-level API a module exposes to import — top-level
@@ -438,11 +437,10 @@ use_cases:
     name: CLI interface contract, config balance, and extension policy
     status: complete
     gap: G22
-    plan: docs/contribute/plans/g22-cli-consolidation.md
     evidence:
       modules: [abicheck/api_types.py, abicheck/service.py, abicheck/cli_options.py, abicheck/buildsource/inline.py]
       tests: [tests/test_cli_contract.py, tests/test_api_types.py, tests/test_config_rebalance.py]
-      docs: [docs/contribute/adr/037-cli-interface-contract.md, docs/contribute/plans/g22-cli-consolidation.md]
+      docs: [docs/contribute/adr/037-cli-interface-contract.md]
     next_steps: >
       ADR-037. Formalises the CLI/API as three tiers (core/service/front-end)
       with the service layer as the only chokepoint, typed CompareRequest
@@ -453,7 +451,7 @@ use_cases:
       a CLI/config rebalance into .abicheck.yml, an explicit exit-code scheme,
       and a cli-contract CI gate. Backward-compat mechanism designed but left
       advisory until 1.0 (pre-1.0, breaking invocations is acceptable now).
-      Phased in plans/g22-cli-consolidation.md (P1 chokepoint + typed request,
+      Phased in the now-retired g22-cli-consolidation.md plan (P1 chokepoint + typed request,
       P2 decorators, P3 depth vocab, P4 command fold, P5 config rebalance,
       P6 ast-frontend/MCP-name-map/validation, P7 deprecation scaffolding).
 
@@ -462,7 +460,6 @@ use_cases:
     name: manylinux/auditwheel vendored-library pairing (hashed sonames)
     status: complete
     gap: G9
-    plan: docs/contribute/plans/g9-wheel-vendored-matching.md
     note: >
       Filename-based pairing: strip_vendor_hash() normalizes the
       auditwheel/delocate content-hash suffix (-[0-9a-f]{6,16}) before
@@ -492,7 +489,6 @@ use_cases:
     name: CPython Limited-API / abi3 import-contract conformance
     status: complete
     gap: G14
-    plan: docs/contribute/plans/g14-stable-abi-subset.md
     evidence:
       modules: [
         abicheck/python_ext.py,
@@ -613,7 +609,6 @@ use_cases:
     name: Platform baseline floor (manylinux glibc requirement)
     status: complete
     gap: G10
-    plan: docs/contribute/plans/g10-glibc-floor-check.md
     evidence:
       modules: [
         abicheck/diff_versioning.py,
@@ -787,7 +782,6 @@ use_cases:
     name: Header-scoped source-mode robustness on stock host toolchains
     status: complete
     gap: G16
-    plan: docs/contribute/plans/g16-header-scope-toolchain-robustness.md
     evidence:
       modules: [abicheck/dumper.py, abicheck/errors.py]
       tests: [

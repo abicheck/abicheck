@@ -28,6 +28,7 @@ NEW_LIBRARY="${INPUT_NEW_LIBRARY:-}"
 NEW_LIBRARY_SET="${INPUT_NEW_LIBRARY_SET:-}"
 OLD_LIBRARY="${INPUT_OLD_LIBRARY:-}"
 UPLOAD_SARIF="${INPUT_UPLOAD_SARIF:-false}"
+LANG_INPUT="${INPUT_LANG:-}"
 AST_FRONTEND="${INPUT_AST_FRONTEND:-}"
 GCC_PATH="${INPUT_GCC_PATH:-}"
 GCC_PREFIX="${INPUT_GCC_PREFIX:-}"
@@ -64,13 +65,49 @@ _is_release_style_operand() {
   return 1
 }
 
+# Workflow-command injection defense (bug class
+# `trust_boundary.shell_workflow_injection`; #705 -> #758).
+#
+# Every message below interpolates at least one INPUT_* value, and those are
+# workflow-controlled. A GitHub annotation is line-delimited, so a value
+# carrying a newline ends the annotation and whatever follows is parsed as a
+# *new* workflow command: `jobs: "1\n::error::spoofed"` emits a spoofed
+# error, and `::set-output`/`::add-mask` are reachable the same way. Command
+# substitution is not the risk here (the value is expanded once, into a
+# double-quoted string, and bash does not re-expand it) -- line breaks are.
+#
+# Collapsing CR/LF in the one place every annotation is emitted covers each
+# interpolation site in this file at once, including the ones that predate
+# this helper, rather than asking every future message to remember.
+#
+# `%` is escaped first, because the runner *percent-decodes* a workflow
+# command's message data: a value carrying the literal five characters
+# `%0A::error::` holds no CR/LF for the collapse below to find, and the
+# runner turns it into a real line break after this script has finished
+# with it. Escaping to `%25` makes the decode round-trip back to a literal
+# `%` for the reader instead. This is `actions/toolkit`'s own `escapeData`
+# order (`%` then CR/LF), followed exactly so an escape introduced here is
+# never itself re-escaped (CodeRabbit review, CWE-117).
+#
+# `printf`, never `echo`: with `xpg_echo` on -- a build-time default on some
+# bash builds, and settable through `BASHOPTS`/`BASH_ENV` -- `echo` expands
+# backslash escapes in its argument, so a value carrying the *literal* five
+# characters `\n::error::` passes the CR/LF collapse above (it holds no real
+# newline to collapse) and is then turned into one by the emitter itself.
+# Reproducible against this script with `bash -O xpg_echo` (Codex review).
+# `printf '%s\n'` treats the value as data under every shell option, which
+# is why the format string is fixed and the message is an argument.
+_sanitize_annotation() {
+  printf '%s' "${1//%/%25}" | tr '\r\n' '  '
+}
+
 _fail() {
-  echo "::error::$1"
+  printf '%s\n' "::error::$(_sanitize_annotation "$1")"
   exit 1
 }
 
 _warn() {
-  echo "::warning::$1"
+  printf '%s\n' "::warning::$(_sanitize_annotation "$1")"
 }
 
 case "$MODE" in
@@ -167,22 +204,34 @@ case "$MODE" in
         _fail "mode: compare does not support format: $FORMAT — only 'json', 'markdown', 'sarif', 'html', 'junit', 'review', and 'oneline' are supported."
       fi
     fi
-    # The L2 compile-context inputs (ast-frontend/gcc-*/sysroot/nostdinc)
-    # are rejected outright by run.sh for a directory/package operand — the
-    # per-library release fan-out never threads a CompileContext to each
-    # pair's header dump — so mirror that check here too (Codex review):
-    # without it, a workflow with a slow dependency-install step still
-    # passes this fail-fast validation and only errors after setup begins,
-    # reopening the exact silent-fallback-until-late-failure bug this
-    # script exists to prevent. "auto" is the documented no-op spelling of
-    # ast-frontend (same default resolution as leaving it unset) and must
-    # not trip this the way a real frontend choice does — mirrors run.sh.
+    # The L2 compile-context inputs (lang/ast-frontend/gcc-*/sysroot/
+    # nostdinc) are rejected outright by run.sh for a directory/package
+    # operand — the per-library release fan-out never threads a
+    # CompileContext to each pair's header dump — so mirror that check here
+    # too (Codex review): without it, a workflow with a slow dependency-
+    # install step still passes this fail-fast validation and only errors
+    # after setup begins, reopening the exact silent-fallback-until-late-
+    # failure bug this script exists to prevent. "auto" is the documented
+    # no-op spelling of ast-frontend (same default resolution as leaving it
+    # unset) and must not trip this the way a real frontend choice does —
+    # mirrors run.sh. Phase 7 (one-comparison-product.md §4.1) removed all
+    # of these flags from compare's CLI, forwarded via a synthesized
+    # --config compile: block instead (run.sh's add_compile_context_flags,
+    # only reachable from the single-pair path) -- lang joined this group
+    # then, since it would otherwise be silently dropped for a
+    # directory/package operand rather than rejected.
     if { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
        || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; then
-      if [[ (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
+      # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is
+      # the *default*, not a user override, so (mirroring the identical
+      # "auto" carve-out for ast-frontend just above) it must not by itself
+      # trip this guard (CodeRabbit review, PR #1146, finding #6; run.sh's
+      # own release-operand predicate carries the same fix).
+      if [[ (-n "$LANG_INPUT" && "$LANG_INPUT" != "c++") \
+            || (-n "$AST_FRONTEND" && "$AST_FRONTEND" != "auto") \
             || -n "$GCC_PATH" || -n "$GCC_PREFIX" || -n "$GCC_OPTIONS" \
             || -n "$SYSROOT" || "$NOSTDINC" == "true" ]]; then
-        _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
+        _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       fi
     fi
     # P0.4: require-complete-analysis is rejected outright by run.sh for a
@@ -344,13 +393,35 @@ if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
   _warn "new-library-set is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
 fi
 
-# bundle-system-providers was a scalar Action input mirroring the CLI's own
-# --bundle-system-providers; CLI cleanup phase two, PR J removed both -- the
-# cross-library bundle-analysis layer's system-provider allow-list
-# extension is sourced only from build-config's own .abicheck.yml
-# `bundle.system_providers:` now, which has no per-mode "inert" state left
-# to warn about (build-config is unconditionally forwarded for every mode
-# that can reach it).
+# Removed inputs, kept registered in action.yml as tombstones and rejected
+# here.
+#
+# Deleting an input from action.yml does not make a workflow that still sets
+# it fail: GitHub drops the undeclared key before the composite action runs,
+# leaving only an "Unexpected input(s)" line in the setup log and no
+# annotation at the step. A pinned caller therefore keeps a setting in its
+# workflow that has silently stopped doing anything -- reported by a real
+# downstream integration (oneDAL) whose `jobs: 1` worker cap became inert on
+# an abicheck bump with nothing failing. Re-declaring the input is what puts
+# the removal in front of the caller; this block is what says so.
+#
+# Severity follows what the setting used to control:
+#   - jobs was a tuning knob (worker count). Its removal changes resource
+#     use, never a verdict, so warn rather than break a bump.
+#   - bundle-system-providers configured which providers count as system
+#     ones, i.e. real analysis semantics. Silently dropping that would
+#     change findings, so it is a hard error with the migration named.
+#
+# bundle-system-providers' replacement is build-config's own .abicheck.yml
+# `bundle.system_providers:` block (CLI cleanup phase two, PR J), which has
+# no per-mode "inert" state left to warn about (build-config is
+# unconditionally forwarded for every mode that can reach it).
+if [[ -n "${INPUT_JOBS:-}" ]]; then
+  _warn "jobs ('${INPUT_JOBS}') was removed (ADR-068 D5) and has no effect: abicheck's release fan-out auto-detects its worker count and clamps it to available memory, and the -j/--jobs flag it forwarded no longer exists. Remove jobs from your workflow. Expect higher wall time and peak RSS than a manually capped run."
+fi
+if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
+  _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
+fi
 
 # estimate, audit: deprecated scan-mode-only aliases.
 if [[ "${INPUT_ESTIMATE:-false}" == "true" && "$MODE" != "scan" ]]; then

@@ -6,8 +6,8 @@ lifecycle: active
 
 # ABI/API knowledge and corpus — proving domain coverage, not case count
 
-**Origin:** a review of the (now completed) [examples/catalog
-split](examples-catalog-split.md) that separated three surfaces this
+**Origin:** a review of the (now completed) examples/catalog
+split (plan record retired after completion) that separated three surfaces this
 repository conflates when discussed loosely as "examples" or "docs":
 `examples/` (task-oriented product workflows), `docs/learn/` (tool-neutral
 ABI/API compatibility education), and `catalog/` (the calibration corpus).

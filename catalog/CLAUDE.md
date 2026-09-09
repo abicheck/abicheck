@@ -3,9 +3,9 @@
 This is the **calibration and compatibility-knowledge tree** — the 208
 `caseNN_*` fixtures the FP-rate, tier-accuracy, mutation, and
 full-catalog-coverage gates all run against, physically split out of
-`examples/` (Phase 4 of the [examples/catalog split]
-(../docs/contribute/plans/examples-catalog-split.md)'s "Corrected Phase 4
-target model"). It is not the curated, task-oriented tree — see
+`examples/` (Phase 4 of the examples/catalog split's "Corrected Phase 4
+target model" — retired plan record, see `docs/contribute/plans/index.md`).
+It is not the curated, task-oriented tree — see
 [`../examples/CLAUDE.md`](../examples/CLAUDE.md) for that.
 
 The catalog has multiple owner families: ordinary single-library pairs,
@@ -165,9 +165,9 @@ enforced — a slug with no definition, and a definition no case uses — by
 `gen_catalog_taxonomy.py` and `tests/test_catalog_rule_registry.py`. Before
 the registry these were unvalidated free-text strings that
 `docs/contribute/catalog-coverage.md` counted as distinct compatibility
-rules, so a typo or a synonym silently became one more "rule". See
-[`docs/contribute/plans/examples-catalog-split.md`](../docs/contribute/plans/examples-catalog-split.md)
-for the full rationale and remaining phases.
+rules, so a typo or a synonym silently became one more "rule". See the
+examples/catalog split's retired plan record (`docs/contribute/plans/index.md`)
+for the full rationale — the split itself is complete, no phases remain.
 
 **A restatement of the same rule under a genuinely different condition is a
 *variant*; the same demonstration restated with no distinguishing condition

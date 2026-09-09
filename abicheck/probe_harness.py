@@ -29,7 +29,7 @@ Public API:
 * :class:`Probe` — one consumer TU snippet.
 * :class:`ProbeResult` — ``(configuration_id, probe_id, AbiSnapshot)``.
 * :class:`MatrixSnapshot` — set of ``ProbeResult`` for one version of
-  a library; serialisable to/from JSON.
+  a library.
 * :func:`load_probe_spec` — parse YAML into ``ProbeSpec``.
 * :func:`run_probe_matrix` — compile each (configuration × probe) and
   return ``MatrixSnapshot``.
@@ -44,6 +44,18 @@ This module deliberately does NOT depend on the existing dumper /
 checker code at import time; the dumper is imported lazily inside
 :func:`_snapshot_object_file` so unit tests that only exercise YAML
 parsing and matrix bookkeeping don't pay the import cost.
+
+JSON (de)serialization of a ``MatrixSnapshot`` -- which needs
+``AbiSnapshot``'s own ``storage``-owned codec (``serialization.
+snapshot_to_dict``/``snapshot_from_dict``) -- deliberately does NOT
+live here (ADR-061 gap E): this module is classified ``compare``,
+which may import only ``model``, and a compare-layer module owning a
+persistence operation is exactly the ownership conflation the ADR
+forbids. ``abicheck.workflows.findings`` owns
+``matrix_snapshot_to_json``/``matrix_snapshot_from_dict``/
+``write_matrix_snapshot``/``load_matrix_snapshot`` instead -- it may
+legally import both this module (``compare``) and ``serialization``
+(a documented ``public_root_surfaces`` compatibility surface).
 """
 
 from __future__ import annotations
@@ -128,18 +140,6 @@ class ProbeResult:
     snapshot: AbiSnapshot | None = None
     error: str | None = None
 
-    def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "configuration_id": self.configuration_id,
-            "probe_id": self.probe_id,
-            "object_path": self.object_path,
-            "error": self.error,
-        }
-        if self.snapshot is not None:
-            from .serialization import snapshot_to_dict
-            out["snapshot"] = snapshot_to_dict(self.snapshot)
-        return out
-
 
 @dataclass
 class MatrixSnapshot:
@@ -157,40 +157,6 @@ class MatrixSnapshot:
         for r in self.results:
             out.setdefault(r.configuration_id, []).append(r)
         return out
-
-    def to_json(self) -> str:
-        return json.dumps({
-            "library": self.library,
-            "version": self.version,
-            "spec_name": self.spec_name,
-            "cxx_stds": self.cxx_stds,
-            "defaults": self.defaults,
-            "results": [r.to_dict() for r in self.results],
-        }, indent=2)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> MatrixSnapshot:
-        from .serialization import snapshot_from_dict
-        results: list[ProbeResult] = []
-        for r in data.get("results", []):
-            snap = None
-            if r.get("snapshot") is not None:
-                snap = snapshot_from_dict(r["snapshot"])
-            results.append(ProbeResult(
-                configuration_id=r["configuration_id"],
-                probe_id=r["probe_id"],
-                object_path=r.get("object_path"),
-                snapshot=snap,
-                error=r.get("error"),
-            ))
-        return cls(
-            library=data["library"],
-            version=data["version"],
-            spec_name=data["spec_name"],
-            cxx_stds=data.get("cxx_stds", {}),
-            defaults=data.get("defaults", {}),
-            results=results,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -482,15 +448,6 @@ def run_probe_matrix(
     )
 
 
-def write_matrix_snapshot(matrix: MatrixSnapshot, path: str | Path) -> None:
-    Path(path).write_text(matrix.to_json(), encoding="utf-8")
-
-
-def load_matrix_snapshot(path: str | Path) -> MatrixSnapshot:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    return MatrixSnapshot.from_dict(data)
-
-
 # ---------------------------------------------------------------------------
 # Re-export helpers used by tests
 # ---------------------------------------------------------------------------
@@ -502,11 +459,9 @@ __all__ = [
     "ProbeConfiguration",
     "ProbeResult",
     "ProbeSpec",
-    "load_matrix_snapshot",
     "load_probe_spec",
     "parse_probe_spec",
     "run_probe_matrix",
-    "write_matrix_snapshot",
 ]
 
 

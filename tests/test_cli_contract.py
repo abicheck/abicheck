@@ -956,41 +956,40 @@ def test_gate_tables_mirror_cli_options() -> None:
 # ── D8: --ast-frontend (legacy --header-backend aliases removed) ─────────────
 
 
-@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
-def test_ast_frontend_is_the_only_frontend_spelling(cmd_name: str) -> None:
-    """``--ast-frontend`` is the frontend flag; the removed ``--header-backend``
-    alias is gone (clean removal, ADR-037 D7/D8)."""
-    cmd = _registered_commands()[cmd_name]
+def test_ast_frontend_is_the_only_frontend_spelling() -> None:
+    """``--ast-frontend`` is the frontend flag on ``scan``; the removed
+    ``--header-backend`` alias is gone (clean removal, ADR-037 D7/D8)."""
+    cmd = _registered_commands()["scan"]
     by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
     param = by_dest["header_backend"]
     assert "--ast-frontend" in param.opts
     assert "--header-backend" not in param.opts
 
 
-def test_per_side_ast_frontend_is_spelled_on_ast_frontend_itself() -> None:
-    """The per-side frontend override is ``--ast-frontend old=``/``new=``.
-
-    ADR-040 Lever 1's side-prefix convention, not a third and fourth flag:
-    the separate ``--ast-frontend old=``/``--ast-frontend new=`` pair (and the
-    ``--*-header-backend`` aliases before it) are gone, and ``compare``'s
-    ``--ast-frontend`` is repeatable so each side can name its own.
-    """
+@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
+def test_ast_frontend_deleted_outright_on_compare_and_dump(cmd_name: str) -> None:
+    """Phase 7 (one-comparison-product.md §4.1/§4.2, ADR-037 D8.1):
+    ``--ast-frontend`` (side-aware or not) is gone from ``compare``/``dump``
+    entirely -- neither is a Click param any more, so there is no
+    ``header_backend`` dest to find at all. ``compile.frontend`` is its only
+    surviving spelling."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    cmd = _registered_commands()["compare"]
+    cmd = _registered_commands()[cmd_name]
     dests = {p.name for p in cmd.params}  # type: ignore[attr-defined]
+    assert "header_backend" not in dests
     assert "old_header_backend" not in dests
     assert "new_header_backend" not in dests
 
-    param = {p.name: p for p in cmd.params}["header_backend"]  # type: ignore[attr-defined]
-    assert param.multiple
-    assert param.opts == ["--ast-frontend"]
+    for help_flag in ("--help", "--help-all"):
+        result = CliRunner().invoke(main, [cmd_name, help_flag])
+        assert "--ast-frontend" not in result.output, (cmd_name, help_flag)
 
-    out = CliRunner().invoke(main, ["compare", "--help-all"]).output
-    assert "--ast-frontend old=" not in out
-    assert "--ast-frontend new=" not in out
+    result = CliRunner().invoke(main, [cmd_name, "--ast-frontend", "clang"])
+    assert result.exit_code == 64
+    assert "No such option" in result.output
 
 
 def test_legacy_header_backend_flag_is_rejected(
@@ -1136,9 +1135,17 @@ def test_removed_gcc_spellings_are_gone_entirely(cmd_name: str) -> None:
         assert "--gcc-prefix" not in result.output, (cmd_name, help_flag)
         assert "--gcc-option" not in result.output, (cmd_name, help_flag)
     # --compiler is an advanced/toolchain-tier flag (the same disclosure tier
-    # the old --gcc-path occupied), so it's only guaranteed on --help-all.
+    # the old --gcc-path occupied), so it's only guaranteed on --help-all --
+    # except on compare/dump, where Phase 7 (one-comparison-product.md
+    # §4.1/§4.2, ADR-037 D8.1) removed it (and --compiler-prefix/
+    # --compiler-option/--sysroot/--nostdinc/--ast-frontend) from the CLI
+    # entirely: compile.compiler is their only spelling now. `scan` keeps
+    # the unreduced compile_context_options() family.
     help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
-    assert "--compiler" in help_all_output, cmd_name
+    if cmd_name == "scan":
+        assert "--compiler" in help_all_output, cmd_name
+    else:
+        assert "--compiler" not in help_all_output, cmd_name
 
 
 def _all_leaf_commands() -> list[tuple[str, object]]:

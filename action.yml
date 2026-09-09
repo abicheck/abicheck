@@ -229,40 +229,60 @@ inputs:
     required: false
   gcc-path:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary (maps to the CLI's
-      --compiler). Applies to dump,
-      scan, and compare mode with a single-pair (non-directory, non-package)
-      operand — a directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      Path to GCC/G++ (or clang) cross-compiler binary. On scan, maps to the
+      CLI's --compiler; on dump and single-pair compare, Phase 7 removed
+      that flag from the CLI entirely, so this Action folds it (together
+      with gcc-prefix, gcc-options, sysroot, and nostdinc, when any of
+      those are also set) into a synthesized .abicheck.yml compile: block
+      forwarded via --config instead. Applies to dump, scan, and compare
+      mode with a single-pair (non-directory, non-package) operand — a
+      directory/package compare rejects it with an error (same
+      restriction as ast-frontend above), and combining any of this group
+      with build-config is rejected too (this Action does not merge two
+      config sources — declare them directly in the build-config file
+      instead).
     required: false
   gcc-prefix:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu- (maps to the CLI's
-      --compiler-prefix). Applies to dump,
-      scan, and compare mode with a single-pair (non-directory, non-package)
-      operand — a directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. On scan, maps to the
+      CLI's --compiler-prefix; on dump and single-pair compare, it folds
+      into the same synthesized compile: block gcc-path describes above
+      (a full gcc-path wins if both are set, since the merged compile.compiler
+      config key can only hold one). Applies to dump, scan, and compare mode
+      with a single-pair (non-directory, non-package) operand — a
+      directory/package compare rejects it with an error (same restriction
+      as ast-frontend above).
     required: false
   gcc-options:
     description: >
-      Extra compiler flags passed through to the header frontend (maps to
-      the CLI's --compiler-option). A single-line value is
-      split on whitespace into separate flags, same as before; a multi-line
-      (YAML block scalar) value keeps each line as one flag verbatim,
-      spaces included — use that form for a flag whose value contains a
-      space. Applies to dump, scan, and compare mode with a single-pair
-      (non-directory, non-package) operand — a directory/package compare
-      rejects it with an error (same restriction as ast-frontend above).
+      Extra compiler flags passed through to the header frontend. On scan,
+      maps to the CLI's --compiler-option; on dump and single-pair compare,
+      it folds into a synthesized compile.options list in the same
+      synthesized compile: block gcc-path describes above. A single-line
+      value is shell-quoting-aware split on whitespace into separate flags
+      (a quoted segment such as -DMSG="hello world" stays one flag); a
+      multi-line (YAML block scalar) value treats each line as one already-
+      complete flag, not split further. On scan, that per-line flag is
+      forwarded verbatim as one --compiler-option occurrence even if it
+      contains a space; on dump and single-pair compare, each synthesized
+      compile.options entry must be a single whitespace-free flag, so a
+      line containing a space is rejected with a clear error rather than
+      silently accepted — put each word needing its own flag on its own
+      line instead. Applies to dump, scan, and compare mode with a
+      single-pair (non-directory, non-package) operand — a directory/
+      package compare rejects it with an error (same restriction as
+      ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (scan and deps-tree keep their own direct --sysroot/CLI forwarding). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
     required: false
   nostdinc:
     description: >
-      Do not search standard system include paths. Applies to dump, scan,
-      and compare mode with a single-pair (non-directory, non-package)
-      operand — a directory/package compare rejects it with an error (same
-      restriction as ast-frontend above).
+      Do not search standard system include paths. On dump and single-pair
+      compare this folds into the same synthesized compile: block gcc-path
+      describes above. Applies to dump, scan, and compare mode with a
+      single-pair (non-directory, non-package) operand — a directory/package
+      compare rejects it with an error (same restriction as ast-frontend above).
     required: false
     default: 'false'
 
@@ -388,6 +408,30 @@ inputs:
       `cohorts:` (the SONAME-skew check) applies to compare only — an
       --artifact-set audit has no old/new release pair to detect a skew
       between, so the setting has no effect there.
+    required: false
+  jobs:
+    description: >
+      Removed and ignored (ADR-068 D5). This input used to forward
+      `-j/--jobs` to `compare`, capping the directory/package release
+      fan-out's worker count. Both the flag and the input are gone: the
+      release engine auto-detects the CPU count and clamps it to available
+      memory, and there is no manual override any more. Kept registered as
+      a tombstone — deleting the input outright made GitHub drop it before
+      the Action ever ran, so a pinned workflow that still sets it got no
+      error and no annotation, and its worker cap silently stopped
+      applying. Setting it now emits an explicit warning telling you it has
+      no effect. Remove it from your workflow.
+    required: false
+  bundle-system-providers:
+    description: >
+      Removed (CLI cleanup phase two, PR J). The cross-library
+      bundle-analysis layer's system-provider allow-list extension moved to
+      `.abicheck.yml`'s `bundle.system_providers:` block, reachable through
+      the `build-config` input. Kept registered as a tombstone for the same
+      reason as `jobs` above — an undeclared input is dropped silently,
+      which here would drop a real analysis setting. Setting it is a hard
+      error: move the list into `.abicheck.yml` and point `build-config` at
+      it.
     required: false
   allow-build-query:
     description: >
@@ -910,6 +954,14 @@ runs:
       shell: bash
       env:
         INPUT_MODE: ${{ inputs.mode }}
+        # Removed inputs, kept declared as tombstones so a pinned
+        # workflow that still sets one is told rather than silently
+        # ignored (see their own descriptions above). Consumed *only*
+        # here -- validate-inputs.sh rejects them and run.sh never
+        # forwards either, which is why both are in
+        # tests/test_action_run_contract.py's _NON_RUN_SH_INPUTS.
+        INPUT_JOBS: ${{ inputs.jobs }}
+        INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
         INPUT_AGAINST: ${{ inputs.against }}
@@ -951,6 +1003,7 @@ runs:
         # (Codex review; found while wiring require-complete-analysis
         # through this same step).
         INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
+        INPUT_LANG: ${{ inputs.lang }}
         INPUT_GCC_PATH: ${{ inputs.gcc-path }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}

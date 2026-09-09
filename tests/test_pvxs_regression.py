@@ -42,9 +42,11 @@ gnu++11 and a wrongly-forced gnu++20 (CodeRabbit review). The ``compare``
 step and its verdict/SONAME assertions remain as a secondary full-pipeline
 smoke check.
 
-Marked ``integration`` (needs a real compiler); uses ``--ast-frontend clang``
-so it also runs on hosts with clang but no castxml (unlike most other
-integration tests here, which default to castxml).
+Marked ``integration`` (needs a real compiler); uses ``compile.frontend:
+clang`` (via a temp ``.abicheck.yml`` + ``--config``, since Phase 7 removed
+compare/dump's ``--ast-frontend`` CLI spelling) so it also runs on hosts
+with clang but no castxml (unlike most other integration tests here, which
+default to castxml).
 """
 
 from __future__ import annotations
@@ -116,7 +118,24 @@ def _build_lib(src_dir: Path, out_so: Path) -> None:
     )
 
 
+def _write_compile_config(tmp_path: Path, *, options: list[str]) -> Path:
+    """Phase 7 (one-comparison-product.md §4.1/§4.2): ``compare``/``dump`` no
+    longer accept ``--ast-frontend``/``--compiler-option`` on the CLI --
+    ``.abicheck.yml``'s ``compile.frontend``/``compile.options`` are the only
+    spelling now. Writes a config file expressing the equivalent
+    ``--ast-frontend clang`` + one ``--compiler-option`` per entry in
+    ``options``."""
+    cfg = tmp_path / f".abicheck-{len(options)}-{abs(hash(tuple(options)))}.yml"
+    options_yaml = "\n".join(f"    - {opt!r}" for opt in options)
+    cfg.write_text(
+        "compile:\n  frontend: clang\n  options:\n" + options_yaml + "\n",
+        encoding="utf-8",
+    )
+    return cfg
+
+
 def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> AbiSnapshot:
+    cfg = _write_compile_config(out_json.parent, options=["-DHAVE_BASE=1"])
     result = CliRunner().invoke(
         main,
         [
@@ -124,10 +143,8 @@ def _dump_snapshot(so_path: Path, header: Path, out_json: Path) -> AbiSnapshot:
             str(so_path),
             "-H",
             str(header),
-            "--ast-frontend",
-            "clang",
-            "--compiler-option",
-            "-DHAVE_BASE=1",
+            "--config",
+            str(cfg),
             "-o",
             str(out_json),
         ],
@@ -177,6 +194,7 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
     assert old_snap.ast_resolved_standard == new_snap.ast_resolved_standard
 
     out_json = tmp_path / "report.json"
+    compare_cfg = _write_compile_config(tmp_path, options=["-DHAVE_BASE=1"])
     result = CliRunner().invoke(
         main,
         [
@@ -187,10 +205,8 @@ def test_pvxs_error_requires_guard_does_not_force_cxx20(tmp_path: Path) -> None:
             f"old={old_dir / 'pvxs.h'}",
             "--header",
             f"new={new_dir / 'pvxs.h'}",
-            "--ast-frontend",
-            "clang",
-            "--compiler-option",
-            "-DHAVE_BASE=1",
+            "--config",
+            str(compare_cfg),
             "--format",
             "json",
             "-o",
@@ -250,6 +266,9 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
     def _dump_with_explicit_gnu11(
         so_path: Path, header: Path, out_json: Path
     ) -> AbiSnapshot:
+        cfg = _write_compile_config(
+            out_json.parent, options=["-DHAVE_BASE=1", "-std=gnu++11"]
+        )
         result = CliRunner().invoke(
             main,
             [
@@ -257,12 +276,8 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
                 str(so_path),
                 "-H",
                 str(header),
-                "--ast-frontend",
-                "clang",
-                "--compiler-option",
-                "-DHAVE_BASE=1",
-                "--compiler-option",
-                "-std=gnu++11",
+                "--config",
+                str(cfg),
                 "-o",
                 str(out_json),
             ],
@@ -286,6 +301,9 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
     assert old_snap.ast_resolved_standard == new_snap.ast_resolved_standard
 
     out_json = tmp_path / "report-gnu11.json"
+    compare_cfg = _write_compile_config(
+        tmp_path, options=["-DHAVE_BASE=1", "-std=gnu++11"]
+    )
     result = CliRunner().invoke(
         main,
         [
@@ -296,12 +314,8 @@ def test_pvxs_explicit_gnu11_dialect_resolves_and_matches_on_both_sides(
             f"old={old_dir / 'pvxs.h'}",
             "--header",
             f"new={new_dir / 'pvxs.h'}",
-            "--ast-frontend",
-            "clang",
-            "--compiler-option",
-            "-DHAVE_BASE=1",
-            "--compiler-option",
-            "-std=gnu++11",
+            "--config",
+            str(compare_cfg),
             "--format",
             "json",
             "-o",

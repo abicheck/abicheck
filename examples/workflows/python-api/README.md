@@ -3,12 +3,12 @@
 **Task:** "I want to run this check from my own build script or test suite,
 not by shelling out to the CLI — how do I call abicheck from Python?"
 
-This is a Phase 5 slice of the [examples/catalog split]
-(../../../docs/contribute/plans/examples-catalog-split.md) — a small,
+This is a Phase 5 slice of the examples/catalog split (retired plan
+record, `docs/contribute/plans/index.md`) — a small,
 curated, task-oriented example independent of the 197-case calibration
 catalog under `catalog/cases/` (which exists to calibrate detectors, not to
-teach the CLI). See that plan's "What is left" section for the rest of this
-curated set, not yet built.
+teach the CLI). See `../../CLAUDE.md` for the rest of this curated set
+(Phase 5 is complete, 7 of 7).
 
 ## The project
 

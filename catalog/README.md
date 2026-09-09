@@ -1,6 +1,6 @@
 # `catalog/` — the calibration catalog
 
-This is the calibration and compatibility-knowledge tree (Phase 4 of the [examples/catalog split](../docs/contribute/plans/examples-catalog-split.md)) -- not the curated, task-oriented tree. See [`../examples/README.md`](../examples/README.md) for that.
+This is the calibration and compatibility-knowledge tree (Phase 4 of the examples/catalog split) -- not the curated, task-oriented tree. See [`../examples/README.md`](../examples/README.md) for that.
 
 Everything below is calibration material: one case per compatibility
 mechanism, driving the FP-rate, tier-accuracy, mutation, and full-catalog
@@ -98,11 +98,11 @@ Commands below use `PYTHONPATH=.`.
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
 | Full example proof matrix | `validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 208 catalog cases | 208/208 COVERED; 207 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
-| Default/debug verdicts | `PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 208 catalog cases | gcc: 164 PASS / 5 XFAIL / 39 SKIP; clang: 165 PASS / 5 XFAIL / 38 SKIP | Green default/debug verdict lane |
+| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 208 catalog cases | gcc: 164 PASS / 5 XFAIL / 39 SKIP; clang: 165 PASS / 5 XFAIL / 38 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running |
 | Runtime smoke | `PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 208 catalog cases | 90 DEMONSTRATED / 78 NO_RUNTIME_SIGNAL / 1 BASELINE_SIGNAL / 39 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. `case06_visibility` is the one remaining, intentionally-unwhitelisted case — see "Known validation gaps" below |
-| Release headers | `python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 208 catalog cases | 157 PASS / 5 XFAIL / 46 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override |
-| Stripped headers | `python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 208 catalog cases | 152 PASS / 5 FAIL / 5 XFAIL / 46 SKIP | Informational; reduced-evidence signal-loss backlog (below) |
-| Build/source proof | `python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
+| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 208 catalog cases | 164 PASS / 5 XFAIL / 39 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
+| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 208 catalog cases | 158 PASS / 6 FAIL / 5 XFAIL / 39 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
+| Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
 the `Examples Validation` workflow and update this table whenever the catalog size or a lane's
@@ -229,11 +229,9 @@ success means one `COVERED` row per current ground-truth entry, with no
 Current stripped-header signal-loss cases: `case103_toolchain_flag_drift`,
 `case117_no_unique_address`, `case129_struct_return_convention`,
 `case60_base_class_position_changed`, `case69_trivial_to_nontrivial`, and
-`case89_inline_accessor_renamed_pimpl_member` (stripped headers loses the L2
-evidence the inline-body/renamed-member check needs and reports the weaker
-`API_BREAK` `field_renamed` instead of `BREAKING`
-`inline_body_references_renamed_member` — same reduced-evidence pattern as
-the other five, not a false positive).
+`case89_inline_accessor_renamed_pimpl_member` (downgrades `BREAKING` to
+`API_BREAK` — a reduced-evidence signal loss consistent with this lane's
+existing pattern, not a new detector bug).
 
 Release and stripped full-catalog lanes remain reported-only plus false-positive
 guarded. The fixed ten-case build/source proof is blocking. A complete
@@ -253,9 +251,8 @@ Recent build/source and ABI-mode examples:
 Current mode-specific backlog: stripped headers under-classifies
 `case103_toolchain_flag_drift`, `case117_no_unique_address`,
 `case129_struct_return_convention`, `case60_base_class_position_changed`,
-`case69_trivial_to_nontrivial`, and
-`case89_inline_accessor_renamed_pimpl_member`; default/debug and
-release-header modes classify those catalog cases correctly.
+`case69_trivial_to_nontrivial`, and `case89_inline_accessor_renamed_pimpl_member`;
+default/debug and release-header modes classify those catalog cases correctly.
 
 Expected non-pass buckets are already represented in `ground_truth.json`:
 

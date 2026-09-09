@@ -42,8 +42,10 @@ scenarios:
     validates: UC-PLAT-windows-pe
     automated: false
     status: planned
-    plan: docs/contribute/plans/g1-cross-platform-e2e.md
     note: >
+      G1 is Done (native PE/Mach-O compare validation and non-blocking MSVC+PDB lane) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
       PE/COFF + PDB parsing is unit-tested (tests/test_pe_metadata_unit.py,
       tests/test_pdb_metadata.py) and a smoke e2e lane exists
       (tests/test_msvc_pdb_e2e.py, marked `msvc`). Full automation needs native
@@ -66,8 +68,10 @@ scenarios:
     validates: UC-PLAT-macos-macho
     automated: false
     status: planned
-    plan: docs/contribute/plans/g1-cross-platform-e2e.md
     note: >
+      G1 is Done (native PE/Mach-O compare validation and non-blocking MSVC+PDB lane) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
       Mach-O parsing is unit-tested (tests/test_macho_metadata_unit.py,
       tests/test_macos_arm64_abi.py). Full automation needs a macOS CI lane with
       native dylib fixtures so the export trie and ARM64 ABI paths run end-to-end.
@@ -82,15 +86,18 @@ scenarios:
       the entrypoints the host resolves. The scanner must check both directions
       so neither side silently breaks the load contract.
     flow:
-      - abicheck appcompat ./host plugin-v1.so plugin-v2.so --policy plugin_abi -H contract/
+      - abicheck compare plugin-v1.so plugin-v2.so --policy plugin_abi -H contract/ --required-symbol plugin_init --required-symbol plugin_process --required-symbol plugin_cleanup
     expected:
       exit_code: 4
       verdict: BREAKING
     validates: UC-ARCH-plugin
     automated: false
     status: planned
-    plan: docs/contribute/plans/g5-plugin-bidirectional-contract.md
     note: >
+      G5 is Done (host<->plugin bidirectional API check, compare --required-symbol,
+      folding the retired standalone plugin-check command) — the plan record was
+      retired after completion (see docs/contribute/plans/index.md).
+      This specific scenario just has no automated end-to-end CLI test yet.
       The plugin_abi policy and consumer-scoped appcompat are unit-tested
       (tests/test_appcompat.py, tests/test_workflow_scenarios.py). Full automation
       needs a host/plugin example pair plus an optional host-contract check

@@ -338,12 +338,17 @@ def test_dump_dwarf_only_does_not_stamp_build_context(
 
         # And the request that explicitly discards those headers never
         # stamps, even though the very same database matched them.
+        # Phase 7c (one-comparison-product.md §4.2, ADR-037 D8.1):
+        # --dwarf-only is gone from dump's CLI entirely -- debug.dwarf_only
+        # in .abicheck.yml is its only spelling now.
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("debug:\n  dwarf_only: true\n", encoding="utf-8")
         _stub_elf_parse(
             monkeypatch,
             AbiSnapshot(library="lib.so", version="1.0", from_headers=False),
         )
         captured = _capture_write(monkeypatch)
-        result = _run(str(elf_lib), "-H", str(hdr), *flags, "--dwarf-only")
+        result = _run(str(elf_lib), "-H", str(hdr), *flags, "--config", str(cfg))
         assert result.exit_code == 0, result.output
         assert captured["snapshot"].parsed_with_build_context is False
 
@@ -432,14 +437,21 @@ def test_dump_inferred_header_root_ranks_below_the_compile_context(
         )
         _capture_write(monkeypatch)
 
+        # Phase 7 (one-comparison-product.md §4.2, ADR-037 D8.1):
+        # --compiler-option is gone from dump's CLI entirely -- compile.options
+        # (a YAML list) in .abicheck.yml is its only spelling now.
+        cfg = tmp_path / f"{name}.abicheck.yml"
+        cfg.write_text(
+            json.dumps({"compile": {"options": ["-isystem", str(ctx_dir)]}}),
+            encoding="utf-8",
+        )
+
         result = _run(
             str(elf_lib),
             "-H",
             str(umbrella),
-            "--compiler-option",
-            "-isystem",
-            "--compiler-option",
-            str(ctx_dir),
+            "--config",
+            str(cfg),
         )
         assert result.exit_code == 0, result.output
 
@@ -470,9 +482,12 @@ def test_dump_hashes_context_include_dirs_into_the_ast_cache_key(
     ):
         build_inc = tmp_path / f"buildinc{idx}"
         build_inc.mkdir()
-        opts: list[str] = []
-        for token in spelling:
-            opts += ["--compiler-option", token.format(dir=str(build_inc))]
+        # Phase 7 (one-comparison-product.md §4.2, ADR-037 D8.1):
+        # --compiler-option is gone from dump's CLI entirely -- compile.options
+        # (a YAML list) in .abicheck.yml is its only spelling now.
+        tokens = [t.format(dir=str(build_inc)) for t in spelling]
+        cfg = tmp_path / f"cfg{idx}.abicheck.yml"
+        cfg.write_text(json.dumps({"compile": {"options": tokens}}), encoding="utf-8")
 
         captured: dict[str, Any] = {}
         _stub_elf_parse(
@@ -482,7 +497,7 @@ def test_dump_hashes_context_include_dirs_into_the_ast_cache_key(
         )
         _capture_write(monkeypatch)
 
-        result = _run(str(elf_lib), "-H", str(hdr), *opts)
+        result = _run(str(elf_lib), "-H", str(hdr), "--config", str(cfg))
         assert result.exit_code == 0, result.output
         assert build_inc in tuple(captured["extra_hash_dirs"]), (
             spelling,

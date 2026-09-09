@@ -76,6 +76,7 @@ from .cli_helpers_compare import (
     resolve_force_public_scope,
 )
 from .cli_options import (
+    LANG_DEFAULT,
     _shared_frontend_explicit,
     resolve_compile_context,
     resolve_contract_domain,
@@ -690,6 +691,7 @@ def _embed_inline_source_sides(
     old_build_info: Path | None, new_build_info: Path | None,
     old_h: Any, new_h: Any, old_inc: Any, new_inc: Any,
     old_version: str, new_version: str, lang: str,
+    lang_explicit: bool = False,
     header_backend: str,
     old_header_backend: str | None, new_header_backend: str | None,
     compile_context: Any,
@@ -757,17 +759,19 @@ def _embed_inline_source_sides(
     # (Codex review). The per-side override is added back below, where it is
     # genuinely explicit for that side.
     _frontend_explicit = _shared_frontend_explicit(ctx)
-    # G31 Phase C follow-up (Codex review): --lang has the identical
+    # G31 Phase C follow-up: --lang had the identical
     # ctx.invoke-loses-COMMANDLINE-source problem as --ast-frontend/
-    # --nostdinc immediately above -- without this, a `compare --lang c++
-    # --old-sources tree/` side would silently resolve `lang_explicit=False`
-    # in the nested `dump_cmd` invocation below regardless of what the user
-    # actually typed, discarding the explicit request on a
-    # language-ambiguous header exactly like the bug this file's sibling
-    # non-inline path (run_compare's own `lang_explicit`) already fixed.
-    _lang_explicit = (
-        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
-    )
+    # --nostdinc immediately above -- without forwarding the caller's
+    # already-resolved explicitness, a raw `--old/new-sources` tree side
+    # would silently resolve `lang_explicit=False` in the nested
+    # `dump_cmd` invocation below regardless of what the caller actually
+    # requested, discarding the explicit request on a language-ambiguous
+    # header. Phase 7 removed `--lang` from `compare`'s CLI entirely, so
+    # the only remaining source of an explicit request is `compile.lang`
+    # in `.abicheck.yml` -- already resolved by the caller (run_compare)
+    # into *lang_explicit* above, since `ctx.get_parameter_source("lang")`
+    # can never report COMMANDLINE any more.
+    _lang_explicit = lang_explicit
 
     _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
     # Cleanup on context teardown so the temp dir never leaks, even if an
@@ -1294,16 +1298,29 @@ def run_compare(
     include_private_dso: bool, keep_extracted: bool,
     manifest_path: Path | None,  # bundle_system_providers/cohorts: PR J, see resolved_cfg
     no_bundle_analysis: bool, bundle_facts_out: Path | None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
-    header_backend: str,
-    sysroot: Path | None, nostdinc: bool,
+    headers: tuple[Path, ...], includes: tuple[Path, ...],
+    # Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1): `lang`/
+    # `header_backend`/`sysroot`/`nostdinc`/`compiler_path`/
+    # `compiler_prefix`/`compiler_option_tokens`/`old_header_backend`/
+    # `new_header_backend` are no longer CLI-populated -- `--lang`/
+    # `--ast-frontend`/`--compiler`/`--compiler-prefix`/`--compiler-option`/
+    # `--sysroot`/`--nostdinc` are all gone from `compare`'s CLI (CONFIG
+    # class; `.abicheck.yml`'s `compile:` block is their only source now).
+    # `lang` is resolved from config below (no `CompileContext` field for
+    # it); the rest reach the same `resolve_compile_context` call as
+    # before with fixed "nothing explicit" inputs, which already treats an
+    # unset/default value as "defer to config" the same way `compile.std`/
+    # `compile.defines` already did.
+    lang: str | None = None,
+    header_backend: str = "auto",
+    sysroot: Path | None = None, nostdinc: bool = False,
     # --gcc-options removed as a CLI flag (CLI audit PR 5/5); kept as an
     # internal-only, defaulted-None parameter -- see cli.py's dump_cmd for
     # why (never populated from the CLI anymore, only ever None here).
     gcc_options: str | None = None,
     compiler_path: str | None = None, compiler_prefix: str | None = None,
     compiler_option_tokens: tuple[str, ...] = (),
-    old_header_backend: str | None, new_header_backend: str | None,
+    old_header_backend: str | None = None, new_header_backend: str | None = None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,
@@ -1379,17 +1396,19 @@ def run_compare(
     _setup_verbosity(verbose)
 
     # G31 Phase C follow-up (AGENTS.md "dump --lang c++ is silently
-    # discarded ..." known gap): --lang carries the same Click default
+    # discarded ..." known gap): --lang used to carry the same Click default
     # ("c++", indistinguishable from a genuine --lang c++) that dump_cmd's
-    # own lang_explicit detection exists to resolve — mirrors the
-    # already-established _frontend_explicit/_nostdinc_explicit pattern in
-    # _embed_inline_source_sides below. Threaded through
+    # own lang_explicit detection existed to resolve. Threaded through
     # _resolve_compare_snapshots -> CompareRequest.lang_explicit so a live
     # ELF/PE/Mach-O side's header-AST pass honors an explicit request on a
     # language-ambiguous header instead of silently auto-detecting past it.
-    lang_explicit = (
-        ctx.get_parameter_source("lang") == click.core.ParameterSource.COMMANDLINE
-    )
+    #
+    # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI spelling
+    # left on `compare` at all, so `ctx.get_parameter_source("lang")` can
+    # never report COMMANDLINE any more -- `compile.lang` in `.abicheck.yml`
+    # is the only remaining source of an explicit request, resolved below
+    # once `resolved_cfg` exists (Codex review: computing this before that
+    # resolution silently discarded every config-set `compile.lang`).
 
     # Workstream D-S1: merge --used-by-manifest-named consumers into the same
     # --used-by pipeline before anything else looks at used_by_apps -- every
@@ -1436,16 +1455,37 @@ def run_compare(
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
     # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
-    # --debug-format are gone as CLI flags (they were hidden, already
-    # config-backed duplicates) -- these are now config-only, read straight
-    # off the resolved config with no raw CLI local left to overwrite. The
-    # config-only knobs above (collapse/strict/justification/show_redundant)
-    # already worked this way.
+    # --debug-format are gone as CLI flags (hidden, already config-backed
+    # duplicates) -- config-only now, read straight off the resolved config
+    # with no raw CLI local to overwrite, same as collapse/strict/
+    # justification/show_redundant above.
     debug_format_opt = resolved_cfg.debug_format
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod
     debuginfod_url = resolved_cfg.debuginfod_url
     show_redundant = resolved_cfg.show_redundant
+    # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI flag
+    # left either; `compile.lang` is its only source, defaulting to the
+    # same `LANG_DEFAULT` ("c++") the removed flag carried so an
+    # unconfigured project's behavior is unchanged. `lang` is always None
+    # here (compare_cmd's own kwargs never carry a "lang" key any more --
+    # the stored-bundle-facts dispatch path resolves its own `lang`/
+    # `lang_explicit` upstream in compare.py and never reaches run_compare
+    # at all), so `resolved_cfg.compile_lang` is the sole source of both
+    # the resolved value and its explicitness.
+    if lang is None:
+        lang = resolved_cfg.compile_lang or LANG_DEFAULT
+    lang_explicit = resolved_cfg.compile_lang is not None
+    # Phase 7: `--allow-ast-frontend-fallback`/`--allow-unsupported-castxml`
+    # are gone from compare's CLI too; a `.abicheck.yml` `compile:` block
+    # setting either to `true` has the identical effect the removed flag
+    # had (both were already pure env-var togglers).
+    from .buildsource.build_config import BuildConfig as _BuildConfig
+    from .cli_options import apply_compile_config_env_toggles
+
+    apply_compile_config_env_toggles(
+        ctx, project_cfg if isinstance(project_cfg, _BuildConfig) else None
+    )
 
     # P1.1 (Codex review): resolved ahead of the inline-embed block below (not
     # just before _resolve_compare_snapshots, where this used to live) so a raw
@@ -1726,6 +1766,7 @@ def run_compare(
             old_build_info=old_build_info, new_build_info=new_build_info,
             old_h=old_h, new_h=new_h, old_inc=old_inc, new_inc=new_inc,
             old_version=old_version, new_version=new_version, lang=lang,
+            lang_explicit=lang_explicit,
             header_backend=header_backend,
             old_header_backend=old_header_backend,
             new_header_backend=new_header_backend,

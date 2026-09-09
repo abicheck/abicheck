@@ -1293,23 +1293,19 @@ def test_cli_dump_explicit_lang_cpp_forces_cpp_mode_on_ambiguous_header(
 
     runner = CliRunner()
 
-    def _dump(*extra_args: str) -> dict:
-        out = tmp_path / f"out{len(extra_args)}.json"
-        result = runner.invoke(
-            main,
-            [
-                "dump", str(so), "-H", str(header),
-                "--ast-frontend", "clang", "-o", str(out),
-                *extra_args,
-            ],
-        )
+    def _dump(lang: str | None = None) -> dict:
+        suffix = lang or "default"
+        out = tmp_path / f"out-{suffix}.json"
+        cfg = tmp_path / f"config-{suffix}.yml"
+        cfg.write_text("compile:\n  frontend: clang\n" + (f"  lang: {lang}\n" if lang else ""))
+        result = runner.invoke(main, ["dump", str(so), "-H", str(header), "--config", str(cfg), "-o", str(out)])
         assert result.exit_code == 0, result.output
         from abicheck.serialization import load_snapshot_document
 
         return load_snapshot_document(out)
 
     default_snap = _dump()
-    explicit_snap = _dump("--lang", "c++")
+    explicit_snap = _dump("c++")
 
     default_widget = next(t for t in default_snap["types"] if t["name"] == "Widget")
     explicit_widget = next(t for t in explicit_snap["types"] if t["name"] == "Widget")
