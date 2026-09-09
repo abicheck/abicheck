@@ -75,3 +75,7 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   disposition ledger; a rewritten `--output-dir` per-library JSON
   previously reported `suppressed_count: 0` despite its own
   `disposition_audit` recording a suppression.
+- Added `tools/` to `[tool.mutmut].also_copy` — the mutation-testing
+  sandbox never had a `tools/` directory to scan, so the new
+  tools-README retired-surfaces test failed in that lane alone (the
+  real repository tree it validates against has always had `tools/`).
