@@ -47,7 +47,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -73,6 +75,28 @@ MICROSOFT_403 = (
     "dists/noble/InRelease  403  Forbidden\n"
     "E: Some index files failed to download. "
     "They have been ignored, or old ones used instead."
+)
+
+
+#: The tests that *execute* `install.sh` need what the script itself needs: a
+#: POSIX shell, GNU `timeout` (the script relies on `-k/--kill-after`, which
+#: BSD/macOS `timeout` does not ship at all), and dpkg/sudo call semantics the
+#: fake tools model. The unit-test matrix in `ci.yml` runs this suite on
+#: macOS and Windows too, where none of that holds -- an unmarked module would
+#: turn those legs red for a script that only ever runs on an Ubuntu runner.
+#:
+#: Deliberately a *capability* probe rather than a bare `sys.platform` check:
+#: a Linux host without GNU `timeout` would otherwise fail the same way, and
+#: the honest precondition is "the tools this script calls are here".
+_HAS_POSIX_APT_HARNESS = (
+    sys.platform.startswith("linux")
+    and shutil.which("bash") is not None
+    and shutil.which("timeout") is not None
+)
+
+requires_apt_harness = pytest.mark.skipif(
+    not _HAS_POSIX_APT_HARNESS,
+    reason="needs a POSIX shell and GNU timeout (install.sh runs on Ubuntu runners only)",
 )
 
 
@@ -158,7 +182,7 @@ exit 1
     )
 
     env = dict(os.environ)
-    env["PATH"] = f"{bindir}:{env['PATH']}"
+    env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
     env["APT_INSTALL_RETRY_DELAY"] = "0"
     return env, log
 
@@ -180,6 +204,7 @@ def _installs(log: Path) -> list[str]:
     return [ln for ln in lines if ln.startswith("apt-get install")]
 
 
+@requires_apt_harness
 class TestUpdateFailureNeverGatesInstall:
     """The reported incident's class, executed rather than described."""
 
@@ -237,6 +262,7 @@ class TestUpdateFailureNeverGatesInstall:
         assert "apt-get update" in result.stdout
 
 
+@requires_apt_harness
 class TestInstallIsTheGate:
     """Moving the gate must not remove it."""
 
@@ -326,6 +352,7 @@ class TestPackagesAreNotInterpolatedIntoTheShell:
     line, so a workflow expression can never be spliced into the shell that
     runs apt (AGENTS.md's #705 -> #758 lesson: execute the attack)."""
 
+    @requires_apt_harness
     def test_shell_metacharacters_in_packages_do_not_execute(
         self, tmp_path: Path
     ) -> None:
@@ -396,7 +423,11 @@ class TestNoWorkflowGatesInstallOnUpdate:
         for expected in ("ci.yml", "examples-validation.yml"):
             assert expected in users, f"{expected} no longer uses the shared action"
 
-    def test_install_sh_is_executable_and_shellcheck_clean_syntax(self) -> None:
+    def test_install_sh_exists(self) -> None:
+        """Portable half: the script the action names is really there."""
         assert INSTALL_SH.exists()
+
+    @requires_apt_harness
+    def test_install_sh_is_executable_and_syntactically_valid(self) -> None:
         assert os.access(INSTALL_SH, os.X_OK)
         assert subprocess.run(["bash", "-n", str(INSTALL_SH)]).returncode == 0
