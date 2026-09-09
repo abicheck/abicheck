@@ -272,3 +272,22 @@ it should read in CHANGELOG.md. Delete the other sections.
   include dependency never reached OLD. Fixed by making the include-reuse
   fallback its own condition, independent of whether the header-reuse
   fallback fired.
+  A thirteenth review round closed two more gaps in the same fallback: a
+  BARE (unsided) header/include -- the dedicated `header`/`include` inputs,
+  or a bare `extra-args -H`/`-I` value -- already reaches OLD via the
+  ordinary bare forwarding this file already does (`cli_scan.py`'s own
+  ADR-040 split folds a bare value into BOTH `headers` and `baseline_
+  header`/`baseline_include` at once), so `_resolve_baseline_header_scope`
+  never reuses anything in that shape at all; without accounting for it,
+  the reuse fallback injected the candidate-only `new-header`/`new-include`
+  on top of the already-shared bare value, parsing OLD through evidence
+  that belongs only to NEW. Fixed with a new `_extra_args_has_bare_value`
+  check (mirroring `_extra_args_has_old_side_value`'s shape for the bare
+  case), gating both the header- and include-reuse fallbacks. Separately, a
+  Click-valid verbose-clustered attached spelling (`-vHnew=api.h`) reaches
+  this file's tokenizer as one opaque token whose name doesn't even start
+  with `-H`/`-I` (it starts with `-v`) -- `_extra_args_expand_short_
+  clusters` deliberately leaves any cluster with something attached after
+  its value char unexpanded, so the previous round's own `-H?*`/`-I?*`
+  patterns never matched it. Fixed by widening those patterns to `-v*H?*`/
+  `-v*I?*` in `_extra_args_forces_legacy_scan_cli`.

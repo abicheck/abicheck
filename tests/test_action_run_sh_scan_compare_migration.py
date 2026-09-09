@@ -438,6 +438,16 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
             # pre-existing `-oPATH` case.
             "-Hnew=api.h",
             "-Iold=inc",
+            # Thirteenth Codex review round, P1 (fresh evidence): the
+            # identical gap for a Click-valid verbose-clustered attached
+            # spelling (`-vHnew=api.h`) -- `_extra_args_expand_short_
+            # clusters` deliberately leaves a cluster with anything attached
+            # after its value char unexpanded, so this reaches the tokenizer
+            # as one opaque `-vHnew=api.h`-shaped token whose name doesn't
+            # even start with `-H`/`-I`, missing the direct attached-form
+            # case above entirely.
+            "-vHnew=api.h",
+            "-vIold=inc",
         ],
     )
     def test_scan_only_extra_arg_stays_on_scan(self, extra_args: str) -> None:
@@ -1061,6 +1071,68 @@ class TestMigratedCompareReusesHeadersForNativeBaseline:
         cmd = _run_cmd(_base_env(INPUT_AGAINST=_native_lib(tmp_path)))
         assert cmd[1] == "compare", cmd
         assert not any(tok.startswith("old=") for tok in cmd), cmd
+
+    def test_no_header_reuse_when_bare_header_already_covers_old_side(
+        self, tmp_path: Path
+    ) -> None:
+        # Thirteenth Codex review round, P1, fresh evidence: `cli_scan.py`'s
+        # own ADR-040 split folds a BARE (unsided) header into both `headers`
+        # (`header_both + header_new`) AND `baseline_header` (`header_both +
+        # header_old`) at once, so a bare header already reaches OLD via the
+        # ordinary bare forwarding -- `_resolve_baseline_header_scope` never
+        # reuses anything in this shape (`baseline_header` is non-empty).
+        # Without accounting for the bare `header` input, the reuse fallback
+        # injected the candidate-only `new-header` on top of it, parsing OLD
+        # through a header that belongs only to NEW.
+        bare_header = str(tmp_path / "both.h")
+        new_only_header = str(tmp_path / "new-only.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_HEADER=bare_header,
+                INPUT_NEW_HEADER=new_only_header,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={new_only_header}" not in cmd, cmd
+
+    def test_no_header_reuse_when_extra_args_bare_header_covers_old_side(
+        self, tmp_path: Path
+    ) -> None:
+        # Same finding, via `extra-args` rather than the dedicated `header`
+        # input.
+        bare_header = str(tmp_path / "both.h")
+        new_only_header = str(tmp_path / "new-only.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=new_only_header,
+                INPUT_EXTRA_ARGS=f"-H {bare_header}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={new_only_header}" not in cmd, cmd
+
+    def test_no_include_reuse_when_bare_include_already_covers_old_side(
+        self, tmp_path: Path
+    ) -> None:
+        # Same class of finding, generalized to `-I`/`--include`: a bare
+        # `include` input already reaches OLD via the ordinary bare
+        # forwarding, so the include-reuse fallback must not also inject
+        # the candidate-only `new-include` on top of it.
+        header = str(tmp_path / "api.h")
+        bare_include = str(tmp_path / "both-include")
+        new_only_include = str(tmp_path / "new-only-include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=header,
+                INPUT_INCLUDE=bare_include,
+                INPUT_NEW_INCLUDE=new_only_include,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={new_only_include}" not in cmd, cmd
 
     def test_new_include_reused_for_old_side_alongside_header(
         self, tmp_path: Path

@@ -894,6 +894,39 @@ _extra_args_has_old_side_value() {
   return 1
 }
 
+# Thirteenth Codex review round, P1, fresh evidence: whether `extra-args`
+# already supplies a BARE (unsided) `-H`/`--header` (or, via `$2`, `-I`/
+# `--include`) value -- `cli_scan.py`'s own ADR-040 split folds a bare value
+# into BOTH `headers` (NEW's own set: `header_both + header_new`) AND
+# `baseline_header` (OLD's own set: `header_both + header_old`) at once, so
+# a bare header already reaches OLD through the ordinary bare forwarding
+# this file already does (`add_flag "-H" "${INPUT_HEADER:-}"`, applied to
+# both sides on `compare` too, per ADR-040's identical base/old/new
+# fan-out) -- `_migrated_compare_against_is_native_library`'s reuse fallback
+# must NOT ALSO inject the candidate-only `new-header`/`public-header-dir`
+# value on top of it: scan's own `baseline_header` being non-empty in this
+# shape (`_resolve_baseline_header_scope`'s `if not baseline_headers`) means
+# the real CLI never reuses anything here at all, and doing so anyway would
+# parse OLD through a header that belongs only to NEW, capable of hiding a
+# real addition. Mirrors `_extra_args_has_old_side_value`'s own shape, for
+# the bare (no `old=`/`new=` prefix) case instead.
+_extra_args_has_bare_value() {
+  local _opt_short="$1" _opt_long="$2" _name _value
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      "$_opt_short" | "$_opt_long")
+        case "$_value" in
+          old=* | new=*) ;;
+          *)
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
 _extra_args_forces_legacy_scan_cli() {
   local _name _value _write_count=0
   while IFS=$'\t' read -r _name _value; do
@@ -1000,7 +1033,7 @@ _extra_args_forces_legacy_scan_cli() {
         # parse a token.
         return 0
         ;;
-      -H?* | -I?*)
+      -H?* | -I?* | -v*H?* | -v*I?*)
         # Eleventh Codex review round, P1, fresh evidence: the identical
         # attached-value blind spot as `-o?*` just above, for `-H`/`-I`.
         # `_extra_args_new_side_header_values`/`_extra_args_new_side_
@@ -1017,6 +1050,21 @@ _extra_args_forces_legacy_scan_cli() {
         # way, changing findings the exact same way every prior header-reuse
         # gap in this block did. Force the legacy CLI outright rather than
         # risk that, the same safe-by-construction direction as `-o?*`.
+        #
+        # Thirteenth Codex review round, P1, fresh evidence: `-v*H?*`/`-v*I?*`
+        # cover the identical gap for a Click-valid verbose-clustered
+        # attached spelling (`-vHnew=api.h`) too -- `_extra_args_expand_
+        # short_clusters` (above) deliberately leaves ANY cluster with
+        # something attached after its value char unexpanded (documented:
+        # "a cluster ending in an *attached* value ... is left as an opaque
+        # token"), so this reaches `_extra_args_options` as one opaque
+        # `-vHnew=api.h`-shaped token whose name doesn't even start with
+        # `-H`/`-I` (it starts with `-v`), missing the bare `-H?*`/`-I?*`
+        # patterns above entirely. The glob is deliberately broader than
+        # "only v's before H/I" (real Click clustering never puts anything
+        # else there) -- an over-match here only ever costs staying on the
+        # already-correct legacy CLI, the same safety this tokenizer's
+        # other checks already rely on.
         return 0
         ;;
     esac
@@ -2907,8 +2955,17 @@ elif [[ "$MODE" == "scan" ]]; then
   # every `-H` occurrence, so OLD would then parse through both the user's
   # own `old.h` AND the reused `new.h` at once, changing findings the same
   # way the fallback firing at all with no `old-header` guard would).
+  # Thirteenth Codex review round, P1, fresh evidence: a BARE (unsided) header
+  # -- `INPUT_HEADER`/a bare `extra-args -H`/`--header` value -- already
+  # reaches OLD via the ordinary bare forwarding above, matching `cli_scan.
+  # py`'s own `baseline_header = header_both + header_old` fold; scan's own
+  # `_resolve_baseline_header_scope` never reuses anything in this shape
+  # (`baseline_header` is non-empty), so the fallback below must not inject
+  # the candidate-only `new-header`/`public-header-dir` value on top of it.
   if [[ -z "${INPUT_OLD_HEADER:-}" ]] \
+     && [[ -z "${INPUT_HEADER:-}" ]] \
      && ! _extra_args_has_old_side_value "-H" "--header" \
+     && ! _extra_args_has_bare_value "-H" "--header" \
      && { [[ -n "${INPUT_NEW_HEADER:-}" ]] || [[ -n "${INPUT_PUBLIC_HEADER_DIR:-}" ]] \
           || [[ -n "$_extra_new_headers" ]]; } \
      && _migrated_compare_against_is_native_library "${INPUT_AGAINST}"; then
@@ -2947,9 +3004,18 @@ elif [[ "$MODE" == "scan" ]]; then
   # `old-header` is ALSO absent, per `_resolve_baseline_header_scope`'s own
   # early-return branch); this direction only ever adds precision an
   # explicit user input deserves, never discards one silently.
+  # Thirteenth Codex review round, P1 (same class, generalized): a BARE
+  # (unsided) `-I`/`--include` value already reaches OLD via the ordinary
+  # bare forwarding above -- `cli_scan.py`'s identical `baseline_include =
+  # include_both + include_old` fold means `_resolve_baseline_header_
+  # scope`'s `bl_includes` fallback never fires in this shape either
+  # (`baseline_includes` is non-empty), so this reuse must not inject the
+  # candidate-only `new-include` value on top of it.
   if _migrated_compare_against_is_native_library "${INPUT_AGAINST}" \
      && [[ -z "${INPUT_OLD_INCLUDE:-}" ]] \
-     && ! _extra_args_has_old_side_value "-I" "--include"; then
+     && [[ -z "${INPUT_INCLUDE:-}" ]] \
+     && ! _extra_args_has_old_side_value "-I" "--include" \
+     && ! _extra_args_has_bare_value "-I" "--include"; then
     if [[ -n "${INPUT_NEW_INCLUDE:-}" ]]; then
       add_sided_flag "-I" "old" "${INPUT_NEW_INCLUDE:-}"
     fi
