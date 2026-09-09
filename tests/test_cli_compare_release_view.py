@@ -598,3 +598,44 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
         assert len(doc["matrix_findings"]) == 1
+
+
+class TestReleaseViewShowOnlyOutputDirStaysFull:
+    """Codex review, fresh evidence (PR #1154 follow-up: "Keep per-library
+    output-dir reports unfiltered"). ``_release_md_library_findings``
+    directs a reader to ``--output-dir`` as the one uncapped, *complete*
+    per-library source when the aggregate report's own findings list was
+    truncated -- the same "always full" contract a secondary ``--write``
+    already gets (:class:`TestReleaseViewShowOnlySecondaryWriteStaysFull`
+    above). ``--view show=...`` used to be forwarded into that per-library
+    JSON write too, so a filter that excluded the very finding a reader was
+    told to go find there made it disappear from the "complete" file as
+    well."""
+
+    def test_output_dir_json_is_full_while_primary_markdown_is_filtered(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        output_dir = tmp_path / "out"
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--view", "show=variables",
+            "--output-dir", str(output_dir),
+        )
+        assert result.exit_code == 4, result.output
+
+        # Primary (markdown, the default format) is filtered: the function
+        # finding is a "functions"-element kind, and `show=variables` keeps
+        # only variable-element kinds.
+        assert "## Per-Library Findings" not in result.output
+        assert "api_b" not in result.output
+
+        # --output-dir's own per-library JSON is a real single-pair `compare`
+        # report (its own `changes` array, not the release summary's capped
+        # `findings` dicts) -- full/unfiltered: the same function finding a
+        # `--view show=variables` filter removed from the primary render
+        # must still be present here.
+        lib_report = json.loads((output_dir / "libfoo.json").read_text(encoding="utf-8"))
+        kinds = {c["kind"] for c in lib_report["changes"]}
+        assert {"func_removed", "public_surface_shrank"} <= kinds

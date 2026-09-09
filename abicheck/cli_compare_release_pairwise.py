@@ -300,7 +300,14 @@ def _compare_one_library(
     *severity_config* is forwarded to the ``--output-dir`` JSON write below
     (Codex review): without it, that write always used the legacy
     exit-code scheme regardless of the release's own severity config.
-    *show_only* (PR #1154 follow-up) is forwarded to that same write.
+    *show_only* is accepted but deliberately NOT forwarded to that write
+    (Codex review, fresh evidence, PR #1154 follow-up: "Keep per-library
+    output-dir reports unfiltered") -- ``--output-dir`` is the "always
+    full" escape hatch a truncated aggregate report directs a reader to,
+    matching a secondary ``--write``'s own contract; the display-filtered
+    ``findings``/``findings_view`` split lives one level up, in
+    :func:`~abicheck.cli_compare_release_matrix._strip_diff_results_and_adjust_verdict`,
+    which has the real live ``DiffResult`` to filter from.
     *explain_patterns* echoes this library's pattern-verdict modulation
     ledger to stderr (``cli_audit.echo_pattern_modulations``), same as a
     single-pair `compare --view patterns`.
@@ -419,9 +426,21 @@ def _compare_one_library(
             entry["filtered_internal_count"] = result.out_of_surface_count
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
+            # Codex review, fresh evidence ("Keep per-library output-dir
+            # reports unfiltered"): `show_only` is deliberately NOT
+            # forwarded here -- `_release_md_library_findings` directs a
+            # reader to `--output-dir` as the one uncapped, *complete*
+            # per-library source when the aggregate report's own findings
+            # list was truncated, the same "always full" contract a
+            # secondary `--write` already gets (see
+            # `cli_compare_release_helpers._release_findings_for_render`).
+            # Applying the primary display filter here too would let
+            # `--view show=...` make a genuinely truncated (or simply
+            # filtered-out) finding disappear from the one place that note
+            # promises the complete list.
             _safe_write_output(
                 lib_report_path,
-                to_json(result, severity_config=severity_config, show_only=show_only),
+                to_json(result, severity_config=severity_config),
             )
         return entry
     except (ProfileMismatchError, ScopeMismatchError) as exc:
@@ -532,9 +551,14 @@ def _suppress_lockstep_soname_findings(
         )
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
+            # Codex review, fresh evidence ("Keep per-library output-dir
+            # reports unfiltered"): `show_only` deliberately NOT forwarded
+            # -- see `_compare_one_library`'s identical first write above
+            # for the full rationale (the "always full" `--output-dir`
+            # contract `_release_md_library_findings` documents).
             _safe_write_output(
                 lib_report_path,
-                to_json(result, severity_config=severity_config, show_only=show_only),
+                to_json(result, severity_config=severity_config),
             )
     return suppressed
 
