@@ -101,3 +101,17 @@
   dispatch, which lets `fail-on-api-break` (default `false`) swallow a
   severity policy the caller explicitly configured as an error, a false
   green a `mode: scan` workflow never expected.
+- **A `RESOLVED` cross-source finding no longer keeps counting against a
+  consumer-scoped verdict (`--used-by`'s app-compatibility check and the
+  plugin-host `--required-symbol(s)` contract).** `appcompat.py`'s
+  `breaking_for_app`/`breaking_for_host` list is both the app/host verdict's
+  scoring input *and* this module's own display/audit list — so an
+  already-fixed cross-source finding correctly stayed listed (a `RESOLVED`
+  finding stays visible everywhere per the first bullet above) but also kept
+  scoring `_compute_appcompat_verdict`'s `COMPATIBLE_WITH_RISK`/breaking
+  verdict, the identical class of bug the checker's own
+  `_verdict_scored_population` and `scan --against`'s
+  `verdict_scored_changes` already close at their own chokepoints. The
+  verdict computation now excludes a `RESOLVED` finding while leaving the
+  returned list itself — and every other reader of it (the report, the
+  uncovered-symbol scan, the disposition ledger) — unfiltered.

@@ -25,6 +25,7 @@ from abicheck.appcompat import (
     AppCompatResult,
     AppRequirements,
     _check_pe_ordinal_imports,
+    _compute_appcompat_verdict,
     _detect_app_format,
     _get_lib_soname,
     _get_new_lib_exports,
@@ -44,7 +45,12 @@ from abicheck.appcompat import (
     uncovered_missing_symbols,
 )
 from abicheck.checker import Change, DiffResult
-from abicheck.checker_policy import ChangeKind, ReachabilityState, Verdict
+from abicheck.checker_policy import (
+    ChangeKind,
+    CrossSourceEvolution,
+    ReachabilityState,
+    Verdict,
+)
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.macho_metadata import MachoExport, MachoMetadata
 from abicheck.model import AbiSnapshot
@@ -320,6 +326,89 @@ class TestAppCompatResultVerdict:
             verdict=Verdict.COMPATIBLE,
         )
         assert result.verdict == Verdict.COMPATIBLE
+
+
+class TestComputeAppcompatVerdictExcludesResolved:
+    """Codex review, PR #1172, round 20: a ``RESOLVED`` cross-source finding
+
+    must not score the app/host-specific verdict, even though it stays in
+    the caller's ``breaking_for_app``/``breaking_for_host`` list for
+    display/audit purposes (``_partition_app_changes`` deliberately keeps
+    it there -- see ``_compute_appcompat_verdict``'s own docstring).
+    """
+
+    def test_resolved_only_finding_yields_compatible_not_breaking(self):
+        breaking_for_app = [
+            Change(
+                kind=ChangeKind.PRIVATE_HEADER_LEAK,
+                symbol="foo_internal",
+                description="was leaked, now fixed",
+                cross_source_evolution=CrossSourceEvolution.RESOLVED,
+            ),
+        ]
+        verdict = _compute_appcompat_verdict(
+            missing_symbols=[],
+            missing_versions=[],
+            breaking_for_app=breaking_for_app,
+            required_count=3,
+            policy="strict",
+            policy_file=None,
+        )
+        assert verdict == Verdict.COMPATIBLE
+
+    def test_resolved_finding_does_not_mask_a_real_break(self):
+        breaking_for_app = [
+            Change(
+                kind=ChangeKind.PRIVATE_HEADER_LEAK,
+                symbol="foo_internal",
+                description="was leaked, now fixed",
+                cross_source_evolution=CrossSourceEvolution.RESOLVED,
+            ),
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="foo_init",
+                description="removed",
+            ),
+        ]
+        verdict = _compute_appcompat_verdict(
+            missing_symbols=[],
+            missing_versions=[],
+            breaking_for_app=breaking_for_app,
+            required_count=3,
+            policy="strict",
+            policy_file=None,
+        )
+        assert verdict != Verdict.COMPATIBLE
+
+    def test_no_resolved_state_still_gates_normally(self):
+        """Negative control: an unstamped (non-RESOLVED) finding still scores."""
+        breaking_for_app = [
+            Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol="foo_init",
+                description="removed",
+            ),
+        ]
+        verdict = _compute_appcompat_verdict(
+            missing_symbols=[],
+            missing_versions=[],
+            breaking_for_app=breaking_for_app,
+            required_count=3,
+            policy="strict",
+            policy_file=None,
+        )
+        assert verdict != Verdict.COMPATIBLE
+
+    def test_empty_breaking_list_with_zero_required_is_no_change(self):
+        verdict = _compute_appcompat_verdict(
+            missing_symbols=[],
+            missing_versions=[],
+            breaking_for_app=[],
+            required_count=0,
+            policy="strict",
+            policy_file=None,
+        )
+        assert verdict == Verdict.NO_CHANGE
 
 
 # ---------------------------------------------------------------------------

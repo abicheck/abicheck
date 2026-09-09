@@ -1373,12 +1373,12 @@
     },
     {
       "path": "tests/test_appcompat.py",
-      "baseline_lines": 2897,
+      "baseline_lines": 2986,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 2779 -> 2891 (Workstream D-S1 consumer-specification slice): new `TestScopeDiffToAppConsumerSpec` covers `scope_diff_to_app`'s ConsumerSpec advisory/required branch (unreadable-format and digest-mismatch cases, both advisory and required) plus provenance pass-through -- this is a same-function unit test, so it belongs beside every other `scope_diff_to_app` test class already in this file, not a new module. Raised 2891 -> 2897 (ADR-067 C-S2 PR #1106 lint fix): `ruff --fix` reflowed three `from abicheck.appcompat_consumer_impact import enrich_covered_changes as _enrich_covered_changes` single-line imports (introduced by the appcompat_consumer_impact.py extraction, same PR) into their parenthesized multi-line form to satisfy ruff's I001 isort check -- 2 extra lines x 3 call sites, no new test content.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 2779 -> 2891 (Workstream D-S1 consumer-specification slice): new `TestScopeDiffToAppConsumerSpec` covers `scope_diff_to_app`'s ConsumerSpec advisory/required branch (unreadable-format and digest-mismatch cases, both advisory and required) plus provenance pass-through -- this is a same-function unit test, so it belongs beside every other `scope_diff_to_app` test class already in this file, not a new module. Raised 2891 -> 2897 (ADR-067 C-S2 PR #1106 lint fix): `ruff --fix` reflowed three `from abicheck.appcompat_consumer_impact import enrich_covered_changes as _enrich_covered_changes` single-line imports (introduced by the appcompat_consumer_impact.py extraction, same PR) into their parenthesized multi-line form to satisfy ruff's I001 isort check -- 2 extra lines x 3 call sites, no new test content. Raised 2897 -> 2986 (Codex review, PR #1172, round 20): new `TestComputeAppcompatVerdictExcludesResolved` covers `_compute_appcompat_verdict`'s `RESOLVED`-cross-source-finding exclusion fix -- a positive case (a lone `RESOLVED` finding yields `COMPATIBLE`), a case proving the exclusion does not mask a real, unstamped break in the same list, a negative control (a non-`RESOLVED` finding still gates normally), and the zero-`required_count` `NO_CHANGE` edge. This is a same-function unit test for a function already covered by this file's own `TestAppCompatResultVerdict` neighbor, so it belongs beside it rather than in a new module.",
       "review_by": "2026-11-30"
     },
     {
