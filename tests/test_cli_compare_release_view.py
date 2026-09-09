@@ -247,6 +247,73 @@ class TestReleaseViewShowOnly:
         )
         assert baseline.exit_code == filtered.exit_code == 4
 
+    def test_release_json_records_the_active_filter_and_counts(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence ("Record the active filter in
+        release JSON"): the release JSON used to substitute the filtered
+        library projection with no trace of the selector or the pre/post
+        counts, leaving a filtered-to-empty ``findings`` list next to
+        ``verdict: BREAKING`` indistinguishable from missing/truncated
+        detail -- unlike scalar `compare` JSON, which has always carried
+        `show_only_filter`/`filtered_summary` for exactly this reason."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json", "--view", "show=variables",
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output)
+        assert doc["libraries"][0].get("findings", []) == []
+        assert doc["show_only_filter"] == "variables"
+        # Two real findings (the removed function plus the resulting
+        # public-surface-shrank note) existed before the filter; neither
+        # is a variable-element finding, so none survive it.
+        assert doc["filtered_summary"] == {"displayed": 0, "total": 2}
+
+    def test_release_json_omits_the_filter_fields_without_view_show(
+        self, tmp_path: Path
+    ) -> None:
+        """The identical comparison with no ``--view show=`` never adds
+        either key -- both are opt-in, matching scalar `compare` JSON's own
+        `show_only_filter` contract."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir), "--format", "json",
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output)
+        assert "show_only_filter" not in doc
+        assert "filtered_summary" not in doc
+
+    def test_release_json_filtered_summary_counts_bundle_and_matrix_too(
+        self, tmp_path: Path
+    ) -> None:
+        """A ``--view show=...`` selection that keeps the per-library
+        finding (a real BREAKING function removal, severity ``breaking``)
+        but drops both the library's own compatible
+        ``public_surface_shrank`` note and the release-global matrix
+        finding (``API_BREAK`` severity) is reflected in the aggregate
+        counts: 3 total (2 per-library + 1 matrix-global), 1 displayed
+        (only the breaking function removal matches ``show=breaking``)."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        matrix_old, matrix_new = _write_matrix_pair(tmp_path, old_std=17, new_std=20)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--probe-matrix", f"old={matrix_old}",
+            "--probe-matrix", f"new={matrix_new}",
+            "--format", "json", "--view", "show=breaking",
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output)
+        assert doc["show_only_filter"] == "breaking"
+        assert doc["matrix_findings"] == []
+        assert doc["libraries"][0]["findings"] != []
+        assert doc["filtered_summary"] == {"displayed": 1, "total": 3}
+
 
 class TestReleaseViewDemangle:
     """``--view demangle``/``--view no-demangle`` on a directory/package input."""

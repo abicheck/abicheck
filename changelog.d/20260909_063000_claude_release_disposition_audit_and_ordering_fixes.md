@@ -46,3 +46,9 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   JUnit XML with no impact representation, matching single-pair
   `compare`'s own already-shipped identical no-op for the same flag
   combination.
+- `compare --format json --view show=...` on a directory/package release
+  now records the active filter (`show_only_filter`) and the pre/post
+  finding counts (`filtered_summary`) in the release JSON document, the
+  same fields scalar `compare` JSON has always carried for this — a
+  filtered-to-empty `findings` list next to `verdict: BREAKING` used to be
+  indistinguishable from missing or truncated detail.

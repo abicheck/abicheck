@@ -1313,6 +1313,15 @@ def _format_release_json(
     computed filtered view), and the release-global ``bundle_findings``/
     ``matrix_findings`` lists below (filtered directly, since those are not
     per-library and carry no pre-computed view of their own).
+
+    When *show_only* is active, the document also records the selector
+    itself (``show_only_filter``) and a release-wide ``filtered_summary``
+    (``displayed``/``total`` finding counts, aggregated across every
+    library plus the bundle/matrix sections above) -- Codex review, fresh
+    evidence: without this, a filtered-to-empty ``findings`` list next to
+    ``verdict: BREAKING`` was indistinguishable from missing or truncated
+    detail, the exact ambiguity scalar ``compare`` JSON has always avoided
+    via its own ``show_only_filter``/``filtered_summary`` fields.
     """
     display_library_results = _release_findings_for_render(library_results, show_only)
     changed_libraries = [
@@ -1455,6 +1464,46 @@ def _format_release_json(
             }
             for c in release_matrix_changes_for_view(matrix_result, show_only)
         ]
+    if show_only:
+        # Codex review, fresh evidence ("Record the active filter in
+        # release JSON"): the release document substituted the filtered
+        # library/bundle/matrix projections above with no trace of *why* --
+        # a filtered-to-empty `findings` list next to `verdict: BREAKING`
+        # was indistinguishable from missing/truncated detail, unlike
+        # scalar `compare` JSON, which has always carried
+        # `show_only_filter`/`filtered_summary` for exactly this reason
+        # (`reporter._add_show_only_filter`). Mirrors that field's name and
+        # "present only when active" convention, aggregated across every
+        # release-level projection this same `show_only` was just applied
+        # to above: each library's own (already display-capped) `findings`
+        # list, plus the bundle/matrix findings when either ran. `"total"`
+        # is the identical, already-computed pre-filter pool each of those
+        # projections was filtered from (`library_results`' own unfiltered
+        # `findings`, `bundle_result.bundle_findings`,
+        # `matrix_result.changes`) -- not a second, independent count that
+        # could itself drift from what was actually filtered.
+        def _finding_list_len(value: object) -> int:
+            return len(value) if isinstance(value, list) else 0
+
+        total_findings = sum(
+            _finding_list_len(lib.get("findings")) for lib in library_results if isinstance(lib, dict)
+        )
+        displayed_findings = sum(
+            _finding_list_len(lib.get("findings"))
+            for lib in display_library_results
+            if isinstance(lib, dict)
+        )
+        if bundle_result is not None:
+            total_findings += len(bundle_result.bundle_findings)
+            displayed_findings += _finding_list_len(summary.get("bundle_findings"))
+        if matrix_result is not None:
+            total_findings += len(matrix_result.changes)
+            displayed_findings += _finding_list_len(summary.get("matrix_findings"))
+        summary["show_only_filter"] = show_only
+        summary["filtered_summary"] = {
+            "displayed": displayed_findings,
+            "total": total_findings,
+        }
     # CLI cleanup phase two, PR B (Codex review, PR #803): the release-level
     # *summary* JSON is a separate computation from the optional per-library
     # `to_json` sidecar files, which reach `add_contract_context` on their
