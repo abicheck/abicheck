@@ -32,6 +32,8 @@ external caller of ``from abicheck.diff_symbols import ...`` keep working.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
 from ..diff_cxx_rules import (
@@ -42,6 +44,7 @@ from ..diff_cxx_rules import (
     strip_trailing_top_level_parameter_list,
 )
 from ..diff_helpers import make_change
+from ..model import Function
 from ..model.synthetic_key import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,
@@ -467,9 +470,20 @@ def _declaring_entity(qualified: str) -> str:
 
 def emit_namespace_move_batches(
     groups: dict[tuple[str, str], list[tuple[str, str]]],
+    old_map: Mapping[str, Function] | None = None,
 ) -> list[Change]:
     """Emit one SYMBOL_RENAMED_BATCH per namespace substitution supported by
     2+ pairs from 2+ *distinct declaring entities*.
+
+    *old_map*, when given, is consulted the same way
+    ``diff_symbols_renames.emit_prefix_batch_rename`` uses its own *old_map*
+    parameter: the emitted change's ``symbol_binding`` is set only when
+    *every* constituent pair's OLD-side declaration carries a real observed
+    ELF binding, so a batch with even one header-reconstructed (non-ELF-
+    backed) constituent correctly downgrades to
+    ``EvidenceStatus.UNATTRIBUTED`` on an ``"elf"``-tiered run rather than
+    inheriting the kind-level default ``ARTIFACT_PROVEN`` unconditionally
+    (Codex review, Finding C(i)).
 
     ``len(pairs) >= 2`` alone gives zero protection at class granularity: an
     unrelated deleted class and an unrelated added class that happen to
@@ -509,6 +523,21 @@ def emit_namespace_move_batches(
         pair_desc = ", ".join(f"{o} → {n}" for o, n in pairs[:5])
         if len(pairs) > 5:
             pair_desc += f", ... ({len(pairs)} total)"
+        # Only truthiness of `symbol_binding` is ever consulted
+        # (`checker_policy.evidence_status_for_result`) -- the specific
+        # binding kind (global/weak/...) has no meaning at batch
+        # granularity, since constituents can legitimately differ. `None`
+        # (the conservative default, matching `emit_prefix_batch_rename`'s
+        # own `old_map is None` fallback) means "assume evidence was
+        # examined" when no map was given to check.
+        binding = (
+            "global"
+            if old_map is None
+            or all(
+                bool(old_map[old].elf_binding) for old, _new in pairs if old in old_map
+            )
+            else None
+        )
         changes.append(
             make_change(
                 ChangeKind.SYMBOL_RENAMED_BATCH,
@@ -520,6 +549,7 @@ def emit_namespace_move_batches(
                 ),
                 old_value=", ".join(o for o, _ in pairs),
                 new_value=", ".join(n for _, n in pairs),
+                symbol_binding=binding,
             )
         )
     return changes

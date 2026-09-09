@@ -30,11 +30,11 @@ No external CSS/JS dependencies — fully self-contained single HTML file.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .checker_policy import HasKind, impact_for
+from .checker_policy import HasKind, evidence_status_for_result, impact_for
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_CSS`` is re-exported via
@@ -100,7 +100,9 @@ if TYPE_CHECKING:
 _abbr_symbol_text = abbr_symbol_text
 
 
-def compute_full_change_rows(changes: Iterable[object]) -> tuple[ChangeRow, ...]:
+def compute_full_change_rows(
+    changes: Iterable[object], evidence_tiers: Sequence[str] = ()
+) -> tuple[ChangeRow, ...]:
     """Resolve every fact a changes-table row needs for one change: the four
     registry-lookup decisions (kind string, category, impact text, ABICC
     severity band) plus every raw display field `render_changes_table`/
@@ -113,6 +115,9 @@ def compute_full_change_rows(changes: Iterable[object]) -> tuple[ChangeRow, ...]
     `ChangeRow` is an ordinary, JSON-round-trippable value, so this replaces
     the previous `id(change)`-keyed `ChangeRowFactsById` lookup table (needed
     only because `Change` is not hashable) with a plain ordered tuple.
+
+    *evidence_tiers* lets an UNATTRIBUTED finding's impact text carry the
+    same evidence caveat the JSON/Markdown views already do (Codex review).
     """
     rows = []
     for ch in changes:
@@ -121,11 +126,16 @@ def compute_full_change_rows(changes: Iterable[object]) -> tuple[ChangeRow, ...]
         relevance = getattr(ch, "contract_relevance", None)
         assurance = getattr(ch, "contract_assurance", None)
         decision = getattr(ch, "compatibility_decision", None)
+        evidence_status = (
+            evidence_status_for_result(cast(HasKind, ch), evidence_tiers)
+            if kind
+            else None
+        )
         rows.append(
             ChangeRow(
                 kind=ks,
                 category=category(ks),
-                impact=(impact_for(kind) or "") if kind else "",
+                impact=(impact_for(kind, evidence_status) or "") if kind else "",
                 severity=severity(ks),
                 symbol=getattr(ch, "symbol", "") or "",
                 description=getattr(ch, "description", "") or "",
@@ -448,7 +458,10 @@ def compute_scoped_verdict(result: DiffResult) -> ScopedVerdictData | None:
 
 
 def _build_compat_problem_data(
-    changed: list[object], added: list[object], removed: list[object]
+    changed: list[object],
+    added: list[object],
+    removed: list[object],
+    evidence_tiers: Sequence[str] = (),
 ) -> dict[str, object]:
     """Bucket ``changed`` into ABICC's type/symbol/other severity bands.
 
@@ -456,6 +469,10 @@ def _build_compat_problem_data(
     made mid-render (a registry lookup via `is_type_problem`/
     `is_symbol_problem`/`severity`); resolving it here, once, is what lets
     the compat-mode renderer make none of its own.
+
+    *evidence_tiers* is threaded into `compute_full_change_rows` so an
+    UNATTRIBUTED finding's impact text carries the same evidence caveat the
+    JSON/Markdown views already do (Codex review).
     """
     type_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
     symbol_problems: dict[str, list[object]] = {"High": [], "Medium": [], "Low": []}
@@ -474,16 +491,21 @@ def _build_compat_problem_data(
         bucket: dict[str, list[object]],
     ) -> dict[str, list[dict[str, object]]]:
         return {
-            sev: [dataclasses.asdict(row) for row in compute_full_change_rows(items)]
+            sev: [
+                dataclasses.asdict(row)
+                for row in compute_full_change_rows(items, evidence_tiers)
+            ]
             for sev, items in bucket.items()
         }
 
     return {
         "added_rows": [
-            dataclasses.asdict(row) for row in compute_full_change_rows(added)
+            dataclasses.asdict(row)
+            for row in compute_full_change_rows(added, evidence_tiers)
         ],
         "removed_rows": [
-            dataclasses.asdict(row) for row in compute_full_change_rows(removed)
+            dataclasses.asdict(row)
+            for row in compute_full_change_rows(removed, evidence_tiers)
         ],
         "type_problems": _rows_by_severity(type_problems),
         "symbol_problems": _rows_by_severity(symbol_problems),
@@ -672,7 +694,12 @@ def build_html_document(
                     if verdict in ("BREAKING", "API_BREAK")
                     else "compatible"
                 ),
-                "compat": _build_compat_problem_data(changed, added, removed),
+                "compat": _build_compat_problem_data(
+                    changed,
+                    added,
+                    removed,
+                    getattr(result, "evidence_tiers", None) or (),
+                ),
                 # ADR-067 D3 applies to *every* projection, and the
                 # compatibility layout returned before the native branch's
                 # sole audit construction -- so a fully suppressed comparison
@@ -701,6 +728,7 @@ def build_html_document(
         suppressed_count,
         not_evaluated=not_evaluated,
         relevance_of=contract_relevance_of,
+        evidence_tiers=getattr(result, "evidence_tiers", None) or (),
     )
 
     empty_state: dict[str, object] | None = None
@@ -852,6 +880,7 @@ def _build_sections_data(
     *,
     not_evaluated: list[object] | None = None,
     relevance_of: Callable[[object], object] | None = None,
+    evidence_tiers: Sequence[str] = (),
 ) -> list[dict[str, object]]:
     """Build the ordered list of section facts for the native HTML report
     body -- the JSON-shaped counterpart of the pre-split
@@ -864,6 +893,10 @@ def _build_sections_data(
     filing them under Removed/Changed/Added would contradict the verdict
     banner at the top of the same page. Defaults to nothing, so a run without
     `--contract` produces the identical document it always did.
+
+    *evidence_tiers* is threaded into `compute_full_change_rows` so an
+    UNATTRIBUTED finding's impact text carries the same evidence caveat the
+    JSON/Markdown views already do (Codex review).
     """
     sections: list[dict[str, object]] = []
     for title, anchor, css_class, items in (
@@ -881,7 +914,7 @@ def _build_sections_data(
                     "css_class": css_class,
                     "rows": [
                         dataclasses.asdict(row)
-                        for row in compute_full_change_rows(items)
+                        for row in compute_full_change_rows(items, evidence_tiers)
                     ],
                 }
             )

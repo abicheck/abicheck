@@ -552,6 +552,25 @@ def impact_for(kind: ChangeKind, evidence_status: EvidenceStatus | None = None) 
     return text
 
 
+def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
+    """Return the standalone evidence caveat sentence, or ``""``.
+
+    A thin public accessor over :data:`_UNATTRIBUTED_IMPACT_CAVEAT` for a
+    caller that cannot embed a full :func:`impact_for` string into its own
+    text (SARIF's per-result ``message.text``, whose matching rule-level
+    ``fullDescription`` is shared across every finding of the same
+    ``ChangeKind`` and so cannot itself carry a per-finding caveat).
+    Returns ``""`` for any status other than
+    :attr:`EvidenceStatus.UNATTRIBUTED`, so an unconditional call site stays
+    a no-op for every other status -- including ``None``.
+    """
+    return (
+        _UNATTRIBUTED_IMPACT_CAVEAT.strip()
+        if evidence_status is EvidenceStatus.UNATTRIBUTED
+        else ""
+    )
+
+
 def policy_registry_markdown() -> str:
     """Build a markdown snippet for docs from the policy registry."""
     lines = [
@@ -760,6 +779,16 @@ def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
 #: ``symbol_binding`` regardless of how solid their evidence is, so treating
 #: an unset ``symbol_binding`` as suspect for every ``BREAKING_KINDS`` kind
 #: would misclassify those as unattributed too.
+#:
+#: ``SYMBOL_RENAMED_BATCH`` (Codex review, Finding C(i)) is a rollup of
+#: several removed/added pairs rather than one detector call, but
+#: ``diff_symbols_renames.emit_prefix_batch_rename``/
+#: ``compare.namespace_move.emit_namespace_move_batches`` stamp the same
+#: field with the aggregated, weakest-link answer: truthy only when *every*
+#: constituent pair's OLD-side declaration carries a real observed ELF
+#: binding. Membership here is what makes the per-finding check below apply
+#: that aggregation the same way it applies a single ``FUNC_REMOVED``'s own
+#: binding.
 _ELF_BINDING_STAMPED_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_REMOVED,
@@ -767,6 +796,7 @@ _ELF_BINDING_STAMPED_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.VAR_REMOVED,
         ChangeKind.FUNC_VISIBILITY_CHANGED,
         ChangeKind.FUNC_DELETED_ELF_FALLBACK,
+        ChangeKind.SYMBOL_RENAMED_BATCH,
     }
 )
 

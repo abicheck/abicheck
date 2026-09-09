@@ -432,6 +432,26 @@ class Change:
     # after it, never between two existing ones
     # (`tests/test_evidence_provenance_completeness.py` pins the order).
     candidate_side_enrichment: bool = field(default=False, kw_only=True)
+    # Codex review, item 8: a human-readable demangling of `symbol`/
+    # `old_value`, populated only when the underlying declaration is
+    # export-table-only (`Visibility.ELF_ONLY` -- no header confirmation,
+    # so `Function.name`/`Variable.name` is never demangled the way a
+    # header-backed declaration's already is; see
+    # `extract.export_symbol_identity.itanium_export_function`'s own
+    # docstring). Stamped by `diff_symbols._check_removed_function`/
+    # `_var_removed` on FUNC_REMOVED_ELF_ONLY/VAR_REMOVED findings whose old
+    # side is ELF-only. None for every other finding, including a
+    # header-backed FUNC_REMOVED/VAR_REMOVED (whose `old_value` is already
+    # demangled text) and any case where demangling the mangled name
+    # produces nothing new. A machine format (JSON/SARIF/JUnit, per
+    # `demangle.demangle_text`'s own docstring) is otherwise "raw symbols
+    # only" by design -- this field is the one deliberate exception: a
+    # reader who never opts into a human-facing render still gets a
+    # readable name to look at, without the machine format losing the raw
+    # `symbol`/`old_value` it needs for matching. Same
+    # field(kw_only=True)-appended-last convention as
+    # `candidate_side_enrichment` above.
+    demangled_symbol: str | None = field(default=None, kw_only=True)
 
 
 @dataclass

@@ -24,6 +24,7 @@ from typing import Any
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.constants import constant_index_pair, diff_constants
+from .demangle import demangle
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -287,6 +288,26 @@ def _format_params(params: list[Param]) -> str:
     return ", ".join(parts) if parts else "(none)"
 
 
+def _elf_only_demangled_name(mangled: str, visibility: Visibility) -> str | None:
+    """:data:`Change.demangled_symbol` for an export-table-only declaration.
+
+    ``itanium_export_function``/``itanium_export_variable``
+    (``extract/export_symbol_identity.py``) set ``Function.name``/
+    ``Variable.name`` to the raw mangled spelling for a ``Visibility.
+    ELF_ONLY`` entity -- there is no header AST to source a pretty name
+    from, unlike every other visibility. So ``description``/``old_value``
+    on a finding about one of these embeds the raw mangled name, not a
+    human-readable one (Codex review, item 8). Returns ``None`` for every
+    other visibility (already demangled at parse time) and whenever
+    :func:`demangle.demangle` itself returns ``None``/the unchanged input
+    (not a valid mangled name, or no demangler available).
+    """
+    if visibility != Visibility.ELF_ONLY:
+        return None
+    demangled = demangle(mangled)
+    return demangled if demangled and demangled != mangled else None
+
+
 def _check_removed_function(
     mangled: str,
     f_old: Function,
@@ -323,6 +344,7 @@ def _check_removed_function(
         # See Change.symbol_binding's docstring — None when not captured.
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
         entity_id=f_old.entity_id,
+        demangled_symbol=_elf_only_demangled_name(mangled, f_old.visibility),
     )
 
 
@@ -1220,6 +1242,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             # See Change.symbol_binding's docstring — None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
+            demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
         )
     ]
 
@@ -1605,10 +1628,12 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
 
     changes = emit_prefix_batch_rename(
-        find_prefix_rename_pairs(removed, added, old_map, new_map)
+        find_prefix_rename_pairs(removed, added, old_map, new_map), old_map
     )
     changes.extend(
-        emit_namespace_move_batches(find_namespace_move_groups(removed, added))
+        emit_namespace_move_batches(
+            find_namespace_move_groups(removed, added), old_map
+        )
     )
     return changes
 

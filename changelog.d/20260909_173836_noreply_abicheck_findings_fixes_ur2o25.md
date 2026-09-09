@@ -27,5 +27,43 @@
   "dynamic linker will refuse to load or crash at call site" no longer
   reads as certain for a finding synthesized from header-only evidence
   with no matching symbol-table entry). Wired into the JSON report's
-  `impact` field; the Markdown/HTML/SARIF renderers are not yet updated
-  and keep the unconditional text for now.
+  `impact` field, every Markdown report mode (full/leaf/root-cause), the
+  native and ABICC-compatible HTML renderers, and SARIF's per-result
+  `message.text` (SARIF's own rule `fullDescription` stays kind-level and
+  unconditional, since it's shared across every finding of that kind — a
+  new `checker_policy.impact_caveat_for()` helper carries just the caveat
+  sentence there instead).
+- **`SYMBOL_RENAMED_BATCH`'s evidence status now reflects its weakest
+  constituent pair, not the kind-level default.** The batch rollup (a
+  common-prefix rename or a namespace-segment move, both landing on
+  `SYMBOL_RENAMED_BATCH`) never stamped `Change.symbol_binding`, so it
+  always read `ARTIFACT_PROVEN` regardless of whether every rolled-up
+  pair was actually matched against a real ELF symbol-table entry.
+  `emit_prefix_batch_rename`/`emit_namespace_move_batches` now take the
+  old-side symbol map and stamp `symbol_binding` only when *every*
+  constituent pair's old side carries a real observed ELF binding, so a
+  batch with even one header-reconstructed (non-ELF-backed) pair
+  correctly downgrades to `unattributed` on an `elf`-tiered run.
+- **An `elf_only`-visibility removal's report now carries a demangled
+  companion to its raw mangled symbol.** `func_removed_elf_only` and an
+  `elf_only`-visibility `var_removed` previously showed only the raw
+  mangled name in `description`/`old_value` (no header AST ever ran to
+  produce a pretty name, unlike every other visibility) — unreadable in
+  a machine format (JSON/SARIF), which deliberately never demangles
+  `symbol`/`old_value` themselves. A new `Change.demangled_symbol`
+  field (JSON `demangled_symbol`, SARIF `properties.demangledSymbol`)
+  carries the demangled form when it differs from the raw name; `None`/
+  omitted for every ordinary, already-demangled finding.
+- **Public-surface scoping can now demote genuinely internal-only
+  vtable/RTTI churn.** `VTABLE_SLOT_COUNT_CHANGED`/
+  `RTTI_INHERITANCE_CHANGED`/`VTT_SLOT_COUNT_CHANGED`
+  (`diff_elf_layout.py`) carry a raw mangled `_ZTV`/`_ZTI`/`_ZTT` symbol in
+  `Change.symbol`, not a plain type spelling. `surface.py`'s type-level
+  reachability fallback previously tried to extract a type name straight
+  out of that mangled blob, which could never match a real type — so
+  these three kinds always fell back to the conservative "unknown, keep"
+  default regardless of whether the class was actually public. The
+  fallback now demangles a mangled `symbol` first (a no-op for every
+  already-demangled case), so scoping treats these the same as every
+  other type-level finding about the same class. Verified against the
+  FP-rate and per-tier-accuracy gates (no drift).

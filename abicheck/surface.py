@@ -65,6 +65,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .demangle import demangle
 from .model import ScopeOrigin
 from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_closure import resolve_public_surface
@@ -574,7 +575,27 @@ def classify_change_surface(
         # so a qualified *type name* like ``ns::Foo`` is never mis-split here.)
         candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
     else:
-        candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+        # Codex review, item 3: a finding whose `symbol` is a raw mangled
+        # Itanium name (e.g. `diff_elf_layout.py`'s ELF-layout-only
+        # VTABLE_SLOT_COUNT_CHANGED/RTTI_INHERITANCE_CHANGED/
+        # VTT_SLOT_COUNT_CHANGED emit `_ZTV`/`_ZTI`/`_ZTT` + the class's
+        # mangled nested-name, never a plain type spelling) reaches here
+        # whenever `_classify_symbol_level` below can't place it in the
+        # function/variable symbol universe -- `_type_identifiers` expects
+        # already-demangled type text (`"ns::Foo"`), not a mangled blob
+        # (`"_ZTVN2ns3FooE"`), which its identifier regex only ever matches
+        # as one opaque, unmatchable token. That token can never appear in
+        # `all_types`/`public_types`, so `_classify_type_level` always fell
+        # through to the conservative "unknown -> keep" default -- safe
+        # (never hides a break), but it meant public-surface scoping could
+        # never demote genuinely internal-only vtable/RTTI churn, unlike
+        # every other type-level finding kind. `demangle` is a no-op
+        # (returns None, so `or sym` keeps the original) for a finding
+        # whose `symbol` is already a plain type/member spelling, so this
+        # is a strict fix, not a behavior change, for every other case.
+        candidates = _type_identifiers(demangle(sym) or sym) | _type_identifiers(
+            change.caused_by_type
+        )
 
     # Symbol-level finding (function/variable): public iff a public symbol.
     # A confident private/system-header origin demotes even an exported

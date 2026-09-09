@@ -37,6 +37,7 @@ from abicheck.checker_policy import (
     EvidenceStatus,
     ReachabilityState,
     evidence_status_for_result,
+    impact_caveat_for,
     impact_for,
     policy_for,
 )
@@ -252,6 +253,12 @@ def _change_detail_properties(change: Change) -> dict[str, Any]:
     # symbol_binding property for the full rationale) -- Codex review.
     if change.symbol_binding:
         props["symbolBinding"] = change.symbol_binding
+    # Human-readable demangling for an export-table-only (ELF_ONLY) removal
+    # (see reporter.py's identical demangled_symbol field for the full
+    # rationale, Codex review item 8) -- `symbol`/`old_value` stay the raw
+    # mangled spelling deliberately.
+    if change.demangled_symbol:
+        props["demangledSymbol"] = change.demangled_symbol
     return props
 
 
@@ -434,6 +441,16 @@ def _result_for(
     )
     if evidence_status is not None:
         properties["evidenceStatus"] = evidence_status.value
+    # The matching rule's `fullDescription` (`_rule_for`) is shared across
+    # every finding of this ChangeKind, so it cannot itself carry a
+    # per-finding evidence caveat the way JSON/Markdown/HTML's per-change
+    # impact text does -- append it to this one result's own message
+    # instead, gated the same way `impact_for` gates it (only when the kind
+    # has impact text to caveat at all; Codex review, fresh evidence).
+    if impact_for(change.kind):
+        caveat = impact_caveat_for(evidence_status)
+        if caveat:
+            msg_parts.append(caveat)
     if root_cause is not None:
         root_cause_id, root_display = root_cause
         properties["rootCauseId"] = root_cause_id
