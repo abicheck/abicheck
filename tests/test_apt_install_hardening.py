@@ -385,6 +385,10 @@ class TestPackagesAreNotInterpolatedIntoTheShell:
 #: `true`, `:` and a plain `echo` are.
 _NON_FAILING_SINKS = frozenset({"true", ":", "echo"})
 
+#: Commands that end the shell (or the enclosing function) where they stand,
+#: so no later fallback in the chain is reachable at all.
+_CONTROL_TERMINATORS = frozenset({"exit", "return", "exec"})
+
 
 def update_failure_is_absorbed(line: str) -> bool:
     """True when this line's ``apt-get update`` cannot abort its step.
@@ -449,6 +453,11 @@ def update_failure_is_absorbed(line: str) -> bool:
             head = segment[1]
         if head in _NON_FAILING_SINKS:
             return True
+        if head in _CONTROL_TERMINATORS:
+            # Nothing after this runs, so a later sink is unreachable:
+            # `|| exit 1 || true` never reaches `true` and bash exits 1
+            # (Codex review, third P2 on PR #1182).
+            return False
     return False
 
 
@@ -578,45 +587,86 @@ class TestUpdateFailureAbsorptionPredicate:
         assert update_failure_is_absorbed("apt-get update || false || true")
         assert update_failure_is_absorbed("apt-get update || true || false")
 
+    # One fallback command per entry, spanning every shape this predicate has
+    # had to reason about: absorbing sinks, plain failures, pipelines whose
+    # last element decides, statement separators, control terminators, and a
+    # stand-in for a retried `apt-get update`. Crossed with itself below, so
+    # the suite covers the *combinations* rather than the handful of forms a
+    # reviewer happened to name -- three consecutive review rounds each found
+    # one more single case, which is the signature of a class that wants
+    # generating rather than enumerating. (The cross-product then found
+    # `exec false`, which no reviewer had named.)
+    _FALLBACKS = (
+        "true",
+        ":",
+        "false",
+        "exit 1",
+        "return 1",
+        "exec false",
+        "echo hi",
+        'echo "::warning::stale; continuing"',
+        "echo hi | false",
+        "echo hi; false",
+        "printf '%d' abc",
+        "sudo true",
+        "false && true",
+        "true && false",
+    )
+
+    @requires_apt_harness
+    @pytest.mark.parametrize("first", _FALLBACKS)
+    def test_single_fallback_is_sound_against_real_bash(self, first: str) -> None:
+        self._assert_sound(f"CMD || {first}")
+
+    @requires_apt_harness
+    @pytest.mark.parametrize("second", _FALLBACKS)
+    @pytest.mark.parametrize("first", _FALLBACKS)
+    def test_chained_fallbacks_are_sound_against_real_bash(
+        self, first: str, second: str
+    ) -> None:
+        self._assert_sound(f"CMD || {first} || {second}")
+
     @requires_apt_harness
     @pytest.mark.parametrize(
-        "form",
-        [
-            "CMD || true",
-            "CMD || :",
-            'CMD || echo "::warning::stale"',
-            'CMD || echo "::warning::stale; continuing"',
-            "CMD || sudo true",
-            "CMD || CMD || true",
-            "CMD||true",
-            "CMD",
-            "CMD && echo installed",
-            "CMD || exit 1",
-            "CMD || false",
-            "CMD || CMD",
-            "CMD || echo warning | false",
-            "CMD || echo hi; false",
-            "CMD || true && false",
-            "CMD || printf '%d' abc",
-            "CMD || false || true",
-            "CMD || true || false",
-        ],
+        "form", ["CMD", "CMD && echo installed", "CMD -qq && CMD2 -y gcc"]
     )
-    def test_predicate_agrees_with_real_bash(self, form: str) -> None:
+    def test_non_fallback_forms_are_sound_against_real_bash(self, form: str) -> None:
+        self._assert_sound(form)
+
+    @staticmethod
+    def _assert_sound(form: str) -> None:
         """The oracle is bash itself, not this module's own reasoning.
 
-        AGENTS.md: a general invariant needs "a stated oracle that is not the
-        same formula/helper the implementation itself uses". Here the failing
-        `apt-get update` is stood in for by `false`, and bash's own exit
-        status for the whole line is the ground truth the predicate must
-        reproduce. This is the check that falsified the chain-ordering claim
-        an earlier revision shipped.
+        AGENTS.md asks a general invariant to be checked "against a stated
+        oracle that is not the same formula/helper the implementation itself
+        uses". The failing `apt-get update` is stood in for by `false`, and
+        bash's own exit status for the whole line is ground truth.
+
+        The invariant is **one-directional, by design**: whenever the
+        predicate says "absorbed", bash must really exit 0. That is the
+        direction with consequences -- the one that would wave a still-gating
+        line past the repository guard. The converse is deliberately not
+        asserted: the predicate refuses to vouch for a fallback containing
+        `&&`, `|`, or `;`, and some such lines do survive in bash
+        (`false || false && true || true` exits 0). Flagging one asks a human
+        to look, which is the safe failure for a guard; the accepted-forms
+        tests above are what keep that conservatism from degrading into
+        "flags everything".
+
+        Not decoration: this has falsified three separate beliefs of mine
+        about shell semantics -- chain ordering, pipeline status, and
+        reachability past `exit` -- each of which a hand-written assertion
+        would have agreed with.
         """
-        executable = form.replace("CMD", "false")
+        executable = form.replace("CMD2", "false").replace("CMD", "false")
         real_exit = subprocess.run(
             ["bash", "-c", executable], capture_output=True
         ).returncode
-        predicted = update_failure_is_absorbed(form.replace("CMD", "apt-get update"))
-        assert predicted == (real_exit == 0), (
-            f"{form!r}: predicate says absorbed={predicted}, bash exits {real_exit}"
+        predicted = update_failure_is_absorbed(
+            form.replace("CMD2", "apt-get install").replace("CMD", "apt-get update")
         )
+        if predicted:
+            assert real_exit == 0, (
+                f"{form!r}: predicate says the failure is absorbed, but bash "
+                f"exits {real_exit} -- the guard would pass a gating line"
+            )
