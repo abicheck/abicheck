@@ -50,6 +50,29 @@ from typing import Any
 import click
 
 
+def resolve_max_json_object_nodes_cfg(
+    configured: int | None, *, config_explicit: bool, default: int
+) -> int | None:
+    """Resolve ``resource_limits.max_bundle_facts_decode_nodes`` for a
+    stored-bundle-facts-OLD_INPUT ``compare`` (Phase 7g; Codex review, PR
+    #1174, both rounds).
+
+    This budget guards a pre-``json.loads()`` decode-bomb defense over
+    content that may itself be attacker-controlled (the BundleFacts
+    documents being decoded), unlike the ordinary policy knobs
+    ``dispatch()`` reads off the same config unconditionally. Only an
+    *explicit* ``--config`` -- an operator's own deliberate choice -- may
+    *raise* the budget past *default*; an auto-discovered ``.abicheck.yml``
+    can come from the same untrusted checkout being decoded (e.g. a PR's
+    own working tree in CI), so raising it that way would let that PR pair
+    a raised budget with a compact decode-bomb payload. An auto-discovered
+    config may still *lower* the budget below *default*, since narrowing a
+    ceiling is never a decode-bomb risk (Codex review, fresh evidence)."""
+    if configured is None or config_explicit:
+        return configured
+    return min(configured, default)
+
+
 def reject_unsupported_options(
     kwargs: dict[str, Any],
     *,

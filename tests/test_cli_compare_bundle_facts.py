@@ -251,17 +251,13 @@ class TestCompareOldBundleFacts:
         assert "JSON containers" in out
         assert "Traceback" not in out
 
-    def test_max_json_object_nodes_override_ignored_when_config_auto_discovered(
+    def test_max_json_object_nodes_lower_override_is_honored_when_auto_discovered(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Codex review (PR #1174): unlike an *explicit* ``--config``, a
-        ``.abicheck.yml`` auto-discovered by walking up from cwd may be
-        content the same untrusted checkout supplies (e.g. a PR's own
-        working tree in CI) -- so it must not be able to raise the
-        pre-``json.loads()`` decode-bomb budget the way an explicit
-        ``--config`` can (the sibling test above). Mirrors
-        ``resolve_dispatch_compile_context``'s existing explicit-vs-
-        auto-discovered trust distinction for ``compile:``."""
+        """Codex review (PR #1174, second round): an auto-discovered
+        ``.abicheck.yml`` may still *lower* the decode-bomb budget below
+        the conservative default -- narrowing a ceiling is never a
+        decode-bomb risk, unlike raising one (the sibling test below)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -286,10 +282,55 @@ class TestCompareOldBundleFacts:
             "json",
         )
 
-        # Had the auto-discovered budget of 1 been honored, this would fail
-        # with "JSON containers" the same way the explicit-config test does.
-        assert code == 0, out
-        assert "JSON containers" not in out
+        assert code != 0
+        assert "JSON containers" in out
+        assert "Traceback" not in out
+
+    def test_max_json_object_nodes_raise_is_ignored_when_auto_discovered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review (PR #1174): unlike an *explicit* ``--config``, a
+        ``.abicheck.yml`` auto-discovered by walking up from cwd may be
+        content the same untrusted checkout supplies (e.g. a PR's own
+        working tree in CI) -- so it must not be able to *raise* the
+        pre-``json.loads()`` decode-bomb budget past the conservative
+        default the way an explicit ``--config`` can. Mirrors
+        ``resolve_dispatch_compile_context``'s existing explicit-vs-
+        auto-discovered trust distinction for ``compile:``.
+
+        Exercised directly against ``resolve_max_json_object_nodes_cfg``
+        (see its own dedicated unit tests) rather than via the CLI here,
+        since demonstrating a raise being honored end to end would need a
+        real facts document with more containers than the real default
+        (1,000,000) -- infeasible to build in a unit test."""
+        from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
+            resolve_max_json_object_nodes_cfg,
+        )
+
+        # An auto-discovered config asking for a *larger* budget than the
+        # conservative default must not raise it.
+        assert (
+            resolve_max_json_object_nodes_cfg(
+                50_000_000, config_explicit=False, default=1_000_000
+            )
+            == 1_000_000
+        )
+        # The identical value from an *explicit* --config is honored.
+        assert (
+            resolve_max_json_object_nodes_cfg(
+                50_000_000, config_explicit=True, default=1_000_000
+            )
+            == 50_000_000
+        )
+        # No configured value at all -- caller's own default applies (None
+        # regardless of config_explicit, matching the pre-existing default
+        # parameter threading through to bundle_facts.load_bundle_facts).
+        assert (
+            resolve_max_json_object_nodes_cfg(
+                None, config_explicit=False, default=1_000_000
+            )
+            is None
+        )
 
     def test_max_json_object_nodes_flag_removed(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

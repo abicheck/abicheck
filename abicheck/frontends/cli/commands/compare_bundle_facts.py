@@ -312,7 +312,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         load_build_config_with_digest as _load_cfg_early,
     )
     from ..options.params import _load_suppression_and_policy
-    from .compare_bundle_facts_rejections import reject_unsupported_options
+    from .compare_bundle_facts_rejections import (
+        reject_unsupported_options,
+        resolve_max_json_object_nodes_cfg,
+    )
 
     _early_cfg_path = kwargs.get("config")
     _early_cfg = None
@@ -403,15 +406,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         bool(_bundle_cfg.release_include_private_dso) if _bundle_cfg else False
     )
     # Phase 7g: --max-json-object-nodes is gone -- resource_limits.
-    # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now.
-    # Codex review: unlike the policy knobs above, this guards a decode-bomb
-    # budget over content that may itself be attacker-controlled -- only an
-    # *explicit* --config may raise it, not an auto-discovered one (which
-    # can come from the same untrusted checkout being decoded).
-    max_json_object_nodes_cfg = (
-        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes
-        if _bundle_cfg and config_explicit
-        else None
+    # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now
+    # -- see resolve_max_json_object_nodes_cfg()'s own docstring (Codex).
+    max_json_object_nodes_cfg = resolve_max_json_object_nodes_cfg(
+        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes if _bundle_cfg else None,
+        config_explicit=config_explicit,
+        default=importlib.import_module("abicheck.bundle_facts").DEFAULT_MAX_JSON_OBJECT_NODES,
     )
 
     if new_is_stored:
