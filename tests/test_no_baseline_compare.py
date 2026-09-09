@@ -239,7 +239,14 @@ class TestNoBaselineRejectsViewTokens:
 
     @pytest.mark.parametrize(
         "view_token",
-        ["leaf", "root-cause", "impact", "show=breaking", "demangle", "patterns"],
+        [
+            "leaf", "root-cause", "impact", "show=breaking", "demangle", "patterns",
+            # Codex review, PR #1180, fresh evidence: these two were added
+            # to --view in the same PR and missed this rejection entirely --
+            # a no-baseline audit has no scope/disposition ledger and no
+            # suppression audit either.
+            "filtered", "suppressions",
+        ],
     )
     def test_any_view_token_is_rejected(
         self, tmp_path: Path, view_token: str

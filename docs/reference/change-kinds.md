@@ -473,7 +473,7 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 
 ### Surface-metric drift (ADR-027)
 
-Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own. Computed unconditionally on every comparison (ADR-068 D4/Phase 5) — `--surface-metrics` is a vestigial, accepted-but-no-op flag kept for backward compatibility.
+Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own. Computed unconditionally on every comparison (ADR-068 D4/Phase 5) — no flag selects them; they are ordinary `changes[]` entries every projection already renders.
 
 | Kind | Description |
 |------|-------------|
