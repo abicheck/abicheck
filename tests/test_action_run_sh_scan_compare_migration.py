@@ -426,6 +426,18 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
             # through `extra-args` -- Click's own last-flag-wins means it
             # always beats a `build-config` input too.
             "--config custom.yml",
+            # Eleventh Codex review round, P1 (fresh evidence): an
+            # attached-value short option (`-Hnew=api.h`, no space) is
+            # Click-valid but this file's tokenizer deliberately never
+            # parses a short option's concatenated value (documented limit,
+            # `_extra_args_options`'s own docstring) -- reaches
+            # `_extra_args_new_side_header_values`/`_extra_args_new_side_
+            # include_values` as one opaque token, invisible to the
+            # native-baseline header-reuse fallback. Forced to the legacy
+            # CLI outright, the same safe-by-construction direction as the
+            # pre-existing `-oPATH` case.
+            "-Hnew=api.h",
+            "-Iold=inc",
         ],
     )
     def test_scan_only_extra_arg_stays_on_scan(self, extra_args: str) -> None:
@@ -1119,6 +1131,49 @@ class TestMigratedCompareReusesHeadersForNativeBaseline:
         )
         assert cmd[1] == "compare", cmd
         assert f"old={include_dir}" in cmd, cmd
+
+    def test_extra_args_old_side_header_not_duplicated_by_reuse(
+        self, tmp_path: Path
+    ) -> None:
+        # Eleventh Codex review round, P1, fresh evidence: `-H`/`--header` is
+        # repeatable, so `extra-args: -H old=old.h -H new=new.h` already
+        # gives OLD its own real header. Without accounting for it, the
+        # reuse fallback injected an ADDITIONAL `-H old=new.h` from the
+        # candidate's own `new=` value alongside the user's real one --
+        # Click keeps every `-H` occurrence, so OLD would parse through
+        # BOTH headers at once. Only the user's own old header may appear
+        # scoped to OLD; the candidate's must not be reused on top of it.
+        old_header = str(tmp_path / "old-api.h")
+        new_header = str(tmp_path / "new-api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_EXTRA_ARGS=f"-H old={old_header} -H new={new_header}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={new_header}" not in cmd, cmd
+
+    def test_extra_args_old_side_include_not_duplicated_by_reuse(
+        self, tmp_path: Path
+    ) -> None:
+        # Same class of gap as the header case above, for `-I`/`--include`:
+        # an `extra-args: -I old=...` already scopes OLD's own include path,
+        # so the reuse fallback must not also inject a reused `-I old=` from
+        # `new-include`/extra-args' own `new=` value alongside it.
+        header = str(tmp_path / "api.h")
+        old_include = str(tmp_path / "old-include")
+        new_include = str(tmp_path / "new-include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=header,
+                INPUT_NEW_INCLUDE=new_include,
+                INPUT_EXTRA_ARGS=f"-I old={old_include}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={new_include}" not in cmd, cmd
 
     def test_extra_args_new_header_alone_does_not_force_legacy_cli(
         self, tmp_path: Path

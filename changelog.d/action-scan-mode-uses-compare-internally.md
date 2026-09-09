@@ -231,3 +231,19 @@ it should read in CHANGELOG.md. Delete the other sections.
   applies an unsided value to BOTH sides on its own (ADR-040's own
   base/old/new fan-out), so OLD is never left headerless in that shape to
   begin with.
+  An eleventh review round closed two more gaps in the same fallback:
+  `-H`/`--header` (and `-I`/`--include`) are repeatable, so
+  `extra-args: -H old=old.h -H new=new.h` already gave OLD its own real
+  header, but the fallback had no way to see it and injected an ADDITIONAL
+  `-H old=new.h` from the candidate's own `new=` value alongside it --
+  Click keeps every occurrence, so OLD ended up parsing through both
+  headers at once. Fixed by a new `_extra_args_has_old_side_value` check,
+  gating the reuse fallback for both `-H`/`--header` and `-I`/`--include`.
+  Separately, a valid Click attached-value short form (`-Hnew=api.h`, no
+  space) reaches this file's shared tokenizer as one opaque token --
+  documented as a pre-existing, accepted limit of every extra-args scan in
+  this file -- so it was invisible to the tenth round's own `new=`
+  detection, silently leaving OLD headerless in exactly this spelling.
+  Fixed the same way the pre-existing `-oPATH` case already handles this:
+  `-H?*`/`-I?*` now force the legacy CLI outright rather than risk
+  guessing, in `_extra_args_forces_legacy_scan_cli`.

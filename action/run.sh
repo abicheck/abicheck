@@ -864,6 +864,36 @@ _extra_args_new_side_include_values() {
   done <<<"$(_extra_args_options)"
 }
 
+# Eleventh Codex review round, P1, fresh evidence: whether `extra-args` already
+# supplies a sided `old=` value for `-H`/`--header` (or, via `$2`, `-I`/
+# `--include`) -- checked before the native-baseline reuse fallback injects
+# its OWN `-H old=.../-I old=...` from a reused `new=` value. `-H`/`--header`
+# is repeatable and Click keeps every occurrence rather than the reuse
+# fallback's own injected one silently overriding it, so
+# `extra-args: -H old=old.h -H new=new.h` used to end up parsing OLD through
+# BOTH `old.h` (the user's own, correct value) AND the reused `new.h` (the
+# fallback's own addition) at once -- unlike the dedicated `old-header`
+# input case, which already stops the fallback outright via
+# `INPUT_OLD_HEADER`, extra-args' identically-scoped value was invisible to
+# that same check. Takes the option's short and long spelling as `$1`/`$2`
+# so `_extra_args_new_side_header_values`'s and `_extra_args_new_side_
+# include_values`'s own reuse gating can share one implementation.
+_extra_args_has_old_side_value() {
+  local _opt_short="$1" _opt_long="$2" _name _value
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      "$_opt_short" | "$_opt_long")
+        case "$_value" in
+          old=*)
+            return 0
+            ;;
+        esac
+        ;;
+    esac
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
 _extra_args_forces_legacy_scan_cli() {
   local _name _value _write_count=0
   while IFS=$'\t' read -r _name _value; do
@@ -968,6 +998,25 @@ _extra_args_forces_legacy_scan_cli() {
         # rather than risk that, the same safe-by-construction direction
         # this tokenizer already takes everywhere else it can't fully
         # parse a token.
+        return 0
+        ;;
+      -H?* | -I?*)
+        # Eleventh Codex review round, P1, fresh evidence: the identical
+        # attached-value blind spot as `-o?*` just above, for `-H`/`-I`.
+        # `_extra_args_new_side_header_values`/`_extra_args_new_side_
+        # include_values` (the native-baseline header-reuse fallback's own
+        # extra-args detection, a few functions below) only ever recognize
+        # `-H new=PATH`/`-I new=PATH` as SEPARATE tokens (or `--header=`/
+        # `--include=`'s single-token `=`-joined long form, which IS fully
+        # parsed) via `_extra_args_options` -- a valid, Click-accepted
+        # attached short form (`-Hnew=api.h`, no space) reaches this
+        # tokenizer as one opaque `-Hnew=api.h` token instead, invisible to
+        # that detection. For a native `--against` baseline this means the
+        # reuse fallback can silently decide OLD needs no reused header at
+        # all when the candidate's only header evidence was spelled this
+        # way, changing findings the exact same way every prior header-reuse
+        # gap in this block did. Force the legacy CLI outright rather than
+        # risk that, the same safe-by-construction direction as `-o?*`.
         return 0
         ;;
     esac
@@ -2821,7 +2870,16 @@ elif [[ "$MODE" == "scan" ]]; then
   # reported `func_added`).
   local _extra_new_headers _extra_new_header _extra_new_includes _extra_new_include
   _extra_new_headers="$(_extra_args_new_side_header_values)"
+  # Eleventh Codex review round, P1, fresh evidence: `-H`/`--header` is
+  # repeatable, so `extra-args: -H old=old.h -H new=new.h` already gives OLD
+  # its own real header -- `INPUT_OLD_HEADER` alone can't see it, and without
+  # `_extra_args_has_old_side_value` here the fallback below injected an
+  # ADDITIONAL `-H old=new.h` alongside it rather than skipping (Click keeps
+  # every `-H` occurrence, so OLD would then parse through both the user's
+  # own `old.h` AND the reused `new.h` at once, changing findings the same
+  # way the fallback firing at all with no `old-header` guard would).
   if [[ -z "${INPUT_OLD_HEADER:-}" ]] \
+     && ! _extra_args_has_old_side_value "-H" "--header" \
      && { [[ -n "${INPUT_NEW_HEADER:-}" ]] || [[ -n "${INPUT_PUBLIC_HEADER_DIR:-}" ]] \
           || [[ -n "$_extra_new_headers" ]]; } \
      && _migrated_compare_against_is_native_library "${INPUT_AGAINST}"; then
@@ -2851,7 +2909,14 @@ elif [[ "$MODE" == "scan" ]]; then
     # `_resolve_baseline_header_scope`'s own branching on `baseline_headers`
     # alone); this direction only ever adds precision an explicit user
     # input deserves, never discards one silently.
-    if [[ -z "${INPUT_OLD_INCLUDE:-}" && -n "${INPUT_NEW_INCLUDE:-}" ]]; then
+    # Eleventh Codex review round: the identical repeatable-flag guard as the
+    # `-H`/`--header` case above, for `-I`/`--include` -- an
+    # `extra-args: -I old=...` already scopes OLD's own include path, so the
+    # reuse fallback below must not also inject a reused `-I old=` from
+    # `new-include`/extra-args' own `new=` value alongside it.
+    if [[ -z "${INPUT_OLD_INCLUDE:-}" ]] \
+       && ! _extra_args_has_old_side_value "-I" "--include" \
+       && [[ -n "${INPUT_NEW_INCLUDE:-}" ]]; then
       add_sided_flag "-I" "old" "${INPUT_NEW_INCLUDE:-}"
     fi
     # Ninth Codex review round (same finding, generalized to -I/--include):
@@ -2860,7 +2925,8 @@ elif [[ "$MODE" == "scan" ]]; then
     # too, for the same reason the dedicated `new-include` input is above --
     # only when no `old-include` was separately given, same non-discarding
     # direction as the dedicated-input case.
-    if [[ -z "${INPUT_OLD_INCLUDE:-}" ]]; then
+    if [[ -z "${INPUT_OLD_INCLUDE:-}" ]] \
+       && ! _extra_args_has_old_side_value "-I" "--include"; then
       _extra_new_includes="$(_extra_args_new_side_include_values)"
       if [[ -n "$_extra_new_includes" ]]; then
         while IFS= read -r _extra_new_include; do
