@@ -69,7 +69,7 @@ def _bash_executable() -> str:
     return "bash"
 
 
-def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+def _run_cmd(env_extra: dict[str, str], cwd: Path | None = None) -> list[str]:
     script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
         "w",
@@ -96,6 +96,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
             text=True,
             encoding="utf-8",
             env=env,
+            cwd=None if cwd is None else str(cwd),
         )
     finally:
         os.unlink(script_path)
@@ -513,31 +514,10 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
     """
 
     def _run_cmd_in(self, cwd: Path, env_extra: dict[str, str]) -> list[str]:
-        script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
-        ) as f:
-            f.write(script)
-            script_path = f.name
-        env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
-        env.update(env_extra)
-        try:
-            result = subprocess.run(
-                [_bash_executable(), script_path],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                env=env,
-                cwd=str(cwd),
-            )
-        finally:
-            os.unlink(script_path)
-        if result.returncode != 0:
-            raise AssertionError(
-                f"harness script failed (exit {result.returncode})\n"
-                f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-            )
-        return [item for item in result.stdout.split("\x1f") if item]
+        # CodeRabbit review, sixth round: reuses `_run_cmd`'s own `cwd`
+        # parameter instead of duplicating its script build/temp-file/
+        # environment-filtering/failure-assertion logic a second time here.
+        return _run_cmd(env_extra, cwd=cwd)
 
     @pytest.mark.parametrize("method", ["auto", "s1"])
     def test_config_with_source_method_stays_on_scan(
@@ -557,6 +537,23 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
         )
         cmd = self._run_cmd_in(tmp_path, _base_env())
         assert cmd[1] == "compare", cmd
+
+    @pytest.mark.parametrize("method", ["auto", "s1"])
+    def test_flow_style_source_method_stays_on_scan(
+        self, tmp_path: Path, method: str
+    ) -> None:
+        # CodeRabbit review, sixth round, fresh evidence: YAML permits a
+        # flow-style mapping on one line (`source: {method: auto}`, this
+        # function's own docstring example) in addition to the block style
+        # already covered above -- the original pattern required `method`
+        # to start a line, so this spelling fell through unmatched and
+        # silently migrated to `compare`, hitting the exact usage error
+        # this gate exists to prevent.
+        (tmp_path / ".abicheck.yml").write_text(
+            f"source: {{method: {method}}}\n", encoding="utf-8"
+        )
+        cmd = self._run_cmd_in(tmp_path, _base_env())
+        assert cmd[1] == "scan", cmd
 
     def test_no_config_still_migrates(self, tmp_path: Path) -> None:
         cmd = self._run_cmd_in(tmp_path, _base_env())

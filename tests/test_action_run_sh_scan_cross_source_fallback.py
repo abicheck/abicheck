@@ -665,7 +665,7 @@ class TestUnreadableReportDestinationTriggersFallback:
         assert "scan" not in calls, calls
 
 
-def _compare_report_with_abi3_finding(verdict: str, exit_code: int) -> dict:
+def _compare_report_with_abi3_finding(verdict: str) -> dict:
     """A `compare`-shaped report carrying a `--abi3` stable-ABI audit
     finding (`python_stable_abi_violation`) that a policy override
     reclassified into a real, policy-scored change -- exactly `compare`'s
@@ -714,7 +714,7 @@ class TestAbi3FindingTriggersLegacyScanFallback:
     def test_final_verdict_matches_scan_not_compare(self, tmp_path: Path) -> None:
         bindir, _log = _stub_abicheck(
             tmp_path,
-            compare_report=_compare_report_with_abi3_finding("BREAKING", 4),
+            compare_report=_compare_report_with_abi3_finding("BREAKING"),
             compare_exit=4,
             scan_report=_scan_report_with_advisory_abi3_finding(),
             scan_exit=0,
@@ -729,7 +729,7 @@ class TestAbi3FindingTriggersLegacyScanFallback:
     def test_two_invocations_happen_compare_then_scan(self, tmp_path: Path) -> None:
         bindir, log = _stub_abicheck(
             tmp_path,
-            compare_report=_compare_report_with_abi3_finding("BREAKING", 4),
+            compare_report=_compare_report_with_abi3_finding("BREAKING"),
             compare_exit=4,
             scan_report=_scan_report_with_advisory_abi3_finding(),
             scan_exit=0,
@@ -743,7 +743,7 @@ class TestAbi3FindingTriggersLegacyScanFallback:
     def test_notice_is_emitted_explaining_the_fallback(self, tmp_path: Path) -> None:
         bindir, _log = _stub_abicheck(
             tmp_path,
-            compare_report=_compare_report_with_abi3_finding("BREAKING", 4),
+            compare_report=_compare_report_with_abi3_finding("BREAKING"),
             compare_exit=4,
             scan_report=_scan_report_with_advisory_abi3_finding(),
             scan_exit=0,

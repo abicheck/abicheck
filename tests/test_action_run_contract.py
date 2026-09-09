@@ -114,7 +114,7 @@ def _valid_flags(subcommand: str) -> set[str]:
     )
     assert result.exit_code == 0, (
         f"`abicheck {subcommand} {help_flag}` exited {result.exit_code} "
-        f"instead of rendering help:\n{result.output}"
+        f"instead of rendering help: {result.exception!r}\n{result.output}"
     )
     out = result.output
     # rich-click wraps help lines, so a flag can be split across the box; join

@@ -118,4 +118,9 @@ it should read in CHANGELOG.md. Delete the other sections.
   the legacy CLI -- `scan` peeks this tag and extracts a live candidate
   unfiltered to match, but `compare` has no automatic equivalent, so the
   comparability gate's own dependency-scope check used to reject the pair
-  outright as `NOT_COMPARABLE` where `scan` succeeds.
+  outright as `NOT_COMPARABLE` where `scan` succeeds. A CodeRabbit pass over
+  the same round widened the `.abicheck.yml`/`.abicheck.yaml` `source.method`
+  detection to also match YAML's flow-style spelling (`source: {method:
+  auto}`, on one line), which the original block-style-only pattern missed
+  entirely -- silently migrating that configuration to `compare` and hitting
+  the exact usage error the check exists to prevent.

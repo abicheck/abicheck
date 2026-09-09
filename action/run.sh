@@ -760,7 +760,17 @@ _config_sets_source_method() {
   else
     return 1
   fi
-  grep -Eq '^[[:space:]]*method[[:space:]]*:[[:space:]]*[^[:space:]#]' "$_cfg" 2>/dev/null
+  # Matches both block-style (`method` starting a line) and flow-style
+  # (`source: {method: auto}`, on one line -- YAML permits both, and this
+  # function's own comment above uses the flow spelling as its example)
+  # `method` entries (CodeRabbit review, sixth round, fresh evidence): the
+  # original block-only pattern let a flow-style config fall through
+  # unmatched, silently migrating to `compare` and hitting the exact usage
+  # error (exit 64) this gate exists to prevent. The over-match direction
+  # (`,`/`{` immediately before `method` even outside a real `source:`
+  # mapping) is safe by this function's own established principle -- it
+  # only ever costs staying on the already-correct legacy CLI.
+  grep -Eq '(^|[[:space:]{,])method[[:space:]]*:[[:space:]]*[^[:space:]#]' "$_cfg" 2>/dev/null
 }
 
 _extra_args_forces_legacy_scan_cli() {
