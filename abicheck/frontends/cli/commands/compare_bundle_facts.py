@@ -325,6 +325,22 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
             raise click.UsageError(
                 f"cannot parse build config {_early_cfg_path}: {exc}"
             ) from exc
+    # Codex review, fresh evidence: when NEW_INPUT resolves to neither a
+    # directory nor a recognized package archive,
+    # compare_release_against_bundle_facts() treats it as exactly one
+    # library file with no ELF-type check at all (unlike the directory-walk
+    # case, where discover_shared_libraries()'s own ET_DYN/non-PIE filter
+    # already makes dso_only a no-op) -- so release.dso_only/
+    # release.include_private_dso would silently have no effect there.
+    # Computed here, ahead of reject_unsupported_options, rather than after
+    # dispatch()'s own later `new_dir = kwargs["new_input"]` binding, so the
+    # combination is rejected before either setting is silently ignored.
+    from ....workflows.extraction import is_package as _is_package_early
+
+    _new_input_early: Path = kwargs["new_input"]
+    _new_is_single_file = not new_is_stored and not (
+        _new_input_early.is_dir() or _is_package_early(_new_input_early)
+    )
     reject_unsupported_options(
         kwargs,
         new_is_stored=new_is_stored,
@@ -335,6 +351,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         fail_on_removed=(
             bool(_early_cfg.gate_fail_on_removed_library) if _early_cfg else False
         ),
+        new_is_single_file=_new_is_single_file,
     )
 
     old_facts_path: Path = kwargs["old_input"]

@@ -13,3 +13,25 @@
   incorrectly, terminating `docs/reference/cli-reference.md`'s options
   table partway through — every option help string is now whitespace-
   collapsed before being placed in its Markdown table cell.
+- **Action config overlays now discover a `--sources` root's own
+  `.abicheck.yml` and validate configs before merging them** —
+  `embed_build_source()` reads `build:`/`sources:`/`compile:`/`source:`/
+  `debug:` via a lookup anchored at `--sources` itself, separate from the
+  checkout-root walk the Action's config-overlay merge already performed;
+  once any compile-context input triggered that merge, the `--sources`
+  root's own such blocks (e.g. a distinct `sources.graph: full`) were
+  silently dropped. The merge now also discovers and folds in that config.
+  A base document that is syntactically valid YAML but structurally
+  invalid per `BuildConfig`'s own schema (e.g. `release: []`) is now
+  validated (and rejected loudly) before any merge, instead of having its
+  invalid key silently replaced by the Action's own overlay. Two more
+  overlay-cleanup gaps (a merge-subprocess failure, and a directory
+  matching a configured `build.compile_db` name) are also fixed.
+- **`compare`'s stored-BundleFacts-OLD-INPUT driver now rejects
+  `release.dso_only`/`release.include_private_dso` for a single-file
+  NEW_INPUT** — when NEW_INPUT resolves to neither a directory nor a
+  recognized package archive, the driver compares it as a single library
+  file with no ELF-type check at all (unlike the directory-walk case,
+  where the existing shared-library discovery already excludes
+  executables regardless of this setting), so these settings previously
+  had no effect and no diagnostic. Now rejected with a `click.UsageError`.

@@ -57,6 +57,7 @@ def reject_unsupported_options(
     dso_only: bool = False,
     include_private_dso: bool = False,
     fail_on_removed: bool = False,
+    new_is_single_file: bool = False,
 ) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
     OLD_INPUT has no channel to honor. See this module's own docstring for
@@ -74,7 +75,18 @@ def reject_unsupported_options(
     ``release.include_private_dso``/``gate.fail_on_removed_library``
     ``.abicheck.yml`` values -- no longer CLI kwargs at all, so the caller
     resolves them off the loaded project config and passes them in here,
-    rather than this (pure, kwargs-only) function loading config itself."""
+    rather than this (pure, kwargs-only) function loading config itself.
+
+    *new_is_single_file* (Codex review, fresh evidence): whether NEW_INPUT
+    resolves to neither a directory nor a recognized package archive --
+    ``compare_release_against_bundle_facts()`` then treats it as exactly one
+    library file (``new_files = [new_dir]``), bypassing
+    ``discover_shared_libraries()``'s own ELF-type filter (ET_DYN,
+    non-PIE) entirely, unlike the directory-walk case where that filter
+    already makes ``dso_only`` a no-op (the driver behaves as DSO-only by
+    construction). With a single explicit file there is no set of
+    candidates to filter/scope at all, so both settings would silently have
+    no effect -- rejected here rather than left to appear honored."""
     fmt = kwargs.get("fmt", "json")
     if fmt not in ("json", "markdown"):
         raise click.UsageError(
@@ -536,6 +548,17 @@ def reject_unsupported_options(
         raise click.UsageError(
             "--demangle/--no-demangle is not supported together with "
             "a stored-bundle-facts OLD_INPUT."
+        )
+    if new_is_single_file and (dso_only or include_private_dso):
+        raise click.UsageError(
+            "release.dso_only/release.include_private_dso are not supported "
+            "when NEW_INPUT resolves to a single library file rather than a "
+            "directory or package archive: compare_release_against_bundle_"
+            "facts() accepts a single-file NEW_INPUT as-is, with no ELF-type "
+            "check and no directory to scope -- these settings would "
+            "silently have no effect. Point NEW_INPUT at a directory or "
+            "package archive if you need executable filtering, or unset "
+            "these settings."
         )
     if new_is_stored:
         _reject_new_side_extraction_options_for_stored_pair(
