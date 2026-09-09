@@ -532,13 +532,18 @@ class TestScanKeepsWhatItDoesNotScore:
         report = self._scan(tmp_path, "--contract", "exports")
         diff = report["diff"]
         assert diff["breaking"] == 0
-        assert diff["not_evaluated"] == 1
+        # `public_surface_shrank` (ADR-027 Phase 5's surface-metric roll-up,
+        # unconditional at the shared `compare_snapshots` Tier-2 chokepoint
+        # regardless of `scan`'s own flags) now joins `func_removed` here --
+        # both are informational-or-excluded facts the removal pair's export
+        # scope proves out of contract.
+        assert diff["not_evaluated"] == 2
         entries = [f for f in diff["findings"] if f["bucket"] == "not_evaluated"]
-        assert [f["kind"] for f in entries] == ["func_removed"]
+        assert {f["kind"] for f in entries} == {"func_removed", "public_surface_shrank"}
         # ...with the reason it did not gate, which is what makes the row
         # actionable rather than merely present.
-        assert entries[0]["contract_relevance"] == "UNKNOWN_UNRESOLVED"
-        assert entries[0]["contract_reason_code"]
+        assert all(f["contract_relevance"] == "UNKNOWN_UNRESOLVED" for f in entries)
+        assert all(f["contract_reason_code"] for f in entries)
 
     def test_a_scan_row_carries_the_canonical_decision_pair(
         self, tmp_path: Path

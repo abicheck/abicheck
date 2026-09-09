@@ -51,11 +51,12 @@ Three surface-metric findings describe the *shape* of the change rather
 than its members: `public_surface_grew`, `public_surface_shrank`, and
 `undocumented_export_ratio_increased` (the fraction of exported symbols
 with no public-header declaration went up — the export table is growing
-faster than the documented contract). They are informational and only
-emitted on request:
+faster than the documented contract). They are informational and computed
+unconditionally (ADR-027 Phase 5's later default flip); `--surface-metrics`
+is accepted for compatibility but no longer changes whether they appear:
 
 ```bash
-abicheck compare old.json new.so -H include/ --surface-metrics --format json
+abicheck compare old.json new.so -H include/ --format json
 ```
 
 ### The release recommendation

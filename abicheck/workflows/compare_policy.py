@@ -226,22 +226,23 @@ def compare_snapshots(
             public_surface_allowlist
         ) | _snapshot_contract_symbols(old)
     query = PublicSurfaceQuery()
-    # Codex review, fresh evidence (PR #1154 follow-up: "Enforce automatic
-    # analysis in public snapshot comparisons"): ADR-068 D4 made pattern-
-    # verdict modulation and surface-metrics computation unconditional --
-    # the same class of AUTO analysis `cross_source_checks` above is never
-    # even a parameter of, for the identical D5 reason ("a flag that merely
-    # enables useful analysis" has no legitimate off position). Forcing it
-    # only at each of this function's own callers (service_compare_pipeline.
-    # classify_compare_pair, the stored-BundleFacts drivers) left this
-    # documented public Tier-2 verb itself -- what `abicheck.service.
-    # compare_snapshots` *is* -- still trusting its own defaultable-False
-    # parameters, so a direct caller of the public API got a different
-    # answer for the same snapshot pair depending on which entry point it
-    # used. Forced unconditionally here instead, at the one chokepoint
-    # every caller of this verb shares; `pattern_verdicts`/`surface_metrics`
-    # stay as accepted, now-ignored parameters (never removed outright, so
-    # no existing caller's keyword argument becomes an error).
+    # Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
+    # before forcing verdict modulation"): the prior version of this
+    # chokepoint forced `pattern_verdicts=True` unconditionally, citing
+    # ADR-068 D4/D5's "no legitimate off position" principle the same way
+    # `cross_source_checks` earns it above. That citation doesn't hold:
+    # ADR-068 is "Proposed -- not implemented", not an accepted decision,
+    # and the ADR that *is* accepted here -- ADR-027 -- explicitly defers
+    # flipping `--pattern-verdicts` to default-on until a release cycle's
+    # worth of FP-rate and parity validation
+    # (docs/contribute/adr/027-api-surface-intelligence.md's "Still deferred
+    # by design" note). So `pattern_verdicts` stays a real, forwarded
+    # parameter here -- forcing it on for every typed-API/CLI/Action caller
+    # of this documented Tier-2 verb would be exactly the un-reviewed
+    # default flip that ADR gates. `surface_metrics=True` is kept forced
+    # (ADR-027 Phase 5's `--surface-metrics` findings; see the pending
+    # follow-up to reconcile the change-catalog/doc text that still
+    # describes them as request-only with this forced-on behavior).
     return compare(
         old,
         new,
@@ -251,7 +252,7 @@ def compare_snapshots(
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
         extra_changes=extra_changes,
-        pattern_verdicts=True,
+        pattern_verdicts=pattern_verdicts,
         surface_metrics=True,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,

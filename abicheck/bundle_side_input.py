@@ -533,7 +533,14 @@ def compare_release_against_bundle_facts(
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
-                pattern_verdicts=True,
+                # pattern_verdicts is deliberately NOT forced True here:
+                # ADR-027 (accepted) defers flipping --pattern-verdicts to
+                # default-on pending FP-rate/parity validation; ADR-068,
+                # which an earlier fix cited for forcing it, is only
+                # "Proposed -- not implemented" (Codex review, PR #1154
+                # follow-up: "Obtain ADR approval before forcing verdict
+                # modulation"). surface_metrics=True stays -- pre-existing,
+                # unaffected by this correction.
                 surface_metrics=True,
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:

@@ -871,23 +871,24 @@ class TestInvalidExitCodeScheme:
             )
 
 
-class TestPatternVerdictsIsUnconditionalAtTier2:
-    """Codex review, fresh evidence (PR #1154 follow-up: "Make automatic
-    analysis unconditional at Tier 2"): ADR-068 D4 made pattern-verdict
-    modulation unconditional for `compare` -- the native single-pair CLI and
-    the release fan-out's own per-library helper both hardcode
-    `pattern_verdicts=True` at their own call sites, but `classify_compare_
-    pair` (the shared Tier-2 chokepoint every other caller of
-    `service.run_compare`/`run_compare_request` -- the typed API, the stored-
-    BundleFacts drivers -- goes through) used to forward the request's own
-    `pattern_verdicts` field, which defaults to `False`. A bare
-    `CompareRequest()` therefore reached compatibility policy with
-    modulation disabled, diverging from every other entry point for an
-    otherwise-identical comparison -- exactly the class of divergence
-    `surface_metrics` (never even a `CompareRequest` field, forced
-    unconditionally at this same chokepoint) was already fixed for."""
+class TestPatternVerdictsStaysOptInAtTier2:
+    """Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
+    before forcing verdict modulation"): an earlier fix forced
+    `pattern_verdicts=True` unconditionally at `classify_compare_pair` and
+    at `workflows.compare_policy.compare_snapshots` itself, citing ADR-068
+    D4's "no legitimate off position" principle the same way
+    `cross_source_checks` earns it. That citation doesn't hold: ADR-068 is
+    "Proposed -- not implemented", not an accepted decision, while the ADR
+    that *is* accepted (ADR-027) explicitly defers flipping
+    `--pattern-verdicts` to default-on until a release cycle's worth of
+    FP-rate and parity validation. So both chokepoints were reverted to
+    forward the request's/caller's own `pattern_verdicts` value again --
+    these tests pin that a bare `CompareRequest()`/`compare_snapshots()`
+    call keeps modulation off, matching the accepted opt-in default, while
+    `surface_metrics` (pre-existing, unaffected by this correction) stays
+    unconditional."""
 
-    def test_true_is_forwarded_regardless_of_the_request_field(
+    def test_default_request_leaves_pattern_verdicts_off(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.service as service_mod
@@ -905,34 +906,48 @@ class TestPatternVerdictsIsUnconditionalAtTier2:
 
         monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
 
-        # `CompareRequest`'s own `pattern_verdicts` field is left at its
-        # default (False) -- the whole point is that the chokepoint no
-        # longer trusts it.
         request = CompareRequest(old=InputSpec(path=old), new=InputSpec(path=new))
         assert request.pattern_verdicts is False
+        run_compare_request(request)
+
+        assert seen_pattern_verdicts == [False]
+
+    def test_request_can_still_opt_in(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.service as service_mod
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.service import run_compare_request
+
+        old, new = _write(tmp_path, *_breaking_pair())
+
+        real_compare_snapshots = service_mod.compare_snapshots
+        seen_pattern_verdicts: list[object] = []
+
+        def _spy_compare_snapshots(old_snap, new_snap, *args, **kwargs):
+            seen_pattern_verdicts.append(kwargs.get("pattern_verdicts"))
+            return real_compare_snapshots(old_snap, new_snap, *args, **kwargs)
+
+        monkeypatch.setattr(service_mod, "compare_snapshots", _spy_compare_snapshots)
+
+        request = CompareRequest(
+            old=InputSpec(path=old), new=InputSpec(path=new), pattern_verdicts=True
+        )
         run_compare_request(request)
 
         assert seen_pattern_verdicts == [True]
 
 
-class TestPatternVerdictsIsUnconditionalAtTheTier2Verb:
-    """Codex review, fresh evidence (PR #1154 follow-up: "Enforce automatic
-    analysis in public snapshot comparisons"). a9c4880e forced
-    `pattern_verdicts=True` only at `service_compare_pipeline.
-    classify_compare_pair`'s own call and at the stored-BundleFacts
-    drivers -- but all three just forward the value into
-    `workflows.compare_policy.compare_snapshots` (what `abicheck.service.
-    compare_snapshots` *is*, ADR-037 D1's documented public Tier-2 verb),
-    which itself still trusted its own defaultable-``False`` parameters.
-    A direct caller of the public API (bypassing every one of those three
-    call sites) still got modulation disabled. Fixed at the one shared
-    chokepoint instead: `compare_snapshots` now forces both unconditionally
-    regardless of what it's called with, the same "accepted, now-ignored
-    parameter" treatment `cross_source_checks` already established one
-    level up in this exact function for the identical D5 reason."""
+class TestSurfaceMetricsIsUnconditionalAtTheTier2Verb:
+    """`surface_metrics` (pre-existing, unaffected by the pattern_verdicts
+    correction above) stays forced unconditionally at `workflows.
+    compare_policy.compare_snapshots` -- ADR-027 Phase 5's `--surface-
+    metrics` findings, so a direct caller of the public API (bypassing the
+    CLI/release drivers that already forced it at their own call sites)
+    still gets them."""
 
-    def test_default_call_forwards_true_to_the_core(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_default_call_forwards_true_for_surface_metrics(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import abicheck.workflows.compare_policy as compare_policy_module
         from abicheck.service import compare_snapshots
@@ -940,25 +955,24 @@ class TestPatternVerdictsIsUnconditionalAtTheTier2Verb:
         old, new = _breaking_pair()
 
         real_compare = compare_policy_module.compare
-        seen: list[tuple[object, object]] = []
+        seen: list[object] = []
 
         def _spy_compare(old_snap, new_snap, *args, **kwargs):
-            seen.append((kwargs.get("pattern_verdicts"), kwargs.get("surface_metrics")))
+            seen.append(kwargs.get("surface_metrics"))
             return real_compare(old_snap, new_snap, *args, **kwargs)
 
         monkeypatch.setattr(compare_policy_module, "compare", _spy_compare)
 
-        # Bare call -- no pattern_verdicts/surface_metrics kwarg at all,
-        # exactly a direct typed-API caller that never learned about either
-        # flag.
+        # Bare call -- no surface_metrics kwarg at all, exactly a direct
+        # typed-API caller that never learned about the flag.
         compare_snapshots(old, new)
 
-        assert seen == [(True, True)]
+        assert seen == [True]
 
     def test_explicit_false_is_still_overridden(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The parameters are accepted but ignored -- even an explicit
+        """The parameter is accepted but ignored -- even an explicit
         ``False`` cannot turn the analysis off, matching `cross_source_
         checks`'s own "no legitimate off position" precedent."""
         import abicheck.workflows.compare_policy as compare_policy_module
@@ -967,14 +981,14 @@ class TestPatternVerdictsIsUnconditionalAtTheTier2Verb:
         old, new = _breaking_pair()
 
         real_compare = compare_policy_module.compare
-        seen: list[tuple[object, object]] = []
+        seen: list[object] = []
 
         def _spy_compare(old_snap, new_snap, *args, **kwargs):
-            seen.append((kwargs.get("pattern_verdicts"), kwargs.get("surface_metrics")))
+            seen.append(kwargs.get("surface_metrics"))
             return real_compare(old_snap, new_snap, *args, **kwargs)
 
         monkeypatch.setattr(compare_policy_module, "compare", _spy_compare)
 
         compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=False)
 
-        assert seen == [(True, True)]
+        assert seen == [True]

@@ -531,26 +531,28 @@ def classify_compare_pair(
             if request.public_surface_allowlist is not None
             else None
         ),
-        # Codex review, fresh evidence (PR #1154 follow-up: "Make automatic
-        # analysis unconditional at Tier 2"): ADR-068 D4 already made
-        # pattern-verdict modulation unconditional for `compare` -- the
-        # native single-pair CLI (cli_compare_helpers.py) and the release
-        # fan-out's own `_compare_one_library` (cli_compare_release_
-        # pairwise.py) both hardcode `pattern_verdicts=True` at their own
-        # call sites -- but this shared Tier-2 chokepoint (the typed API's
-        # `service.run_compare`, and the stored-BundleFacts drivers that
-        # call it) still forwarded the request's own field, which defaults
-        # to False. A bare `CompareRequest()`/`run_compare()` call therefore
-        # left modulation disabled, diverging from every other entry point
-        # for an otherwise-identical comparison. Forced unconditionally
-        # here too, the same "the flag is a no-op, the analysis always
-        # runs" treatment `surface_metrics` already gets on the next line --
-        # `CompareRequest.pattern_verdicts` itself stays as an accepted,
-        # now-ignored compatibility field rather than being removed outright
-        # (mirroring `surface_metrics`, which was never even a `CompareRequest`
-        # field to begin with).
-        pattern_verdicts=True,
-        surface_metrics=True,  # unconditional here too (PR #1154 review)
+        # Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
+        # before forcing verdict modulation"): a prior fix here forced
+        # `pattern_verdicts=True` unconditionally, citing ADR-068 D4's
+        # "no legitimate off position" principle -- but ADR-068 is
+        # "Proposed -- not implemented", not an accepted decision, and the
+        # ADR that *is* accepted (ADR-027) explicitly defers flipping
+        # `--pattern-verdicts` to default-on until a release cycle's worth
+        # of FP-rate and parity validation. The native single-pair CLI
+        # (cli_compare_helpers.py) and the release fan-out's own
+        # `_compare_one_library` (cli_compare_release_pairwise.py) each
+        # made their own, separately-committed decision to hardcode
+        # `pattern_verdicts=True` at their own call sites -- that predates
+        # this fix and is out of scope for it -- but this shared Tier-2
+        # chokepoint (the typed API's `service.run_compare`, and the
+        # stored-BundleFacts drivers that call it) forwards the request's
+        # own field again, so a bare `CompareRequest()`/`run_compare()` call
+        # keeps the accepted opt-in default instead of a silent, un-reviewed
+        # flip. `surface_metrics=True` stays unconditional here (pre-existing,
+        # ADR-027 Phase 5's `--surface-metrics` findings; unaffected by this
+        # correction).
+        pattern_verdicts=request.pattern_verdicts,
+        surface_metrics=True,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=service.load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
