@@ -531,6 +531,25 @@ from abicheck.config_paths import (
 )
 
 
+def _gha_escape(text: object) -> str:
+    # Codex review (P2), PR #1159: every value interpolated into an
+    # ``::error::``/``::warning::`` workflow command below is untrusted --
+    # a path derived from the Action's own build-config input (which a PR
+    # author fully controls on a pull_request trigger, per action/AGENTS.md's
+    # "treat every INPUT_*/GITHUB_* as untrusted" rule) or the text of a
+    # PyYAML ParserError/ScannerError, which echoes attacker-controlled
+    # config-file bytes verbatim. GitHub's runner parses workflow commands
+    # line-by-line from stdout, so an embedded "\n" lets the remainder of
+    # an untrusted value start a *new* command line (e.g. a smuggled
+    # "::add-mask::..." or another "::error::..."), and an embedded "%"
+    # would similarly corrupt a real property-escaped value if this text
+    # were ever nested inside one. Escaping matches GitHub's own documented
+    # message-data escaping (%->%25, CR->%0D, LF->%0A) so the annotation
+    # always renders as the single, literal line intended -- never a
+    # second, attacker-authored command.
+    return str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
 def _validate_or_exit(doc: dict[str, object], source_path: Path) -> None:
     # Codex review, fresh evidence: a base document is loaded here via a
     # bare `yaml.safe_load` -- syntactically valid YAML, but never run
@@ -550,9 +569,10 @@ def _validate_or_exit(doc: dict[str, object], source_path: Path) -> None:
         BuildConfig.from_dict(doc)
     except ValueError as exc:
         print(
-            f"::error::the config at {source_path} is invalid: {exc}. "
-            "Refusing to silently proceed with (or merge on top of) a "
-            "malformed project config -- fix the file or remove it.",
+            f"::error::the config at {_gha_escape(source_path)} is invalid: "
+            f"{_gha_escape(exc)}. Refusing to silently proceed with (or "
+            "merge on top of) a malformed project config -- fix the file "
+            "or remove it.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -586,9 +606,9 @@ if merge_mode == "explicit":
     found_path = Path(os.path.abspath(base_source))
     if not found_path.is_file():
         print(
-            f"::error::the explicit build-config {found_path} does not "
-            "exist or is not a file. Refusing to silently proceed as if "
-            "it were unconfigured.",
+            f"::error::the explicit build-config {_gha_escape(found_path)} "
+            "does not exist or is not a file. Refusing to silently proceed "
+            "as if it were unconfigured.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -597,8 +617,8 @@ if merge_mode == "explicit":
     except Exception as exc:
         print(
             f"::error::failed to parse the explicit build-config "
-            f"{found_path}: {exc}. Refusing to silently proceed as if it "
-            "were unconfigured.",
+            f"{_gha_escape(found_path)}: {_gha_escape(exc)}. Refusing to "
+            "silently proceed as if it were unconfigured.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -624,9 +644,10 @@ else:
             # just because a synthesized topology/compile-context input was
             # also set (Codex review, PR #1159).
             print(
-                f"::error::failed to parse the discovered project config {found}: "
-                f"{exc}. Refusing to silently proceed as if no project config "
-                "existed -- fix the file or remove it.",
+                f"::error::failed to parse the discovered project config "
+                f"{_gha_escape(found)}: {_gha_escape(exc)}. Refusing to "
+                "silently proceed as if no project config existed -- fix "
+                "the file or remove it.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -665,8 +686,9 @@ else:
             except Exception as exc:
                 print(
                     f"::error::failed to parse the discovered sources-root "
-                    f"config {sources_found}: {exc}. Refusing to silently "
-                    "proceed as if it were unconfigured.",
+                    f"config {_gha_escape(sources_found)}: "
+                    f"{_gha_escape(exc)}. Refusing to silently proceed as "
+                    "if it were unconfigured.",
                     file=sys.stderr,
                 )
                 sys.exit(1)
