@@ -851,7 +851,24 @@ from typing import Any
 #:       than diffed findings. Every pre-existing report gains two additive
 #:       keys and nothing else changes -- neither block is folded into
 #:       ``changes``/the verdict/the exit code.
-REPORT_SCHEMA_VERSION = "3.12"  #: 3.12 -- see the block comment immediately above.
+#: 3.13 -- Codex review of the 3.12 pre-scan work above (fresh evidence),
+#:       four fixes to the identical ``pattern_prescan``/``preprocessor_
+#:       prescan`` blocks with no shape change to anything else:
+#:       (1) each side's dict already grew an explicit ``coverage`` block
+#:       (``PatternScanResult``/``PreprocessorScanResult.coverage().
+#:       to_dict()``) on top of the plain ``to_dict()`` shape 3.12
+#:       documented, but the packaged/docs schemas and this version comment
+#:       never caught up to describe it -- both schema copies' descriptions
+#:       now say so explicitly, though the wire shape is unchanged
+#:       (``additionalProperties: true`` already tolerated the extra key);
+#:       (2) a ``pattern_prescan`` side dict gains one additive key,
+#:       ``scope_reason`` (``"no_inputs"``/``"empty_seed"``/
+#:       ``"unreadable_inputs"``/``null``) distinguishing three different
+#:       reasons ``files_scanned`` can read 0 that a single "not evaluated"
+#:       Markdown message previously collapsed onto each other. Neither
+#:       change touches ``changes``/the verdict/the exit code; every
+#:       pre-existing report gains at most two additive keys.
+REPORT_SCHEMA_VERSION = "3.13"  #: 3.13 -- see the block comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

@@ -184,3 +184,268 @@ def test_full_markdown_report_omits_pre_scan_sections_when_never_folded():
     md = to_markdown(result)
     assert "Pattern Pre-Scan" not in md
     assert "Preprocessor Pre-Scan" not in md
+
+
+# ---------------------------------------------------------------------------
+# Codex review (PR #1151), finding #2: a `partial` preprocessor-scan side
+# must not read as a clean, fully-scanned one.
+# ---------------------------------------------------------------------------
+
+
+def test_render_preprocessor_prescan_markdown_flags_partial_coverage():
+    """A side with ``coverage.status == "partial"`` (some `clang -E` probes
+    failed, or the probe cap truncated the scan) must not read identically
+    to a genuinely clean, fully-scanned side reporting the same zero
+    divergences/leaks -- the rendered line must carry a visible partial/
+    incomplete indicator."""
+    summary = compute_preprocessor_prescan_summary(
+        {
+            "old": {
+                "ran": True,
+                "divergences": [],
+                "leaks": [],
+                "coverage": {
+                    "status": "partial",
+                    "detail": "2 clang run(s) failed",
+                },
+            },
+            "new": {
+                "ran": True,
+                "divergences": [],
+                "leaks": [],
+                "coverage": {"status": "present", "detail": "clean"},
+            },
+        }
+    )
+    lines = render_preprocessor_prescan_markdown(summary)
+    text = "\n".join(lines)
+    old_line = next(line for line in lines if line.startswith("- **OLD**"))
+    new_line = next(line for line in lines if line.startswith("- **NEW**"))
+    assert "partial" in old_line.lower()
+    assert "2 clang run(s) failed" in old_line
+    # The clean side must NOT be flagged, and the two lines must differ even
+    # though both report identical divergence/leak counts.
+    assert "partial" not in new_line.lower()
+    assert old_line != new_line
+    assert "0 macro divergence(s)" in text
+
+
+def test_full_markdown_report_distinguishes_partial_from_clean_preprocessor_scan():
+    """Same invariant, through the real `to_markdown` entry point: a run
+    where only some probes succeeded must never render identically to an
+    all-clean run reporting the same zero findings."""
+    partial_result = DiffResult(
+        old_version="1.0",
+        new_version="1.1",
+        library="libfoo.so",
+        preprocessor_prescan={
+            "old": {
+                "ran": True,
+                "divergences": [],
+                "leaks": [],
+                "coverage": {"status": "partial", "detail": "1 clang run(s) failed"},
+            },
+            "new": {
+                "ran": True,
+                "divergences": [],
+                "leaks": [],
+                "coverage": {"status": "present", "detail": "clean"},
+            },
+        },
+    )
+    clean_result = DiffResult(
+        old_version="1.0",
+        new_version="1.1",
+        library="libfoo.so",
+        preprocessor_prescan={
+            "old": {
+                "ran": True,
+                "divergences": [],
+                "leaks": [],
+                "coverage": {"status": "present", "detail": "clean"},
+            },
+            "new": {
+                "ran": True,
+                "divergences": [],
+                "leaks": [],
+                "coverage": {"status": "present", "detail": "clean"},
+            },
+        },
+    )
+    partial_md = to_markdown(partial_result)
+    clean_md = to_markdown(clean_result)
+    assert partial_md != clean_md
+    assert "partial" in partial_md.lower()
+    assert "partial" not in clean_md.lower()
+
+
+# ---------------------------------------------------------------------------
+# Codex review (PR #1151), finding #3: `--report-mode leaf`/`root-cause`
+# must render both pre-scan sections too, not just full mode.
+# ---------------------------------------------------------------------------
+
+
+def _prescan_result() -> DiffResult:
+    return DiffResult(
+        old_version="1.0",
+        new_version="1.1",
+        library="libfoo.so",
+        pattern_prescan={
+            "old": {
+                "files_scanned": 0,
+                "facts": [],
+                "coverage": {"status": "not_collected"},
+                "scope_reason": "no_inputs",
+            },
+            "new": {
+                "files_scanned": 1,
+                "facts": [{"kind": "virtual_method"}],
+                "escalation_triggers": [],
+                "coverage": {"status": "present"},
+                "scope_reason": None,
+            },
+        },
+        preprocessor_prescan={
+            "old": {"ran": False, "skipped_reason": "no L3 build evidence"},
+            "new": {"ran": False, "skipped_reason": "no L3 build evidence"},
+        },
+    )
+
+
+def test_leaf_mode_markdown_report_shows_both_pre_scan_sections():
+    md = to_markdown(_prescan_result(), report_mode="leaf")
+    assert "Pattern Pre-Scan" in md
+    assert "Preprocessor Pre-Scan" in md
+    assert "no L3 build evidence" in md
+
+
+def test_root_cause_mode_markdown_report_shows_both_pre_scan_sections():
+    md = to_markdown(_prescan_result(), report_mode="root-cause")
+    assert "Pattern Pre-Scan" in md
+    assert "Preprocessor Pre-Scan" in md
+    assert "no L3 build evidence" in md
+
+
+# ---------------------------------------------------------------------------
+# Codex review (PR #1151), finding #4: distinguish "no inputs supplied" /
+# "a valid empty --since seed" / "all supplied inputs unreadable" in the
+# rendered message -- three different situations a single "not evaluated"
+# message previously collapsed.
+# ---------------------------------------------------------------------------
+
+
+def test_pattern_prescan_markdown_distinguishes_no_inputs_from_empty_seed():
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {
+                "files_scanned": 0,
+                "facts": [],
+                "coverage": {"status": "not_collected"},
+                "scope_reason": "no_inputs",
+            },
+            "new": {
+                "files_scanned": 0,
+                "facts": [],
+                "coverage": {"status": "not_collected"},
+                "scope_reason": "empty_seed",
+            },
+        }
+    )
+    lines = render_pattern_prescan_markdown(summary)
+    old_line = next(line for line in lines if line.startswith("- **OLD**"))
+    new_line = next(line for line in lines if line.startswith("- **NEW**"))
+    assert old_line != new_line
+    assert "no headers" in old_line
+    assert "empty scope" in new_line
+    assert "by design" in new_line
+    # The empty-seed side must not be described as having no inputs at all.
+    assert "no headers" not in new_line
+
+
+def test_pattern_prescan_markdown_distinguishes_empty_seed_from_unreadable_inputs():
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {
+                "files_scanned": 0,
+                "facts": [],
+                "coverage": {"status": "not_collected"},
+                "scope_reason": "empty_seed",
+            },
+            "new": {
+                "files_scanned": 0,
+                "facts": [],
+                "coverage": {"status": "not_collected"},
+                "scope_reason": "unreadable_inputs",
+            },
+        }
+    )
+    lines = render_pattern_prescan_markdown(summary)
+    old_line = next(line for line in lines if line.startswith("- **OLD**"))
+    new_line = next(line for line in lines if line.startswith("- **NEW**"))
+    assert old_line != new_line
+    assert "by design" in old_line
+    assert "unreadable" in new_line
+    assert "by design" not in new_line
+
+
+def test_pattern_prescan_markdown_falls_back_when_scope_reason_absent():
+    """A report built before schema 3.13 (no `scope_reason` key at all) must
+    still render the old, coarser message rather than fail to render."""
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {
+                "files_scanned": 0,
+                "facts": [],
+                "coverage": {"status": "not_collected"},
+            },
+            "new": {
+                "files_scanned": 1,
+                "facts": [],
+                "coverage": {"status": "present"},
+            },
+        }
+    )
+    lines = render_pattern_prescan_markdown(summary)
+    old_line = next(line for line in lines if line.startswith("- **OLD**"))
+    assert "not evaluated" in old_line
+
+
+def test_workflows_pattern_scan_scope_reason_distinguishes_all_three_cases(
+    tmp_path,
+):
+    """Direct unit coverage for
+    `workflows.lexical_prescan._pattern_scan_scope_reason` -- the primitive
+    the fold populates `pattern_prescan[...]["scope_reason"]` from."""
+    from abicheck.buildsource.pattern_scan import PatternScanResult
+    from abicheck.workflows.lexical_prescan import (
+        _pattern_scan_scope_reason,
+        compute_pattern_prescan_side,
+    )
+
+    # (a) no headers/--sources supplied at all.
+    empty_roots: list = []
+    no_input_result = compute_pattern_prescan_side(empty_roots, None, None, None)
+    assert (
+        _pattern_scan_scope_reason(empty_roots, False, no_input_result) == "no_inputs"
+    )
+
+    # (b) a real, valid, empty --since/--changed-path seed.
+    header = tmp_path / "risky.hpp"
+    header.write_text("virtual void f();\n", encoding="utf-8")
+    seeded_result = compute_pattern_prescan_side([header], None, None, (), seeded=True)
+    assert seeded_result.files_scanned == 0
+    assert _pattern_scan_scope_reason([header], True, seeded_result) == "empty_seed"
+
+    # (c) supplied inputs that are all unreadable (not a directory, not a
+    # real file the scanner can open).
+    ghost = tmp_path / "does-not-exist.hpp"
+    unreadable_result = PatternScanResult(facts=[], files_scanned=0, files_skipped=1)
+    assert (
+        _pattern_scan_scope_reason([ghost], False, unreadable_result)
+        == "unreadable_inputs"
+    )
+
+    # A side that actually scanned something needs no reason at all.
+    scanned_result = compute_pattern_prescan_side([header], None, None, None)
+    assert scanned_result.files_scanned == 1
+    assert _pattern_scan_scope_reason([header], False, scanned_result) is None

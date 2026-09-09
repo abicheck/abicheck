@@ -53,10 +53,23 @@ at all; ``_to_markdown_leaf``/``_to_markdown_root_cause`` moved to
 ``report/dispatch_markdown.py``), so the ``importlib`` indirection this
 module used to inherit from that helper is gone.
 
-Every view's byte-for-byte output is unchanged by this split -- leaf mode
-has no dedicated golden suite but is covered by
+Every view's byte-for-byte output was unchanged by the split itself -- leaf
+mode has no dedicated golden suite but is covered by
 ``tests/test_checker_reporter_branches.py``'s substring assertions, and
 ``tests/test_golden_root_cause.py`` pins root-cause mode's exact text.
+
+**Pre-scan sections (Codex review, PR #1151, fresh evidence):**
+``_view_preamble_mapping``/``_render_view_preamble`` also fold and render
+``pattern_prescan``/``preprocessor_prescan`` (``workflows/lexical_prescan.py``,
+schema 3.12/3.13) -- the full-mode Markdown renderer
+(``render_markdown_document.py``) wired these two sections in when they were
+added, but this module's two alternate views return their own document
+before ever reaching that code, so both sections silently vanished under
+``--report-mode leaf``/``root-cause``. Worth noting for context, not as
+precedent this bug was excused by: unlike this gap, ``cross_source_evolution``
+(the sibling per-change evolution axis 3.6/3.7 added) was never rendered to
+Markdown in *any* mode, full included -- it is JSON-only by design, so its
+absence here is not a parallel omission this fix also needed to close.
 """
 
 from __future__ import annotations
@@ -71,6 +84,12 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .lexical_prescan import (
+    compute_pattern_prescan_summary,
+    compute_preprocessor_prescan_summary,
+    render_pattern_prescan_markdown,
+    render_preprocessor_prescan_markdown,
+)
 from .render_markdown import (
     OutOfSurfaceNote,
     RecommendationSection,
@@ -182,6 +201,17 @@ def _view_preamble_mapping(
         # the digest carry (workstream G S1) -- one preamble, both alternate
         # modes.
         "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
+        # plan §3 rows 6/8, §6 Phase 2b (Codex review, fresh evidence): the
+        # full-mode Markdown renderer wired these two pre-scan sections in
+        # (render_markdown_document.py), but `--report-mode leaf`/
+        # `root-cause` both return from this alternate-mode module before
+        # ever reaching that code -- so they silently vanished in those two
+        # modes. Folded into the one preamble both alternate modes share,
+        # mirroring how `disposition_audit`/`surface_changes` above already
+        # reach all three modes from a single computation. Already-plain
+        # JSON-safe dicts, same as the full-mode fold.
+        "pattern_prescan": getattr(result, "pattern_prescan", None),
+        "preprocessor_prescan": getattr(result, "preprocessor_prescan", None),
     }
     return d, changes
 
@@ -219,6 +249,12 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
     surface = d.get("surface_changes")
     if isinstance(surface, Mapping):
         lines += render_surface_changes_section(SurfaceChangeSection.from_dict(surface))
+    lines += render_pattern_prescan_markdown(
+        compute_pattern_prescan_summary(d.get("pattern_prescan"))
+    )
+    lines += render_preprocessor_prescan_markdown(
+        compute_preprocessor_prescan_summary(d.get("preprocessor_prescan"))
+    )
     return lines
 
 

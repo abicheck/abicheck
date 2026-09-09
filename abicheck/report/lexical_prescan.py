@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Lexical/preprocessor pre-scan report sections (plan §3 rows 6/8, §6 Phase
-2b; schema 3.12).
+2b; schema 3.13).
 
 Follows this package's compute/render split (see ``abicheck/report/
 AGENTS.md``): each ``compute_*`` reads ``DiffResult.pattern_prescan``/
@@ -94,9 +94,38 @@ def render_preprocessor_prescan_json(
     return {"old": dict(summary.old), "new": dict(summary.new)}
 
 
+#: Rendered text for each :func:`~abicheck.workflows.lexical_prescan.
+#: _pattern_scan_scope_reason` value (Codex review, fresh evidence) -- three
+#: materially different "nothing was scanned" situations that a single
+#: "not evaluated (no headers/`--sources` in scope)" message used to
+#: collapse onto one another, so a valid empty ``--since`` seed (b) read
+#: identically to no inputs being supplied at all (a), and both read
+#: identically to every supplied input being unreadable (c).
+_SCOPE_REASON_MESSAGES: Mapping[str, str] = {
+    "no_inputs": "not evaluated (no headers/`--sources` in scope)",
+    "empty_seed": (
+        "not evaluated (`--since`/`--changed-path` resolved to a real, "
+        "empty scope -- 0 files by design, not a missing/unreadable input)"
+    ),
+    "unreadable_inputs": (
+        "not evaluated (headers/`--sources` were supplied, but every "
+        "candidate file was unreadable or matched no scannable extension)"
+    ),
+}
+
+
 def _pattern_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
+    reason = side.get("scope_reason")
+    if reason is not None:
+        message = _SCOPE_REASON_MESSAGES.get(
+            reason, "not evaluated (no headers/`--sources` in scope)"
+        )
+        return f"- **{label}**: {message}"
     coverage = side.get("coverage") or {}
     if coverage.get("status") == "not_collected" or not side.get("files_scanned"):
+        # `scope_reason` absent (e.g. a report built before this field
+        # existed) -- fall back to the old, coarser message rather than
+        # fail to render anything.
         return f"- **{label}**: not evaluated (no headers/`--sources` in scope)"
     facts = side.get("facts") or []
     triggers = side.get("escalation_triggers") or []
@@ -132,15 +161,25 @@ def render_pattern_prescan_markdown(
 
 def _preprocessor_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
     coverage = side.get("coverage") or {}
-    if not side.get("ran") or coverage.get("status") == "not_collected":
+    status = coverage.get("status")
+    if not side.get("ran") or status == "not_collected":
         reason = side.get("skipped_reason") or coverage.get("detail") or "not evaluated"
         return f"- **{label}**: skipped -- {reason}"
     divergences = side.get("divergences") or []
     leaks = side.get("leaks") or []
-    return (
+    line = (
         f"- **{label}**: {len(divergences)} macro divergence(s), "
         f"{len(leaks)} header leak(s)"
     )
+    if status == "partial":
+        # Codex review, fresh evidence: only some `clang -E` probes
+        # succeeded, or the probe count hit `ABICHECK_PREPROCESSOR_SCAN_
+        # MAX_PROBES`'s cap -- without this, a partially-inspected build
+        # can report zero divergences/leaks and read exactly like a clean,
+        # fully-scanned one.
+        detail = coverage.get("detail") or "incomplete coverage"
+        line += f" -- ⚠️ **partial coverage** ({detail})"
+    return line
 
 
 def render_preprocessor_prescan_markdown(

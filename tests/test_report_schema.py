@@ -144,6 +144,44 @@ class TestSchemaFile:
         assert docs_copy.is_file()
         assert docs_copy.read_text() == COMPARE_REPORT_SCHEMA_PATH.read_text()
 
+    def test_pattern_and_preprocessor_prescan_schema_describe_coverage_field(self):
+        """Codex review (PR #1151), finding #1: the pre-scan fold (workflows.
+        lexical_prescan._pattern_side_dict/_preprocessor_side_dict) attaches
+        an explicit `coverage` block on top of each side's plain to_dict()
+        shape -- the packaged/docs schemas' own descriptions must say so,
+        not just tolerate it silently via additionalProperties: true."""
+        schema = load_compare_report_schema()
+        pattern_desc = schema["properties"]["pattern_prescan"]["description"]
+        preproc_desc = schema["properties"]["preprocessor_prescan"]["description"]
+        assert "coverage" in pattern_desc
+        assert "coverage" in preproc_desc
+        # Both copies (packaged + docs mirror) must agree, per the byte-
+        # identical invariant test_docs_mirror_matches_packaged_schema pins.
+        docs_copy = (
+            COMPARE_REPORT_SCHEMA_PATH.parent.parent.parent
+            / "docs"
+            / "reference"
+            / "schemas"
+            / "v1"
+            / "compare_report.schema.json"
+        )
+        docs_schema = json.loads(docs_copy.read_text())
+        assert docs_schema["properties"]["pattern_prescan"]["description"] == (
+            pattern_desc
+        )
+        assert docs_schema["properties"]["preprocessor_prescan"]["description"] == (
+            preproc_desc
+        )
+
+    def test_report_schema_version_bumped_for_prescan_coverage_and_scope_reason(self):
+        """The 3.12 pre-scan fields (coverage block, scope_reason) changed
+        shape after 3.12 shipped -- REPORT_SCHEMA_VERSION must have moved
+        forward from 3.12 to record that, per this repo's "renumber, don't
+        reuse" schema-version convention (see schemas/__init__.py's own
+        block comment)."""
+        major, minor = (int(p) for p in REPORT_SCHEMA_VERSION.split("."))
+        assert (major, minor) > (3, 12)
+
 
 @_requires_jsonschema
 class TestReportValidatesAgainstSchema:
