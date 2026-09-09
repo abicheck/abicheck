@@ -1057,19 +1057,43 @@ _old_library_is_stored_snapshot() {
 # function's docstring. Only single-pair `compare OLD NEW` with a genuinely
 # *live* OLD operand is pairwise: both operands are then independently-
 # parsed live headers under the SAME resolved compile context. `dump` has
-# one operand; `scan --against`'s own -H/-I have always applied only to the
-# scanned ARTIFACT, never to --against (never live headers on that side at
-# all); and a `compare` whose OLD operand is a stored snapshot or resolved
-# ABI baseline (_old_library_is_stored_snapshot) does no header/debug
-# extraction on that side either (Codex review, fresh evidence, PR #1171,
-# fifth round: the earlier `$MODE == "compare"` check alone was too coarse
-# and silently discarded a live NEW-with-`--sources` operand's own
-# compile:/source:/debug: settings whenever OLD was a stored/baseline
-# snapshot) -- none of these three shapes has an "other side" a --sources
-# tree's own compile:/debug: could leak into, so all three stay
-# single-sided. The release-style directory/package `compare` fan-out never
-# calls add_compile_context_flags at all (it rejects every compile-context
-# input outright), so it never reaches this helper.
+# one operand, period, live or not; a `compare` (or a translated `scan
+# --against`, see below) whose OLD-like operand is a stored snapshot or
+# resolved ABI baseline (_old_library_is_stored_snapshot) does no
+# header/debug extraction on that side either (Codex review, fresh
+# evidence, PR #1171, fifth round: the earlier `$MODE == "compare"` check
+# alone was too coarse and silently discarded a live NEW-with-`--sources`
+# operand's own compile:/source:/debug: settings whenever OLD was a
+# stored/baseline snapshot) -- neither shape has an "other side" a
+# --sources tree's own compile:/debug: could leak into, so both stay
+# single-sided.
+#
+# `scan --against` -- both its *legacy* CLI branch and the branch
+# internally routed through `compare` (ADR-068 D2) -- stays single-sided
+# UNCONDITIONALLY, regardless of whether `--against` is itself live: unlike
+# `compare`'s genuinely independent, two-sided OLD/NEW model, native scan
+# resolves ONE shared `compile_context` for the whole invocation
+# (`resolve_compile_context()`, `cli_scan.py`) and applies it to BOTH the
+# baseline and the candidate -- `cli_scan_baseline.py`'s own
+# `_run_baseline_compare` threads that same `compile_context` into the
+# baseline's own `InputSpec`/`SideEvidence` too (a bare `-H`/`--include`
+# applies to both sides per ADR-040; even a genuinely live `--against`
+# reuses the candidate's own headers/compile context, with a warning, when
+# no `old=`-scoped ones are given). So the `--sources`-root's own
+# `compile:`/`source:`/`debug:` block being the intended, single source for
+# that ONE shared context is scan's own real, native, already-established
+# behavior -- NOT a "no other side to leak into" special case the way
+# dump's true single operand is (Codex review, fresh evidence, PR #1171,
+# tenth round: a ninth-round fix mistakenly modeled scan's translated branch
+# on `compare`'s asymmetric OLD/NEW liveness distinction, which does NOT
+# apply to scan at all -- excluding the sources-root promotion for a live
+# `--against` would have made the translated route silently diverge from
+# what `_discover_scan_project_config()` already does on the untranslated,
+# legacy route for the exact same `scan --against` request).
+#
+# The release-style directory/package `compare` fan-out never calls
+# add_compile_context_flags at all (it rejects every compile-context input
+# outright), so it never reaches this helper either.
 _compile_context_sources_pairwise() {
   if [[ "$MODE" == "compare" ]] && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
     echo "pairwise"
@@ -1078,7 +1102,9 @@ _compile_context_sources_pairwise() {
 
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
-  # (dump and single-pair compare take --lang here; scan keeps its own
+  # (dump, single-pair compare, and scan's translated-to-compare branch --
+  # see _compile_context_sources_pairwise's own docstring above -- all take
+  # --lang here; only the *legacy* scan CLI branch keeps its own literal
   # --lang flag and never calls this function at all).
   local include_lang="${1:-true}"
   # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is the
