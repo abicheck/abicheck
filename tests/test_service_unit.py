@@ -3236,12 +3236,16 @@ class TestContractEvaluationThreading:
         # context for the release fan-out), then depth (D1, CLI-audit), then
         # severity_preset (ADR-064/PR G2). Its sibling `exit_code_scheme` was
         # appended at the same time but later deleted outright (PR G2's
-        # manual-override removal). public_header_dirs (PR #1138) is next.
-        assert params[-10:] == [
+        # manual-override removal). public_header_dirs (PR #1138) is next,
+        # then collapse_versioned_symbols (Codex review: the release
+        # fan-out's own gap -- see service_compare_pipeline.run_compare's
+        # docstring).
+        assert params[-11:] == [
             "diagnostic_comparison", "contract_evaluation",
             "include_dependencies", "contract_mode", "pack_policy_overrides",
             "pack_internal_namespaces", "compile_context", "depth",
             "severity_preset", "public_header_dirs",
+            "collapse_versioned_symbols",
         ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):

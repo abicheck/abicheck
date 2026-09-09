@@ -383,6 +383,22 @@ def _from_compare(
     gate_api_break: bool = False,
     gate_breaking: bool = True,
 ) -> CommentModel:
+    # ADR-050 D2 comparability-gate refusal (`_report_not_comparable()` /
+    # `report.not_comparable.not_comparable_document()`) -- `checker.compare`
+    # raised before any `DiffResult` existed, so this report carries no
+    # `changes` list at all, only `{"verdict": null, "reason": {...}}`.
+    # Without this check, `_bucket_changes(None, ...)` below silently sees no
+    # changes and every bucket stays empty, so this comment would render the
+    # generic "No ABI changes" headline for a comparison that never ran
+    # (Codex review, fresh evidence). Mirrors `pr_comment_scan.from_scan`'s
+    # identical `diff["reason"]` handling for scan's own NOT_COMPARABLE
+    # shape -- surfaced the same way, as a single blocking "analysis
+    # incomplete" finding, since there is nothing to itemize.
+    not_comparable_reason: str | None = None
+    reason = report.get("reason")
+    if report.get("verdict") is None and isinstance(reason, dict):
+        message = reason.get("message")
+        not_comparable_reason = str(message) if message else "not comparable"
     levels = _severity_levels(report)
     breaking, review, safe, incomplete = _bucket_changes(
         report.get("changes"), gate_api_break, levels
@@ -397,6 +413,16 @@ def _from_compare(
     incomplete_blocking = _incomplete_is_blocking(
         incomplete, gate_api_break, gate_breaking, levels
     )
+    if not_comparable_reason is not None:
+        incomplete.append(
+            Finding(
+                kind="compare_not_comparable",
+                symbol="Baseline comparison",
+                detail=not_comparable_reason,
+                severity="unknown",
+            )
+        )
+        incomplete_blocking = True
     # ADR-049 Phase 5's sibling coverage-failure ledger (Codex review) — see
     # `_contract_coverage_findings`'s own docstring for why `changes` alone
     # misses this entirely. `contract_coverage_exit_contribution` folds via

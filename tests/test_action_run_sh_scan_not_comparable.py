@@ -40,8 +40,8 @@ _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
 _FINAL_EXIT_START = "if [[ \"$VERDICT\" == \"ERROR\" ]]; then\n"
 _FINAL_EXIT_SCAN_START = (
-    'elif [[ "$MODE" == "scan" ]]; then\n'
-    "  # scan: BREAKING/API_BREAK follow the fail-on flags"
+    'elif [[ "$_CLI_MODE" == "scan" ]]; then\n'
+    "  # Keyed on `$_CLI_MODE`, not `$MODE`"
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
@@ -64,7 +64,7 @@ def _exit_case_fragment() -> str:
     extracted verbatim (the second ``elif [[ "$MODE" == "scan" ]]`` region,
     which maps ``ABICHECK_EXIT`` to ``VERDICT``)."""
     text = RUN_SH.read_text(encoding="utf-8")
-    marker = 'elif [[ "$MODE" == "scan" ]]; then\n  # scan exit codes:'
+    marker = 'elif [[ "$_CLI_MODE" == "scan" ]]; then\n  # Keyed on `$_CLI_MODE`'
     start = text.index(marker)
     case_start = text.index(_CASE_START, start)
     case_end = text.index(_CASE_END, case_start) + len(_CASE_END)
@@ -172,6 +172,7 @@ def test_not_comparable_still_fails_the_step():
     script = _final_exit_scan_fragment() + "fi\necho \"FINAL_EXIT=$FINAL_EXIT\"\n"
     script = (
         'MODE="scan"\n'
+        '_CLI_MODE="scan"\n'
         'VERDICT="NOT_COMPARABLE"\n'
         'GATE_TIER=""\n'
         'ADVISORY_BREAK="false"\n'
@@ -179,6 +180,52 @@ def test_not_comparable_still_fails_the_step():
         'INPUT_FAIL_ON_API_BREAK="false"\n'
         "_severity_gate_categories() { echo \"\"; }\n"
         "_coverage_gated() { return 1; }\n"
+        "FINAL_EXIT=0\n"
+        + script
+    )
+    result = _run_bash_script(script)
+    assert result.returncode == 0, result.stderr
+    assert "FINAL_EXIT=1" in result.stdout
+
+
+def _final_exit_compare_fragment() -> str:
+    """The `compare` (real, non-scan-translated) branch of the final-exit-
+    code `if/elif/else` chain, extracted verbatim -- the `else` sibling of
+    `_final_exit_scan_fragment()` above, swapped to stand alone as its own
+    `if ... fi` the same way. Every nested `if [[ ... ]]; then ... fi`
+    inside this branch is indented two spaces, so its closing `fi` reads
+    `\n  fi\n`, not `\nfi\n` -- only the outer, column-0 `fi` that closes
+    this whole branch matches the unindented marker."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_FINAL_EXIT_SCAN_END, text.index(_FINAL_EXIT_SCAN_START))
+    start += len(_FINAL_EXIT_SCAN_END)  # skip past the "\nelse\n" itself
+    end = text.index("\nfi\n", start) + 1  # keep the newline before the outer "fi"
+    return "if true; then\n" + text[start:end]
+
+
+def test_compare_mode_not_comparable_still_fails_the_step():
+    """Codex review, PR #1160, round 7, fresh evidence: adding the exit-16
+    -> NOT_COMPARABLE dispatch arm for a real ``mode: compare`` request
+    (round 4 of this same PR) silently regressed a scope/profile mismatch
+    from failing the step (it used to fall into the generic
+    ``VERDICT="ERROR"`` case, which does fail) to passing it -- the
+    ``compare``-mode branch of this final-exit block had no
+    ``NOT_COMPARABLE`` arm at all, unlike its ``scan``-mode sibling
+    (``test_not_comparable_still_fails_the_step`` above)."""
+    script = (
+        _final_exit_compare_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
+    )
+    script = (
+        'MODE="compare"\n'
+        '_CLI_MODE="compare"\n'
+        'VERDICT="NOT_COMPARABLE"\n'
+        'GATE_TIER=""\n'
+        'ADVISORY_BREAK="false"\n'
+        'INPUT_FAIL_ON_BREAKING="true"\n'
+        'INPUT_FAIL_ON_API_BREAK="false"\n'
+        "_coverage_gated() { return 1; }\n"
+        "_assurance_gated() { return 1; }\n"
+        "_scope_gated() { return 1; }\n"
         "FINAL_EXIT=0\n"
         + script
     )

@@ -40,7 +40,14 @@ from pathlib import Path
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _ALIAS_START_MARKER = 'MODE="${INPUT_MODE:-compare}"'
 _ALIAS_END_MARKER = 'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"'
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
+# ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
+# routings -- the legacy `scan` CLI branch (gated on `_SCAN_NEEDS_LEGACY_CLI`,
+# unchanged code) and a `compare`-translated branch. The --against/
+# FORCE_AUDIT_ONLY gating this file exercises is the legacy branch's own,
+# unchanged logic, so the marker is anchored there specifically rather than
+# to the (now ambiguous) bare `'elif [[ "$MODE" == "scan" ]]; then'`, which
+# the new translated branch's header also matches.
+_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then'
 _AGAINST_START_MARKER = 'add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"'
 _AGAINST_END_MARKER = 'add_single_flag "--lang" "${INPUT_LANG:-}"'
 

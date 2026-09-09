@@ -39,16 +39,30 @@ from typing import Any
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 
-def _compile_overlay_from_cmd(cmd: str) -> dict[str, Any]:
+def _compile_overlay_from_cmd(cmd: str, tmp_path: Path) -> dict[str, Any]:
     """Read back the synthesized ``compile:`` block a ``--config <path>``
     token in *cmd* points at (Phase 7: dump/single-pair compare forward the
     cross-compiler inputs via a synthesized config overlay now, not
     individually-forwarded ``--compiler``/``--sysroot``/... flags -- see
-    ``add_compile_context_flags`` in ``action/run.sh``)."""
+    ``add_compile_context_flags`` in ``action/run.sh``).
+
+    Reads the fake ``abicheck`` stub's own COPY of that file
+    (``captured_config.json``, made by ``_run_compare_raw`` while the real
+    ``run.sh`` process was still running), not the original path itself:
+    the overlay is created under ``$RUNNER_TEMP`` and cleaned up by
+    ``run.sh``'s own main ``EXIT`` trap once the script finishes, so by the
+    time this test process inspects the *original* path (well after
+    ``subprocess.run`` returns) it has already been removed -- the same
+    "the leak this session fixed is now correctly closed, so a post-exit
+    read of the original file no longer works" class this session's other
+    harness-based tests hit."""
     tokens = cmd.split()
     assert "--config" in tokens, cmd
-    path = tokens[tokens.index("--config") + 1]
-    with open(path, encoding="utf-8") as f:
+    captured_config = tmp_path / "captured_config.json"
+    assert captured_config.is_file(), (
+        "the fake abicheck stub never captured a --config file's content"
+    )
+    with open(captured_config, encoding="utf-8") as f:
         doc = json.load(f)
     return doc.get("compile", {})
 
@@ -76,10 +90,22 @@ def _run_compare_raw(
     fake_bin = tmp_path / "fakebin"
     fake_bin.mkdir()
     captured = tmp_path / "captured_argv.txt"
+    # Snapshots any --config <path> file's content while it still exists --
+    # the real run.sh's own main EXIT trap removes it once the whole
+    # process finishes, well before this test process ever gets to inspect
+    # the original path (see _compile_overlay_from_cmd's own docstring).
+    captured_config = tmp_path / "captured_config.json"
     abicheck_stub = fake_bin / "abicheck"
     abicheck_stub.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\n\' "$*" >> "{captured}"\n'
+        'args=("$@")\n'
+        'for ((_i = 0; _i < ${#args[@]}; _i++)); do\n'
+        '  if [[ "${args[_i]}" == "--config" ]]; then\n'
+        f'    cp "${{args[$((_i + 1))]}}" "{captured_config}" 2>/dev/null || true\n'
+        "    break\n"
+        "  fi\n"
+        "done\n"
         'echo \'{"verdict":"COMPATIBLE"}\'\n'
         "exit 0\n",
         encoding="utf-8",
@@ -168,6 +194,29 @@ class TestCompareModeForwardsBuildSourceEvidence:
         assert "--depth" not in cmd
 
 
+class TestCompareModeForwardsChangeFocusInputs:
+    """``since``/``changed-path`` were only ever forwarded to the CLI in
+    scan mode's branch -- github-action-source-scans.md already documents
+    ``mode: compare`` as taking "the identical depth/since/changed-path/
+    sources/build-info inputs mode: scan does", but the compare branch
+    silently dropped both: ``since:``'s scope-narrowing value was ignored
+    and a pinned ``depth: source`` replayed the whole target instead of the
+    PR's changed files (Codex review, fresh evidence)."""
+
+    def test_since_reaches_the_cli(self, tmp_path: Path) -> None:
+        cmd = _run_compare({"INPUT_SINCE": "origin/main"}, tmp_path)
+        assert "--since origin/main" in cmd
+
+    def test_changed_path_reaches_the_cli(self, tmp_path: Path) -> None:
+        cmd = _run_compare({"INPUT_CHANGED_PATH": "src/foo.cpp"}, tmp_path)
+        assert "--changed-path src/foo.cpp" in cmd
+
+    def test_neither_input_adds_no_flags(self, tmp_path: Path) -> None:
+        cmd = _run_compare({}, tmp_path)
+        assert "--since" not in cmd
+        assert "--changed-path" not in cmd
+
+
 def _run_scan(env_extra: dict[str, str], tmp_path: Path) -> str:
     """Like _run_compare, but drives run.sh's scan-mode branch instead."""
     fake_bin = tmp_path / "fakebin"
@@ -253,7 +302,7 @@ class TestCompareModeForwardsCrossCompilerFlags:
             },
             tmp_path,
         )
-        compile_blk = _compile_overlay_from_cmd(cmd)
+        compile_blk = _compile_overlay_from_cmd(cmd, tmp_path)
         # gcc_path wins over gcc_prefix when both are given (the merged
         # compile.compiler field can only hold one).
         assert compile_blk["compiler"] == "/opt/cross/bin/aarch64-linux-gnu-g++"

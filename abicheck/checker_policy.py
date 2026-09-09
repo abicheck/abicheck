@@ -253,12 +253,19 @@ class EvidenceStatus(str, Enum):
       binary artifact at all (``DiffResult.evidence_tiers`` populated with
       only ``"header"``, e.g. a Python-API caller comparing hand-built or
       loaded snapshots) — see :func:`evidence_status_for_result`. This is
-      the one place a *comparison-level* signal (not the finding's own
-      kind) is allowed to downgrade the status, because it doesn't
-      re-litigate whether the *kind itself* is classified correctly (the
+      one of two places a signal *other than the finding's own kind* is
+      allowed to downgrade the status, because neither re-litigates
+      whether the *kind itself* is classified correctly (the
       BREAKING_KINDS/API_BREAK_KINDS/RISK_KINDS partition stays untouched)
-      — it only refuses to claim proof by an artifact that provably was
-      never looked at (P0 evidence-provider audit).
+      — each only refuses to claim proof by an artifact that provably was
+      never looked at. The first is comparison-level (P0 evidence-provider
+      audit, above); the second is *per-finding* (see
+      :func:`evidence_status_for_result`'s ``symbol_binding`` check) — a
+      comparison can genuinely have examined a real ELF/PE/Mach-O symbol
+      table while *this specific* ``BREAKING_KINDS`` finding was never
+      matched against it (e.g. a header-only overload-set synthesis with
+      no corresponding mangled export), and the comparison-level check
+      alone cannot see that.
 
     ``COMPATIBLE``/``NO_CHANGE`` findings (additions, clean comparisons) carry
     no status — nothing to explain the epistemic strength of.
@@ -681,24 +688,67 @@ def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
     return None
 
 
+#: ``BREAKING_KINDS`` members whose removal/visibility-change detector
+#: (``diff_symbols._check_removed_function``/``_var_removed``,
+#: ``diff_platform._diff_elf_deleted_fallback``) always stamps
+#: ``Change.symbol_binding`` from a real observed ELF/PE/Mach-O symbol table
+#: entry when the finding is genuinely backed by one — see that field's own
+#: docstring on ``checker_types.Change``. Scoped to exactly those kinds: most
+#: ``BREAKING_KINDS`` members (e.g. ``TYPE_SIZE_CHANGED``) never populate
+#: ``symbol_binding`` regardless of how solid their evidence is, so treating
+#: an unset ``symbol_binding`` as suspect for every ``BREAKING_KINDS`` kind
+#: would misclassify those as unattributed too.
+_ELF_BINDING_STAMPED_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        ChangeKind.VAR_REMOVED,
+        ChangeKind.FUNC_VISIBILITY_CHANGED,
+        ChangeKind.FUNC_DELETED_ELF_FALLBACK,
+    }
+)
+
+
 def evidence_status_for_result(
     change: HasKind, evidence_tiers: Sequence[str] = ()
 ) -> EvidenceStatus | None:
-    """:func:`evidence_status_for_change`, refined by one comparison-level
-    fact: whether this comparison ever actually examined a real binary
-    artifact (``DiffResult.evidence_tiers``, P0 evidence-provider audit).
+    """:func:`evidence_status_for_change`, refined by two facts neither the
+    kind alone nor the comparison alone can see: whether this comparison
+    ever actually examined a real binary artifact (``DiffResult.
+    evidence_tiers``, P0 evidence-provider audit), and — independently —
+    whether *this specific finding* was ever matched against one.
 
     ``ARTIFACT_PROVEN`` means "L0/L1/L2 artifact evidence confirms a shipped
     ABI break" (see :class:`EvidenceStatus`) — but the kind-only classifier
     can't see whether *this run* actually had that evidence, only that the
-    detector emitting this kind is only ever supposed to run with it. A
-    comparison built from hand-loaded/hand-built snapshots and never routed
-    through a real binary (``evidence_tiers == ["header"]``, e.g. a direct
-    Python-API caller) can still surface a BREAKING_KINDS finding — the
-    partition itself isn't wrong, but claiming that specific run's finding
-    is "artifact_proven" would be. Downgrades exactly that case to
-    :attr:`EvidenceStatus.UNATTRIBUTED`; every other kind/tier combination is
-    unchanged from :func:`evidence_status_for_change`.
+    detector emitting this kind is only ever supposed to run with it.
+
+    - **Comparison-level gap**: a comparison built from hand-loaded/
+      hand-built snapshots and never routed through a real binary
+      (``evidence_tiers == ["header"]``, e.g. a direct Python-API caller)
+      can still surface a BREAKING_KINDS finding — the partition itself
+      isn't wrong, but claiming that specific run's finding is
+      "artifact_proven" would be.
+    - **Per-finding gap**: even a comparison that *did* examine a real ELF
+      symbol table (``evidence_tiers`` includes ``"elf"``) can produce a
+      ``BREAKING_KINDS`` finding synthesized from header-only evidence
+      with no corresponding export — e.g. an overload-set member
+      reconstructed from declarations alone, never actually matched
+      against a mangled ELF symbol. For the kinds whose detector always
+      stamps ``Change.symbol_binding`` from a real observed symbol-table
+      entry when one backs the finding (:data:`_ELF_BINDING_STAMPED_KINDS`),
+      an unset ``symbol_binding`` on an ``"elf"``-tiered run is the
+      positive signal that no such entry was ever observed for *this*
+      finding, independent of what the run as a whole examined. Scoped to
+      ``"elf"`` specifically (not ``"pe"``/``"macho"``) because
+      ``symbol_binding`` mirrors ``Function.elf_binding``/``Variable.
+      elf_binding`` and is never populated on a PE/Mach-O run regardless
+      of evidence quality — checking it there would misdowngrade every
+      genuine PE/Mach-O removal.
+
+    Both gaps downgrade to :attr:`EvidenceStatus.UNATTRIBUTED`; every other
+    kind/tier/finding combination is unchanged from
+    :func:`evidence_status_for_change`.
 
     *evidence_tiers* defaults to ``()`` — the "unknown" case
     :func:`has_binary_evidence` already treats as "assume evidence was
@@ -707,8 +757,21 @@ def evidence_status_for_result(
     calling :func:`evidence_status_for_change` directly.
     """
     status = evidence_status_for_change(change)
-    if status is EvidenceStatus.ARTIFACT_PROVEN and not has_binary_evidence(
-        evidence_tiers
+    if status is not EvidenceStatus.ARTIFACT_PROVEN:
+        return status
+    if not has_binary_evidence(evidence_tiers):
+        return EvidenceStatus.UNATTRIBUTED
+    # ``symbol_binding`` is ELF-specific (``Function.elf_binding``/
+    # ``Variable.elf_binding``) -- it is never populated for a PE/Mach-O
+    # comparison regardless of evidence quality, so the per-finding check
+    # below only applies when this run's own evidence_tiers says "elf" was
+    # actually examined. Without this guard, every genuine PE/Mach-O
+    # BREAKING_KINDS removal would be misdowngraded to UNATTRIBUTED.
+    kind = getattr(change, "kind", None)
+    if (
+        "elf" in evidence_tiers
+        and kind in _ELF_BINDING_STAMPED_KINDS
+        and not getattr(change, "symbol_binding", None)
     ):
         return EvidenceStatus.UNATTRIBUTED
     return status

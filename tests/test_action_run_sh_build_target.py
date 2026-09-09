@@ -115,6 +115,13 @@ class TestDumpBuildTarget:
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanBuildTarget:
     def test_forwarded_as_build_target_flags(self) -> None:
+        # `compare` has no `--build-target` option at all yet (unlike
+        # `dump`/`scan` -- see `tests/test_action_run_contract.py::
+        # test_action_flags_are_real_cli_options`), so a scan request that
+        # sets it always routes to the legacy `scan` CLI branch (ADR-068
+        # D2, plan Phase 4 commit 1), even with a baseline present, rather
+        # than reach `compare` and fail there as a CLI usage error. "scan"
+        # is still the real CLI verb dispatched here.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",

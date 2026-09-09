@@ -139,13 +139,43 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
                 if more_needed > 0:
                     probe += f.read(more_needed)
                 return probe[:n]
+            # What the budget bounds is *amplification* -- raw input read
+            # per decoded byte asked for -- not how much a caller may ask
+            # for. So the ceiling is `max(n, cap)`, not `cap`:
+            #
+            #   n <= cap (every caller in the tree today): unchanged. The
+            #     first read is `n`, escalation stops at the cap.
+            #   n  > cap: the first read is `n`, which is 1:1 with the
+            #     request and so amplifies nothing, and escalation stops
+            #     there too -- no raw read beyond what was asked for.
+            #
+            # Clamping to the cap outright (the previous commit's own fix,
+            # from a CodeRabbit finding) bounded the wrong quantity: it
+            # refused requests the function could serve. A 1.3 MB stored
+            # snapshot asked for a 4 MiB prefix returned `None`, because
+            # one cap-sized raw read cannot yield 4 MiB decoded -- while
+            # `read_snapshot_bytes` returned all 3.9 MB of it. The plain
+            # branch above never had that clamp at all, which is how the
+            # inconsistency surfaced (Codex review); with the ceiling
+            # expressed this way both branches read exactly `n` and there
+            # is no rule left for either to violate.
+            ceiling = max(n, _BOUNDED_PREFIX_MAX_RAW_BYTES)
             raw_size = max(n, len(probe))
             while True:
                 f.seek(0)
-                head = f.read(raw_size)
-                # A short read means EOF: `head` is the entire file, so
-                # no larger raw prefix exists and the decode is final.
-                exhausted = len(head) < raw_size
+                # One byte past the window, purely as an EOF probe: a file
+                # whose length is *exactly* `raw_size` is at EOF, but a
+                # plain `read(raw_size)` cannot say so -- it returns a full
+                # buffer either way. Reading one more byte distinguishes
+                # them, and the extra byte is then dropped so the decode
+                # window stays exactly the budget it claims to be. Without
+                # this, a file sitting exactly on the cap reported "not
+                # exhausted" and fell into the past-budget branch, which
+                # answered `None` for a snapshot that was entirely in hand
+                # (Codex review).
+                head = f.read(raw_size + 1)
+                exhausted = len(head) <= raw_size
+                head = head[:raw_size]
                 result = _try_decode_prefix(head, compression, n)
                 # "No exception" is not "decoded everything the file has to
                 # offer": a frame cut at the raw-byte boundary decodes short
@@ -161,7 +191,7 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
                     # answer rather than a truncation artifact. (`None`
                     # here means genuinely corrupt/undecodable.)
                     return result
-                if raw_size >= _BOUNDED_PREFIX_MAX_RAW_BYTES:
+                if raw_size >= ceiling:
                     # The cap was reached with more stored input left and
                     # fewer than `n` decoded bytes in hand. Unlike the
                     # exhausted case we do *not* know this is all the file
@@ -173,6 +203,6 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
                     # 1-byte first frame. `None` says "no prefix within
                     # budget", which is what actually happened.
                     return None
-                raw_size = min(raw_size * 4, _BOUNDED_PREFIX_MAX_RAW_BYTES)
+                raw_size = min(raw_size * 4, ceiling)
     except OSError:
         return None

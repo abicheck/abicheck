@@ -20,6 +20,18 @@ recording verdict / coverage / DWARF presence / SONAME / wall time to
 ``data/oneapi_scan_2026-06.json``. Network + ``abicheck`` on PATH required; this
 is a slow real-world lane, not a unit test.
 
+Deliberately stays on `scan --against`, not `compare` (ADR-068 D2 / plan
+Phase 4 commit 4 originally migrated this, then reverted it -- Codex review,
+fresh evidence): `compare`'s automatic cross-source-checks stage has no
+opt-out and no advisory-only stripping for a baseline comparison, unlike
+`scan`'s own `_strip_automatic_cross_source_findings()` -- the identical gap
+documented in `action/run.sh`'s own `_SCAN_NEEDS_LEGACY_CLI` routing
+comment. Reproduced directly: `compare --depth binary` on an identical
+snapshot pair (`catalog/cases/case145_audit_unversioned_export`) reports
+`COMPATIBLE_WITH_RISK`/`unversioned_exported_symbol`, where the equivalent
+`scan --against --depth binary` reports `NO_CHANGE` with an empty diff --
+not depth-gated, so a plain binary-depth comparison is not exempt either.
+
 Reproducibility: each pair pins the exact ``old_file``/``new_file`` build
 basename (like ``data/manifest.json``), so a rebuild publishing a higher build
 number for the same version cannot silently change which artifacts are scanned.

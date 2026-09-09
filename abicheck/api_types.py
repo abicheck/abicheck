@@ -774,6 +774,19 @@ class CompareRequest:
     #: as ``(major, minor)``. ``None`` (the default) leaves the audit off,
     #: so every pre-existing request is unchanged.
     abi3_floor: tuple[int, int] | None = field(default=None, kw_only=True)
+    #: One-comparison-product Phase 4 commit 2 (ADR-068, ADR-055 amendment):
+    #: absorbed from ``ScanRequest.collapse_versioned_symbols`` -- a genuine
+    #: gap, not a mirrored duplicate. ``checker.compare()``/
+    #: ``compare_snapshots()`` have accepted this parameter since G15, and
+    #: ``ScanRequest``/``scan --against`` could already reach it
+    #: (``scope.collapse_versioned_symbols`` in a project config, or the
+    #: typed field directly), but ``CompareRequest`` had no field for it at
+    #: all -- a typed ``compare`` caller had no way to opt into version-
+    #: rename-pair collapsing (G15) short of calling ``compare_snapshots``
+    #: directly, which the ``cli-contract`` gate forbids for a front-end
+    #: module. ``False`` (the default) reproduces every pre-existing
+    #: request's behavior unchanged.
+    collapse_versioned_symbols: bool = field(default=False, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).

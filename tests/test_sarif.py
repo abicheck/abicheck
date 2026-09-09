@@ -430,12 +430,12 @@ class TestResultContent:
         props = doc["runs"][0]["results"][0]["properties"]
         assert props["evidenceStatus"] == "unattributed"
 
-    def test_result_evidence_status_artifact_proven_with_binary_evidence(self) -> None:
-        result = _make_result([_breaking_change()], verdict=Verdict.BREAKING)
-        result.evidence_tiers = ["header", "elf"]
-        doc = to_sarif(result)
-        props = doc["runs"][0]["results"][0]["properties"]
-        assert props["evidenceStatus"] == "artifact_proven"
+    # This test used to construct _breaking_change() (no symbol_binding) and
+    # assert artifact_proven under an "elf" tier. ADR-068 finding C changed
+    # that: symbol_binding must now be stamped for that claim to hold. Moved
+    # (with its new-semantics fix, plus its sibling regression) to
+    # tests/unit/report/test_evidence_status_sarif.py -- this file sits at
+    # its architecture debt-no-growth baseline.
 
 
 # ---------------------------------------------------------------------------

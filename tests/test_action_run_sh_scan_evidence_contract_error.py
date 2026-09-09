@@ -85,8 +85,7 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
 _FINAL_EXIT_SCAN_START = (
-    'elif [[ "$MODE" == "scan" ]]; then\n'
-    "  # scan: BREAKING/API_BREAK follow the fail-on flags"
+    'elif [[ "$_CLI_MODE" == "scan" ]]; then\n  # Keyed on `$_CLI_MODE`, not `$MODE`'
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
@@ -109,7 +108,7 @@ def _exit_case_fragment() -> str:
     extracted verbatim (the second ``elif [[ "$MODE" == "scan" ]]`` region,
     which maps ``ABICHECK_EXIT`` to ``VERDICT``)."""
     text = RUN_SH.read_text(encoding="utf-8")
-    marker = 'elif [[ "$MODE" == "scan" ]]; then\n  # scan exit codes:'
+    marker = 'elif [[ "$_CLI_MODE" == "scan" ]]; then\n  # Keyed on `$_CLI_MODE`'
     start = text.index(marker)
     case_start = text.index(_CASE_START, start)
     case_end = text.index(_CASE_END, case_start) + len(_CASE_END)
@@ -299,6 +298,7 @@ def test_evidence_contract_error_still_fails_the_step():
     script = _final_exit_scan_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
     script = (
         'MODE="scan"\n'
+        '_CLI_MODE="scan"\n'
         'VERDICT="EVIDENCE_CONTRACT_ERROR"\n'
         'GATE_TIER=""\n'
         'ADVISORY_BREAK="false"\n'

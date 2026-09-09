@@ -122,6 +122,7 @@ _CompareReleaseCommonArgs = tuple[
     "CompileContext | None",
     "str | None",
     "list[Path] | None",
+    bool,
 ]
 
 
@@ -155,6 +156,7 @@ def _run_compare_pair(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     public_header_dirs: list[Path] | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -244,6 +246,7 @@ def _run_compare_pair(
         compile_context=compile_context,
         depth=depth,
         public_header_dirs=public_header_dirs,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -280,6 +283,7 @@ def _compare_one_library(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     public_header_dirs: list[Path] | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -325,6 +329,7 @@ def _compare_one_library(
             compile_context=compile_context,
             depth=depth,
             public_header_dirs=public_header_dirs,
+            collapse_versioned_symbols=collapse_versioned_symbols,
         )
         result = compare_result.diff
         v = result.verdict.value
@@ -554,6 +559,7 @@ def _compare_release_libraries(
     compile_context: CompileContext | None = None,
     depth: str | None = None,
     public_header_dirs: list[Path] | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -627,6 +633,7 @@ def _compare_release_libraries(
         compile_context,
         depth,
         public_header_dirs,
+        collapse_versioned_symbols,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

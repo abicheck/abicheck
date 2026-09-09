@@ -57,6 +57,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
+| `collapse_versioned_symbols` | `bool` | `False` |
 
 ## `CompareResult`
 
@@ -502,6 +503,7 @@ Compare two ABI inputs and return the classified diff result.
 | *(keyword-only below)* | | |
 | `severity_preset` | `str \| None` | `None` |
 | `public_header_dirs` | `list[Path] \| None` | `None` |
+| `collapse_versioned_symbols` | `bool` | `False` |
 
 **Returns:** `CompareResult`
 

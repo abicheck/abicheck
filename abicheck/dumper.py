@@ -255,23 +255,18 @@ def _clang_header_dump(
     ``force_cpp`` (Codex review: the provenance probe must not re-derive a
     stale guess once this already resolved the real answer).
 
-    Known, narrower residual (Codex review, fresh evidence, not fixed
-    here): a cache/memo *hit* still returns the pre-retry ``force_cpp``
-    rather than the mode that actually produced the *cached* AST, since
-    neither the disk cache (a raw JSON/XML document, byte-identical to what
-    a fresh parse writes) nor the in-process memo (``dumper_cache.
-    store_cached_ast``, a bare ``(backend, key, root)`` tuple) persists this
-    fact alongside the AST -- and the cache key deliberately does *not*
-    distinguish a C-mode success from an initially-C-mode call's self-healed
-    C++ success (see the key's own ``system_includes`` comment below). A
-    correct fix needs a real cache-format change on both backends (a
-    wrapper or sidecar carrying this one extra bit) verified against their
-    existing cache-corruption/eviction paths -- a genuine, if narrow,
-    cross-cutting change, not a follow-up to this fix. Matters only when a
-    *second*, cache-hit call is made for the identical self-healed input
-    (the common single-dump-per-process path never hits this, since the
-    fresh call that actually self-healed already reports the correct
-    value).
+    Formerly a known residual (Codex review, two rounds): the LOOKUP key
+    doesn't distinguish a C-mode success from an initially-C-mode call's
+    self-healed C++ success (both are computed before clang ever runs --
+    see the key's own ``system_includes`` comment below), so a cache HIT
+    used to return the pre-retry ``force_cpp`` instead of the mode that
+    actually produced the cached content. Closed at the WRITE side instead
+    of a cache-format change: the entry is written under a key/path
+    recomputed from ``cur_fcpp`` whenever self-heal changed it, not the
+    stale pre-retry ``key``/``cached``. A later identical call that would
+    self-heal now simply misses the unused pre-retry key and re-runs fresh
+    -- always correct, at the cost of caching's benefit for that one input
+    shape rather than a wrong answer.
 
     The clang-frontend counterpart of :func:`_castxml_dump`: aggregates the
     headers into one ``#include`` TU, runs ``clang -ast-dump=json``, returns
@@ -333,30 +328,23 @@ def _clang_header_dump(
     # hard dependency on g++ merely for cache identity/provenance.
     compiler_identity = frontend_identity
 
-    key = _cache_key(
-        headers,
-        extra_includes,
-        clang_bin,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        lang=lang,
-        backend="clang",
-        # Both include sets feed the key: whichever the retry settles on, a
-        # toolchain change to either invalidates the cached AST. Equal when
-        # already in C++ mode — pass once so existing C++ cache keys are stable.
-        system_includes=system_includes
-        if force_cpp
-        else (*system_includes, *cpp_system_includes),
-        extra_hash_dirs=extra_hash_dirs,
-        frontend_identity=frontend_identity,
-        compiler_identity=compiler_identity,
-        force_cpp=force_cpp,
-        force_cpp20=force_cpp20,
-        frontend_context=frontend_context,
+    def _make_key(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> str:
+        return _cache_key(
+            headers, extra_includes, clang_bin,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+            lang=lang, backend="clang", system_includes=sysinc,
+            extra_hash_dirs=extra_hash_dirs, frontend_identity=frontend_identity,
+            compiler_identity=compiler_identity, force_cpp=fcpp, force_cpp20=fcpp20,
+            frontend_context=frontend_context,
+        )
+
+    # Both include sets feed the *lookup* key: whichever the retry settles on, a
+    # toolchain change to either invalidates the cached AST. Equal when already
+    # in C++ mode — pass once so existing C++ cache keys are stable.
+    key = _make_key(
+        force_cpp, force_cpp20,
+        system_includes if force_cpp else (*system_includes, *cpp_system_includes),
     )
     resolved_kind = frontend_context if dpcpp_multi_context else None
     cached = _cache_path(key, backend="clang")
@@ -448,9 +436,13 @@ def _clang_header_dump(
             log.warning(
                 "AST toolchain changed during clang execution; skipping cache write"
             )
+        # Write under the mode that ACTUALLY produced `result`, not the
+        # stale pre-retry `key`/`cached` (see this function's own docstring).
+        write_key = key if cur_fcpp == force_cpp else _make_key(cur_fcpp, cur_fcpp20, cur_sysinc)
+        write_cached = cached if cur_fcpp == force_cpp else _cache_path(write_key, backend="clang")
         root = _parse_clang_ast_result(
             result,
-            cached,
+            write_cached,
             _ast_paths[-1],
             cache_write=identities_stable,
             dpcpp_capable=dpcpp_multi_context,
@@ -458,6 +450,13 @@ def _clang_header_dump(
             header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
+            # Kept under the ORIGINAL `key`, not `write_key` (Codex review, P1):
+            # the memo is a one-shot HANDOFF to `_attach_header_graph`'s own
+            # follow-up call, which independently recomputes this same
+            # pre-retry key -- storing under `write_key` would miss that
+            # lookup, repeating both clang attempts and leaking the handed-off
+            # tree in this thread's slot forever. Safe: that consumer discards
+            # `resolved_force_cpp`, unlike the disk path keyed correctly above.
             dumper_cache.store_cached_ast(key, "clang", root)
         return root, resolved_kind, cur_fcpp
     finally:
@@ -634,7 +633,6 @@ def _header_ast_parser(
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
-
         def _bare_reprobe() -> str | None:
             # Deferred (Codex review, fresh evidence): eagerly evaluating this would
             # start a second compiler subprocess (its own 10s timeout) on every call.
@@ -660,6 +658,7 @@ def _header_ast_parser(
             public_dir_paths=public_dir_paths,
             target_triple=target_triple,
             no_binary_evidence=no_binary_evidence,
+            is_cxx=resolved_force_cpp,
         )
         stamped = cast(
             _ClangAstParser,
