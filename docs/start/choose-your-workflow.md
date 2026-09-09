@@ -82,7 +82,7 @@ and where each one goes blind — see the
 | **L0** | Binaries only | **Low** | Symbol add/remove, SONAME/version changes, basic metadata |
 | **L1** | + debug info | **Medium** | Struct layout, field offsets, enum values, calling convention, emitted-ABI type changes |
 | **L2** | + headers | **High** | Declared public API surface, source-level API breaks, inline/template-related surface |
-| **L3** | + build flags (`-p build/`) | **Higher** | The exact ABI-affecting flags the library was built with (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, …) |
+| **L3** | + build flags (`--build-info build/`) | **Higher** | The exact ABI-affecting flags the library was built with (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, …) |
 | **L4** | + sources (build/source pack) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument values, uninstantiated templates |
 
 abicheck reports the **artifact** depth it reached (L0–L2) as the

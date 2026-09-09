@@ -15,9 +15,14 @@ named by what you get rather than by an internal tier number:
 | `--depth` | Adds | Newly answerable | Still blind to |
 |---|---|---|---|
 | `binary` | export tables only (ELF `.dynsym` / PE export dir / Mach-O trie) | removed/added exports, mangling changes, `_ZTV`/`_ZTI` vtable-size drift | anything about types, layout, or signatures |
-| `headers` (default) | header AST | signatures, struct/enum/union layout, member visibility, source-API breaks | changes only the build reveals (flags, macros, conditional compilation) |
+| `headers` (inference floor) | header AST | signatures, struct/enum/union layout, member visibility, source-API breaks | changes only the build reveals (flags, macros, conditional compilation) |
 | `build` | build context (compile flags, macros, include order) | ABI-relevant flag drift, macro-conditional layout, dialect mismatches | which code actually reaches which symbol |
 | `source` | source replay + call graph | reachability, consumer-relative impact, source-level root causes | nothing further in this ladder |
+
+Omitting `--depth` is not a fixed `headers` default: `compare` infers
+`source`/`build` from whichever of `--sources`/`--build-info` is supplied,
+and `dump` always resolves internally to the deepest rung its supplied
+evidence reaches — `headers` is only the floor when neither is given.
 
 `--depth build` and `--depth source` require real build evidence — pass
 `--sources` and/or `--build-info`. What happens when the inputs cannot

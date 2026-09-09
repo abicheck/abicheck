@@ -201,7 +201,10 @@ abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so -H include/ \
 The depth knob is `--depth {binary,headers,build,source}` (`binary` =
 binary-only, up to `source` = source-ABI replay — unseeded, it replays the
 whole library; with a `--since`/`--changed-path` seed, just the changed TUs);
-leave it off and abicheck **auto**-picks by changed-path risk. **How each depth
+leave it off on `compare` and it infers the deepest rung `--sources`/
+`--build-info` already justify, bottoming out at `headers` if neither is
+given — never a risk-based choice. (Legacy `scan` alone has a risk-scored
+`auto` rung; `compare` has no equivalent.) **How each depth
 works, how to produce a compile database for `make`/`cmake`/`bazel`/`meson`,
 and the per-level input table live in [Evidence Depth](../use/evidence-depth.md)** —
 that's the home for the build-system details, kept out of this walkthrough on
