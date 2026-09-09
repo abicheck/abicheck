@@ -236,3 +236,19 @@ class TestSupportPromiseFindingsCli:
         assert entry["support_promise"] == "introduced"
         assert entry["verdict"] == "NO_CHANGE"
         assert code == 0
+
+    def test_an_invalid_value_is_a_usage_error_not_a_crash(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1180: the removed ``--support-promise`` Click
+        option enforced its ``off``/``declared`` enum itself; once the value
+        moved to ``.abicheck.yml`` alone, an out-of-enum value must still
+        fail as a usage error at config-load time -- not survive all the way
+        to ``support_promise_changes()``'s own uncaught ``ValueError``."""
+        _old_dir, _new_dir, old_pkg, new_pkg = _pair(tmp_path)
+        code, out = _run(
+            "compare", str(old_pkg), str(new_pkg),
+            *_support_promise_config(tmp_path, "typo"),
+        )
+        assert code == 64, out
+        assert "release.support_promise" in out

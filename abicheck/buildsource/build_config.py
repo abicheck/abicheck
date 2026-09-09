@@ -48,6 +48,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ..config_paths import discover_build_config as _discover_build_config
+from ..policy.support_promise import (
+    SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
+)
 from .build_config_schema import (
     BOOL_SUBKEYS as _BOOL_SUBKEYS,
     LIST_SUBKEYS as _LIST_SUBKEYS,
@@ -649,7 +652,11 @@ class BuildConfig:
             gate_fail_on_removed_library=_opt_bool(gate, "fail_on_removed_library"),
             release_dso_only=_opt_bool(release, "dso_only"),
             release_include_private_dso=_opt_bool(release, "include_private_dso"),
-            release_support_promise=_opt_str(release, "support_promise"),
+            release_support_promise=_one_of(
+                _opt_str(release, "support_promise"),
+                _SUPPORT_PROMISE_POLICIES,
+                "release.support_promise",
+            ),
             resource_limits_max_bundle_facts_decode_nodes=_opt_int(resource_limits, "max_bundle_facts_decode_nodes"),
             version=(
                 version_raw
