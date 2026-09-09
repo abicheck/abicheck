@@ -482,6 +482,7 @@ class LineScan(NamedTuple):
     quote: str | None
     at_word_start: bool
     continues: bool
+    uncertain: bool = False
 
 
 def scan_line(line: str, quote: str | None, at_word_start: bool) -> LineScan:
@@ -517,6 +518,11 @@ def scan_line(line: str, quote: str | None, at_word_start: bool) -> LineScan:
                     return LineScan(None, quote, at_word_start, True)
                 i += 2
                 continue
+            # Command substitution is live inside double quotes too, and
+            # opens a fresh lexical context there -- the exact shape that
+            # defeated the previous revision.
+            if ch == "`" or (ch == "$" and i + 1 < n and line[i + 1] == "("):
+                return LineScan(None, None, True, False, uncertain=True)
             if ch == '"':
                 quote = None
             i += 1
@@ -527,6 +533,13 @@ def scan_line(line: str, quote: str | None, at_word_start: bool) -> LineScan:
             i += 2
             at_word_start = False
             continue
+        if ch == "`" or (ch == "$" and i + 1 < n and line[i + 1] == "("):
+            # A command substitution opens its own lexical context, with its
+            # own quoting, nested arbitrarily. Rather than half-model that --
+            # every previous revision of this helper lost a command by
+            # guessing at grammar it did not implement -- say so and let the
+            # caller fall back to keeping the text intact.
+            return LineScan(None, None, True, False, uncertain=True)
         if ch in "'\"":
             quote = ch
             at_word_start = False
@@ -582,6 +595,7 @@ def logical_lines(script: str) -> list[str]:
     pending = ""
     quote: str | None = None
     at_word_start = True
+    unsure = False
 
     def flush(text: str) -> None:
         stripped = text.strip()
@@ -591,6 +605,15 @@ def logical_lines(script: str) -> list[str]:
     for raw in script.splitlines():
         scan = scan_line(raw, quote, at_word_start)
         quote, at_word_start = scan.quote, scan.at_word_start
+        if scan.uncertain:
+            # Fail closed: emit the line verbatim, strip no comment, splice
+            # nothing across it, and start clean. Keeping too much text can
+            # only make the scan look at more; dropping text is what hid a
+            # command in every bug this helper has had.
+            unsure = True
+            flush(pending + raw)
+            pending, quote, at_word_start = "", None, True
+            continue
         if scan.comment_at is not None:
             # bash runs the code before the comment and never sees the rest.
             # While a splice is open this joins first, exactly as bash does.
@@ -606,6 +629,20 @@ def logical_lines(script: str) -> list[str]:
         flush(pending + raw)
         pending, quote, at_word_start = "", None, True
     flush(pending)
+    if unsure:
+        # Once a construct we cannot model appears, the lexical state of every
+        # *later* line is guesswork too -- the nested case proved it, since the
+        # line after the substitution opened with a `#` that was really inside
+        # a quote. So the raw physical lines are added alongside the parsed
+        # view: the union can only give the scan more to look at, and a
+        # spurious flag asks a human to look where a dropped command asks
+        # nobody anything.
+        seen = set(lines)
+        for raw in script.splitlines():
+            stripped = raw.strip()
+            if stripped and stripped not in seen:
+                lines.append(stripped)
+                seen.add(stripped)
     return lines
 
 
@@ -636,8 +673,6 @@ class TestNoWorkflowGatesInstallOnUpdate:
             for line in logical_lines(script):
                 stripped = line.strip()
                 if not re.search(r"\bapt-get\s+update\b", stripped):
-                    continue
-                if stripped.lstrip().startswith("#"):
                     continue
                 if not update_failure_is_absorbed(stripped):
                     offenders.append(f"{name}: {stripped}")
@@ -942,6 +977,46 @@ class TestLogicalLines:
         'echo "open\nstill open"; probe update\n',
         "echo 'single \\\nliteral backslash'; probe update\n",
     )
+
+    # Scripts holding a construct the lexer refuses to model. These are NOT
+    # in the bash-equality matrix on purpose: the fallback deliberately keeps
+    # more text than bash runs (comments included), so argv equality is the
+    # wrong claim. The right one is below -- nothing is dropped.
+    _UNPARSEABLE = (
+        'echo "$(printf "%s" "x \\\n# nested")"; sudo apt-get update -qq && sudo apt-get install -y gcc\n',
+        "echo `printf x` \\\n# c\nsudo apt-get update -qq && sudo apt-get install -y gcc\n",
+        "X=$(date) # c \\\nsudo apt-get update -qq && sudo apt-get install -y gcc\n",
+        'echo "${x:-$(true)}" \\\n# c\nsudo apt-get update -qq && sudo apt-get install -y gcc\n',
+    )
+
+    @pytest.mark.parametrize("script", _UNPARSEABLE)
+    def test_nothing_is_dropped_when_the_lexer_is_unsure(self, script: str) -> None:
+        """The invariant that replaces guessing at the rest of shell grammar.
+
+        Six review rounds each found one more corner of the grammar this
+        helper modelled wrongly, and every single one failed the same way:
+        text was *dropped*, so a gating command stopped being visible to the
+        scan. Modelling the next corner would only invite a seventh.
+
+        So the helper now declares defeat on command substitution rather than
+        half-parsing it, and this states what that guarantees: whatever it
+        cannot parse, it does not discard. A spurious flag asks a human to
+        look; a dropped command asks nobody anything.
+        """
+        assert any("apt-get update" in line for line in logical_lines(script)), (
+            "a gating command vanished from an unparseable script"
+        )
+
+    def test_the_scan_flags_an_unparseable_gating_script(self) -> None:
+        """And the kept text really does reach the offender check."""
+        script = self._UNPARSEABLE[0]
+        offenders = [
+            line
+            for line in logical_lines(script)
+            if re.search(r"\bapt-get\s+update\b", line)
+            and not update_failure_is_absorbed(line)
+        ]
+        assert offenders
 
     @requires_apt_harness
     @pytest.mark.parametrize("script", _SCRIPTS)
