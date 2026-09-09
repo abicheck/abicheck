@@ -14,7 +14,7 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` still has one too, but it is **being retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-being-retired) before depending on any of its codes.
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
@@ -311,8 +311,15 @@ below.
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
+| `7` | Evidence-contract error (ADR-037 D5) — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable today through **`--abi3 VERSION` against a candidate that is not a recognisable CPython extension module** (ADR-068 plan Phase 2d); `verdict: "EVIDENCE_CONTRACT_ERROR"` in `--format json`. `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins. |
 | `16` | `not_comparable` (ADR-050 D2) — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `--format json`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
+
+> **Not yet reachable on `compare`: a pinned `--depth build`/`--depth source`
+> with no evidence to satisfy it.** `scan` raises exit `7` for that;
+> `compare` prints a `Note:` and exits on the verdict alone. Closing that is
+> ADR-068 plan §3 row 28 — see
+> [Evidence Depth](../use/evidence-depth.md#what-each-depth-reaches).
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
 > to distinguish them (e.g. warn on deployment risk), use `--format json` and
@@ -329,6 +336,7 @@ is computed from the severity configuration rather than the verdict:
 | `1` | Error-level findings in `addition` or `quality_issues` only |
 | `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
 | `4` | Error-level findings in `abi_breaking` |
+| `7` | Evidence-contract error — as in the legacy table above; raised before severity classification runs, so it is scheme-independent. |
 | `16` | `not_comparable` (ADR-050 D2) — the comparability gate hard-fails before severity classification ever runs, identical to the legacy scheme's `16`. |
 
 The highest applicable code wins. For example, if both `abi_breaking=error` and
@@ -428,7 +436,28 @@ scheme-independent CI behaviour.
 
 ---
 
-## `abicheck scan`
+## `abicheck scan` (being retired)
+
+!!! danger "`scan` is retired by ADR-068 — hard removal, no deprecation window"
+    [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+    D1 reduces the root surface to six verbs and retires `scan` as a second
+    analysis product. D8 is explicit that the removal is **hard**: no hidden
+    alias, no shim, no silent ignoring. Once the retirement PR lands,
+    `abicheck scan` exits `64` with `No such command`, and the error names
+    `compare --no-baseline`. **The whole table below stops existing at that
+    point** — exit `5`, `6` and `7` do not become `compare` codes by
+    inheritance; each moves onto `compare`'s own `ExitDecision` axes on its
+    own schedule, and the `compare` sections above are where a migrated axis
+    is documented.
+
+    Nothing is deleted before its capability has a proven home (D9), so this
+    table is accurate for the current build. But do not write new CI against
+    it: pin the equivalent `compare` invocation instead, and where none
+    exists yet, see
+    [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
+    for what is still open. GitHub Action users are insulated — `mode: scan`
+    is translated inside the Action and retires on the Action's own input
+    lifecycle (D8, [ADR-047](../contribute/adr/047-github-actions-integration-model.md)).
 
 The one-shot source-intelligence scan has its own contract (it may compare
 `ARTIFACT` against `--against` and adds a budget guard). `--against` is the

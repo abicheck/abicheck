@@ -38,6 +38,53 @@ no-baseline input yet), a `budget` wall-clock guard, `crosscheck`'s
 (multi-library audit). None of those inputs are read by `mode: compare`
 today.
 
+### `mode: scan` is being retired — and is already translated where it can be
+
+[ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+retires `scan` as a second analysis product. The CLI command is removed
+outright, with **no deprecation window** (D8). Your workflow YAML is the one
+thing the ADR protects: the Action absorbs the change, so `mode: scan` keeps
+working across the CLI's removal and is itself dropped only in the Action's
+own next major, per [ADR-047](../contribute/adr/047-github-actions-integration-model.md)'s
+input lifecycle.
+
+Concretely, `action/run.sh` already re-issues a **baseline** `mode: scan`
+step as `abicheck compare` wherever the two commands are proven equivalent.
+Its `_SCAN_NEEDS_LEGACY_CLI` predicate is the exhaustive list of request
+shapes that still fall back to the legacy `scan` CLI — each is an
+independently verified capability gap, not a stylistic preference, and each
+is tracked in
+[known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli):
+
+| Your step sets… | Why it still runs legacy `scan` |
+|---|---|
+| no `against`/`abi-baseline` (audit-only) | `compare --no-baseline` does not reproduce the audit's findings yet |
+| `new-library-set` | no `compare` equivalent for the multi-library audit mode |
+| `budget`, `risk-rules`, `crosscheck`, `build-target` | no `compare` flag equivalent |
+| no `depth` at all | `scan`'s risk-driven `auto` selection has no `compare` equivalent; `compare` would silently cap at `headers` |
+| `depth: build` or `depth: source` | `scan`'s hard evidence-contract floor (exit `7`) has no `compare` equivalent — routing it would drop a real, actionable error |
+| a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |
+| an `against:` ending `.json`/`.json.gz`/`.json.zst`, or any file content-detected as a JSON snapshot | `compare` and `scan` disagree on snapshot-baseline handling |
+| `output-file`, or an effective `format: json` (from the input or an `extra-args` override), or a `-o`/`--output` in `extra-args` | the two commands write different file shapes |
+| any `--write` or scan-only flag in `extra-args` (`--abi3`, `--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the compile-context family) | no `compare` equivalent for the flag itself |
+| anything other than an explicit bare `--pattern-verdicts` in `extra-args` | `compare`'s pattern-verdict modulation is unconditional (ADR-068 D4) with no flag left to disable it, while `scan --against` still defaults it off |
+
+The routing is invisible in your YAML: the same inputs, outputs, and verdict
+either way. It matters only when you read the step's log and see which
+command actually ran. **The ~17 `mode: scan` branches in `action/run.sh`
+disappear only when the last row above closes** — the predicate shrinks, it
+does not vanish, until then.
+
+!!! warning "One behavior change already landed for baseline `mode: scan`"
+    ADR-068's 2026-09-09 amendment stopped `scan --against` from stripping
+    cross-source findings to advisory-only. A baseline scan of a library
+    with an accidental export, an unversioned exported symbol, or any other
+    cross-source-only issue now reports that finding as a real, policy-gated
+    result — the same way `compare` always did. It can raise the step's
+    verdict, and under a severity preset that treats `RISK`/`API_BREAK` as
+    error-level, its exit code. This is a documented breaking change to the
+    `mode: scan` contract, not a regression.
+
 > **New to what these layers see?** The concept-track
 > [level-by-level walk-through](../learn/what-each-level-sees.md)
 > shows, on one running example, the concrete data each level (L0→L5) produces
@@ -136,11 +183,11 @@ actually supplied.
 
 Run the intra-version hygiene checks against one build — no old version needed.
 Useful as a standing lint on the default branch. `mode: compare` has no
-no-baseline input at the Action level yet (the CLI's `compare --no-baseline`
-isn't wired to an Action input, and that CLI slice doesn't yet accept
-`sources`/`build-info` either — see [Scenario
-S5](../integration/scenarios/single-build-audit.md)), so this stays
-`mode: scan`:
+no-baseline input at the Action level yet, and the CLI's own
+`compare --no-baseline` does not report these findings ([known
+gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings);
+see [Scenario S5](../integration/scenarios/single-build-audit.md)), so this
+stays `mode: scan` — and, per the routing table above, runs the legacy CLI:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
