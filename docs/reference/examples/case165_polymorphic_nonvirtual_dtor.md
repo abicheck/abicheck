@@ -39,7 +39,7 @@ is silently skipped, with no compiler or linker diagnostic on either side.
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libv1.so
 g++ -shared -fPIC -g v2.cpp -o libv2.so
-abicheck compare libv1.so libv2.so --pattern-verdicts
+abicheck compare libv1.so libv2.so
 ```
 
 ## Expected abicheck finding
@@ -64,9 +64,10 @@ the newly introduced `Exporter` triggers the finding.
 
 `min_evidence: L1` — DWARF alone carries enough to reconstruct the vtable
 (via the mangled `_ZTV...` symbols and `DW_AT_vtable_elem_location`) and the
-absence of a virtual destructor slot; no public headers are required. The
-finding also needs `--pattern-verdicts` (ADR-027 opt-in anti-pattern
-analysis) — it is not emitted by a bare `compare`.
+absence of a virtual destructor slot; no public headers are required.
+ADR-027's anti-pattern analysis (this finding's own detector) is
+unconditional (ADR-068 D4) — it runs automatically on every `compare`
+wherever idiom evidence exists, with no flag needed to enable it.
 
 ## Why abicheck catches it
 

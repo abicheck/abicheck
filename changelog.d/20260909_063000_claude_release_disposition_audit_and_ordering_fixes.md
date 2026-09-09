@@ -33,3 +33,7 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   audit reports an empty change set by construction, so it has no
   root-cause graph, findings list, or pattern-modulation ledger for
   `--view` to act on.
+- Case 165's (`polymorphic_nonvirtual_dtor`) example command referenced the
+  retired `compare --pattern-verdicts` flag (pattern-verdict modulation is
+  unconditional now); copying it verbatim exited with a usage error instead
+  of producing the documented finding.

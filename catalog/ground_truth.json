@@ -1556,7 +1556,7 @@
    "api_break": false,
    "bad_practice": true,
    "category": "risk",
-   "description": "v2 adds a NEW polymorphic type (Exporter has a vtable via virtual write()) whose destructor is not virtual, plus a public factory returning Exporter* that callers delete. Deleting any future subclass through the base skips the derived destructor (UB). Existing binaries keep working \u2014 the finding is the ADR-027 anti-pattern POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR, emitted as RISK only for newly introduced instances under --pattern-verdicts.",
+   "description": "v2 adds a NEW polymorphic type (Exporter has a vtable via virtual write()) whose destructor is not virtual, plus a public factory returning Exporter* that callers delete. Deleting any future subclass through the base skips the derived destructor (UB). Existing binaries keep working \u2014 the finding is the ADR-027 anti-pattern POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR, emitted as RISK only for newly introduced instances (modulation is unconditional; ADR-068 D4).",
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
     "polymorphic_type_non_virtual_dtor"

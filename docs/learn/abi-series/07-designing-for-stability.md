@@ -360,13 +360,13 @@ pointer to an incomplete type, a `create`/`destroy` pair around a handle, a
 C-linkage factory returning an interface, a callback typedef. abicheck
 recognises those idioms from the header facts, and the anti-patterns beside
 them — an STL container passed by value across the boundary, a polymorphic
-type with no virtual destructor. With `--pattern-verdicts` it uses that
-evidence to *modulate* a verdict: a layout change inside a type the header
-proves opaque is demoted with a stated reason rather than reported as a
-break, and it is never deleted — the finding stays in the report with its
-modulation recorded in a ledger. The reverse holds too: losing an opacity
-or handle guarantee, so that a hidden layout becomes reachable, is raised
-as `opaque_invariant_broken` or `handle_type_changed`.
+type with no virtual destructor. It automatically uses that evidence to
+*modulate* a verdict: a layout change inside a type the header proves
+opaque is demoted with a stated reason rather than reported as a break, and
+it is never deleted — the finding stays in the report with its modulation
+recorded in a ledger. The reverse holds too: losing an opacity or handle
+guarantee, so that a hidden layout becomes reachable, is raised as
+`opaque_invariant_broken` or `handle_type_changed`.
 
 ```bash
 abicheck compare old.so new.so -H include/ --view patterns
