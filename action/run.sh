@@ -4235,6 +4235,26 @@ _build_json_cmd() {
       --format | -o | --output | --output-file)
         ((i++))  # skip the flag's value too
         ;;
+      --write)
+        # Codex review, fresh evidence: this rerun's whole purpose is one
+        # clean JSON report at $PR_JSON via the -o appended below -- a
+        # pre-existing --write left over from $CMD (the primary run's own
+        # PR_JSON sidecar injection, present on every non-JSON-format
+        # compare/scan invocation) is not just redundant here, it collides:
+        # this function is only ever reached after the caller's own
+        # "$PR_JSON already populated" check came back empty, i.e. the
+        # primary run aborted before ever reaching its own --write
+        # (NOT_COMPARABLE and other early-refusal verdicts never render any
+        # output at all -- confirmed live). Keeping --write here re-adds
+        # the identical "json=$PR_JSON" path this rerun's own -o also
+        # targets, which the CLI hard-rejects (--write's PATH must differ
+        # from --output/-o), so the rerun always failed and the comment was
+        # silently skipped with a misleading "no JSON report produced"
+        # warning. Drop it (and its value) unconditionally -- a --write to
+        # some other path would be equally pointless to keep for a run
+        # whose only output anyone reads is $PR_JSON.
+        ((i++))  # skip the flag's value too
+        ;;
       --show-only)
         # Display filter ("limit displayed changes", does NOT affect exit codes).
         # Keeping it would hide gated breaks from the comment while the check

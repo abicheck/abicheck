@@ -1661,7 +1661,7 @@ def run_compare(
             secondary_writes=secondary_writes,
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
-            depth=release_depth, public_header_dirs=project_config_public_header_dirs(project_cfg),
+            depth=release_depth, public_header_dirs=project_config_public_header_dirs(project_cfg), collapse_versioned_symbols=collapse_versioned_symbols,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

@@ -449,3 +449,37 @@ def test_compare_request_collapse_versioned_symbols_field_reaches_the_diff(tmp_p
     kinds = {c.kind.value for c in collapsed_result.changes}
     assert "versioned_symbol_scheme_detected" in kinds
     assert "func_removed" not in kinds and "func_added" not in kinds
+
+
+def test_service_run_compare_shim_forwards_collapse_versioned_symbols(tmp_path):
+    """Codex review, fresh evidence: ``service_compare_pipeline.run_compare()``
+    -- the single Tier-2 chokepoint the directory/package release fan-out
+    calls per member (``cli_compare_release_pairwise._run_compare_pair`` ->
+    ``service.run_compare``), not just the typed ``CompareRequest`` path the
+    test above already covers -- had no ``collapse_versioned_symbols``
+    parameter at all, so a ``scope.collapse_versioned_symbols: true``
+    project config resolved by the release CLI had no channel to reach a
+    package member's own comparison: every member silently kept the field
+    at its ``False`` default and could report a version-renamed symbol as a
+    removal/addition where the identical scalar comparison collapsed it.
+    Exercises the real shim end to end (not ``classify_compare_pair``
+    directly), proving the fix actually reaches the function the release
+    fan-out calls."""
+    from abicheck.serialization import snapshot_to_json
+    from abicheck.service_compare_pipeline import run_compare
+
+    old, new = _snap("75.1", "75"), _snap("78.3", "78")
+    old_p, new_p = tmp_path / "old.json", tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+    default_result = run_compare(old_p, new_p).diff
+    collapsed_result = run_compare(
+        old_p, new_p, collapse_versioned_symbols=True
+    ).diff
+
+    assert default_result.verdict == Verdict.BREAKING
+    assert collapsed_result.verdict != Verdict.BREAKING
+    kinds = {c.kind.value for c in collapsed_result.changes}
+    assert "versioned_symbol_scheme_detected" in kinds
+    assert "func_removed" not in kinds and "func_added" not in kinds

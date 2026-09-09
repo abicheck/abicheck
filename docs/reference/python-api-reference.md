@@ -503,6 +503,7 @@ Compare two ABI inputs and return the classified diff result.
 | *(keyword-only below)* | | |
 | `severity_preset` | `str \| None` | `None` |
 | `public_header_dirs` | `list[Path] \| None` | `None` |
+| `collapse_versioned_symbols` | `bool` | `False` |
 
 **Returns:** `CompareResult`
 
