@@ -700,11 +700,16 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "3.12",
+  "report_schema_version": "<REPORT_SCHEMA_VERSION>",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
 ```
+
+The real value is whatever `abicheck.schemas.REPORT_SCHEMA_VERSION` (imported
+above) resolves to on the build that produced the report -- shown here as a
+placeholder rather than a literal number, since embedding the current value
+would need editing on every schema bump (Codex review, fresh evidence).
 
 > **`effective_config_digest`/`effective_config_fields` (schema 2.45; the
 > field set itself grew again in 2.46 -- see below).**

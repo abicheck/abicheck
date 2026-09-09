@@ -796,7 +796,193 @@ def test_scan_files_skips_missing_root_gracefully(tmp_path: Path) -> None:
     res = scan_files([tmp_path / "does-not-exist"])
     assert res.files_scanned == 0
     assert res.facts == []
+    # Codex review, fourth round, fresh evidence: `iter_source_files`
+    # silently drops a root that is neither a file nor a directory with no
+    # accounting at all -- `scan_files` itself now counts it as skipped
+    # (same as an unreadable *found* file) so this doesn't read as a
+    # clean, fully-covered scan of zero files.
+    assert res.files_skipped == 1
     assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
+def test_scan_files_counts_missing_sibling_root_even_when_another_scans(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fourth round, fresh evidence: when one of several
+    supplied roots exists and scans successfully while another is missing,
+    the missing root must still downgrade coverage to `partial` -- not
+    read as a clean PRESENT row just because a sibling root produced real
+    evidence. `[existing.hpp, missing.hpp]` previously reported
+    `files_skipped == 0` and `coverage().status == "present"`."""
+    existing = tmp_path / "existing.hpp"
+    existing.write_text("struct S { int x; };")
+    missing = tmp_path / "missing.hpp"
+    res = scan_files([existing, missing])
+    assert res.files_scanned == 1
+    assert res.files_skipped == 1
+    assert res.coverage().status is CoverageStatus.PARTIAL
+
+
+def test_scan_files_out_of_scope_changed_path_is_not_flagged_as_unreadable(
+    tmp_path: Path,
+) -> None:
+    """Codex review, sixth round attempted a per-entry ``changed_paths``
+    "unresolved" check (a deleted/renamed file beneath an existing root);
+    the seventh round found it unsound and it was reverted: ``changed_paths``
+    is the WHOLE PR diff's file list, not a pre-filtered subset, so an
+    ordinary out-of-scope entry (a file outside ``roots``, or outside
+    :func:`_is_scannable`'s suffix set, e.g. ``README.md``) never matches
+    any candidate either -- exactly the normal case for every OTHER file in
+    a real multi-file PR diff. This pins that the reverted behaviour stays
+    reverted: such an entry must never count as skipped/unreadable."""
+    (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
+    res = scan_files([tmp_path], changed_paths=["README.md", "src/other.cpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+    assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
+def test_scan_files_missing_root_and_matching_changed_path_not_double_counted(
+    tmp_path: Path,
+) -> None:
+    """Codex review, seventh round: when the same missing file is named as
+    both a root and a changed-path entry, only the missing-root check
+    (fourth round) may count it -- never twice."""
+    missing = tmp_path / "deleted.hpp"
+    res = scan_files([missing], changed_paths=["deleted.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+
+
+def test_scan_files_missing_root_out_of_changed_scope_is_not_counted(
+    tmp_path: Path,
+) -> None:
+    """Codex review, eighth round, fresh evidence: an unconditional
+    missing-root check counted `roots=[missing.hpp]` even when
+    `changed_paths=["different.hpp"]` would never have selected
+    `missing.hpp` anyway -- misreporting a real, valid `empty_seed` as
+    `unreadable_inputs`. A missing root with an unambiguous source suffix
+    that the changed-path filter would exclude must not be counted."""
+    missing = tmp_path / "missing.hpp"
+    res = scan_files([missing], changed_paths=["different.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+
+
+def test_scan_files_missing_directory_root_still_counted_under_changed_paths(
+    tmp_path: Path,
+) -> None:
+    """Sibling case to the one above: a missing DIRECTORY root (no suffix,
+    ambiguous) must stay unconditionally counted even under a seeded
+    changed_paths filter -- its own path never matches an individual
+    changed-path entry, so exempting it the same way a file root is
+    exempted would silently swallow a genuine directory-acquisition
+    failure."""
+    missing_dir = tmp_path / "missing_sources"
+    res = scan_files([missing_dir], changed_paths=["some/file.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+
+
+def test_scan_files_missing_extensionless_file_root_is_a_known_gap(
+    tmp_path: Path,
+) -> None:
+    """Documents the accepted, deliberately-NOT-fixed limitation
+    :func:`iter_source_files`'s own docstring records (Codex review, twelfth
+    round, fresh evidence): a missing root that is itself an explicit,
+    extensionless FILE (the libstdc++-style header shape `_is_scannable`
+    documents as legitimate) has no `SOURCE_SUFFIXES` entry to match, so it
+    falls through to the unconditional "ambiguous, count it" branch the
+    same way a missing DIRECTORY root does -- even though `changed_paths`
+    here would never have selected it. There is no textual signal
+    distinguishing this from a missing directory root, so (per this repo's
+    "attempted twice, reverted twice" discipline) it stays a known,
+    documented gap rather than a third heuristic patch."""
+    missing = tmp_path / "Core"  # extensionless explicit file root
+    res = scan_files([missing], changed_paths=["different.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1  # accepted gap: should be 0 (empty_seed)
+
+
+def test_scan_files_missing_directory_root_exempted_under_a_truly_empty_seed(
+    tmp_path: Path,
+) -> None:
+    """Codex review, tenth round, fresh evidence: a genuinely EMPTY (but
+    non-`None`) `changed_paths` selects nothing at all, unambiguously -- no
+    root, file OR directory, could ever have been selected by it. The
+    suffix heuristic above only resolves ambiguity for a NON-empty
+    changed-path set; with zero entries there is nothing to be ambiguous
+    about, so even a missing, no-suffix directory root must be exempted
+    here (unlike the sibling case above, whose changed_paths names a real,
+    unrelated entry)."""
+    missing_dir = tmp_path / "missing_sources"
+    res = scan_files([missing_dir], changed_paths=())
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+
+
+def test_scan_files_deduplicates_a_repeated_missing_root(tmp_path: Path) -> None:
+    """Codex review, eleventh round, fresh evidence: `iter_source_files`
+    dedupes existing candidates into a `set[Path]`, so a caller passing the
+    same root twice (duplicate `--header` values, a directly-constructed
+    API input) only ever scans it once. The missing-root accounting must
+    dedupe identically -- one missing input must not inflate
+    `files_skipped` by however many times it's repeated in `roots`."""
+    missing = tmp_path / "missing.hpp"
+    res = scan_files([missing, missing, missing])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+
+
+def test_scan_files_accepts_a_one_shot_changed_paths_iterable(
+    tmp_path: Path,
+) -> None:
+    """Codex review, ninth round, fresh evidence: `changed_paths` is typed
+    `Iterable[str] | None`, which permits a one-shot generator. The eighth
+    round's own missing-root accounting consumed it once (building
+    `changed_suffixes`) before passing the SAME object to
+    `iter_source_files`, which then saw an already-exhausted iterable and
+    excluded every real candidate -- even one the generator genuinely
+    named."""
+    real = tmp_path / "real.hpp"
+    real.write_text("struct S { int x; };")
+
+    def _changed_paths():
+        yield "real.hpp"
+
+    res = scan_files([real], changed_paths=_changed_paths())
+    assert res.files_scanned == 1
+    assert res.files_skipped == 0
+
+
+def test_scan_files_empty_changed_paths_reports_no_skips(
+    tmp_path: Path,
+) -> None:
+    """An empty (but non-``None``) ``changed_paths`` -- the real, valid,
+    by-design empty-diff scope ``workflows.lexical_prescan``'s own
+    ``empty_seed`` reason covers -- has zero entries, so it must not read
+    as an acquisition failure."""
+    (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
+    res = scan_files([tmp_path], changed_paths=())
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+    assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
+def test_scan_files_deleted_changed_path_beneath_existing_root_is_a_known_gap(
+    tmp_path: Path,
+) -> None:
+    """Documents the accepted, deliberately-NOT-fixed limitation
+    :func:`iter_source_files`'s own docstring records: a ``changed_paths``
+    entry naming a file specifically deleted from within an otherwise-
+    existing, in-scope root reads identically to a real, valid empty diff
+    (``files_skipped == 0``) rather than as an acquisition failure -- the
+    seventh round's attempted fix for this exact shape produced worse false
+    positives on ordinary out-of-scope changed paths and was reverted."""
+    (tmp_path / "untouched.hpp").write_text("struct S { int x; };")
+    res = scan_files([tmp_path], changed_paths=["deleted.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
 
 
 def test_scan_files_counts_unreadable_as_skipped(

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Lexical/preprocessor pre-scan report sections (plan §3 rows 6/8, §6 Phase
-2b; schema 3.12).
+2b; schema 3.13).
 
 Follows this package's compute/render split (see ``abicheck/report/
 AGENTS.md``): each ``compute_*`` reads ``DiffResult.pattern_prescan``/
@@ -94,17 +94,58 @@ def render_preprocessor_prescan_json(
     return {"old": dict(summary.old), "new": dict(summary.new)}
 
 
+#: Rendered text for each :func:`~abicheck.workflows.lexical_prescan.
+#: _pattern_scan_scope_reason` value (Codex review, fresh evidence) -- three
+#: materially different "nothing was scanned" situations that a single
+#: "not evaluated (no headers/`--sources` in scope)" message used to
+#: collapse onto one another, so a valid empty ``--since`` seed (b) read
+#: identically to no inputs being supplied at all (a), and both read
+#: identically to every supplied input being unreadable (c).
+_SCOPE_REASON_MESSAGES: Mapping[str, str] = {
+    "no_inputs": "not evaluated (no headers/`--sources` in scope)",
+    "empty_seed": (
+        "not evaluated (`--since`/`--changed-path` resolved to a real, "
+        "empty scope -- 0 files by design, not a missing/unreadable input)"
+    ),
+    "unreadable_inputs": (
+        "not evaluated (headers/`--sources` were supplied, but every "
+        "candidate file was unreadable or matched no scannable extension)"
+    ),
+}
+
+
 def _pattern_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
+    reason = side.get("scope_reason")
+    if reason is not None:
+        message = _SCOPE_REASON_MESSAGES.get(
+            reason, "not evaluated (no headers/`--sources` in scope)"
+        )
+        return f"- **{label}**: {message}"
     coverage = side.get("coverage") or {}
     if coverage.get("status") == "not_collected" or not side.get("files_scanned"):
+        # `scope_reason` absent (e.g. a report built before this field
+        # existed) -- fall back to the old, coarser message rather than
+        # fail to render anything.
         return f"- **{label}**: not evaluated (no headers/`--sources` in scope)"
     facts = side.get("facts") or []
     triggers = side.get("escalation_triggers") or []
-    return (
+    line = (
         f"- **{label}**: {side.get('files_scanned', 0)} file(s) scanned, "
         f"{len(facts)} construct(s) found, {len(triggers)} escalation "
         "trigger(s)"
     )
+    if coverage.get("status") == "partial":
+        # Codex review, fifth round, fresh evidence: `scan_files` now counts
+        # a missing sibling root as skipped even when another root scans
+        # successfully (`coverage.status == "partial"` with `scope_reason`
+        # itself `None`, since real coverage exists) -- this full/leaf/
+        # root-cause Markdown line bypassed the `scope_reason` branch
+        # entirely and printed only the plain counts, indistinguishable
+        # from a fully-covered scan. Mirrors `_preprocessor_side_markdown_
+        # line`'s own `partial` handling.
+        detail = coverage.get("detail") or "incomplete coverage"
+        line += f" -- ⚠️ **partial coverage** ({detail})"
+    return line
 
 
 def render_pattern_prescan_markdown(
@@ -132,15 +173,25 @@ def render_pattern_prescan_markdown(
 
 def _preprocessor_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
     coverage = side.get("coverage") or {}
-    if not side.get("ran") or coverage.get("status") == "not_collected":
+    status = coverage.get("status")
+    if not side.get("ran") or status == "not_collected":
         reason = side.get("skipped_reason") or coverage.get("detail") or "not evaluated"
         return f"- **{label}**: skipped -- {reason}"
     divergences = side.get("divergences") or []
     leaks = side.get("leaks") or []
-    return (
+    line = (
         f"- **{label}**: {len(divergences)} macro divergence(s), "
         f"{len(leaks)} header leak(s)"
     )
+    if status == "partial":
+        # Codex review, fresh evidence: only some `clang -E` probes
+        # succeeded, or the probe count hit `ABICHECK_PREPROCESSOR_SCAN_
+        # MAX_PROBES`'s cap -- without this, a partially-inspected build
+        # can report zero divergences/leaks and read exactly like a clean,
+        # fully-scanned one.
+        detail = coverage.get("detail") or "incomplete coverage"
+        line += f" -- ⚠️ **partial coverage** ({detail})"
+    return line
 
 
 def render_preprocessor_prescan_markdown(
@@ -159,6 +210,88 @@ def render_preprocessor_prescan_markdown(
     ]
 
 
+def pattern_prescan_review_warnings(summary: PatternPrescanSummary | None) -> list[str]:
+    """Coverage-warning strings for the ``--format review`` digest (Codex
+    review, fresh evidence): ``build_review_digest_document`` never called
+    :func:`render_pattern_prescan_markdown` at all, so a scope-limited or
+    partially-covered side silently vanished from the one GitHub-facing
+    summary a reviewer approves a merge from, which could still read as an
+    unqualified "safe to merge".
+
+    Only ``no_inputs`` stays silent here: no headers/``--sources`` were ever
+    supplied, the ordinary, structural "this evidence tier does not apply"
+    case every binary-only comparison hits, and repeating it in the digest
+    would just be noise. The other three all mean this diff's *own* header/
+    source surface has less lexical coverage than a naive "0 findings" read
+    would suggest, so each gets a warning (Codex review, second round, fresh
+    evidence): ``unreadable_inputs`` (a genuine acquisition failure --
+    inputs were supplied but nothing could be read), ``empty_seed`` (a
+    ``--since``/``--changed-path`` seed narrowed this side to 0 files by
+    design -- still worth a reviewer knowing the scan didn't see this PR's
+    changes), and ``coverage.status == "partial"`` (some, but not all,
+    candidate files were scanned -- ``files_scanned > 0`` so ``scope_reason``
+    itself is ``None``, but the side is still not fully covered).
+    """
+    if summary is None:
+        return []
+    warnings = []
+    for label, side in (("OLD", summary.old), ("NEW", summary.new)):
+        reason = side.get("scope_reason")
+        if reason == "unreadable_inputs":
+            warnings.append(
+                f"{label} pattern pre-scan: headers/--sources were supplied "
+                "but every candidate file was unreadable or matched no "
+                "scannable extension -- lexical ABI-risk coverage is 0 "
+                "files, not a by-design empty scope"
+            )
+        elif reason == "empty_seed":
+            warnings.append(
+                f"{label} pattern pre-scan: --since/--changed-path narrowed "
+                "this side's scope to 0 files -- lexical ABI-risk coverage "
+                "does not include this diff's full header/source surface"
+            )
+        else:
+            coverage = side.get("coverage") or {}
+            if coverage.get("status") == "partial":
+                detail = coverage.get("detail") or "incomplete coverage"
+                warnings.append(
+                    f"{label} pattern pre-scan: partial coverage ({detail})"
+                )
+    return warnings
+
+
+def preprocessor_prescan_review_warnings(
+    summary: PreprocessorPrescanSummary | None,
+) -> list[str]:
+    """Same rationale as :func:`pattern_prescan_review_warnings`, for the S2
+    preprocessor pre-scan's own two "ran, but not fully covered" cases: a
+    ``partial`` coverage row (some ``clang -E`` probes failed, or the scan's
+    own probe cap truncated it) and a ``not_collected`` row where ``ran`` is
+    still ``True`` (``PreprocessorScanResult.all_failed`` -- clang and build
+    evidence were both available, but *every* invocation failed) -- without
+    either, a partially- or entirely-failed scan reports its divergence/leak
+    counts (0, in the ``all_failed`` case) in the review digest exactly like
+    a clean, fully-scanned one. The ordinary ``ran: False`` skip (no L3
+    build evidence / no clang at all -- also ``not_collected``, but never
+    attempted) stays silent, same as ``pattern_prescan``'s ``no_inputs``.
+    """
+    if summary is None:
+        return []
+    warnings = []
+    for label, side in (("OLD", summary.old), ("NEW", summary.new)):
+        coverage = side.get("coverage") or {}
+        status = coverage.get("status")
+        if status == "partial":
+            detail = coverage.get("detail") or "incomplete coverage"
+            warnings.append(
+                f"{label} preprocessor pre-scan: partial coverage ({detail})"
+            )
+        elif side.get("ran") and status == "not_collected":
+            detail = coverage.get("detail") or "every clang -E invocation failed"
+            warnings.append(f"{label} preprocessor pre-scan: {detail}")
+    return warnings
+
+
 __all__ = [
     "PatternPrescanSummary",
     "PreprocessorPrescanSummary",
@@ -168,4 +301,6 @@ __all__ = [
     "render_preprocessor_prescan_json",
     "render_pattern_prescan_markdown",
     "render_preprocessor_prescan_markdown",
+    "pattern_prescan_review_warnings",
+    "preprocessor_prescan_review_warnings",
 ]

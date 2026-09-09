@@ -40,7 +40,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -764,6 +764,78 @@ def iter_source_files(
     suffix-matching the path tail), implementing the ADR-035 D2 "changed +
     public" scope: callers pass public roots and the PR's changed paths. The
     walk is deterministic (sorted) for reproducible reports.
+
+    **Deliberately NOT attempted**: distinguishing "a `changed_paths` entry
+    matches no candidate because the entry names a deleted/renamed file" from
+    "a `changed_paths` entry matches no candidate because it is an ordinary,
+    expected out-of-scope path" (a `.cpp`/`README.md`/anything outside
+    ``roots`` or outside :func:`_is_scannable`'s suffix set -- the normal
+    case for the *other* files in a real multi-file PR diff, since
+    ``changed_paths`` is the whole diff's file list, not a pre-filtered
+    subset). A per-entry "unresolved" check was attempted (Codex review,
+    sixth round) and reverted after the seventh round's review found it
+    unsound in exactly this way: `roots=[include]` + `changed_paths=
+    ["README.md"]` (an ordinary out-of-scope file, present in nearly every
+    real PR) counted as an acquisition failure, and a `changed_paths` entry
+    that ALSO named the same file as a missing root double-counted it. Per
+    this repo's own "attempted twice, reverted twice" discipline for a
+    heuristic that keeps finding one more counterexample, this narrow class
+    (a changed-path entry naming a file specifically deleted from within an
+    otherwise-existing, in-scope root) stays a documented, accepted gap
+    rather than a third attempt -- see :func:`scan_files`'s own missing-root
+    accounting (a *root* that no longer exists) for the shape that IS fixed.
+
+    **Also deliberately NOT attempted** (Codex review, eighth round, fresh
+    evidence): a directory root that exists (``Path.exists()``/``is_dir()``
+    both succeed) but whose ``os.walk`` traversal hits an ``OSError``
+    (permission denied, a broken mount, an I/O error) partway through --
+    ``os.walk``'s default error handling silently swallows such errors
+    (yielding whatever it already found, never raising) unless given an
+    ``onerror`` callback, so this reads identically to "this directory
+    genuinely contains nothing in scope," the same `empty_seed`-vs-failure
+    ambiguity the fourth/eighth rounds close for a *missing* root. Left
+    unfixed deliberately rather than threading an `onerror` callback through
+    (which would need either a second, duplicate walk purely to detect the
+    error, or restructuring this function's return shape the same way the
+    reverted sixth-round attempt did) -- this is an adversarial-only,
+    OS-level failure mode a best-effort advisory pre-scan (ADR-035 D2/D3:
+    "never fatal") already degrades gracefully from, unlike the two shapes
+    above which are ordinary, everyday outcomes of a real PR's own edits.
+
+    **Also deliberately NOT attempted** (Codex review, twelfth round, fresh
+    evidence): :func:`scan_files`'s own missing-root exemption (the
+    ``SOURCE_SUFFIXES``-based check just above this function) only resolves
+    the ambiguity for a root carrying a *known* header/source suffix -- a
+    missing root that is itself an explicit, extensionless FILE (e.g.
+    ``include/mylib/Core``, the libstdc++-style extensionless-header shape
+    :func:`_is_scannable` already documents as a legitimate, supported
+    input) still has no suffix to match `SOURCE_SUFFIXES`, so it falls
+    through to the unconditional "ambiguous, count it" branch the same way
+    a missing DIRECTORY root does -- even when `changed_paths` demonstrably
+    would never have selected it, misreporting a real, valid `empty_seed`
+    as `unreadable_inputs` for this one shape. This is the identical
+    ambiguity the eighth/tenth rounds already closed for a *suffixed* file
+    root and a *directory* root respectively, but here it is structurally
+    unresolvable from the path string alone: given only ``roots`` (plain
+    strings/`Path`s, no file/directory tag) and the fact that the path
+    doesn't exist, there is no textual signal distinguishing "a missing
+    extensionless header FILE" from "a missing DIRECTORY" -- both are real,
+    legitimate shapes this function's own `roots` parameter accepts, and
+    `SOURCE_SUFFIXES` can only ever guess right by accident of naming
+    convention (a project could equally name a source subdirectory
+    `include/mylib/Impl` with no extension). A structurally sound fix needs
+    real file-vs-directory *provenance* threaded through from the two call
+    sites that already know it at the point `roots` is assembled
+    (`scan_engine.py`'s and `workflows/lexical_prescan.py`'s own root
+    construction) -- through `scan_files`'s and `iter_source_files`'s
+    shared, deliberately simple `Iterable[str | Path]` signature, which
+    would be a materially larger, more invasive change than any fix in this
+    chain so far. Per this repo's own "attempted twice, reverted twice"
+    discipline (already invoked once in this same docstring, for the
+    seventh round's revert), a third heuristic patch on top of the same
+    suffix-based guess is not attempted; this narrow shape (a missing,
+    extensionless, explicit file root that `changed_paths` would have
+    excluded) stays a documented, accepted gap alongside the two above.
     """
     changed_suffixes: set[str] | None = None
     if changed_paths is not None:
@@ -912,11 +984,89 @@ def scan_files(
     concatenated in that order. Any executor failure falls back to serial so a
     constrained sandbox never turns a scan into an error.
     """
+    roots = list(roots)
+    # Codex review, ninth round, fresh evidence: `changed_paths` is typed as
+    # `Iterable[str] | None`, which permits a one-shot iterable (a
+    # generator). Materialized here, once, so the missing-root accounting
+    # below and the `iter_source_files` call after it both see the SAME
+    # entries -- consuming a generator once (e.g. building `changed_suffixes`
+    # below) would silently exhaust it, leaving `iter_source_files` an empty
+    # set and excluding every real candidate.
+    changed_paths = list(changed_paths) if changed_paths is not None else None
+    # Codex review, fourth round, fresh evidence: `iter_source_files` silently
+    # drops a root that is neither a file nor a directory (deleted/renamed
+    # after being selected) with no accounting at all -- `[existing.hpp,
+    # missing.hpp]` previously scanned the one existing root, reported
+    # `files_skipped == 0`, and read as a clean, fully-covered PRESENT row
+    # (`coverage()`) even though one of its two supplied roots contributed
+    # no evidence whatsoever. Counted here, once, so every return path below
+    # (serial, parallel, and the parallel-failure fallback) inherits it
+    # uniformly rather than needing the same fix three times over.
+    #
+    # Eighth round, fresh evidence: that check is unconditional, so a missing
+    # root the seed's OWN `changed_paths` filter would never have selected
+    # anyway (`roots=[missing.hpp]`, `changed_paths=["different.hpp"]`) was
+    # still counted, misreporting a real, valid `empty_seed` as
+    # `unreadable_inputs`. Exempted here only for a root whose suffix is an
+    # unambiguous known source/header suffix (`SOURCE_SUFFIXES`) AND the
+    # changed-path filter would exclude it -- a root with no suffix (or a
+    # non-source suffix) is ambiguous (it could be the `sources` DIRECTORY
+    # root, whose own path never itself matches an individual changed-path
+    # entry) and stays unconditionally counted, so a genuine missing/
+    # unreadable directory root is never silently exempted just because its
+    # own path doesn't happen to appear in the changed-path list.
+    changed_suffixes = (
+        {str(p).replace("\\", "/") for p in changed_paths}
+        if changed_paths is not None
+        else None
+    )
+    missing_roots = 0
+    # Eleventh round, fresh evidence: `iter_source_files` dedupes existing
+    # candidates into a `set[Path]`, so a caller passing the same root twice
+    # (duplicate `--header` values, a directly-constructed API input) only
+    # ever scans it once -- this accounting must dedupe identically, or a
+    # single missing input inflates `files_skipped` by however many times
+    # it was repeated in `roots`.
+    seen_roots: set[Path] = set()
+    for r in roots:
+        rp = Path(r)
+        if rp in seen_roots:
+            continue
+        seen_roots.add(rp)
+        if rp.exists():
+            continue
+        if changed_suffixes is not None and not changed_suffixes:
+            # Ninth round, fresh evidence: a truly EMPTY (but non-`None`)
+            # `changed_paths` selects nothing at all, unambiguously -- no
+            # root, file OR directory, could ever have been selected by it,
+            # so a missing root's absence is irrelevant regardless of
+            # suffix. This is the one case the suffix heuristic below
+            # doesn't need at all: there is no ambiguity to resolve when
+            # the changed-path set has zero entries to match against.
+            continue
+        if (
+            changed_suffixes is not None
+            and rp.suffix.lower() in SOURCE_SUFFIXES
+            and not _path_changed(rp, changed_suffixes)
+        ):
+            continue
+        missing_roots += 1
     files = iter_source_files(roots, changed_paths)
     jobs = _resolve_scan_jobs(len(files))
     if jobs <= 1:
-        return _scan_files_serial(files)
+        result = _scan_files_serial(files)
+    else:
+        result = _scan_files_parallel(files, jobs)
+    if missing_roots:
+        result = replace(result, files_skipped=result.files_skipped + missing_roots)
+    return result
 
+
+def _scan_files_parallel(files: list[Path], jobs: int) -> PatternScanResult:
+    """The process-pool path split out of :func:`scan_files` (Codex review,
+    fourth round) so the missing-root accounting there has one shared return
+    value to adjust regardless of which path (serial/parallel/fallback) ran.
+    """
     from concurrent.futures import ProcessPoolExecutor
 
     facts: list[PatternFact] = []

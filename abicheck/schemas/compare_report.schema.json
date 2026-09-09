@@ -648,22 +648,22 @@
     },
     "pattern_prescan": {
       "type": "object",
-      "description": "Schema 3.12 (plan §3 row 6, §6 Phase 2b): both sides' compiler-free lexical ABI-risk pre-scan result (buildsource.pattern_scan, ADR-035 D2), always present -- computed automatically on every invocation, no opt-in flag. Advisory only: never a diffed Change/ChangeKind and never authoritative for a verdict. Each side's object is PatternScanResult.to_dict() verbatim (files_scanned/files_skipped/facts/escalation_triggers/counts_by_kind); an all-zero side means nothing was in scope to scan (no headers, no --old/new-sources reaching source evidence), not a failure.",
+      "description": "Schema 3.12 (plan §3 row 6, §6 Phase 2b): both sides' compiler-free lexical ABI-risk pre-scan result (buildsource.pattern_scan, ADR-035 D2), always present -- computed automatically on every invocation, no opt-in flag. Advisory only: never a diffed Change/ChangeKind and never authoritative for a verdict. Each side's object is PatternScanResult.to_dict() verbatim (files_scanned/files_skipped/facts/escalation_triggers/counts_by_kind) plus two schema-3.13 additions from workflows.lexical_prescan._pattern_side_dict: an explicit `coverage` block (PatternScanResult.coverage().to_dict(), the mandatory ADR-033 D6 coverage row -- status/confidence/detail) and `scope_reason` (`\"no_inputs\"`/`\"empty_seed\"`/`\"unreadable_inputs\"`/`null`), distinguishing why `files_scanned` reads 0 when it does: no headers/--sources were ever supplied, a `--since`/`--changed-path` seed resolved to a real empty scope by design, or supplied inputs were unreadable/unscannable. `null` (or absent, for a report built before schema 3.13) whenever the side has real coverage (`files_scanned > 0`). An all-zero side with `scope_reason` `\"no_inputs\"` or `\"empty_seed\"` means nothing was in scope to scan by design, not a failure; `\"unreadable_inputs\"` is the opposite -- inputs WERE supplied and could not be scanned, a genuine acquisition failure.",
       "required": ["old", "new"],
       "additionalProperties": true,
       "properties": {
-        "old": {"type": "object", "additionalProperties": true},
-        "new": {"type": "object", "additionalProperties": true}
+        "old": {"$ref": "#/$defs/pattern_prescan_side"},
+        "new": {"$ref": "#/$defs/pattern_prescan_side"}
       }
     },
     "preprocessor_prescan": {
       "type": "object",
-      "description": "Schema 3.12 (plan §3 row 8, §6 Phase 2b): both sides' S2 preprocessor pre-scan result (buildsource.preprocessor_scan, ADR-035 D2) -- per-TU ABI-macro-value divergence and public-header-leaks-private/generated-header detection via macro expansion. Always present; gated per side on L3 build evidence plus a working preprocessor -- a side lacking either reads `ran: false` with a `skipped_reason`, never a silently clean scan. Advisory only, same authority rule as pattern_prescan above. Each side's object is PreprocessorScanResult.to_dict() verbatim.",
+      "description": "Schema 3.12 (plan §3 row 8, §6 Phase 2b): both sides' S2 preprocessor pre-scan result (buildsource.preprocessor_scan, ADR-035 D2) -- per-TU ABI-macro-value divergence and public-header-leaks-private/generated-header detection via macro expansion. Always present; gated per side on L3 build evidence plus a working preprocessor -- a side lacking either reads `ran: false` with a `skipped_reason`, never a silently clean scan. Advisory only, same authority rule as pattern_prescan above. Each side's object is PreprocessorScanResult.to_dict() verbatim (attempted/succeeded/probes_truncated/divergences/leaks/ran/skipped_reason) plus the same schema-3.13 explicit `coverage` block pattern_prescan gained (PreprocessorScanResult.coverage().to_dict()) -- `coverage.status` reads `\"partial\"` when only some `clang -E` probes succeeded or the scan's own probe cap (`ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES`) truncated it, which a consumer must not conflate with a genuinely clean, fully-scanned side reporting zero divergences/leaks.",
       "required": ["old", "new"],
       "additionalProperties": true,
       "properties": {
-        "old": {"type": "object", "additionalProperties": true},
-        "new": {"type": "object", "additionalProperties": true}
+        "old": {"$ref": "#/$defs/preprocessor_prescan_side"},
+        "new": {"$ref": "#/$defs/preprocessor_prescan_side"}
       }
     },
     "surface_changes": {
@@ -1792,6 +1792,129 @@
     }
   },
   "$defs": {
+    "prescan_layer_coverage": {
+      "type": "object",
+      "description": "Schema 3.13 (Codex review, PR #1169, eleventh round, fresh evidence: also types the remaining fields LayerCoverage.to_dict() unconditionally emits, not just layer/status/confidence/detail): the mandatory ADR-033 D6 coverage row both pre-scan sides carry (LayerCoverage.to_dict() -- pattern_scan.PatternScanResult.coverage() / preprocessor_scan.PreprocessorScanResult.coverage()). requested_roots/resolved_roots/transitive_targets/compile_units/link_units are P0.2 root-target-scoping fields that stay empty/null for these two pre-scans (which never scope by build target) -- typed here for the shape they always carry, not because pattern/preprocessor pre-scan populates them.",
+      "additionalProperties": true,
+      "properties": {
+        "layer": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["present", "partial", "not_collected"]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "reduced", "unknown"]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "elapsed_s": {
+          "type": "number"
+        },
+        "requested_roots": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "resolved_roots": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "transitive_targets": {
+          "type": ["integer", "null"]
+        },
+        "compile_units": {
+          "type": ["integer", "null"]
+        },
+        "link_units": {
+          "type": ["integer", "null"]
+        }
+      }
+    },
+    "pattern_prescan_side": {
+      "type": "object",
+      "description": "Schema 3.13 (Codex review, PR #1169, third round, fresh evidence): one side of `pattern_prescan` -- PatternScanResult.to_dict() plus the coverage/scope_reason additions workflows.lexical_prescan._pattern_side_dict attaches. Typed here so a report claiming schema 3.13 can actually be validated on these public fields, not merely tolerated via additionalProperties.",
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "files_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "facts": {
+          "type": "array"
+        },
+        "escalation_triggers": {
+          "type": "array"
+        },
+        "counts_by_kind": {
+          "type": "object"
+        },
+        "coverage": {
+          "$ref": "#/$defs/prescan_layer_coverage"
+        },
+        "scope_reason": {
+          "type": ["string", "null"],
+          "enum": ["no_inputs", "empty_seed", "unreadable_inputs", null]
+        }
+      }
+    },
+    "preprocessor_prescan_side": {
+      "type": "object",
+      "description": "Schema 3.13 (Codex review, PR #1169, third round, fresh evidence): one side of `preprocessor_prescan` -- PreprocessorScanResult.to_dict() plus the same coverage addition pattern_prescan_side gained. Typed here for the same reason.",
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "ran": {
+          "type": "boolean"
+        },
+        "skipped_reason": {
+          "type": "string"
+        },
+        "tus_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "headers_scanned": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probes_truncated": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "all_failed": {
+          "type": "boolean"
+        },
+        "divergences": {
+          "type": "array"
+        },
+        "leaks": {
+          "type": "array"
+        },
+        "coverage": {
+          "$ref": "#/$defs/prescan_layer_coverage"
+        }
+      }
+    },
     "surface_change_entry": {
       "type": "object",
       "description": "One reviewable surface change (workstream G slice S1, schema 3.9).",

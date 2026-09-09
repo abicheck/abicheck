@@ -184,6 +184,56 @@ def compute_pattern_prescan_side(
     return scan_files(roots, changed_paths if seeded else None)
 
 
+#: Machine-readable reason a pattern-prescan side's ``coverage()`` reads
+#: ``NOT_COLLECTED`` (``files_scanned == 0``) -- distinguishes three
+#: materially different situations a single "not evaluated" message used to
+#: collapse (Codex review, fresh evidence):
+#:
+#: * ``"no_inputs"`` -- genuinely no headers/``--sources`` were ever supplied
+#:   for this side (the roots list this scan would have walked is empty).
+#: * ``"empty_seed"`` -- a ``--since``/``--changed-path`` scope was actually
+#:   attempted (:func:`compute_pattern_prescan_side`'s own ``seeded=True``)
+#:   and resolved to a real, valid, empty diff -- headers/``--sources`` WERE
+#:   supplied, they were just outside this run's deliberately narrow scope.
+#: * ``"unreadable_inputs"`` -- headers/``--sources`` were supplied but the
+#:   scan still found nothing to scan: either no changed-path seed narrowed
+#:   anything and every candidate file failed to read/matched no scannable
+#:   extension, or a seed *did* select candidate files (``result.
+#:   files_skipped > 0``) and every one of them was unreadable/missing --
+#:   a real acquisition failure, not the seed's own empty-by-design scope.
+#:   ``pattern_scan.scan_files`` itself counts a supplied root that no
+#:   longer exists on disk (deleted/renamed after being selected) as
+#:   skipped, same as an unreadable *found* file, so this function needs no
+#:   separate existence check of its own.
+#:
+#: ``None`` when the side has real coverage (``files_scanned > 0``) -- this
+#: reason exists only to explain an otherwise-ambiguous zero. Note this
+#: means a side with SOME roots missing and at least one other root
+#: scanned successfully reads `None` here (real coverage exists) --
+#: `pattern_prescan_review_warnings` catches that case instead, via
+#: `coverage.status == "partial"` (Codex review, fourth round, fresh
+#: evidence: a missing sibling root previously left `files_skipped == 0`
+#: even when a co-supplied root did scan, so `[existing.hpp, missing.hpp]`
+#: read as a clean PRESENT row; fixed at the producer, `scan_files`, so
+#: every consumer of `PatternScanResult.coverage()` inherits it uniformly).
+def _pattern_scan_scope_reason(
+    roots: list[Path], seeded: bool, result: PatternScanResult
+) -> str | None:
+    if result.files_scanned > 0:
+        return None
+    if not roots:
+        return "no_inputs"
+    # A seeded run's own `files_skipped` count (Codex review, second round,
+    # fresh evidence) is what actually distinguishes "the seed resolved to
+    # a real, valid, empty diff" from "the seed selected files and every
+    # one of them was unreadable" -- `seeded` alone collapsed both onto
+    # `empty_seed`, masking a genuine acquisition failure as a by-design
+    # empty scope.
+    if seeded and not result.files_skipped:
+        return "empty_seed"
+    return "unreadable_inputs"
+
+
 def _resolve_prescan_clang_bin(compile_context: CompileContext | None) -> str:
     """The ``clang -E``/``clang -M`` binary for the S2 pre-scan, from a side's
     resolved compile context -- mirrors ``scan_engine._preprocessor_scan_
@@ -217,7 +267,9 @@ def compute_preprocessor_prescan_side(
     )
 
 
-def _pattern_side_dict(scan: PatternScanResult) -> dict[str, Any]:
+def _pattern_side_dict(
+    scan: PatternScanResult, scope_reason: str | None
+) -> dict[str, Any]:
     """``PatternScanResult.to_dict()`` plus an explicit ``coverage`` block.
 
     ADR-035 D2 coverage honesty, made explicit rather than merely inferable:
@@ -229,9 +281,18 @@ def _pattern_side_dict(scan: PatternScanResult) -> dict[str, Any]:
     ``LayerCoverage``-shaped row every other evidence tier's report block
     already carries (``layer_coverage``, ``diff_embedded_build_source``'s
     own coverage rows).
+
+    *scope_reason* (:func:`_pattern_scan_scope_reason`) is a second,
+    additive, machine-readable field distinguishing the three materially
+    different reasons ``files_scanned`` can read 0 -- no inputs supplied at
+    all, a deliberately empty ``--since``/``--changed-path`` seed, or
+    supplied inputs that were unreadable/unscannable (Codex review, fresh
+    evidence: a single "not evaluated" rendering used to collapse all three).
+    ``None`` when the side has real coverage.
     """
     d = scan.to_dict()
     d["coverage"] = scan.coverage().to_dict()
+    d["scope_reason"] = scope_reason
     return d
 
 
@@ -298,9 +359,15 @@ def fold_lexical_prescan(
     new_pattern = compute_pattern_prescan_side(
         new_headers, new_sources, depth, changed_paths, seeded=seeded
     )
+    old_roots = _pattern_scan_roots(old_headers, old_sources, depth)
+    new_roots = _pattern_scan_roots(new_headers, new_sources, depth)
     result.pattern_prescan = {
-        "old": _pattern_side_dict(old_pattern),
-        "new": _pattern_side_dict(new_pattern),
+        "old": _pattern_side_dict(
+            old_pattern, _pattern_scan_scope_reason(old_roots, seeded, old_pattern)
+        ),
+        "new": _pattern_side_dict(
+            new_pattern, _pattern_scan_scope_reason(new_roots, seeded, new_pattern)
+        ),
     }
 
     old_pack = old_snapshot.build_source
