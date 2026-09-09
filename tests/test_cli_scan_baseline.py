@@ -783,3 +783,74 @@ class TestGatingRedundantChanges:
         from abicheck.policy.disposition_ledger import DispositionLedger
 
         assert csb.gating_redundant_changes([], DispositionLedger()) == []
+
+
+class TestVerdictScoredChanges:
+    """``verdict_scored_changes()`` (Codex review, PR #1172, round 12): the
+    ``--crosscheck KEY=off`` post-removal verdict recompute must exclude a
+    ``CrossSourceEvolution.RESOLVED`` finding from ``diff.changes`` the same
+    way `checker.compare()`'s own ``all_unsuppressed`` already does (plan
+    F-9) -- otherwise disabling one unrelated check here can resurrect an
+    already-fixed cross-source issue into a failing verdict.
+    """
+
+    def _change(self, symbol: str = "_Zfoo", **kwargs: object) -> Change:
+        return Change(
+            kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="x", **kwargs
+        )
+
+    def test_excludes_a_resolved_cross_source_finding(self) -> None:
+        from abicheck.checker_policy import CrossSourceEvolution
+
+        resolved = self._change(
+            "_Zresolved", cross_source_evolution=CrossSourceEvolution.RESOLVED
+        )
+        ordinary = self._change("_Zordinary")
+
+        result = csb.verdict_scored_changes([resolved, ordinary], [], None)
+
+        assert result == [ordinary]
+
+    def test_persistent_cross_source_finding_still_scores(self) -> None:
+        # Negative control: only RESOLVED is excluded -- PERSISTENT (still
+        # broken on both sides) and a plain, non-cross-source Change must
+        # keep gating normally.
+        from abicheck.checker_policy import CrossSourceEvolution
+
+        persistent = self._change(
+            "_Zpersistent", cross_source_evolution=CrossSourceEvolution.PERSISTENT
+        )
+        ordinary = self._change("_Zordinary")
+
+        result = csb.verdict_scored_changes([persistent, ordinary], [], None)
+
+        assert result == [persistent, ordinary]
+
+    def test_combines_with_gating_redundant_changes(self) -> None:
+        from abicheck.checker_policy import CrossSourceEvolution
+        from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
+
+        resolved = self._change(
+            "_Zresolved", cross_source_evolution=CrossSourceEvolution.RESOLVED
+        )
+        kept = self._change("_Zkept")
+        gating_redundant = self._change("_Zgating")
+        deduplicated_redundant = self._change("_Zdeduplicated")
+        ledger = DispositionLedger()
+        ledger.record(
+            gating_redundant, Disposition.GATING, application_point="p", from_gate=True
+        )
+        ledger.record(
+            deduplicated_redundant, Disposition.DEDUPLICATED, application_point="p"
+        )
+
+        result = csb.verdict_scored_changes(
+            [resolved, kept], [gating_redundant, deduplicated_redundant], ledger
+        )
+
+        assert result == [kept, gating_redundant]
+
+    def test_no_resolved_findings_and_no_ledger_is_a_no_op(self) -> None:
+        kept = self._change("_Zkept")
+
+        assert csb.verdict_scored_changes([kept], [], None) == [kept]

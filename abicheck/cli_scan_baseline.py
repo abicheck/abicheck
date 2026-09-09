@@ -1010,6 +1010,33 @@ def gating_redundant_changes(redundant_changes: list[Any], ledger: Any) -> list[
     ]
 
 
+def verdict_scored_changes(
+    kept_changes: list[Any], redundant_changes: list[Any], ledger: Any
+) -> list[Any]:
+    """The population a baseline scan's post-removal verdict recompute must
+    score (Codex review, PR #1172, round 12) -- everything
+    ``checker.compare()``'s own ``all_unsuppressed`` excludes from the gate
+    must stay excluded here too, or a late, unrelated ``--crosscheck
+    KEY=off`` recompute silently resurrects what the first pass already
+    correctly dropped:
+
+    - a ``CrossSourceEvolution.RESOLVED`` finding (plan F-9,
+      ``checker_policy.is_cross_source_resolved`` -- the same predicate
+      ``checker.py``'s ``all_unsuppressed`` and ``policy/severity.py``'s
+      ``gate_eligible_changes``/``gate_contribution_for_change`` apply) stays
+      fully visible in *kept_changes* but must not drive the verdict;
+    - the *redundant_changes* ``compare()`` itself scored, reconstructed via
+      :func:`gating_redundant_changes` (see its own docstring) since
+      ``verdict_redundant`` is a private local never exposed on
+      ``DiffResult``.
+    """
+    from .checker_policy import is_cross_source_resolved
+
+    return [
+        c for c in kept_changes if not is_cross_source_resolved(c)
+    ] + gating_redundant_changes(redundant_changes, ledger)
+
+
 def _run_baseline_compare(
     baseline: Path,
     binary: Path,
@@ -1304,9 +1331,17 @@ def _run_baseline_compare(
                 # (set to `len(suppressed)` at construction time), not derived
                 # from `len(suppressed_changes)` -- must stay in sync.
                 diff.suppressed_count = len(diff.suppressed_changes)
+                # Codex review (PR #1172, round 12): `verdict_scored_changes`
+                # also excludes a `CrossSourceEvolution.RESOLVED` finding --
+                # it stays visible in `diff.changes` but must not drive this
+                # recompute, the same way `checker.compare()`'s own
+                # `all_unsuppressed` already excludes it (plan F-9); without
+                # that, disabling an unrelated crosscheck here could
+                # resurrect an already-fixed cross-source issue into a
+                # failing verdict.
                 _redundant = getattr(diff, "redundant_changes", None) or []
-                _verdict_population = diff.changes + gating_redundant_changes(
-                    _redundant, _ledger
+                _verdict_population = verdict_scored_changes(
+                    diff.changes, _redundant, _ledger
                 )
                 if policy_file is not None:
                     diff.verdict = policy_file.compute_verdict(_verdict_population)

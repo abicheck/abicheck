@@ -10,4 +10,8 @@
   criterion ("resolved, and visible on a passing run"). A `RESOLVED`
   finding now stays fully visible in the report and every disposition
   ledger, but no longer contributes to the verdict, the severity-preset
-  exit code, or its own per-finding `gate_contribution` field.
+  exit code, or its own per-finding `gate_contribution` field. This
+  exclusion also applies to `scan --against`'s own `--crosscheck KEY=off`
+  post-removal verdict recompute, which previously could resurrect an
+  already-`RESOLVED` cross-source finding into a failing verdict when an
+  unrelated check was disabled on the same run.
