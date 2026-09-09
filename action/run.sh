@@ -438,8 +438,22 @@ PYEOF
     printf '%s\0%s\0%s\0%s\0%s\0%s\0%s\0%s\0' \
       "$include_lang" "${INPUT_LANG:-}" "${INPUT_AST_FRONTEND:-}" "${INPUT_GCC_PATH:-}" \
       "${INPUT_GCC_PREFIX:-}" "${INPUT_GCC_OPTIONS:-}" "${INPUT_SYSROOT:-}" "${INPUT_NOSTDINC:-false}" |
-    python3 "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"
+    "${_PY_BIN:-python3}" "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"
+    # PIPESTATUS[1] is the interpreter's own exit status, not the printf's
+    # (CodeRabbit review, fresh evidence): this script has no `set -e`, so a
+    # failed interpreter invocation would otherwise fall through to the
+    # unconditional `CMD+=(--config ...)` below with an empty/partial overlay
+    # file still on disk, silently parsing headers under the wrong (or no)
+    # compile context instead of failing loud -- the same "explicit input
+    # deserves a loud rejection, not a silent wrong result" precedent this
+    # function's own module docstring already sets for the release-operand
+    # guard.
+    _compile_context_overlay_rc="${PIPESTATUS[1]}"
     rm -f "$_COMPILE_CONTEXT_HELPER_PY"
+    if [[ "$_compile_context_overlay_rc" -ne 0 || ! -s "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
+      echo "::error::mode: ${MODE} could not synthesize the compile: config block from the ast-frontend/gcc-*/sysroot/nostdinc${include_lang:+/lang} inputs (interpreter exit ${_compile_context_overlay_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
+      exit 1
+    fi
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
 }
