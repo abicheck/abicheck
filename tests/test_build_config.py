@@ -406,3 +406,41 @@ class TestRemovedCommandsAreGone:
         assert "init" not in main.commands
         assert "config" not in main.commands
         assert "doctor" not in main.commands
+
+
+# ── build_config_schema.py: opt_int/int_subkey_findings direct coverage ─────
+
+
+class TestIntSubkeyHelpers:
+    """Direct unit coverage for `build_config_schema.opt_int`/
+    `int_subkey_findings` (Phase 7g) -- both are exercised indirectly
+    through `BuildConfig.from_dict`/`_validate_structure` in
+    tests/test_config_rebalance.py, but `_validate_structure` rejects a
+    bool value before `opt_int` ever sees one on that path, so its own
+    bool-rejection branch (matching `_opt_bool`/`_opt_str`'s identical
+    defensive shape) needs a direct call to reach."""
+
+    def test_opt_int_rejects_bool(self) -> None:
+        from abicheck.buildsource.build_config_schema import opt_int
+
+        assert opt_int({"n": True}, "n") is None
+        assert opt_int({"n": False}, "n") is None
+
+    def test_opt_int_accepts_real_int(self) -> None:
+        from abicheck.buildsource.build_config_schema import opt_int
+
+        assert opt_int({"n": 5}, "n") == 5
+        assert opt_int({}, "n") is None
+
+    def test_int_subkey_findings_rejects_bool(self) -> None:
+        from abicheck.buildsource.build_config_schema import int_subkey_findings
+
+        findings = int_subkey_findings(
+            "resource_limits", "max_bundle_facts_decode_nodes", True
+        )
+        assert findings and "must be an integer" in findings[0]
+
+    def test_int_subkey_findings_unregistered_subkey_is_silent(self) -> None:
+        from abicheck.buildsource.build_config_schema import int_subkey_findings
+
+        assert int_subkey_findings("scope", "public", "not-an-int") == []
