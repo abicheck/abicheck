@@ -474,6 +474,39 @@ def update_failure_is_absorbed(line: str) -> bool:
     return False
 
 
+def logical_lines(script: str) -> list[str]:
+    """Split a shell script into *logical* lines, joining continuations.
+
+    A workflow can spell the gating chain across physical lines:
+
+        sudo apt-get \\
+          update -qq && sudo apt-get install -y gcc
+
+    Neither physical line matches `apt-get\\s+update`, so a per-line scan
+    reports no offender while bash runs exactly the chain the guard exists
+    to forbid (Codex review, fifth P2 on PR #1182 -- verified by injecting
+    that form into a real workflow and watching the scan pass). The scan
+    therefore runs over what the shell actually executes, not over how the
+    YAML happens to be wrapped.
+    """
+    lines: list[str] = []
+    pending = ""
+    for raw in script.splitlines():
+        stripped = raw.rstrip()
+        # An escaped backslash (`\\\\`) ends the line; a single one continues it.
+        if stripped.endswith("\\") and not stripped.endswith("\\\\"):
+            segment = stripped.lstrip() if pending else stripped
+            pending += segment[:-1].rstrip() + " "
+            continue
+        # A continuation carries the next line's indentation with it; drop it
+        # so the joined command reads as the shell sees it.
+        lines.append((pending + (stripped.lstrip() if pending else stripped)).strip())
+        pending = ""
+    if pending:
+        lines.append(pending.strip())
+    return lines
+
+
 class TestNoWorkflowGatesInstallOnUpdate:
     """The class invariant, over every workflow at once.
 
@@ -498,7 +531,7 @@ class TestNoWorkflowGatesInstallOnUpdate:
     def test_no_step_lets_apt_get_update_abort_it(self) -> None:
         offenders: list[str] = []
         for name, script in self._run_scripts():
-            for line in script.splitlines():
+            for line in logical_lines(script):
                 stripped = line.strip()
                 if not re.search(r"\bapt-get\s+update\b", stripped):
                     continue
@@ -691,3 +724,41 @@ class TestUpdateFailureAbsorptionPredicate:
                 f"{form!r}: predicate says the failure is absorbed, but bash "
                 f"exits {real_exit} -- the guard would pass a gating line"
             )
+
+
+class TestLogicalLines:
+    """The scanner's other primitive: what the shell actually runs.
+
+    A guard is only as good as the text it looks at. This one silently
+    reported "no offender" for a genuinely gating workflow purely because
+    the YAML wrapped the command, so the joiner gets the same
+    stated-as-invariants treatment as the absorption predicate.
+    """
+
+    def test_a_continued_command_becomes_one_line(self) -> None:
+        script = "sudo apt-get \\\n  update -qq && sudo apt-get install -y gcc\n"
+        assert logical_lines(script) == [
+            "sudo apt-get update -qq && sudo apt-get install -y gcc"
+        ]
+
+    def test_multiple_continuations_join(self) -> None:
+        script = "sudo apt-get \\\n  update \\\n  -qq\n"
+        assert logical_lines(script) == ["sudo apt-get update -qq"]
+
+    def test_uncontinued_lines_are_untouched(self) -> None:
+        script = "sudo apt-get update -qq || true\necho done\n"
+        assert logical_lines(script) == ["sudo apt-get update -qq || true", "echo done"]
+
+    def test_an_escaped_backslash_does_not_continue(self) -> None:
+        script = "echo 'a\\\\'\nsudo apt-get update || true\n"
+        assert logical_lines(script) == ["echo 'a\\\\'", "sudo apt-get update || true"]
+
+    def test_a_trailing_continuation_still_yields_its_line(self) -> None:
+        assert logical_lines("sudo apt-get update \\\n") == ["sudo apt-get update"]
+
+    def test_the_scan_catches_a_continued_gating_chain(self) -> None:
+        """End-to-end: the joined form is what the offender check sees."""
+        script = "sudo apt-get \\\n  update -qq && sudo apt-get install -y gcc\n"
+        (joined,) = logical_lines(script)
+        assert re.search(r"\bapt-get\s+update\b", joined)
+        assert not update_failure_is_absorbed(joined)
