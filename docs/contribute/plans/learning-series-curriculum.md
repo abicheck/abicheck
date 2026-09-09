@@ -184,12 +184,12 @@ without teaching; "absent" means neither.
 
 | Feature / scenario | Tool-track owner | Series status |
 |---|---|---|
-| Evidence ladder L0–L5 and the `--depth` dial | `use/scan-levels.md` | **taught** (five times — see F4) |
+| Evidence ladder L0–L5 and the `--depth` dial | `use/evidence-depth.md` | **taught** (five times — see F4) |
 | Which change family needs which input | `reference/tool-comparison.md` §evidence-tier benchmark | **taught** (`08-detection.md` §2, `what-each-level-sees.md` §Reference) |
-| Header AST (L2): castxml vs clang backends, compile context, why headers need flags | `use/scan-levels.md` §Compile context, `reference/header-backend-capabilities.md` | partial — `08-detection.md` §1a covers compile context; backend choice and its capability gaps (`case122`) only in reference |
+| Header AST (L2): castxml vs clang backends, compile context, why headers need flags | `use/evidence-depth.md` §Compile context, `reference/header-backend-capabilities.md` | partial — `08-detection.md` §1a covers compile context; backend choice and its capability gaps (`case122`) only in reference |
 | Source replay (L4) and the L5 graph | `use/producing-source-facts.md` | taught, but inside `build-source-data.md` (expert-level, contributor tone) |
-| `scan` one-build audit (no `--against`): accidental export, private-header leak, unversioned export, RTTI leak, cross-source checks | `use/scan-levels.md` §single-build audit, `integration/scenarios/single-build-audit.md` | linked (hub §source scan); cases 143–151 indexed on the hub |
-| PR-scoped scan (`--since`/`--changed-path`), `--budget`, `--dry-run` cost estimate | `use/scan-levels.md`, `use/github-action-source-scans.md` | linked only |
+| `scan` one-build audit (no `--against`): accidental export, private-header leak, unversioned export, RTTI leak, cross-source checks | `use/evidence-depth.md` §single-build audit, `integration/scenarios/single-build-audit.md` | linked (hub §source scan); cases 143–151 indexed on the hub |
+| PR-scoped scan (`--since`/`--changed-path`), `--budget`, `--dry-run` cost estimate | `use/evidence-depth.md`, `use/github-action-source-scans.md` | linked only |
 | Contract domains (`--contract` with `public`, `exports` or `all`), coverage exit `1` | `use/contract-evaluation.md` | taught on `contract-aware-compatibility.md` — but placed in Concepts, not next to Part 0's "define the public surface" |
 | Consumer-scoped check (`--used-by APP`) | `use/appcompat.md` | taught (`consumer-models.md`, `evidence-and-detectability.md` §4) — no command |
 | Plugin/`dlopen` contract (`--required-symbol[s]`, `plugin_abi`) | `use/plugin-systems.md` | linked (Part 0 §5, role path) |
@@ -310,7 +310,7 @@ note on that page).
 
 **The strongest area, and the most over-taught.** The evidence trio
 (`evidence-and-detectability.md` model, `what-each-level-sees.md` worked
-example, `use/scan-levels.md` flag reference) is a deliberate design that
+example, `use/evidence-depth.md` flag reference) is a deliberate design that
 `docs/AGENTS.md` protects ("don't add a fourth page"). The problem is that
 `08-detection.md` §2 and `build-source-data.md` §Evidence layers each
 carry their own evidence table outside the trio, neither registered as a

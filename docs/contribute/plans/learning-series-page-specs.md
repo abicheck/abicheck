@@ -802,12 +802,12 @@ Sections:
    scenarios only, and P7 adds the B6 link when it creates the page.
 
 Runs: the four above, one per moment; every other depth/flag combination
-is a link to `use/scan-levels.md` §Worked examples, which owns the
+is a link to `use/evidence-depth.md` §Worked examples, which owns the
 per-depth invocations. Cases: `case147` (a scan states the depth it
 reached). Links, not restatements: baseline lifecycle and storage
 (`use/baseline-*.md`), Action inputs (`reference/github-action-inputs.md`),
 gating order (`use/ci-gating.md`), per-depth commands
-(`use/scan-levels.md`). Done when: each moment has one runnable
+(`use/evidence-depth.md`). Done when: each moment has one runnable
 command and one link to its how-to; the accepted-main/release-contract
 distinction is explained in ≤ 2 paragraphs and links out.
 
@@ -1289,7 +1289,7 @@ names (`extractor_passes` and siblings) to the same reference page.
 
 Replace the closing "Next: Evidence & Detectability" with the A3 footer
 (previous: Evidence & Detectability; next: `elf-symbol-filtering.md`),
-and add one line under it: "Ready to run it? `use/scan-levels.md` owns
+and add one line under it: "Ready to run it? `use/evidence-depth.md` owns
 the `--depth` choice."
 
 ### C12. MSVC/PE worked example
@@ -1404,7 +1404,7 @@ are rewritten first.
 | `limitations.md` | "Troubleshooting" stub section | a heading with a link under it | delete; link from the page intro instead |
 | `architecture.md` | the module map and per-module prose | contributor material; `docs/contribute/codebase-overview.md` owns the module map for site readers (the root `AGENTS.md` for agents) | shrink to the pipeline diagram + link to the codebase overview |
 | `architecture.md` | verdict / exit-code table | `verdicts.md` owns it | shrink to a link (C7) |
-| `build-source-data.md` | "Recommended defaults", "Time & resource model" | `use/scan-levels.md` §Cost guide and `contribute/performance.md` own them | shrink to links |
+| `build-source-data.md` | "Recommended defaults", "Time & resource model" | `use/evidence-depth.md` §Cost guide and `contribute/performance.md` own them | shrink to links |
 | `build-source-data.md` | schema, storage and redaction sections | reference material, not a mental model | move to the existing reference owners (C9) |
 | `impact-analysis.md` | "slice 1 of G29 Phase 3 (ADR-052)" opener and `contribute/plans/` links | delivery history, not learning | delete (C10) |
 | `graph-coverage.md` | "G31 Phase B" references and pass-state field names in prose | same | delete the phase references; fields move to the reference page (C10) |
