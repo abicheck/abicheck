@@ -589,11 +589,11 @@ def classify_compare_pair(
     )
     # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot
     # path, so a snapshot-input compare left note_if_same_binary_compared
-    # unable to fire even on content-identical snapshots. Fall back to a
-    # digest of `old`/`new`'s (already-loaded) canonical serialization --
-    # only consulted when the metadata sha256 above didn't already answer.
+    # unable to fire on content-identical snapshots. Digest fallback below
+    # requires *both* sides missing metadata (`and`, not `or`): a mixed
+    # live-binary-vs-snapshot compare has one side absent by design.
     old_digest = new_digest = None
-    if result.old_metadata is None or result.new_metadata is None:
+    if result.old_metadata is None and result.new_metadata is None:
         import hashlib
 
         from .serialization import snapshot_to_json

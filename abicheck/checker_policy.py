@@ -519,20 +519,22 @@ def policy_for(kind: ChangeKind) -> PolicyEntry:
 #: ("dynamic linker will refuse to load or crash at call site") that is
 #: only true when a real symbol-table entry actually backs the finding
 #: (see :func:`evidence_status_for_result`'s per-finding downgrade). An
-#: ``UNATTRIBUTED`` finding of the same kind rests on weaker evidence (an
-#: `"elf"`-tiered run examined a real symbol table but found no matching
-#: entry for *this* finding), so the unconditional claim would overstate
-#: what this run actually proved.
+#: ``UNATTRIBUTED`` finding of the same kind rests on weaker evidence --
+#: two distinct cases share this one status: an `"elf"`-tiered run that
+#: examined a real symbol table but found no matching entry for *this*
+#: finding, and a header-only run that never had a symbol table to
+#: consult at all (:func:`evidence_status_for_result`'s first branch).
+#: Deliberately neutral wording, not "no matching entry was found" --
+#: that would misrepresent the header-only case as a search that
+#: happened and came up empty (Codex review).
 _UNATTRIBUTED_IMPACT_CAVEAT = (
-    " (Evidence note: no matching symbol-table entry was found for this "
-    "specific finding in this run -- treat the consequence above as "
-    "plausible, not confirmed.)"
+    " (Evidence note: this run's evidence does not establish a matching "
+    "symbol-table entry for this specific finding -- treat the "
+    "consequence above as plausible, not confirmed.)"
 )
 
 
-def impact_for(
-    kind: ChangeKind, evidence_status: EvidenceStatus | None = None
-) -> str:
+def impact_for(kind: ChangeKind, evidence_status: EvidenceStatus | None = None) -> str:
     """Return human-readable impact explanation for a ChangeKind, or empty string.
 
     *evidence_status*, when given as :attr:`EvidenceStatus.UNATTRIBUTED`,

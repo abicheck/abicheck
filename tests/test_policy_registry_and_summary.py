@@ -68,7 +68,9 @@ def test_compatibility_metrics_honours_named_policy_without_kind_sets() -> None:
     counting it via raw ChangeKind membership would wrongly report it (and
     show a contradictory <100% binary compatibility) despite the effective
     verdict being compatible."""
-    c = Change(ChangeKind.CALLING_CONVENTION_CHANGED, "cb", "calling convention changed")
+    c = Change(
+        ChangeKind.CALLING_CONVENTION_CHANGED, "cb", "calling convention changed"
+    )
     metrics = compatibility_metrics([c], old_symbol_count=10, policy="plugin_abi")
     assert metrics.breaking_count == 0
     assert metrics.binary_compatibility_pct == 100.0
@@ -90,7 +92,13 @@ def test_build_summary_risk_count_nonzero() -> None:
         old_version="1.0",
         new_version="2.0",
         library="libx.so",
-        changes=[Change(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, "libc.so.6", "New GLIBC_2.34 requirement")],
+        changes=[
+            Change(
+                ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+                "libc.so.6",
+                "New GLIBC_2.34 requirement",
+            )
+        ],
         verdict=Verdict.COMPATIBLE_WITH_RISK,
     )
     summary = build_summary(result)
@@ -169,3 +177,35 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
     assert summary.compatible_additions == 2
     assert summary.quality_issues == 1
     assert summary.compatible_additions - summary.quality_issues == 1
+
+
+def test_review_digest_additions_count_excludes_quality_issues() -> None:
+    """Codex review, fresh evidence: the Markdown review digest's own
+    additions_count/quality_issues_count are two rows in the same
+    rendered table, so they must not overlap -- unlike the JSON summary
+    (where compatible_additions stays the historical whole-bucket total
+    by design), the digest's "Additions" row must show only genuine
+    additions, mirroring pr_comment.py's identical derivation for the
+    release path. Before this fix, a mixed batch (1 addition + 1 quality
+    finding) rendered "Additions: 2" / "Quality issues: 1" -- overlapping
+    rows that still summed to more real additions than actually occurred.
+    """
+    from abicheck.reporter_markdown import compute_review_digest
+
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[
+            Change(ChangeKind.FUNC_ADDED, "_Z3barv", "New function added"),
+            Change(
+                ChangeKind.PUBLIC_SURFACE_SHRANK,
+                symbol=None,
+                description="public surface shrank: 439 -> 425 declarations (-14)",
+            ),
+        ],
+        verdict=Verdict.COMPATIBLE,
+    )
+    digest = compute_review_digest(result)
+    assert digest.additions_count == 1
+    assert digest.quality_issues_count == 1

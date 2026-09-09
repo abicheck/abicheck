@@ -734,7 +734,7 @@ class ReviewDigest:
     #: ADR-067 D3: raw-vs-effective counts (optional for a hand-built digest).
     disposition_audit: DispositionAudit | None = None
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
-    quality_issues_count: int = 0  #: non-addition subset of additions_count
+    quality_issues_count: int = 0  #: non-addition compatible findings, own row
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -765,7 +765,7 @@ def render_review_digest(digest: ReviewDigest) -> str:
         f"| ⚠️ Risk findings | {digest.risk_count} |",
         f"| ✅ {digest.additions_label} | {digest.additions_count} |",
     ]
-    if digest.quality_issues_count:  # non-additive subset of the row above
+    if digest.quality_issues_count:  # own row, not part of Additions above
         lines.append(f"| ℹ️ Quality issues | {digest.quality_issues_count} |")
     if digest.scoped:
         lines.append(
