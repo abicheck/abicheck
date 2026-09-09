@@ -2401,6 +2401,38 @@ _SCAN_HAS_BASELINE=false
 if [[ "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
   _SCAN_HAS_BASELINE=true
 fi
+# Whether `$INPUT_AGAINST` is a stored JSON snapshot *by content*, not just
+# by filename (Codex review, PR #1172, round 8): a valid snapshot saved
+# under a neutral name (e.g. `baseline.snapshot`) carries none of the three
+# canonical suffixes the check below matches, so the suffix check alone
+# lets it slip onto the `compare` translation -- which does not apply the
+# same `dependency_scope`-aware candidate collection the legacy `scan`
+# path's `_scan_candidate_include_dependencies()` does. Reuses the
+# canonical Python sniffer
+# (`abicheck.workflows.input_resolution.sniff_text_format`, ADR-059)
+# rather than re-implementing gzip/zstd-aware magic-byte detection in bash.
+# Resolves to an absolute path first (`_is_path_already_qualified`'s own
+# established idiom): the Python call below runs inside a
+# `$_PY_SAFE_DIR`-scoped subshell, so a checkout-relative `INPUT_AGAINST`
+# would otherwise resolve against the wrong directory. Answers "not JSON"
+# (never forces legacy) when no working Python interpreter with abicheck
+# importable is available -- a best-effort refinement must not hard-fail
+# the whole routing decision.
+_against_is_json_snapshot_by_content() {
+  [[ -z "${INPUT_AGAINST:-}" ]] && return 1
+  [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]] && return 1
+  [[ -f "${INPUT_AGAINST}" ]] || return 1
+  local _against_abs="${INPUT_AGAINST}"
+  _is_path_already_qualified "$_against_abs" || _against_abs="$PWD/$_against_abs"
+  local _fmt
+  _fmt="$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+from abicheck.workflows.input_resolution import sniff_text_format
+print(sniff_text_format(Path(sys.argv[1])))
+' "$_against_abs" 2>/dev/null)"
+  [[ "$_fmt" == "json" ]]
+}
 # `_SCAN_NEEDS_LEGACY_CLI` used to be unconditionally true for every
 # `mode: scan` baseline request (Codex review, PR #1160, fifth round):
 # `scan`'s baseline path called `_strip_automatic_cross_source_findings()`
@@ -2433,6 +2465,7 @@ if [[ "$MODE" == "scan" ]]; then
      || [[ ( -n "${INPUT_HEADER:-}" && ( -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_NEW_HEADER:-}" || -n "${INPUT_PUBLIC_HEADER_DIR:-}" ) ) \
            || ( -n "${INPUT_INCLUDE:-}" && ( -n "${INPUT_OLD_INCLUDE:-}" || -n "${INPUT_NEW_INCLUDE:-}" ) ) ]] \
      || [[ "${INPUT_AGAINST:-}" == *.json || "${INPUT_AGAINST:-}" == *.json.gz || "${INPUT_AGAINST:-}" == *.json.zst ]] \
+     || _against_is_json_snapshot_by_content \
      || [[ -n "${INPUT_OUTPUT_FILE:-}" ]] \
      || _extra_args_has_write_flag \
      || _extra_args_has_scan_only_flag; then

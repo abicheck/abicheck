@@ -335,3 +335,55 @@ class TestExtraArgsOutputFlagStaysOnLegacyCli:
             }
         )
         assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestBaselineDetectedByContentStaysOnLegacyCli:
+    """A stored JSON snapshot saved under a neutral filename (e.g.
+    `baseline.snapshot`) carries none of the three canonical suffixes the
+    existing suffix check matches, so it used to slip onto the `compare`
+    translation -- which does not apply the same `dependency_scope`-aware
+    candidate collection the legacy `scan` path's own
+    `_scan_candidate_include_dependencies()` does (Codex review, PR #1172,
+    round 8). `_against_is_json_snapshot_by_content()` content-sniffs via
+    the canonical Python `sniff_text_format` instead of trusting the
+    filename."""
+
+    def test_json_snapshot_under_a_neutral_filename_stays_on_legacy_cli(
+        self, tmp_path: Path
+    ) -> None:
+        baseline = tmp_path / "baseline.snapshot"
+        baseline.write_text('{"schema_version": 1}', encoding="utf-8")
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_AGAINST": str(baseline),
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_a_native_library_baseline_under_the_same_directory_still_routes_to_compare(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: a real, non-JSON file at a path that could
+        # plausibly be content-sniffed must not itself force the legacy
+        # CLI -- only a real JSON snapshot does.
+        baseline = tmp_path / "baseline.so"
+        baseline.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 24)
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_AGAINST": str(baseline),
+            }
+        )
+        assert cmd[1] == "compare"
+
+    def test_a_nonexistent_baseline_path_still_routes_to_compare(self) -> None:
+        # Negative control: the content-sniff helper must not itself force
+        # the legacy CLI for a baseline path that doesn't exist on disk
+        # (e.g. this harness's own fixture strings like "baseline.so" in
+        # _BASE_INPUTS) -- only a real, readable JSON file does.
+        cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
+        assert cmd[1] == "compare"
