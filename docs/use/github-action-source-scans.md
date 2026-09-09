@@ -61,7 +61,7 @@ is tracked in
 | no `against`/`abi-baseline` (audit-only) | `compare --no-baseline` does not reproduce the audit's findings yet |
 | `new-library-set` | no `compare` equivalent for the multi-library audit mode |
 | `budget`, `risk-rules`, `crosscheck`, `build-target` | no `compare` flag equivalent |
-| no `depth` at all | `scan`'s risk-driven `auto` selection has no `compare` equivalent; `compare` would silently cap at `headers` |
+| no `depth` at all | `scan`'s risk-driven `auto` selection has no `compare` equivalent; `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers` — either way, never the risk-scored choice `auto` makes |
 | `depth: build` or `depth: source` | `scan`'s hard evidence-contract floor (exit `7`) has no `compare` equivalent — routing it would drop a real, actionable error |
 | a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |
 | an `against:` ending `.json`/`.json.gz`/`.json.zst`, or any file content-detected as a JSON snapshot | `compare` and `scan` disagree on snapshot-baseline handling |
@@ -130,9 +130,11 @@ base ref is available.
 
 `depth` is the single evidence-depth dial, and `mode: compare` reads the same
 values `mode: scan` does. Pin it for reproducible CI — unlike `scan`,
-`compare` has no risk-driven `auto` rung yet (plan §3 row 13); omitting
-`depth` on `compare` defaults deterministically to `headers`, not a
-risk-based choice.
+`compare` has no risk-driven `auto` rung yet (plan §3 row 13). Omitting
+`depth` is not itself risk-based selection either way: `compare` infers
+`source`/`build` from whichever of `sources`/`build-info` is supplied with no
+`depth` pinned, and only bottoms out at `headers` when neither is given —
+never the risk-scored choice `auto` makes.
 
 **`compare`'s pinned depth is not a contract the way `scan`'s is.** `scan
 --depth source` with no `--sources`/`--build-info` given hard-fails before

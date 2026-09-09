@@ -39,16 +39,21 @@ migration item in
 [`plans/one-comparison-product.md`](../contribute/plans/one-comparison-product.md)
 §3 rather than something `compare` silently covers:
 
-- **Risk-driven `auto` depth.** Omitting `--depth` on `compare` or `dump`
-  defaults *deterministically* to `headers`, never deeper, even with a
-  `--since` seed. `scan`'s risk-scored `auto` rung has no `compare`
+- **Risk-driven `auto` depth.** Omitting `--depth` on `compare`/`dump` is
+  *not* itself risk-based selection: with no `--since` seed and no
+  `--sources`/`--build-info`, it bottoms out at `headers`, but the choice
+  never scores the risk of what changed the way `scan`'s dedicated `auto`
+  rung does — `scan`'s risk-scored `auto` rung has no `compare`/`dump`
   equivalent (§3 row 13) — see [Let risk pick the
   depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now).
-- **The fail-loud evidence-contract floor.** A *pinned* `--depth
-  build`/`--depth source` with nothing to collect from is a hard error
-  (exit `7`) under `scan`; `compare --depth source` on a pair with zero
-  build/source evidence exits `0`/`NO_CHANGE` instead (§3 row 28). Read
-  [the fail-loud warning](#what-each-depth-reaches) below as `scan`-only.
+- **The fail-loud evidence-contract floor, on `compare` alone.** A *pinned*
+  `--depth build`/`--depth source` with nothing to collect from is a hard
+  error under `scan` (evidence-contract exit `7`) and under `dump`
+  (`DumpDepthNotSatisfiedError`, exit `1`, no snapshot written) — but
+  `compare --depth source` on a pair with zero build/source evidence exits
+  `0`/`NO_CHANGE` instead (§3 row 28, `compare`-only gap). Read [the
+  fail-loud warning](#what-each-depth-reaches) below as `scan`-and-`dump`
+  only, never `compare`.
 - **The single-build audit.** `compare --no-baseline` (ADR-068 D2) exists
   but does not yet reproduce the audit's findings — see [Single-build
   audit](#single-build-audit-no-baseline) below and
@@ -575,8 +580,12 @@ explicitly on `compare` the same way you would on `scan`.
 
 `--depth` requests a level but `L` is *evidence*, so a run can request a deep
 level and only reach a shallow one (clang missing, no sources, a parse error).
-That is never reported as "failed" — the run states the depth it **actually
-reached** and, for each disabled check, the input or tool to add:
+On `compare` this is never reported as "failed" — the run states the depth it
+**actually reached** and, for each disabled check, the input or tool to add.
+(This best-effort behavior does not apply to a *pinned* `dump --depth
+build|source` or `scan --depth build|source` whose evidence can't reach that
+depth — both fail loud instead, per the warning above: no coverage block is
+printed because no output is written at all.)
 
 ```text
 Checks enabled for this scan (and why others are not):
