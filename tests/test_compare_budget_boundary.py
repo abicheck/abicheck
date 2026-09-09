@@ -136,3 +136,22 @@ class TestBudgetBoundaryCheck:
         assert "comparison aborted" in md_p.read_text(encoding="utf-8")
         assert html_p.exists() and html_p.stat().st_size > 0
         assert "comparison aborted" in html_p.read_text(encoding="utf-8")
+
+    def test_zero_budget_renders_abort_for_oneline_too(self, tmp_path: Path) -> None:
+        # Codex review, fresh evidence ("Render budget aborts in oneline
+        # format"): --format oneline is a real, separate primary format
+        # (service_render.ONELINE_FORMAT) the markdown/text/review branch
+        # never matched -- `-o out` stayed absent on abort.
+        old_p, new_p = _write_snapshots(tmp_path)
+        out_p = tmp_path / "out"
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "compare", str(old_p), str(new_p), "--budget", "0s",
+                "--format", "oneline", "-o", str(out_p),
+            ],
+        )
+        assert result.exit_code == 5, result.output
+        assert out_p.exists() and out_p.stat().st_size > 0
+        assert "comparison aborted" in out_p.read_text(encoding="utf-8")

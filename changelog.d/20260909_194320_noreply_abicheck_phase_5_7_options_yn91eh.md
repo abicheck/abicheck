@@ -23,9 +23,9 @@
   auto-discovery. Rejected outright now, the same way every other
   single-pair-only flag already is (Codex review, PR #1180).
 - **A `--budget` abort now renders its refusal document to a markdown,
-  text, review, or HTML target too**, not just JSON/SARIF/JUnit — an
-  `-o out.md`/`--write html=out.html` target used to stay silently absent,
-  or worse keep a stale prior-run document, on an aborted run (Codex
-  review, PR #1180).
+  text, review, HTML, or oneline target too**, not just JSON/SARIF/JUnit —
+  an `-o out.md`/`--write html=out.html` target used to stay silently
+  absent, or worse keep a stale prior-run document, on an aborted run
+  (Codex review, PR #1180, two rounds).
 - **The Markdown report's out-of-surface hint now says `--view filtered`**
   instead of the removed `--show-filtered` (Codex review, PR #1180).

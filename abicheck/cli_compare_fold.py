@@ -77,6 +77,7 @@ import click
 
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.runtime import _write_or_echo
+from .service_render import ONELINE_FORMAT as _ONELINE_FORMAT
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -738,6 +739,16 @@ def _report_run_aborted(
             _write_or_echo(target_output, _render_run_aborted_text(*refusal))
         elif target_fmt == "html":
             _write_or_echo(target_output, _render_run_aborted_html(*refusal))
+        elif target_fmt == _ONELINE_FORMAT:
+            # Codex review, fresh evidence ("Render budget aborts in
+            # oneline format"): --format oneline is a real, separate
+            # primary format (service_render.ONELINE_FORMAT) the branch
+            # above never matched -- same "must not stay silently absent"
+            # reasoning, in oneline's own single-line shape.
+            _write_or_echo(
+                target_output,
+                f"{library}: comparison aborted ({kind}): {message}",
+            )
 
     _render_one(fmt, output)
     for secondary_fmt, secondary_output in secondary_writes:
