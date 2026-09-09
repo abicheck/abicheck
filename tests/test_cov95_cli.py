@@ -960,12 +960,15 @@ class TestCompareReleaseFormatHelpers:
         assert "libfoo.so" in text
 
     def test_md_bundle_findings_empty(self) -> None:
-        assert _release_md_bundle_findings(None) == []
+        assert _release_md_bundle_findings(None, []) == []
 
     def test_md_matrix_findings_empty(self) -> None:
-        assert _release_md_matrix_findings(None) == []
+        assert _release_md_matrix_findings(None, []) == []
 
     def test_md_matrix_findings_with_change(self) -> None:
+        # PR #1154 follow-up ("Move release filtering out of the Markdown
+        # renderer"): the renderer no longer filters -- the caller passes
+        # the already-selected view (here, mr.changes unfiltered) directly.
         mr = DiffResult(
             old_version="1",
             new_version="2",
@@ -976,7 +979,7 @@ class TestCompareReleaseFormatHelpers:
                 ),
             ],
         )
-        lines = _release_md_matrix_findings(mr)
+        lines = _release_md_matrix_findings(mr, mr.changes)
         assert any("Matrix" in ln for ln in lines)
         assert any("foo" in ln for ln in lines)
 
@@ -2839,7 +2842,11 @@ class TestReleaseFormatWithBundleAndMatrix:
         }
 
     def test_md_bundle_findings_rendered(self) -> None:
-        lines = _release_md_bundle_findings(_bundle_with_findings())
+        # PR #1154 follow-up ("Move release filtering out of the Markdown
+        # renderer"): pass the unfiltered findings view directly, matching
+        # the real call site's own no-show_only default.
+        bundle = _bundle_with_findings()
+        lines = _release_md_bundle_findings(bundle, bundle.bundle_findings)
         assert any("Bundle" in ln for ln in lines)
         assert any("foo" in ln for ln in lines)
         assert any("consumer" in ln for ln in lines)

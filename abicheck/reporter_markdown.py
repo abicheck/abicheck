@@ -588,17 +588,18 @@ def release_bundle_findings_for_view(
     Codex review, PR #1154 second follow-up ("Apply release show filters
     inside each renderer"): shared by the release fan-out's JSON
     (``cli_compare_release_helpers._format_release_json``) and Markdown
-    (``report.render_release_markdown._release_md_bundle_findings``)
-    bundle sections so the two formats can never disagree about which
-    bundle findings a given ``show_only`` selection keeps. Both are
-    ``report``-layer-reachable call sites (this module and
-    ``report/render_release_markdown.py`` are both classified ``report``;
-    ``cli_compare_release_helpers.py``, a ``frontends`` module, is allowed
-    to import ``report`` -- routing the shared logic through here, rather
-    than through the ``frontends`` module, is what keeps
-    ``report/render_release_markdown.py`` from having to import
-    ``frontends`` code, which ADR-061's dependency-direction rule forbids).
-    A no-op (returns every finding) when *show_only* is falsy.
+    (``cli_compare_release_helpers._format_release_markdown``) bundle
+    sections so the two formats can never disagree about which bundle
+    findings a given ``show_only`` selection keeps. Both call sites live in
+    ``cli_compare_release_helpers.py`` (a ``frontends`` module, which may
+    import both this module and ``report``) as of Codex review, fresh
+    evidence, PR #1154 follow-up ("Move release filtering out of the
+    Markdown renderer") -- ``report/render_release_markdown.py``'s own
+    Markdown section renderer used to call this function directly, which
+    `report/AGENTS.md`'s renderer contract forbids (a renderer may only
+    format an already-computed projection, never filter one itself); it now
+    takes the pre-filtered result as a parameter instead. A no-op (returns
+    every finding) when *show_only* is falsy.
     """
     if not show_only:
         return list(bundle_result.bundle_findings)
@@ -616,12 +617,14 @@ def release_matrix_changes_for_view(
     """Return *matrix_result*'s changes, ``--view show=``-filtered when active.
 
     Shared by the release fan-out's JSON and Markdown release-global matrix
-    (build-configuration) sections, for the identical reason as
-    :func:`release_bundle_findings_for_view`. Unlike a bundle finding, a
-    matrix result is a real :class:`DiffResult`, so it is filtered the
-    identical way a per-library one is (``kind_sets``/``policy_file``
-    included, so the severity dimension resolves consistently). A no-op
-    (returns every change) when *show_only* is falsy.
+    (build-configuration) sections, both called from
+    ``cli_compare_release_helpers.py`` for the identical reason as
+    :func:`release_bundle_findings_for_view` -- see that function's own
+    docstring. Unlike a bundle finding, a matrix result is a real
+    :class:`DiffResult`, so it is filtered the identical way a per-library
+    one is (``kind_sets``/``policy_file`` included, so the severity
+    dimension resolves consistently). A no-op (returns every change) when
+    *show_only* is falsy.
     """
     if not show_only:
         return list(matrix_result.changes)

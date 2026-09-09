@@ -38,8 +38,11 @@ without a source change at the call site.
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libmylib_v1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libmylib_v2.so
-abicheck compare libmylib_v1.so libmylib_v2.so \
-  --header old=v1.h --header new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libmylib_v1.so libmylib_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -63,7 +66,7 @@ Verdict: API_BREAK (exit 2)
 (it's an inline hidden friend), so neither the symbol table (L0) nor DWARF
 (L1) shows any difference between v1 and v2. Only the public-header AST
 records that `point` no longer befriends an `operator==`; castxml is the
-documented default AST backend for this (`--ast-frontend clang` is a
+documented default AST backend for this (`compile.frontend: clang` (via `.abicheck.yml`) is a
 supported alternative, used here since castxml isn't installed in this
 environment).
 

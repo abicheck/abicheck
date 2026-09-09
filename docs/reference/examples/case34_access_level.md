@@ -69,7 +69,7 @@ access (member-variable `DW_AT_accessibility` is emitted regardless of
 headers) as a `field_access_changed` finding, but `helper()`'s method
 access narrowing needs the header AST to resolve reliably — abicheck's
 default AST backend is castxml; clang is a supported alternative frontend
-(`--ast-frontend clang`), used here because castxml isn't installed in
+(`compile.frontend: clang` (via `.abicheck.yml`)), used here because castxml isn't installed in
 this environment. The full `method_access_changed` finding this case is
 named for requires L2.
 

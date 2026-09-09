@@ -61,8 +61,8 @@ itself (full definition → forward declaration) is a *header-surface* fact
 rather than a binary-layout one — the internal struct definition still
 exists inside `v2.c` and is fully described in DWARF — so confirming it
 specifically needs header/AST evidence (abicheck's default AST backend is
-castxml; clang is a supported alternative frontend via `--ast-frontend
-clang`). The typedef/return-type changes above are enough on their own to
+castxml; clang is a supported alternative frontend via
+`.abicheck.yml`'s `compile.frontend: clang`). The typedef/return-type changes above are enough on their own to
 reach the correct BREAKING verdict at L1.
 
 ## Why abicheck catches it

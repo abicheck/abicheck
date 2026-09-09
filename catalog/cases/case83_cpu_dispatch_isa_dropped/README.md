@@ -28,8 +28,12 @@ dropped ISA before shipping.
 ```bash
 g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --ast-frontend clang -H old=v1.h -H new=v2.h --lang c++
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  lang: c++
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -50,7 +54,7 @@ Deployment Risk Changes:
 `min_evidence: L0` — the removed/surviving symbol sets alone carry the
 clustering signal (ISA-token infixes on the mangled names, correlated
 against which algorithm stems still have a sibling ISA). The command above
-also supplies header/AST evidence (`--ast-frontend clang`, since `castxml`
+also supplies header/AST evidence (`compile.frontend: clang` (via `.abicheck.yml`), since `castxml`
 is unavailable in this environment) so the demangled, namespace-qualified
 names the ISA-token matcher keys off are available deterministically; a
 production install with `castxml` reaches the same finding from `-H` alone,

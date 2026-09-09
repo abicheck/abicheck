@@ -39,9 +39,12 @@ misinterpreted. Recompilation against v2 is mandatory.
 ```bash
 clang -std=c2x -shared -fPIC -g v1.c -o libfoo_v1.so
 clang -std=c2x -shared -fPIC -g v2.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --compiler "$(command -v clang)"
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  compiler: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -81,7 +84,7 @@ names this specific `ChangeKind` runs on the header-derived type spelling
 (`_BitInt(64)` / `_BitInt(128)`) rather than the DWARF one. castxml is the
 documented default header/AST backend; its bundled Clang frontend cannot
 parse C23 `_BitInt` at all, so this case needs a supported alternative AST
-frontend (`--ast-frontend clang`, backed by a system Clang capable of C23) to
+frontend (`compile.frontend: clang` (via `.abicheck.yml`), backed by a system Clang capable of C23) to
 reach that evidence.
 
 ## Why abicheck catches it

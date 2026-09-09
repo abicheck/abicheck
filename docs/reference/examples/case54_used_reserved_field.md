@@ -54,8 +54,8 @@ Verdict: COMPATIBLE (exit 0)
 offset) for both versions is enough for the dedicated reserved-field
 detector to match `__reserved1`/`__reserved2` renamed to new names at
 unchanged offsets; no public headers required. (castxml is the documented
-default AST backend for header-level evidence; clang, via `--ast-frontend
-clang`, is a supported alternative when castxml isn't available — neither is
+default AST backend for header-level evidence; clang, via
+`.abicheck.yml`'s `compile.frontend: clang`, is a supported alternative when castxml isn't available — neither is
 needed at this evidence tier.)
 
 ## Why abicheck catches it

@@ -172,6 +172,28 @@ def _py_bin_has_abicheck_source() -> str:
     return text[start:end]
 
 
+# The extra-args option/value tokenizer family -- `_extra_args_is_value_option`
+# through `_extra_args_has_config_flag` -- extracted verbatim as one
+# self-contained region (`add_compile_context_flags`'s own new
+# `_extra_args_has_config_flag()` call, Codex review, PR #1154 follow-up:
+# "Reject configs supplied through extra-args", needs `_extra_args_options`,
+# which in turn needs `_extra_args_is_value_option`/
+# `_extra_args_expand_short_clusters`).
+_EXTRA_ARGS_FAMILY_START = "_extra_args_is_value_option() {"
+_EXTRA_ARGS_FAMILY_END = (
+    '    [[ "$_name" == "--config" ]] && return 0\n'
+    "  done <<<\"$(_extra_args_options)\"\n"
+    "  return 1\n}\n"
+)
+
+
+def _extra_args_family_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_EXTRA_ARGS_FAMILY_START)
+    end = text.index(_EXTRA_ARGS_FAMILY_END, start) + len(_EXTRA_ARGS_FAMILY_END)
+    return text[start:end]
+
+
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
     _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
@@ -1003,6 +1025,7 @@ class TestCompileContextRejectsAutoDiscoveredConfig:
             + _py_bin_has_abicheck_source()
             + _add_flag_source()
             + _is_release_style_operand_source()
+            + _extra_args_family_source()
             + _add_compile_context_flags_source()
             + "\nCMD=()\n"
         )
@@ -1147,3 +1170,42 @@ class TestCompileContextRejectsAutoDiscoveredConfig:
         assert result.returncode != 0, (result.stdout, result.stderr)
         assert "cannot import abicheck" in result.stdout
         assert "already-checked-out project config" not in result.stdout
+
+    def test_fails_loud_when_config_is_supplied_via_extra_args(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence ("Reject configs supplied through
+        extra-args"): a project config can also reach the CLI via the
+        documented, supported ``extra-args: --config PATH`` passthrough --
+        neither the explicit ``build-config`` guard nor the auto-discovery
+        guard sees this channel, and ``extra-args`` is appended to ``CMD``
+        *after* this function's own synthesized ``--config`` overlay, so
+        Click's last-flag-wins would keep the extra-args value and silently
+        discard the overlay's compiler/sysroot/etc. settings."""
+        result = self._run_from(
+            tmp_path,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_EXTRA_ARGS": "--config /already/checked-out/.abicheck.yml",
+            },
+        )
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert "cannot combine" in result.stdout
+        assert "extra-args" in result.stdout
+
+    def test_succeeds_when_extra_args_carries_no_config(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion: an unrelated extra-args flag doesn't trip the new
+        check."""
+        result = self._run_from(
+            tmp_path,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_EXTRA_ARGS": "--verbose",
+            },
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        cmd = result.stdout.splitlines()
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"

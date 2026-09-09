@@ -1509,15 +1509,21 @@ def _format_release_markdown(
     already computed under.
 
     *show_only* (Codex review, PR #1154 second follow-up) is applied here,
-    at render time, the same three ways :func:`_format_release_json` applies
-    it: the per-library findings section (via
+    at this call site, the same three ways :func:`_format_release_json`
+    applies it: the per-library findings section (via
     :func:`_release_findings_for_render`), and the release-global bundle/
     matrix findings sections (via
     :func:`abicheck.reporter_markdown.release_bundle_findings_for_view`/
-    :func:`abicheck.reporter_markdown.release_matrix_changes_for_view`) --
-    *library_results* itself is
-    never mutated, so this function's caller can also render an unfiltered
-    (``show_only=None``) secondary ``--write`` from the same data.
+    :func:`abicheck.reporter_markdown.release_matrix_changes_for_view`).
+    Each filtered projection (``display_bundle_findings``/
+    ``display_matrix_changes``) is computed once, here, and handed to
+    ``render_release_markdown``'s two Markdown functions as an already-
+    filtered, immutable value (Codex review, fresh evidence, PR #1154
+    follow-up: "Move release filtering out of the Markdown renderer") --
+    `report/AGENTS.md`'s renderer contract forbids the ``report``-classified
+    renderer itself from calling either filter function. *library_results*
+    itself is never mutated, so this function's caller can also render an
+    unfiltered (``show_only=None``) secondary ``--write`` from the same data.
     """
     from .cli_compare_receipt import (
         _release_md_library_findings,
@@ -1533,6 +1539,19 @@ def _format_release_markdown(
     display_bundle_findings = (
         release_bundle_findings_for_view(bundle_result, show_only)
         if bundle_result is not None
+        else []
+    )
+    # Codex review, fresh evidence (PR #1154 follow-up: "Move release
+    # filtering out of the Markdown renderer"): precomputed here, at this
+    # workflow-boundary call site, rather than inside `render_release_
+    # markdown._release_md_matrix_findings` itself -- `report/AGENTS.md`'s
+    # renderer contract forbids a renderer from filtering findings; it may
+    # only consume an already-computed, immutable projection. Mirrors
+    # `display_bundle_findings` immediately above, which already followed
+    # this rule.
+    display_matrix_changes = (
+        release_matrix_changes_for_view(matrix_result, show_only)
+        if matrix_result is not None
         else []
     )
 
@@ -1574,8 +1593,8 @@ def _format_release_markdown(
     lines += _release_md_coverage_warnings(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     lines += _release_md_library_findings(display_library_results)
-    lines += _release_md_bundle_findings(bundle_result, show_only)
-    lines += _release_md_matrix_findings(matrix_result, show_only)
+    lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)
+    lines += _release_md_matrix_findings(matrix_result, display_matrix_changes)
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(
             release_disposition_audit_block(

@@ -320,6 +320,19 @@ add_compile_context_flags() {
     echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with build-config: those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
     exit 1
   fi
+  # Codex review, fresh evidence, PR #1154 follow-up ("Reject configs
+  # supplied through extra-args"): a project config can also arrive via the
+  # documented, supported `extra-args: --config PATH` passthrough --
+  # `extra-args` is appended to `CMD` *after* this function's own
+  # synthesized `--config` overlay (see the append site near the bottom of
+  # this script), so Click's last-flag-wins would keep the extra-args value
+  # and silently discard this overlay's compiler/sysroot/etc. settings.
+  # Same fail-loud precedent as the explicit `build-config` guard above,
+  # extended to this third way a config can already be in play.
+  if _extra_args_has_config_flag; then
+    echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with a --config already supplied via extra-args: those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in that same file instead, and drop the separate input(s)."
+    exit 1
+  fi
   # Codex review, PR #1154 follow-up: the explicit `build-config` input
   # above isn't the only way a project config can already be in play --
   # `compare`/`dump` auto-discover a checked-out `.abicheck.yml` when no
@@ -766,6 +779,26 @@ _extra_args_has_dry_run_flag() {
   local _name _value
   while IFS=$'\t' read -r _name _value; do
     [[ "$_name" == "--dry-run" ]] && return 0
+  done <<<"$(_extra_args_options)"
+  return 1
+}
+
+# Same shape as `_extra_args_has_write_flag`/`_extra_args_has_dry_run_flag`
+# above (Codex review, fresh evidence, PR #1154 follow-up: "Reject configs
+# supplied through extra-args"): `add_compile_context_flags`'s own explicit-
+# `build-config`/auto-discovered-config guards only ever checked
+# `INPUT_BUILD_CONFIG` and the checked-out tree -- neither sees a project
+# config supplied via the documented, supported `extra-args: --config PATH`
+# passthrough channel. Since `extra-args` is appended to `CMD` *after* this
+# script's own synthesized `--config` overlay, Click keeps the extra-args
+# value (last-flag-wins) and silently discards the overlay containing the
+# requested compiler/sysroot/etc. settings -- the exact "second config
+# source shadows the first" failure this whole guard family exists to
+# reject loudly, just reached through a channel the guard never inspected.
+_extra_args_has_config_flag() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    [[ "$_name" == "--config" ]] && return 0
   done <<<"$(_extra_args_options)"
   return 1
 }

@@ -75,8 +75,11 @@ same two functions are recognized as the same declaration source
 finding gets renamed to the more specific `func_cv_changed`:
 
 ```bash
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=old/lib.h --header new=new/lib.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=old/lib.h --header new=new/lib.h --config .abicheck.yml
 ```
 
 ```text
