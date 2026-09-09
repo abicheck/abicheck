@@ -238,15 +238,38 @@ def _build(root: Path, *, n_tus: int, cxx: str) -> Path:
 
 
 # ── measurement ─────────────────────────────────────────────────────────────
-# We parse the human ``--format text`` report rather than ``--format json``: the
-# verdict is a structured JSON field, but the per-level L4 coverage counts
-# (``N/M TUs parsed`` + elapsed) live only inside the rendered coverage-row detail
-# string — there is no structured JSON field for them — and exposing them as one
-# would mean changing the shipped ``ScanOutcome`` surface for a manual eval
-# harness. The regexes are intentionally loose so a small text-layout change does
-# not break the sweep (a missing match just leaves the field ``None``).
+# ``--format json``: `compare` accepts no ``text`` format at all (its choices are
+# json/markdown/sarif/html/junit/review/oneline), and markdown renders the verdict
+# as a table cell rather than the ``Verdict: X`` line the old regex expected. So
+# the verdict is read from the parsed document, which is the structured field for
+# it. The per-level L4 coverage counts (``N/M TUs parsed`` + elapsed) still have
+# no structured field of their own — they live inside a ``layer_coverage[].detail``
+# string — so that one stays a regex, applied to the raw response text (the detail
+# string appears in it verbatim). It is intentionally loose: a missing match just
+# leaves the field ``None`` rather than failing the sweep.
 _L4_RE = re.compile(r"(\d+)/(\d+) TUs parsed.*?([\d.]+)s")
-_VERDICT_RE = re.compile(r"Verdict:\s*(\w+)")
+
+
+def _verdict_from(out: str) -> str | None:
+    """Read ``verdict`` out of a captured `compare --format json` response.
+
+    ``out`` is stdout **with stderr merged in** (the harness wants a single
+    stream so a warning cannot be lost), so a plain ``json.loads`` fails on the
+    scope/header warnings abicheck prints alongside the report. Decode from the
+    first ``{`` with ``raw_decode`` instead, which stops at the end of the
+    object and ignores whatever trails it. A usage error, a crash, or a
+    NOT_COMPARABLE abort leaves no parsable object at all -- that returns
+    ``None`` and lets the ``exit`` column carry the story, same as a missing L4
+    match.
+    """
+    start = out.find("{")
+    if start < 0:
+        return None
+    try:
+        doc, _ = json.JSONDecoder().raw_decode(out[start:])
+    except ValueError:
+        return None
+    return doc.get("verdict") if isinstance(doc, dict) else None
 
 
 def _maxrss_to_mb(maxrss: int) -> float:
@@ -364,10 +387,16 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         f"old={base_so.parent / 'include'}",
         "--header",
         f"new={new_root / 'include'}",
+        # Both sides, not just NEW: `compare` refuses a pair whose two sides were
+        # extracted under different scope contracts (exit 16, NOT_COMPARABLE), so
+        # a NEW-only `--sources` makes every `build`/`source` rung measure a
+        # comparability rejection instead of a replay. Verified directly.
+        "--sources",
+        f"old={base_so.parent}",
         "--sources",
         f"new={new_root}",
         "--format",
-        "text",
+        "json",
         *_level_args(level, seed),
     ]
     # ``jobs <= 0`` means "auto": the sweep must measure abicheck's normal auto
@@ -397,7 +426,7 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
     _pid, status, ru = os.wait4(proc.pid, 0)
     wall = time.monotonic() - t0
     l4 = _L4_RE.search(out)
-    verdict = _VERDICT_RE.search(out)
+    verdict = _verdict_from(out)
     return Point(
         level=level,
         n_tus=0,
@@ -405,7 +434,7 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         wall_s=round(wall, 2),
         rss_mb=_maxrss_to_mb(ru.ru_maxrss),
         exit=os.waitstatus_to_exitcode(status),
-        verdict=verdict.group(1) if verdict else None,
+        verdict=verdict,
         l4_parsed=int(l4.group(1)) if l4 else None,
         l4_total=int(l4.group(2)) if l4 else None,
         l4_secs=float(l4.group(3)) if l4 else None,
