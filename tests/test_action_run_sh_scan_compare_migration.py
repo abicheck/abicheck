@@ -773,7 +773,14 @@ class TestMigratedCompareForwardsSourcesTreeConfig:
     ) -> None:
         sources_dir = tmp_path / "vendored-src"
         sources_dir.mkdir()
-        cmd = _run_cmd(_base_env(INPUT_SOURCES=str(sources_dir)))
+        # CodeRabbit review, fresh evidence: without `cwd=tmp_path`,
+        # `_resolve_scan_effective_config_path`'s own upward-walk fallback
+        # (once `--sources`' own tree has nothing) runs from wherever the
+        # test process's real cwd happens to be, which could spuriously
+        # discover a real `.abicheck.yml` above it and flip this assertion --
+        # isolate the same way the sibling sources-tree-config tests already
+        # do.
+        cmd = _run_cmd(_base_env(INPUT_SOURCES=str(sources_dir)), cwd=tmp_path)
         assert cmd[1] == "compare", cmd
         assert "--config" not in cmd, cmd
 
