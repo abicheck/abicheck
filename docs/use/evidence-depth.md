@@ -54,7 +54,8 @@ migration item in
   audit](#single-build-audit-no-baseline) below and
   [Scenario S5](../integration/scenarios/single-build-audit.md).
 - **`--budget`, `--crosscheck KEY=error`, `--build-target`.** No `compare`
-  flag equivalent (§3 rows 19/23 and the `--build-target` row).
+  flag equivalent (§3 rows 19/23 and the `--build-target` row). `dump` does
+  carry its own `--build-target`; `compare` does not.
 
 `abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
 **positional** argument (not a flag); `--against OLD` is the previous
