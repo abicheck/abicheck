@@ -1025,15 +1025,24 @@ def verdict_scored_changes(
       ``checker.py``'s ``all_unsuppressed`` and ``policy/severity.py``'s
       ``gate_eligible_changes``/``gate_contribution_for_change`` apply) stays
       fully visible in *kept_changes* but must not drive the verdict;
+    - a ``NOT_EVALUATED`` finding (ADR-049 D1/D9, Codex review, PR #1172,
+      round 15) -- one already proven out of the run's ``--contract``
+      domain or whose required evidence is missing has no compatibility
+      decision, the same exclusion ``_compute_verdict_for``'s own
+      ``evaluated_for_policy`` step applies before the *first* verdict
+      computation. Without it here, disabling an unrelated crosscheck could
+      resurrect an already-excluded contract finding (e.g. a
+      ``PROVEN_OUT_OF_CONTRACT`` `FUNC_REMOVED`) into a failing verdict;
     - the *redundant_changes* ``compare()`` itself scored, reconstructed via
       :func:`gating_redundant_changes` (see its own docstring) since
       ``verdict_redundant`` is a private local never exposed on
       ``DiffResult``.
     """
     from .checker_policy import is_cross_source_resolved
+    from .contract_gating import is_evaluated
 
     return [
-        c for c in kept_changes if not is_cross_source_resolved(c)
+        c for c in kept_changes if not is_cross_source_resolved(c) and is_evaluated(c)
     ] + gating_redundant_changes(redundant_changes, ledger)
 
 

@@ -13,11 +13,15 @@
   exit code, or its own per-finding `gate_contribution` field. This
   exclusion applies at every verdict-computing chokepoint: `scan
   --against`'s own `--crosscheck KEY=off` post-removal verdict recompute,
-  and `compare`'s own opt-in `--surface-metrics`/`--pattern-verdicts`
-  verdict recomputations — each previously could resurrect an
-  already-`RESOLVED` cross-source finding into a failing verdict when an
-  unrelated check was disabled, or an unrelated public-surface/pattern
-  finding also fired, on the same run.
+  `compare`'s own opt-in `--surface-metrics`/`--pattern-verdicts`
+  verdict recomputations, and `recommend_release`'s conserved-delta
+  reading of a suppressed finding's kind-level class — each previously
+  could resurrect an already-`RESOLVED` cross-source finding (or, for the
+  `--crosscheck KEY=off` recompute, an already-out-of-contract one too)
+  into a failing verdict or a waived-major-break release recommendation
+  when an unrelated check was disabled, an unrelated public-surface/pattern
+  finding also fired, or an ordinary suppression rule happened to match it,
+  on the same run.
 - **`mode: scan` Action requests carrying a `compare`-only flag through
   `extra-args` (`--surface-metrics`, `--used-by`, `--diagnostic-comparison`,
   and about three dozen others `scan --help-all` doesn't accept) now stay

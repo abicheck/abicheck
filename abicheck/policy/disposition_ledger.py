@@ -433,6 +433,7 @@ class DispositionLedger:
         and it is what makes ``suppressed_gating_records`` (hence
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
+        from ..checker_policy import is_cross_source_resolved
         from ..contract_gating import is_evaluated
         from ..reclassify import effective_verdict_for_change
 
@@ -445,6 +446,10 @@ class DispositionLedger:
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
             if record.disposition is not Disposition.SUPPRESSED:
                 continue
+            # A RESOLVED cross-source finding is excluded from the gate the
+            # same way NOT_EVALUATED is (plan F-9); suppressing it must not
+            # resurrect its class either (Codex review, PR #1172, round 15).
+            _excluded = not is_evaluated(change) or is_cross_source_resolved(change)
             if record.verdict_class is not None:
                 # A record can arrive here already carrying a class:
                 # `_verdict_class_of` reads whatever verdict was *stamped on
@@ -457,10 +462,10 @@ class DispositionLedger:
                 # straight back to `recommend_release` as a waived major
                 # break, bypassing the exclusion entirely. So the guard
                 # clears rather than skips (Codex review).
-                if not is_evaluated(change):
+                if _excluded:
                     self._records[index] = replace(record, verdict_class=None)
                 continue
-            if not is_evaluated(change):
+            if _excluded:
                 # ADR-049 D1: compatibility policy never scored this finding,
                 # and `contract_pipeline.record_compatibility_decisions`
                 # deliberately leaves its decision `None` for exactly that
@@ -469,7 +474,7 @@ class DispositionLedger:
                 # then drive `semver.recommend_release` to MAJOR/REVIEW,
                 # while the identical unsuppressed exclusion correctly
                 # recommends no bump. Suppression must not resurrect a
-                # contract exclusion.
+                # contract exclusion (or, per plan F-9, a RESOLVED finding).
                 continue
             self._records[index] = replace(
                 record,

@@ -850,6 +850,37 @@ class TestVerdictScoredChanges:
 
         assert result == [kept, gating_redundant]
 
+    def test_excludes_a_not_evaluated_finding(self) -> None:
+        # Codex review, PR #1172, round 15: contract_gating.is_evaluated()
+        # must be applied here too, the same exclusion checker.py's own
+        # first all_unsuppressed computation applies via evaluated_for_policy
+        # -- a PROVEN_OUT_OF_CONTRACT finding must not resurrect into the
+        # verdict just because an unrelated crosscheck was disabled.
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        not_evaluated = self._change(
+            "_Znoteval",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.NOT_EVALUATED,
+        )
+        ordinary = self._change("_Zordinary")
+
+        result = csb.verdict_scored_changes([not_evaluated, ordinary], [], None)
+
+        assert result == [ordinary]
+
+    def test_evaluated_finding_still_scores(self) -> None:
+        # Negative control: only NOT_EVALUATED is excluded.
+        from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+
+        evaluated = self._change(
+            "_Zevaluated",
+            compatibility_evaluation_status=CompatibilityEvaluationStatus.EVALUATED,
+        )
+
+        result = csb.verdict_scored_changes([evaluated], [], None)
+
+        assert result == [evaluated]
+
     def test_no_resolved_findings_and_no_ledger_is_a_no_op(self) -> None:
         kept = self._change("_Zkept")
 
