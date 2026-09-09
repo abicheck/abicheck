@@ -510,6 +510,43 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         assert "build.query" not in result.stderr
         assert "compile.compiler" not in result.stderr
 
+    def test_symlinked_explicit_build_config_resolves_against_its_own_logical_location(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1159 (P2, fresh evidence): the native CLI's
+        ``--config`` (a plain ``click.Path`` with no ``resolve_path=True``)
+        never dereferences a symlink -- ``project_root_for_config(cfg)`` sees
+        exactly the path the user passed. This Action's own merge helper used
+        to call ``Path(base_source).resolve()``, which DOES dereference a
+        symlink: a checkout-level ``build-config: .abicheck.yml`` pointing at
+        ``/shared/config.yml`` would then anchor a relative
+        ``compile.include_dirs`` entry under ``/shared`` (the symlink's
+        target directory) instead of the logical location the user actually
+        named, silently parsing a different header surface."""
+        real_dir = tmp_path / "shared"
+        real_dir.mkdir()
+        (real_dir / "include").mkdir()
+        real_config = real_dir / "config.yml"
+        real_config.write_text(
+            "compile:\n  include_dirs: [include]\n", encoding="utf-8"
+        )
+        symlink_config = tmp_path / ".abicheck.yml"
+        symlink_config.symlink_to(real_config)
+
+        script = _release_topology_script_with_preexisting_config_flag(
+            str(symlink_config)
+        )
+        result = _run_bash_script(
+            script,
+            {"INPUT_DSO_ONLY": "true", "INPUT_BUILD_CONFIG": str(symlink_config)},
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        # Anchored at the symlink's own directory (tmp_path/include) -- NOT
+        # the symlink target's directory (tmp_path/shared/include).
+        assert doc["compile"]["include_dirs"] == [str((tmp_path / "include").resolve())]
+
 
 class TestReleaseTopologyOverlayMergesWithDiscoveredProjectConfig:
     """Codex review, PR #1159 (P1): the synthesized overlay must AUGMENT the
@@ -641,6 +678,29 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
         serialized = json.dumps(doc)
         assert "rm -rf" not in serialized
         assert "/malicious/cc" not in serialized
+
+    def test_discovered_build_compile_db_is_stripped(self, tmp_path: Path) -> None:
+        """A different concern from build.query/compile.compiler above (a
+        trust/execution gate) -- this key is harmless in itself, but
+        abicheck/buildsource/embed.py's compile_db_explicit is derived from
+        "was *any* --config passed", not from where this one field's value
+        came from. Forwarding it into this always-explicit overlay would
+        silently promote a stale/inapplicable discovered build.compile_db
+        to "explicit" status (its miss must surface, never falling through
+        to inference) purely because an unrelated Action input triggered
+        this overlay synthesis (Codex review, fresh evidence)."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: /stale/compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert "compile_db" not in doc.get("build", {})
+        assert doc["build"] == {"system": "cmake"}
+        assert "build.compile_db" in result.stderr
 
 
 class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:

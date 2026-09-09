@@ -505,7 +505,17 @@ if merge_mode == "explicit":
     # config found" (a missing/unreadable explicit build-config is a usage
     # error, matching the ordinary CLI's own explicit ``--config`` failure
     # mode).
-    found_path = Path(base_source).resolve()
+    #
+    # os.path.abspath, not Path.resolve(): the latter also dereferences a
+    # symlink, which the native CLI's own --config never does (Click's
+    # click.Path has no resolve_path=True here, so cli_options.py's
+    # project_root_for_config(cfg) sees exactly the path the user passed).
+    # A symlinked build-config (e.g. a checkout-level .abicheck.yml ->
+    # /shared/config.yml) would otherwise have project_root_for_config()
+    # anchor a relative compile.include_dirs entry under the symlink's
+    # *target* directory instead of the logical location the user actually
+    # named, silently parsing a different header surface (Codex review).
+    found_path = Path(os.path.abspath(base_source))
     if not found_path.is_file():
         print(
             f"::error::the explicit build-config {found_path} does not "
@@ -572,6 +582,32 @@ if merge_mode != "explicit":
             "auto-discovered config is never trusted to run a build-system "
             "query; set build-config explicitly (naming a config you reviewed) "
             "to opt in.",
+            file=sys.stderr,
+        )
+    if isinstance(base.get("build"), dict) and "compile_db" in base["build"]:
+        # A different concern from build.query above (that one is a trust/
+        # execution gate) -- here the field itself is harmless, but
+        # abicheck/buildsource/embed.py's compile_db_explicit is derived
+        # from "was *any* --config passed", not from where this one field's
+        # value came from. Forwarding a merged overlay as an explicit
+        # --config would silently promote a stale/inapplicable discovered
+        # build.compile_db to "explicit" status (its miss must surface, no
+        # falling through to inference/autodiscovery) purely because an
+        # unrelated Action input (dso-only, gcc-path, ...) also happened to
+        # trigger this overlay synthesis (Codex review, fresh evidence).
+        # Stripped for the same reason as build.query: this Action has no
+        # per-field provenance channel to tell the CLI "this one came from
+        # an auto-discovered document, not an operator's own --config".
+        stripped_build = dict(base["build"])
+        del stripped_build["compile_db"]
+        base["build"] = stripped_build
+        print(
+            "::warning::the discovered .abicheck.yml's build.compile_db was "
+            "dropped from this Action's synthesized --config overlay -- "
+            "forwarding it here would silently promote it to an explicit, "
+            "must-not-be-missing compile-DB path (the field would otherwise "
+            "fall back to inference); set build-config explicitly (naming a "
+            "config you reviewed) to opt in.",
             file=sys.stderr,
         )
     if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
