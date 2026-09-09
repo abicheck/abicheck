@@ -321,3 +321,35 @@ class TestReleaseSummarySidecarCarriesDispositionAudit:
         _write_release_summary_file(tmp_path, "NO_CHANGE", entries, [], [], {}, {})
         data = json.loads((tmp_path / "summary.json").read_text())
         assert data["disposition_audit"]["detected_total"] == 1
+
+    def test_bundle_findings_are_included_too(self, tmp_path: Path) -> None:
+        """Codex review, fresh evidence ("Include bundle findings in
+        output-dir audits"): `_write_release_summary_file` receives
+        `bundle_result` but used to forward only `library_results`/
+        `matrix_result`/`severity_config` to `release_disposition_audit_
+        block` -- a bundle-only break reported `detected_total: 0`/
+        `effective_total: 0` in this sidecar while the primary report
+        (which does thread `bundle_result` through) correctly showed it."""
+        import json
+
+        from abicheck.bundle_models import BundleDiffResult, BundleFinding
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.cli_compare_release import _write_release_summary_file
+
+        bundle_result = BundleDiffResult(
+            old_root=Path("/o"),
+            new_root=Path("/n"),
+            bundle_findings=[
+                BundleFinding(
+                    kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
+                    symbol="libfoo.so",
+                    description="library removed from the bundle",
+                )
+            ],
+        )
+        _write_release_summary_file(
+            tmp_path, "BREAKING", [], [], [], {}, {}, bundle_result=bundle_result
+        )
+        data = json.loads((tmp_path / "summary.json").read_text())
+        assert data["disposition_audit"]["detected_total"] == 1
+        assert data["disposition_audit"]["effective_total"] == 1

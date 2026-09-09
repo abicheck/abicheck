@@ -576,11 +576,16 @@ def _suppress_lockstep_soname_findings(
         # own "return a copy relabelled" shape) before `entry["disposition_
         # audit"]` is recomputed below, so the release-level fold
         # (`cli_compare_receipt.release_disposition_audit_block`) sees the
-        # suppression too.
-        from .report.disposition_audit import (
-            compute_disposition_audit,
-            supersede_as_suppressed,
-        )
+        # suppression too. Applied via `workflows.disposition` (Codex
+        # review, fresh evidence: "Move release suppression out of report
+        # projection") -- mutating the ledger is the policy decision
+        # itself, not a projection of one already made, so it does not
+        # belong behind a `report/` crossing-point; `workflows/
+        # disposition.py` is the established "a frontend legitimately
+        # touches the disposition ledger through here" home every other
+        # such need in this codebase already uses.
+        from .report.disposition_audit import compute_disposition_audit
+        from .workflows.disposition import supersede_as_suppressed
 
         supersede_as_suppressed(
             result, unnecessary,

@@ -9,7 +9,8 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   includes cross-library bundle findings — a release whose only change was
   a `bundle_library_removed`-shaped bundle finding used to report
   `detected_total: 0`/`effective_total: 0` alongside a breaking
-  `bundle_findings` entry.
+  `bundle_findings` entry. The `--output-dir` `summary.json` sidecar now
+  carries the same bundle contribution as the primary report.
 - The lockstep-SONAME-bump suppression on a directory/package `compare`
   (a coordinated `SONAME_BUMP_UNNECESSARY` downgrade when a sibling library
   has a real binary break) now records the suppression on the affected

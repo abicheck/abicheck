@@ -161,7 +161,7 @@ def _write_release_summary_file(
     from ...cli_compare_receipt import release_disposition_audit_block
 
     summary_data["disposition_audit"] = release_disposition_audit_block(
-        library_results, matrix_result, severity_config
+        library_results, matrix_result, severity_config, bundle_result
     )
     summary_path = output_dir / "summary.json"
     writer = write_output if write_output is not None else _write_text
