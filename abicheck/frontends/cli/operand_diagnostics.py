@@ -59,7 +59,9 @@ def _warn_unused_set_flags(
     """Warn that the set-input fan-out flags do not apply to single-file inputs."""
     used = []
     if dso_only:
-        used.append("--dso-only")
+        # Phase 7d demoted --dso-only to .abicheck.yml's release.dso_only --
+        # there is no CLI flag left to name here, only the config key.
+        used.append("release.dso_only")
     if output_dir is not None:
         used.append("--output-dir")
     if select:

@@ -215,7 +215,12 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--bundle-facts-library-manifest" in out
 
-    def test_include_private_dso_is_rejected(self, tmp_path: Path) -> None:
+    def test_include_private_dso_flag_is_gone(self, tmp_path: Path) -> None:
+        """Phase 7d (one-comparison-product.md §4.1): --include-private-dso
+        is gone from `compare`'s CLI entirely -- exit 64 comes from Click's
+        own 'No such option' now, not this module's custom UsageError (see
+        test_release_include_private_dso_config_is_rejected below for the
+        config-level rejection)."""
         old_path, new_path = self._both_stored(tmp_path)
 
         code, out = _invoke(
@@ -225,17 +230,53 @@ class TestStoredPairEarlyRejections:
         assert code == 64
         assert "--include-private-dso" in out
 
-    def test_dso_only_is_rejected(self, tmp_path: Path) -> None:
+    def test_release_include_private_dso_config_is_rejected(self, tmp_path: Path) -> None:
+        """Phase 7d: release.include_private_dso is a project-wide
+        .abicheck.yml setting now -- a project that sets it still gets
+        this dispatch's own out-of-scope UsageError (neither stored side
+        discovers shared libraries from a live directory/package), rather
+        than silently never being honored."""
+        old_path, new_path = self._both_stored(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("release:\n  include_private_dso: true\n")
+
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--config", str(cfg)
+        )
+
+        assert code == 64
+        assert "release.include_private_dso" in out
+
+    def test_dso_only_flag_is_gone(self, tmp_path: Path) -> None:
         """A persisted BundleFacts document carries no per-library
         executable/library distinction to filter by, unlike the live
         release fan-out's own old/new map filtering for this flag (Codex
-        review, PR #1060, round 7)."""
+        review, PR #1060, round 7).
+
+        Phase 7d: --dso-only is gone from `compare`'s CLI entirely -- exit
+        64 comes from Click's own 'No such option' now (see
+        test_release_dso_only_config_is_rejected below for the
+        config-level rejection)."""
         old_path, new_path = self._both_stored(tmp_path)
 
         code, out = _invoke("compare", str(old_path), str(new_path), "--dso-only")
 
         assert code == 64
         assert "--dso-only" in out
+
+    def test_release_dso_only_config_is_rejected(self, tmp_path: Path) -> None:
+        """Phase 7d: release.dso_only is a project-wide .abicheck.yml
+        setting now -- a project that sets it still gets this dispatch's
+        own out-of-scope UsageError, rather than silently never being
+        honored."""
+        old_path, new_path = self._both_stored(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("release:\n  dso_only: true\n")
+
+        code, out = _invoke("compare", str(old_path), str(new_path), "--config", str(cfg))
+
+        assert code == 64
+        assert "release.dso_only" in out
 
     def test_keep_extracted_is_rejected(self, tmp_path: Path) -> None:
         old_path, new_path = self._both_stored(tmp_path)
@@ -492,6 +533,42 @@ class TestStoredPairEndToEnd:
         )
 
         code, out = _invoke("compare", str(old_path), str(new_path), "--format", "json")
+
+        data = json.loads(out)
+        assert data["verdict"] == "NO_CHANGE"
+        assert code == 0
+
+    def test_scope_on_incomplete_config_is_read_through_this_dispatch(
+        self, tmp_path: Path
+    ) -> None:
+        """Codecov patch-coverage gap: Phase 7d's ``dispatch()`` now passes
+        ``_bundle_cfg.scope_on_incomplete`` (read from a real ``--config``)
+        into ``scope_terms_for()`` instead of the removed ``compare
+        --on-incomplete-scope`` CLI kwarg, but no existing test in this file
+        ever supplied ``--config`` -- so that branch (a real, non-None
+        ``_bundle_cfg``) never ran. A complete scope like this pair's own
+        doesn't change the *outcome* under ``block`` vs. the default
+        ``warn`` (the policy only bites on an incomplete one); this proves
+        the config is read and the dispatch still completes cleanly rather
+        than crashing on the new code path."""
+        old_path = _write_facts(
+            tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
+        )
+        new_path = _write_facts(
+            tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("scope:\n  on_incomplete: block\n", encoding="utf-8")
+
+        code, out = _invoke(
+            "compare",
+            str(old_path),
+            str(new_path),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
 
         data = json.loads(out)
         assert data["verdict"] == "NO_CHANGE"

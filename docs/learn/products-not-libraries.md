@@ -67,12 +67,22 @@ the bundle's.
 Two directories are a product comparison:
 
 ```bash
-abicheck compare release-1.0/ release-2.0/ -H include/ --fail-on-removed-library
+abicheck compare release-1.0/ release-2.0/ -H include/
+```
+
+Set `.abicheck.yml`'s `gate.fail_on_removed_library: true` to make a proven
+removal exit `8` instead of an incomplete-scope warning:
+
+```yaml
+gate:
+  fail_on_removed_library: true
 ```
 
 Every shared object discovered in both trees is compared as a pair, a
-library present only on the old side is reported as removed (exit 8 with
-the flag above), and the cross-library pass runs over the whole set. The
+library present only on the old side is reported as removed when NEW's
+inventory is proven complete (exit 8 when the config key above is true;
+otherwise it's an incomplete scope, governed by `scope.on_incomplete`), and
+the cross-library pass runs over the whole set. The
 JSON report carries the per-library results under their library names and
 a `bundle` block for the cross-library findings and the bundle verdict;
 Markdown renders the latter as a "Bundle (Cross-Library) Findings" section.

@@ -93,17 +93,21 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
     data, or a very small file whose compressor overhead dominates), a
     frame truncated at the raw-byte boundary can legitimately fail to
     decode at all (CodeRabbit review, fresh evidence). Escalating the raw
-    read (quadrupling up to `_BOUNDED_PREFIX_MAX_RAW_BYTES`) before giving
+    read (quadrupling, up to the bound stated below) before giving
     up still keeps this bounded and cheap for the common case (typically
     succeeds on the first, smallest attempt for real ABI snapshot JSON,
     which compresses well) while no longer misclassifying a valid but
     less-compressible compressed snapshot as unreadable.
 
-    **The escalation cap bounds the guarantee.** This returns
-    ``read_snapshot_bytes(path)[:n]`` for every envelope whose first *n*
-    decoded bytes are reachable within ``_BOUNDED_PREFIX_MAX_RAW_BYTES`` of
-    stored input -- which every snapshot abicheck itself writes is, by a
-    wide margin, at any compression ratio, single- or multi-frame. It is
+    **The escalation cap bounds the guarantee.** The raw read is bounded by
+    ``_BOUNDED_PREFIX_MAX_RAW_BYTES`` for a request at or below it, and by
+    ``n + _BOUNDED_PREFIX_MAX_RAW_BYTES`` for a larger one -- the same
+    allowance of one cap of stored input beyond the request, since
+    producing *n* decoded bytes can take more than *n* stored bytes. This
+    returns ``read_snapshot_bytes(path)[:n]`` for every envelope whose
+    first *n* decoded bytes are reachable within that bound -- which every
+    snapshot abicheck itself writes is, by a wide margin, at any
+    compression ratio, single- or multi-frame. It is
     not an unconditional promise, and cannot be: an envelope can place
     arbitrarily much stored data before its *n*-th decoded byte (a tiny
     leading data frame, then a megabyte-sized *skippable* frame, then the
@@ -146,20 +150,40 @@ def bounded_decoded_prefix(path: str | Path, n: int | None = None) -> bytes | No
             #   n <= cap (every caller in the tree today): unchanged. The
             #     first read is `n`, escalation stops at the cap.
             #   n  > cap: the first read is `n`, which is 1:1 with the
-            #     request and so amplifies nothing, and escalation stops
-            #     there too -- no raw read beyond what was asked for.
+            #     request and so amplifies nothing, and escalation may go
+            #     one further cap beyond it -- see the `if` below for why
+            #     a ceiling sitting exactly on `n` does not work.
             #
-            # Clamping to the cap outright (the previous commit's own fix,
-            # from a CodeRabbit finding) bounded the wrong quantity: it
-            # refused requests the function could serve. A 1.3 MB stored
-            # snapshot asked for a 4 MiB prefix returned `None`, because
-            # one cap-sized raw read cannot yield 4 MiB decoded -- while
+            # So the raw read is bounded by `cap` at or below the cap, and
+            # by `n + cap` above it. Both are the same amplification
+            # allowance -- one cap of stored input beyond the request --
+            # which is the resource bound that distinguishes this helper
+            # from a full decompression. Keep this paragraph true if the
+            # ceiling changes: a stale bound here is worse than none,
+            # because callers and later fixes reason from it (Codex
+            # review).
+            #
+            # Clamping to the cap outright (an earlier attempt, from a
+            # CodeRabbit finding) bounded the wrong quantity: it refused
+            # requests the function could serve. A 1.3 MB stored snapshot
+            # asked for a 4 MiB prefix returned `None`, because one
+            # cap-sized raw read cannot yield 4 MiB decoded -- while
             # `read_snapshot_bytes` returned all 3.9 MB of it. The plain
             # branch above never had that clamp at all, which is how the
-            # inconsistency surfaced (Codex review); with the ceiling
-            # expressed this way both branches read exactly `n` and there
-            # is no rule left for either to violate.
-            ceiling = max(n, _BOUNDED_PREFIX_MAX_RAW_BYTES)
+            # inconsistency surfaced (Codex review).
+            ceiling = _BOUNDED_PREFIX_MAX_RAW_BYTES
+            if n > ceiling:
+                # Above the cap the request itself is the floor, and it needs
+                # *headroom* on top: producing `n` decoded bytes can take more
+                # than `n` stored bytes (an incompressible payload, or a
+                # level-0 gzip stream, where stored exceeds raw). A ceiling
+                # sitting exactly on `n` gives the escalation loop nowhere to
+                # go -- the first read comes up short, `raw_size >= ceiling`
+                # fires immediately, and a serveable request answers `None`
+                # (Codex review; reproduced with `compresslevel=0`). One cap
+                # of slack keeps the amplification bounded by the same
+                # constant the sub-cap path uses.
+                ceiling = n + _BOUNDED_PREFIX_MAX_RAW_BYTES
             raw_size = max(n, len(probe))
             while True:
                 f.seek(0)

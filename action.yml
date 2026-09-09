@@ -73,21 +73,18 @@ inputs:
     description: 'Development package with headers for new side. compare mode, directory/package operands only.'
     required: false
   dso-only:
-    description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only.'
+    description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only. Deliberately no declared default (Codex review, fresh evidence): the synthesized release:/gate: config overlay needs to tell "omitted" apart from an explicit "false" (which must override a discovered/explicit .abicheck.yml''s own release.dso_only: true) -- a declared default would make every omitted invocation indistinguishable from an explicit false, silently losing that override.'
     required: false
-    default: 'false'
   include-private-dso:
-    description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only.'
+    description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
-    default: 'false'
   keep-extracted:
     description: 'Keep extracted temporary files for debugging. compare mode, directory/package operands only.'
     required: false
     default: 'false'
   fail-on-removed-library:
-    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must be a stored ProjectSnapshot package whose declared inventory is complete (ADR-065); an unmatched library under an unproven inventory (a live directory or archive) is an incomplete scope instead, governed by --on-incomplete-scope. compare mode, directory/package operands only.'
+    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full (ADR-065 D2/S3); a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
-    default: 'false'
 
   # ── Header inputs ───────────────────────────────────────────────────────────
   header:
@@ -237,10 +234,10 @@ inputs:
       forwarded via --config instead. Applies to dump, scan, and compare
       mode with a single-pair (non-directory, non-package) operand — a
       directory/package compare rejects it with an error (same
-      restriction as ast-frontend above), and combining any of this group
-      with build-config is rejected too (this Action does not merge two
-      config sources — declare them directly in the build-config file
-      instead).
+      restriction as ast-frontend above). Combining any of this group with
+      build-config is supported: the synthesized compile: block is merged
+      into a copy of the named build-config, and this Action's input wins
+      on a key conflict.
     required: false
   gcc-prefix:
     description: >
@@ -810,7 +807,7 @@ outputs:
       evidence -- ADR-049's orthogonal coverage axis, which leaves the
       compatibility verdict unchanged), SCOPE_INCOMPLETE (directory/package
       operands only, ADR-065: a selected member went unchecked under
-      `--on-incomplete-scope block` passed via extra-args, or the run
+      `.abicheck.yml`'s `scope.on_incomplete: block` key, or the run
       completed no comparison at all -- the completeness axis, orthogonal
       to the compatibility verdict, which then covers the compared members
       only; fails the step unconditionally, since no fail-on-* input governs
@@ -904,7 +901,7 @@ outputs:
       incomplete contract coverage, incomplete analysis assurance with
       the require-complete-analysis input, or -- directory/package
       operands, ADR-065 -- an incompletely checked comparison scope under
-      --on-incomplete-scope block or no comparison completed at all under
+      `.abicheck.yml`'s scope.on_incomplete: block key, or no comparison completed at all under
       either setting; the four share the code and are told apart by the
       report's pre-fold severity.exit_code /
       contract_coverage_exit_contribution / analysis_assurance.status /

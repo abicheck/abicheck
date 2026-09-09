@@ -117,7 +117,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # record capacity. Line-scoped (not the whole multi-entry
                 # registry), so a live `--gcc-option` added to a different
                 # entry later still gets flagged (CodeRabbit review).
-                "docs/contribute/usecase-registry.yaml#L416",
+                "docs/contribute/usecase-registry.yaml#L428",
             }
         ),
     ),
@@ -420,7 +420,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 # registry's bundle_soname_skew entry. Line-scoped, not the
                 # whole multi-entry registry (CodeRabbit review) -- see the
                 # --gcc-* entry above for why.
-                "docs/contribute/usecase-registry.yaml#L383",
+                "docs/contribute/usecase-registry.yaml#L395",
                 # Same "replacing the removed ..." historical framing, in
                 # the canonical config-file reference's own bundle: section.
                 "reference/config-file.md",
@@ -438,6 +438,14 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--exit-code-scheme", "exit_code_scheme:"),
         frozenset(
             {
+                # This file's own "Exit codes"/task-routing sections and
+                # duplication-and-convergence-assessment notes name the
+                # retired flag/key in the identical "no manual override any
+                # more"/"deleted"/"back when that flag existed" historical
+                # framing every other allowed page below already uses --
+                # only reached by this sweep once it started scanning the
+                # repository root, not `docs/`, alongside every other page.
+                "AGENTS.md",
                 # Historical "what changed" migration note explaining the
                 # old scoped-severity fix, including that its manual pin
                 # was later removed.
@@ -467,11 +475,35 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "compare --on-incomplete-scope/--fail-on-removed-library/"
+        "--no-fail-on-removed-library/--dso-only/--include-private-dso"
+        " (Phase 7d, ADR-068 D5: demoted to CONFIG-only -- scope."
+        "on_incomplete/gate.fail_on_removed_library/release.dso_only/"
+        "release.include_private_dso in .abicheck.yml, no CLI override)",
+        (
+            "--on-incomplete-scope",
+            "--fail-on-removed-library",
+            "--no-fail-on-removed-library",
+            "--dso-only",
+            "--include-private-dso",
+        ),
+        frozenset(
+            {
+                # Each config-key section names "the former `compare ...`"
+                # flag it replaces, in its own historical-record capacity.
+                "reference/config-file.md",
+                # Historical migration note, line-pinned so a later, live
+                # mention added elsewhere in this file still gets flagged.
+                "reference/exit-codes.md#L99",
+            }
+        ),
+    ),
 )
 
 
 def retired_surface_scan_targets(
-    docs: Path, cases: Path, scenarios: Path, catalog: Path
+    docs: Path, cases: Path, scenarios: Path, catalog: Path, root: Path
 ) -> list[tuple[Path, str]]:
     """Every page the retired-surface sweep reads, with its allowlist key.
 
@@ -512,10 +544,14 @@ def retired_surface_scan_targets(
     spelling, invisible to this sweep the same way (Codex review, fresh
     evidence).
 
+    The root `README.md`/`AGENTS.md` are here too: both entirely outside
+    `docs/`, each kept advertising a retired flag after removal, invisible
+    above (Codex review, fresh evidence -- twice, one file each).
+
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
-    `catalog/ground_truth.json`), which cannot collide with a docs-relative
-    key, so an allowlist entry stays unambiguous about which tree it exempts.
+    `catalog/ground_truth.json`, `README.md`, `AGENTS.md`), which cannot
+    collide with a docs-relative key, so an allowlist entry stays unambiguous.
     """
     targets = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
     targets += [
@@ -531,6 +567,9 @@ def retired_surface_scan_targets(
     ground_truth = catalog / "ground_truth.json"
     if ground_truth.is_file():
         targets.append((ground_truth, "catalog/ground_truth.json"))
+    for name in ("README.md", "AGENTS.md"):
+        if (root / name).is_file():
+            targets.append((root / name, name))
     return targets
 
 

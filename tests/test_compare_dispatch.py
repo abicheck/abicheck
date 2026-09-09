@@ -1320,15 +1320,26 @@ class TestCompareDispatch:
         assert "--used-by" in msg
 
     def test_set_only_flags_warn_on_single_file(self, tmp_path: Path) -> None:
+        """Phase 7d (one-comparison-product.md §4.1): --dso-only is gone
+        from `compare`'s CLI -- release.dso_only in .abicheck.yml is its
+        only source now, still a no-op (with the identical warning) on a
+        single-file compare."""
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "old.json", old)
         new_f = _write_snap(tmp_path / "new.json", new)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("release:\n  dso_only: true\n")
         result = CliRunner().invoke(
-            main, ["compare", str(old_f), str(new_f), "--dso-only"]
+            main, ["compare", str(old_f), str(new_f), "--config", str(cfg)]
         )
-        # The flag is ignored (single-file path), with a warning on stderr.
+        # The setting is ignored (single-file path), with a warning on
+        # stderr naming the config key -- not the removed --dso-only flag,
+        # which would be a stale, uncopyable diagnostic (Codex review).
         assert result.exit_code == 4
-        assert "only apply to directory/package" in (result.stderr or "")
+        stderr = result.stderr or ""
+        assert "only apply to directory/package" in stderr
+        assert "release.dso_only" in stderr
+        assert "--dso-only" not in stderr
 
 
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────

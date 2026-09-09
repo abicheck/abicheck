@@ -229,8 +229,8 @@ dropped — an ordinary `required: true` check against `accepted-main`/
 `release-contract` resolves it the same as any other library from then on.
 
 A library that is *removed* from a release is the converse case, already
-covered on the compatibility-evaluation side by `compare`/`scan`'s
-`--fail-on-removed-library` (see the [exit-codes
+covered on the compatibility-evaluation side by `.abicheck.yml`'s
+`gate.fail_on_removed_library` key (see the [exit-codes
 reference](../reference/exit-codes.md)) rather than by the
 baseline-resolution layer this section covers.
 

@@ -125,14 +125,16 @@ class TestNotComparableMemberIsRecordedNotRaised:
         """Exit 16 outranks the completeness policy and `ERROR`, as in the
         fan-out; the document still carries the sibling and the record."""
         old, new = self._write_pair(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(f"scope:\n  on_incomplete: {policy}\n")
         code, out = _invoke(
             "compare",
             str(old),
             str(new),
             "--format",
             "json",
-            "--on-incomplete-scope",
-            policy,
+            "--config",
+            str(cfg),
         )
         assert code == 16, out
         doc = json.loads(out[out.index("{") :])

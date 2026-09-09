@@ -4118,7 +4118,10 @@ class TestPackageExtractorProtocol:
 
 class TestCompareReleaseDsoOnly:
     def test_dso_only_flag_accepted(self, tmp_path: Path) -> None:
-        """Verify --dso-only flag is accepted by compare-release."""
+        """Verify release.dso_only is accepted by `compare`'s directory/
+        package fan-out (Phase 7d, one-comparison-product.md §4.1: the
+        former --dso-only flag, gone from the CLI -- .abicheck.yml's
+        release.dso_only is its only source now)."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -4137,11 +4140,13 @@ class TestCompareReleaseDsoOnly:
         new_dir.mkdir()
         (old_dir / "libfoo.so.json").write_text(snapshot_to_json(snap))
         (new_dir / "libfoo.so.json").write_text(snapshot_to_json(snap))
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("release:\n  dso_only: true\n")
 
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_dir), str(new_dir),
-            "--format", "json", "--dso-only",
+            "--format", "json", "--config", str(cfg),
         ])
         # Flag accepted (no usage error); zero pairs is exit 1 `no_comparison_completed` (ADR-065 D7)
         assert result.exit_code == 1, f"Exit {result.exit_code}: {result.output}"

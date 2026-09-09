@@ -146,14 +146,17 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
+            # Phase 7d (one-comparison-product.md §4.1): --dso-only/
+            # --fail-on-removed-library/--include-private-dso/
+            # --on-incomplete-scope are gone from this group -- release.
+            # dso_only/gate.fail_on_removed_library/release.
+            # include_private_dso/scope.on_incomplete in .abicheck.yml are
+            # their only source now, no surviving CLI override.
             "name": "Release (directory/package inputs)",
             "options": [
-                "--dso-only",
                 "--output-dir",
-                "--fail-on-removed-library",
                 "--debug-info",
                 "--devel-pkg",
-                "--include-private-dso",
                 "--keep-extracted",
                 "--instantiation-manifest",
                 "--no-bundle-analysis",

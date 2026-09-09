@@ -1270,7 +1270,7 @@ def _retired_surface_scan_targets() -> list[tuple[Path, str]]:
     AI-readiness `file-size` gate's own 2000-line hard cap.
     """
     return retired_surfaces.retired_surface_scan_targets(
-        DOCS, CASES, SCENARIOS, CATALOG
+        DOCS, CASES, SCENARIOS, CATALOG, ROOT
     )
 
 

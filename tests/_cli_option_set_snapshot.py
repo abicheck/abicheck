@@ -39,6 +39,17 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # --frontend-context, --lang, --no-debuginfod, --no-dwarf-only,
         # --no-nostdinc, --nostdinc, --sysroot -- .abicheck.yml's compile:/
         # debug: blocks are their only source now.
+        # Phase 7d deleted 4 more, with no CLI spelling left at all:
+        # --dso-only (release.dso_only), --fail-on-removed-library/
+        # --no-fail-on-removed-library (gate.fail_on_removed_library),
+        # --include-private-dso (release.include_private_dso),
+        # --on-incomplete-scope (scope.on_incomplete).
+        # ADR-068 D4/Phase 5 collapsed --report-mode/--show-only/--demangle/
+        # --no-demangle/--explain-patterns into one repeatable --view option.
+        # --instantiation-manifest, --bundle-facts-out, and
+        # --bundle-facts-library-manifest stay CLI flags this phase (see
+        # frontends/cli/options/release.py and bundle_facts.py's own
+        # docstrings for why).
         "--abi3",
         "--audit-suppressions",
         "--bundle-facts-library-manifest",
@@ -53,10 +64,8 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--devel-pkg",
         "--diagnostic-comparison",
         "--dry-run",
-        "--dso-only",
         "--dump-manifest",
         "--env-matrix",
-        "--fail-on-removed-library",
         "--follow-deps",
         "--format",
         "--header",
@@ -64,15 +73,12 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--help-all",
         "--include",
         "--include-system-declarations",
-        "--include-private-dso",
         "--instantiation-manifest",
         "--keep-extracted",
         "--ld-library-path",
         "--max-json-object-nodes",
         "--no-baseline",
         "--no-bundle-analysis",
-        "--no-fail-on-removed-library",
-        "--on-incomplete-scope",
         "--no-scope-public-headers",
         "--new-variant",
         "--old-variant",

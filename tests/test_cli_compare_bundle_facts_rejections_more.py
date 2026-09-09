@@ -495,3 +495,94 @@ class TestConfigDebugPdbPathRejected:
 
         assert code == 64
         assert "debug:" in out
+
+
+class TestDsoOnlyRejectedForSingleFileNewInput:
+    """Codex review, fresh evidence: when NEW_INPUT resolves to neither a
+    directory nor a recognized package archive,
+    ``compare_release_against_bundle_facts()`` treats it as exactly one
+    library file (``new_files = [new_dir]``) with no ELF-type check at all
+    -- unlike the directory-walk case, where ``discover_shared_libraries()``'s
+    own ET_DYN/non-PIE filter already makes ``release.dso_only`` a no-op (the
+    driver behaves as DSO-only by construction regardless of the setting).
+    With a single explicit file there is no set of candidates to filter, so
+    ``release.dso_only``/``release.include_private_dso`` would silently have
+    no effect -- rejected instead."""
+
+    def test_dso_only_is_rejected_for_a_single_file_new_input(
+        self, tmp_path: Path
+    ) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        # A plain file, not a directory and not a recognized package
+        # archive -- exactly the operand shape this rejection targets.
+        new_file = tmp_path / "libreal.so"
+        new_file.write_text("not a real ELF file")
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("release:\n  dso_only: true\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_file),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "release.dso_only" in out
+        assert "single library file" in out
+
+    def test_include_private_dso_is_rejected_for_a_single_file_new_input(
+        self, tmp_path: Path
+    ) -> None:
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_file = tmp_path / "libreal.so"
+        new_file.write_text("not a real ELF file")
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("release:\n  include_private_dso: true\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_file),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "release.include_private_dso" in out
+
+    def test_dso_only_is_not_rejected_for_a_directory_new_input(
+        self, tmp_path: Path
+    ) -> None:
+        """Confirms the rejection is scoped to the single-file operand
+        shape -- an ordinary directory NEW_INPUT (where
+        ``discover_shared_libraries()``'s own ELF-type filter already
+        applies regardless of ``dso_only``) must not be newly rejected by
+        this fix."""
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("release:\n  dso_only: true\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(config_path),
+            "--format",
+            "json",
+        )
+
+        # Reaches a later, unrelated failure (no matching libraries) --
+        # never the new "single library file" rejection.
+        assert "single library file" not in out

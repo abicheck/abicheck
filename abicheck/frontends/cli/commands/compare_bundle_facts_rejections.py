@@ -50,7 +50,15 @@ from typing import Any
 import click
 
 
-def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = False) -> None:
+def reject_unsupported_options(
+    kwargs: dict[str, Any],
+    *,
+    new_is_stored: bool = False,
+    dso_only: bool = False,
+    include_private_dso: bool = False,
+    fail_on_removed: bool = False,
+    new_is_single_file: bool = False,
+) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
     OLD_INPUT has no channel to honor. See this module's own docstring for
     the design.
@@ -60,7 +68,25 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
     check below still applies (neither stored side has any of these
     channels), plus the NEW-side-specific extraction options rejected at
     the bottom of this function, which only make sense when NEW_INPUT is a
-    *live* directory/package (the default, ``False``, unchanged)."""
+    *live* directory/package (the default, ``False``, unchanged).
+
+    *dso_only*/*include_private_dso*/*fail_on_removed* (Phase 7d,
+    one-comparison-product.md §4.1) are the resolved ``release.dso_only``/
+    ``release.include_private_dso``/``gate.fail_on_removed_library``
+    ``.abicheck.yml`` values -- no longer CLI kwargs at all, so the caller
+    resolves them off the loaded project config and passes them in here,
+    rather than this (pure, kwargs-only) function loading config itself.
+
+    *new_is_single_file* (Codex review, fresh evidence): whether NEW_INPUT
+    resolves to neither a directory nor a recognized package archive --
+    ``compare_release_against_bundle_facts()`` then treats it as exactly one
+    library file (``new_files = [new_dir]``), bypassing
+    ``discover_shared_libraries()``'s own ELF-type filter (ET_DYN,
+    non-PIE) entirely, unlike the directory-walk case where that filter
+    already makes ``dso_only`` a no-op (the driver behaves as DSO-only by
+    construction). With a single explicit file there is no set of
+    candidates to filter/scope at all, so both settings would silently have
+    no effect -- rejected here rather than left to appear honored."""
     fmt = kwargs.get("fmt", "json")
     if fmt not in ("json", "markdown"):
         raise click.UsageError(
@@ -97,9 +123,9 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
                 "a stored-bundle-facts OLD_INPUT: only json/markdown are supported for a "
                 "stored-bundle-facts comparison."
             )
-    if kwargs.get("fail_on_removed"):
+    if fail_on_removed:
         raise click.UsageError(
-            "--fail-on-removed-library is not supported together with "
+            "gate.fail_on_removed_library is not supported together with "
             "a stored-bundle-facts OLD_INPUT: answering it would require re-scanning "
             "OLD_FACTS a second time, defeating the point of handing in an "
             "already-loaded facts document. Diff the stored facts' own "
@@ -553,11 +579,26 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "modulation ledger itself still appears in this comparison's "
             "own JSON output unconditionally."
         )
+    if new_is_single_file and (dso_only or include_private_dso):
+        raise click.UsageError(
+            "release.dso_only/release.include_private_dso are not supported "
+            "when NEW_INPUT resolves to a single library file rather than a "
+            "directory or package archive: compare_release_against_bundle_"
+            "facts() accepts a single-file NEW_INPUT as-is, with no ELF-type "
+            "check and no directory to scope -- these settings would "
+            "silently have no effect. Point NEW_INPUT at a directory or "
+            "package archive if you need executable filtering, or unset "
+            "these settings."
+        )
     if new_is_stored:
-        _reject_new_side_extraction_options_for_stored_pair(kwargs)
+        _reject_new_side_extraction_options_for_stored_pair(
+            kwargs, dso_only=dso_only, include_private_dso=include_private_dso
+        )
 
 
-def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) -> None:
+def _reject_new_side_extraction_options_for_stored_pair(
+    kwargs: dict[str, Any], *, dso_only: bool = False, include_private_dso: bool = False
+) -> None:
     """PR I stored/stored: the NEW-side-scoped mirror of every OLD-side
     extraction-only rejection above, applied once NEW_INPUT classifies as a
     stored BundleFacts document too -- ``compare_stored_bundle_facts_pair()``
@@ -607,13 +648,13 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
             "there is no live NEW-side library set to apply per-library "
             "header/include/compile overrides to."
         )
-    if kwargs.get("include_private_dso"):
+    if include_private_dso:
         raise click.UsageError(
-            "--include-private-dso is not supported when both OLD_INPUT "
+            "release.include_private_dso is not supported when both OLD_INPUT "
             "and NEW_INPUT are stored BundleFacts documents: neither side "
             "discovers shared libraries from a live directory/package."
         )
-    if kwargs.get("dso_only"):
+    if dso_only:
         # Codex review, PR #1060, round 7: the live release fan-out
         # (cli_compare_release.py's _prepare_compare_release_inputs)
         # explicitly filters both old/new library maps to skip executables
@@ -625,7 +666,7 @@ def _reject_new_side_extraction_options_for_stored_pair(kwargs: dict[str, Any]) 
         # rather than silently compare every intersecting entry including
         # ones a live --dso-only run would have skipped.
         raise click.UsageError(
-            "--dso-only is not supported when both OLD_INPUT and NEW_INPUT "
+            "release.dso_only is not supported when both OLD_INPUT and NEW_INPUT "
             "are stored BundleFacts documents: a persisted document carries "
             "no per-library executable/library distinction to filter by."
         )

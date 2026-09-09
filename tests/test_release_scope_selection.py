@@ -35,6 +35,7 @@ from test_release_scope_bundle import _lib, _removal_findings
 from test_release_scope_completeness import (
     _facts_file,
     _invoke_json,
+    _release_config,
     _write,
     _write_stored_package,
 )
@@ -195,12 +196,13 @@ class TestManifestScopedToRetainedMembers:
         )
         new = tmp_path / "new"
         _write(new, "libalgo.so.json", _lib("libalgo.so", exports=("algo_fn",)))
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
             "compare",
             str(old),
             str(new / "libalgo.so.json"),
-            "--on-incomplete-scope",
-            policy,
+            "--config",
+            str(cfg),
         )
         assert _manifest_findings(doc) == []
         assert doc["verdict"] != "BREAKING"
@@ -353,14 +355,16 @@ class TestDsoOnlyUnclassifiedIsFailed:
             old, {**libs, "libnoelf.so": _lib("libnoelf.so", exports=("x",))}
         )
         _write_stored_package(new, libs)
+        cfg = _release_config(
+            tmp_path, dso_only=True, fail_on_removed_library=True,
+            on_incomplete_scope=policy,
+        )
         code, doc = _invoke_json(
             "compare",
             str(old),
             str(new),
-            "--dso-only",
-            "--fail-on-removed-library",
-            "--on-incomplete-scope",
-            policy,
+            "--config",
+            str(cfg),
         )
         scope = doc["comparison_scope"]
         assert scope["new_inventory"]["completeness"] == "unproven"
@@ -391,12 +395,13 @@ class TestDsoOnlyUnclassifiedIsFailed:
             old, {**libs, "libgone.so": _lib("libgone.so", exports=("g",))}
         )
         _write_stored_package(new, libs)
+        cfg = _release_config(tmp_path, dso_only=True, fail_on_removed_library=True)
         code, doc = _invoke_json(
             "compare",
             str(old),
             str(new),
-            "--dso-only",
-            "--fail-on-removed-library",
+            "--config",
+            str(cfg),
         )
         scope = doc["comparison_scope"]
         assert scope["new_inventory"]["completeness"] == "proven"
@@ -450,12 +455,13 @@ class TestFailedMemberIsNeverAProvenRemoval:
             {**libs, "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1")},
         )
         _write_stored_package(new, libs)
+        cfg = _release_config(tmp_path, dso_only=True, fail_on_removed_library=True)
         code, doc = _invoke_json(
             "compare",
             str(old),
             str(new),
-            "--dso-only",
-            "--fail-on-removed-library",
+            "--config",
+            str(cfg),
         )
         scope = doc["comparison_scope"]
         assert scope["new_inventory"]["completeness"] == "proven"
@@ -599,8 +605,9 @@ class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
         old, new = self._packages(tmp_path)
         if degraded_side == "old":
             old, new = new, old
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert "func_removed" not in json.dumps(doc)
         assert doc["verdict"] != "BREAKING"
@@ -837,13 +844,13 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
                 "libnoelf.so": AbiSnapshot(library="libnoelf.so", version="1"),
             },
         )
+        cfg = _release_config(tmp_path, dso_only=True, on_incomplete_scope=policy)
         code, doc = _invoke_json(
             "compare",
             str(old),
             str(so),
-            "--dso-only",
-            "--on-incomplete-scope",
-            policy,
+            "--config",
+            str(cfg),
         )
         scope = doc["comparison_scope"]
         assert scope["selection"] == "current_artifact"
@@ -941,8 +948,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         new_dir = tmp_path / "new"
         _write(new_dir, "libok.so.json", libs["libok.so"])
         (new_dir / "libbad.so.json").write_bytes(damage)
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new_dir), "--on-incomplete-scope", policy
+            "compare", str(old), str(new_dir), "--config", str(cfg)
         )
         assert code == 4, doc
         assert doc["run_outcome"]["operational"] == "extraction_error"
@@ -982,8 +990,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         assert code == 0, doc
         assert doc["run_outcome"]["operational"] == "none"
         assert doc["extraction_failures"] == {}
+        cfg = _release_config(tmp_path, on_incomplete_scope="block", name="block.abicheck.yml")
         code, doc = _invoke_json(
-            "compare", str(old), str(new_dir), "--on-incomplete-scope", "block"
+            "compare", str(old), str(new_dir), "--config", str(cfg)
         )
         assert code == 1
 
@@ -1137,13 +1146,15 @@ class TestGhostMarkerInAStoredPackageIsRefused:
 
         from abicheck.cli import main
 
+        cfg = _release_config(tmp_path, fail_on_removed_library=True)
         result = CliRunner().invoke(
             main,
             [
                 "compare",
                 str(old),
                 str(new),
-                "--fail-on-removed-library",
+                "--config",
+                str(cfg),
                 "--format",
                 "json",
             ],

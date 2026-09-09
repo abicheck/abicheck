@@ -34,7 +34,7 @@ RESOLVE_MESSAGE="${RESOLVE_MESSAGE:-}"
 ANALYSIS_RAN="${ANALYSIS_RAN:-false}"
 ANALYSIS_REPORT_PATH="${ANALYSIS_REPORT_PATH:-}"
 # The nested root Action's own real process exit code (its `exit-code`
-# output) -- some of its gates (e.g. --fail-on-removed-library on a
+# output) -- some of its gates (e.g. gate.fail_on_removed_library on a
 # directory/package compare) take effect as a dedicated exit code that
 # overrides the persisted severity scheme rather than feeding into it, so
 # the report body alone can under-report the real outcome (Codex review).

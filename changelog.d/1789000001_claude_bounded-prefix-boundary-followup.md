@@ -11,11 +11,14 @@
   which introduced the past-budget branch this depends on.
 - **A prefix request larger than `bounded_decoded_prefix`'s raw-input cap is
   served rather than refused.** The cap bounds *amplification* — raw input
-  read per decoded byte asked for — not how much a caller may ask for, and
-  the escalation ceiling now says so (`max(n, cap)`). This restores the
-  behaviour that shipped before an intermediate attempt in this branch
-  clamped the first read to the cap outright: that clamp refused prefixes
-  the function could produce (a 1.3 MB stored snapshot asked for a 4 MiB
-  prefix returned `None` while `read_snapshot_bytes` returned all 3.9 MB of
-  it), and applied to the compressed path only, leaving the plain branch
-  inconsistent. No released version carried the clamp.
+  read per decoded byte asked for — not how much a caller may ask for. Above
+  the cap the ceiling is now the request plus one cap of escalation
+  headroom: sitting it exactly on the request leaves the escalation loop
+  nowhere to go, so a stream needing slightly more than `n` stored bytes to
+  yield `n` decoded ones (an incompressible payload, or `compresslevel=0`
+  gzip, where stored exceeds raw) answered `None` for a prefix it could
+  produce. At or below the cap nothing changes, which is every caller in the
+  tree. Two intermediate attempts in this branch got this wrong in opposite
+  directions — clamping the first read to the cap refused serveable requests,
+  and a ceiling of `max(n, cap)` removed the headroom — and neither was ever
+  released.

@@ -348,7 +348,10 @@ class TestSetOnlyFlagWarnings:
     @pytest.mark.parametrize(
         ("kwargs", "flag"),
         [
-            ({"dso_only": True}, "--dso-only"),
+            # Phase 7d demoted --dso-only to .abicheck.yml's release.dso_only
+            # -- the warning must name the surviving config key, not the
+            # removed flag (Codex review).
+            ({"dso_only": True}, "release.dso_only"),
             ({"output_dir": Path("out")}, "--output-dir"),
             ({"select": ("libfoo.so",)}, "--select"),
             ({"select_required": ("libfoo.so",)}, "--select-required"),
@@ -368,7 +371,7 @@ class TestSetOnlyFlagWarnings:
             capsys, dso_only=True, select=("a.so",), select_required=("b.so",)
         )
         assert out.count("Warning:") == 1, out
-        for flag in ("--dso-only", "--select", "--select-required"):
+        for flag in ("release.dso_only", "--select", "--select-required"):
             assert flag in out
 
     def test_nothing_is_emitted_when_no_set_flag_was_given(

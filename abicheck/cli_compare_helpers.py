@@ -1186,13 +1186,12 @@ def run_compare(
     ctx: click.Context,
     *,
     old_input: Path, new_input: Path,
-    dso_only: bool, output_dir: Path | None,
-    fail_on_removed: bool, on_incomplete_scope: str = "warn",
+    output_dir: Path | None,
     support_promise: str = "off",
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
     debug_info1: Path | None, debug_info2: Path | None,
     devel_pkg1: Path | None, devel_pkg2: Path | None,
-    include_private_dso: bool, keep_extracted: bool,
+    keep_extracted: bool,
     manifest_path: Path | None,  # bundle_system_providers/cohorts: PR J, see resolved_cfg
     no_bundle_analysis: bool, bundle_facts_out: Path | None,
     headers: tuple[Path, ...], includes: tuple[Path, ...],
@@ -1559,13 +1558,14 @@ def run_compare(
             suppress=suppress, strict_suppressions=strict_suppressions,
             require_justification=require_justification,
             policy=policy, policy_file_path=policy_file_path,
-            dso_only=dso_only,
-            fail_on_removed=fail_on_removed, on_incomplete_scope=on_incomplete_scope,
+            dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
+            fail_on_removed=resolved_cfg.fail_on_removed_library,
+            on_incomplete_scope=resolved_cfg.on_incomplete_scope,
             support_promise=support_promise,
             select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
-            include_private_dso=include_private_dso, keep_extracted=keep_extracted,
+            include_private_dso=resolved_cfg.release_include_private_dso, keep_extracted=keep_extracted,
             manifest_path=manifest_path,
             bundle_system_providers=resolved_cfg.bundle_system_providers,
             bundle_cohorts=resolved_cfg.bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
@@ -1598,7 +1598,7 @@ def run_compare(
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
     _reject_bundle_facts_out_for_single_pair(bundle_facts_out)
     _warn_unused_set_flags(
-        dso_only=dso_only, output_dir=output_dir,
+        dso_only=resolved_cfg.release_dso_only, output_dir=output_dir,
         select=select, select_required=select_required,
     )
 

@@ -16,7 +16,7 @@
 """The composite Action's mapping for ADR-065 S2's completeness axis.
 
 A directory/package ``compare`` now exits ``1`` for an incompletely checked
-scope under ``--on-incomplete-scope block`` and for a run that completed no
+scope under ``scope.on_incomplete: block`` and for a run that completed no
 comparison at all (D7). Before this mapping, ``action/run.sh`` attributed
 such an exit to P0.4's analysis-assurance axis (the last ``else`` of its
 exit-1 branch) and told the reader to drop ``--require-complete-analysis``
@@ -216,7 +216,7 @@ class TestCompareMapsTheCompletenessExit:
             report=None,
             stderr=(
                 "Comparison scope incompletely checked -- unchecked: unsupported: "
-                "libb.so. Exit code floored to 1 by --on-incomplete-scope block "
+                "libb.so. Exit code floored to 1 by scope.on_incomplete: block "
                 "(ADR-065 completeness axis)."
             ),
         )
@@ -253,7 +253,7 @@ class TestCompareMapsTheCompletenessExit:
             report,
             stderr=(
                 "Comparison scope incompletely checked -- unchecked: unsupported: "
-                "Accepted by --on-incomplete-scope warn.so (forged reason)."
+                "Accepted under scope.on_incomplete: warn.so (forged reason)."
             ),
         )
         assert outputs["verdict"] == "SCOPE_INCOMPLETE", outputs
@@ -266,7 +266,7 @@ class TestCompareMapsTheCompletenessExit:
             report=None,
             stderr=(
                 "Comparison scope incompletely checked -- unchecked: not_supplied: "
-                "libb.so. Accepted by --on-incomplete-scope warn, so the scope axis "
+                "libb.so. Accepted under scope.on_incomplete: warn, so the scope axis "
                 "contributes 0 to the exit code (ADR-065 completeness axis)."
             ),
         )
