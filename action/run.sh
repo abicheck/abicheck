@@ -1669,7 +1669,7 @@ _extra_args_has_scan_only_flag() {
       --demangle | --no-demangle | --dump-manifest | --post-manifest | \
       --instantiation-manifest | --reconcile-build-context | \
       --explain-patterns | --audit-suppressions | --max-json-object-nodes | \
-      --name-only | --output-dir | --require-complete-analysis | --version)
+      --output-dir | --version)
       return 0
       ;;
     esac

@@ -551,7 +551,7 @@ class TestResolvedExcludedFromTheGate:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
-        assert result.verdict != Verdict.COMPATIBLE
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_introduced_leak_still_gates_normally(self) -> None:
         # Negative control, the other direction.
@@ -563,7 +563,7 @@ class TestResolvedExcludedFromTheGate:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.INTRODUCED
-        assert result.verdict != Verdict.COMPATIBLE
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 def _phl_isolated_snapshot_with_addition(*, leaked: bool) -> AbiSnapshot:
@@ -633,7 +633,7 @@ class TestResolvedExcludedFromEveryVerdictRecompute:
         leaks = [c for c in result.changes if c.kind == ChangeKind.PRIVATE_HEADER_LEAK]
         assert len(leaks) == 1
         assert leaks[0].cross_source_evolution == CrossSourceEvolution.PERSISTENT
-        assert result.verdict != Verdict.COMPATIBLE
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 # --------------------------------------------------------------------------- #

@@ -54,8 +54,8 @@ uses, which would be exactly the parallel-policy duplication this ledger
 exists to avoid (CodeRabbit review, PR #1172).
 
 Re-export only, deliberately: ``policy/disposition_ledger.py``/
-``disposition_close.py``/``policy/rule_provenance.py`` remain the modules to
-read and to change.
+``disposition_close.py``/``policy/disposition_types.py``/
+``policy/rule_provenance.py`` remain the modules to read and to change.
 """
 
 from __future__ import annotations
@@ -66,9 +66,9 @@ from ..policy.disposition_close import (
     override_suppressed_change as override_suppressed_change,
 )
 from ..policy.disposition_ledger import (
-    Disposition as Disposition,
     record_suppressed_change as record_suppressed_change,
 )
+from ..policy.disposition_types import Disposition as Disposition
 from ..policy.rule_provenance import RuleProvenance as RuleProvenance
 
 __all__ = [

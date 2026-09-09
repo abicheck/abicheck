@@ -632,9 +632,7 @@ class TestCompareOnlyExtraArgsFlagsStayOnLegacyCli:
             "--explain-patterns",
             "--audit-suppressions",
             "--max-json-object-nodes 1000",
-            "--name-only",
             "--output-dir out/",
-            "--require-complete-analysis",
             "--version old=1.0",
         ],
     )
@@ -648,15 +646,30 @@ class TestCompareOnlyExtraArgsFlagsStayOnLegacyCli:
         )
         assert cmd[1] == "scan"
 
-    def test_no_compare_only_flag_still_routes_to_compare(self) -> None:
-        # Negative control: this predicate change must not catch every
-        # extra-args flag, only the compare-only ones above. `--severity-
-        # preset` is genuinely shared by both `scan` and `compare`.
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            # Genuinely shared by both `scan` and `compare` -- must not be
+            # caught by this predicate, only the compare-only flags above.
+            "--severity-preset strict",
+            # CodeRabbit review, round 15, fresh evidence: this one was
+            # wrongly included in the compare-only case arm above (a false
+            # positive from scraping `--help-all`'s wrapped prose instead of
+            # each command's real Click option table) -- it is defined on
+            # both `scan` (cli_scan.py) and `compare`
+            # (frontends/cli/commands/compare.py), and `cli_scan_baseline.py`
+            # already forwards it from the dedicated
+            # `INPUT_REQUIRE_COMPLETE_ANALYSIS` Action input for the legacy
+            # path too, so it needs no special-casing here at all.
+            "--require-complete-analysis",
+        ],
+    )
+    def test_no_compare_only_flag_still_routes_to_compare(self, flag: str) -> None:
         cmd = _run_cmd(
             {
                 **_BASE_INPUTS,
                 "INPUT_DEPTH": "headers",
-                "INPUT_EXTRA_ARGS": "--severity-preset strict",
+                "INPUT_EXTRA_ARGS": flag,
             }
         )
         assert cmd[1] == "compare"
