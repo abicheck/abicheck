@@ -17,5 +17,6 @@ it should read in CHANGELOG.md. Delete the other sections.
   already carried (schema 2.31), even though the release's own aggregate
   disposition-audit ledger tallied the reclassification correctly. Fixed by
   routing all three finding-dict builders through one shared helper
-  (`reporter.release_finding_entry`).
+  (`reporter.release_finding_entry`). The release's Markdown report gains
+  the same disclosure (`reporter.release_finding_detail_lines`).
 

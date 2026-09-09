@@ -237,3 +237,11 @@ def test_every_finding_dict_builder_agrees_on_reclassified_by(
 
     release_dicts = _release_finding_dicts(diff, None, None)
     assert release_dicts[0]["reclassified_by"] == expected
+
+    # 4. The release fan-out's Markdown rendering of that same dict (Codex
+    # review, PR #1176 follow-up): fixing the JSON dict alone left the
+    # Markdown report discarding the field a second time.
+    from abicheck.reporter import release_finding_detail_lines
+
+    md_lines = release_finding_detail_lines(release_dicts[0])
+    assert any(expected in line for line in md_lines)

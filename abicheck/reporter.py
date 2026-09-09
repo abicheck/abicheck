@@ -1420,6 +1420,24 @@ def release_finding_entry(
     return entry
 
 
+def release_finding_detail_lines(entry: dict[str, object]) -> list[str]:
+    """Markdown detail bullets (``description``/``reclassified_by``) for one
+    :func:`release_finding_entry` dict -- the Markdown counterpart of that
+    JSON entry, for ``cli_compare_receipt._release_md_library_findings``
+    (Codex review, PR #1176 follow-up: the release Markdown report rendered
+    kind/symbol only, discarding ``reclassified_by`` even after the JSON
+    projection above gained it).
+    """
+    lines: list[str] = []
+    description = entry.get("description")
+    if description:
+        lines.append(f"  - {description}")
+    reclassified_by = entry.get("reclassified_by")
+    if reclassified_by:
+        lines.append(f"  - _Reclassified by:_ {reclassified_by}")
+    return lines
+
+
 def _change_to_dict(
     c: object,
     *,
