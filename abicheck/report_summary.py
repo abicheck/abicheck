@@ -71,7 +71,21 @@ class ReportSummary:
     breaking: int
     source_breaks: int
     risk_count: int
+    #: All ``COMPATIBLE``-verdict changes, additions and quality issues alike
+    #: -- the historical, back-compat meaning of this field (mirrors
+    #: ``cli_compare_release_pairwise.py``'s per-library
+    #: ``"compatible_additions"`` entry). A caller wanting *only* real API
+    #: growth should subtract :attr:`quality_issues`, the same derivation
+    #: ``pr_comment.py``'s ``_per_library_counts`` already performs for the
+    #: release path -- do not read this field alone as "additions occurred".
     compatible_additions: int
+    #: The subset of :attr:`compatible_additions` that is not a genuine
+    #: addition (``ADDITION_KINDS``) -- e.g. ``public_surface_shrank``,
+    #: which is ``COMPATIBLE`` but reports a *decrease*. Exists so a
+    #: consumer reading ``compatible_additions`` alone cannot mistake a
+    #: quality/informational finding (net surface shrink included) for real
+    #: API growth. Additive field; see ``report_schema_version`` 3.13.
+    quality_issues: int
     total_changes: int
     binary_compatibility_pct: float
     affected_pct: float
@@ -162,11 +176,43 @@ def build_summary(result: DiffResult) -> ReportSummary:
         kind_sets=result._effective_kind_sets(),
         policy_file=result.policy_file,
     )
+    compatible = result.compatible
+    # Codex review, fresh evidence: a bare `c.kind not in ADDITION_KINDS`
+    # test reads the finding's *raw* kind, not its *effective* category --
+    # a per-finding modulation (a `reclassify:` rule, or an
+    # `effective_verdict` override) can move a finding into `compatible`
+    # (COMPATIBLE effective verdict) whose raw kind disagrees with what
+    # that modulation actually decided. `classify_effective_change` is the
+    # canonical per-finding category resolver (`policy/severity.py`,
+    # already the source `report.finding`'s own ADDITION/QUALITY_ISSUES
+    # split goes through) -- reusing it here keeps this summary count and
+    # the severity/gate categorization agreeing on every finding, not just
+    # the common case a static kind-set membership test happens to get
+    # right. `verdict=Verdict.COMPATIBLE` is passed through since every `c`
+    # here already satisfied that exact check to land in `compatible`,
+    # avoiding a second `effective_verdict_for_change` resolution per
+    # finding (`classify_effective_change`'s own optimization parameter).
+    from .checker_policy import Verdict
+    from .severity import IssueCategory, classify_effective_change
+
+    quality_issues = sum(
+        1
+        for c in compatible
+        if classify_effective_change(
+            c,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+            verdict=Verdict.COMPATIBLE,
+        )
+        == IssueCategory.QUALITY_ISSUES
+    )
     return ReportSummary(
         breaking=len(result.breaking),
         source_breaks=len(result.source_breaks),
         risk_count=len(result.risk),
-        compatible_additions=len(result.compatible),
+        compatible_additions=len(compatible),
+        quality_issues=quality_issues,
         total_changes=len(result.changes),
         binary_compatibility_pct=metrics.binary_compatibility_pct,
         affected_pct=metrics.affected_pct,

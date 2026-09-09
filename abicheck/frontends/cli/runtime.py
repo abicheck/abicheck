@@ -559,6 +559,7 @@ def _finalize_compare_result(
     show_redundant: bool, show_filtered: bool,
     severity_config: SeverityConfig | None = None,
     contract_evaluation: bool = False,
+    old_snapshot: AbiSnapshot | None = None, new_snapshot: AbiSnapshot | None = None,
 ) -> None:
     """Attach metadata and emit redundancy/filter/suppression output.
 
@@ -575,6 +576,12 @@ def _finalize_compare_result(
     ``--used-by``/``--required-symbol`` scoping (``used_by_old_input``/
     ``used_by_new_input``) -- reuse that pair here rather than threading a
     third copy of the same resolution through.
+
+    ``old_snapshot``/``new_snapshot``, when given, feed Item 4's snapshot-
+    content-digest fallback (Codex review, fresh evidence: this native CLI
+    path was missing it entirely, unlike the typed-API path's
+    ``service_compare_pipeline.classify_compare_pair``) -- only consulted
+    when neither side got real metadata above.
     """
     # Routed through `workflows.extraction`/`workflows.gate`, not
     # `binary_utils`/`confidence` directly, and not through `service` --
@@ -593,7 +600,18 @@ def _finalize_compare_result(
 
     result.old_metadata = _collect_metadata(_hashable_path(metadata_old_input))
     result.new_metadata = _collect_metadata(_hashable_path(metadata_new_input))
-    note_if_same_binary_compared(result)
+    old_digest = new_digest = None
+    if (
+        result.old_metadata is None and result.new_metadata is None
+        and old_snapshot is not None and new_snapshot is not None
+    ):
+        from ...workflows.gate import snapshot_identity_digest
+
+        old_digest = snapshot_identity_digest(old_snapshot)
+        new_digest = snapshot_identity_digest(new_snapshot)
+    note_if_same_binary_compared(
+        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
+    )
 
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)

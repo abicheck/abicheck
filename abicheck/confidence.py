@@ -281,7 +281,12 @@ _compute_confidence = compute_confidence
 SAME_BINARY_WARNING_MARKER = "byte-identical"
 
 
-def note_if_same_binary_compared(result: DiffResult) -> None:
+def note_if_same_binary_compared(
+    result: DiffResult,
+    *,
+    old_snapshot_digest: str | None = None,
+    new_snapshot_digest: str | None = None,
+) -> None:
     """Append an L0 coverage warning when *result*'s two compared binaries
     are byte-for-byte identical.
 
@@ -305,9 +310,31 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
     is the only signal available that is unconditionally exact regardless
     of binary format (ELF/PE/Mach-O) or whether the snapshot carries ELF
     metadata at all, and it needs no new model field or extraction work.
-    A no-op whenever either side's metadata is absent (a pure two-snapshot
-    Python-API comparison never populates ``old_metadata``/
-    ``new_metadata`` at all) or the two digests differ.
+
+    *old_snapshot_digest*/*new_snapshot_digest* are the fallback signal for
+    a run with no live binary at all -- a snapshot-input comparison
+    (``--old-snapshot``/``--new-snapshot``) never populates
+    ``old_metadata``/``new_metadata`` (``collect_metadata`` deliberately
+    returns ``None`` for a JSON/text snapshot path -- its own docstring:
+    "not a binary, so a same-binary comparison must never claim it"), so
+    without this fallback the guard could never fire on that pattern even
+    when the two snapshots are content-identical. A caller with real
+    ``AbiSnapshot`` objects in scope (``service_compare_pipeline.
+    classify_compare_pair``) passes a canonical content digest of each
+    (e.g. a sha256 of ``serialization.snapshot_to_json``); this function
+    only ever compares the two strings it is given -- it never computes one
+    itself, keeping this module's own "depends only on the snapshot model
+    and the policy enums" dependency-direction invariant (module docstring)
+    intact. Consulted only when ``old_metadata``/``new_metadata`` did not
+    already resolve an answer, so a run with a real binary on either side
+    keeps the stronger, binary-level claim.
+
+    A no-op whenever neither signal (metadata sha256, snapshot digest) is
+    available on both sides, or the two available digests differ -- the
+    "weaker evidence narrows conclusions" rule (root ``AGENTS.md``): a run
+    genuinely built from two hand-loaded snapshots with no provenance at
+    all (a pure two-snapshot Python-API comparison, per the caller not
+    supplying a digest) still gets no claim either way.
 
     Idempotent and additive: appends to the existing
     ``DiffResult.coverage_warnings`` list already surfaced by every
@@ -315,40 +342,73 @@ def note_if_same_binary_compared(result: DiffResult) -> None:
     field on the ADR-061 no-growth-baselined ``DiffResult``/``checker.py``.
     """
     old_meta, new_meta = result.old_metadata, result.new_metadata
-    if old_meta is None or new_meta is None:
-        return
-    if old_meta.sha256 != new_meta.sha256:
-        return
-    # The two *binaries* being byte-identical says nothing about whether a
-    # real change could still be caught: a comparison that also analyzed
-    # header/AST evidence (e.g. --old-header/--new-header, --build-info,
-    # or --sources pointing at genuinely different content than what
-    # produced this identical .so/.dll/.dylib) can still detect a real
-    # API/source-level difference even though the binary content is the
-    # same -- so the stronger "this comparison cannot detect a change"
-    # claim is only true when no such evidence was in play (Codex review,
-    # fresh evidence: the original wording overclaimed for exactly this
-    # case).
-    # Also true whenever the comparison already produced a real finding:
-    # L3-L5 build/source-pack evidence can detect and report a change
-    # without ever setting "header" in evidence_tiers (that list only
-    # reflects snapshot-level elf/dwarf/header/pe/macho facts), so a
-    # non-empty result.changes directly contradicts "cannot detect a
-    # change" regardless of which tier produced it (Codex review, fresh
-    # evidence).
-    header_evidence_used = "header" in result.evidence_tiers or bool(result.changes)
-    if header_evidence_used:
-        detection_note = (
-            "any ABI/API difference this run could still catch would have "
-            "to come from the header/build evidence supplied alongside "
-            "these binaries, not from the binaries themselves"
+    if old_meta is not None and new_meta is not None:
+        if old_meta.sha256 != new_meta.sha256:
+            return
+        digest_prefix = old_meta.sha256[:12]
+        # The two *binaries* being byte-identical says nothing about whether
+        # a real change could still be caught: a comparison that also
+        # analyzed header/AST evidence (e.g. --old-header/--new-header,
+        # --build-info, or --sources pointing at genuinely different content
+        # than what produced this identical .so/.dll/.dylib) can still
+        # detect a real API/source-level difference even though the binary
+        # content is the same -- so the stronger "this comparison cannot
+        # detect a change" claim is only true when no such evidence was in
+        # play (Codex review, fresh evidence: the original wording
+        # overclaimed for exactly this case).
+        # Also true whenever the comparison already produced a real
+        # finding: L3-L5 build/source-pack evidence can detect and report a
+        # change without ever setting "header" in evidence_tiers (that list
+        # only reflects snapshot-level elf/dwarf/header/pe/macho facts), so
+        # a non-empty result.changes directly contradicts "cannot detect a
+        # change" regardless of which tier produced it (Codex review, fresh
+        # evidence).
+        if "header" in result.evidence_tiers or bool(result.changes):
+            detection_note = (
+                "any ABI/API difference this run could still catch would "
+                "have to come from the header/build evidence supplied "
+                "alongside these binaries, not from the binaries themselves"
+            )
+        else:
+            detection_note = (
+                "this comparison cannot detect a change even if one was "
+                "intended -- verify the correct build artifacts were provided"
+            )
+        result.coverage_warnings.append(
+            f"old and new binaries are {SAME_BINARY_WARNING_MARKER} "
+            f"(sha256 {digest_prefix}...); {detection_note}"
         )
-    else:
-        detection_note = (
-            "this comparison cannot detect a change even if one was "
-            "intended -- verify the correct build artifacts were provided"
+    elif old_snapshot_digest is not None and new_snapshot_digest is not None:
+        if old_snapshot_digest != new_snapshot_digest:
+            return
+        # A snapshot-content match is a claim about the *canonical
+        # serialization* (every fact the snapshot captures -- header/build
+        # facts included, since those are already fields on the snapshot
+        # object being serialized), not about the original snapshot files'
+        # raw bytes, and not about any underlying binary at all -- neither
+        # exists to be identical here. So this branch deliberately doesn't
+        # share the binaries-only wording above (Codex review, fresh
+        # evidence): "header evidence supplied alongside these binaries"
+        # would both invent binaries that don't exist and imply separate,
+        # un-hashed header evidence that could still differ -- when in
+        # fact any header/build facts are already part of what matched.
+        # Only evidence entirely outside the snapshot's own captured
+        # fields (reflected by a non-empty result.changes -- a real
+        # finding already surfaced from such evidence) leaves room for a
+        # detectable difference.
+        if bool(result.changes):
+            detection_note = (
+                "any ABI/API difference this run could still catch would "
+                "have to come from evidence outside these snapshots' own "
+                "captured facts, not from the snapshot content itself"
+            )
+        else:
+            detection_note = (
+                "this comparison cannot detect a change even if one was "
+                "intended -- verify the correct snapshot files were provided"
+            )
+        result.coverage_warnings.append(
+            f"old and new abi snapshots' canonical serialization is "
+            f"{SAME_BINARY_WARNING_MARKER} (sha256 "
+            f"{old_snapshot_digest[:12]}...); {detection_note}"
         )
-    result.coverage_warnings.append(
-        f"old and new binaries are {SAME_BINARY_WARNING_MARKER} (sha256 "
-        f"{old_meta.sha256[:12]}...); {detection_note}"
-    )

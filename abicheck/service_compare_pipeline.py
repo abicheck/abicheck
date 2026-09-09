@@ -633,7 +633,20 @@ def classify_compare_pair(
     result.new_metadata = service.collect_metadata(
         _hashable_path(required_path(request.new, "new"))
     )
-    note_if_same_binary_compared(result)
+    # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot
+    # path, so a snapshot-input compare left note_if_same_binary_compared
+    # unable to fire on content-identical snapshots. Digest fallback below
+    # requires *both* sides missing metadata (`and`, not `or`): a mixed
+    # live-binary-vs-snapshot compare has one side absent by design.
+    old_digest = new_digest = None
+    if result.old_metadata is None and result.new_metadata is None:
+        from .serialization import snapshot_content_digest
+
+        old_digest = snapshot_content_digest(old)
+        new_digest = snapshot_content_digest(new)
+    note_if_same_binary_compared(
+        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
+    )
 
     # P0.4 follow-up (P2 review, discussion_r3787839902): stamps
     # `DiffResult.requested_depth` for `analysis_assurance` below, preferring

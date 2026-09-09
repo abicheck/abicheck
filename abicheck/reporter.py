@@ -200,6 +200,7 @@ def to_stat_json(
             "source_breaks": summary.source_breaks,
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
+            "quality_issues": summary.quality_issues,
             "total_changes": summary.total_changes,
             "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
             "affected_pct": round(summary.affected_pct, 1),
@@ -538,6 +539,7 @@ def _to_json_leaf(
             "source_breaks": summary.source_breaks,
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
+            "quality_issues": summary.quality_issues,
             "total_changes": summary.total_changes,
         },
         "leaf_changes": leaf_changes_list,
@@ -895,6 +897,7 @@ def _build_json_base(result: DiffResult) -> dict[str, object]:
         "source_breaks": summary.source_breaks,
         "risk_changes": summary.risk_count,
         "compatible_additions": summary.compatible_additions,
+        "quality_issues": summary.quality_issues,
         "total_changes": summary.total_changes,
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
@@ -1018,6 +1021,14 @@ def _suppressed_change_entry(
         entry["impact_assessment"] = assessment.to_dict()
     if getattr(c, "symbol_binding", None):
         entry["symbol_binding"] = c.symbol_binding
+    # Codex review, fresh evidence: an elf_only-visibility removal's
+    # demangled_symbol (schema 3.14) reaches every other machine-format
+    # projection of this same Change -- a suppressed one must not lose it
+    # just because it's rendered through this narrower audit-entry shape
+    # instead of _change_to_dict.
+    demangled_symbol = getattr(c, "demangled_symbol", None)
+    if demangled_symbol:
+        entry["demangled_symbol"] = demangled_symbol
     # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
     # display/gate decision, not a reason to erase the contract-relevance
     # decision checker._apply_contract_evaluation_shadow already stamped on
@@ -1519,6 +1530,16 @@ def _change_to_dict(
     }
     if reclassified_by:
         d["reclassified_by"] = reclassified_by
+    # Codex review, item 8: a human-readable demangling for a finding whose
+    # old-side declaration is export-table-only (Visibility.ELF_ONLY) --
+    # `symbol`/`old_value` stay the raw mangled spelling deliberately (this
+    # is the "machine format" branch demangle.demangle_text's own docstring
+    # describes), but a reader gets a readable name too instead of having
+    # to demangle `symbol` themselves. None (omitted) for every ordinary,
+    # already-demangled finding.
+    demangled_symbol = getattr(c, "demangled_symbol", None)
+    if demangled_symbol:
+        d["demangled_symbol"] = demangled_symbol
     if isinstance(kind, ChangeKind):
         d["operation"] = operation_for_kind(kind.value)
         d["finding_id"] = _finding_id(c)
@@ -1542,9 +1563,12 @@ def _change_to_dict(
             d["reviewer_action"] = reviewer_action
     if evidence_status is not None:
         d["evidence_status"] = evidence_status.value
-    # Impact explanation
+    # Impact explanation. Finding C(ii): pass the already-computed
+    # evidence_status so a downgraded (UNATTRIBUTED) finding's impact text
+    # gets its evidence caveat rather than the same unconditional claim an
+    # ARTIFACT_PROVEN finding of the same kind carries.
     if kind:
-        impact = impact_for(kind)
+        impact = impact_for(kind, evidence_status)
         if impact:
             d["impact"] = impact
     d.update(_change_annotation_fields(c))

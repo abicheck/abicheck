@@ -513,9 +513,62 @@ def policy_for(kind: ChangeKind) -> PolicyEntry:
     return POLICY_REGISTRY.get(kind, PolicyEntry(Verdict.BREAKING, "error", kind.value))
 
 
-def impact_for(kind: ChangeKind) -> str:
-    """Return human-readable impact explanation for a ChangeKind, or empty string."""
-    return IMPACT_TEXT.get(kind, "")
+#: Appended to a kind's static ``impact`` text when the finding's own
+#: ``EvidenceStatus`` is ``UNATTRIBUTED`` (Finding C(ii)) -- several
+#: ``BREAKING_KINDS`` impact strings assert an unconditional consequence
+#: ("dynamic linker will refuse to load or crash", "heap/stack corruption")
+#: that is only true when the run's evidence actually backs the finding
+#: (see :func:`evidence_status_for_result`). ``UNATTRIBUTED`` covers two
+#: distinct, evidence-type-varying cases -- an ``"elf"``-tiered run that
+#: examined a real symbol table but found no matching entry for *this*
+#: finding (``_ELF_BINDING_STAMPED_KINDS``), and a run with no binary
+#: evidence at all, of *any* kind, not only symbol-table-backed ones (a
+#: header-only ``type_size_changed``/``enum_member_value_changed`` gets
+#: the identical status per ``evidence_status_for_result``'s first
+#: branch). Deliberately kind-agnostic, evidence-type-agnostic wording --
+#: neither "no matching symbol-table entry" (wrong for a struct-layout or
+#: DWARF-only fact, confirmed by golden-output regression: a header-only
+#: type_size_changed carried it too) nor "no search happened" (misstates
+#: the elf-tiered case) is accurate for both cases at once (Codex review).
+_UNATTRIBUTED_IMPACT_CAVEAT = (
+    " (Evidence note: this run's available evidence does not fully confirm "
+    "this specific finding -- treat the consequence above as plausible, "
+    "not confirmed.)"
+)
+
+
+def impact_for(kind: ChangeKind, evidence_status: EvidenceStatus | None = None) -> str:
+    """Return human-readable impact explanation for a ChangeKind, or empty string.
+
+    *evidence_status*, when given as :attr:`EvidenceStatus.UNATTRIBUTED`,
+    appends :data:`_UNATTRIBUTED_IMPACT_CAVEAT` -- see that constant's
+    docstring. Optional and keyword-compatible with every pre-existing
+    call site: omitting it (or passing ``None``/any other status) leaves
+    the returned text byte-identical to before this parameter existed.
+    """
+    text = IMPACT_TEXT.get(kind, "")
+    if text and evidence_status is EvidenceStatus.UNATTRIBUTED:
+        text += _UNATTRIBUTED_IMPACT_CAVEAT
+    return text
+
+
+def impact_caveat_for(evidence_status: EvidenceStatus | None) -> str:
+    """Return the standalone evidence caveat sentence, or ``""``.
+
+    A thin public accessor over :data:`_UNATTRIBUTED_IMPACT_CAVEAT` for a
+    caller that cannot embed a full :func:`impact_for` string into its own
+    text (SARIF's per-result ``message.text``, whose matching rule-level
+    ``fullDescription`` is shared across every finding of the same
+    ``ChangeKind`` and so cannot itself carry a per-finding caveat).
+    Returns ``""`` for any status other than
+    :attr:`EvidenceStatus.UNATTRIBUTED`, so an unconditional call site stays
+    a no-op for every other status -- including ``None``.
+    """
+    return (
+        _UNATTRIBUTED_IMPACT_CAVEAT.strip()
+        if evidence_status is EvidenceStatus.UNATTRIBUTED
+        else ""
+    )
 
 
 def policy_registry_markdown() -> str:
@@ -726,6 +779,16 @@ def evidence_status_for_change(change: HasKind) -> EvidenceStatus | None:
 #: ``symbol_binding`` regardless of how solid their evidence is, so treating
 #: an unset ``symbol_binding`` as suspect for every ``BREAKING_KINDS`` kind
 #: would misclassify those as unattributed too.
+#:
+#: ``SYMBOL_RENAMED_BATCH`` (Codex review, Finding C(i)) is a rollup of
+#: several removed/added pairs rather than one detector call, but
+#: ``diff_symbols_renames.emit_prefix_batch_rename``/
+#: ``compare.namespace_move.emit_namespace_move_batches`` stamp the same
+#: field with the aggregated, weakest-link answer: truthy only when *every*
+#: constituent pair's OLD-side declaration carries a real observed ELF
+#: binding. Membership here is what makes the per-finding check below apply
+#: that aggregation the same way it applies a single ``FUNC_REMOVED``'s own
+#: binding.
 _ELF_BINDING_STAMPED_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_REMOVED,
@@ -733,6 +796,7 @@ _ELF_BINDING_STAMPED_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.VAR_REMOVED,
         ChangeKind.FUNC_VISIBILITY_CHANGED,
         ChangeKind.FUNC_DELETED_ELF_FALLBACK,
+        ChangeKind.SYMBOL_RENAMED_BATCH,
     }
 )
 

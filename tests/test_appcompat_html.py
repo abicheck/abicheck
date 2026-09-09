@@ -182,6 +182,59 @@ def test_html_shows_breaking_for_app() -> None:
     assert "removed_func" in out
 
 
+def test_html_irrelevant_table_carries_the_unattributed_evidence_caveat() -> None:
+    """Codex review, fresh evidence: appcompat's own irrelevant-for-app
+    changes table called `_changes_table` with no `evidence_tiers` at all,
+    so an unattributed finding from an ELF-plus-header comparison with no
+    binary evidence for *this specific* finding rendered the unconditional
+    impact text -- unlike the native and ABICC HTML renderers, which
+    already thread `evidence_tiers` through. `["header"]` (no `elf`) means
+    `has_binary_evidence` reads False, downgrading an otherwise
+    `ARTIFACT_PROVEN` finding to `UNATTRIBUTED`."""
+    from enum import Enum
+
+    class K(str, Enum):
+        V = "func_removed"
+
+    change = SimpleNamespace(
+        kind=K.V, symbol="removed_func", description="Public function removed",
+        old_value="removed_func", new_value=None, source_location=None,
+        affected_symbols=None, caused_by_type=None, caused_count=0,
+        demangled_symbol="removed_func",
+    )
+    irrelevant_r = _appcompat_result(irrelevant=[change])
+    irrelevant_r.full_diff.evidence_tiers = ["header"]
+    irrelevant_out = appcompat_to_html(irrelevant_r)
+    assert "available evidence does not fully confirm" in irrelevant_out
+
+
+def test_html_relevant_table_keeps_consumer_proven_impact_text() -> None:
+    """Codex review, fresh evidence (round 2): a `breaking_for_app` finding
+    is proven relevant by the supplied consumer's own import table --
+    independent of what the library-to-library comparison's own
+    evidence_tiers show -- the same override `reporter.py`'s JSON
+    projection already stamps (`EvidenceStatus.CONSUMER_PROVEN`) for the
+    identical finding set. The relevant-changes table must not demote it
+    to "plausible, not confirmed" just because evidence_tiers is thin,
+    unlike the irrelevant table's own ordinary tier-derived findings
+    (covered by the sibling test above)."""
+    from enum import Enum
+
+    class K(str, Enum):
+        V = "func_removed"
+
+    change = SimpleNamespace(
+        kind=K.V, symbol="removed_func", description="Public function removed",
+        old_value="removed_func", new_value=None, source_location=None,
+        affected_symbols=None, caused_by_type=None, caused_count=0,
+        demangled_symbol="removed_func",
+    )
+    r = _appcompat_result(verdict=Verdict.BREAKING, breaking=[change])
+    r.full_diff.evidence_tiers = ["header"]
+    out = appcompat_to_html(r)
+    assert "available evidence does not fully confirm" not in out
+
+
 def test_html_escapes_xss_in_app_path() -> None:
     """Malicious app_path must be escaped in output."""
     r = _appcompat_result()

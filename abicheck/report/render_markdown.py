@@ -44,7 +44,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..checker_policy import impact_for
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
@@ -92,8 +91,14 @@ def _format_change_md_oneline(c: object) -> str:
     return line
 
 
-def _format_change_md(c: object) -> str:
-    """Format a single change as a markdown list item with impact and metadata."""
+def _format_change_md(c: object, impact: str | None = None) -> str:
+    """Markdown list item with impact/metadata; *impact* is the caller's
+    already-resolved display string, never a registry lookup made here
+    (Codex review: ``report/AGENTS.md`` L78-L89 treats ``impact_for()``
+    itself as a report decision, not a render-side formatting choice).
+    Resolved by ``reporter_markdown.compute_root_cause_section``, matching
+    every other projection's ``row["impact"]`` shape.
+    """
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     desc = getattr(c, "description", "")
@@ -118,10 +123,8 @@ def _format_change_md(c: object) -> str:
         line += f" — `{loc}`"
 
     # Impact
-    if kind:
-        impact = impact_for(kind)
-        if impact:
-            line += f"\n  > {impact}"
+    if impact:
+        line += f"\n  > {impact}"
 
     # Collapsed derived changes
     if caused_count > 0:
@@ -731,12 +734,10 @@ class ReviewDigest:
     bump_value: str
     soname_value: str
     impacted: tuple[ImpactedSymbol, ...]
-    #: ADR-067 D3 / workstream G's report invariant: the raw-versus-effective
-    #: counts every view must carry. Optional only so a caller constructing a
-    #: digest by hand (several tests do) is not forced to build one; a real
-    #: ``compute_review_digest`` always supplies it.
+    #: ADR-067 D3: raw-vs-effective counts (optional for a hand-built digest).
     disposition_audit: DispositionAudit | None = None
     surface_changes: SurfaceChangeSection | None = None  #: workstream G S1
+    quality_issues_count: int = 0  #: non-addition compatible findings, own row
 
 
 def render_review_digest(digest: ReviewDigest) -> str:
@@ -767,6 +768,8 @@ def render_review_digest(digest: ReviewDigest) -> str:
         f"| ⚠️ Risk findings | {digest.risk_count} |",
         f"| ✅ {digest.additions_label} | {digest.additions_count} |",
     ]
+    if digest.quality_issues_count:  # own row, not part of Additions above
+        lines.append(f"| ℹ️ Quality issues | {digest.quality_issues_count} |")
     if digest.scoped:
         lines.append(
             f"| 🔒 Filtered (internal/private) | {digest.out_of_surface_count} |"

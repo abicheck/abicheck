@@ -65,7 +65,9 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .demangle import demangle
 from .model import ScopeOrigin
+from .model.mangled_name import itanium_special_name_owner_scope_components
 from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_closure import resolve_public_surface
 
@@ -565,16 +567,80 @@ def classify_change_surface(
     # constructor/destructor/helper symbol named ``Foo``. In that case the
     # layout change's ``symbol`` still denotes the type, so reachability decides.
     type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
-    if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
-        # Member-level findings are owner-qualified: ``Type::field`` (struct/union
-        # field) or ``Enum::member`` (enum member). Classifying the full string as
-        # a type keeps a private member's churn in-surface as an "unknown" type;
-        # use the owner type for reachability/provenance decisions. (Membership in
-        # this set implies type_level_finding — see the import-time assert above —
-        # so a qualified *type name* like ``ns::Foo`` is never mis-split here.)
-        candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
-    else:
-        candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+
+    def _resolve_type_candidates() -> set[str]:
+        # CodeRabbit review: this used to run unconditionally before the
+        # symbol-level early return below, forking a `c++filt` (via
+        # `demangle()`, in the mangled-owner branch) for every finding this
+        # function classifies, including an ordinary symbol-level
+        # FUNC_REMOVED/VAR_REMOVED that `_classify_symbol_level` resolves
+        # and returns from without ever consulting `candidates`. Computed
+        # lazily now, only when actually needed for `_classify_type_level`.
+        if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
+            # Member-level findings are owner-qualified: ``Type::field``
+            # (struct/union field) or ``Enum::member`` (enum member).
+            # Classifying the full string as a type keeps a private
+            # member's churn in-surface as an "unknown" type; use the
+            # owner type for reachability/provenance decisions.
+            # (Membership in this set implies type_level_finding — see
+            # the import-time assert above — so a qualified *type name*
+            # like ``ns::Foo`` is never mis-split here.)
+            return {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
+        # Codex review, item 3: a finding whose `symbol` is a raw mangled
+        # Itanium name (e.g. `diff_elf_layout.py`'s ELF-layout-only
+        # VTABLE_SLOT_COUNT_CHANGED/RTTI_INHERITANCE_CHANGED/
+        # VTT_SLOT_COUNT_CHANGED emit `_ZTV`/`_ZTI`/`_ZTT` + the class's
+        # mangled nested-name, never a plain type spelling) reaches here
+        # whenever `_classify_symbol_level` below can't place it in the
+        # function/variable symbol universe -- `_type_identifiers` expects
+        # already-demangled type text (`"ns::Foo"`), not a mangled blob
+        # (`"_ZTVN2ns3FooE"`), which its identifier regex only ever matches
+        # as one opaque, unmatchable token. That token can never appear in
+        # `all_types`/`public_types`, so `_classify_type_level` always fell
+        # through to the conservative "unknown -> keep" default -- safe
+        # (never hides a break), but it meant public-surface scoping could
+        # never demote genuinely internal-only vtable/RTTI churn, unlike
+        # every other type-level finding kind. `demangle` is a no-op
+        # (returns None, so `or sym` keeps the original) for a finding
+        # whose `symbol` is already a plain type/member spelling, so this
+        # is a strict fix, not a behavior change, for every other case.
+        #
+        # The `_ZTV`/`_ZTI`/`_ZTT` shape specifically is resolved via the
+        # in-process, dependency-free structural parser instead of
+        # `demangle()` (Codex review, fresh evidence): `demangle()` needs
+        # an optional external tool (`cxxfilt`/`c++filt`) that isn't
+        # installed on every host, so a policy-affecting classification
+        # (public-surface scoping) must not silently vary by whether that
+        # tool happens to be present -- a minimal CI image or Windows
+        # without it would otherwise keep every such finding in-surface
+        # regardless of the class's real visibility, while a developer
+        # machine with cxxfilt installed correctly demotes it.
+        owner_scope = itanium_special_name_owner_scope_components(sym)
+        # Codex review, fresh evidence: the structural parser deliberately
+        # keeps a template owner's *raw encoded* argument list (see
+        # itanium_scope_components's own docstring -- "the raw
+        # template-argument encoding is kept so distinct specializations
+        # stay distinct", e.g. Box<int> -> "BoxIiE") rather than a
+        # canonical spelling like the model's own "Box<int>", so an owner
+        # whose own component carries a template-argument list can never
+        # match `all_types`/`public_types` -- unlike the non-template case
+        # this parser exists for, this is not "unmatched, conservatively
+        # kept" by design; it is a real match failure a demangler would
+        # resolve, on any host where one happens to be installed. Falling
+        # back to `demangle()` only for that specific shape keeps the
+        # dependency-free path for every ordinary (non-template) owner
+        # while not leaving a templated one strictly worse off than before
+        # this parser existed.
+        owner_has_template_args = (
+            owner_scope is not None and (len(owner_scope[0]) - 1) in owner_scope[1]
+        )
+        if owner_scope is not None and not owner_has_template_args:
+            sym_for_types = "::".join(owner_scope[0])
+        else:
+            sym_for_types = demangle(sym) or sym
+        return _type_identifiers(sym_for_types) | _type_identifiers(
+            change.caused_by_type
+        )
 
     # Symbol-level finding (function/variable): public iff a public symbol.
     # A confident private/system-header origin demotes even an exported
@@ -591,7 +657,7 @@ def classify_change_surface(
             return verdict
 
     return _classify_type_level(
-        candidates,
+        _resolve_type_candidates(),
         all_types,
         public_types,
         surf_old,

@@ -468,6 +468,40 @@ def itanium_scope_components_with_template_positions(
     return components, frozenset(template_positions)
 
 
+#: The three Itanium ``<special-name>`` productions
+#: ``diff_elf_layout.py``'s ELF-layout-only detectors synthesize a symbol
+#: for (``TV`` vtable, ``TI`` typeinfo, ``TT`` VTT/construction-vtable-table)
+#: -- each is ``_Z`` + this 2-character code + the SAME ``<class-enc>``/
+#: ``<name>`` production an ordinary member mangling's nested-name prefix
+#: already uses, so rewriting the code away and re-parsing through the
+#: existing structural parser needs no new grammar.
+_SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TT")
+
+
+def itanium_special_name_owner_scope_components(
+    mangled: str,
+) -> tuple[list[str], frozenset[int]] | None:
+    """Scope components of the class a vtable/typeinfo/VTT special-name
+    belongs to, e.g. ``_ZTVN2ns3FooE`` -> ``(["ns", "Foo"], frozenset())``.
+
+    Purely structural, like :func:`itanium_scope_components_with_template_
+    positions` itself -- no dependency on an external demangler
+    (``c++filt``/``cxxfilt``), which is not installed on every platform.
+    Without this, a caller that fell back to :func:`~abicheck.demangle.
+    demangle` for these three symbol shapes specifically would get a
+    policy-affecting classification (public-surface scoping) that silently
+    varies by whether that optional tool happens to be present on the host
+    (Codex review, fresh evidence). Returns ``None`` for any other prefix,
+    or when the remainder fails to parse.
+    """
+    if not mangled.startswith("_Z"):
+        return None
+    code, rest = mangled[2:4], mangled[4:]
+    if code not in _SPECIAL_NAME_OWNER_CODES or not rest:
+        return None
+    return itanium_scope_components_with_template_positions("_Z" + rest)
+
+
 def itanium_scope_components(mangled: str) -> list[str] | None:
     """Scope components of an Itanium-mangled C++ symbol, parsed structurally.
 

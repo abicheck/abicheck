@@ -116,6 +116,9 @@ def _render_leaf_type_change_row(row: Mapping[str, Any]) -> list[str]:
     from .render_markdown_document import _row_contract_tag
 
     lines = [f"### {row['symbol']} — {row['description']}"]
+    impact = row.get("impact")
+    if impact:
+        lines.append(f"\n> {impact}")
     affected = row.get("affected_symbols")
     if affected:
         lines.append(f"\n**Affected interfaces ({len(affected)}):**")
@@ -285,13 +288,20 @@ def build_leaf_document(
             else None
         ),
         "type_sections": [
-            {"heading": s.heading, "rows": [_change_row(c) for c in s.changes]}
+            {
+                "heading": s.heading,
+                "rows": [_change_row(c, result.evidence_tiers) for c in s.changes],
+            }
             for s in leaf_sections.sections
         ],
         "non_type_changes": (
-            [_change_row(c) for c in non_type_changes] if non_type_changes else None
+            [_change_row(c, result.evidence_tiers) for c in non_type_changes]
+            if non_type_changes
+            else None
         ),
-        "not_evaluated": _not_evaluated_mapping(not_evaluated_section),
+        "not_evaluated": _not_evaluated_mapping(
+            not_evaluated_section, result.evidence_tiers
+        ),
         "empty_message": (
             None
             if changes
@@ -419,6 +429,7 @@ def build_root_cause_document(
         blocks,
         missing_kind,
         contract_evaluation=contract_evaluation,
+        evidence_tiers=result.evidence_tiers,
     )
     has_root_cause_entries = root_cause_section is not None
 

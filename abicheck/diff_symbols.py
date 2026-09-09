@@ -24,6 +24,10 @@ from typing import Any
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.constants import constant_index_pair, diff_constants
+from .compare.elf_only_demangle import (
+    elf_only_demangled_name,
+    prewarm_elf_only_demangling,
+)
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -287,6 +291,10 @@ def _format_params(params: list[Param]) -> str:
     return ", ".join(parts) if parts else "(none)"
 
 
+_elf_only_demangled_name = elf_only_demangled_name
+_prewarm_elf_only_demangling = prewarm_elf_only_demangling
+
+
 def _check_removed_function(
     mangled: str,
     f_old: Function,
@@ -323,6 +331,7 @@ def _check_removed_function(
         # See Change.symbol_binding's docstring — None when not captured.
         symbol_binding=f_old.elf_binding.value if f_old.elf_binding else None,
         entity_id=f_old.entity_id,
+        demangled_symbol=_elf_only_demangled_name(mangled, f_old.visibility),
     )
 
 
@@ -932,6 +941,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # joins on. One shared primitive instead of a second hand-rolled multimap,
     # the same way ``build_type_map`` already backs flat *type* matching.
     new_map = SymbolIdentityIndex.for_functions(_public_functions(new))
+    _prewarm_elf_only_demangling(old_map, new_map)
 
     # Lookups for the virtual-method-addition check below: type records
     # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
@@ -1220,6 +1230,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
             # See Change.symbol_binding's docstring — None when not captured.
             symbol_binding=v_old.elf_binding.value if v_old.elf_binding else None,
             entity_id=v_old.entity_id,
+            demangled_symbol=_elf_only_demangled_name(mangled, v_old.visibility),
         )
     ]
 
@@ -1251,9 +1262,12 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     and one ambiguity contract.
     """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
+    old_vars = _public_variables(old)
+    new_vars_index = SymbolIdentityIndex.for_variables(_public_variables(new))
+    _prewarm_elf_only_demangling(old_vars, new_vars_index)
     return diff_by_key(
-        SymbolIdentityIndex.for_variables(_public_variables(old)),
-        SymbolIdentityIndex.for_variables(_public_variables(new)),
+        SymbolIdentityIndex.for_variables(old_vars),
+        new_vars_index,
         on_removed=_var_removed,
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
@@ -1605,10 +1619,10 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return []
 
     changes = emit_prefix_batch_rename(
-        find_prefix_rename_pairs(removed, added, old_map, new_map)
+        find_prefix_rename_pairs(removed, added, old_map, new_map), old_map
     )
     changes.extend(
-        emit_namespace_move_batches(find_namespace_move_groups(removed, added))
+        emit_namespace_move_batches(find_namespace_move_groups(removed, added), old_map)
     )
     return changes
 

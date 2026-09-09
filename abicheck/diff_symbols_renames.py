@@ -48,6 +48,7 @@ from .compare.namespace_move import (  # noqa: F401  (public-surface re-exports)
     emit_namespace_move_batches as emit_namespace_move_batches,
     find_namespace_move_groups as find_namespace_move_groups,
 )
+from .compare.rename_evidence import all_constituents_elf_bound
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_helpers import make_change
@@ -782,8 +783,22 @@ def find_prefix_rename_pairs(
     return pairs
 
 
-def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
-    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix."""
+def emit_prefix_batch_rename(
+    rename_pairs: list[tuple[str, str]],
+    old_map: Mapping[str, Function] | None = None,
+) -> list[Change]:
+    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix.
+
+    *old_map*, when given, is consulted so the emitted change's
+    ``symbol_binding`` reflects whether *every* constituent pair is actually
+    ELF-backed (:func:`compare.rename_evidence.all_constituents_elf_bound`) --
+    ``SYMBOL_RENAMED_BATCH`` is a member of ``_ELF_BINDING_STAMPED_KINDS``
+    (``checker_policy.py``), so an unset ``symbol_binding`` on an
+    ``"elf"``-tiered run downgrades the whole batch to
+    ``EvidenceStatus.UNATTRIBUTED`` -- the correct outcome when even one
+    constituent pair was never actually matched against a real symbol-table
+    entry, not just when none were (Codex review, Finding C(i)).
+    """
     if len(rename_pairs) < 2:
         return []
     prefixes = {
@@ -795,6 +810,17 @@ def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change
     pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
     if len(rename_pairs) > 5:
         pair_desc += f", ... ({len(rename_pairs)} total)"
+    # Only truthiness of `symbol_binding` is ever consulted
+    # (`checker_policy.evidence_status_for_result`) -- the specific binding
+    # kind (global/weak/...) has no meaning at batch granularity, since
+    # constituents can legitimately differ.
+    binding = (
+        "global"
+        if all_constituents_elf_bound(
+            (o for o, _ in rename_pairs), old_map, lambda f: f.name
+        )
+        else None
+    )
     return [
         make_change(
             ChangeKind.SYMBOL_RENAMED_BATCH,
@@ -803,5 +829,6 @@ def emit_prefix_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change
             detail=f"{len(rename_pairs)} symbols ({pair_desc})",
             old_value=", ".join(o for o, _ in rename_pairs),
             new_value=", ".join(n for _, n in rename_pairs),
+            symbol_binding=binding,
         )
     ]

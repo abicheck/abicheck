@@ -57,6 +57,8 @@ operation performed on an input before extraction -- which is exactly what
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..analysis_assurance import (
     analysis_assurance_exit_contribution,
     analysis_assurance_report_dict,
@@ -123,6 +125,9 @@ from ..policy.severity import (
     resolve_severity_config,
 )
 
+if TYPE_CHECKING:
+    from ..model import AbiSnapshot
+
 __all__ = [
     "ExitDecision",
     "GATE_SEVERITY_CATEGORIES",
@@ -168,5 +173,23 @@ __all__ = [
     "resolve_scope_decision",
     "resolve_severity_config",
     "scope_completeness_for_record",
+    "snapshot_identity_digest",
     "validate_incomplete_scope_policy",
 ]
+
+
+def snapshot_identity_digest(snap: AbiSnapshot) -> str:
+    """A canonical content digest of *snap*, for
+    :func:`note_if_same_binary_compared`'s snapshot-digest fallback.
+
+    Thin re-export of ``serialization.snapshot_content_digest`` -- exists so
+    a ``frontends`` caller (``frontends/cli/runtime.py``'s own
+    ``_finalize_compare_result``, Codex review: importing ``serialization``
+    directly there crossed the documented ``frontends`` dependency boundary,
+    which permits only ``model``/``workflows``/``report``) can reach the
+    identical computation ``service_compare_pipeline.classify_compare_pair``
+    uses without importing a non-permitted module itself.
+    """
+    from ..serialization import snapshot_content_digest
+
+    return snapshot_content_digest(snap)

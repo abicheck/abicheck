@@ -225,6 +225,197 @@ def test_evidence_status_for_result_downgrades_unattributed_finding_despite_elf_
     )
 
 
+def test_impact_for_unattributed_appends_evidence_caveat() -> None:
+    """Finding C(ii): FUNC_REMOVED's static impact text unconditionally
+    asserts the dynamic linker will refuse to load/crash -- true only when
+    a real symbol-table entry backs the finding. An UNATTRIBUTED finding
+    (evidence_status_for_result's own downgrade, tested above) must get a
+    caveat, not the same unconditional claim an ARTIFACT_PROVEN finding of
+    the same kind carries."""
+    from abicheck.checker_policy import impact_for
+
+    base = impact_for(ChangeKind.FUNC_REMOVED)
+    assert "refuse to load or crash" in base
+    hedged = impact_for(ChangeKind.FUNC_REMOVED, EvidenceStatus.UNATTRIBUTED)
+    assert hedged.startswith(base)
+    assert hedged != base
+    assert "available evidence does not fully confirm" in hedged
+
+
+def test_impact_for_artifact_proven_is_unchanged() -> None:
+    from abicheck.checker_policy import impact_for
+
+    base = impact_for(ChangeKind.FUNC_REMOVED)
+    assert impact_for(ChangeKind.FUNC_REMOVED, EvidenceStatus.ARTIFACT_PROVEN) == base
+    assert impact_for(ChangeKind.FUNC_REMOVED, None) == base
+    assert impact_for(ChangeKind.FUNC_REMOVED) == base
+
+
+def test_reporter_json_impact_carries_the_unattributed_caveat() -> None:
+    """End-to-end: a downgraded finding's rendered JSON `impact` field
+    carries the evidence caveat, not the bare unconditional claim."""
+    from abicheck.reporter import _change_to_dict
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    d = _change_to_dict(c, evidence_tiers=["header", "elf"])
+    assert d["evidence_status"] == EvidenceStatus.UNATTRIBUTED.value
+    assert "available evidence does not fully confirm" in d["impact"]
+
+
+def test_reporter_json_impact_stays_bare_when_artifact_proven() -> None:
+    from abicheck.reporter import _change_to_dict
+
+    c = _change(ChangeKind.FUNC_REMOVED, symbol_binding="global")
+    d = _change_to_dict(c, evidence_tiers=["header", "elf"])
+    assert d["evidence_status"] == EvidenceStatus.ARTIFACT_PROVEN.value
+    assert "available evidence does not fully confirm" not in d["impact"]
+
+
+def test_leaf_mode_markdown_impact_carries_the_unattributed_caveat() -> None:
+    """Codex review, fresh evidence: `--report-mode leaf` still called
+    `_change_row`/`_not_evaluated_mapping` with no `evidence_tiers` after
+    the full-mode view was fixed, leaving the overclaim in leaf reports."""
+    from abicheck.report.dispatch_markdown import to_markdown
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    md = to_markdown(result, report_mode="leaf")
+    assert "available evidence does not fully confirm" in md
+
+
+def test_root_cause_mode_markdown_impact_carries_the_unattributed_caveat() -> None:
+    """Codex review, fresh evidence: `--report-mode root-cause` still called
+    `_format_change_md` with no `evidence_tiers` after full/leaf were fixed,
+    leaving the overclaim in root-cause reports."""
+    from abicheck.report.dispatch_markdown import to_markdown
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    md = to_markdown(result, report_mode="root-cause")
+    assert "available evidence does not fully confirm" in md
+
+
+def test_html_report_impact_carries_the_unattributed_caveat() -> None:
+    """Codex review, fresh evidence: the HTML renderer's `compute_full_change_rows`
+    was still called with no `evidence_tiers` after JSON/Markdown were fixed,
+    leaving the overclaim in HTML reports."""
+    from abicheck.html_report import build_html_document
+    from abicheck.report.render_html_document import render_html_document
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    doc = build_html_document(result, lib_name="libx.so")
+    html = render_html_document(doc)
+    assert "available evidence does not fully confirm" in html
+
+
+def test_leaf_mode_type_change_row_carries_the_unattributed_caveat() -> None:
+    """CodeRabbit review: `_change_row` computes the evidence-qualified
+    `impact` for every row, but `--report-mode leaf`'s *type*-change section
+    renderer (`_render_leaf_type_change_row`, for a `ChangeKind` in
+    `_ROOT_TYPE_CHANGE_KINDS`) never read `row["impact"]` at all -- unlike
+    the non-type-change row renderer (`_render_change_row`), which does. So
+    a type-kind finding's leaf-mode heading carried no impact text
+    whatsoever, evidence-qualified or otherwise, even though the JSON/full
+    Markdown/HTML/SARIF surfaces for the identical finding all did."""
+    from abicheck.report.dispatch_markdown import to_markdown
+
+    c = _change(ChangeKind.TYPE_SIZE_CHANGED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header"],  # no binary evidence -> UNATTRIBUTED
+    )
+    md = to_markdown(result, report_mode="leaf")
+    assert "available evidence does not fully confirm" in md
+
+
+def test_html_compat_report_impact_carries_the_unattributed_caveat() -> None:
+    """Same wiring gap as above, but through the `compat_html=True` (ABICC
+    clone) layout's own `_build_compat_problem_data` path. That layout's own
+    table (`render_compat_changes_table`) never displays the `impact` field
+    at all (by design, matching ABICC's own columns), so this checks the
+    resolved document data rather than the rendered HTML."""
+    from abicheck.html_report import build_html_document
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    doc = build_html_document(result, lib_name="libx.so", compat_html=True)
+    mapping = doc.to_mapping()
+    removed_rows = mapping["compat"]["removed_rows"]
+    assert len(removed_rows) == 1
+    assert "available evidence does not fully confirm" in removed_rows[0]["impact"]
+
+
+def test_sarif_impact_carries_the_unattributed_caveat() -> None:
+    """Codex review, fresh evidence: SARIF's per-result message was never
+    given the evidence caveat -- only the kind-level (shared-across-findings)
+    rule `fullDescription` carried impact text at all, unconditionally --
+    leaving the overclaim (or rather, the missing caveat) in SARIF reports."""
+    from abicheck.sarif import to_sarif
+
+    c = _change(ChangeKind.FUNC_REMOVED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    doc = to_sarif(result)
+    msg = doc["runs"][0]["results"][0]["message"]["text"]
+    assert "available evidence does not fully confirm" in msg
+
+
+def test_sarif_impact_stays_bare_when_artifact_proven() -> None:
+    from abicheck.sarif import to_sarif
+
+    c = _change(ChangeKind.FUNC_REMOVED, symbol_binding="global")
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header", "elf"],
+    )
+    doc = to_sarif(result)
+    msg = doc["runs"][0]["results"][0]["message"]["text"]
+    assert "available evidence does not fully confirm" not in msg
+
+
 def test_evidence_status_for_result_symbol_binding_check_is_elf_only() -> None:
     # symbol_binding mirrors Function.elf_binding/Variable.elf_binding and is
     # never populated on a PE/Mach-O run regardless of evidence quality --

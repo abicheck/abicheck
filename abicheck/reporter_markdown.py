@@ -38,7 +38,10 @@ from .checker import (
     Verdict,
 )
 from .checker_policy import (
+    EvidenceStatus,
     HasKind,
+    evidence_status_for_result,
+    impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_gating import is_evaluated
@@ -108,6 +111,7 @@ def to_stat(
             "source_breaks": summary.source_breaks,
             "risk_changes": summary.risk_count,
             "compatible_additions": summary.compatible_additions,
+            "quality_issues": summary.quality_issues,
             "total_changes": summary.total_changes,
         },
         "redundant_count": result.redundant_count,
@@ -996,6 +1000,7 @@ def compute_root_cause_section(
     missing_kind: str,
     *,
     contract_evaluation: bool,
+    evidence_tiers: Sequence[str] = (),
 ) -> _rmd.RootCauseSectionData | None:
     """The structured intermediate for ``--report-mode root-cause``'s
     "## Root Causes" section.
@@ -1006,20 +1011,59 @@ def compute_root_cause_section(
     :func:`_root_cause_key_and_display` computes. Returns ``None`` (no
     section at all) only when there is neither a real group nor a missing
     label to show.
+
+    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets this
+    function qualify an ``UNATTRIBUTED`` finding's impact text here too
+    (Codex review, fresh evidence: this root-cause path kept the
+    unconditional text even after the full/leaf Markdown views were
+    fixed). The resolved impact string -- not just the evidence status --
+    is computed here and handed to ``_format_change_md`` as a plain
+    value: the earlier fix passed a resolved ``EvidenceStatus`` in and let
+    the renderer call ``impact_for()`` itself, which still left that
+    registry lookup on the render side (Codex review, fresh evidence --
+    ``report/AGENTS.md``'s compute/render split treats a per-change
+    ``impact_for()`` call as a report decision the compute half owes the
+    renderer, not a formatting choice).
+
+    A *scoped_only* member keeps its ``EvidenceStatus.CONSUMER_PROVEN``
+    override rather than being re-scored from *evidence_tiers* like an
+    ordinary comparison finding -- JSON (``reporter.to_json``'s
+    ``_scoped_only_change_dict``) and SARIF already stamp scoped_only
+    findings this way (they are proven by the supplied consumer's own
+    import table, independent of what evidence the library-to-library
+    comparison itself carries), so recomputing via
+    ``evidence_status_for_result`` here would contradict those two formats
+    and could demote a consumer-proven finding to "plausible, not
+    confirmed" (Codex review, fresh evidence).
     """
     groups = _group_changes_by_root_cause(changes + scoped_only)
     if not groups and not missing_labels:
         return None
 
+    scoped_only_ids = {_finding_id(c) for c in scoped_only}
+
     order: list[str] = []
     root_by_key: dict[str, str] = {}
     finding_lines_by_key: dict[str, list[str]] = {}
     count_by_key: dict[str, int] = {}
+
+    def _resolved_impact(c: Change) -> str | None:
+        kind = getattr(c, "kind", None)
+        if kind is None:
+            return None
+        evidence_status = (
+            EvidenceStatus.CONSUMER_PROVEN
+            if _finding_id(c) in scoped_only_ids
+            else evidence_status_for_result(c, evidence_tiers)
+        )
+        return impact_for(kind, evidence_status)
+
     for key, root_display, group_changes in groups:
         order.append(key)
         root_by_key[key] = root_display
         finding_lines_by_key[key] = [
-            _format_change_md(c) + _cross_source_evolution_md_suffix(c)
+            _format_change_md(c, _resolved_impact(c))
+            + _cross_source_evolution_md_suffix(c)
             for c in group_changes
         ]
         count_by_key[key] = len(group_changes)
@@ -1674,7 +1718,15 @@ def compute_review_digest(
         breaking_count=summary.breaking,
         source_breaks_count=summary.source_breaks,
         risk_count=summary.risk_count,
-        additions_count=summary.compatible_additions,
+        # Codex review: additions_count/quality_issues_count are two rows
+        # in the same rendered table, so they must not overlap -- unlike
+        # the JSON summary (where compatible_additions stays the
+        # historical whole-bucket total by design), the digest's own
+        # "Additions" row means *only* genuine additions here, mirroring
+        # pr_comment.py's identical `max(compatible_additions - quality, 0)`
+        # derivation for the release path.
+        additions_count=max(summary.compatible_additions - summary.quality_issues, 0),
+        quality_issues_count=summary.quality_issues,
         scoped=bool(scoped),
         out_of_surface_count=result.out_of_surface_count,
         bump_value=rec.bump.value,
