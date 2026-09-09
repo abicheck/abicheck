@@ -405,10 +405,17 @@ _merge_config_overlay_with_discovered_project_config() {
   #     the base document directly, no discovery/walk.
   # $4: optional; "explicit" selects explicit-build-config mode described
   #     above. Omitted (or any other value) is the default discovery mode.
+  # $5: optional; the --sources root a discovered build.compile_db glob
+  #     resolves against (inline.py: `sorted(sources.glob(cfg.compile_db))`)
+  #     -- passed by add_compile_context_flags (which knows $INPUT_SOURCES),
+  #     omitted by add_release_topology_config_flags (compare's release
+  #     fan-out never reads build.compile_db, so there is no root to check
+  #     against and the field is always stripped there, same as before).
   local overlay_json="$1"
   local out_path="$2"
   local base_source="$3"
   local merge_mode="${4:-discover}"
+  local sources_root="${5:-}"
   # Codex review, PR #1159, third round: in "explicit" mode base_source is
   # the caller-supplied build-config input, which is very often a
   # checkout-relative path (e.g. `build-config: .abicheck.yml`) -- exactly
@@ -429,6 +436,12 @@ _merge_config_overlay_with_discovered_project_config() {
   if ! _is_path_already_qualified "$base_source"; then
     base_source="$PWD/$base_source"
   fi
+  # Same relative-path-vs-$_PY_SAFE_DIR bug class as base_source above:
+  # $INPUT_SOURCES (add_compile_context_flags's own sources_root) is very
+  # often a checkout-relative path (e.g. `sources: src`) too.
+  if [[ -n "$sources_root" ]] && ! _is_path_already_qualified "$sources_root"; then
+    sources_root="$PWD/$sources_root"
+  fi
   if [[ -z "$_PY_BIN" || "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
     # Same "fail loud rather than silently produce a wrong compile/release
     # context" precedent as add_flag_shlex_split's own missing-interpreter
@@ -442,6 +455,7 @@ _merge_config_overlay_with_discovered_project_config() {
    && ABICHECK_MERGE_MODE="$merge_mode" \
       ABICHECK_BASE_CONFIG_SOURCE="$base_source" \
       ABICHECK_OVERLAY_JSON="$overlay_json" \
+      ABICHECK_SOURCES_ROOT="$sources_root" \
       PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
 # Discovers the real project .abicheck.yml (if any) the same way
 # discover_project_config() does -- config_paths.find_config_in_dir(),
@@ -594,22 +608,46 @@ if merge_mode != "explicit":
         # build.compile_db to "explicit" status (its miss must surface, no
         # falling through to inference/autodiscovery) purely because an
         # unrelated Action input (dso-only, gcc-path, ...) also happened to
-        # trigger this overlay synthesis (Codex review, fresh evidence).
-        # Stripped for the same reason as build.query: this Action has no
-        # per-field provenance channel to tell the CLI "this one came from
-        # an auto-discovered document, not an operator's own --config".
-        stripped_build = dict(base["build"])
-        del stripped_build["compile_db"]
-        base["build"] = stripped_build
-        print(
-            "::warning::the discovered .abicheck.yml's build.compile_db was "
-            "dropped from this Action's synthesized --config overlay -- "
-            "forwarding it here would silently promote it to an explicit, "
-            "must-not-be-missing compile-DB path (the field would otherwise "
-            "fall back to inference); set build-config explicitly (naming a "
-            "config you reviewed) to opt in.",
-            file=sys.stderr,
-        )
+        # trigger this overlay synthesis. This Action has no per-field
+        # provenance channel to tell the CLI "this one came from an
+        # auto-discovered document, not an operator's own --config", so the
+        # only way to avoid the incorrect-hard-failure risk is to strip the
+        # field -- UNLESS it demonstrably already resolves to a real file
+        # (Codex review, fresh evidence, second round): stripping a
+        # perfectly *usable* discovered compile_db is its own real cost
+        # (buildsource/inline.py's own fallback chain -- auto-discovered
+        # compile_commands.json, then inferred build-system query -- may
+        # collect different or no L3-L5 evidence than the config's own
+        # setting would have). `build.compile_db` is documented as a glob
+        # *relative to the --sources root* (`inline.py`: `sorted(sources.
+        # glob(cfg.compile_db))`), so it can only be validated when that
+        # root is known -- `add_compile_context_flags`'s own call passes it
+        # via ABICHECK_SOURCES_ROOT; add_release_topology_config_flags's
+        # call (compare's release fan-out, which never reads build.
+        # compile_db at all) leaves it empty, always stripping, matching
+        # this field's own irrelevance there.
+        _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
+        _compile_db_resolves = False
+        if _sources_root:
+            try:
+                _compile_db_resolves = any(
+                    Path(_sources_root).glob(base["build"]["compile_db"])
+                )
+            except (OSError, ValueError):
+                _compile_db_resolves = False
+        if not _compile_db_resolves:
+            stripped_build = dict(base["build"])
+            del stripped_build["compile_db"]
+            base["build"] = stripped_build
+            print(
+                "::warning::the discovered .abicheck.yml's build.compile_db was "
+                "dropped from this Action's synthesized --config overlay -- "
+                "forwarding it here would silently promote it to an explicit, "
+                "must-not-be-missing compile-DB path (the field would otherwise "
+                "fall back to inference); set build-config explicitly (naming a "
+                "config you reviewed) to opt in.",
+                file=sys.stderr,
+            )
     if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
         stripped_compile = dict(base["compile"])
         del stripped_compile["compiler"]
@@ -836,10 +874,11 @@ PYEOF
       # before Phase 7 demoted these flags to config).
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" \
-        "${INPUT_BUILD_CONFIG}" "explicit"
+        "${INPUT_BUILD_CONFIG}" "explicit" "${INPUT_SOURCES:-}"
     else
       _merge_config_overlay_with_discovered_project_config \
-        "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD"
+        "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD" \
+        "discover" "${INPUT_SOURCES:-}"
     fi
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")

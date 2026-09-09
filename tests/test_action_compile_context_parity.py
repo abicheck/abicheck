@@ -1247,6 +1247,84 @@ class TestCompileContextMergesWithRelativeBuildConfig:
         assert doc["compile"]["sysroot"] == "/opt/sysroot"
 
 
+class TestCompileContextPreservesUsableDiscoveredCompileDb:
+    """Codex review, PR #1159 (P1, second round): a discovered
+    ``build.compile_db`` is stripped from the merged overlay by default
+    (``buildsource/embed.py``'s ``compile_db_explicit`` would otherwise
+    treat a miss as a hard failure purely because an unrelated Action input
+    triggered this overlay's synthesis) -- but stripping a compile_db that
+    demonstrably *does* resolve is its own real cost: ``inline.py``'s own
+    fallback chain (auto-discovered ``compile_commands.json``, then an
+    inferred build-system query) may collect different or no L3-L5
+    evidence than the config's own setting would have. When ``sources``
+    names a real root and the discovered glob resolves under it, the field
+    now survives untouched."""
+
+    def test_resolving_compile_db_survives_the_merge(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(tmp_path),
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"compile_db": "compile_commands.json", "system": "cmake"}
+        assert "build.compile_db" not in stderr
+
+    def test_nonresolving_compile_db_is_still_stripped(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: nonexistent_compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(tmp_path),
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert "compile_db" not in doc.get("build", {})
+        assert doc["build"] == {"system": "cmake"}
+        assert "build.compile_db" in stderr
+
+    def test_relative_sources_root_still_resolves(self, tmp_path: Path) -> None:
+        """``sources`` is normally a checkout-relative path too (e.g.
+        ``sources: src``) -- the same relative-path-vs-``$_PY_SAFE_DIR``
+        bug class ``TestCompileContextMergesWithRelativeBuildConfig``
+        covers for ``build-config``."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"compile_db": "compile_commands.json"}
+
+
 class TestCompileContextOverlayGenerationIsIsolated:
     """Codex review, PR #1159 (P1, fourth round): confirmed
     ``add_compile_context_flags`` had the identical bare-``python3``
