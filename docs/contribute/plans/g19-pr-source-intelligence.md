@@ -54,11 +54,11 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 - **DONE** — New `abicheck/buildsource/pattern_facts.py`: stdlib-regex scanner over
   changed + public files for the ADR-035 D2 construct list; emits normalized
   advisory facts + per-kind escalation triggers (`PatternFact`/
-  `PatternScanResult`/`EscalationTrigger`), with mandatory coverage reporting and
+  `PatternFactsResult`/`EscalationTrigger`), with mandatory coverage reporting and
   no compile DB / compiler. Tree-sitter is a pluggable later backend.
   Tests: `tests/test_pattern_facts.py`.
 - **DONE** — New `abicheck/buildsource/preprocessor_facts.py` (S2 conditional
-  tier): `run_preprocessor_scan` runs over the collected L3 build evidence **only**
+  tier): `collect_preprocessor_facts` runs over the collected L3 build evidence **only**
   when a compile DB + `clang -E` are present (else an honest skipped coverage row).
   Captures per-TU ABI-macro values (`clang -E -dM`) → `find_macro_divergence`, and
   public-header resolved includes (`clang -M`) → `find_private_header_leaks`

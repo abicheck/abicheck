@@ -13691,7 +13691,7 @@ CLI path still exits 64.
 
 **A *fourth* round found the third fix's own placement inside
 `_build_new_snapshot` was still too late.** `run_scan_core` runs its S3
-pattern scan (`scan_files`) and points-of-interest build
+pattern scan (`find_pattern_facts`) and points-of-interest build
 (`_build_scan_poi`, which reads both sides' L0 export tables) *before* ever
 calling `_build_new_snapshot` — real, if cheap, work a typed `run_scan()`/
 `run_scan_subprocess()` caller (no `cli_scan.py` pre-flight ahead of it) paid
@@ -13714,7 +13714,7 @@ build_targets=(...))` was wrongly rejected by the unguarded check, the exact
 false-positive class the `depth=binary` exemption exists to prevent.
 `tests/test_bazel_root_targets_scan.py` gained two more cases:
 `test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (monkeypatches
-`scan_files` to raise if called, proving the check now runs first) and
+`find_pattern_facts` to raise if called, proving the check now runs first) and
 `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check`
 (monkeypatches `bazel_target_scoping_failure` itself to raise if called,
 proving the moved check's exemption actually fires rather than merely

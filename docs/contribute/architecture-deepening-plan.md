@@ -645,7 +645,7 @@ driven through one uniform, cost-estimable interface. In the current code:
   shared engine core PR #536 extracted from `cli_scan.py`) imports and calls
   the concrete collector functions directly —
   `buildsource.cross_source_checks.run_crosschecks`, `buildsource.pattern_facts.
-  scan_files`, `buildsource.preprocessor_facts.run_preprocessor_scan`, etc.
+  find_pattern_facts`, `buildsource.preprocessor_facts.collect_preprocessor_facts`, etc.
   (`scan_engine.py:53-57`) — never touching `providers.py`.
 - **The typed half of the same ADR section shipped, the protocol half
   didn't.** `service_scan.py`'s `ScanRequest`/`ScanResult`/`run_scan()`/

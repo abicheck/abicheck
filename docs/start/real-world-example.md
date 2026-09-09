@@ -319,7 +319,7 @@ Other formats — **HTML**, SARIF, JUnit — are in [Output Formats](../use/outp
    headers and their include root; pin `-std`/`-D` in a `.abicheck.yml`.
 2. **Run** the header-aware compare (`abicheck compare OLD NEW … --config .abicheck.yml`
    as a CI gate).
-3. **Go deeper** (recommended) with `abicheck compare OLD NEW --sources . --since … --depth source`
+3. **Go deeper** (recommended) with `abicheck compare OLD NEW --sources new=. --since … --depth source`
    when you can give it your sources and build command — see
    [Source-Scan Depth](../use/scan-levels.md).
 4. **Read** the verdict + confidence: headers give a high-confidence,

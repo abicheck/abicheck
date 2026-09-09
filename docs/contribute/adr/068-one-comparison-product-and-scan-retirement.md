@@ -60,8 +60,8 @@ reach at all**: the eleven cross-source checks
 pattern pre-scan (`buildsource/pattern_facts.py`), the preprocessor scan
 (`buildsource/preprocessor_facts.py`), changed-path localization
 (`--since`/`--changed-path`), and the `abi3` limited-API audit. Verified by
-call site, not by import: the only production callers of `scan_files`,
-`run_preprocessor_scan` and `run_crosschecks` anywhere under `abicheck/` are
+call site, not by import: the only production callers of `find_pattern_facts`,
+`collect_preprocessor_facts` and `run_crosschecks` anywhere under `abicheck/` are
 three lines in `scan_engine.py`. (`workflows/extraction.py` *imports* the
 first two, but only re-exports them — it never calls either, which is
 exactly the kind of near-miss that makes an import-graph reading alone
