@@ -134,6 +134,17 @@ have to close, not just one of the two.
       compatibility comparison produced. Check `exit`, not `verdict`, to
       detect this on `compare` — see [Exit
       Codes](../reference/exit-codes.md) for the same caveat on `--abi3`'s
+
+    **This floor applies to `compare` only when at least one side is a live
+    extraction** (a binary/package operand, not a pre-existing
+    `.abi.json`/`.abi.snapshot`). Comparing **two already-serialized
+    snapshots** is exempted even when neither embeds L3/L4 evidence — a
+    pinned `--depth source` over `compare v1.abi.json v1.abi.json` reports
+    whatever the snapshots actually carry and exits `0`/`2`/`4` normally,
+    it does **not** exit `7`. A clean result from a both-snapshot
+    `compare` is therefore not proof the pinned depth was actually
+    reached — only a run with at least one live side, or an explicit look
+    at each snapshot's own recorded depth, tells you that.
       identical axis.
 
     `compare --dry-run` does not preview this failure, though: pinning an
