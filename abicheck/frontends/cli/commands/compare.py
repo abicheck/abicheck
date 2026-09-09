@@ -97,7 +97,7 @@ _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
 
 
 def reject_release_incompatible_view_mode(
-    report_mode: str, *, show_filtered: bool = False, audit_suppressions: bool = False
+    report_mode: str, *, show_filtered: bool = False
 ) -> None:
     """Reject a ``--view`` mode/token a directory/package release fan-out
     can't honor: ``leaf``/``root-cause`` restructure a single comparison's
@@ -106,18 +106,26 @@ def reject_release_incompatible_view_mode(
     and ``impact`` (each library already has its own ``DiffResult`` to
     compute an impact table from) are the only accepted report modes here.
 
-    ``filtered``/``suppressions`` (Codex review, PR #1180, fresh evidence)
-    are rejected the same way rather than silently accepted-and-ignored:
-    unlike ``report_mode``, `_dispatch_release_compare`` never threads
-    ``show_filtered``/``audit_suppressions`` through to the release
-    engine's own renderer at all (`cli_compare_release.py` has no such
-    concept), so ``--view filtered``/``--view suppressions`` on a
-    directory/package operand used to produce the identical output an
-    invocation without the token would -- the one thing a rendering
-    selector must never do (ADR-068 D4). Wiring the two ledgers into the
-    per-library release renderer is a real feature, not a rename fix; a
-    directory/package caller who needs them compares one library pair at a
-    time in the meantime, same as ``leaf``/``root-cause`` above.
+    ``filtered`` (Codex review, PR #1180, fresh evidence) is rejected the
+    same way rather than silently accepted-and-ignored: unlike
+    ``report_mode``, ``_dispatch_release_compare`` never threads
+    ``show_filtered`` through to the release engine's own renderer at all
+    (``cli_compare_release.py`` has no such concept), so ``--view
+    filtered`` on a directory/package operand used to produce the
+    identical output an invocation without the token would -- the one
+    thing a rendering selector must never do (ADR-068 D4). Wiring the
+    ledger into the per-library release renderer is a real feature, not a
+    rename fix; a directory/package caller who needs it compares one
+    library pair at a time in the meantime, same as ``leaf``/``root-cause``
+    above.
+
+    ``suppressions``/``audit_suppressions`` is deliberately NOT checked
+    here: ``cli_compare_options._reject_set_input_flags`` already rejects
+    it, but only together with a real ``--suppress`` file -- with no
+    ``--suppress`` at all it is a harmless no-op on a directory/package
+    operand, the same as on a single-pair `compare` (CodeRabbit/Codex
+    review, PR #1154). Checking it unconditionally here would regress that
+    no-op back to a blanket rejection.
 
     Shared by ``_dispatch_release_compare``'s own check below and
     ``cli_compare_helpers.py``'s pre-``--dry-run`` rejection point (Codex
@@ -136,13 +144,12 @@ def reject_release_incompatible_view_mode(
             "restructure. Compare one library at a time (a single old/new "
             f".so pair) to use --view {report_mode}."
         )
-    if show_filtered or audit_suppressions:
-        token = "filtered" if show_filtered else "suppressions"
+    if show_filtered:
         raise click.UsageError(
-            f"--view {token} is not available when comparing directories or "
+            "--view filtered is not available when comparing directories or "
             "packages: the release engine does not yet render this ledger "
             "per library. Compare one library at a time (a single old/new "
-            f".so pair) to use --view {token}."
+            ".so pair) to use --view filtered."
         )
 
 
@@ -195,10 +202,16 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
     # `show_filtered`/`audit_suppressions` are popped (not forwarded):
     # `compare_release_cmd` has no such parameter at all -- the release
-    # engine doesn't render these ledgers per library yet (Codex review, PR
-    # #1180) -- so their only role here is the rejection immediately below.
+    # engine doesn't render either ledger per library yet (Codex review, PR
+    # #1180). `show_filtered`'s only role here is the unconditional
+    # rejection immediately below; `audit_suppressions` is popped purely so
+    # it never reaches `compare_release_cmd` as an unexpected kwarg --
+    # cli_compare_options._reject_set_input_flags (run ahead of this call,
+    # same as the pre-dry-run block below) already rejects it together with
+    # a real --suppress file, and is a no-op without one, so it is not
+    # rejected a second time (unconditionally) here.
     view_show_filtered = kwargs.pop("show_filtered", False)
-    view_audit_suppressions = kwargs.pop("audit_suppressions", False)
+    kwargs.pop("audit_suppressions", False)
     # Already validated ahead of the --dry-run emit (cli_compare_helpers.py's
     # pre-dry-run block) -- re-checked here too since _dispatch_release_
     # compare has its own direct callers/tests and must reject on its own,
@@ -206,7 +219,6 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     reject_release_incompatible_view_mode(
         report_mode,
         show_filtered=view_show_filtered,
-        audit_suppressions=view_audit_suppressions,
     )
     kwargs["show_impact"] = report_mode == "impact"
     if report_mode == "impact":

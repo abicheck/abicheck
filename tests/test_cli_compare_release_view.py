@@ -645,16 +645,24 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
             assert result.exit_code == 0, (token, result.output)
 
 
-class TestReleaseViewFilteredSuppressionsRejected:
+class TestReleaseViewFilteredRejected:
     """Codex review (PR #1180, fresh evidence): unlike ``report_mode``,
-    ``show_filtered``/``audit_suppressions`` were never threaded through
-    ``_dispatch_release_compare`` to the release engine at all -- so
-    ``compare OLD_DIR NEW_DIR --view filtered``/``--view suppressions`` was
-    accepted but silently produced the identical output an invocation
-    without the token would, the one thing a rendering selector must never
-    do (ADR-068 D4). Rejected outright instead, the same way
-    ``leaf``/``root-cause`` are -- the release engine doesn't render either
-    ledger per library yet."""
+    ``show_filtered`` was never threaded through ``_dispatch_release_
+    compare`` to the release engine at all -- so ``compare OLD_DIR NEW_DIR
+    --view filtered`` was accepted but silently produced the identical
+    output an invocation without the token would, the one thing a
+    rendering selector must never do (ADR-068 D4). Rejected outright
+    instead, the same way ``leaf``/``root-cause`` are -- the release
+    engine doesn't render this ledger per library yet.
+
+    ``--view suppressions`` is deliberately NOT covered by this class: it
+    already has its own, narrower rejection
+    (``cli_compare_options._reject_set_input_flags``, proven by
+    ``tests/test_cli_compare_audit_suppressions.py::TestRejectedOnSetInputs``)
+    that fires only together with a real ``--suppress`` file and is a
+    harmless no-op without one -- a first version of this fix rejected it
+    unconditionally here too, which regressed that no-op back to a blanket
+    rejection (caught by CI, see this file's own git history)."""
 
     def test_filtered_is_rejected_for_a_directory_operand(
         self, tmp_path: Path
@@ -669,18 +677,6 @@ class TestReleaseViewFilteredSuppressionsRejected:
         assert "--view filtered is not available" in result.output
         assert "directories or packages" in result.output
 
-    def test_suppressions_is_rejected_for_a_directory_operand(
-        self, tmp_path: Path
-    ) -> None:
-        old_dir, new_dir = _write_removed_function_pair(tmp_path)
-
-        result = _invoke(
-            "compare", str(old_dir), str(new_dir),
-            "--view", "suppressions",
-        )
-        assert result.exit_code == 64, result.output
-        assert "--view suppressions is not available" in result.output
-
     def test_filtered_is_rejected_under_dry_run_for_a_directory_operand(
         self, tmp_path: Path
     ) -> None:
@@ -693,17 +689,19 @@ class TestReleaseViewFilteredSuppressionsRejected:
         assert result.exit_code == 64, result.output
         assert "--view filtered is not available" in result.output
 
-    def test_suppressions_is_rejected_under_dry_run_for_a_directory_operand(
+    def test_suppressions_with_no_suppress_stays_a_no_op(
         self, tmp_path: Path
     ) -> None:
+        """Companion, the exact regression CI caught: ``--view
+        suppressions`` alone (no ``--suppress``) must still be accepted as
+        a no-op on a directory/package operand, not rejected."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
             "compare", str(old_dir), str(new_dir),
-            "--dry-run", "--view", "suppressions",
+            "--view", "suppressions",
         )
-        assert result.exit_code == 64, result.output
-        assert "--view suppressions is not available" in result.output
+        assert result.exit_code == 4, result.output
 
     def test_full_and_impact_still_accepted_alongside_the_rejection(
         self, tmp_path: Path

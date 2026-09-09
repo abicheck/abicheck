@@ -1449,7 +1449,6 @@ def run_compare(
         reject_release_incompatible_view_mode(
             report_mode,
             show_filtered=show_filtered,
-            audit_suppressions=audit_suppressions,
         )
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
