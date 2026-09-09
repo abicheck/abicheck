@@ -99,8 +99,8 @@ Three findings from the audit of `main`, each verified directly:
 
 **1. `compare` cannot reach `scan`'s checks.** Verified by call site: the
 only production callers of `buildsource.cross_source_checks.run_crosschecks`,
-`buildsource.pattern_facts.scan_files` and
-`buildsource.preprocessor_facts.run_preprocessor_scan` anywhere under
+`buildsource.pattern_facts.find_pattern_facts` and
+`buildsource.preprocessor_facts.collect_preprocessor_facts` anywhere under
 `abicheck/` are `scan_engine.py:1292`, `:1126` and `:1275`. Check by call
 site, not import: `workflows/extraction.py` imports two of the three and
 calls neither. The eleven cross-source checks —
@@ -571,8 +571,8 @@ One PR per capability group, each landing with parity tests going green:
   `pattern_preprocessor_scan` report block (`report_schema_version` 3.12)
   rather than new `ChangeKind`s — read-only, never reaching the verdict,
   severity, or exit code. Both entries are gone from
-  `tests/parity/gaps.py`, and `scan_files`/`run_preprocessor_scan` are no
-  longer tracked in `test_engine_primitive_call_sites.py`'s
+  `tests/parity/gaps.py`, and `find_pattern_facts`/`collect_preprocessor_facts`
+  are no longer tracked in `test_engine_primitive_call_sites.py`'s
   gap-cross-referenced table (neither backs any remaining scan-only row),
   though their exact two-caller sets stay pinned there;
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI

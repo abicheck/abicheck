@@ -67,7 +67,7 @@ covered at all in the PR gate. The report must show breaks *and* additions: "0 b
 "nothing to review" ([Report the Surface, Not Only the Breaks](surface-growth.md)).
 
 ```bash
-abicheck compare baseline.json build/libfoo.so -H include/ --sources . \
+abicheck compare baseline.json build/libfoo.so -H include/ --sources new=. \
   --since origin/main --depth source
 ```
 

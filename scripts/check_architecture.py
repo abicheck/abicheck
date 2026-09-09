@@ -466,6 +466,46 @@ def _git_pending_renames(root: Path, revision: str) -> dict[str, str]:
     return renames
 
 
+def _base_debt_tracked_paths(root: Path, revision: str) -> frozenset[str]:
+    """The set of paths ``architecture/debt.yaml`` already tracked at
+    *revision*.
+
+    ``_git_pending_renames`` trusts git's own similarity-based rename
+    detection (default 50%), which git applies to *any* changed file pair,
+    not just debt-tracked ones. Without this check, a contributor could
+    rename an ordinary file that was under the size limit, grow it while
+    keeping >=50% textual similarity to the old content, and add the new
+    path to the debt ledger with ``baseline_lines`` equal to its new
+    (already-grown) size -- git's rename detection would make
+    ``debt-exemption``/``debt-no-growth`` both read it as a legitimate
+    established-debt rename instead of undeclared growth. Gating on the old
+    path having genuinely been a tracked debt entry at *revision* closes
+    that: an attacker's chosen old path must already appear in the base
+    ledger, which they don't control. Best-effort: any git/JSON failure
+    yields an empty set, which makes every rename fall through to the
+    ordinary (stricter) new-file path."""
+    proc = subprocess.run(
+        ["git", "show", f"{revision}:architecture/debt.yaml"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return frozenset()
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return frozenset()
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, list):
+        return frozenset()
+    return frozenset(
+        entry["path"]
+        for entry in files
+        if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+    )
+
+
 def _base_has_architecture_contract(root: Path, revision: str) -> bool | None:
     revision_check = subprocess.run(
         ["git", "cat-file", "-e", f"{revision}^{{commit}}"],
@@ -868,6 +908,11 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         if base_revision and not adopting_contract
         else {}
     )
+    base_debt_tracked_paths = (
+        _base_debt_tracked_paths(root, base_revision)
+        if base_revision and not adopting_contract and pending_renames
+        else frozenset()
+    )
     for relative, baseline in baselines.items():
         path = root / relative
         if not path.is_file():
@@ -884,11 +929,18 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
             if base_revision and not adopting_contract
             else None
         )
-        if base_lines is None and relative in pending_renames:
-            # Not a new file -- git itself recognizes this path as a rename
-            # of a debt-tracked file. Compare against the renamed-from
-            # path's own baseline content instead of treating this as a
-            # from-scratch addition.
+        if (
+            base_revision
+            and base_lines is None
+            and relative in pending_renames
+            and pending_renames[relative] in base_debt_tracked_paths
+        ):
+            # Not a new file -- git itself recognizes this path as a rename,
+            # *and* the renamed-from path was itself a genuinely debt-tracked
+            # file at the base revision (not just any git-detected rename
+            # source -- see _base_debt_tracked_paths's own docstring for why
+            # that second check matters). Compare against its own baseline
+            # content instead of treating this as a from-scratch addition.
             base_lines = _git_file_line_count(
                 root, base_revision, pending_renames[relative]
             )

@@ -174,10 +174,12 @@ that neither the binary nor the headers reveal. The simple model: give it your
 # run from the new checkout (as in §4), with a diff seed so the source replay
 # (--depth source) only re-parses the changed TUs
 abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so -H include/ \
-  --sources . --since origin/main --config .abicheck.yml --depth source
+  --sources new=. --since origin/main --config .abicheck.yml --depth source
 ```
 
-- `--sources .` — your checkout.
+- `--sources new=.` — your checkout, scoped to the NEW side (unprefixed
+  `--sources` applies to both sides; the baseline here is a headers-only
+  snapshot with no checkout of its own, so scope explicitly).
 - a `build:` query in `.abicheck.yml` — the command that builds it, so abicheck
   learns your real compile flags:
   ```yaml
