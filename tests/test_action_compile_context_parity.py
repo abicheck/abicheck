@@ -1764,17 +1764,20 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         assert doc["severity"] == {"abi_breaking": "error"}
 
     @pytest.mark.parametrize(
-        "old_library",
+        "old_library,content",
         [
-            "old.abicheck.json",
-            "old.json",
-            "OLD.JSON",
-            "baseline.json.gz",
-            "baseline.json.zst",
+            ("old.abicheck.json", b'{"schema_version": 1}'),
+            ("old.json", b'{"schema_version": 1}'),
+            ("OLD.JSON", b'{"schema_version": 1}'),
+            # gzip magic (1f 8b) -- real gzip bytes aren't needed, only the
+            # magic prefix this classifier itself checks.
+            ("baseline.json.gz", b"\x1f\x8b\x08\x00stub"),
+            # zstd magic (28 b5 2f fd).
+            ("baseline.json.zst", b"\x28\xb5\x2f\xfdstub"),
         ],
     )
     def test_sources_root_compile_block_is_sourced_from_it_under_compare_with_stored_old_snapshot(
-        self, tmp_path: Path, old_library: str
+        self, tmp_path: Path, old_library: str, content: bytes
     ) -> None:
         """Codex review, PR #1171 (P1, fresh evidence, sixth round): a
         ``compare`` whose OLD operand is a stored snapshot (whatever a prior
@@ -1786,7 +1789,14 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         and unconditionally treated every compare as pairwise, silently
         discarding NEW's own sources-root compile:/source:/debug: settings.
         Companion to the dump-mode single-sided test above, and the
-        negative (genuinely pairwise, live OLD) tests just above."""
+        negative (genuinely pairwise, live OLD) tests just above.
+
+        ``_old_library_is_stored_snapshot`` is content-sniffed (seventh
+        round, following a further Codex finding that an extension-only
+        check misclassified a live binary literally named ``old.json``),
+        so each case here writes real bytes carrying the classifier's own
+        magic prefix -- not just a suggestively-named, empty/nonexistent
+        path -- to actually exercise that sniffing rather than assume it."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -1798,6 +1808,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
+        (tmp_path / old_library).write_bytes(content)
         cmd, _ = _run_region_with_cwd(
             _COMPARE_MODE_MARKER,
             {
@@ -1818,15 +1829,92 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         assert doc["source"] == {"method": "s6"}
         assert doc["debug"] == {"format": "dwarf"}
 
-    def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary_shaped_like_json(
+    def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary(
         self, tmp_path: Path
     ) -> None:
-        """Negative control for the parametrized test above: an old-library
-        value that does NOT end in .json/.json.gz/.json.zst (e.g. a real
-        ``.so``) stays on the pre-existing, safe pairwise side even though
-        this is the identical --sources/checkout-config setup -- confirming
-        the new exclusion is keyed on the extension, not on merely setting
-        old-library or on --sources being present."""
+        """Negative control for the parametrized test above: a real live
+        binary (ELF magic bytes) stays on the pre-existing, safe pairwise
+        side even though this is the identical --sources/checkout-config
+        setup -- confirming the new exclusion is keyed on the operand's
+        actual content, not on merely setting old-library or on --sources
+        being present."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
+            "source:\n  method: s6\n"
+            "debug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "old.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8)
+        cmd, _ = _run_region_with_cwd(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_OLD_LIBRARY": "old.so",
+            },
+            tmp_path,
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
+        assert "source" not in doc
+        assert "debug" not in doc
+
+    def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary_named_like_a_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1171 (P1, fresh evidence, seventh round): the
+        exact case the review named -- a live ELF binary literally named
+        ``old.json`` (the extension-only version of this check would have
+        misclassified it as a stored snapshot). ``resolve_input()`` checks
+        binary magic bytes BEFORE any JSON/text sniffing, so this operand
+        is genuinely live and pairwise, regardless of its filename;
+        ``_old_library_is_stored_snapshot`` must agree."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
+            "source:\n  method: s6\n"
+            "debug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "old.json").write_bytes(
+            b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8
+        )
+        cmd, _ = _run_region_with_cwd(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_OLD_LIBRARY": "old.json",
+            },
+            tmp_path,
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
+        assert "source" not in doc
+        assert "debug" not in doc
+
+    def test_sources_root_compile_block_stays_pairwise_when_old_library_does_not_exist_yet(
+        self, tmp_path: Path
+    ) -> None:
+        """An old-library path this classifier cannot open at all (does not
+        exist on disk at this point in the script) falls back to the
+        pre-existing, safe "pairwise" side rather than guessing -- matching
+        ``_is_release_style_operand``'s own identical `-f` fallback."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -1843,7 +1931,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
             {
                 "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
                 "INPUT_SOURCES": "src",
-                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_OLD_LIBRARY": "does-not-exist.json",
             },
             tmp_path,
             _COMPARE_COMPILE_CONTEXT_START,
