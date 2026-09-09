@@ -506,22 +506,72 @@ class TestEffectiveJsonFormatStaysOnLegacyCli:
         )
         assert cmd[1] == "scan"
 
-    def test_extra_args_format_text_override_still_routes_to_compare(self) -> None:
-        # Negative control, the reverse override: the dedicated `format`
-        # input says `json`, but `extra-args --format text` overrides it
-        # back -- the *effective* format decides, not the nominal one.
-        cmd = _run_cmd(
-            {
-                **_BASE_INPUTS,
-                "INPUT_DEPTH": "headers",
-                "INPUT_FORMAT": "json",
-                "INPUT_EXTRA_ARGS": "--format markdown",
-            }
-        )
-        assert cmd[1] == "compare"
-
     def test_no_format_input_at_all_still_routes_to_compare(self) -> None:
         # Negative control: the default format (text) must not itself
         # force the legacy CLI -- only an effective json format does.
         cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
         assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestUnsupportedExtraArgsFormatStaysOnLegacyCli:
+    """`extra-args: --format markdown` (similarly `sarif`/`html`/`junit`/
+    `review`/`oneline`) via the general passthrough (Codex review, PR
+    #1172, round 12): `scan --help-all` accepts only `text`/`json` --
+    `compare` accepts these too. Before this PR's routing change, the same
+    raw arguments reached `scan` and failed as a real, correct usage error
+    (Click rejects the value). Silently routing that value onto `compare`
+    instead succeeds, since `compare` genuinely supports it, hiding a
+    usage error the caller should see rather than reproducing it."""
+
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            "--format markdown",
+            "--format sarif",
+            "--format html",
+            "--format junit",
+            "--format review",
+            "--format oneline",
+        ],
+    )
+    def test_unsupported_format_value_stays_on_legacy_cli(self, flag: str) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": flag,
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_extra_args_format_text_override_stays_on_legacy_cli(self) -> None:
+        # The dedicated `format` input says `json`, but `extra-args
+        # --format text` overrides it back -- `text` is itself one of the
+        # "not json" values this predicate now catches (it was already the
+        # narrower, original special case before this round widened it).
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_FORMAT": "json",
+                "INPUT_EXTRA_ARGS": "--format text",
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_extra_args_format_json_also_stays_on_legacy_cli(self) -> None:
+        # Not a negative control: `--format json` is round 10's own case
+        # (a different reason -- the JSON schema divergence), and every
+        # `--format` value now forces the legacy CLI one way or another --
+        # there is no longer a "safe" override value at all. See
+        # `test_no_format_input_at_all_still_routes_to_compare` above for
+        # the actual negative control (no override at all).
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--format json",
+            }
+        )
+        assert cmd[1] == "scan"

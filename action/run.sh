@@ -1580,12 +1580,20 @@ _extra_args_has_scan_only_flag() {
       # usage error instead of running the scan it asked for.
       return 0
       ;;
-    # `--format text` (Codex review P2, PR #1160, four rounds): a
-    # value-taking option, so this is checked by value, not just name --
-    # `scan --help-all` lists `text`/`json`; `compare --help-all` doesn't
-    # have `text` at all (json/markdown/sarif/html/junit/review instead).
+    # `--format` (Codex review P2, PR #1160, four rounds; widened round 12,
+    # PR #1172): a value-taking option, so this is checked by value, not
+    # just name -- `scan --help-all` lists only `text`/`json`, and
+    # `compare --help-all` has a strictly larger, disjoint-except-for-json
+    # set (markdown/sarif/html/junit/review/oneline, no bare `text`).
+    # Any value that isn't literally `json` forces the legacy CLI: `text`
+    # is the original case (`compare` has no `text` at all, so translating
+    # it would fail outright), but an unsupported value like `markdown`
+    # would previously have been a real, correct scan usage error (Click
+    # rejects it) -- silently routing that same value onto `compare`
+    # instead succeeds, since `compare` genuinely supports it, hiding a
+    # usage error the caller should see rather than reproducing it.
     --format)
-      [[ "$_value" == "text" ]] && return 0
+      [[ "$_value" != "json" ]] && return 0
       ;;
     # `--depth build`/`--depth source` via the general extra-args
     # passthrough (Codex review, PR #1172): the dedicated `depth` Action
