@@ -148,6 +148,22 @@ def _py_bin_has_abicheck_source() -> str:
     return text[start:end]
 
 
+# The real script's main EXIT trap (Codex review, fresh evidence): both
+# add_compile_context_flags's and add_release_topology_config_flags's own
+# synthesized --config overlays run well before this trap is installed, so
+# extracting it verbatim -- rather than hand-writing a stand-in -- is the
+# only way to prove the actual cleanup list, not an aspirational one.
+_MAIN_EXIT_TRAP_START = 'trap \'rm -f "$STDERR_FILE"'
+_MAIN_EXIT_TRAP_END = "' EXIT\n"
+
+
+def _main_exit_trap_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_MAIN_EXIT_TRAP_START)
+    end = text.index(_MAIN_EXIT_TRAP_END, start) + len(_MAIN_EXIT_TRAP_END)
+    return text[start:end]
+
+
 # `_merge_config_overlay_with_discovered_project_config`'s own
 # `base_source` absolutization (Codex review, PR #1159, fourth round) now
 # delegates to `_is_path_already_qualified` (a real Windows drive/UNC/
@@ -428,6 +444,48 @@ _PY_BIN="{sys.executable}"
 add_release_topology_config_flags
 printf '%s\\n' "${{CMD[@]}}"
 """
+
+
+class TestReleaseTopologyOverlayCleansUpOnExit:
+    """Codex review, PR #1159 (P2, fresh evidence): the synthesized overlay
+    used to be a function-local variable, created under ``$RUNNER_TEMP``
+    well before the real script's main ``EXIT`` trap is installed -- so
+    that trap's cleanup list never reached it, leaking one file per run on
+    a persistent self-hosted runner (a hosted runner's own per-job
+    workspace teardown masked the leak). Now a script-global
+    ``_RELEASE_TOPOLOGY_CONFIG_OVERLAY``, alongside the pre-existing
+    ``_COMPILE_CONTEXT_CONFIG_OVERLAY``, both reachable from the real,
+    verbatim-extracted trap. Runs the real trap for real (not a hand-
+    written stand-in) so a future edit dropping either variable from the
+    trap's own cleanup list fails this test, not just a code-review pass."""
+
+    def test_release_topology_overlay_is_removed_after_the_trap_fires(
+        self, tmp_path: Path
+    ) -> None:
+        fn_source = _add_release_topology_config_flags_source()
+        merge_fn_source = _merge_config_overlay_fn_source()
+        script = f"""#!/usr/bin/env bash
+set -uo pipefail
+CMD=(compare)
+_PY_BIN="{sys.executable}"
+{_py_safe_dir_source()}
+{_py_bin_has_abicheck_source()}
+{_path_qualified_helper_source()}
+{_mktemp_canonical_source()}
+{merge_fn_source}
+{fn_source}
+add_release_topology_config_flags
+_overlay_path="${{CMD[-1]}}"
+STDERR_FILE=$(mktemp)
+{_main_exit_trap_source()}
+printf '%s\\n' "$_overlay_path"
+"""
+        result = _run_bash_script(script, {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        overlay_path = result.stdout.strip().splitlines()[-1]
+        assert not Path(overlay_path).exists(), (
+            f"the real EXIT trap should have removed {overlay_path}"
+        )
 
 
 class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:

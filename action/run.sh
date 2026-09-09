@@ -670,6 +670,12 @@ PYEOF
 }
 
 _COMPILE_CONTEXT_CONFIG_OVERLAY=""
+# Same script-global-for-cleanup shape as _COMPILE_CONTEXT_CONFIG_OVERLAY
+# above -- add_release_topology_config_flags's own synthesized overlay
+# (Codex review, fresh evidence): a function-local `overlay` was created
+# under $RUNNER_TEMP but never reached the main EXIT trap further down,
+# leaking one file per run on a persistent self-hosted runner.
+_RELEASE_TOPOLOGY_CONFIG_OVERLAY=""
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
   # (dump and single-pair compare take --lang here; scan keeps its own
@@ -937,24 +943,25 @@ if os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY") == "true":
 json.dump(doc, sys.stdout)
 PYEOF
   )
-  local overlay
   # $RUNNER_TEMP (not a bare `mktemp`), matching the convention every other
   # mktemp call in this file already follows (PR_JSON/PR_BODY, the compile-
   # context overlay above) -- a bare `mktemp` can resolve under Git Bash's
   # own MSYS-internal /tmp mount, a spelling only Git Bash processes
-  # reliably translate back to a real filesystem path.
-  overlay=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-release-topology.XXXXXX")
-  if ! overlay=$(_mktemp_canonical "$overlay"); then
+  # reliably translate back to a real filesystem path. Script-global (not
+  # `local`), like _COMPILE_CONTEXT_CONFIG_OVERLAY, so the main EXIT trap
+  # further down can actually clean it up (Codex review, fresh evidence).
+  _RELEASE_TOPOLOGY_CONFIG_OVERLAY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-release-topology.XXXXXX")
+  if ! _RELEASE_TOPOLOGY_CONFIG_OVERLAY=$(_mktemp_canonical "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY"); then
     exit 1
   fi
   if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
     _merge_config_overlay_with_discovered_project_config \
-      "$_release_overlay_json" "$overlay" "${INPUT_BUILD_CONFIG}" "explicit"
+      "$_release_overlay_json" "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY" "${INPUT_BUILD_CONFIG}" "explicit"
   else
     _merge_config_overlay_with_discovered_project_config \
-      "$_release_overlay_json" "$overlay" "$PWD"
+      "$_release_overlay_json" "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY" "$PWD"
   fi
-  CMD+=(--config "$overlay")
+  CMD+=(--config "$_RELEASE_TOPOLOGY_CONFIG_OVERLAY")
 }
 
 # A directory, a file whose name matches a recognized package extension, or
@@ -2767,7 +2774,14 @@ STDERR_FILE=$(mktemp)
 #: a non-PR-comment run or `pr-comment-on: never` where the temp file was
 #: still created but never posted. Without this, a persistent self-hosted
 #: runner accumulates one JSON report per scan run indefinitely.
-trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
+#: _COMPILE_CONTEXT_CONFIG_OVERLAY/_RELEASE_TOPOLOGY_CONFIG_OVERLAY (Codex
+#: review, fresh evidence): both are created well before this trap is
+#: installed too (add_compile_context_flags/add_release_topology_config_
+#: flags run while CMD is still being assembled), same "referencing a
+#: not-yet-existing empty-string global is a no-op, not an error" property
+#: as PR_JSON above -- a run that never enables either input just cleans
+#: up an empty path.
+trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_COMPILE_CONTEXT_CONFIG_OVERLAY:-}" "${_RELEASE_TOPOLOGY_CONFIG_OVERLAY:-}"; rm -rf "${_BASELINE_CLEANUP:-}" "${_PY_SAFE_DIR:-}"' EXIT
 
 # `_json_report_src`/`_extra_args_write_json_path` below trust `OUTPUT_
 # FILE`/a user-supplied `--write json=PATH` purely on "the file exists and
