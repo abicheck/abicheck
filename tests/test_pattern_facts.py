@@ -27,16 +27,16 @@ from pathlib import Path
 import pytest
 
 from abicheck.buildsource.model import CoverageStatus, LayerConfidence
-from abicheck.buildsource.pattern_scan import (
+from abicheck.buildsource.pattern_facts import (
     _EXTENSIONLESS_MAX_BYTES,
-    PATTERN_SCAN_VERSION,
+    PATTERN_FACTS_VERSION,
     PatternCategory,
+    PatternFactsResult,
     PatternKind,
-    PatternScanResult,
     _is_scannable,
     _resolve_scan_jobs,
+    find_pattern_facts,
     iter_source_files,
-    scan_files,
     scan_text,
 )
 
@@ -263,7 +263,7 @@ def test_real_char_literal_still_blanks_its_contents() -> None:
 
 
 def test_function_template_instantiation_escalates() -> None:
-    res = PatternScanResult(
+    res = PatternFactsResult(
         facts=scan_text("template void api<int>();", path="h.h"), files_scanned=1
     )
     assert res.should_escalate is True
@@ -355,7 +355,7 @@ def test_raw_string_edge_cases_fall_back_to_normal_string() -> None:
     # _raw_string_end returns -1 (not a raw string) for: an alnum char before
     # the prefix, no opening paren near the quote, a whitespace delimiter, and a
     # missing close sequence — exercising each guard.
-    from abicheck.buildsource.pattern_scan import _raw_string_end
+    from abicheck.buildsource.pattern_facts import _raw_string_end
 
     assert _raw_string_end('aR"(x)"', 2) == -1  # `a` before the `R` prefix
     assert _raw_string_end('R"' + "x" * 30, 1) == -1  # no `(` near the quote
@@ -366,7 +366,7 @@ def test_raw_string_edge_cases_fall_back_to_normal_string() -> None:
 
 
 def test_snippet_out_of_range_returns_empty() -> None:
-    from abicheck.buildsource.pattern_scan import _snippet
+    from abicheck.buildsource.pattern_facts import _snippet
 
     assert _snippet(["only one line"], 5) == ""
 
@@ -376,7 +376,7 @@ def test_snippet_out_of_range_returns_empty() -> None:
 
 def test_layout_construct_escalates_to_s5() -> None:
     facts = scan_text("#pragma pack(1)\nstruct S { int x; };", path="h.h")
-    res = PatternScanResult(facts=facts, files_scanned=1)
+    res = PatternFactsResult(facts=facts, files_scanned=1)
     assert res.should_escalate is True
     triggers = res.escalation_triggers
     assert len(triggers) == 1
@@ -388,14 +388,14 @@ def test_layout_construct_escalates_to_s5() -> None:
 
 def test_advisory_only_construct_does_not_escalate() -> None:
     facts = scan_text('extern "C" void f();', path="h.h")
-    res = PatternScanResult(facts=facts, files_scanned=1)
+    res = PatternFactsResult(facts=facts, files_scanned=1)
     assert res.should_escalate is False
     assert res.escalation_triggers == []
 
 
 def test_escalation_triggers_grouped_per_kind() -> None:
     src = "struct B { virtual void a(); virtual void b(); virtual void c(); };"
-    res = PatternScanResult(facts=scan_text(src, path="h.h"), files_scanned=1)
+    res = PatternFactsResult(facts=scan_text(src, path="h.h"), files_scanned=1)
     triggers = [
         t for t in res.escalation_triggers if t.kind is PatternKind.VIRTUAL_METHOD
     ]
@@ -405,7 +405,7 @@ def test_escalation_triggers_grouped_per_kind() -> None:
 
 def test_escalation_triggers_sorted_deterministically() -> None:
     src = "virtual void f();\n#pragma pack(1)\ninline namespace v1 {}"
-    res = PatternScanResult(facts=scan_text(src), files_scanned=1)
+    res = PatternFactsResult(facts=scan_text(src), files_scanned=1)
     kinds = [t.kind.value for t in res.escalation_triggers]
     assert kinds == sorted(kinds)
 
@@ -415,19 +415,19 @@ def test_escalation_triggers_sorted_deterministically() -> None:
 
 def test_counts_by_kind_and_to_dict_roundtrip() -> None:
     src = "virtual void a();\nvirtual void b();\n#pragma pack(1)"
-    res = PatternScanResult(facts=scan_text(src, path="h.h"), files_scanned=1)
+    res = PatternFactsResult(facts=scan_text(src, path="h.h"), files_scanned=1)
     counts = res.counts_by_kind()
     assert counts[PatternKind.VIRTUAL_METHOD.value] == 2
     assert counts[PatternKind.PRAGMA_PACK.value] == 1
     payload = res.to_dict()
-    assert payload["version"] == PATTERN_SCAN_VERSION
+    assert payload["version"] == PATTERN_FACTS_VERSION
     assert payload["counts_by_kind"] == counts
     assert len(payload["facts"]) == 3
     assert payload["escalation_triggers"]  # non-empty (layout + vtable escalate)
 
 
 def test_coverage_present_when_files_scanned() -> None:
-    res = PatternScanResult(facts=[], files_scanned=3)
+    res = PatternFactsResult(facts=[], files_scanned=3)
     cov = res.coverage()
     assert cov.status is CoverageStatus.PRESENT
     assert cov.confidence is LayerConfidence.REDUCED
@@ -435,12 +435,12 @@ def test_coverage_present_when_files_scanned() -> None:
 
 
 def test_coverage_partial_when_files_skipped() -> None:
-    res = PatternScanResult(facts=[], files_scanned=2, files_skipped=1)
+    res = PatternFactsResult(facts=[], files_scanned=2, files_skipped=1)
     assert res.coverage().status is CoverageStatus.PARTIAL
 
 
 def test_coverage_not_collected_when_nothing_scanned() -> None:
-    assert PatternScanResult().coverage().status is CoverageStatus.NOT_COLLECTED
+    assert PatternFactsResult().coverage().status is CoverageStatus.NOT_COLLECTED
 
 
 # ── File walking + changed-path scoping ──────────────────────────────────────
@@ -564,7 +564,7 @@ def test_resolve_scan_jobs_env_overrides(monkeypatch) -> None:
 
 
 def test_resolve_scan_jobs_auto_and_invalid(monkeypatch) -> None:
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 4)
     monkeypatch.setattr(ps.os, "cpu_count", lambda: 6)
@@ -578,7 +578,7 @@ def test_resolve_scan_jobs_auto_and_invalid(monkeypatch) -> None:
 
 
 def test_looks_binary(tmp_path: Path) -> None:
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     text = tmp_path / "t"
     text.write_text("struct S {};")
@@ -590,7 +590,7 @@ def test_looks_binary(tmp_path: Path) -> None:
 
 
 def test_scan_one_file_readable_and_unreadable(tmp_path: Path) -> None:
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     f = tmp_path / "h.hpp"
     f.write_text("#pragma pack(1)\nstruct S {};")
@@ -604,11 +604,11 @@ def test_scan_one_file_readable_and_unreadable(tmp_path: Path) -> None:
 
 
 def test_scan_files_serial_counts_unreadable_as_skipped(tmp_path: Path) -> None:
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     good = tmp_path / "a.hpp"
     good.write_text("struct S { virtual void f(); };")
-    result = ps._scan_files_serial([good, tmp_path])  # tmp_path: a dir → skipped
+    result = ps._find_pattern_facts_serial([good, tmp_path])  # tmp_path: a dir → skipped
     assert result.files_scanned == 1
     assert result.files_skipped == 1
 
@@ -616,7 +616,7 @@ def test_scan_files_serial_counts_unreadable_as_skipped(tmp_path: Path) -> None:
 class _InProcessExecutor:
     """A drop-in ``ProcessPoolExecutor`` that runs ``map`` in-process.
 
-    Lets the parallel branch of ``scan_files`` be exercised deterministically
+    Lets the parallel branch of ``find_pattern_facts`` be exercised deterministically
     (and under coverage, in the measured parent) without spawning workers.
     """
 
@@ -640,14 +640,14 @@ def _make_tree(tmp_path: Path, n: int = 6) -> None:
         )
 
 
-def _facts_key(r: PatternScanResult) -> list:
+def _facts_key(r: PatternFactsResult) -> list:
     return [(f.kind, f.path, f.line, f.snippet) for f in r.facts]
 
 
 def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None:
     import concurrent.futures
 
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
     # Run the parallel branch in-process so it is deterministic and measured.
@@ -655,9 +655,9 @@ def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None
     _make_tree(tmp_path)
 
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
-    serial = ps.scan_files([tmp_path])
+    serial = ps.find_pattern_facts([tmp_path])
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "2")
-    parallel = ps.scan_files([tmp_path])
+    parallel = ps.find_pattern_facts([tmp_path])
 
     assert _facts_key(serial) == _facts_key(parallel)
     assert serial.files_scanned == parallel.files_scanned == 6
@@ -672,7 +672,7 @@ def test_scan_files_parallel_counts_unreadable_as_skipped(
     # one (.., False) result so the skip branch runs deterministically.
     import concurrent.futures
 
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     class _ExecutorWithOneUnreadable(_InProcessExecutor):
         def map(self, fn, iterable, chunksize: int = 1):
@@ -686,7 +686,7 @@ def test_scan_files_parallel_counts_unreadable_as_skipped(
     )
     _make_tree(tmp_path, n=3)
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "2")
-    result = ps.scan_files([tmp_path])
+    result = ps.find_pattern_facts([tmp_path])
     assert result.files_scanned == 3
     assert result.files_skipped == 1
 
@@ -708,7 +708,7 @@ def test_resolve_scan_jobs_daemonic_is_serial(monkeypatch) -> None:
     # (Codex review: ProcessPoolExecutor.map raises AssertionError otherwise).
     import multiprocessing
 
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "4")
@@ -726,7 +726,7 @@ def test_scan_files_parallel_falls_back_to_serial(
 ) -> None:
     import concurrent.futures
 
-    import abicheck.buildsource.pattern_scan as ps
+    import abicheck.buildsource.pattern_facts as ps
 
     monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
 
@@ -738,9 +738,9 @@ def test_scan_files_parallel_falls_back_to_serial(
     _make_tree(tmp_path)
 
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
-    serial = ps.scan_files([tmp_path])
+    serial = ps.find_pattern_facts([tmp_path])
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "4")
-    fell_back = ps.scan_files([tmp_path])  # raises → serial fallback
+    fell_back = ps.find_pattern_facts([tmp_path])  # raises → serial fallback
 
     assert _facts_key(fell_back) == _facts_key(serial)
     assert fell_back.files_scanned == 6
@@ -769,7 +769,7 @@ def test_scan_files_finds_constructs_in_extensionless_header(tmp_path: Path) -> 
     inc = tmp_path / "include"
     inc.mkdir()
     (inc / "Core").write_text("#pragma pack(1)\nstruct S { int x; };")
-    res = scan_files([inc], changed_paths=["include/Core"])
+    res = find_pattern_facts([inc], changed_paths=["include/Core"])
     assert res.files_scanned == 1
     assert PatternKind.PRAGMA_PACK in {f.kind for f in res.facts}
 
@@ -784,7 +784,7 @@ def test_iter_source_files_changed_scope_bare_name(tmp_path: Path) -> None:
 def test_scan_files_aggregates_and_records_paths(tmp_path: Path) -> None:
     h = tmp_path / "api.h"
     h.write_text('extern "C" void f();\n#pragma pack(1)\nstruct S { int x; };')
-    res = scan_files([tmp_path])
+    res = find_pattern_facts([tmp_path])
     assert res.files_scanned == 1
     assert res.files_skipped == 0
     assert any(f.path.endswith("api.h") for f in res.facts)
@@ -793,7 +793,7 @@ def test_scan_files_aggregates_and_records_paths(tmp_path: Path) -> None:
 
 
 def test_scan_files_skips_missing_root_gracefully(tmp_path: Path) -> None:
-    res = scan_files([tmp_path / "does-not-exist"])
+    res = find_pattern_facts([tmp_path / "does-not-exist"])
     assert res.files_scanned == 0
     assert res.facts == []
     assert res.coverage().status is CoverageStatus.NOT_COLLECTED
@@ -808,7 +808,7 @@ def test_scan_files_counts_unreadable_as_skipped(
         raise OSError("unreadable")
 
     monkeypatch.setattr(Path, "read_text", _boom)
-    res = scan_files([tmp_path])
+    res = find_pattern_facts([tmp_path])
     assert res.files_scanned == 0
     assert res.files_skipped == 1
     assert res.coverage().status is CoverageStatus.NOT_COLLECTED

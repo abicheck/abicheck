@@ -146,7 +146,7 @@ The exhaustive change-kind catalogue is
 ## 6. Grouping before summarizing
 
 Do not read `changes` linearly for anything larger than a handful of
-findings — use `--report-mode root-cause` and read `root_causes` /
+findings — use `--view root-cause` and read `root_causes` /
 `root_cause_count` instead. See
 [root-cause-grouping.md](root-cause-grouping.md).
 
@@ -161,7 +161,7 @@ invoked:
 | `severity` | severity-aware grading was resolved from *any* source — a `--severity-*` flag, a `.abicheck.yml` `severity:` map, a run profile, or a gate pack |
 | `scope` | `--scope-public-headers` was requested |
 | `contract_coverage_failures`, `contract_coverage_exit_contribution`, `contract_context` | `--contract` was passed |
-| `root_causes`, `root_cause_count` | `--report-mode root-cause` |
+| `root_causes`, `root_cause_count` | `--view root-cause` |
 | `reason` | the comparison was refused (`verdict: null`) |
 | `coverage_warnings` | the run actually had coverage gaps — a clean run omits the key entirely, which is good news, not a malformed report |
 | `requested_depth`, `effective_depth`, `compatibility_verdict`, `policy_gate_decision` | never on a direct `compare` — Action `check-target` envelope only |

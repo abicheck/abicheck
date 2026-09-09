@@ -27,7 +27,7 @@ C.9 ``source_edges`` fold) — two flat modules rather than one, purely to stay
 under the new-file line-count cap. Comparison (:func:`diff_source_graph`,
 :func:`localize_symbol`) lives in ``source_graph_compare.py``. The shared
 node/edge-classification predicates neither half owns exclusively (used by
-``crosscheck.py``, ``graph_reconcile.py``, ``internal_leak.py``,
+``cross_source_checks.py``, ``graph_reconcile.py``, ``internal_leak.py``,
 ``impact/*``, ``surface.py``, ``post_processing_reachability.py``, and
 others) live in ``source_graph_query.py``.
 

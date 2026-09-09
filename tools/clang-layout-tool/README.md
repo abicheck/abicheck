@@ -6,7 +6,7 @@ companion program for abicheck's G28 Phase 4
 
 ## What it does
 
-abicheck's direct-clang L2 backend (`--ast-frontend clang`, `dumper_clang.py`)
+abicheck's direct-clang L2 backend (`compile.frontend: clang`, `dumper_clang.py`)
 parses headers via `clang -ast-dump=json`, which is **syntactic only** — it
 never computes a record's actual compiled layout (field offsets, base
 offsets, vtable-pointer placement). CastXML, abicheck's other L2 backend,
@@ -60,7 +60,11 @@ Point `ABICHECK_CLANG_LAYOUT_TOOL` at the compiled binary:
 
 ```bash
 export ABICHECK_CLANG_LAYOUT_TOOL=/path/to/abicheck-clang-layout-tool
-abicheck compare old.so new.so -H include/ --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare old.so new.so -H include/ --config .abicheck.yml
 ```
 
 When set, and the L2 backend actually resolved to `clang`, abicheck runs this

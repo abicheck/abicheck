@@ -410,7 +410,7 @@ renumber them, so exporting them is an ABI time bomb. This is a *hygiene*
 anti-pattern, best caught before it breaks.
 
 **Detection.** Single-snapshot audit (the `surface-report` /
-`crosscheck.py` anti-pattern precedent, like
+`cross_source_checks.py` anti-pattern precedent, like
 `POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR`): flag exported symbols whose mangling
 contains unnamed-type components. At diff time, report only when **newly
 introduced** (same rule as the other single-snapshot RISK kinds).

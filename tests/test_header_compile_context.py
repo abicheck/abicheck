@@ -1969,7 +1969,7 @@ def test_e2e_crosscheck_header_build_context_mismatch_stops_firing(
 
     from abicheck import service
     from abicheck.api_types import DumpRequest, InputSpec
-    from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
     from abicheck.checker_policy import ChangeKind
 
     so, header, src_dir = widget_lib

@@ -205,7 +205,7 @@ from typing import TYPE_CHECKING, Any
 from .. import deadline
 from .clang_ast_run import run_clang_ast_dump
 from .graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
-from .preprocessor_scan import _DEFINE_RE
+from .preprocessor_facts import _DEFINE_RE
 from .type_graph import (
     _FUNCTION_DECL_KINDS,
     _OTHER_TYPE_DECL_KINDS,

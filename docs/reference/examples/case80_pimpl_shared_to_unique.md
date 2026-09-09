@@ -74,7 +74,7 @@ the scoped, noise-free equivalent.
 debug info. Because no public header is passed at this floor, the compare
 also diffs the *entire* exported symbol table (including libstdc++
 internals pulled in transitively), which is where the extra noise above
-comes from. Adding public headers (`-H` + `--ast-frontend clang`, scoping
+comes from. Adding public headers (`-H` + `compile.frontend: clang` (via `.abicheck.yml`), scoping
 the surface to `v1.h`/`v2.h`) sharpens this to exactly the two kinds
 `examples/ground_truth.json` records for this case —
 `typedef_base_changed: pimpl (std::shared_ptr<T> -> std::unique_ptr<T>)`

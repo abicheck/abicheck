@@ -63,9 +63,9 @@ from .workflows.scan_subprocess import (
 )
 
 if TYPE_CHECKING:
-    from .buildsource.scan_levels import EvidenceDepth, SourceMethod
     from .bundle_manifest import InstantiationManifest
     from .environment_matrix import EnvironmentMatrix
+    from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
     from .policy_file import PolicyFile
     from .suppression import SuppressionList
 
@@ -160,7 +160,7 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
 def _scan_imports() -> tuple[Any, ...]:
     """Lazily import the buildsource level/risk vocabulary (keeps import cheap)."""
     from .buildsource.risk import RiskRules, score_changed_paths
-    from .buildsource.scan_levels import (
+    from .model.evidence_depth_levels import (
         EvidenceDepth,
         ScanMode,
         SourceMethod,
@@ -677,7 +677,7 @@ def _intrinsic_layer_estimates(
     req: ScanRequest, eff_depth: EvidenceDepth
 ) -> list[CostEstimate]:
     """The always-present L0/L1/L2 rows (intrinsic layers, no S-method)."""
-    from .buildsource.scan_levels import EvidenceDepth
+    from .model.evidence_depth_levels import EvidenceDepth
 
     # --depth binary is symbols-only: the real scan suppresses the L2 header AST, so
     # the estimate must not price an L2_header layer for headers that won't be parsed
@@ -1316,7 +1316,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         parse_user_depth,
         SourceScope,
     ) = _scan_imports()
-    from .buildsource.crosscheck import ALL_CHECKS
+    from .buildsource.cross_source_checks import ALL_CHECKS
     from .scan_engine import (
         _BudgetOverflow,
         _EvidenceContractError,
@@ -1585,8 +1585,8 @@ def _run_scan_one_member(
     `build_targets`; accepts ``sibling_exported_symbols`` (G35: a sibling's
     export also satisfies `public_not_exported`).
     """
-    from .buildsource.crosscheck import ALL_CHECKS
-    from .buildsource.scan_levels import EvidenceDepth, ScanMode, SourceMethod
+    from .buildsource.cross_source_checks import ALL_CHECKS
+    from .model.evidence_depth_levels import EvidenceDepth, ScanMode, SourceMethod
     from .scan_engine import _BudgetOverflow, _EvidenceContractError, run_scan_core
     from .workflows.scan_config import public_provenance_set as _public_provenance_set
 

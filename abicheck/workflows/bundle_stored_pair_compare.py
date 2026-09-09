@@ -285,12 +285,31 @@ def compare_stored_bundle_facts_pair(
         # whose extraction contracts disagree is `not_comparable` on the
         # record; the sibling comparisons survive, as in the fan-out.
         try:
+            # CodeRabbit/Codex review on PR #1154: surface_metrics is
+            # unconditional on every other path reaching this Tier-2
+            # chokepoint -- omitting it here silently dropped
+            # public_surface_grew/public_surface_shrank findings a
+            # stored/stored comparison of the identical library pair would
+            # get from a live `compare`. Codex review, fresh evidence
+            # (follow-up: "Make automatic analysis unconditional at Tier
+            # 2"): pattern-verdict modulation (ADR-068 D4) is the identical
+            # class of AUTO analysis and was missing the same way here --
+            # forced True for the same reason.
             diff = compare_snapshots(
                 projected_old_snapshots[key],
                 projected_new_snapshots[key],
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
+                # pattern_verdicts is deliberately NOT forced True here:
+                # ADR-027 (accepted) defers flipping --pattern-verdicts to
+                # default-on pending FP-rate/parity validation; ADR-068,
+                # which an earlier fix cited for forcing it, is only
+                # "Proposed -- not implemented" (Codex review, PR #1154
+                # follow-up: "Obtain ADR approval before forcing verdict
+                # modulation"). surface_metrics=True stays -- pre-existing,
+                # unaffected by this correction.
+                surface_metrics=True,
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:
             not_comparable[key] = (mismatch_kind(exc), str(exc))

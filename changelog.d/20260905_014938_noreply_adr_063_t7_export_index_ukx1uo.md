@@ -1,7 +1,7 @@
 ### Changed
 
 - **One canonical raw export index, with named projections** — ADR-063 T7:
-  `policy/depth_projection.py`, `buildsource/crosscheck_base.py`,
+  `policy/depth_projection.py`, `buildsource/cross_source_checks_base.py`,
   `buildsource/snapshot_exports.py`, `post_manifest.py`, and
   `diff_unnamed_types.py` each kept an independent copy of "read a
   snapshot's/binary's platform export table," subtly diverging on ELF

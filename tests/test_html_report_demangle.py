@@ -56,7 +56,7 @@ class TestRealDemanglingThroughTheProductionChangeDataclass:
 
     def test_default_demangles_old_and_new_value(self) -> None:
         """Codex review: a finding carrying mangled names in `old_value`/
-        `new_value` (as `buildsource/crosscheck.py` does) left those raw
+        `new_value` (as `buildsource/cross_source_checks.py` does) left those raw
         even under the default `--demangle`, since `_changes_table` only
         ever applied `demangle_text` to the description and primary
         symbol."""

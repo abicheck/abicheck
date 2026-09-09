@@ -32,6 +32,7 @@ from .runner import (  # noqa: E402
     invoke_cli,
     kinds_of,
     scan_finding_set,
+    without_surface_metrics,
     write_snapshot,
 )
 
@@ -54,8 +55,10 @@ def test_f3_call_graph_break_finding_set_parity() -> None:
         context="case192 (--depth source, F-3)",
     )
     # Identity, not just kind: both tools must resolve the same symbol.
+    # (without_surface_metrics: see its own docstring -- a `compare`-only
+    # ADR-027 roll-up here would otherwise fail this exact-identity check.)
     scan_identities = {f.identity for f in scan_findings}
-    compare_identities = {f.identity for f in compare_findings}
+    compare_identities = {f.identity for f in without_surface_metrics(compare_findings)}
     assert scan_identities == compare_identities
     assert scan_identities == {"_ZN4demo6detail13compute_avx2ERKNS_10DescriptorE"}
 
@@ -84,7 +87,8 @@ def test_f3_non_reachable_counterexample_finding_set_parity() -> None:
         compare_findings=compare_findings,
         context="case193 (--depth source, F-3 counter-example)",
     )
-    assert kinds_of(scan_findings) == kinds_of(compare_findings) == {"func_removed"}
+    # without_surface_metrics: see its own docstring in runner.py.
+    assert kinds_of(scan_findings) == kinds_of(without_surface_metrics(compare_findings)) == {"func_removed"}
 
 
 def _inline_removal_snapshots(tmp_path: Path) -> tuple[Path, Path]:

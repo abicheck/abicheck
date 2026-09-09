@@ -67,26 +67,24 @@ covered at all in the PR gate. The report must show breaks *and* additions: "0 b
 "nothing to review" ([Report the Surface, Not Only the Breaks](surface-growth.md)).
 
 ```bash
-abicheck scan build/libfoo.so -H include/ --sources . \
-  --against baseline.json --since origin/main --depth source
+abicheck compare baseline.json build/libfoo.so -H include/ --sources new=. \
+  --since origin/main --depth source
 ```
 
-Without `--depth`, `scan` picks `auto`, which is risk-driven under a
-`--since` seed and may stop short of the source tier; pin it. The
-[GitHub Action](../use/github-action.md) equivalent is scan mode — `against`
-and `since` are scan-only inputs, so a compare-mode `old-library`/`new-library`
-pair cannot express the seeded scan:
+Pin `--depth source` explicitly — an unpinned depth stops short of the source
+tier. The [GitHub Action](../use/github-action.md) equivalent is `mode:
+compare` (the default), with `since` as a real compare-mode input:
 
 ```yaml
 - uses: abicheck/abicheck@v1
   with:
-    mode: scan
+    mode: compare
+    old-library: baseline.json  # or abi-baseline: latest-release
     new-library: build/libfoo.so
     new-header: include/
     sources: .
     depth: source
     since: origin/main
-    against: baseline.json      # or abi-baseline: latest-release
 ```
 
 What each depth reaches, and the exact command for every other
@@ -173,7 +171,7 @@ guides carry the exact commands, flags and CI YAML:
 | You want to… | Go to |
 |--------------|-------|
 | Pick the right command for your situation (binary compare → full source scan → combine evidence → plugin) | [Choose Your Workflow](../start/choose-your-workflow.md) |
-| Run `abicheck scan` and pin a depth | [Source-Scan Depth](../use/scan-levels.md) |
+| Pin a `--depth` on `compare` (or `scan` for the cases it still owns) | [Source-Scan Depth](../use/scan-levels.md) |
 | *Produce* the source facts — post-build replay, the `abicheck-cc` wrapper, or the Clang plugin | [Producing Source Facts](../use/producing-source-facts.md) |
 | Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
 | Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action: Source Scans](../use/github-action-source-scans.md) |

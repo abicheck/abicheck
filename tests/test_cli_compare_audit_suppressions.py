@@ -82,21 +82,25 @@ def _write_suppression(tmp_path: Path, yaml_text: str) -> Path:
     return p
 
 
-class TestRequiresSuppress:
-    def test_rejected_without_suppress(self, tmp_path):
+class TestNoOpWithoutSuppress:
+    """ADR-068 D4/Phase 5: `--audit-suppressions` is a rendering-only flag
+    now (matching `--surface-metrics`/`--show-filtered`'s own shape) -- with
+    no `--suppress` file there is genuinely nothing to audit, so the flag is
+    a no-op rather than a usage error."""
+
+    def test_no_op_without_suppress(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--audit-suppressions"]
+            main,
+            ["compare", str(old_p), str(new_p), "--audit-suppressions", "--format", "json"],
         )
-        assert result.exit_code != 0
-        assert "--audit-suppressions requires --suppress" in result.output
+        # A real BREAKING removal in _breaking_pair() -- the flag's absence
+        # of a suppression file must not change that outcome.
+        assert result.exit_code == 4, result.output
+        payload = json.loads(result.stdout)
+        assert payload.get("suppression_audit") is None
 
-    def test_rejected_without_suppress_even_with_dry_run(self, tmp_path):
-        # Regression (Codex review, fresh evidence): --dry-run exits via
-        # emit_dry_run's SystemExit before the CLI ever reaches the later,
-        # post-suppression-loading guard -- without an earlier check,
-        # `--audit-suppressions --dry-run` (no --suppress) reported "ok" for
-        # an invocation the identical non-dry-run call rejects outright.
+    def test_no_op_without_suppress_even_with_dry_run(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
@@ -105,12 +109,17 @@ class TestRequiresSuppress:
                 "--audit-suppressions", "--dry-run",
             ],
         )
-        assert result.exit_code != 0
-        assert "--audit-suppressions requires --suppress" in result.output
+        assert result.exit_code == 0, result.output
 
 
 class TestRejectedOnSetInputs:
-    def test_rejected_on_directory_inputs(self, tmp_path):
+    def test_rejected_on_directory_inputs_with_a_real_suppress_file(self, tmp_path):
+        """CodeRabbit/Codex review, PR #1154: this combination -- a real
+        ``--suppress`` file *and* ``--audit-suppressions`` -- is still
+        rejected on a directory/package operand: it asks for a genuine
+        per-finding audit result the per-library fan-out has no single
+        place to attach. See the no-op test right below for the
+        combination this same review fixed (no ``--suppress`` at all)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -128,8 +137,36 @@ class TestRejectedOnSetInputs:
             ],
         )
         assert result.exit_code != 0
-        assert "not supported for directory/package" in result.output
+        assert "not supported" in result.output
+        assert "directory/package" in result.output
         assert "--audit-suppressions" in result.output
+
+    def test_accepted_as_a_no_op_on_directory_inputs_without_suppress(
+        self, tmp_path
+    ) -> None:
+        """CodeRabbit/Codex review on PR #1154: ``--audit-suppressions``
+        with no ``--suppress`` is a harmless no-op on the scalar `compare`
+        path (nothing to audit) -- it must be equally harmless on a
+        directory/package operand instead of the blanket usage error this
+        class used to assert for every ``--audit-suppressions`` regardless
+        of ``--suppress``."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old, new = _breaking_pair()
+        (old_dir / "libfoo.json").write_text(snapshot_to_json(old), encoding="utf-8")
+        (new_dir / "libfoo.json").write_text(snapshot_to_json(new), encoding="utf-8")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_dir), str(new_dir),
+                "--audit-suppressions", "--format", "json",
+            ],
+        )
+        assert result.exit_code == 4, result.output
+        assert "--audit-suppressions" not in result.output
 
 
 class TestJsonReport:
@@ -510,7 +547,7 @@ class TestJsonReport:
             [
                 "compare", str(old_p), str(new_p),
                 "--suppress", str(suppress), "--audit-suppressions",
-                "--format", "json", "--report-mode", report_mode,
+                "--format", "json", "--view", report_mode,
             ],
         )
         assert result.exit_code == 4, result.output

@@ -48,7 +48,7 @@ _HBCM_FLAG = "evidence_flagged"
 
 def _hbcm_snapshot(state: str) -> AbiSnapshot:
     """``header_build_context_mismatch``: ABI-relevant build flags recorded
-    but the headers parsed context-free (mirrors ``test_crosscheck.py``'s
+    but the headers parsed context-free (mirrors ``test_cross_source_checks.py``'s
     own fixture shape)."""
     if state == _HBCM_NONE:
         return AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
@@ -126,7 +126,7 @@ _ODR_FLAG = "evidence_flagged"
 
 def _odr_snapshot(state: str, header: str = "widget.h") -> AbiSnapshot:
     """``odr_type_variant``: a recorded L4 cross-TU layout conflict for one
-    type (mirrors ``test_crosscheck.py``'s own fixture shape)."""
+    type (mirrors ``test_cross_source_checks.py``'s own fixture shape)."""
     if state == _ODR_NONE:
         return AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)
     if state not in (_ODR_CLEAN, _ODR_FLAG):
@@ -221,7 +221,7 @@ _ICD_FLAG = "evidence_flagged"
 
 def _icd_snapshot(state: str, identity: str = "f#sha256:abc") -> AbiSnapshot:
     """``identity_collision_detected``: two distinct declarations linked
-    onto one L4 identity key (mirrors ``test_crosscheck.py``'s own fixture
+    onto one L4 identity key (mirrors ``test_cross_source_checks.py``'s own fixture
     shape)."""
     if state == _ICD_NONE:
         return AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True)

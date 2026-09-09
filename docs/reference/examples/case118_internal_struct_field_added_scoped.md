@@ -37,10 +37,12 @@ change under public-surface scoping would be a false positive.
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --compiler "$(command -v clang)" \
-  --scope-public-headers --show-filtered
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  compiler: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --show-filtered --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -68,7 +70,7 @@ type requires the public header AST: DWARF alone (L1) sees every struct the
 compiler emitted debug info for and can't tell which ones are reachable from
 an exported declaration. castxml is the documented default header/AST
 backend; this environment used the supported alternative Clang AST frontend
-(`--ast-frontend clang`) to produce that evidence, since castxml itself
+(`compile.frontend: clang` (via `.abicheck.yml`)) to produce that evidence, since castxml itself
 isn't installed here.
 
 ## Why abicheck catches it (and doesn't report it)

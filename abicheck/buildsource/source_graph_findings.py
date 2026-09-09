@@ -178,7 +178,7 @@ def _dependency_reachability(
     emitted standalone), so restricting entries to
     ``SOURCE_DECL_MAPS_TO_SYMBOL`` missed exactly the ADR's own headline
     example — ``inline int f() { return detail::SECRET; }`` — whenever ``f``
-    isn't separately exported. ``crosscheck.py``'s intra-version check already
+    isn't separately exported. ``cross_source_checks.py``'s intra-version check already
     treats a ``visibility="public_header"`` decl as public
     (``is_public_dependency_node``, shared since the fourth review); this
     closure now uses the identical rule, so a public type is no longer a

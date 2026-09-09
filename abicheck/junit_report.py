@@ -570,11 +570,10 @@ def _build_testsuite(
     # fix). Element/action tokens don't cleanly apply to "a symbol is simply
     # absent", so only the severity dimension is checked.
     if show_only and missing_labels:
-        from .reporter_markdown import ShowOnlyFilter
+        from .reporter_markdown import show_only_matches_severity_label
 
         missing_severity_label = "breaking" if missing_blocks else "compatible"
-        show_only_severities = ShowOnlyFilter.parse(show_only).severities
-        if show_only_severities and missing_severity_label not in show_only_severities:
+        if not show_only_matches_severity_label(show_only, missing_severity_label):
             missing_labels = ()
     total = (len(all_symbols) if all_symbols else len(change_by_symbol)) + len(
         missing_labels

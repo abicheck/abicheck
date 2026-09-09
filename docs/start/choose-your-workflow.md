@@ -39,7 +39,7 @@ command** when you need more confidence or a CI gate.
 | One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --header old=include/v1/ --header new=include/v2/` — the primary flow |
 | Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
 | No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root old=old-debug --debug-root new=new-debug` |
-| Stripped production binaries | `abicheck compare old.so new.so --debug-root old=old-debug --debug-root new=new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
+| Stripped production binaries | `abicheck compare old.so new.so --debug-root old=old-debug --debug-root new=new-debug` (or a `.abicheck.yml` `debug.debuginfod: true` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
 | A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Storing Baselines](../use/baseline-storage.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck compare baseline.json build/libfoo.so -H include/ --sources new=. --since origin/main --depth source` | `compare` already runs the always-on pattern + cross-source checks and the pinned L3/L4/L5 level on every invocation (no separate orchestrator command needed) — see [Source & Build Data](../learn/build-source-data.md) and the [GitHub Action: Source Scans](../use/github-action-source-scans.md) |
 | No baseline yet — single-build hygiene audit (accidental exports, private-header leaks, unversioned symbols) | `abicheck scan build/libfoo.so -H include/` (no `--against`) | `compare --no-baseline` (ADR-068 D2) is not a safe replacement yet — verified it crashes with an unhandled `AssertionError` instead of reporting when the candidate actually has one of these problems (only "worked" for an already-clean candidate) — see [Scenario S5](../integration/scenarios/single-build-audit.md) |
@@ -107,9 +107,9 @@ when the default doesn't reach the layer you need.
 abicheck separates two independent questions: **what fails the build**
 (verdict/severity/exit code — `--severity-*` flags or GitHub Action
 `fail-on-*`/`severity-*` inputs) and **what appears in the report**
-(display-only `--show-only`, which never changes the verdict or exit code).
+(display-only `--view show=...`, which never changes the verdict or exit code).
 See [Severity Configuration](../use/severity.md) for the full failure-policy
-recipe table and [Output Formats → `--show-only` filter](../use/output-formats.md#-show-only-filter)
+recipe table and [Output Formats → `--view show=...` filter](../use/output-formats.md#-view-show-filter)
 for display filtering.
 
 Beyond severity, two more mechanisms can each independently decide what

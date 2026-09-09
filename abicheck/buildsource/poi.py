@@ -16,7 +16,7 @@
 """Evidence-directed focusing — the points-of-interest work-list (ADR-035 D7).
 
 Cross-source links are read in **two** directions (ADR-035 D7). The cross-check
-engine (``crosscheck.py``, D4) reads them *after* a scan to emit findings; this
+engine (``cross_source_checks.py``, D4) reads them *after* a scan to emit findings; this
 module reads the *same* cheap, already-computed facts *before* the expensive scan
 to shrink its scope to a **points-of-interest (POI) set**. It is mechanically the
 **reverse** of the ``graph explain`` localization walk (export → decl → header
@@ -170,7 +170,7 @@ def build_points_of_interest(
       added unconditionally as a ``CHANGED_PATH`` POI **first**, so nothing below
       can drop it.
     - ``pattern_triggers`` — the S3 pattern pre-scan's per-kind
-      :class:`~abicheck.buildsource.pattern_scan.EscalationTrigger` objects; each
+      :class:`~abicheck.buildsource.pattern_facts.EscalationTrigger` objects; each
       contributes its sample paths as ``PATTERN_TRIGGER`` POIs.
     - ``baseline`` / ``candidate`` — when both are given, the L0/L1/L2 export
       deltas are walked (reverse `graph explain`): added/removed exports,

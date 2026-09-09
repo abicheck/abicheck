@@ -6,7 +6,7 @@
 
 abicheck parses public headers **context-free** by default: the header AST is
 captured with no compile database, so no build-time `-D` defines are applied
-(see `abicheck/buildsource/crosscheck.py`, which notes "the header AST was
+(see `abicheck/buildsource/cross_source_checks.py`, which notes "the header AST was
 captured context-free"). That is deliberate — it keeps the header layer usable
 without a build — but it has a sharp failure mode.
 

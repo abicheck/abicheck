@@ -2995,7 +2995,7 @@ def _run_g20_audit_case(name: str, entry: dict[str, Any]) -> ToolResult:
         return ToolResult(verdict="SKIP")
     started = time.monotonic()
     try:
-        from abicheck.buildsource.crosscheck import run_crosschecks  # noqa: PLC0415
+        from abicheck.buildsource.cross_source_checks import run_crosschecks  # noqa: PLC0415
         from abicheck.serialization import load_snapshot  # noqa: PLC0415
 
         snap_path = example_catalog.case_dir(name) / str(

@@ -317,5 +317,13 @@ def test_compare_cli_diffs_compressed_snapshots_at_production_scale(tmp_path, su
     payload = json.loads(result.stdout)
     changes = payload["changes"]
     assert [(c["kind"], c["symbol"]) for c in changes] == [
-        ("func_added", _MARKER_MANGLED)
+        ("func_added", _MARKER_MANGLED),
+        # ADR-068 D4/Phase 5: `--surface-metrics` computation is now
+        # unconditional (this PR's own change) -- the one added public
+        # function also grows the public-surface count by one, so the
+        # always-on roll-up finding is now a real, expected second entry
+        # here, matching the same fix already applied to this PR's other
+        # surface-metrics-affected fixtures (test_cov95_cli.py,
+        # test_junit_report.py, test_cli_project_validate_use_cases.py).
+        ("public_surface_grew", "<surface>"),
     ]

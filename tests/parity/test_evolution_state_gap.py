@@ -67,7 +67,7 @@ def test_f8_pre_existing_leak_defaults_to_not_evaluated_never_manufactured() -> 
     carries, since crosscheck itself (Phase 2a work) does not compute
     evolution yet.
     """
-    from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
 
     snapshot = _g20_snapshot("case144_audit_private_header_leak")
     result = run_crosschecks(snapshot, None)

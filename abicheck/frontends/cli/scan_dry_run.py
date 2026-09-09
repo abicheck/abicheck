@@ -29,7 +29,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ...buildsource.scan_levels import EvidenceDepth, SourceMethod
+from ...model.evidence_depth_levels import EvidenceDepth, SourceMethod
 
 
 def _dry_run_exit_code_lines(

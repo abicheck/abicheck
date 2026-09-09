@@ -12,22 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compiler-free lexical ABI-risk pattern pre-scan (ADR-035 D2, phase 1 / G19.1).
-
-This is the **always-on, compiler-free** half of the ADR-035 PR pre-scan tier:
+"""Compiler-free lexical ABI-risk pattern facts (ADR-035 D2; renamed off the
+``scan`` identity in the Phase 6 rename, ADR-068 §3 #34 —
+``docs/contribute/plans/one-comparison-product.md``). This is the
+**always-on, compiler-free** half of the ADR-035 pre-scan tier:
 a stdlib-regex (no new dependency, no compile DB, no compiler) scan over
 changed + public source/header files for the ABI-risk constructs called out in
 ADR-035 D2 — ``#pragma pack``, ``alignas``, ``__attribute__((packed|
 visibility))``, ``__declspec(dllexport|dllimport)``, ``extern "C"``,
 calling-convention macros, explicit / ``extern`` template instantiation,
 ``inline namespace``, public ``virtual`` methods, and ``operator new``/
-``delete``.
+``delete``. Reached automatically from both ``compare()``'s pipeline
+(``workflows/pattern_preprocessor_scan.py``, ADR-068 Phase 2b) and ``scan``.
 
-The scan emits **advisory facts** and **escalation triggers** only — it never
-produces a verdict and is never authoritative for a ``BREAKING`` finding (the
-ADR-028 D3 / ADR-035 D1 authority rule). Its facts pre-populate the L2/L5
-surface and its escalation triggers feed the D7 points-of-interest list that
-targets the expensive S5 source-ABI replay.
+This module emits **advisory facts** and **escalation triggers** only — it never produces a verdict and is never authoritative for a ``BREAKING`` finding
+(the ADR-028 D3 / ADR-035 D1 authority rule). Its facts pre-populate the L2/L5 surface and its triggers feed the D7 points-of-interest list that targets
+the expensive S5 source-ABI replay.
 
 Everything here is a pure function over text: no binaries are parsed and no
 external tools are run, so the whole module is exercised by fast unit tests.
@@ -50,8 +50,8 @@ from .model import CoverageStatus, LayerConfidence, LayerCoverage
 
 #: Pattern-scan fact-schema version. Independent of every other buildsource
 #: schema version (see ``buildsource/CLAUDE.md`` "Versioning"); bumped on any
-#: breaking change to the emitted ``PatternFact``/``PatternScanResult`` layout.
-PATTERN_SCAN_VERSION: int = 1
+#: breaking change to the emitted ``PatternFact``/``PatternFactsResult`` layout.
+PATTERN_FACTS_VERSION: int = 1
 
 #: File suffixes the lexical scanner treats as C/C++ source or headers. Headers
 #: without a suffix (the libstdc++ ``<vector>`` style) are not on disk under a
@@ -366,7 +366,7 @@ class EscalationTrigger:
 
 
 @dataclass(frozen=True)
-class PatternScanResult:
+class PatternFactsResult:
     """Outcome of a lexical pre-scan over a set of files (ADR-035 D2).
 
     ``facts`` are the raw advisory hits; ``escalation_triggers`` is the deduped
@@ -377,7 +377,7 @@ class PatternScanResult:
     facts: list[PatternFact] = field(default_factory=list)
     files_scanned: int = 0
     files_skipped: int = 0
-    version: int = PATTERN_SCAN_VERSION
+    version: int = PATTERN_FACTS_VERSION
 
     @property
     def escalation_triggers(self) -> list[EscalationTrigger]:
@@ -715,7 +715,7 @@ def _looks_binary(path: Path) -> bool:
     """Heuristic: a NUL byte in the first 8 KiB marks a non-text (binary) file.
 
     Unreadable files are treated as binary so they fall out of the scan set
-    (``scan_files`` would skip them anyway).
+    (``find_pattern_facts`` would skip them anyway).
     """
     try:
         with open(path, "rb") as fh:
@@ -878,7 +878,7 @@ def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
     return scan_text(text, path=path_str), True
 
 
-def _scan_files_serial(files: list[Path]) -> PatternScanResult:
+def _find_pattern_facts_serial(files: list[Path]) -> PatternFactsResult:
     """Scan ``files`` one at a time (the serial path / parallel fallback).
 
     Unreadable files are counted as skipped rather than raising — the pre-scan
@@ -894,13 +894,13 @@ def _scan_files_serial(files: list[Path]) -> PatternScanResult:
             continue
         facts.extend(rfacts)
         scanned += 1
-    return PatternScanResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
+    return PatternFactsResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
 
 
-def scan_files(
+def find_pattern_facts(
     roots: Iterable[str | Path],
     changed_paths: Iterable[str] | None = None,
-) -> PatternScanResult:
+) -> PatternFactsResult:
     """Run the lexical pre-scan over the in-scope files and aggregate facts.
 
     Unreadable files are counted as skipped (reported via ``coverage()``), never
@@ -915,7 +915,7 @@ def scan_files(
     files = iter_source_files(roots, changed_paths)
     jobs = _resolve_scan_jobs(len(files))
     if jobs <= 1:
-        return _scan_files_serial(files)
+        return _find_pattern_facts_serial(files)
 
     from concurrent.futures import ProcessPoolExecutor
 
@@ -937,5 +937,5 @@ def scan_files(
     except (OSError, RuntimeError, ImportError, AssertionError):
         # BrokenProcessPool, no-fork sandbox, or a daemonic process that slipped
         # past the _resolve_scan_jobs guard (AssertionError) → serial fallback.
-        return _scan_files_serial(files)
-    return PatternScanResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
+        return _find_pattern_facts_serial(files)
+    return PatternFactsResult(facts=facts, files_scanned=scanned, files_skipped=skipped)

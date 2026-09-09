@@ -9,7 +9,7 @@
   x4, `cli_resolve.py`) reaching a parser module directly rather than through
   the engine; each now goes through `abicheck.workflows.extraction`, which
   already owns this re-export role for the sibling extraction helpers.
-  `abicheck.buildsource.scan_levels` (the `scan` depth/mode/source-method
+  `abicheck.model.evidence_depth_levels` (the `scan` depth/mode/source-method
   resolver — pure enums and functions over them, no first-party imports) is
   now classified `model` for the same reason.
 

@@ -492,7 +492,7 @@ def test_l5_public_inline_fn_with_no_exported_symbol_gains_private_dependency() 
     # binary symbol at all — an inline/template/constexpr function is inlined
     # at every call site rather than separately emitted. A public entry must
     # be seeded from public-header *visibility* alone (matching
-    # crosscheck.py's is_public_dependency_node), not only from
+    # cross_source_checks.py's is_public_dependency_node), not only from
     # SOURCE_DECL_MAPS_TO_SYMBOL, or this exact scenario is never flagged.
     nodes = [
         _N("hdr", "header", "api.h"),
@@ -543,7 +543,7 @@ def test_l5_public_type_gains_unannotated_project_field_type_flagged() -> None:
     # header, so no `visibility` attr) but marked `defined_in_project` by the
     # type-graph extractor (its dst_file is a project source/private header)
     # IS internal — project-source-location provenance is exactly the signal
-    # crosscheck.py's `_is_internal_decl` already accepts for this case.
+    # cross_source_checks.py's `_is_internal_decl` already accepts for this case.
     nodes = [
         _N("pub_hdr", "header", "api.h"),
         _N("pub_type", "record_type", "Public", visibility="public_header"),

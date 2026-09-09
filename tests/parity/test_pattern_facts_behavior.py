@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Behavioral half of the (now closed) pattern_scan gap (plan §3 #6, Phase 2b).
 
-``test_engine_primitive_call_sites.py`` proves ``scan_files`` has exactly
+``test_engine_primitive_call_sites.py`` proves ``find_pattern_facts`` has exactly
 two production callers now: ``scan_engine.py`` and
 ``workflows/pattern_preprocessor_scan.py``. This module proves the positive
-side concretely and cheaply -- ``scan_files`` is pure lexical text scanning
+side concretely and cheaply -- ``find_pattern_facts`` is pure lexical text scanning
 (no compiler, no castxml) and really does find an ABI-risk construct scan
 surfaces today, over a tiny fixture file, and that the same construct now
 also reaches ``compare()``'s own JSON report.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from abicheck.buildsource.pattern_scan import scan_files
+from abicheck.buildsource.pattern_facts import find_pattern_facts
 
 from .gaps import EXPECTED_GAPS
 from .runner import compare_json, invoke_cli
@@ -24,7 +24,7 @@ def test_scan_files_finds_explicit_template_instantiation(tmp_path: Path) -> Non
     header = tmp_path / "risky.hpp"
     header.write_text("template class Widget<int>;\n", encoding="utf-8")
 
-    result = scan_files([tmp_path])
+    result = find_pattern_facts([tmp_path])
     kinds = {f.kind.value for f in result.facts}
     assert "explicit_template_instantiation" in kinds
     assert result.files_scanned == 1
@@ -48,7 +48,7 @@ def test_compare_has_no_pattern_scan_cli_surface() -> None:
 def test_compare_surfaces_a_pattern_scan_escalation_introduced_in_new(
     tmp_path: Path,
 ) -> None:
-    """The construct `scan_files` finds above now also reaches `compare`'s
+    """The construct `find_pattern_facts` finds above now also reaches `compare`'s
     own report -- present only on NEW's header, so it reads `introduced`."""
     from abicheck.model import AbiSnapshot, Function
 

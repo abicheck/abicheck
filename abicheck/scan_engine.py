@@ -53,21 +53,15 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from . import deadline
-from .buildsource.crosscheck import CrosscheckConfig, run_crosschecks
-from .buildsource.pattern_scan import scan_files
+from .buildsource.cross_source_checks import CrosscheckConfig, run_crosschecks
+from .buildsource.pattern_facts import find_pattern_facts
 from .buildsource.poi import (
     build_points_of_interest,
     resolve_changed_paths_public_impact,
     resolve_symbol_tus,
 )
-from .buildsource.preprocessor_scan import run_preprocessor_scan
+from .buildsource.preprocessor_facts import collect_preprocessor_facts
 from .buildsource.risk import RiskScore
-from .buildsource.scan_levels import (
-    EvidenceDepth,
-    ScanMode,
-    SourceMethod,
-    public_depth_value,
-)
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
@@ -82,6 +76,12 @@ from .cli_scan_helpers import (
     scan_pattern_roots,
 )
 from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
+from .model.evidence_depth_levels import (
+    EvidenceDepth,
+    ScanMode,
+    SourceMethod,
+    public_depth_value,
+)
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext
@@ -1064,7 +1064,7 @@ def run_scan_core(
     ``sibling_exported_symbols`` (G35, ``scan --artifact-set`` only via
     ``service_scan.run_scan_set``) is forwarded to the always-on cross-check
     tier's ``CrosscheckConfig`` unchanged — see
-    :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig` for what it
+    :class:`~abicheck.buildsource.cross_source_checks.CrosscheckConfig` for what it
     does. ``None``/empty for the single-binary ``scan``/``compare`` paths.
 
     ``max_findings`` overrides the default ``--against`` report cap (default
@@ -1123,7 +1123,7 @@ def run_scan_core(
     # back to the whole-tree scan (Codex review).
     pattern_roots = scan_pattern_roots(list(headers), sources, eff_depth_enum)
     _stage = time.monotonic()
-    pattern = scan_files(pattern_roots, changed if seeded else None)
+    pattern = find_pattern_facts(pattern_roots, changed if seeded else None)
     _record_stage("pattern_scan", _stage)
 
     # --- D7 points-of-interest: cheap facts steer the expensive scan ----------
@@ -1272,7 +1272,7 @@ def run_scan_core(
     # the same shrinking, process-group-safe deadline the other stages get,
     # so it can't run its own remaining compile units past the budget.
     with deadline.deadline_scope(_remaining_budget_s(start, budget_s)):
-        preproc = run_preprocessor_scan(
+        preproc = collect_preprocessor_facts(
             pp_build,
             _expand_public_headers(list(headers)),
             clang_bin=_preprocessor_scan_clang_bin(compile_context),

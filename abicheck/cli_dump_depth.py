@@ -16,7 +16,7 @@
 """``dump``'s ``--depth`` dial resolution -- split out of ``cli_dump_helpers.py``
 purely to stay under the AI-readiness 2000-line hard cap.
 
-A genuine leaf: only ``.buildsource.scan_levels`` and ``click``. Reachable
+A genuine leaf: only ``.model.evidence_depth_levels`` and ``click``. Reachable
 under its original names (``cli_dump_helpers.resolve_dump_depth``/
 ``resolve_dump_collect_context``) via that module's own lazy ``__getattr__``
 shim (PEP 562), mirroring the identical pattern at the tail of
@@ -46,7 +46,7 @@ def resolve_dump_depth(
     *default_mode* is returned (``dump`` embeds at ``source-target``;
     ``compare`` reads at ``off``).
     """
-    from .buildsource.scan_levels import (
+    from .model.evidence_depth_levels import (
         EvidenceDepth,
         SourceScope,
         depth_to_method,

@@ -35,7 +35,11 @@ compiles and links unchanged against v2. No consumer action is required.
 ```bash
 gcc -shared -fPIC -g v1.c -o libv1.so
 gcc -shared -fPIC -g v2.c -o libv2.so
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -56,7 +60,7 @@ to see `char *` vs `const char *` as differing strings and misreport a
 break; the public header AST is what lets abicheck recognize the top-level
 `*`-plus-`const`-only shape and suppress the finding correctly rather than
 merely downgrade it. castxml is the documented default backend for this
-evidence layer; clang (`--ast-frontend clang`, used above) is a supported
+evidence layer; clang (`compile.frontend: clang` (via `.abicheck.yml`), used above) is a supported
 alternative AST frontend for hosts without castxml installed.
 
 ## Why abicheck catches it

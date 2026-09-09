@@ -91,8 +91,47 @@ def maybe_dispatch_no_baseline_compare(
             "--no-baseline does not support a directory/package operand yet "
             "-- pass a single artifact (a binary or a stored snapshot)."
         )
+    _reject_view_tokens_for_no_baseline(kwargs)
     _run_no_baseline_compare_cmd(ctx, candidate, **kwargs)
     return True
+
+
+#: The four values `--view` resolves into, and each one's "nothing requested"
+#: default -- anything else means a real `--view` token was given.
+_VIEW_DEFAULTS: dict[str, object] = {
+    "report_mode": "full",
+    "show_only": None,
+    "demangle": None,
+    "explain_patterns": False,
+}
+
+
+def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
+    """Reject any non-default ``--view`` token for a ``--no-baseline`` audit.
+
+    Codex review, fresh evidence ("Reject unsupported views for no-baseline
+    audits"): a `--no-baseline` report is a self-diff audit against nothing
+    (an empty change set, by construction -- see `report/no_baseline.py`'s
+    own module docstring) -- it has no root-cause graph for `leaf`/
+    `root-cause` to restructure, no per-library `DiffResult` for `impact`
+    to summarize, no findings list for `show=...` to filter, no symbol
+    table for `demangle` to affect, and no pattern-modulation ledger for
+    `patterns` to echo. Silently accepting any of them (`parse_view_tokens`
+    resolved them, but this dispatch never reads the result) reads as "your
+    selector was honored" when nothing changed at all -- the same class of
+    gap `_dispatch_release_compare` already guards against for its own
+    unsupported view modes.
+    """
+    for name, default in _VIEW_DEFAULTS.items():
+        value = kwargs.get(name, default)
+        if value != default:
+            raise click.UsageError(
+                "--view is not available together with --no-baseline: a "
+                "no-baseline audit has no root-cause graph, findings list, "
+                "or pattern-modulation ledger for --view to act on (it "
+                "reports an empty change set by construction). Drop --view "
+                "for this operand."
+            )
 
 
 def _run_no_baseline_compare_cmd(

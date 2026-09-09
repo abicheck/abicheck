@@ -35,7 +35,7 @@ flowchart LR
     PR --> V2["Verdict/gate recomputed<br/>if promotion changed anything"]
     V2 --> E["6 · Exit code<br/>(legacy or severity scheme)"]
     CC["Contract coverage<br/>(evidence completeness)"] -.->|max, orthogonal| E
-    V2 -.-> R["Report rendering<br/>(--show-only, --format)"]
+    V2 -.-> R["Report rendering<br/>(--view, --format)"]
 ```
 
 ## The order of operations
@@ -117,9 +117,10 @@ CI, and they should not be collapsed into one mental "ignored" bucket —
 each is visible in the report under a different field
 (`contract_relevance`, `suppressed_count`, `contract_coverage_failures`).
 
-**Display filtering is outside the pipeline.** `--show-only`, `--format
-oneline`'s one-line summary, `--report-mode`, and `--format` change what the
-report *renders*, never the verdict or the exit code.
+**Display filtering is outside the pipeline.** `--view` (its `show=...`
+token, and its report-mode tokens), `--format oneline`'s one-line summary,
+and `--format` change what the report *renders*, never the verdict or the
+exit code.
 
 !!! tip "No `--profile ci-gate` shortcut any more"
     A `--profile ci-gate` used to bundle the common gating knobs

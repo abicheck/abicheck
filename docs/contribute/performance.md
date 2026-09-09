@@ -536,7 +536,7 @@ finding below):
 `--depth source`, since replay *scope* (a change seed present vs. absent), not
 evidence depth, was the only thing distinguishing them, and `scan` itself now
 resolves that scope from whether `--since`/`--changed-path` was given (see
-`abicheck/buildsource/scan_levels.py`'s `EvidenceDepth.FULL`/`SourceScope`
+`abicheck/model/evidence_depth_levels.py`'s `EvidenceDepth.FULL`/`SourceScope`
 docstrings). The harness's own seedless `"source"` entry *is* the shape the
 old `"full"` entry measured — keeping both would just re-run the identical
 `--depth source` argv twice under two names. (Concretely, before this fix
@@ -608,7 +608,7 @@ legitimately produce hundreds of MB to multiple GB of AST-dump output, which
 builds; measured ~27% lower Python-heap peak (`tracemalloc`) on the depth-150
 fixture (364.5 MB → 267.1 MB) with the fix. The same `deadline.run_bounded`
 treatment (shrinking `--budget` deadline, process-group kill on timeout) was
-also extended to `preprocessor_scan.py`'s live extractor and both L4 source
+also extended to `preprocessor_facts.py`'s live extractor and both L4 source
 extractors (`source_extractors/clang.py`, `source_extractors/castxml.py`),
 which previously used the same fixed-timeout/no-process-group pattern the P0
 fix closed for L2 — and a --budget deadline expiring during a PE/Mach-O
@@ -683,7 +683,7 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
 
 ### S2 preprocessor pre-scan performance (`scan --depth build`)
 
-`scan`'s S2 preprocessor pre-scan (ADR-035 D2, `buildsource/preprocessor_scan.py`)
+`scan`'s S2 preprocessor pre-scan (ADR-035 D2, `buildsource/preprocessor_facts.py`)
 is the conditional tier that runs once L3 build evidence is available: per-TU
 ABI-macro-value capture (`clang -E -dM`) and public-header-leak detection
 (`clang -M`). It is advisory-only (never a verdict on its own), but on a
@@ -716,7 +716,7 @@ the tier's own core purpose, worse than the perf win it bought. See this
 repo's "known gaps over risky reactive patches" convention (root
 `AGENTS.md`).
 
-Knobs (`abicheck/buildsource/preprocessor_scan.py`), mirroring the L4
+Knobs (`abicheck/buildsource/preprocessor_facts.py`), mirroring the L4
 conventions above:
 
 - **`ABICHECK_PREPROCESSOR_SCAN_JOBS`** — worker count for the probe pool.

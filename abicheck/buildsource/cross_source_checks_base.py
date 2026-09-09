@@ -15,13 +15,15 @@
 """Shared plumbing for the cross-check engine and its check modules.
 
 A **leaf** module: it holds the finding/coverage primitives that both
-``crosscheck.py`` (the engine) and the split-out check modules
-(``crosscheck_coherence.py``) need, so those two never have to import each
-other's internals. Keeping this dependency-free of ``crosscheck`` is what lets
-a check live in its own file without forming a ``crosscheck`` ↔ check import
-cycle (CLAUDE.md "M1-3": move the shared logic to a leaf module both sides can
-depend on). ``crosscheck.py`` re-exports every name here for back-compat, so
-existing ``from .crosscheck import _change`` call sites and tests keep working.
+``cross_source_checks.py`` (the engine) and the split-out check modules
+(``cross_source_checks_coherence.py``) need, so those two never have to import
+each other's internals. Keeping this dependency-free of
+``cross_source_checks`` is what lets a check live in its own file without
+forming a ``cross_source_checks`` ↔ check import cycle (CLAUDE.md "M1-3":
+move the shared logic to a leaf module both sides can depend on).
+``cross_source_checks.py`` re-exports every name here for back-compat, so
+existing ``from .cross_source_checks import _change`` call sites and tests
+keep working.
 """
 from __future__ import annotations
 

@@ -280,7 +280,7 @@ shouldn't be frozen before real call sites are examined.
 exhaustive over every finding shape -- a fourth, `current:` scope is
 needed for genuinely unary findings (Codex review, fresh evidence,
 confirmed by reading real call sites rather than assumed from the
-prefix table alone).** `buildsource/crosscheck.py`'s
+prefix table alone).** `buildsource/cross_source_checks.py`'s
 `_check_header_build_context_mismatch`/`_check_public_to_internal_
 dependency` (and their sibling `_check_*` functions in that module) each
 take exactly one `snapshot: AbiSnapshot` parameter -- there is no old/new
@@ -311,7 +311,7 @@ draft cited "~45 `Change(...)` construction sites"; a later revision
 "corrected" that to "about 14 sites" plus "~350" `make_change()` calls —
 also wrong, confirmed by a fresh `git grep -n "Change(" -- 'abicheck/**/*.py'`
 at implementation time finding several dozen direct-construction sites in
-`buildsource/` alone (`build_diff.py`, `crosscheck_base.py`,
+`buildsource/` alone (`build_diff.py`, `cross_source_checks_base.py`,
 `evidence_policy.py`, `graph_reconcile.py`, `source_diff.py`,
 `source_graph_findings.py`, ...), none of which the prior revision's file
 list named. A hand-copied count in a plan document goes stale the moment
@@ -964,7 +964,7 @@ structure already in place:
    constant tuple can state only the first half honestly. This slice's own
    audit must therefore go call-site by call-site *within*
    `diff_platform.py`, exactly as slice 2 (`diff_types.py`) and the
-   `crosscheck.py` sub-slice already do — a detector reading only
+   `cross_source_checks.py` sub-slice already do — a detector reading only
    `old_elf`/`new_elf` (most of the ELF/PE/Mach-O-specific findings this file
    holds) is genuinely static and keeps its one-constant-tuple treatment; a
    detector that also reads a declaration-side record for gating (
@@ -1128,10 +1128,10 @@ structure already in place:
    evidence entirely or, worse, mislabels the finding `both:<tier>` as if
    both sides contributed a fact, when only one did and the other
    contributed a negative result. The fix is the identical `searched:`
-   shape item 3 below establishes for `crosscheck.py`'s own negative
+   shape item 3 below establishes for `cross_source_checks.py`'s own negative
    `_check_*` findings (`current:l2:searched:<frontend>`, recording which
    complete surface was consulted and found nothing, not which fact produced a
-   result): generalize it here rather than treating it as a `crosscheck.py`
+   result): generalize it here rather than treating it as a `cross_source_checks.py`
    -specific vocabulary entry. For a removal, `evidence_provenance` records
    the *matched* side's real per-fact provenance (whichever tier actually
    produced `f_old`, per the hybrid-aware rule above) alongside a
@@ -1299,11 +1299,11 @@ structure already in place:
    code: `evidence_category` is a coarse binary tag,
    `"source_only"`/`"build_context"` only — `evidence_policy.
    tag_evidence_category` and the two direct call sites in
-   `crosscheck_coherence.py`/`diff_reconcile.py` are the only producers,
+   `cross_source_checks_coherence.py`/`diff_reconcile.py` are the only producers,
    and it cannot express a finding that rests on more than one evidence
    *kind*, e.g. `exported_not_public` (binary exports + L2 header AST) or
    `header_build_context_mismatch` (L2 header AST + L3 build context)).
-   `buildsource/crosscheck.py`'s `run_crosschecks()` already records the
+   `buildsource/cross_source_checks.py`'s `run_crosschecks()` already records the
    real, specific sources for every one of its checks in each
    `_CheckOutput.providers` list — a sequence of `PROVIDER_*` constants
    (`PROVIDER_BINARY_EXPORTS`, `PROVIDER_PUBLIC_HEADER_AST`,
@@ -1334,7 +1334,7 @@ structure already in place:
    the `old:`/`new:`/`both:`/`current:` scoping section above) is the
    correct value for that check specifically, and is *not* recoverable from
    `providers` alone. The fix is not a richer `PROVIDER_*` enum (that would
-   re-litigate `crosscheck_base.py`'s own provider-agreement-matrix
+   re-litigate `cross_source_checks_base.py`'s own provider-agreement-matrix
    contract, which several other consumers beyond this plan already
    depend on) — it is that this slice's wiring must key the `l*:` prefix
    off **the emitting `_check_*` function's own known tier**, not off the
