@@ -426,6 +426,7 @@ def build_root_cause_document(
         blocks,
         missing_kind,
         contract_evaluation=contract_evaluation,
+        evidence_tiers=result.evidence_tiers,
     )
     has_root_cause_entries = root_cause_section is not None
 

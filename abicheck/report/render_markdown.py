@@ -41,10 +41,11 @@ re-derivation from ``DiffResult``/``Change``). See
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
-from ..checker_policy import impact_for
+from ..checker_policy import HasKind, evidence_status_for_result, impact_for
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
@@ -92,8 +93,8 @@ def _format_change_md_oneline(c: object) -> str:
     return line
 
 
-def _format_change_md(c: object) -> str:
-    """Format a single change as a markdown list item with impact and metadata."""
+def _format_change_md(c: object, evidence_tiers: Sequence[str] = ()) -> str:
+    """Markdown list item with impact/metadata; evidence_tiers qualifies an UNATTRIBUTED impact."""
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     desc = getattr(c, "description", "")
@@ -119,7 +120,9 @@ def _format_change_md(c: object) -> str:
 
     # Impact
     if kind:
-        impact = impact_for(kind)
+        impact = impact_for(
+            kind, evidence_status_for_result(cast(HasKind, c), evidence_tiers)
+        )
         if impact:
             line += f"\n  > {impact}"
 

@@ -678,6 +678,21 @@ class TestNoteIfSameBinaryCompared:
             for w in result.coverage_warnings
         ), result.coverage_warnings
 
+    def test_snapshot_digest_fallback_wording_never_mentions_binaries(self):
+        """Codex review, fresh evidence: the snapshot-fallback message must
+        not reuse the binaries-only wording -- no binary exists in this
+        branch, and the digest covers the snapshot's own canonical
+        serialization (header/build facts included), not raw file bytes."""
+        from abicheck.confidence import note_if_same_binary_compared
+
+        result = self._result(evidence_tiers=["header"])
+        note_if_same_binary_compared(
+            result, old_snapshot_digest="d" * 64, new_snapshot_digest="d" * 64
+        )
+        (warning,) = [w for w in result.coverage_warnings if "byte-identical" in w]
+        assert "binaries" not in warning
+        assert "canonical serialization" in warning
+
     def test_snapshot_digest_fallback_is_a_noop_when_digests_differ(self):
         from abicheck.confidence import note_if_same_binary_compared
 

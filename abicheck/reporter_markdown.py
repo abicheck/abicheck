@@ -997,6 +997,7 @@ def compute_root_cause_section(
     missing_kind: str,
     *,
     contract_evaluation: bool,
+    evidence_tiers: Sequence[str] = (),
 ) -> _rmd.RootCauseSectionData | None:
     """The structured intermediate for ``--report-mode root-cause``'s
     "## Root Causes" section.
@@ -1007,6 +1008,11 @@ def compute_root_cause_section(
     :func:`_root_cause_key_and_display` computes. Returns ``None`` (no
     section at all) only when there is neither a real group nor a missing
     label to show.
+
+    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets
+    ``_format_change_md`` qualify an ``UNATTRIBUTED`` finding's impact text
+    here too (Codex review, fresh evidence: this root-cause path kept the
+    unconditional text even after the full/leaf Markdown views were fixed).
     """
     groups = _group_changes_by_root_cause(changes + scoped_only)
     if not groups and not missing_labels:
@@ -1020,7 +1026,7 @@ def compute_root_cause_section(
         order.append(key)
         root_by_key[key] = root_display
         finding_lines_by_key[key] = [
-            _format_change_md(c) + _cross_source_evolution_md_suffix(c)
+            _format_change_md(c, evidence_tiers) + _cross_source_evolution_md_suffix(c)
             for c in group_changes
         ]
         count_by_key[key] = len(group_changes)
