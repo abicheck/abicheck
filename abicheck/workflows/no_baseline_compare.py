@@ -119,7 +119,11 @@ def resolve_no_baseline_candidate(
     build_info: Path | None = None,
     build_config: Path | None = None,
     depth: str | None = None,
+    version: str = "",
+    debug_roots: list[Path] | None = None,
     header_backend: str = "auto",
+    frontend_context: str = "host",
+    include_labels: dict[Path, str] | None = None,
     compile: CompileContext | None = None,
     include_dependencies: bool = True,
     notify: Callable[[str], None] | None = None,
@@ -158,25 +162,51 @@ def resolve_no_baseline_candidate(
     resolution, mirroring exactly what the two-sided native CLI path does.
     """
     from ..api_types import InputSpec
-    from ..service_compare_evidence import SideEvidence, collect_mode_for
+    from ..service_compare_evidence import collect_mode_for, resolve_side_evidence
     from .artifact.execute import resolve_side_snapshot
 
     side = InputSpec.of(
         path,
         headers=headers or [],
         includes=includes or [],
+        version=version,
         sources=sources,
         build_info=build_info,
         build_config=build_config,
+        debug_roots=debug_roots or [],
         public_header_dirs=public_header_dirs or [],
         include_dependencies=include_dependencies,
         compile=compile,
     )
-    evidence = SideEvidence(
-        headers=list(headers or []),
-        compile=compile,
+    # Built through the *shared* resolver rather than by hand: it is what
+    # applies ``--depth binary``'s own clearing rules (headers and any dump
+    # manifest are dropped, so a binary-only request cannot silently keep
+    # running the L2 header-AST frontend). Hand-building ``SideEvidence`` here
+    # skipped both, so ``compare --no-baseline lib.so -H inc --depth binary``
+    # still parsed headers and could report a header-derived finding at a
+    # depth documented as symbols-only -- diverging from the two-sided
+    # ``compare``, which drops the ``header`` tier for the identical
+    # invocation (Codex review, P1). ``pair_compile=None`` for the same reason
+    # ``resolve_dump_request_evidence`` passes it: the pair-wide C++20 override
+    # exists so two *sides* cannot disagree, and there is no second side here.
+    # *frontend_context* is SYCL's device/host AST selector (``DumpRequest``'s
+    # own ``"host"`` default), not the header backend -- they are separate
+    # axes, and conflating them makes every ordinary ELF audit demand a
+    # DPC++ compiler.
+    evidence = resolve_side_evidence(
+        side,
+        depth=depth,
         collect_mode=collect_mode_for(depth, side),
-        dump_manifest=None,
+        pair_compile=None,
+        frontend_context=frontend_context.lower(),
+    )
+    public_files, public_dirs = (
+        ([], [])
+        if depth is not None and depth.lower() == "binary"
+        # ``_public_header_sets``' own rule, for the same reason: a headerless
+        # dump still fingerprints these, so leaving them populated at binary
+        # depth records a public-header scope the snapshot does not have.
+        else (list(public_headers or []), list(public_header_dirs or []))
     )
     return resolve_side_snapshot(
         side,
@@ -185,8 +215,9 @@ def resolve_no_baseline_candidate(
         lang_explicit=lang_explicit,
         header_backend=header_backend,
         fmt=None,
-        public_headers=list(public_headers or []),
-        public_header_dirs=list(public_header_dirs or []),
+        public_headers=public_files,
+        public_header_dirs=public_dirs,
+        include_labels=include_labels,
         notify=notify,
     )
 

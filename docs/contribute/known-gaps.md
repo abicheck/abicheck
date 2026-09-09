@@ -6993,6 +6993,58 @@ against all four regressions, including the over-correction (making JUnit
 pass by *dropping* findings satisfies the failure-count invariant while
 losing the audit's whole content — a separate test catches that).
 
+**A second review round, four more findings, all real (2026-09-09).** Two
+of them are again the same class this entry is about, and one is that class
+*inside the mechanism built to prevent it*:
+
+- **The exhaustiveness test had a hole exactly where it hand-waved (P1).**
+  `_CONSUMED_UPSTREAM` allowlisted the *pre-normalization* option names
+  (`dump_manifest`, `version`, `debug_root`, `probe_matrix`), on the
+  reasoning that `normalize_sided_options` consumes them before dispatch.
+  It does -- but the `new_*`/`old_*` destinations it *generates* were never
+  read, so the test passed **because the option had been renamed**. A bare
+  `--dump-manifest` was accepted and dropped: even an invalid manifest
+  exited `0` while the audit analysed a different surface than requested,
+  and `--version new=` was equally inert. The test now expands each raw name
+  into the destinations it generates and requires each one separately to be
+  read or declared -- which immediately surfaced **16** silently-dropped
+  destinations, not the four the review named. `--version`, `--debug-root`
+  and `--include`'s per-path labels are now wired; `--dump-manifest`,
+  `--probe-matrix`, `--debug-info` and `--devel-pkg` are rejected (their
+  guards re-keyed onto the generated names, since a guard keyed on the raw
+  name could never fire); `old_version` is recorded as inert *by
+  construction* with its reason, since Click always populates it with the
+  placeholder `"old"` and an explicit `--version old=` is therefore
+  indistinguishable from the default by dispatch time.
+- **`--depth binary` still ran the L2 header frontend (P1).** The audit
+  hand-built its `SideEvidence` instead of going through
+  `service_compare_evidence.resolve_side_evidence`, so it skipped that
+  function's binary-depth clearing rules (headers *and* any dump manifest
+  are dropped). Verified live: one-sided reported `evidence_tiers: [elf,
+  dwarf, dwarf_advanced, header]` and an `exported_not_public` finding where
+  two-sided reported no `header` tier at all — a **manufactured finding** at
+  a depth documented as symbols-only. Fixed by reuse, not a second copy.
+- **A failed evidence contract read as operationally successful (P1).**
+  `no_baseline_exit_code` correctly returned `7`, while `run_outcome.
+  operational` still serialized `none`. `compatibility`/`gate` genuinely
+  never apply to an audit, but *operational* is a different axis, and
+  `OperationalStatus.EVIDENCE_CONTRACT_ERROR` is its canonical state. Now
+  read off the same flag the exit code folds, so the two cannot disagree.
+- **Extraction failure escaped as a traceback (P2).** A corrupt candidate
+  printed a full stack trace where the two-sided path printed
+  `Error: Failed to dump '...'` for the identical input. Now translated at
+  the CLI boundary with the same `ValidationError` -> exit 64 /
+  `SnapshotError` -> exit 1 mapping `cli_resolve`'s own `run_dump` wrapper
+  uses.
+
+Each has a regression test in `tests/test_compare_no_baseline_cli.py`, and
+the exhaustiveness rule itself gained
+`test_every_generated_destination_is_wired_or_declared` -- the half the
+original test missed. `report/no_baseline.py` crossed the 800-line new-file
+cap in the process; its SARIF/JUnit renderers moved to
+`report/no_baseline_render.py`, matching this package's own
+`render_json.py`/`render_xml.py` split, rather than being trimmed to fit.
+
 **Coverage and complexity follow-up (same pass).** Codecov's patch gate
 and CodeFactor both flagged the first two commits, and both were acting on
 something real rather than on noise:

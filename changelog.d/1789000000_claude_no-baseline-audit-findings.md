@@ -75,6 +75,26 @@
   reported as a blocker, while the real run exempts that operand (it
   performs no extraction, so it cannot fall short of a depth) and exits `0`.
 
+- **`compare --no-baseline --depth binary` no longer parses headers.** It
+  hand-built its evidence description instead of using the shared resolver, so
+  it skipped that resolver's binary-depth clearing rules and could report a
+  header-derived finding at a depth documented as symbols-only — diverging
+  from the two-sided `compare` on the identical invocation.
+- **A failed evidence contract is now visible on `run_outcome.operational`.**
+  The exit code was already `7`, but the structured outcome still read `none`,
+  telling a report consumer the run was operationally fine.
+- **An unreadable candidate reports a clean error instead of a traceback.**
+  Extraction failures are now translated at the CLI boundary the same way the
+  two-sided path already translates them.
+- **`--version`, `--debug-root` and `--include`'s per-path labels are read;
+  `--dump-manifest`, `--probe-matrix`, `--debug-info` and `--devel-pkg` are
+  refused.** All were silently dropped: they reach the command under
+  destination names produced by option normalization, and the guard added
+  earlier in this changelog was keyed on the pre-normalization names, so it
+  could never fire for them. A bare `--dump-manifest` was the worst case —
+  even an invalid manifest exited 0 while the audit analysed a different
+  surface than requested.
+
 ### Added
 
 - **`compare --no-baseline --format` accepts `sarif`, `junit` and `oneline`**

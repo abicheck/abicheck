@@ -151,6 +151,27 @@ def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
 _OLD_ONLY_DESTS: dict[str, str] = {
     "old_headers_only": "--header old=",
     "old_includes_only": "--include old=",
+    "debug_roots_old": "--debug-root old=",
+    "debug_info1": "--debug-info old=",
+    "devel_pkg1": "--devel-pkg old=",
+}
+
+#: Destinations that are inert here *by construction*, with the reason.
+#:
+#: ``old_version`` is a display **label**, not evidence, and
+#: ``cli_options._split_sided_version`` always populates it -- with the
+#: literal placeholder ``"old"`` when the user says nothing. So an explicit
+#: ``--version old=`` is indistinguishable from the default by the time this
+#: dispatch runs, and guarding on it would reject *every* invocation (it did,
+#: briefly). An audit has no OLD side to label, so the value is dropped; the
+#: candidate's own label comes from ``new_version``, which is wired.
+#: Recorded here rather than left out of the accounting entirely, so the
+#: exhaustiveness test still sees a decision rather than an omission.
+_INERT_DESTS: dict[str, str] = {
+    "old_version": (
+        "a label for a side that does not exist; Click always populates it, so "
+        "an explicit value cannot be told from the default"
+    ),
 }
 
 #: Evidence dests whose bare/``both=`` value lands on *both* sides
@@ -178,7 +199,10 @@ def _reject_old_sided_inputs(kwargs: dict[str, Any]) -> None:
     point of passing it.
     """
     for dest, spelling in _OLD_ONLY_DESTS.items():
-        if kwargs.get(dest):
+        # `_was_given`, not truthiness: several of these default to Click's
+        # `UNSET` sentinel, which is truthy -- guarding on truthiness rejected
+        # every invocation, including ones passing nothing at all.
+        if _was_given(kwargs.get(dest)):
             raise click.UsageError(_old_sided_message(spelling))
     for dest, (new_dest, spelling) in _SIDED_SINGLE_DESTS.items():
         old_value = kwargs.get(dest)
@@ -330,13 +354,33 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "--ld-library-path",
         "dependency search paths only matter with --follow-deps",
     ),
-    "debug_info": (
+    # Keyed on the destinations `normalize_sided_options` *generates*, not on
+    # the raw option names: `compare_cmd` normalizes before dispatching, so a
+    # guard keyed on `debug_info`/`devel_pkg`/`dump_manifest` would check a
+    # key that never exists and never fire (Codex review, P1 -- the same hole
+    # that let a bare `--dump-manifest` through as a silent no-op).
+    "debug_info2": (
         "--debug-info",
         "separate debug-info resolution is not wired to this path yet",
     ),
-    "devel_pkg": (
+    "devel_pkg2": (
         "--devel-pkg",
         "development-package header discovery is not wired to this path yet",
+    ),
+    "new_dump_manifest": (
+        "--dump-manifest",
+        "a dump manifest selects a multi-TU header surface and carries its own "
+        "comparability contract, neither of which this path resolves yet -- it "
+        "was silently ignored before, so even an invalid manifest exited 0 "
+        "while the audit analysed a different surface than requested",
+    ),
+    "probe_matrix_old": (
+        "--probe-matrix",
+        "a build-configuration matrix is folded across two sides",
+    ),
+    "probe_matrix_new": (
+        "--probe-matrix",
+        "a build-configuration matrix is folded across two sides",
     ),
 }
 
@@ -410,6 +454,13 @@ class _CompileChoices:
     lang: str
     lang_explicit: bool
     include_dependencies: bool
+    #: ``--version new=``/bare, and ``--debug-root``. Both are per-side inputs
+    #: `normalize_sided_options` produces and this path used to drop silently.
+    version: str
+    debug_roots: list[Path]
+    #: ``--include new=label:path``'s own per-path labels, which
+    #: `normalize_sided_options` splits out and this path used to drop.
+    include_labels: dict[Path, str] | None
 
 
 @dataclass(frozen=True)
@@ -547,6 +598,10 @@ def _resolve_no_baseline_invocation(
             lang=kwargs.get("lang") or "c++",
             lang_explicit=lang_src == click.core.ParameterSource.COMMANDLINE,
             include_dependencies=bool(kwargs.get("include_dependencies", False)),
+            version=kwargs.get("new_version") or "",
+            debug_roots=list(kwargs.get("debug_roots") or ())
+            + list(kwargs.get("debug_roots_new") or ()),
+            include_labels=kwargs.get("include_labels") or None,
         ),
         contract=_ContractChoices(
             mode=resolve_contract_domain(contract_mode_raw, ctx),
@@ -560,7 +615,9 @@ def _emit_no_baseline_report(
 ) -> None:
     """Render the audit in every requested format, then exit accordingly."""
     text, exit_code = render_no_baseline(
-        result, inv.output.fmt, require_complete_analysis=inv.output.require_complete_analysis
+        result,
+        inv.output.fmt,
+        require_complete_analysis=inv.output.require_complete_analysis,
     )
     _write_or_echo(inv.output.output, text)
     for write_fmt, write_path in inv.output.secondary_writes:
@@ -573,11 +630,53 @@ def _emit_no_baseline_report(
         # clean Click error rather than a traceback on an otherwise-complete
         # run (Codex review, P2).
         rendered, _ = render_no_baseline(
-            result, write_fmt, require_complete_analysis=inv.output.require_complete_analysis
+            result,
+            write_fmt,
+            require_complete_analysis=inv.output.require_complete_analysis,
         )
         _safe_write_output(write_path, rendered)
     if exit_code != 0:
         sys.exit(exit_code)
+
+
+def _resolve_candidate_or_fail(candidate: Path, inv: _ResolvedInvocation) -> Any:
+    """Resolve the candidate, translating extraction failure at the boundary.
+
+    ``resolve_no_baseline_candidate`` raises framework-free errors
+    (``SnapshotError`` for an unreadable/unparseable artifact, a header set
+    that will not parse, a missing frontend), which is correct for a workflow
+    -- but this is the CLI boundary, and without translation the exception
+    escapes as a full traceback. The two-sided path already converts the same
+    failures (``cli_resolve``'s own ``run_dump`` wrapper), so an identical
+    input produced a clean ``Error: ...`` there and a stack trace here (Codex
+    review, P2). ``ValidationError`` maps to a usage error (exit 64) and
+    ``SnapshotError`` to a plain operational failure, matching that wrapper
+    exactly rather than inventing a second mapping.
+    """
+    from ....errors import SnapshotError, ValidationError
+
+    try:
+        return resolve_no_baseline_candidate(
+            candidate,
+            headers=inv.headers.headers,
+            includes=inv.headers.includes,
+            lang=inv.compile.lang,
+            lang_explicit=inv.compile.lang_explicit,
+            public_headers=inv.headers.public_headers,
+            public_header_dirs=inv.headers.public_header_dirs,
+            sources=inv.evidence.sources,
+            build_info=inv.evidence.build_info,
+            build_config=inv.evidence.build_config,
+            depth=inv.evidence.depth,
+            version=inv.compile.version,
+            debug_roots=inv.compile.debug_roots,
+            include_labels=inv.compile.include_labels,
+            include_dependencies=inv.compile.include_dependencies,
+        )
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _run_no_baseline_compare_cmd(
@@ -613,20 +712,7 @@ def _run_no_baseline_compare_cmd(
             )
         )
 
-    new_snapshot = resolve_no_baseline_candidate(
-        candidate,
-        headers=inv.headers.headers,
-        includes=inv.headers.includes,
-        lang=inv.compile.lang,
-        lang_explicit=inv.compile.lang_explicit,
-        public_headers=inv.headers.public_headers,
-        public_header_dirs=inv.headers.public_header_dirs,
-        sources=inv.evidence.sources,
-        build_info=inv.evidence.build_info,
-        build_config=inv.evidence.build_config,
-        depth=inv.evidence.depth,
-        include_dependencies=inv.compile.include_dependencies,
-    )
+    new_snapshot = _resolve_candidate_or_fail(candidate, inv)
 
     suppression, policy_file_obj = _load_suppression_and_policy(
         kwargs.get("suppress"),

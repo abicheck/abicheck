@@ -35,6 +35,7 @@ import pytest
 
 from abicheck.cli import main
 from abicheck.frontends.cli.commands.compare_no_baseline import (
+    _INERT_DESTS,
     _OLD_ONLY_DESTS,
     _SIDED_SINGLE_DESTS,
     _UNSUPPORTED_OPTIONS,
@@ -47,30 +48,40 @@ _MODULE = (
     / "abicheck/frontends/cli/commands/compare_no_baseline.py"
 )
 
-#: Parameters rewritten or expanded before ``maybe_dispatch_no_baseline_compare``
-#: runs, so the dispatch never sees the original dest.
+#: Every destination ``cli_options.normalize_sided_options`` *generates*,
+#: keyed by the raw parameter it replaces. ``compare_cmd`` calls that
+#: function (and ``parse_view_tokens``) before dispatching, so the raw name
+#: never reaches this module -- but the generated names do, and those are
+#: what must be accounted for.
 #:
-#: ``compare_cmd`` calls ``normalize_sided_options`` (which pops ``header``/
-#: ``include``/``sources``/``build_info``/``dump_manifest``/``debug_root``/
-#: ``probe_matrix``/``version``/``header_backend`` into ``old_*``/``new_*``
-#: dests) and ``parse_view_tokens`` (which expands ``view`` into the
-#: ``_VIEW_DEFAULTS`` dests) *before* dispatching. Each name below is
-#: therefore consumed upstream, and its per-side/expanded results are what
-#: this module must account for — which the other buckets do.
-_CONSUMED_UPSTREAM = frozenset(
-    {
-        "header",
-        "include",
-        "sources",
-        "build_info",
-        "dump_manifest",
-        "debug_root",
-        "probe_matrix",
-        "version",
-        "view",
-        "header_backend",
-    }
-)
+#: Listing only the raw names here was a real hole, not a cosmetic one
+#: (Codex review, P1): it made this test pass *because the option had been
+#: renamed*, while the dispatch read none of the results. A bare
+#: ``--dump-manifest`` was accepted and silently dropped -- even an invalid
+#: manifest exited 0, auditing a different surface than the user asked for
+#: -- and ``--version new=`` likewise. The generated destinations are now
+#: expanded into the accounted-for set, so each one is separately either
+#: read or declared unsupported.
+#: Only the families ``compare`` actually declares -- it composes neither
+#: ``--pdb`` nor the sided ``--ast-frontend``, so those destinations are
+#: never generated for this command and listing them would assert against
+#: a shape that does not exist here.
+_NORMALIZED_DESTS: dict[str, tuple[str, ...]] = {
+    "header": ("headers", "old_headers_only", "new_headers_only"),
+    "dump_manifest": ("old_dump_manifest", "new_dump_manifest"),
+    "include": ("includes", "old_includes_only", "new_includes_only", "include_labels"),
+    "debug_root": ("debug_roots", "debug_roots_old", "debug_roots_new"),
+    "sources": ("old_sources", "new_sources"),
+    "build_info": ("old_build_info", "new_build_info"),
+    "probe_matrix": ("probe_matrix_old", "probe_matrix_new"),
+    "debug_info": ("debug_info1", "debug_info2"),
+    "devel_pkg": ("devel_pkg1", "devel_pkg2"),
+    "version": ("old_version", "new_version"),
+}
+
+#: The raw names themselves, consumed before dispatch. Accounted for only
+#: because :data:`_NORMALIZED_DESTS` accounts for what each becomes.
+_CONSUMED_UPSTREAM = frozenset(_NORMALIZED_DESTS) | {"view"}
 
 #: Click-level parameters that belong to no command body.
 _CLICK_LEVEL = frozenset({"help", "help_all"})
@@ -118,6 +129,7 @@ def test_every_compare_option_is_wired_or_declared() -> None:
     accounted = (
         _dests_read_by_module()
         | set(_UNSUPPORTED_OPTIONS)
+        | {dest for dests in _NORMALIZED_DESTS.values() for dest in dests}
         | set(_VIEW_DEFAULTS)
         | set(_OLD_ONLY_DESTS)
         | set(_SIDED_SINGLE_DESTS)
@@ -125,6 +137,7 @@ def test_every_compare_option_is_wired_or_declared() -> None:
         | _CLICK_LEVEL
         | _DISPATCH_OWNED
         | _PRESENTATION_ONLY
+        | set(_INERT_DESTS)
     )
     unaccounted = sorted(_compare_params() - accounted)
     assert not unaccounted, (
@@ -138,12 +151,16 @@ def test_every_compare_option_is_wired_or_declared() -> None:
 
 
 def test_no_unsupported_entry_is_stale() -> None:
-    """A declared-unsupported option must still be a real `compare` option.
+    """A declared-unsupported entry must still name something reachable.
 
-    Otherwise the table accumulates entries for flags that no longer exist,
-    and a reader cannot tell which rows are load-bearing.
+    Either a real `compare` parameter, or a destination
+    ``normalize_sided_options`` generates from one -- the table has to hold
+    both, since the dispatch only ever sees the generated name. Without this,
+    the table accumulates entries for flags that no longer exist and a reader
+    cannot tell which rows are load-bearing.
     """
-    stale = sorted(set(_UNSUPPORTED_OPTIONS) - _compare_params())
+    generated = {dest for dests in _NORMALIZED_DESTS.values() for dest in dests}
+    stale = sorted(set(_UNSUPPORTED_OPTIONS) - _compare_params() - generated)
     assert not stale, f"_UNSUPPORTED_OPTIONS names non-existent options: {stale}"
 
 
@@ -246,4 +263,38 @@ def test_module_documents_why_the_table_exists() -> None:
     assert "_UNSUPPORTED_OPTIONS" in source
     assert re.search(r"accepted but never read|silently", source), (
         "the table must explain that it exists to prevent silently-dropped options"
+    )
+
+
+def test_every_generated_destination_is_wired_or_declared() -> None:
+    """The half that ``test_every_compare_option_is_wired_or_declared`` misses.
+
+    That test asks about `compare`'s *declared parameters*. But
+    ``normalize_sided_options`` renames several of them before the dispatch
+    ever runs, so a raw name being "consumed upstream" says nothing about
+    whether its *result* is read. Allowlisting the raw names alone let a bare
+    ``--dump-manifest`` and ``--version new=`` through as silent no-ops --
+    the very defect this module exists to make impossible.
+
+    So every generated destination is checked separately, against the same
+    rule: read by the dispatch, or named in ``_UNSUPPORTED_OPTIONS``. An
+    ``old_``-scoped destination is also satisfied by the sided-input guards,
+    since those refuse it outright.
+    """
+    read = _dests_read_by_module()
+    guarded = set(_OLD_ONLY_DESTS) | set(_SIDED_SINGLE_DESTS) | set(_INERT_DESTS)
+    unaccounted = sorted(
+        dest
+        for dests in _NORMALIZED_DESTS.values()
+        for dest in dests
+        if dest not in read
+        and dest not in _UNSUPPORTED_OPTIONS
+        and dest not in guarded
+        and dest not in _CLICK_LEVEL
+    )
+    assert not unaccounted, (
+        "these destinations are produced by normalize_sided_options and then "
+        f"silently dropped by the --no-baseline dispatch: {unaccounted}. Wire "
+        "each one, or declare it in _UNSUPPORTED_OPTIONS so passing the option "
+        "that produces it is a usage error."
     )

@@ -344,3 +344,134 @@ def test_dry_run_does_not_block_without_a_pinned_depth() -> None:
     """Omitting ``--depth`` is never a contract, so there is nothing to miss."""
     assert not _dry_run(depth=None).blockers
     assert not _dry_run(depth="headers").blockers
+
+
+# ---------------------------------------------------------------------------
+# Depth, outcome and error-boundary contracts (Codex review round 2).
+# ---------------------------------------------------------------------------
+
+
+def test_binary_depth_does_not_run_the_header_frontend(tmp_path: Path) -> None:
+    """``--depth binary`` is symbols-only, even when headers are supplied.
+
+    Regression guard: the audit hand-built its ``SideEvidence`` instead of
+    going through the shared resolver, so it skipped the binary-depth
+    clearing rules -- headers were still parsed and could *manufacture* a
+    header-derived finding at a depth documented as symbols-only, diverging
+    from the two-sided `compare` on the identical invocation.
+
+    Asserted on a stored snapshot's own resolution rather than a live build,
+    so it needs no toolchain: the rule under test is which evidence the
+    resolver is handed, not what an extractor then finds.
+    """
+    from abicheck.api_types import InputSpec
+    from abicheck.service_compare_evidence import resolve_side_evidence
+
+    side = InputSpec.of(tmp_path / "libfoo.so", headers=[tmp_path / "inc"])
+    binary = resolve_side_evidence(
+        side,
+        depth="binary",
+        collect_mode="off",
+        pair_compile=None,
+        frontend_context="host",
+    )
+    headers = resolve_side_evidence(
+        side,
+        depth="headers",
+        collect_mode="off",
+        pair_compile=None,
+        frontend_context="host",
+    )
+    assert binary.headers == [], "--depth binary must clear headers"
+    assert headers.headers, "--depth headers must keep them"
+
+
+def test_evidence_contract_failure_is_visible_in_run_outcome(
+    candidate: Path,
+) -> None:
+    """A non-zero exit must not read as operationally successful.
+
+    ``compatibility``/``gate`` genuinely never apply to an audit, but
+    *operational* is a different axis -- and reporting ``none`` beside exit 7
+    told a structured consumer the run was fine when the process said
+    otherwise.
+    """
+    from abicheck.report.no_baseline import compute_no_baseline_document
+    from abicheck.workflows.no_baseline_compare import (
+        resolve_no_baseline_candidate,
+        run_no_baseline_compare,
+    )
+
+    result = run_no_baseline_compare(resolve_no_baseline_candidate(candidate))
+    assert compute_no_baseline_document(result).run_outcome["operational"] == "none"
+
+    result.diff.evidence_contract_error = True
+    doc = compute_no_baseline_document(result)
+    assert doc.exit_code != 0
+    assert doc.run_outcome["operational"] == "evidence_contract_error", (
+        "a failed evidence contract must be visible on the outcome, not only "
+        "in the process exit code"
+    )
+
+
+def test_an_unreadable_candidate_is_a_clean_error_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """Extraction failure is translated at the CLI boundary.
+
+    The two-sided path already converts ``SnapshotError`` into a concise
+    ``Error: ...``; this path let it escape as a full traceback for the
+    identical input.
+    """
+    broken = tmp_path / "broken.so"
+    broken.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"garbage" * 4)
+    result = invoke_cli("compare", "--no-baseline", str(broken))
+    assert result.exit_code == 1, result.output
+    assert "Traceback" not in result.output
+    assert "Failed to dump" in result.output
+
+
+def test_a_dump_manifest_is_refused_rather_than_ignored(
+    candidate: Path, tmp_path: Path
+) -> None:
+    """The sharpest instance of the silently-dropped-option class.
+
+    A bare ``--dump-manifest`` reached a *generated* destination the dispatch
+    never read, so even an invalid manifest exited 0 while the audit analysed
+    a different surface than the user asked for. The guard is keyed on the
+    generated destination now, not the pre-normalization name.
+    """
+    manifest = tmp_path / "bogus.json"
+    manifest.write_text('{"not": "a manifest"}')
+    result = invoke_cli(
+        "compare", "--no-baseline", str(candidate), "--dump-manifest", str(manifest)
+    )
+    assert result.exit_code == _EXIT_USAGE, result.output
+    assert "--dump-manifest" in result.output
+
+
+def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) -> None:
+    """``--version new=`` was another silently-dropped generated destination.
+
+    Checked against a *live* artifact, since a stored snapshot keeps its own
+    recorded version on both the one- and two-sided paths -- asserting on the
+    snapshot would pass whether or not the option was wired.
+    """
+    import shutil
+
+    src = shutil.which("true")
+    if src is None:  # pragma: no cover - every supported CI image has it
+        pytest.skip("no native binary available to label")
+    binary = tmp_path / "libfoo.so"
+    binary.write_bytes(Path(src).read_bytes())
+    result = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(binary),
+        "--version",
+        "new=9.9",
+        "--format",
+        "json",
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["new_version"] == "9.9"
