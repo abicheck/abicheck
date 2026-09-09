@@ -264,6 +264,62 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added --for
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
 
+    def test_rerun_strips_a_stale_write_flag_targeting_the_same_path(
+        self, tmp_path
+    ):
+        """Codex review, fresh evidence, round 9: NOT_COMPARABLE (and any
+        other early-refusal verdict) aborts the primary run before it ever
+        renders its own injected ``--write json=$PR_JSON`` sidecar --
+        confirmed live: neither ``-o`` nor ``--write``'s target exists on
+        disk after a real ``compare`` run that hits a comparability
+        mismatch. ``PR_JSON`` therefore stays the empty mktemp file
+        ``_maybe_post_pr_comment`` created, ``_can_reuse_primary_json``
+        finds nothing to reuse either, and the fallback rerun's own
+        ``_build_json_cmd`` used to leave that stale ``--write
+        json=$PR_JSON`` in the rebuilt command while *also* appending
+        ``-o "$PR_JSON"`` -- the identical path for both, which the real
+        CLI hard-rejects (``--write's PATH must differ from --output/-o``,
+        confirmed live). The rerun always failed and the comment was
+        silently skipped with a misleading "no JSON report produced"
+        warning.
+
+        The stub here plays the real CLI's own rejection: it refuses (exits
+        1, writes nothing) if invoked with a bare ``--write`` flag at all,
+        the same way the real CLI would reject this specific duplicate-path
+        shape. Before the fix, `_build_json_cmd` handed the stub exactly
+        that forbidden `--write ... -o $PR_JSON` combination and the rerun
+        failed; after the fix, `--write` (and its value) is stripped before
+        the rerun, so the stub receives a clean command and succeeds.
+        """
+        pr_json = tmp_path / "pr.json"
+        pr_json.write_text("", encoding="utf-8")
+        stub = tmp_path / "stub.sh"
+        stub.write_text(
+            'for a in "$@"; do\n'
+            '  if [[ "$a" == "--write" ]]; then\n'
+            '    echo "stub: refusing --write, same as the real CLI would" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            "done\n"
+            'echo rerun-sentinel > "${@: -1}"\n',
+            encoding="utf-8",
+        )
+        harness = """
+PR_JSON="$TEST_PR_JSON"
+FORMAT=markdown
+OUTPUT_FILE=
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --write "json=$TEST_PR_JSON" --format markdown)
+"""
+        _run(
+            harness,
+            {
+                "TEST_PR_JSON": str(pr_json),
+                "TEST_STUB": str(stub),
+                "TEST_BASH": _bash_executable(),
+            },
+        )
+        assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
+
     def test_sarif_primary_with_no_json_anywhere_reruns_rather_than_reusing_sarif(
         self, tmp_path
     ):

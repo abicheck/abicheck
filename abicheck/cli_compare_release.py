@@ -463,6 +463,15 @@ def compare_release_cmd(
     # above. `None` (the default) is a true no-op: every library is compared
     # exactly as it was before this parameter existed.
     public_header_dirs: list[Path] | None = None,
+    # Codex review, fresh evidence: resolved once by the caller
+    # (`cli_compare_helpers.run_compare`'s already-extracted
+    # `resolved_cfg.collapse_versioned_symbols`, the same place that
+    # already resolves `project_cfg` for the single-pair path) and
+    # forwarded here -- same internal-parameter shape as
+    # `compile_context`/`public_header_dirs` above. `False` (the default)
+    # is a true no-op: every library is compared exactly as it was before
+    # this parameter existed.
+    collapse_versioned_symbols: bool = False,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -795,6 +804,7 @@ def compare_release_cmd(
                 show_only=show_only,
                 explain_patterns=explain_patterns,
                 public_header_dirs=public_header_dirs,
+                collapse_versioned_symbols=collapse_versioned_symbols,
             )
 
             for key in matched_keys:

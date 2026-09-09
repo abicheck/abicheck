@@ -12,6 +12,64 @@
 > (Phase 4 of
 > [`plans/one-comparison-product.md`](../plans/one-comparison-product.md)),
 > per that plan's deletion-follows-callers rule.
+>
+> **Progress (2026-09-08, Phase 4 commit 2).** A field-by-field audit of
+> `ScanRequest`/`ScanResult` against `CompareRequest`/`CompareResult` found
+> that the large majority of `ScanRequest`'s fields already have a real
+> `CompareRequest` equivalent — not the same field, but the same capability,
+> reachable through `InputSpec` (`headers`/`includes`/`sources`/
+> `build_info`/`public_header_dirs`/`compile`) or an already-identically-
+> named top-level field (`lang`, `policy`, `pattern_verdicts`,
+> `contract_evaluation`/`contract_mode`, `abi3_floor`, `severity_preset`,
+> `changed_paths`, `depth`) — because Phase 2 already moved those
+> enrichments onto `compare`. `ScanRequest.mode`/`source_method` (the S/L
+> preset axis) are subsumed by `depth` + `changed_paths` and need no
+> mirror. `ScanResult.layers`/`.confidence` are likewise already covered by
+> `DiffResult.layer_coverage`/`.analysis_assurance`, reachable through
+> `CompareResult.diff` — they are nested, not top-level, but the capability
+> is not missing. `ScanResult.estimate` has its own already-merged
+> counterpart (`dry_run.py`, plan §3 #35) rather than a `CompareResult`
+> field, since a dry-run estimate is a separate pre-flight operation on
+> both sides, not a field an *executed* result carries.
+>
+> One genuine, narrow gap in `CompareRequest` itself was found and closed:
+> `collapse_versioned_symbols` (G15) was already a `checker.compare()`/
+> `compare_snapshots()` parameter every `ScanRequest` caller could already
+> reach, but `CompareRequest` had no field for it at all — an oversight,
+> not a scan-only capability, so it is now a `CompareRequest` field wired
+> through `classify_compare_pair`.
+>
+> The rest of `ScanRequest`'s fields are **real, currently-open gaps** with
+> no `CompareRequest`/`compare` CLI equivalent — left on `ScanRequest`
+> rather than force-absorbed, per this plan's own no-fabrication rule:
+> `budget` (the `Budget`/exit-5 overflow axis — plan: "`compare` does not
+> emit exit 5 yet"), `enabled_checks`/`severities` (the `--crosscheck
+> KEY=error` per-check selection/severity syntax — plan §3 #23, "MERGE into
+> policy", not started), `build_config`/`allow_build_query` (the Bazel
+> build-query axis), `risk_rules_path` (plan §3 #14, "Phase 7"),
+> `bundle_system_providers` (the `--artifact-set` audit bundle detector's
+> allow-list — plan: "`--artifact-set`... not started"), `build_targets`
+> (`compare` has no `--build-target` option at all yet, unlike `dump`), and
+> `max_findings` (the scan JSON baseline summary's own truncation cap, tied
+> to `cli_scan_baseline`'s report shape). `bundle_manifest`
+> (`InstantiationManifest`) is reachable from `compare` today only through
+> the *release fan-out*'s own bundle/instantiation-manifest handling
+> (`cli_compare_release_helpers.py`), not through single-pair
+> `CompareRequest`/`classify_compare_pair` — also left open rather than
+> wired speculatively. `ScanRequest.suppression`/`.policy_file` take an
+> already-*resolved* `SuppressionList`/`PolicyFile` object, where
+> `CompareRequest.suppress`/`.policy_file_path` take a path `run_compare_
+> request` resolves itself; equivalent capability, deliberately different
+> resolution stage, not absorbed as a new field. `ScanRequest.seeded`/
+> `.changed_src` are internal scan-engine bookkeeping with no user-facing
+> capability to mirror.
+>
+> `ScanRequest`/`ScanResult`/`SCAN_SCHEMA_VERSION` are unchanged and remain
+> in the registry: `scan` is still a fully working command (Phase 6 has not
+> started), and every field above that is a real, open gap is exactly why
+> retiring them now would be premature. See
+> [`plans/one-comparison-product.md`](../plans/one-comparison-product.md)
+> §3 row 31 for the running status.
 
 **Date:** 2026-07-27 (D1–D3); Gap 3/D4 added 2026-07-27 after a second,
 more detailed external review of the same subject was checked line-by-line

@@ -112,31 +112,39 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanPublicHeaderDirAlsoForwardedAsDashH:
     def test_public_header_dir_forwarded_as_both_flags(self) -> None:
+        # A baseline (against) is present, which now unconditionally keeps
+        # this request on the legacy `scan` CLI (Codex review, PR #1160,
+        # fifth round): directly verified that `compare`'s automatic
+        # cross-source-checks stage has no way to reproduce `scan`'s own
+        # advisory-only stripping of single-version hygiene findings for a
+        # baseline comparison, at *any* depth/evidence combination -- not a
+        # narrow case, since a baseline comparison always runs cross-source
+        # checks on both CLIs and only `scan`'s strips them. See the
+        # routing comment above `_SCAN_NEEDS_LEGACY_CLI` in run.sh for the
+        # full account; every earlier narrower condition in that predicate
+        # is now dead code, kept as the shape a future capability gap fix
+        # would relax. So "scan", not "compare", is the real CLI verb this
+        # test now exercises -- the legacy branch forwards
+        # `--public-header-dir` unconditionally *and* folds it into `-H`
+        # (both flags, unlike the now-unreachable `compare`-translation
+        # behavior a superseded revision of this test asserted) -- see
+        # `test_action_compile_context_parity.py`'s own marker note for
+        # that still-unconditional, still-both-flags behavior.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.json",
+                "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
+                "INPUT_DEPTH": "headers",
             }
         )
         assert "scan" in cmd
-        # --public-header-dir (scope) is still forwarded, unchanged.
+        assert "compare" not in cmd
         i = cmd.index("--public-header-dir")
         assert cmd[i + 1] == "include"
-        # It must ALSO ride along as an -H root, so scan's own header
-        # extraction expands the whole directory the same way dump's does.
-        # SIDED (`new=include`), not bare, for a scalar scan with a resolved
-        # baseline (Codex review, later follow-up, fresh evidence): a bare
-        # -H root is side-both (ADR-040 L1), so it also fed the candidate's
-        # public-header-dir tree into the baseline/old side's own header
-        # parse -- see test_action_run_sh_public_header_dir_scan_scope.py
-        # for the dedicated regression coverage of that fix. Bare stays
-        # correct for audit-only/--artifact-set scans (no old side to
-        # contaminate), see the sibling test below.
         h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
         assert "new=include" in h_pairs, cmd
-        assert "include" not in h_pairs
 
     def test_public_header_dir_absent_forwards_neither(self) -> None:
         cmd = _run_cmd(

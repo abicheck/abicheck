@@ -1586,6 +1586,7 @@ def run_compare(
             config_includes=directory_config_includes,
             depth=release_depth,
             public_header_dirs=project_config_public_header_dirs(project_cfg),
+            collapse_versioned_symbols=collapse_versioned_symbols,
             # Codex review (PR #1154 follow-up): --view's derived values were
             # silently dropped from this dispatch -- forwarded raw
             # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);

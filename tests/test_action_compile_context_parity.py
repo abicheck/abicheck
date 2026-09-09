@@ -48,7 +48,19 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
+# ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
+# routings -- the legacy `scan` CLI branch (gated on `_SCAN_NEEDS_LEGACY_CLI`,
+# unchanged code, unconditionally forwarding these six flags exactly as
+# before) and a `compare`-translated branch (which only forwards them once a
+# baseline is present -- an audit-only request using any of them routes to
+# the legacy branch instead, see that branch's own `_SCAN_NEEDS_LEGACY_CLI`
+# computation). This file's parity assertions are about the legacy branch's
+# unconditional forwarding, so the marker is anchored there specifically
+# rather than to the (now ambiguous) bare `'elif [[ "$MODE" == "scan"
+# ]]; then'`, which the new translated branch's header also matches.
+_SCAN_MODE_MARKER = (
+    'elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then'
+)
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 # scan has no release fan-out, so its region ends at the nostdinc if-block;
@@ -321,6 +333,7 @@ def _run_region(
         + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
+        + _extra_args_family_source()
         + _add_compile_context_flags_source()
         + "\nCMD=()\n"
     )
@@ -356,6 +369,7 @@ def _run_region_raw(
         + _py_bin_has_abicheck_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
+        + _extra_args_family_source()
         + _add_compile_context_flags_source()
         + "\nCMD=()\n"
     )
@@ -445,15 +459,17 @@ class TestCompileContextInputsTravelViaStdinNotEnvVars:
 
     def test_helper_invocation_pipes_data_via_stdin(self) -> None:
         source = self._function_source()
-        assert (
-            'python3 "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"'
-            in source
-        ), source
-        # The invocation is fed by a `printf ... | python3 ...` pipe, not a
-        # bare call -- confirms the eight values really travel on stdin.
-        idx = source.index(
-            'python3 "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"'
-        )
+        # `${_PY_BIN:-python3}`, not a bare `python3` (CodeRabbit review,
+        # fresh evidence): the script resolves a canonical interpreter into
+        # $_PY_BIN elsewhere (PWD-anchored, abicheck-importable-checked) and
+        # every other Python invocation in this file already uses it -- a
+        # bare `python3` here was the one inconsistent holdout.
+        needle = '"${_PY_BIN:-python3}" "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"'
+        assert needle in source, source
+        # The invocation is fed by a `printf ... | ${_PY_BIN:-python3} ...`
+        # pipe, not a bare call -- confirms the eight values really travel
+        # on stdin.
+        idx = source.index(needle)
         preceding = source[:idx]
         assert preceding.rstrip().endswith("|"), preceding[-200:]
         assert "printf " in preceding, preceding
@@ -496,6 +512,68 @@ class TestCompileContextForwardingParity:
         assert compile_blk["options"] == ["-DFOO=1"]
         assert compile_blk["sysroot"] == "/opt/sysroot"
         assert compile_blk["nostdinc"] is True
+
+    def _env_with_python_that_fails_only_synthesis(
+        self, tmp_path: Path
+    ) -> dict[str, str]:
+        """A fake ``python3`` that passes the ``$_PY_BIN_HAS_ABICHECK``
+        preflight (``-c "import abicheck"``) but fails the later, separate
+        overlay-synthesis invocation (a real ``.py`` script path as ``$1``).
+
+        Needed since the merge that added the security fix at
+        ``action/run.sh``'s ``_PY_BIN_HAS_ABICHECK`` check
+        (`abicheck/cli_compare_helpers.py`'s sibling P1 trust-boundary
+        commit 793a5962): `_env_with_unusable_python` makes *every*
+        invocation of the fake interpreter fail, including the preflight's
+        own ``-c "import abicheck"`` probe -- which now trips that separate,
+        earlier guard (\"cannot combine ... with a self-hosted runner's
+        Python interpreter ... that cannot import abicheck\") before this
+        test's own target code (the overlay-synthesis subprocess call)
+        ever runs. This fixture instead only fakes success for the *exact*
+        ``-c "import abicheck"`` probe -- a second ``-c`` invocation exists
+        too (the auto-discovered-project-config guard's own inline script),
+        which must still genuinely fail closed (its own ``sys.exit(1)``
+        "no config found" outcome) rather than have a blanket ``-c`` match
+        return a fake success with empty stdout, which the caller would
+        misread as "found an empty-string config path" and reject on a
+        *third*, still different guard."""
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        fake_python3 = fake_bin / "python3"
+        fake_python3.write_text(
+            '#!/bin/bash\n'
+            '[[ "$1" == "-c" && "$2" == "import abicheck" ]] && exit 0\n'
+            "exit 1\n"
+        )
+        fake_python3.chmod(0o755)
+        return {"PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    def test_overlay_synthesis_failure_fails_loud(self, tmp_path: Path) -> None:
+        """CodeRabbit review, fresh evidence: this script has no `set -e`, so
+        a failed interpreter invocation while synthesizing the compile:
+        config overlay used to fall through silently -- `rm -f` cleanup ran,
+        then the unconditional `CMD+=(--config ...)` appended a path to an
+        empty/never-written overlay file, so the run would proceed and parse
+        headers under no compile context at all instead of failing.
+        `_env_with_python_that_fails_only_synthesis` isolates exactly this
+        failure mode (the synthesis subprocess call, not the separate
+        ``$_PY_BIN_HAS_ABICHECK`` preflight probe -- see that fixture's own
+        docstring for why the two must be distinguished): real quoting/glob
+        content isn't needed, any real compile-context input reaching the
+        helper at all is enough to trigger it."""
+        env = {
+            **_FULL_ENV,
+            **self._env_with_python_that_fails_only_synthesis(tmp_path),
+            "INPUT_OLD_LIBRARY": "old.so",
+            "INPUT_NEW_LIBRARY": "new.so",
+        }
+        result = _run_region_raw(
+            _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
+        )
+        assert result.returncode == 1
+        assert "::error::" in result.stdout
+        assert "could not synthesize the compile" in result.stdout
+        assert "--config" not in result.stdout
 
     def test_dump_gcc_options_multiline_is_one_token_per_line(self) -> None:
         """CodeRabbit review, PR #1146, finding #7: a multi-line gcc-options
@@ -1157,6 +1235,7 @@ class TestCompileContextRejectsAutoDiscoveredConfig:
             + '_PY_BIN_HAS_ABICHECK="false"\n'
             + _add_flag_source()
             + _is_release_style_operand_source()
+            + _extra_args_family_source()
             + _add_compile_context_flags_source()
             + "\nCMD=()\n"
         )

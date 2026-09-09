@@ -77,19 +77,35 @@ from abicheck.model import (  # noqa: E402
     Visibility,
 )
 
-# The five collection depths the ``abicheck scan --depth`` dial exposes, and the
-# evidence layer each one reaches (see docs/concepts/evidence-and-detectability).
-DEPTHS: tuple[str, ...] = ("binary", "headers", "build", "source", "full")
+# The four real collection depths the ``abicheck compare --depth`` dial
+# exposes (ADR-068 D2 -- `compare` absorbed `scan`'s depth dial in Phase 4:
+# `binary`/`headers`/`build`/`source`, confirmed against `compare --help-all`
+# — there is no `--depth full`). The evidence layer each one reaches is per
+# docs/concepts/evidence-and-detectability.
+#
+# An earlier revision of this script also carried a fifth, synthetic "full"
+# column meant to exercise the L5 source-graph/call-graph fold on top of
+# `source`'s own evidence. It never did: no case builder actually constructed
+# distinct L5 evidence for it, so every case fell through to the same
+# `(old, new)` pair `source` already used, `band_at()` applied the identical
+# public-surface scoping for both, and the column always read identically to
+# `source` — a duplicate column mislabeled as exercising more evidence than it
+# did (Codex review, fresh evidence). Removed rather than faked: this script's
+# synthetic `AbiSnapshot` builders have no source-graph/call-graph model to
+# construct genuinely L5-distinct input from, and `check_tier_accuracy.py`
+# already owns the real, artifact-driven per-tier comparison this demo does
+# not attempt to duplicate.
+DEPTHS: tuple[str, ...] = ("binary", "headers", "build", "source")
 DEPTH_LAYER = {
     "binary": "L0",
     "headers": "L2",
     "build": "L3",
     "source": "L4",
-    "full": "L5",
 }
+_DEPTH_LABEL = {d: d for d in DEPTHS}
 # Scoping (public/internal surface resolution) becomes available once headers
 # are present — exactly the depths at/above "headers".
-_SCOPED_DEPTHS = frozenset({"headers", "build", "source", "full"})
+_SCOPED_DEPTHS = frozenset({"headers", "build", "source"})
 
 # Verdict -> 3-band ordinal severity, matching check_tier_accuracy.py so the two
 # gates speak the same language: non-breaking (0) / risk (1) / breaking (2).
@@ -174,7 +190,7 @@ def _preproc_conditional_field(depth):
       parse to ``{a, b}`` -> the phantom vanishes, verdict is correct. This does
       not overturn an artifact-proven break (there was none — the binary was
       blind); it corrects the context-free header parse. Authority rule intact.
-    - source/full: strictly more evidence than build -> stays correct.
+    - source: strictly more evidence than build -> stays correct.
     """
     kept = _snap("1", types=[_rec("S", 2)], functions=[_fn("use", "S *")])
     if depth == "binary":
@@ -189,7 +205,7 @@ def _preproc_conditional_field(depth):
         old = _snap("1", types=[_rec("S", 2)], functions=[_fn("use", "S *")])
         new = _snap("2", types=[_rec("S", 1)], functions=[_fn("use", "S *")])
         return old, new
-    # build / source / full: compile DB supplies -DKEEP_B -> true, unchanged ABI.
+    # build / source: compile DB supplies -DKEEP_B -> true, unchanged ABI.
     return kept, kept
 
 
@@ -336,7 +352,9 @@ def render(markdown: bool) -> str:
             "`FP` = depth over-calls (flags a break that isn't); `FN` = depth "
             "under-calls (misses a real break). Truth is the ground-truth band.",
             "",
-            "| Case | Axis | Truth | " + " | ".join(DEPTHS) + " |",
+            "| Case | Axis | Truth | "
+            + " | ".join(_DEPTH_LABEL[d] for d in DEPTHS)
+            + " |",
             "|------|------|-------|" + "|".join([":--:"] * len(DEPTHS)) + "|",
         ]
         for c in CORPUS:
@@ -350,12 +368,14 @@ def render(markdown: bool) -> str:
                     f"- `{trans}`: {len(names)} FP cleared ({', '.join(names)})"
                 )
     else:
-        header = f"{'case':<28} {'truth':<12} " + " ".join(f"{d:>7}" for d in DEPTHS)
+        header = f"{'case':<28} {'truth':<12} " + " ".join(
+            f"{_DEPTH_LABEL[d]:>10}" for d in DEPTHS
+        )
         lines.append(header)
         lines.append("-" * len(header))
         for c in CORPUS:
             row = f"{c.name:<28} {_BAND_NAME[c.truth]:<12} " + " ".join(
-                f"{_CELL[results[c.name][d]]:>7}" for d in DEPTHS
+                f"{_CELL[results[c.name][d]]:>10}" for d in DEPTHS
             )
             lines.append(row)
         lines.append("")
