@@ -516,6 +516,24 @@ def _release_display_buckets(
         ("api_break", diff.source_breaks),
         ("risk", diff.risk),
         ("compatible", diff.compatible),
+        # Codex review, fresh evidence ("Preserve not-evaluated findings in
+        # release summaries"): `breaking`/`source_breaks`/`risk`/`compatible`
+        # all route through `_evaluated_changes()`, which -- under
+        # `--contract` -- excludes a finding contract evaluation left
+        # NOT_EVALUATED (unknown/unproven/proven-out-of-contract relevance).
+        # Without this bucket, the severity_config-is-None branch above (the
+        # legacy, non-severity-aware release path) is the one place such a
+        # finding disappears entirely from `findings`/`--view show=...`: the
+        # severity_config branch above categorizes `diff.changes` directly
+        # (kind-based, relevance-blind), so it never drops them in the first
+        # place, and the equivalent scalar `compare` JSON/per-library
+        # `--output-dir` report serialize `diff.changes` too. `diff.
+        # not_evaluated` is the same disclosure the single-pair renderer's
+        # own dedicated not-evaluated section gives these findings -- listed
+        # under their own bucket, never silently merged into "compatible"
+        # (which would misrepresent an unproven/unresolved relevance as an
+        # actual compatibility verdict).
+        ("not_evaluated", diff.not_evaluated),
     ]
 
 

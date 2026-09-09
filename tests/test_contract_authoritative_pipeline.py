@@ -571,6 +571,57 @@ class TestScanKeepsWhatItDoesNotScore:
         assert "not_evaluated" not in diff
 
 
+class TestReleaseFanoutKeepsWhatItDoesNotScore:
+    """The directory/package release fan-out's own counterpart to
+    :class:`TestScanKeepsWhatItDoesNotScore` above (Codex review, PR #1154
+    follow-up: "Preserve not-evaluated findings in release summaries").
+
+    Without a severity configuration in effect, `cli_compare_release_
+    matrix._release_display_buckets`'s legacy branch walked ``diff.
+    breaking``/``diff.source_breaks``/``diff.risk``/``diff.compatible`` --
+    all four route through ``DiffResult._evaluated_changes()``, which under
+    ``--contract`` excludes a finding contract evaluation left
+    ``NOT_EVALUATED``. A directory/package operand's own ``findings`` list
+    silently lost such a finding entirely, unlike the equivalent scalar
+    ``compare`` report (serializes ``diff.changes`` directly) or ``scan
+    --against`` (already surfaces its own ``"not_evaluated"`` bucket, see
+    above).
+    """
+
+    def test_a_directory_operand_still_surfaces_the_excluded_finding(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old, new = _removal_pair()
+        (old_dir / "libfoo.json").write_text(
+            snapshot_to_json(old), encoding="utf-8"
+        )
+        (new_dir / "libfoo.json").write_text(
+            snapshot_to_json(new), encoding="utf-8"
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--contract",
+                "exports",
+            ],
+        )
+        assert isinstance(result.exception, SystemExit | None), result.output
+        payload = json.loads(result.output)
+        lib = payload["libraries"][0]
+        entries = [f for f in lib["findings"] if f["bucket"] == "not_evaluated"]
+        by_kind = {f["kind"]: f for f in entries}
+        assert by_kind["func_removed"]["symbol"] == "_Z5pub_bv"
+
+
 class TestExplicitScopeReachesTheGateBeforeItComputes:
     """ADR-049 §4.3: an explicit consumer/required-symbol contract is the
     strongest in-contract evidence there is — so it has to be applied
