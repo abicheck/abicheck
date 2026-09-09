@@ -976,6 +976,40 @@ def _baseline_contract_block(diff: Any, resolved_config: Any) -> dict[str, Any]:
     }
 
 
+def gating_redundant_changes(redundant_changes: list[Any], ledger: Any) -> list[Any]:
+    """The subset of *redundant_changes* `checker.compare()` actually scored
+    (CodeRabbit review, PR #1172): it computes the verdict over
+    ``kept + verdict_redundant`` -- ``redundant`` minus the rename-collapsed
+    halves ``SuppressRenamedPairs`` tags ``"rename:…"`` -- but
+    ``verdict_redundant`` is a private local never exposed on ``DiffResult``.
+    A caller revising the verdict after ``compare()`` returned (this
+    module's own ``--crosscheck KEY=off`` post-removal recompute) needs that
+    same population back, not a naive ``compute_verdict(diff.changes, ...)``
+    that silently drops it -- one of these can independently drive a
+    breaking exit code (``checker.py``'s own example: a downgraded
+    ``TYPE_SIZE_CHANGED`` with its redundant, still-breaking
+    ``FUNC_PARAMS_CHANGED`` sibling).
+
+    Reconstructs it by asking the already-finalized disposition ledger which
+    of *redundant_changes* it disposed ``GATING``
+    (``disposition_close.finalize_ledger``'s own ``verdict_scored`` handling
+    already recorded exactly that distinction) rather than re-deriving the
+    ``caused_by_type`` rule a second time. Returns ``[]`` when *ledger* is
+    ``None`` -- the same "nothing to revise" answer the rest of this
+    call site's ledger-optional helpers give.
+    """
+    if ledger is None:
+        return []
+    from .workflows.disposition import Disposition
+
+    return [
+        c
+        for c in redundant_changes
+        if (record := ledger.record_for(c)) is not None
+        and record.disposition is Disposition.GATING
+    ]
+
+
 def _run_baseline_compare(
     baseline: Path,
     binary: Path,
@@ -1252,11 +1286,12 @@ def _run_baseline_compare(
             if _dropped:
                 _dropped_ids = {id(c) for c in _dropped}
                 diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
+                _ledger = getattr(diff, "disposition_ledger", None)
                 for c in _dropped:
                     _rule_id = f"crosscheck:{c.kind.value}=off"
                     c.suppression_rule = _rule_id
                     override_suppressed_change(
-                        getattr(diff, "disposition_ledger", None),
+                        _ledger,
                         c,
                         rule=RuleProvenance(
                             rule_id=_rule_id,
@@ -1265,12 +1300,20 @@ def _run_baseline_compare(
                         application_point="scan_crosscheck_off",
                     )
                 diff.suppressed_changes = [*diff.suppressed_changes, *_dropped]
+                # CodeRabbit review: `suppressed_count` is a distinct scalar
+                # (set to `len(suppressed)` at construction time), not derived
+                # from `len(suppressed_changes)` -- must stay in sync.
+                diff.suppressed_count = len(diff.suppressed_changes)
+                _redundant = getattr(diff, "redundant_changes", None) or []
+                _verdict_population = diff.changes + gating_redundant_changes(
+                    _redundant, _ledger
+                )
                 if policy_file is not None:
-                    diff.verdict = policy_file.compute_verdict(diff.changes)
+                    diff.verdict = policy_file.compute_verdict(_verdict_population)
                 else:
                     from .checker_policy import compute_verdict
 
-                    diff.verdict = compute_verdict(diff.changes, policy=policy)
+                    diff.verdict = compute_verdict(_verdict_population, policy=policy)
     # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 

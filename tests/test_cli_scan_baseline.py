@@ -735,3 +735,51 @@ class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
         assert payload["verdict"] == "COMPATIBLE_WITH_RISK"
         kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
         assert "exported_not_public" in kinds
+
+
+class TestGatingRedundantChanges:
+    """``gating_redundant_changes()`` (CodeRabbit review, PR #1172):
+    ``checker.compare()`` scores the verdict over ``kept + verdict_redundant``
+    -- ``redundant`` minus the rename-collapsed halves -- but
+    ``verdict_redundant`` is a private local never exposed on ``DiffResult``.
+    The ``--crosscheck KEY=off`` post-removal verdict recompute needs that
+    exact population back; this reconstructs it from the already-finalized
+    disposition ledger's own per-change disposition rather than
+    re-deriving the ``caused_by_type`` rule a second time.
+    """
+
+    def _change(self, symbol: str = "_Zfoo") -> Change:
+        return Change(kind=ChangeKind.FUNC_REMOVED, symbol=symbol, description="x")
+
+    def test_returns_empty_list_when_ledger_is_none(self) -> None:
+        assert csb.gating_redundant_changes([self._change()], None) == []
+
+    def test_returns_only_the_gating_disposed_changes(self) -> None:
+        from abicheck.policy.disposition_ledger import Disposition, DispositionLedger
+
+        gating = self._change("_Zgating")
+        deduplicated = self._change("_Zdeduplicated")
+        ledger = DispositionLedger()
+        ledger.record(gating, Disposition.GATING, application_point="p", from_gate=True)
+        ledger.record(deduplicated, Disposition.DEDUPLICATED, application_point="p")
+
+        result = csb.gating_redundant_changes([gating, deduplicated], ledger)
+
+        assert result == [gating]
+
+    def test_skips_a_change_the_ledger_never_recorded(self) -> None:
+        # A redundant_changes entry the ledger has no record for at all
+        # (e.g. a hand-built DiffResult from a caller other than
+        # checker.compare) must not raise -- the same "unrecorded means
+        # nothing to say" contract record_for() itself documents.
+        from abicheck.policy.disposition_ledger import DispositionLedger
+
+        ledger = DispositionLedger()
+        unrecorded = self._change("_Zunrecorded")
+
+        assert csb.gating_redundant_changes([unrecorded], ledger) == []
+
+    def test_empty_redundant_changes_returns_empty_list(self) -> None:
+        from abicheck.policy.disposition_ledger import DispositionLedger
+
+        assert csb.gating_redundant_changes([], DispositionLedger()) == []

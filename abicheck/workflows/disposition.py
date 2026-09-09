@@ -43,7 +43,15 @@ not ``disposition_ledger.py``: the 800-line production-file seam).
 ``RuleProvenance`` joined for the same call site's fourth reason: a
 ``--crosscheck KEY=off`` policy is not a suppression-file rule, so it builds
 its own synthetic provenance directly rather than duck-typing a fake
-``Suppression`` (Codex review, fourth round).
+``Suppression`` (Codex review, fourth round). ``Disposition`` joined for a
+fifth: that same call site's post-removal verdict recompute needs to tell
+which of ``DiffResult.redundant_changes`` were part of the original
+verdict-scored population (``Disposition.GATING``, per
+``disposition_close.finalize_ledger``'s own ``verdict_scored`` handling) --
+querying the ledger via ``DispositionLedger.record_for`` rather than
+re-deriving the ``caused_by_type``-based rule ``checker.compare()`` itself
+uses, which would be exactly the parallel-policy duplication this ledger
+exists to avoid (CodeRabbit review, PR #1172).
 
 Re-export only, deliberately: ``policy/disposition_ledger.py``/
 ``disposition_close.py``/``policy/rule_provenance.py`` remain the modules to
@@ -58,11 +66,13 @@ from ..policy.disposition_close import (
     override_suppressed_change as override_suppressed_change,
 )
 from ..policy.disposition_ledger import (
+    Disposition as Disposition,
     record_suppressed_change as record_suppressed_change,
 )
 from ..policy.rule_provenance import RuleProvenance as RuleProvenance
 
 __all__ = [
+    "Disposition",
     "RuleProvenance",
     "close_consumer_scope",
     "ledger_for",
