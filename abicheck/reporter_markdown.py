@@ -1384,8 +1384,33 @@ def compute_review_digest(
     # on incomplete evidence -- e.g. compare.note_if_same_binary_compared's
     # byte-identical-inputs warning -- and this digest is exactly the
     # GitHub-facing summary a reviewer approves a merge from, so it must not
-    # read as unconditionally clean when one of these is present.
-    coverage_warnings = tuple(result.coverage_warnings or ())
+    # read as unconditionally clean when one of these is present. The
+    # pattern/preprocessor pre-scan sections (Phase 2b) are folded in here
+    # too (Codex review, fresh evidence): `build_review_digest_document`
+    # never renders `render_pattern_prescan_markdown`/`render_preprocessor_
+    # prescan_markdown` at all (those are leaf/root-cause/full-mode-only),
+    # so a genuine acquisition failure or partial-coverage scan previously
+    # vanished from the one GitHub-facing summary entirely.
+    from .report.lexical_prescan import (
+        compute_pattern_prescan_summary,
+        compute_preprocessor_prescan_summary,
+        pattern_prescan_review_warnings,
+        preprocessor_prescan_review_warnings,
+    )
+
+    coverage_warnings = (
+        tuple(result.coverage_warnings or ())
+        + tuple(
+            pattern_prescan_review_warnings(
+                compute_pattern_prescan_summary(result.pattern_prescan)
+            )
+        )
+        + tuple(
+            preprocessor_prescan_review_warnings(
+                compute_preprocessor_prescan_summary(result.preprocessor_prescan)
+            )
+        )
+    )
 
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"

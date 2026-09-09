@@ -13,6 +13,8 @@ from abicheck.report.dispatch_markdown import to_markdown
 from abicheck.report.lexical_prescan import (
     compute_pattern_prescan_summary,
     compute_preprocessor_prescan_summary,
+    pattern_prescan_review_warnings,
+    preprocessor_prescan_review_warnings,
     render_pattern_prescan_json,
     render_pattern_prescan_markdown,
     render_preprocessor_prescan_json,
@@ -436,6 +438,19 @@ def test_workflows_pattern_scan_scope_reason_distinguishes_all_three_cases(
     assert seeded_result.files_scanned == 0
     assert _pattern_scan_scope_reason([header], True, seeded_result) == "empty_seed"
 
+    # (b2) a seeded run whose seed *did* select candidate files, but every
+    # one was unreadable (`files_skipped > 0`) -- a genuine acquisition
+    # failure, not the seed's own empty-by-design scope (Codex review,
+    # fresh evidence: `seeded` alone used to collapse this onto
+    # `empty_seed`, masking the failure).
+    seeded_unreadable_result = PatternScanResult(
+        facts=[], files_scanned=0, files_skipped=1
+    )
+    assert (
+        _pattern_scan_scope_reason([header], True, seeded_unreadable_result)
+        == "unreadable_inputs"
+    )
+
     # (c) supplied inputs that are all unreadable (not a directory, not a
     # real file the scanner can open).
     ghost = tmp_path / "does-not-exist.hpp"
@@ -449,3 +464,95 @@ def test_workflows_pattern_scan_scope_reason_distinguishes_all_three_cases(
     scanned_result = compute_pattern_prescan_side([header], None, None, None)
     assert scanned_result.files_scanned == 1
     assert _pattern_scan_scope_reason([header], False, scanned_result) is None
+
+
+def test_pattern_prescan_review_warnings_none_when_never_folded():
+    assert pattern_prescan_review_warnings(None) == []
+
+
+def test_pattern_prescan_review_warnings_silent_for_by_design_scopes():
+    """`no_inputs`/`empty_seed` are the ordinary "nothing to scan" cases
+    every other report view already covers via each side's own `coverage`
+    block -- the review digest must not repeat them as a warning."""
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {"files_scanned": 0, "scope_reason": "no_inputs"},
+            "new": {"files_scanned": 0, "scope_reason": "empty_seed"},
+        }
+    )
+    assert pattern_prescan_review_warnings(summary) == []
+
+
+def test_pattern_prescan_review_warnings_surfaces_unreadable_inputs():
+    """Codex review, PR #1169: `build_review_digest_document` never called
+    `render_pattern_prescan_markdown` at all, so an `unreadable_inputs` side
+    -- a genuine acquisition failure -- silently vanished from the one
+    GitHub-facing summary a reviewer approves a merge from."""
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {"files_scanned": 0, "scope_reason": "unreadable_inputs"},
+            "new": {"files_scanned": 3, "scope_reason": None},
+        }
+    )
+    warnings = pattern_prescan_review_warnings(summary)
+    assert len(warnings) == 1
+    assert warnings[0].startswith("OLD pattern pre-scan:")
+    assert "unreadable" in warnings[0]
+
+
+def test_preprocessor_prescan_review_warnings_none_when_never_folded():
+    assert preprocessor_prescan_review_warnings(None) == []
+
+
+def test_preprocessor_prescan_review_warnings_silent_when_fully_covered():
+    summary = compute_preprocessor_prescan_summary(
+        {
+            "old": {"ran": True, "coverage": {"status": "present"}},
+            "new": {"ran": True, "coverage": {"status": "present"}},
+        }
+    )
+    assert preprocessor_prescan_review_warnings(summary) == []
+
+
+def test_preprocessor_prescan_review_warnings_surfaces_partial_coverage():
+    """Codex review, PR #1169: a partially-inspected build (some `clang -E`
+    probes failed, or the probe cap truncated it) reported its divergence/
+    leak counts in the review digest exactly like a clean, fully-scanned
+    one."""
+    summary = compute_preprocessor_prescan_summary(
+        {
+            "old": {"ran": True, "coverage": {"status": "present"}},
+            "new": {
+                "ran": True,
+                "coverage": {"status": "partial", "detail": "3/5 probes failed"},
+            },
+        }
+    )
+    warnings = preprocessor_prescan_review_warnings(summary)
+    assert len(warnings) == 1
+    assert (
+        warnings[0] == "NEW preprocessor pre-scan: partial coverage (3/5 probes failed)"
+    )
+
+
+def test_compute_review_digest_surfaces_pattern_prescan_scope_warning():
+    """End-to-end: `reporter_markdown.compute_review_digest` -- what
+    `build_review_digest_document` actually calls for `--format review` --
+    now folds the pattern-prescan warning into `coverage_warnings` instead
+    of dropping it (Codex review, PR #1169)."""
+    from abicheck.reporter_markdown import compute_review_digest
+
+    result = DiffResult(
+        library="libfoo",
+        old_version="1.0",
+        new_version="1.1",
+        changes=[],
+        pattern_prescan={
+            "old": {"files_scanned": 0, "scope_reason": "unreadable_inputs"},
+            "new": {"files_scanned": 2, "scope_reason": None},
+        },
+    )
+    digest = compute_review_digest(result)
+    assert any(
+        "pattern pre-scan" in w and "unreadable" in w for w in digest.coverage_warnings
+    )

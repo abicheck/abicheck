@@ -195,10 +195,12 @@ def compute_pattern_prescan_side(
 #:   attempted (:func:`compute_pattern_prescan_side`'s own ``seeded=True``)
 #:   and resolved to a real, valid, empty diff -- headers/``--sources`` WERE
 #:   supplied, they were just outside this run's deliberately narrow scope.
-#: * ``"unreadable_inputs"`` -- headers/``--sources`` were supplied and no
-#:   changed-path seed narrowed anything, but the scan still found nothing to
-#:   scan (every candidate file failed to read, or none matched a scannable
-#:   extension at all).
+#: * ``"unreadable_inputs"`` -- headers/``--sources`` were supplied but the
+#:   scan still found nothing to scan: either no changed-path seed narrowed
+#:   anything and every candidate file failed to read/matched no scannable
+#:   extension, or a seed *did* select candidate files (``result.
+#:   files_skipped > 0``) and every one of them was unreadable -- a real
+#:   acquisition failure, not the seed's own empty-by-design scope.
 #:
 #: ``None`` when the side has real coverage (``files_scanned > 0``) -- this
 #: reason exists only to explain an otherwise-ambiguous zero.
@@ -209,7 +211,13 @@ def _pattern_scan_scope_reason(
         return None
     if not roots:
         return "no_inputs"
-    if seeded:
+    # A seeded run's own `files_skipped` count (Codex review, fresh
+    # evidence) is what actually distinguishes "the seed resolved to a
+    # real, valid, empty diff" from "the seed selected files and every one
+    # of them was unreadable" -- `seeded` alone collapsed both onto
+    # `empty_seed`, masking a genuine acquisition failure as a by-design
+    # empty scope.
+    if seeded and not result.files_skipped:
         return "empty_seed"
     return "unreadable_inputs"
 

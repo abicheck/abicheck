@@ -198,6 +198,56 @@ def render_preprocessor_prescan_markdown(
     ]
 
 
+def pattern_prescan_review_warnings(summary: PatternPrescanSummary | None) -> list[str]:
+    """Coverage-warning strings for the ``--format review`` digest (Codex
+    review, fresh evidence): ``build_review_digest_document`` never called
+    :func:`render_pattern_prescan_markdown` at all, so an ``unreadable_
+    inputs`` side -- headers/``--sources`` were supplied but nothing could
+    actually be scanned -- silently vanished from the one GitHub-facing
+    summary a reviewer approves a merge from, which could still read as an
+    unqualified "safe to merge". Only ``unreadable_inputs`` is surfaced
+    here: ``no_inputs``/``empty_seed`` are the ordinary, by-design "nothing
+    to scan" cases every other report view already covers via each side's
+    own ``coverage`` block, and repeating them in the digest would just be
+    noise for the common case of a headerless/sourceless comparison.
+    """
+    if summary is None:
+        return []
+    warnings = []
+    for label, side in (("OLD", summary.old), ("NEW", summary.new)):
+        if side.get("scope_reason") == "unreadable_inputs":
+            warnings.append(
+                f"{label} pattern pre-scan: headers/--sources were supplied "
+                "but every candidate file was unreadable or matched no "
+                "scannable extension -- lexical ABI-risk coverage is 0 "
+                "files, not a by-design empty scope"
+            )
+    return warnings
+
+
+def preprocessor_prescan_review_warnings(
+    summary: PreprocessorPrescanSummary | None,
+) -> list[str]:
+    """Same rationale as :func:`pattern_prescan_review_warnings`, for the S2
+    preprocessor pre-scan's own ``partial`` coverage case (some ``clang -E``
+    probes failed, or the scan's own probe cap truncated it) -- without this
+    a partially-inspected build reports its (possibly incomplete) divergence/
+    leak counts in the review digest exactly like a clean, fully-scanned
+    one.
+    """
+    if summary is None:
+        return []
+    warnings = []
+    for label, side in (("OLD", summary.old), ("NEW", summary.new)):
+        coverage = side.get("coverage") or {}
+        if coverage.get("status") == "partial":
+            detail = coverage.get("detail") or "incomplete coverage"
+            warnings.append(
+                f"{label} preprocessor pre-scan: partial coverage ({detail})"
+            )
+    return warnings
+
+
 __all__ = [
     "PatternPrescanSummary",
     "PreprocessorPrescanSummary",
@@ -207,4 +257,6 @@ __all__ = [
     "render_preprocessor_prescan_json",
     "render_pattern_prescan_markdown",
     "render_preprocessor_prescan_markdown",
+    "pattern_prescan_review_warnings",
+    "preprocessor_prescan_review_warnings",
 ]
