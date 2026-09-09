@@ -475,7 +475,7 @@ def update_failure_is_absorbed(line: str) -> bool:
 
 
 def logical_lines(script: str) -> list[str]:
-    """Split a shell script into *logical* lines, joining continuations.
+    """Split a shell script into *logical* lines, splicing continuations.
 
     A workflow can spell the gating chain across physical lines:
 
@@ -488,19 +488,36 @@ def logical_lines(script: str) -> list[str]:
     that form into a real workflow and watching the scan pass). The scan
     therefore runs over what the shell actually executes, not over how the
     YAML happens to be wrapped.
+
+    Two rules, both of which an earlier revision got wrong (CodeRabbit and
+    Codex, independently, on PR #1183 -- each verified against real bash):
+
+    1. A backslash continues a line only when it is *immediately* before the
+       newline. Testing that after `rstrip()` makes `# note \\ ` look like a
+       continuation, which splices the next line into a comment and hides it
+       from the scan entirely -- a bypass, not a cosmetic slip.
+    2. Splicing removes the backslash-newline pair and adds **nothing**.
+       Inserting a space breaks a token split across lines: bash reads
+       `apt-get upda\\` + `te` as `apt-get update`, while a space yields
+       `apt-get upda te`, which the scan's regex does not match. The
+       indentation the continued line carries is likewise real -- bash keeps
+       it, word splitting absorbs it, and `\\s+` in the scan's pattern
+       matches it.
+
+    ``TestLogicalLines`` differential-tests this against bash rather than
+    against my reading of it, for the same reason the absorption predicate
+    is tested that way.
     """
     lines: list[str] = []
     pending = ""
     for raw in script.splitlines():
-        stripped = raw.rstrip()
+        # Checked on the raw line: trailing whitespace after the backslash
+        # means it is not adjacent to the newline, so bash does not splice.
         # An escaped backslash (`\\\\`) ends the line; a single one continues it.
-        if stripped.endswith("\\") and not stripped.endswith("\\\\"):
-            segment = stripped.lstrip() if pending else stripped
-            pending += segment[:-1].rstrip() + " "
+        if raw.endswith("\\") and not raw.endswith("\\\\"):
+            pending += raw[:-1]
             continue
-        # A continuation carries the next line's indentation with it; drop it
-        # so the joined command reads as the shell sees it.
-        lines.append((pending + (stripped.lstrip() if pending else stripped)).strip())
+        lines.append((pending + raw).strip())
         pending = ""
     if pending:
         lines.append(pending.strip())
@@ -732,20 +749,36 @@ class TestLogicalLines:
     A guard is only as good as the text it looks at. This one silently
     reported "no offender" for a genuinely gating workflow purely because
     the YAML wrapped the command, so the joiner gets the same
-    stated-as-invariants treatment as the absorption predicate.
+    stated-as-invariants treatment as the absorption predicate -- and, after
+    two independent reviewers found two more holes in it, the same
+    differential-against-bash treatment too.
     """
 
     def test_a_continued_command_becomes_one_line(self) -> None:
-        """The reported bypass: two physical lines, one shell command."""
+        """The reported bypass: two physical lines, one shell command.
+
+        The continued line's indentation is preserved because bash preserves
+        it; `\\s+` in the scan's pattern is what absorbs it.
+        """
         script = "sudo apt-get \\\n  update -qq && sudo apt-get install -y gcc\n"
         assert logical_lines(script) == [
-            "sudo apt-get update -qq && sudo apt-get install -y gcc"
+            "sudo apt-get   update -qq && sudo apt-get install -y gcc"
         ]
+
+    def test_a_token_split_across_lines_rejoins_exactly(self) -> None:
+        """Splicing adds nothing: `upda\\` + `te` is `update`, not `upda te`.
+
+        Inserting a space here was a real bypass -- the scan's regex needs
+        `apt-get update` as one token pair, and an invented space hid it
+        (Codex, PR #1183).
+        """
+        assert logical_lines("apt-get upda\\\nte\n") == ["apt-get update"]
 
     def test_multiple_continuations_join(self) -> None:
         """Joining is not a one-shot: a command may wrap several times."""
-        script = "sudo apt-get \\\n  update \\\n  -qq\n"
-        assert logical_lines(script) == ["sudo apt-get update -qq"]
+        assert logical_lines("sudo apt-get \\\n  update \\\n  -qq\n") == [
+            "sudo apt-get   update   -qq"
+        ]
 
     def test_uncontinued_lines_are_untouched(self) -> None:
         """Ordinary scripts must survive the rewrite unchanged -- the scan
@@ -757,11 +790,24 @@ class TestLogicalLines:
         """`\\\\` is a literal backslash, not a continuation.
 
         Getting this wrong would swallow the *following* line into the
-        current one and hide whatever command it holds -- the same
-        blind spot as the bug this function exists to close, in reverse.
+        current one and hide whatever command it holds -- the same blind
+        spot as the bug this function exists to close, in reverse.
         """
         script = "echo 'a\\\\'\nsudo apt-get update || true\n"
         assert logical_lines(script) == ["echo 'a\\\\'", "sudo apt-get update || true"]
+
+    def test_a_backslash_before_trailing_space_does_not_continue(self) -> None:
+        """A backslash continues a line only when it touches the newline.
+
+        Testing that after `rstrip()` let a comment ending in `\\ ` swallow the
+        next line; the scan then skipped the whole thing as a comment, hiding
+        a real gating command (CodeRabbit, PR #1183).
+        """
+        script = "# note \\ \nsudo apt-get update -qq && sudo apt-get install -y gcc\n"
+        assert logical_lines(script) == [
+            "# note \\",
+            "sudo apt-get update -qq && sudo apt-get install -y gcc",
+        ]
 
     def test_a_trailing_continuation_still_yields_its_line(self) -> None:
         """A script ending mid-continuation must not drop its last command."""
@@ -773,3 +819,55 @@ class TestLogicalLines:
         (joined,) = logical_lines(script)
         assert re.search(r"\bapt-get\s+update\b", joined)
         assert not update_failure_is_absorbed(joined)
+
+    # Every wrapping shape reviewers have raised, plus the ones they have
+    # not: a split token, a split flag, a backslash before trailing space, an
+    # escaped backslash, several continuations in a row. Checked against bash
+    # rather than against my reading of it -- both holes above came from
+    # reasoning about continuations instead of asking the shell.
+    _SCRIPTS = (
+        "probe update\n",
+        "probe \\\n  update\n",
+        "probe upda\\\nte\n",
+        "probe update \\\n  -qq\n",
+        "probe --op\\\ntion\n",
+        "probe \\\n  upda\\\nte \\\n  -qq\n",
+        "probe a\\\\\nprobe b\n",
+        "probe one\nprobe two\n",
+        "probe x \\\n\nprobe y\n",
+    )
+
+    @requires_apt_harness
+    @pytest.mark.parametrize("script", _SCRIPTS)
+    def test_splicing_matches_bash(self, script: str, tmp_path: Path) -> None:
+        """The oracle is bash's own line splicing, not this module's.
+
+        A stub `probe` on PATH records the argv of every invocation bash
+        actually makes; the same scripts are run through `logical_lines` and
+        tokenized. The two must agree -- which is the whole claim this
+        function makes about itself.
+        """
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        log = tmp_path / "argv.log"
+        probe = bindir / "probe"
+        probe.write_text(
+            f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> {log}\n', encoding="utf-8"
+        )
+        probe.chmod(0o755)
+
+        env = dict(os.environ)
+        env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
+        subprocess.run(["bash", "-c", script], env=env, capture_output=True, check=True)
+        from_bash = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+
+        # `probe` logs "$*", i.e. its arguments without argv[0], so drop the
+        # command name on this side too.
+        from_helper = [
+            " ".join(shlex.split(line)[1:])
+            for line in logical_lines(script)
+            if line.startswith("probe")
+        ]
+        assert from_helper == from_bash, (
+            f"{script!r}: helper produced {from_helper}, bash ran {from_bash}"
+        )
