@@ -60,6 +60,7 @@ rather than pinned to the one reported oneDAL file.
 from __future__ import annotations
 
 import functools
+import gzip
 import io
 import json
 import random
@@ -485,6 +486,44 @@ def test_a_request_larger_than_the_cap_is_still_served(tmp_path, compression):
 
     n = _BOUNDED_PREFIX_MAX_RAW_BYTES * 16
     assert n > len(data), "n must exceed the payload so the whole of it is the answer"
+
+    assert bounded_decoded_prefix(path, n) == read_snapshot_bytes(path)[:n]
+
+
+def test_a_large_request_keeps_escalation_headroom(tmp_path):
+    """Above the cap the ceiling must sit *above* the request, not on it.
+
+    Producing `n` decoded bytes can take more than `n` stored bytes -- an
+    incompressible payload, or a level-0 gzip stream where stored exceeds
+    raw. With the ceiling exactly at `n` the first read comes up short,
+    `raw_size >= ceiling` fires immediately, and a serveable request
+    answers `None` (Codex review).
+
+    Two properties of this fixture are load-bearing and asserted, because
+    the previous large-request test passed against the bug it was written
+    for by violating both:
+
+    * the decoded payload is **longer than** `n`, so the first read cannot
+      reach EOF and pass for the wrong reason, and
+    * the stored form is **larger than** the decoded form, so `n` stored
+      bytes genuinely cannot yield `n` decoded bytes.
+    """
+    from abicheck.snapshot_io import _BOUNDED_PREFIX_MAX_RAW_BYTES
+
+    data = _over_cap_payload()
+    path = tmp_path / "level0.json.gz"
+    path.write_bytes(gzip.compress(data, compresslevel=0))
+
+    n = _BOUNDED_PREFIX_MAX_RAW_BYTES + 4096
+    assert n > _BOUNDED_PREFIX_MAX_RAW_BYTES, "n must exceed the cap"
+    assert len(data) > n, (
+        "the payload must outlast the request, or the first read reaches "
+        "EOF and this test passes without exercising escalation at all"
+    )
+    assert path.stat().st_size > len(data), (
+        "level-0 gzip must store more than it decodes, or `n` stored bytes "
+        "could already yield `n` decoded bytes"
+    )
 
     assert bounded_decoded_prefix(path, n) == read_snapshot_bytes(path)[:n]
 
