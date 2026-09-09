@@ -80,6 +80,7 @@ def reject_unsupported_options(
     dso_only: bool = False,
     include_private_dso: bool = False,
     fail_on_removed: bool = False,
+    support_promise: str | None = None,
     new_is_single_file: bool = False,
 ) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
@@ -93,9 +94,10 @@ def reject_unsupported_options(
     the bottom of this function, which only make sense when NEW_INPUT is a
     *live* directory/package (the default, ``False``, unchanged).
 
-    *dso_only*/*include_private_dso*/*fail_on_removed* (Phase 7d,
-    one-comparison-product.md §4.1) are the resolved ``release.dso_only``/
-    ``release.include_private_dso``/``gate.fail_on_removed_library``
+    *dso_only*/*include_private_dso*/*fail_on_removed*/*support_promise*
+    (Phase 7d/7i, one-comparison-product.md §4.1) are the resolved
+    ``release.dso_only``/``release.include_private_dso``/
+    ``gate.fail_on_removed_library``/``release.support_promise``
     ``.abicheck.yml`` values -- no longer CLI kwargs at all, so the caller
     resolves them off the loaded project config and passes them in here,
     rather than this (pure, kwargs-only) function loading config itself.
@@ -154,6 +156,21 @@ def reject_unsupported_options(
             "already-loaded facts document. Diff the stored facts' own "
             "per_library_snapshots keys against the release directory "
             "yourself if you need this accounting."
+        )
+    if support_promise and support_promise != "off":
+        # Codex review, PR #1180, fresh evidence: compare_release_against_
+        # bundle_facts() has no support-promise channel at all -- neither a
+        # policy parameter it forwards nor a proven-inventory acquisition
+        # record it builds one from -- so a declared policy here would
+        # silently omit every support_promise_component_retired/_introduced
+        # finding a directory/package `compare` of the same content would
+        # report. Rejected rather than left to appear honored.
+        raise click.UsageError(
+            "release.support_promise is not supported together with "
+            "a stored-bundle-facts OLD_INPUT: this driver builds no proven-"
+            "inventory acquisition record to derive a support-promise "
+            "finding from. Compare the release directory/package itself "
+            "(not a stored bundle-facts document) to use it."
         )
     if kwargs.get("bundle_facts_out") is not None:
         raise click.UsageError(

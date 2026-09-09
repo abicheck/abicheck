@@ -96,13 +96,28 @@ from .dump import dump_cmd
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
 
 
-def reject_release_incompatible_view_mode(report_mode: str) -> None:
-    """Reject a ``--view`` mode a directory/package release fan-out can't
-    honor: ``leaf``/``root-cause`` restructure a single comparison's own
-    root-cause graph, and the release summary is an aggregate report across
-    every library with no single such graph to restructure. ``full`` and
-    ``impact`` (each library already has its own ``DiffResult`` to compute
-    an impact table from) are the only accepted values here.
+def reject_release_incompatible_view_mode(
+    report_mode: str, *, show_filtered: bool = False, audit_suppressions: bool = False
+) -> None:
+    """Reject a ``--view`` mode/token a directory/package release fan-out
+    can't honor: ``leaf``/``root-cause`` restructure a single comparison's
+    own root-cause graph, and the release summary is an aggregate report
+    across every library with no single such graph to restructure. ``full``
+    and ``impact`` (each library already has its own ``DiffResult`` to
+    compute an impact table from) are the only accepted report modes here.
+
+    ``filtered``/``suppressions`` (Codex review, PR #1180, fresh evidence)
+    are rejected the same way rather than silently accepted-and-ignored:
+    unlike ``report_mode``, `_dispatch_release_compare`` never threads
+    ``show_filtered``/``audit_suppressions`` through to the release
+    engine's own renderer at all (`cli_compare_release.py` has no such
+    concept), so ``--view filtered``/``--view suppressions`` on a
+    directory/package operand used to produce the identical output an
+    invocation without the token would -- the one thing a rendering
+    selector must never do (ADR-068 D4). Wiring the two ledgers into the
+    per-library release renderer is a real feature, not a rename fix; a
+    directory/package caller who needs them compares one library pair at a
+    time in the meantime, same as ``leaf``/``root-cause`` above.
 
     Shared by ``_dispatch_release_compare``'s own check below and
     ``cli_compare_helpers.py``'s pre-``--dry-run`` rejection point (Codex
@@ -120,6 +135,14 @@ def reject_release_incompatible_view_mode(report_mode: str) -> None:
             "report across every library with no single such graph to "
             "restructure. Compare one library at a time (a single old/new "
             f".so pair) to use --view {report_mode}."
+        )
+    if show_filtered or audit_suppressions:
+        token = "filtered" if show_filtered else "suppressions"
+        raise click.UsageError(
+            f"--view {token} is not available when comparing directories or "
+            "packages: the release engine does not yet render this ledger "
+            "per library. Compare one library at a time (a single old/new "
+            f".so pair) to use --view {token}."
         )
 
 
@@ -170,11 +193,21 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     kwargs["show_only"] = kwargs.pop("show_only", None)
     kwargs["demangle"] = kwargs.pop("demangle", None)
     kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
+    # `show_filtered`/`audit_suppressions` are popped (not forwarded):
+    # `compare_release_cmd` has no such parameter at all -- the release
+    # engine doesn't render these ledgers per library yet (Codex review, PR
+    # #1180) -- so their only role here is the rejection immediately below.
+    view_show_filtered = kwargs.pop("show_filtered", False)
+    view_audit_suppressions = kwargs.pop("audit_suppressions", False)
     # Already validated ahead of the --dry-run emit (cli_compare_helpers.py's
     # pre-dry-run block) -- re-checked here too since _dispatch_release_
     # compare has its own direct callers/tests and must reject on its own,
     # not merely rely on an upstream caller having done so.
-    reject_release_incompatible_view_mode(report_mode)
+    reject_release_incompatible_view_mode(
+        report_mode,
+        show_filtered=view_show_filtered,
+        audit_suppressions=view_audit_suppressions,
+    )
     kwargs["show_impact"] = report_mode == "impact"
     if report_mode == "impact":
         report_mode = "full"

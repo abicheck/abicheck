@@ -59,3 +59,10 @@
   `demangle`/`no-demangle` and `patterns`. Both are pure rendering
   selectors over data the run already computed; asking for the suppression
   audit with no `--suppress` stays a no-op rather than a usage error.
+  Rejected outright (exit `64`), rather than silently ignored, on a
+  directory/package comparison — the release fan-out doesn't render either
+  ledger per library yet.
+- **`release.support_promise` (`.abicheck.yml`) is rejected together with a
+  stored-bundle-facts `OLD_INPUT`**: that driver builds no proven-inventory
+  acquisition record to derive a support-promise finding from, so a
+  declared policy there would previously have silently produced none.

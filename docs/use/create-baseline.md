@@ -37,8 +37,8 @@ Snapshots include provenance metadata that tracks where and when they were creat
 ```bash
 abicheck dump libfoo.so -H include/foo.h \
   --version 2.0.0 \
-  --git-tag v2.0.0 \
-  --build-id "$CI_RUN_ID" \
+  --provenance git-tag=v2.0.0 \
+  --provenance build-id="$CI_RUN_ID" \
   -o libfoo-2.0.0.abicheck.json
 ```
 
@@ -47,11 +47,11 @@ This embeds in the snapshot JSON:
 | Field | Source | Example |
 |-------|--------|---------|
 | `git_commit` | Auto-detected from `git rev-parse HEAD` | `abc1234def5678` |
-| `git_tag` | `--git-tag` flag | `v2.0.0` |
+| `git_tag` | `--provenance git-tag=...` | `v2.0.0` |
 | `created_at` | Auto-set (ISO 8601 UTC) | `2026-03-24T12:00:00+00:00` |
-| `build_id` | `--build-id` flag | `gh-actions-1234` |
+| `build_id` | `--provenance build-id=...` | `gh-actions-1234` |
 
-Use `--no-git` to skip automatic git commit detection (e.g., in non-git environments).
+Use `--provenance git=off` to skip automatic git commit detection (e.g., in non-git environments).
 
 ### The `.abicheck.json` Naming Convention
 

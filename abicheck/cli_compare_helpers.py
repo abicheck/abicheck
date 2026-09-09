@@ -1446,7 +1446,11 @@ def run_compare(
             reject_release_incompatible_view_mode,
         )
 
-        reject_release_incompatible_view_mode(report_mode)
+        reject_release_incompatible_view_mode(
+            report_mode,
+            show_filtered=show_filtered,
+            audit_suppressions=audit_suppressions,
+        )
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
 
@@ -1612,6 +1616,10 @@ def run_compare(
             # _dispatch_release_compare resolves and validates them.
             report_mode=report_mode, show_only=show_only,
             demangle=demangle, explain_patterns=explain_patterns,
+            # Codex review, PR #1180: forwarded (not silently dropped) so
+            # _dispatch_release_compare can reject them -- the release
+            # engine doesn't render either ledger per library yet.
+            show_filtered=show_filtered, audit_suppressions=audit_suppressions,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

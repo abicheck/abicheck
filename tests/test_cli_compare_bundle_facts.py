@@ -445,6 +445,69 @@ class TestCompareOldBundleFacts:
         assert code == 64
         assert "gate.fail_on_removed_library" in out
 
+    def test_release_support_promise_config_is_rejected(self, tmp_path: Path) -> None:
+        """Codex review, PR #1180, fresh evidence: release.support_promise
+        moved from a per-invocation flag (compare --support-promise) to a
+        project-wide .abicheck.yml setting in this same PR, but this
+        dispatch was never taught to reject it the way its sibling
+        gate.fail_on_removed_library above already is -- so a project
+        declaring support_promise: declared would silently get no
+        support-promise findings at all from a stored-bundle-facts
+        comparison, with nothing to say so. Now rejected the same way."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text('release:\n  support_promise: "declared"\n')
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "release.support_promise" in out
+
+    def test_release_support_promise_off_is_not_rejected(self, tmp_path: Path) -> None:
+        """Companion: the default ('off', whether stated explicitly or left
+        unset) must not be newly rejected by the check above."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text('release:\n  support_promise: "off"\n')
+
+        code, _out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        assert code == 0
+
     def test_bundle_facts_out_together_with_stored_old_input_is_rejected(
         self, tmp_path: Path
     ) -> None:

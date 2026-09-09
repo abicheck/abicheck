@@ -122,7 +122,7 @@ To pin to a specific release:
 
 ```bash
 abicheck dump libfoo.so -H include/foo.h \
-  --version 2.0.0 --git-tag v2.0.0 \
+  --version 2.0.0 --provenance git-tag=v2.0.0 \
   -o libfoo-2.0.0.abicheck.json
 gh release upload v2.0.0 libfoo-2.0.0.abicheck.json --clobber
 ```
