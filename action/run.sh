@@ -719,25 +719,39 @@ _effective_format() {
 # `cli_scan.py`'s own `--config` help text ("auto-discovered upward from the
 # current directory when [no explicit --config]"); no Action input names
 # this file's path at all, so `run.sh` has no other way to see it -- states
-# an explicit `source: {method: auto}`. Checked only at the checkout root
-# (`$PWD`, where the Action's own working directory always is), not a full
-# upward walk: the common case (repo-root config) is covered, and a config
-# discovered from a directory *above* the checkout is not a shape this
-# Action's own single-repo checkout model produces anyway.
+# ANY explicit `source: {method: ...}` value. Checked only at the checkout
+# root (`$PWD`, where the Action's own working directory always is), not a
+# full upward walk: the common case (repo-root config) is covered, and a
+# config discovered from a directory *above* the checkout is not a shape
+# this Action's own single-repo checkout model produces anyway.
 #
-# `source.method: auto` behaves identically to `scan`'s own CLI `--depth
-# auto`/omitted-depth default (`cli_scan._resolve_auto_source_method`'s
-# risk-scored preset) -- but `compare`'s own auto-resolution
-# (`cli_compare_helpers._resolve_compare_collect_mode`) has no config-driven
-# equivalent for it at all and raises a usage error outright on this
-# specific value (Codex review, fresh evidence: `scan --dry-run` resolves it
-# to the PR preset's `source-target`, while the equivalent migrated
-# `compare` invocation exits 64). A narrow textual check (not a real YAML
-# parse) on purpose, matching this file's existing no-YAML-dependency
-# convention elsewhere -- a false-positive match (a config that happens to
-# contain this text outside the `source:` mapping) only ever costs staying
-# on the already-correct legacy CLI, never a wrong answer.
-_config_sets_source_method_auto() {
+# Originally scoped to `method: auto` alone (`compare`'s own auto-resolution
+# has no config-driven equivalent for that value at all and raises a usage
+# error outright: `scan --dry-run` resolves it to the PR preset's
+# `source-target`, the equivalent migrated `compare` invocation exits 64) --
+# widened to ANY value on a second Codex review round, fresh evidence: a
+# NON-`auto` `source.method` (e.g. `s1`) diverges too, just differently --
+# `scan`'s own `_resolve_auto_source_method` risk-scores changed paths
+# regardless of the pinned method and can still resolve `source-target`,
+# while `compare`'s `_resolve_compare_collect_mode` genuinely *honors* a
+# pinned method value where `scan` only uses it as one input to its own
+# risk-scored preset, resolving `build` instead for the identical
+# committed-snapshot reproduction. Different failure modes (a hard usage
+# error for `auto`, a silent different depth for anything else), same root
+# cause (compare's config-driven resolution has no real parity with scan's
+# own here at all) and same fix: any `source.method` setting in this file
+# stays on the legacy CLI, not just the one value known to hard-fail.
+#
+# `[[:space:]]` (POSIX bracket expression), not `\s` (a GNU grep extension
+# BSD/macOS's stock grep does not recognize -- Codex review, fresh evidence:
+# an ordinary indented `method: auto` line under `source:` failed to match
+# on macOS, silently missing the very case this function exists to catch).
+# A narrow textual check (not a real YAML parse) on purpose, matching this
+# file's existing no-YAML-dependency convention elsewhere -- a false-
+# positive match (a config that happens to contain this text outside the
+# `source:` mapping) only ever costs staying on the already-correct legacy
+# CLI, never a wrong answer.
+_config_sets_source_method() {
   local _cfg=""
   if [[ -f "$PWD/.abicheck.yml" ]]; then
     _cfg="$PWD/.abicheck.yml"
@@ -746,7 +760,7 @@ _config_sets_source_method_auto() {
   else
     return 1
   fi
-  grep -Eq '^\s*method\s*:\s*"?'\''?auto'\''?"?\s*(#.*)?$' "$_cfg" 2>/dev/null
+  grep -Eq '^[[:space:]]*method[[:space:]]*:[[:space:]]*[^[:space:]#]' "$_cfg" 2>/dev/null
 }
 
 _extra_args_forces_legacy_scan_cli() {
@@ -2013,7 +2027,7 @@ elif [[ "$MODE" == "scan" ]]; then
           && { [[ -n "${INPUT_BUILD_INFO:-}" ]] || [[ -n "${INPUT_COMPILE_DB:-}" ]]; } \
           && [[ -z "${INPUT_SOURCES:-}" ]]; } \
      || { { [[ -z "${INPUT_DEPTH:-}" ]] || [[ "${INPUT_DEPTH:-}" == "auto" ]]; } \
-          && _config_sets_source_method_auto; } \
+          && _config_sets_source_method; } \
      || [[ "$FORCE_AUDIT_ONLY" == "true" ]] \
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
@@ -3180,11 +3194,35 @@ PYQUERY
 # is actually present; the common case (neither) uses the compare run's own
 # result as-is, since nothing would have differed from scan's own baseline
 # path anyway.
-if [[ "$MODE" == "scan" && "${_SCAN_MIGRATED_TO_COMPARE:-false}" == "true" ]]; then
+#
+# A fifth Codex review round found the original `-n "$_cross_source_report_src"`
+# guard backwards for one real case: a successful run whose effective JSON
+# destination cannot be READ BACK (`output-file: /dev/null`, or the
+# equivalent `extra-args: -o /dev/null`) makes `_json_report_src` return
+# empty exactly the same way a genuine dry-run does (no output file this
+# run actually needs to inspect) -- but unlike a dry run, a real comparison
+# DID run and DID produce a verdict, one this code now has no way to check
+# for the exact divergence it exists to catch, so it silently trusted
+# compare's raw, unstripped result instead of falling back to safety.
+# Distinguished from the genuine dry-run case (where skipping this check
+# entirely is correct -- no comparison ran at all, nothing to verify) via
+# the same effective-dry-run test the PR-comment/annotation code above
+# already uses (`INPUT_DRY_RUN`/`_extra_args_has_dry_run_flag`): only a
+# REAL run with an unreadable report now falls back, conservatively, to the
+# legacy CLI rather than trusting an unverifiable compare result.
+if [[ "$MODE" == "scan" && "${_SCAN_MIGRATED_TO_COMPARE:-false}" == "true" ]] \
+   && [[ "${INPUT_DRY_RUN:-false}" != "true" ]] && ! _extra_args_has_dry_run_flag; then
   _cross_source_report_src="$(_json_report_src)"
-  if [[ -n "$_cross_source_report_src" ]] \
-     && [[ "$(_report_query "$_cross_source_report_src" cross_source_finding_present)" == "1" ]]; then
+  if [[ -z "$_cross_source_report_src" ]]; then
+    echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) produced a result this Action could not read back to verify (the effective JSON destination is unreadable, e.g. output-file/-o pointed at /dev/null or another sink outside this checkout). Re-running via the legacy 'abicheck scan' CLI, whose semantics are already known-correct, rather than trusting an unverifiable compare result."
+    _cross_source_fallback_fires=true
+  elif [[ "$(_report_query "$_cross_source_report_src" cross_source_finding_present)" == "1" ]]; then
     echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) found a cross-source hygiene finding, or a pattern-verdict modulation, in this comparison that scan's own default behavior wouldn't have produced (cross-source findings stay advisory-only unless explicitly promoted via --crosscheck KEY=error; pattern-verdict modulation is off by default). Re-running via the legacy 'abicheck scan' CLI to match scan's own semantics, and using that result instead."
+    _cross_source_fallback_fires=true
+  else
+    _cross_source_fallback_fires=false
+  fi
+  if [[ "$_cross_source_fallback_fires" == "true" ]]; then
     # Rebuild CMD from scratch as the equivalent legacy `scan` invocation --
     # same builder, same INPUT_* values, so every flag this run already
     # resolved (headers, build evidence, policy, depth, ...) is forwarded

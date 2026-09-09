@@ -90,3 +90,18 @@ it should read in CHANGELOG.md. Delete the other sections.
   means "the one candidate" on `scan` but "both operands" on `compare` —
   previously reachable without any error, silently applying the candidate's
   evidence to the baseline side too.
+  A fifth review round closed three more gaps: the `source.method` config
+  check is widened from `method: auto` alone to ANY explicit value (a
+  non-`auto` pinned method diverges too — `scan` risk-scores past it
+  regardless, `compare` genuinely honors it — a different failure mode, same
+  root cause); that same check now uses `[[:space:]]` instead of `\s` (a GNU
+  grep extension BSD/macOS's stock grep doesn't recognize, silently missing
+  the check entirely on those platforms); and the cross-source/pattern-
+  verdict fallback now also fires when the migrated `compare` run's
+  effective JSON destination is itself unreadable (`output-file: /dev/null`,
+  or the equivalent via `extra-args`) — previously indistinguishable from a
+  genuine dry run's legitimately-absent report, so an unverifiable real
+  result was silently trusted as-is; now falls back to the legacy CLI for
+  any real (non-dry-run) invocation whose report can't be read back,
+  correctly leaving a genuine dry run's own single-invocation behavior
+  unaffected.

@@ -491,7 +491,7 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestScanStaysOnLegacyCliForAutoSourceMethodConfig:
+class TestScanStaysOnLegacyCliForSourceMethodConfig:
     """Fourth Codex review round, P1 (fresh evidence): an auto-discovered
     ``.abicheck.yml``/``.abicheck.yaml`` stating an explicit ``source:
     {method: auto}`` hits the identical auto-depth-resolution mismatch class
@@ -500,6 +500,16 @@ class TestScanStaysOnLegacyCliForAutoSourceMethodConfig:
     auto-resolution has no equivalent for this value and raises a usage
     error outright (`scan --dry-run` resolves it to the PR preset's
     `source-target`).
+
+    A fifth review round found the original ``method: auto``-only check too
+    narrow: a NON-``auto`` value (e.g. ``s1``) diverges too, just
+    differently -- ``scan``'s own risk-scored preset still resolves
+    `source-target` regardless of the pinned method, while `compare`
+    genuinely honors the pinned value and resolves `build` instead, for the
+    identical inputs. Widened to match ANY `source.method` setting, not
+    just the one value known to hard-fail; parametrized across both to
+    prove the widened check covers the class, not just the originally
+    reported value.
     """
 
     def _run_cmd_in(self, cwd: Path, env_extra: dict[str, str]) -> list[str]:
@@ -529,11 +539,12 @@ class TestScanStaysOnLegacyCliForAutoSourceMethodConfig:
             )
         return [item for item in result.stdout.split("\x1f") if item]
 
-    def test_config_with_source_method_auto_stays_on_scan(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("method", ["auto", "s1"])
+    def test_config_with_source_method_stays_on_scan(
+        self, tmp_path: Path, method: str
     ) -> None:
         (tmp_path / ".abicheck.yml").write_text(
-            "source:\n  method: auto\n", encoding="utf-8"
+            f"source:\n  method: {method}\n", encoding="utf-8"
         )
         cmd = self._run_cmd_in(tmp_path, _base_env())
         assert cmd[1] == "scan", cmd

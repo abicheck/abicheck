@@ -530,3 +530,126 @@ class TestCrossSourceFallbackFindsReportBehindExtraArgsOutputOverride:
         assert outputs["exit-code"] == "2", outputs
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
         assert calls == ["compare"], calls
+
+
+class TestUnreadableReportDestinationTriggersFallback:
+    """Fifth Codex review round, P2 (fresh evidence): a successful migrated
+    `compare` run whose effective JSON destination cannot be READ BACK
+    (`output-file: /dev/null`, or `extra-args: -o /dev/null`) made
+    `_json_report_src` return empty exactly the same way a genuine dry run
+    does -- but unlike a dry run, a real comparison DID run and DID produce
+    a verdict this code then had no way to check for the cross-source/
+    pattern-verdict divergence it exists to catch, silently trusting
+    compare's raw result instead of falling back to safety. Fixed by
+    treating an empty (unreadable) report src, in a REAL (non-dry-run) run,
+    as itself a reason to fall back -- distinguished from a genuine dry run
+    via the same effective-dry-run test the PR-comment/annotation code
+    already uses, so a dry run's own legitimately-absent report never
+    triggers a real second invocation.
+    """
+
+    def test_unreadable_output_destination_falls_back_to_scan(
+        self, tmp_path: Path
+    ) -> None:
+        # A real API_BREAK from compare's raw (unstripped) result -- but
+        # written to /dev/null, so this Action cannot read it back to know
+        # that. Must not be trusted as-is; must fall back to scan's own
+        # (already-correct) result instead.
+        break_report = {
+            "report_schema_version": "2.49",
+            "verdict": "API_BREAK",
+            "changes": [
+                {
+                    "kind": "function_removed",
+                    "symbol": "foo",
+                    "description": "removed",
+                    "severity": "api_break",
+                }
+            ],
+        }
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=break_report,
+            compare_exit=2,
+            scan_report=_scan_report_after_stripping(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_OUTPUT_FILE"] = "/dev/null"
+        outputs = _run_action(tmp_path, env, bindir)
+        # The fallback's own re-run reuses the identical (still-/dev/null)
+        # output destination, so its rich JSON verdict (`COMPATIBLE_WITH_
+        # RISK`) is just as unreadable as compare's was -- this correctly
+        # degrades to exit-code-only resolution (scan's real exit 0 ->
+        # plain COMPATIBLE), not a wrong answer, just a coarser one. What
+        # this test actually proves is the part that matters: scan's own
+        # (already-correct) exit code is what gets published, not
+        # compare's raw exit 2/API_BREAK -- and the fallback really
+        # happened (two invocations, not one).
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["exit-code"] == "0", outputs
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare", "scan"], calls
+
+    def test_extra_args_output_to_dev_null_also_falls_back(
+        self, tmp_path: Path
+    ) -> None:
+        break_report = {
+            "report_schema_version": "2.49",
+            "verdict": "API_BREAK",
+            "changes": [
+                {
+                    "kind": "function_removed",
+                    "symbol": "foo",
+                    "description": "removed",
+                    "severity": "api_break",
+                }
+            ],
+        }
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=break_report,
+            compare_exit=2,
+            scan_report=_scan_report_after_stripping(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        del env["INPUT_OUTPUT_FILE"]
+        env["INPUT_EXTRA_ARGS"] = "-o /dev/null"
+        outputs = _run_action(tmp_path, env, bindir)
+        # The fallback's own re-run reuses the identical (still-/dev/null)
+        # output destination, so its rich JSON verdict (`COMPATIBLE_WITH_
+        # RISK`) is just as unreadable as compare's was -- this correctly
+        # degrades to exit-code-only resolution (scan's real exit 0 ->
+        # plain COMPATIBLE), not a wrong answer, just a coarser one. What
+        # this test actually proves is the part that matters: scan's own
+        # (already-correct) exit code is what gets published, not
+        # compare's raw exit 2/API_BREAK -- and the fallback really
+        # happened (two invocations, not one).
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["exit-code"] == "0", outputs
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare", "scan"], calls
+
+    def test_dry_run_with_no_report_does_not_trigger_a_second_invocation(
+        self, tmp_path: Path
+    ) -> None:
+        # The negative control this fix must not break: a genuine dry run
+        # never writes a real report either (nothing ran to check), but
+        # must NOT be mistaken for the unreadable-destination case above --
+        # a dry run stays a single (or zero) invocation, never a real
+        # second `scan` call.
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=_compare_report_with_finding(
+                "persistent", "header_build_context_mismatch"
+            ),
+            compare_exit=2,
+            scan_report=_scan_report_after_stripping(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_DRY_RUN"] = "true"
+        _run_action(tmp_path, env, bindir)
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert "scan" not in calls, calls
