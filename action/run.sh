@@ -320,6 +320,39 @@ add_compile_context_flags() {
     echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with build-config: those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in the file named by build-config instead, and drop the separate input(s)."
     exit 1
   fi
+  # Codex review, PR #1154 follow-up: the explicit `build-config` input
+  # above isn't the only way a project config can already be in play --
+  # `compare`/`dump` auto-discover a checked-out `.abicheck.yml` (cwd-
+  # upward for `compare`) when no `--config` is given at all. Writing this
+  # overlay and passing it as `--config` REPLACES that discovery entirely
+  # (an explicit --config is the CLI's one source of truth, never merged
+  # with a discovered one) -- so a real project config's severity/
+  # suppression/scope/bundle/etc. settings would be silently dropped for
+  # this run, exactly the "second config source shadows the first" failure
+  # already rejected loudly above for an *explicit* build-config. Same
+  # fail-loud precedent, extended to the auto-discovered case.
+  local _checkout_dir="$PWD"
+  if _discovered_cfg=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+
+from abicheck.cli_helpers_compare import discover_project_config
+
+# Run from the private, empty $_PY_SAFE_DIR (never the checkout) so this
+# invocation can never itself be shadowed by a same-named abicheck.py/
+# abicheck/ package a PR-controlled checkout might plant -- but the
+# discovery walk itself must still search the REAL checkout, passed
+# explicitly as `start` (captured BEFORE the `cd` above) rather than
+# relying on Path.cwd(), which would resolve to $_PY_SAFE_DIR instead.
+found = discover_project_config(start=Path(sys.argv[1]))
+if found is not None:
+    print(found)
+    sys.exit(0)
+sys.exit(1)
+' "$_checkout_dir" 2>/dev/null); then
+    echo "::error::mode: ${MODE} cannot combine ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc${include_lang:+ or lang, when set,} with an already-checked-out project config ('$_discovered_cfg' would otherwise be auto-discovered): those settings now live only in .abicheck.yml's compile: block (Phase 7 CLI cleanup), and this Action does not merge two config sources. Declare them directly in that file instead (pass it via build-config), and drop the separate input(s)."
+    exit 1
+  fi
   if [[ -z "$_COMPILE_CONTEXT_CONFIG_OVERLAY" ]]; then
     # Codex review, PR #1154 follow-up: bare `mktemp` under Git Bash on
     # windows-latest returns an MSYS-only `/tmp/...` spelling a native

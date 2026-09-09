@@ -859,6 +859,7 @@ def merge_compile_config(
     frontend_explicit: bool = False,
     nostdinc_explicit: bool = False,
     frontend_context_explicit: bool = False,
+    config_explicit: bool | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
@@ -896,6 +897,25 @@ def merge_compile_config(
     — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
     intended ``compile:`` settings and still exit 0 — but best-effort (warn +
     CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
+    This parse-error-loudness question is governed by ``build_config is not
+    None`` alone, unaffected by ``config_explicit`` below — every existing
+    caller already relies on it exactly as documented here.
+
+    ``config_explicit`` narrowly overrides only the ``compile.compiler``
+    trust gate documented below, for a caller that has *already* resolved
+    ``build_config`` through its own auto-discovery (e.g. a cwd-upward
+    ``discover_project_config()``/``discover_build_config()`` call made
+    ahead of this one, for severity/scope/suppression resolution). Passing
+    the resulting non-``None`` discovered path straight through as
+    ``build_config`` without this parameter would make the ``build_config
+    is not None`` inference the trust gate used to rely on directly read as
+    "explicitly trusted", defeating that gate for exactly the untrusted,
+    auto-discovered config it exists to distrust (Codex review, fresh
+    evidence — real finding on PR #1154, confirmed exploitable end to end
+    against ``compare``'s own such caller). Leave unset (``None``) when
+    ``build_config`` is still the raw, unresolved CLI value (the common
+    case, and what every pre-existing caller passes) — the historical
+    ``build_config is not None`` inference is exactly right there.
     """
     from .config_paths import project_root_for_config
     from .service_scan import CompileContext
@@ -905,6 +925,14 @@ def merge_compile_config(
     cfg = build_config if explicit_config else discover_build_config(sources)
     if cfg is None:
         return cli_ctx, cli_includes
+    # Only the `compile.compiler` trust gate below is overridable via
+    # `config_explicit` -- parse-error loudness above stays tied to
+    # `explicit_config` unconditionally, matching every pre-existing
+    # caller's expectation that a malformed *explicit* --config here fails
+    # loud regardless of this narrower override.
+    trust_compiler_selection = (
+        explicit_config if config_explicit is None else config_explicit
+    )
 
     try:
         bc = load_build_config(cfg)
@@ -999,7 +1027,7 @@ def merge_compile_config(
     gcc_path = cli_ctx.gcc_path
     gcc_prefix = cli_ctx.gcc_prefix
     if gcc_path is None and gcc_prefix is None and bc.compile_compiler:
-        if not explicit_config:
+        if not trust_compiler_selection:
             click.echo(
                 "warning: compile.compiler ignored from auto-discovered "
                 f"{cfg}; pass a trusted config with --config to permit "
@@ -1185,6 +1213,12 @@ def resolve_compile_context(
     # an effective_gcc_options string from other sources (build-context
     # flags, etc.) can pass it through unchanged.
     gcc_options: str | None = None,
+    # See `merge_compile_config`'s own docstring: set this when `build_config`
+    # is already a *resolved* path from the caller's own auto-discovery
+    # (not necessarily the raw CLI value), so the `compile.compiler` trust
+    # gate isn't fooled into treating a discovered config as explicitly
+    # chosen (Codex review, fresh evidence — real finding on PR #1154).
+    config_explicit: bool | None = None,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
 
@@ -1241,6 +1275,7 @@ def resolve_compile_context(
         # declares at all (compare/dump, Phase 7) rather than raising, so
         # this always resolves False there and the config value applies.
         frontend_context_explicit=_explicit("frontend_context"),
+        config_explicit=config_explicit,
     )
 
 

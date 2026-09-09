@@ -1530,6 +1530,12 @@ def scan_cmd(
         compiler_path=compiler_path,
         compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        # `cfg_path` is `_discover_scan_project_config`'s resolved result --
+        # `build_config` (explicit --build-config) OR the auto-discovered
+        # .abicheck.yml -- not necessarily the raw explicit CLI value
+        # merge_compile_config's own inference expects (Codex review, fresh
+        # evidence -- real finding on PR #1154).
+        config_explicit=(build_config is not None),
     )
     includes = includes_tuple
     binary = artifact

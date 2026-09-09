@@ -807,6 +807,7 @@ def resolve_directory_compile_context(
     compiler_path: str | None,
     compiler_prefix: str | None,
     compiler_option_tokens: tuple[str, ...],
+    config_explicit: bool | None = None,
 ) -> Any:
     """Resolve the both-sides L2 compile context for a directory/package
     compare's release fan-out -- the identical ``resolve_compile_context``
@@ -815,6 +816,8 @@ def resolve_directory_compile_context(
     ``(CompileContext, merged_includes)`` -- the caller must forward
     *both*: dropping the merged-includes half silently drops
     ``compile.include_dirs`` for every library (Codex review).
+
+    ``config_explicit``: see ``merge_compile_config``'s docstring (PR #1154).
     """
     from .cli_options import resolve_compile_context
 
@@ -830,4 +833,5 @@ def resolve_directory_compile_context(
         compiler_path=compiler_path,
         compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        config_explicit=config_explicit,
     )

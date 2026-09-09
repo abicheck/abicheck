@@ -55,12 +55,17 @@ _PLUGIN_LOADING_PREFIXES = (
 def reject_plugin_loading_options(tokens: list[str]) -> None:
     """Raise ``ValueError`` if ``tokens`` (``compile.options``) load a plugin.
 
-    Catches both a self-contained flag (``-fplugin=./evil.so``) and the
+    Catches a self-contained flag (``-fplugin=./evil.so``), the
     ``-Xclang``-prefixed two-token form Clang uses to pass an otherwise
     frontend-only flag through the driver (``-Xclang -load -Xclang
-    ./evil.so``) -- the latter only smuggles a plugin when the token
-    *following* ``-Xclang`` is itself one of the plugin-loading options, so a
-    legitimate, unrelated ``-Xclang <frontend-flag>`` pair is left alone.
+    ./evil.so``, and its documented ``-Xclang=<arg>`` joined alias) -- the
+    two-token form only smuggles a plugin when the token *following*
+    ``-Xclang`` is itself one of the plugin-loading options, so a
+    legitimate, unrelated ``-Xclang <frontend-flag>`` pair is left alone --
+    and, unconditionally, Clang's own ``--config``/``--config=<file>``
+    configuration-file mechanism and the ``@<file>`` response-file
+    convention, both of which indirect into a separate file this scan
+    cannot see the contents of.
     """
     for index, token in enumerate(tokens):
         if token.startswith(_PLUGIN_LOADING_PREFIXES) or token in _PLUGIN_LOADING_BARE_OPTIONS:
@@ -91,3 +96,29 @@ def reject_plugin_loading_options(tokens: list[str]) -> None:
                     "code into the compiler is not a supported use case for "
                     "header-ABI extraction)"
                 )
+        elif (
+            token == "--config"
+            or token.startswith("--config=")
+            or token.startswith("@")
+        ):
+            # Both Clang's own `--config <file>`/`--config=<file>`
+            # configuration-file mechanism (`clang --help-hidden`) and the
+            # GCC/Clang-common `@<file>` response-file convention let an
+            # otherwise-scanned argv token indirect into a SEPARATE file
+            # whose own contents are never scanned by this function --
+            # verified locally against the real Clang contract (`--config=
+            # <file>` genuinely loads a named compiler plugin from a config
+            # file's own `-fplugin=...` line). A sibling file is exactly as
+            # reachable to a PR-controlled `.abicheck.yml` as the config
+            # itself, so this is not a narrower attack surface than the
+            # inline forms above -- rejected unconditionally, the same as
+            # every other plugin-loading vector here (Codex review, fresh
+            # evidence -- real finding on PR #1154).
+            raise ValueError(
+                f"compile.options: {token!r} may indirect to a plugin-loading "
+                "flag in a separate file (Clang's --config/--config=<file> "
+                "mechanism and the @<file> response-file convention both "
+                "point at a file whose contents this check cannot scan) and "
+                "is not permitted; header-ABI extraction has no legitimate "
+                "use for either"
+            )

@@ -898,3 +898,81 @@ class TestCompileContextForwardingParity:
         )
         assert result.returncode != 0
         assert "not support" in result.stdout
+
+
+class TestCompileContextRejectsAutoDiscoveredConfig:
+    """Codex review, PR #1154 follow-up ("Preserve the discovered config
+    when adding Action overrides"): the explicit ``build-config`` input
+    already gets a fail-loud rejection when combined with a compile-context
+    input (see the ``INPUT_BUILD_CONFIG:-`` guard right before this one in
+    ``add_compile_context_flags``); an already-checked-out, auto-discovered
+    ``.abicheck.yml`` needs the identical guard, since ``--config`` (what
+    the synthesized overlay is forwarded as) fully replaces auto-discovery
+    rather than merging with it -- silently dropping every OTHER block
+    (severity/suppression/scope/bundle/...) the real project config
+    declared."""
+
+    def _run_from(
+        self, cwd: Path, env_extra: dict[str, str]
+    ) -> subprocess.CompletedProcess[str]:
+        harness = (
+            f'MODE="{_mode_value_for_marker(_DUMP_MODE_MARKER)}"\n'
+            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+            '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+            + _py_safe_dir_source()
+            + _py_bin_has_abicheck_source()
+            + _add_flag_source()
+            + _is_release_style_operand_source()
+            + _add_compile_context_flags_source()
+            + "\nCMD=()\n"
+        )
+        script = (
+            harness
+            + _compile_context_region(_DUMP_MODE_MARKER, _DUMP_COMPILE_CONTEXT_START)
+            + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+        )
+        env = {**os.environ, **env_extra}
+        return _run_bash_script(script, env, check=False, cwd=cwd)
+
+    def test_fails_loud_when_a_project_config_would_be_discovered(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  addition: error\n", encoding="utf-8"
+        )
+        result = self._run_from(tmp_path, {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++"})
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert "cannot combine" in result.stdout
+        assert "already-checked-out project config" in result.stdout
+        assert str(tmp_path / ".abicheck.yml") in result.stdout
+
+    def test_succeeds_with_no_discoverable_config(self, tmp_path: Path) -> None:
+        """The identical inputs, from a directory with no discoverable
+        project config at all, still synthesize the overlay normally --
+        this guard only fires when there's a real second config source to
+        silently shadow."""
+        result = self._run_from(tmp_path, {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++"})
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        cmd = result.stdout.splitlines()
+        compile_blk = _read_compile_config_overlay(cmd)
+        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
+
+    def test_explicit_build_config_guard_still_fires_first(
+        self, tmp_path: Path
+    ) -> None:
+        """The pre-existing explicit-build-config rejection is unaffected
+        by this new check -- both guards report the same class of problem,
+        but the explicit input is checked first (it's the one the user
+        actually named)."""
+        (tmp_path / ".abicheck.yml").write_text("severity:\n  addition: error\n")
+        result = self._run_from(
+            tmp_path,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_BUILD_CONFIG": "/explicit/path.yml",
+            },
+        )
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert "cannot combine" in result.stdout
+        assert "build-config" in result.stdout
+        assert "already-checked-out" not in result.stdout

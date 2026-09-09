@@ -1533,6 +1533,14 @@ def run_compare(
             build_config=cfg_path, frontend_context=frontend_context,
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
+            # `cfg_path` above is `config` (explicit --config) OR the
+            # cwd-upward auto-discovered .abicheck.yml -- NOT necessarily
+            # the raw explicit CLI value merge_compile_config's own
+            # `build_config is not None` inference expects. Without this,
+            # an auto-discovered config's `compile.compiler` would bypass
+            # the untrusted-executable-selection gate entirely (Codex
+            # review, fresh evidence -- real finding on PR #1154).
+            config_explicit=(config is not None),
         )
         # Dirs the config appended past the CLI -I roots (mirrors the single-pair
         # `config_includes` split below): must survive a per-library-pair
@@ -1633,6 +1641,11 @@ def run_compare(
         frontend_context=frontend_context,
         compiler_path=compiler_path, compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        # `cfg_path` is `config` (explicit --config) OR the cwd-upward
+        # auto-discovered .abicheck.yml -- see the identical note on the
+        # directory/package `resolve_directory_compile_context` call above
+        # (Codex review, fresh evidence -- real finding on PR #1154).
+        config_explicit=(config is not None),
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include
