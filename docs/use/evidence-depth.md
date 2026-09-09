@@ -92,17 +92,22 @@ one-build audit.
   (ADR-068 D2), or legacy `scan CANDIDATE` with no `--against`. There is no
   separate `--audit` flag on either.
 
-!!! warning "A pinned depth is a contract (fail-loud) — `scan` only"
+!!! warning "A pinned depth is a contract (fail-loud) — `scan` and `dump`"
     Under legacy `scan`, pinning a deep depth (`--depth build|source`) with
     **no source input** (`--sources`/`--build-info`) is a hard
     evidence-contract error (exit `7`), not a silent shallow run: there is
-    nothing to collect L3/L4/L5 from. **`compare` and `dump` have no
-    equivalent floor** — the same pinned depth with nothing to collect
-    prints a `Note: --depth collected evidence mode '…' was requested but no
-    build-info/source facts were embedded or supplied` line, leaves the
-    L3/L4/L5 coverage rows uncollected, and still exits on the verdict alone
-    (`0` for an otherwise-clean pair). Read the coverage block (below)
-    rather than trusting the pin. Closing this is plan §3 row 28.
+    nothing to collect L3/L4/L5 from. `dump` has its own, separately
+    implemented fail-loud floor for the identical case
+    (`cli_dump_helpers.check_requested_depth_satisfied`): an explicit
+    `--depth build|source` that the collected evidence doesn't reach raises
+    `DumpDepthNotSatisfiedError` and exits `1` — no snapshot is written.
+    **`compare` alone has no equivalent floor** — the same pinned depth with
+    nothing to collect prints a `Note: --depth collected evidence mode '…'
+    was requested but no build-info/source facts were embedded or supplied`
+    line, leaves the L3/L4/L5 coverage rows uncollected, and still exits on
+    the verdict alone (`0` for an otherwise-clean pair). Read the coverage
+    block (below) rather than trusting the pin on `compare`. Closing this
+    gap for `compare` is plan §3 row 28.
 
 !!! note "`--mode`/`--source-method` are gone"
     Earlier releases exposed a precise `--source-method s0…s6` axis and

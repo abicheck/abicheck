@@ -66,7 +66,9 @@ is tracked in
 | a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |
 | an `against:` ending `.json`/`.json.gz`/`.json.zst`, or any file content-detected as a JSON snapshot | `compare` and `scan` disagree on snapshot-baseline handling |
 | `output-file`, or an effective `format: json` (from the input or an `extra-args` override), or a `-o`/`--output` in `extra-args` | the two commands write different file shapes |
-| any `--write` or scan-only flag in `extra-args` (`--abi3`, `--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the compile-context family) | no `compare` equivalent for the flag itself |
+| `--write` in `extra-args` | `compare` accepts `--write` too, but the Action's own PR-comment JSON injection already manages a `--write json=…` slot itself, so a user-supplied one forces legacy routing to avoid a collision, not because the flag is missing on `compare` |
+| `--abi3 FLOOR` in `extra-args` | `compare` accepts `--abi3` too (`cli_compare_helpers.fold_abi3_into_extra_changes`, ADR-068 Phase 2d) — but with genuinely different gating: `scan`'s own audit only ever lands the finding in the advisory `crosscheck` report, gated solely via `--crosscheck python_stable_abi_violation=error`, while `compare --abi3` folds it into the real diff that policy/suppression/verdict score like any other finding. Routing a baseline `--abi3` scan onto `compare` would silently change an existing workflow's verdict/exit code, so any value forces legacy CLI |
+| a scan-only flag in `extra-args` (`--frontend-context`, `--allow-ast-frontend-fallback`, and the rest of the compile-context family) | no `compare` equivalent for the flag itself |
 | anything other than an explicit bare `--pattern-verdicts` in `extra-args` | `compare`'s pattern-verdict modulation is unconditional (ADR-068 D4) with no flag left to disable it, while `scan --against` still defaults it off |
 
 The routing is invisible in your YAML: the same inputs, outputs, and verdict
