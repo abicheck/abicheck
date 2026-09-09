@@ -179,6 +179,50 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
     assert summary.compatible_additions - summary.quality_issues == 1
 
 
+def test_build_summary_quality_issues_derives_from_effective_category(
+    tmp_path,
+) -> None:
+    """Codex review, PR #1181: a bare `c.kind not in ADDITION_KINDS` test
+    reads the finding's *raw*, policy-independent kind -- but a policy can
+    globally override an ADDITION_KINDS member out of the effective
+    compatible kind set (here, `func_added` overridden to `break`), and a
+    per-finding `effective_verdict` override can independently bring one
+    specific finding back to COMPATIBLE without going through a matching
+    `reclassify:` selector rule. `result.compatible` (effective-verdict
+    based) includes that finding, but `classify_effective_change` --
+    the canonical resolver `report.finding`'s own category split already
+    uses -- correctly reads it as QUALITY_ISSUES (its kind is no longer in
+    the override-adjusted compatible set, and no reclassify rule backs the
+    COMPATIBLE result), not ADDITION. `quality_issues` must agree with that,
+    not with the static kind-set test the old implementation used."""
+    from pathlib import Path
+
+    from abicheck.policy_file import PolicyFile
+
+    p = Path(tmp_path) / "policy.yaml"
+    p.write_text("overrides:\n  func_added: break\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+
+    demoted = Change(
+        ChangeKind.FUNC_ADDED,
+        "_Z3foov",
+        "New function added",
+        effective_verdict=Verdict.COMPATIBLE,
+    )
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[demoted],
+        verdict=Verdict.COMPATIBLE,
+        policy_file=pf,
+    )
+    assert result.compatible == [demoted]
+    summary = build_summary(result)
+    assert summary.compatible_additions == 1
+    assert summary.quality_issues == 1
+
+
 def test_review_digest_additions_count_excludes_quality_issues() -> None:
     """Codex review, fresh evidence: the Markdown review digest's own
     additions_count/quality_issues_count are two rows in the same

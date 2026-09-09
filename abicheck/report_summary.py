@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
-from .checker_policy import ADDITION_KINDS, HasKind
+from .checker_policy import HasKind
 
 if TYPE_CHECKING:
     from .severity import KindSets
@@ -177,12 +177,42 @@ def build_summary(result: DiffResult) -> ReportSummary:
         policy_file=result.policy_file,
     )
     compatible = result.compatible
+    # Codex review, fresh evidence: a bare `c.kind not in ADDITION_KINDS`
+    # test reads the finding's *raw* kind, not its *effective* category --
+    # a per-finding modulation (a `reclassify:` rule, or an
+    # `effective_verdict` override) can move a finding into `compatible`
+    # (COMPATIBLE effective verdict) whose raw kind disagrees with what
+    # that modulation actually decided. `classify_effective_change` is the
+    # canonical per-finding category resolver (`policy/severity.py`,
+    # already the source `report.finding`'s own ADDITION/QUALITY_ISSUES
+    # split goes through) -- reusing it here keeps this summary count and
+    # the severity/gate categorization agreeing on every finding, not just
+    # the common case a static kind-set membership test happens to get
+    # right. `verdict=Verdict.COMPATIBLE` is passed through since every `c`
+    # here already satisfied that exact check to land in `compatible`,
+    # avoiding a second `effective_verdict_for_change` resolution per
+    # finding (`classify_effective_change`'s own optimization parameter).
+    from .checker_policy import Verdict
+    from .severity import IssueCategory, classify_effective_change
+
+    quality_issues = sum(
+        1
+        for c in compatible
+        if classify_effective_change(
+            c,
+            policy=result.policy,
+            kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file,
+            verdict=Verdict.COMPATIBLE,
+        )
+        == IssueCategory.QUALITY_ISSUES
+    )
     return ReportSummary(
         breaking=len(result.breaking),
         source_breaks=len(result.source_breaks),
         risk_count=len(result.risk),
         compatible_additions=len(compatible),
-        quality_issues=sum(1 for c in compatible if c.kind not in ADDITION_KINDS),
+        quality_issues=quality_issues,
         total_changes=len(result.changes),
         binary_compatibility_pct=metrics.binary_compatibility_pct,
         affected_pct=metrics.affected_pct,
