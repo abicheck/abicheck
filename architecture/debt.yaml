@@ -1292,6 +1292,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "tests/test_action_release_topology_config.py",
+      "baseline_lines": 1215,
+      "target": "tests/unit-or-contract ownership matching production migration",
+      "rule": "no_growth",
+      "category": "adr062_new_capability_growth",
+      "owner": "abicheck maintainers",
+      "rationale": "Not legacy debt: this file was comfortably under the 1200-line test-file cap until Codex review (PR #1174, third round) found the sibling merge helper's own resource_limits.max_bundle_facts_decode_nodes handling had the identical explicit-vs-auto-discovered laundering gap this class already covers for build.query/compile.compiler/build.compile_db -- forwarding a discovered .abicheck.yml's value via --config lets an auto-discovered, repository-controlled config raise this pre-json.loads() decode-bomb budget past the conservative default. Fixed in run.sh by capping (not stripping, since narrowing the budget is never a decode-bomb risk) via the identical resolve_max_json_object_nodes_cfg() the native CLI calls. Two new tests (raise-is-capped, lower-survives-uncapped) plus one assertion added to the pre-existing explicit-build-config test prove both directions, mirroring this class's own build.query/compile.compiler pattern.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "tests/test_action_coverage_verdict.py",
       "baseline_lines": 1613,
       "target": "tests/unit-or-contract ownership matching production migration",

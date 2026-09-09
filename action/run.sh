@@ -516,6 +516,13 @@ _merge_config_overlay_with_discovered_project_config() {
 #    dropping headers from extraction with no diagnostic. So every
 #    compile.include_dirs entry from the discovered document is rewritten
 #    to an absolute path against the real project root before merging.
+# 3. resource_limits.max_bundle_facts_decode_nodes is the pre-json.loads()
+#    decode-bomb budget compare_bundle_facts.dispatch() only lets an
+#    *explicit* --config raise past the conservative default (Codex
+#    review, PR #1174) -- exactly the "explicit --config" status this
+#    merged overlay would launder a discovered value into. Capped (not
+#    stripped -- a lower value is never a decode-bomb risk) via the same
+#    resolve_max_json_object_nodes_cfg() the CLI itself calls.
 import json
 import os
 import sys
@@ -524,10 +531,14 @@ from pathlib import Path
 import yaml
 
 from abicheck.buildsource.build_config import BuildConfig
+from abicheck.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
 from abicheck.config_paths import (
     discover_build_config,
     find_config_in_dir,
     project_root_for_config,
+)
+from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
+    resolve_max_json_object_nodes_cfg,
 )
 
 
@@ -727,8 +738,9 @@ else:
             found_path = sources_found
 
 # Discover mode's own base document is untrusted, repository-controlled
-# content: strip the two executable-authorizing keys before merging (see
-# this function's own docstring for the trust reasoning). Explicit mode's
+# content: strip (or, for the decode-node budget below, cap) each key that
+# gates execution or a resource ceiling before merging (see this
+# function's own docstring for the trust reasoning). Explicit mode's
 # base document is exactly what the operator named via build-config --
 # already the trusted case cli_options.py's own `explicit_config` check
 # grants, so nothing here is stripped from it.
@@ -817,6 +829,38 @@ if merge_mode != "explicit":
             "reviewed) to opt in.",
             file=sys.stderr,
         )
+    # Codex review, fresh evidence, third round: forwarding this merged
+    # overlay via --config makes the CLI's own explicit-vs-auto-discovered
+    # check (resolve_dispatch_compile_context's `_config_explicit`) see an
+    # *explicit* --config, which the compare_bundle_facts dispatch trusts to
+    # *raise* resource_limits.max_bundle_facts_decode_nodes past the
+    # conservative default -- laundering this discovered, repository-
+    # controlled value into that trusted status. Reuses the identical
+    # resolve_max_json_object_nodes_cfg() the CLI itself calls, with
+    # config_explicit=False, so the two can never drift: this only ever
+    # caps the value down (a lower budget is never a decode-bomb risk and
+    # is left untouched), never strips it outright.
+    if isinstance(base.get("resource_limits"), dict):
+        _configured_nodes = base["resource_limits"].get("max_bundle_facts_decode_nodes")
+        _capped_nodes = resolve_max_json_object_nodes_cfg(
+            _configured_nodes if isinstance(_configured_nodes, int) and not isinstance(_configured_nodes, bool) else None,
+            config_explicit=False,
+            default=DEFAULT_MAX_JSON_OBJECT_NODES,
+        )
+        if _capped_nodes != _configured_nodes:
+            stripped_rl = dict(base["resource_limits"])
+            stripped_rl["max_bundle_facts_decode_nodes"] = _capped_nodes
+            base["resource_limits"] = stripped_rl
+            print(
+                "::warning::the discovered .abicheck.yml's "
+                "resource_limits.max_bundle_facts_decode_nodes was capped to "
+                f"the conservative default ({DEFAULT_MAX_JSON_OBJECT_NODES}) "
+                "when synthesizing this Action's --config overlay -- an "
+                "auto-discovered config is never trusted to raise this "
+                "pre-json.loads() decode-bomb budget; set build-config "
+                "explicitly (naming a config you reviewed) to opt in.",
+                file=sys.stderr,
+            )
 
 if found_path is not None and isinstance(base.get("compile"), dict):
     include_dirs = base["compile"].get("include_dirs")
