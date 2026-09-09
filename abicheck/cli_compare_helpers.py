@@ -323,6 +323,38 @@ def _classify_and_reject_operands(
     return old_kind, new_kind
 
 
+#: ADR-068 §3 #19: mirrors ``cli_scan._DURATION_UNITS`` (that module is not
+#: imported from here -- ``scan`` is scheduled for its own later deletion,
+#: and ``compare`` must not depend on it in the meantime).
+_DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
+
+
+def _parse_budget(value: str | None) -> float | None:
+    """Parse a ``time``-style duration (``15m``/``900s``/``1h``) to seconds.
+
+    A bare number is read as seconds. Returns ``None`` for an empty value;
+    raises :class:`click.BadParameter` for an unparseable one. Mirrors
+    ``cli_scan._parse_budget`` exactly (ADR-068 §3 #19 absorbs the
+    capability, not the module).
+    """
+    if not value:
+        return None
+    raw = value.strip().lower()
+    unit = 1
+    if raw and raw[-1] in _DURATION_UNITS:
+        unit = _DURATION_UNITS[raw[-1]]
+        raw = raw[:-1]
+    try:
+        amount = float(raw)
+    except ValueError as exc:
+        raise click.BadParameter(
+            f"invalid --budget {value!r}; use e.g. 15m, 900s, 1h"
+        ) from exc
+    if amount < 0:
+        raise click.BadParameter(f"--budget must be non-negative, got {value!r}")
+    return amount * unit
+
+
 def _report_not_comparable(
     exc: ProfileMismatchError | ScopeMismatchError,
     old: AbiSnapshot,
@@ -361,9 +393,38 @@ def _report_not_comparable(
         'assurance: "none") if you understand the risk.',
         err=True,
     )
+    from .report.not_comparable import OperationalStatus
+
+    _report_run_aborted(
+        kind, message, old, new, fmt=fmt, output=output, operational=OperationalStatus.NOT_COMPARABLE
+    )
+
+
+def _report_run_aborted(
+    kind: str,
+    message: str,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    *,
+    fmt: str,
+    output: Path | None,
+    operational: Any,
+) -> None:
+    """Render an aborted-run refusal report -- generalizes :func:`_report_not_comparable`.
+
+    ADR-068 §3 #19: the budget-overflow abort (``--budget``, exit 5) shares
+    the identical shape ``_report_not_comparable`` already established for
+    ADR-050's comparability refusal (exit 6) -- no ``DiffResult`` exists in
+    either case, so the same schema-conformant JSON refusal document
+    (``report/not_comparable.py``, already parameterized by
+    :class:`~abicheck.policy.outcome.OperationalStatus`) and the same
+    generic SARIF/JUnit "run did not complete" renderers apply verbatim,
+    just with a different *kind*/*operational* pair. Split out so a second
+    abort axis does not have to duplicate the format dispatch.
+    """
     refusal = (old.library, old.version, new.version, kind, message)
     if fmt == "json":
-        from .report.not_comparable import OperationalStatus, render_not_comparable_json
+        from .report.not_comparable import render_not_comparable_json
         from .schemas import REPORT_SCHEMA_VERSION
 
         _write_or_echo(
@@ -371,7 +432,7 @@ def _report_not_comparable(
             render_not_comparable_json(
                 *refusal,
                 report_schema_version=REPORT_SCHEMA_VERSION,
-                operational=OperationalStatus.NOT_COMPARABLE,
+                operational=operational,
             ),
         )
     elif fmt == "sarif":
@@ -1272,12 +1333,26 @@ def run_compare(
     since: str | None = None,  # ADR-068 Phase 2c: changed-path localization
     changed_paths_opt: tuple[str, ...] = (),
     abi3: str | None = None,  # ADR-068 Phase 2d: candidate-side abi3 audit
+    budget: str | None = None,  # ADR-068 §3 #19: absorbed from scan, exit 5
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
     from .frontends.cli.commands.compare import _warn_unused_set_flags  # cycle
 
     reject_dry_run_with_output(dry_run, output)
+    budget_s = _parse_budget(budget)
+    # ADR-068 §3 #19: a single wall-clock start for the whole run -- each
+    # `deadline.deadline_scope()` entry below passes the *remaining* budget
+    # from this point, not `budget_s` again, so resolving a slow side does
+    # not silently grant the classification stage a second full budget.
+    import time as _time
+
+    _budget_started_at = _time.monotonic()
+
+    def _remaining_budget_s() -> float | None:
+        if budget_s is None:
+            return None
+        return budget_s - (_time.monotonic() - _budget_started_at)
     _reject_incoherent_compare_flags(
         dry_run=dry_run,
         output=output,
@@ -1761,28 +1836,49 @@ def run_compare(
         debuginfod=debuginfod, debuginfod_url=debuginfod_url,
     )
 
-    old, new = _resolve_compare_snapshots(
-        old_input, new_input, old_fmt, new_fmt,
-        old_h, new_h, old_inc, new_inc,
-        old_version, new_version, lang,
-        pdb_path, old_pdb_path, new_pdb_path,
-        dwarf_only, effective_debug_format,
-        follow_deps, search_paths, ld_library_path,
-        header_backend=header_backend,
-        old_header_backend=old_header_backend,
-        new_header_backend=new_header_backend,
-        compile_context=side_compile_context,
-        old_debug_roots=resolved_old_debug or None,
-        new_debug_roots=resolved_new_debug or None,
-        enable_debuginfod=debuginfod,
-        debuginfod_url=debuginfod_url,
-        include_labels=include_labels,
-        old_dump_manifest=old_manifest_obj,
-        new_dump_manifest=new_manifest_obj,
-        include_dependencies=include_dependencies,
-        lang_explicit=lang_explicit, changed_paths=_enrich.changed_paths,
-        config_public_header_dirs=project_config_public_header_dirs(project_cfg),
-    )
+    # ADR-068 §3 #19: `--budget` bounds every deadline-aware subprocess call
+    # reached from here on (`deadline.check()`/`bounded_timeout()` consult
+    # the ambient contextvar this sets, however deep the call stack --
+    # castxml/clang extraction, the preprocessor scan, source replay --
+    # without threading `budget_s` through each one explicitly). Entered
+    # around the resolve call specifically, not the whole function: this is
+    # where nearly all of a run's wall time actually goes, and a deadline
+    # already expired before extraction starts must fail here rather than
+    # silently degrading (mirrors `scan_engine`'s own placement).
+    from . import deadline
+
+    try:
+        with deadline.deadline_scope(_remaining_budget_s()):
+            old, new = _resolve_compare_snapshots(
+                old_input, new_input, old_fmt, new_fmt,
+                old_h, new_h, old_inc, new_inc,
+                old_version, new_version, lang,
+                pdb_path, old_pdb_path, new_pdb_path,
+                dwarf_only, effective_debug_format,
+                follow_deps, search_paths, ld_library_path,
+                header_backend=header_backend,
+                old_header_backend=old_header_backend,
+                new_header_backend=new_header_backend,
+                compile_context=side_compile_context,
+                old_debug_roots=resolved_old_debug or None,
+                new_debug_roots=resolved_new_debug or None,
+                enable_debuginfod=debuginfod,
+                debuginfod_url=debuginfod_url,
+                include_labels=include_labels,
+                old_dump_manifest=old_manifest_obj,
+                new_dump_manifest=new_manifest_obj,
+                include_dependencies=include_dependencies,
+                lang_explicit=lang_explicit, changed_paths=_enrich.changed_paths,
+                config_public_header_dirs=project_config_public_header_dirs(project_cfg),
+            )
+    except deadline.DeadlineExceeded as exc:
+        click.echo(
+            f"Error: --budget {budget!r} exceeded while resolving "
+            f"'{old_input}'/'{new_input}': {exc}. Pin a shallower --depth or "
+            "raise the budget; a budget never silently narrows evidence.",
+            err=True,
+        )
+        sys.exit(5)
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap (Codex review, PR
     # #1020): this native CLI path calls `compare_snapshots()` directly, not
@@ -1910,25 +2006,59 @@ def run_compare(
     except AbicheckError as exc:
         raise click.UsageError(str(exc)) from exc
     try:
-        result = compare_snapshots(
-            old, new, suppression=suppression, policy=policy, policy_file=pf,
-            env_matrix=env_matrix,
-            scope_to_public_surface=scope_public_headers,
-            force_public_symbols=force_public,
-            extra_changes=extra_changes,
-            pattern_verdicts=True,
-            surface_metrics=True,
-            collapse_versioned_symbols=collapse_versioned_symbols,
-            public_surface_allowlist=post_manifest_allowlist,
-            reconcile_build_context=reconcile_build_context,
-            diagnostic_comparison=diagnostic_comparison,
-            contract_evaluation=contract_evaluation,
-            contract_mode=resolved_contract_mode,
-        )
+        with deadline.deadline_scope(_remaining_budget_s()):
+            result = compare_snapshots(
+                old, new, suppression=suppression, policy=policy, policy_file=pf,
+                env_matrix=env_matrix,
+                scope_to_public_surface=scope_public_headers,
+                force_public_symbols=force_public,
+                extra_changes=extra_changes,
+                pattern_verdicts=True,
+                surface_metrics=True,
+                collapse_versioned_symbols=collapse_versioned_symbols,
+                public_surface_allowlist=post_manifest_allowlist,
+                reconcile_build_context=reconcile_build_context,
+                diagnostic_comparison=diagnostic_comparison,
+                contract_evaluation=contract_evaluation,
+                contract_mode=resolved_contract_mode,
+            )
     except (ProfileMismatchError, ScopeMismatchError) as exc:
         _report_not_comparable(exc, old, new, fmt=fmt, output=output)
         sys.exit(_EXIT_NOT_COMPARABLE)
+    except deadline.DeadlineExceeded as exc:
+        # ADR-068 §3 #19: budget expired during classification itself (the
+        # automatic cross-source/pattern/preprocessor scans, ADR-068 D4/D5,
+        # can still run `clang -E`) rather than during resolution above --
+        # same axis, same exit code, caught separately only because `old`/
+        # `new` already resolved by this point and resolution's own except
+        # above cannot see this call.
+        click.echo(
+            f"Error: --budget {budget!r} exceeded while comparing "
+            f"'{old.library}': {exc}. Pin a shallower --depth or raise the "
+            "budget; a budget never silently narrows evidence.",
+            err=True,
+        )
+        sys.exit(5)
     _enrichment.report_abi3_evidence_contract_error(result, _abi3_failure)  # ADR-068 exit-7 axis
+    # ADR-068 §3 #28: this native CLI path resolves `old`/`new` through its
+    # own `_resolve_compare_snapshots`, which -- unlike `resolve_compare_
+    # request` -- never calls `enforce_requested_depth`, so a pinned
+    # `--depth build`/`--depth source` that neither side's evidence actually
+    # reached would otherwise silently degrade instead of failing loudly the
+    # way `scan --against`'s own evidence-contract floor (exit 7) always
+    # did. Additive with the abi3 axis just above (both set the same flag).
+    from .policy.depth_evidence_contract import record_depth_evidence_contract_error
+
+    # A side detected as a recognized live binary format (old_fmt/new_fmt
+    # non-None -- ELF/PE/Mach-O) is what this run itself extracted and can
+    # legitimately be blamed for under-collecting; an already-serialized
+    # JSON/text/Perl snapshot input was never (re-)extracted by this run at
+    # all, so the floor does not apply to it (module docstring's "Live
+    # extraction only" note).
+    record_depth_evidence_contract_error(
+        result, depth, old, new,
+        old_is_live=old_fmt is not None, new_is_live=new_fmt is not None,
+    )
     _report_compare_result(
         ctx, result, old, new,
         old_input=old_input, new_input=new_input,

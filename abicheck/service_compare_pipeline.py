@@ -564,6 +564,17 @@ def classify_compare_pair(
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
+    # ADR-068 §3 #28: defense-in-depth alongside `resolve_compare_request`'s
+    # own hard `enforce_requested_depth` fail (which already runs before this
+    # function for the composed `run_compare_request` path) -- a caller that
+    # builds a `ResolvedComparePair` some other way and calls this function
+    # directly still gets the exit-7 axis recorded rather than a silent
+    # depth downgrade. A no-op whenever the floor was already satisfied
+    # (the overwhelmingly common case) or `request.depth` names no gated
+    # rung at all.
+    from .policy.depth_evidence_contract import record_depth_evidence_contract_error
+
+    record_depth_evidence_contract_error(result, request.depth, old, new)
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -682,8 +693,24 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     parameters pushed that file over the AI-readiness file-size cap --
     re-exported from ``service.py`` unchanged, the same pattern
     ``resolve_compare_request``/``classify_compare_pair`` already use.
+
+    ADR-068 §3 #19: ``request.budget_s`` (``None`` = unbounded, unchanged
+    default) bounds both phases together under one
+    ``deadline.deadline_scope`` -- the single composition point, so unlike
+    the two phases' own separate call sites this needs no remaining-time
+    bookkeeping of its own. A typed caller gets a clear
+    :class:`~abicheck.deadline.DeadlineExceeded` rather than a partial
+    :class:`~abicheck.api_types.CompareResult`: unlike the CLI (which must
+    always produce *some* exit code and report), a typed caller can already
+    catch an exception, so there is no "fabricate a result to carry the
+    flag" step to add here -- the native CLI's own budget wiring
+    (``cli_compare_helpers.run_compare``) is what maps this same axis onto
+    exit 5 for the front end that needs an exit code instead of an exception.
     """
-    return classify_compare_pair(request, resolve_compare_request(request))
+    from . import deadline
+
+    with deadline.deadline_scope(request.budget_s):
+        return classify_compare_pair(request, resolve_compare_request(request))
 
 
 def run_compare(

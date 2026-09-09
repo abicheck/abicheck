@@ -673,6 +673,17 @@ def _embed_inline_source_side(
                    "add/remove/size change the build proves never happened is moved to an "
                    "audit bucket instead of the verdict. No-op unless snapshots carry "
                    "build_context_defines + per-field guards.")
+@click.option("--budget", "budget", default=None,
+              help="ADR-068 §3 #19 (absorbed from scan): a wall-clock guard on this "
+                   "run's own deadline-aware stages (build/source evidence collection "
+                   "-- castxml/clang subprocess calls, preprocessor and source replay "
+                   "-- and the automatic cross-source/pattern/preprocessor scans), so "
+                   "a CI job fails clearly (exit 5, BUDGET_OVERFLOW) instead of running "
+                   "unbounded or being killed opaquely by the runner. A duration like "
+                   "15m, 900s, or 1h; a bare number is seconds. Unset means no budget. "
+                   "Orthogonal to the compatibility verdict (ADR-064): overflow never "
+                   "changes what was already found, only whether the run reports "
+                   "itself complete.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, resolve "
                    "depth/scope, show tool/config resolution -- and print a report "

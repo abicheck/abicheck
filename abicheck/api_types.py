@@ -659,6 +659,18 @@ class CompareRequest:
     # since a binary-only depth request that still carries headers would
     # otherwise silently keep running L2.
     depth: str | None = None
+    # ADR-068 §3 #19: absorbed from the retiring `ScanRequest.budget` --
+    # a wall-clock guard (seconds) on this request's own deadline-aware
+    # stages. `None` (the default) means unbounded, exactly today's
+    # behavior for every existing caller. `service.run_compare_request`
+    # forwards this to `deadline.deadline_scope` around resolution and
+    # classification, the same mechanism `scan`'s own `--budget` used;
+    # overflow sets `CompareResult.diff.budget_overflow` (ADR-064's exit-5
+    # axis) rather than raising, so a typed caller always gets a `CompareResult`
+    # back to inspect. Seconds, not the CLI's `15m`/`900s`/`1h` duration
+    # string -- a typed caller already has a float, so there's nothing to
+    # parse.
+    budget_s: float | None = None
     # ADR-055 D1, second slice: the last four concepts `compare`'s own
     # resolution (`cli_resolve._resolve_compare_snapshots`) could express and
     # this request could not, so a Python/MCP caller had to drop to loose
