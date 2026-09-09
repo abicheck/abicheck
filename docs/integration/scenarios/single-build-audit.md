@@ -84,10 +84,12 @@ for the equivalent one-step `mode: scan` (no `against:`) wiring.
 
 ## When to move past this scenario
 
-- **You now have something to compare against** → any other scenario;
-  `--no-baseline` (CLI) / `baseline-channel: none` (Action) is a starting
-  point, not a permanent choice for a project that will eventually publish
-  a release or track `main`.
+- **You now have something to compare against** → any other scenario; a
+  no-baseline audit (`scan CANDIDATE` with no `--against` on the CLI,
+  `baseline-channel: none` on the Action — see "The recommended CLI path"
+  above for why `compare --no-baseline` is not the safe spelling here) is a
+  starting point, not a permanent choice for a project that will eventually
+  publish a release or track `main`.
 - **`target-kind: app-consumer`/`plugin-contract`** — not supported with
   `baseline-channel: none`: `scan` has no `--used-by`/`--required-symbol`
   equivalent, so an app-consumer/plugin-contract audit with no baseline has
