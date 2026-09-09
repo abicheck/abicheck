@@ -214,7 +214,13 @@ def _outcome_from_findings(
                 ),
             )
         )
-        severities[key] = c.get("severity", "unknown")
+        # `compare`'s `changes[]` entries carry `severity`; `scan`'s own
+        # `diff.findings[]` entries carry the same per-run label under
+        # `bucket` instead (`_baseline_finding_dicts`) -- same value space
+        # ("risk"/"potential_breaking"/... per `_VERDICT_TO_SEVERITY_LABEL`),
+        # different key name. Prefer `severity` when both are present (a
+        # `compare`-shaped entry never carries `bucket`).
+        severities[key] = c.get("severity", c.get("bucket", "unknown"))
         gate[key] = c.get("gate_contribution", 0)
     return RunOutcome(
         verdict=verdict if verdict is None else str(verdict),

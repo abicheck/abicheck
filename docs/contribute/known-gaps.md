@@ -6633,3 +6633,45 @@ adjacent, deliberately *unclaimed* half: whether the newly-static
 dependency's code is ABI-compatible with what consumers already linked is a
 question about a third artifact abicheck was not given, which is
 `dependency-abi.transitive-break`'s territory, not this leaf's.
+
+### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
+
+Found while closing ADR-068's baseline cross-source authority divergence
+(see the ADR's 2026-09-09 amendment,
+[`plans/one-comparison-product.md`](plans/one-comparison-product.md) Phase
+4). `action/run.sh`'s `_SCAN_NEEDS_LEGACY_CLI` predicate no longer treats
+*every* `mode: scan` baseline request as needing the legacy CLI — the
+severity/gating divergence that forced that catch-all
+(`9f2166e5c`) is fixed (`scan --against`'s baseline path no longer strips
+cross-source findings to advisory-only; see the ADR amendment). But the
+predicate's other, narrower conditions remain live and route to the legacy
+CLI for real, independent reasons — none of them are instances of the
+severity divergence the amendment closed:
+
+- `--budget`, `--risk-rules`, `--crosscheck`, `--build-target` — `scan`-only
+  Action inputs with no `compare` flag equivalent yet (`compare --help-all`
+  has none of them). Plan §3 rows #14/#19/#23 and the `--build-target` row
+  track each as its own migration item.
+- No explicit `--depth` — `scan`'s risk-driven `auto` depth selection
+  (binary/headers/build/source scored off the diff) has no `compare`
+  equivalent; omitting `--depth` on `compare` deterministically defaults to
+  `headers`, never deeper. Routing that case onto `compare` would silently
+  cap a high-risk change that should have reached source replay.
+- `--header`/`--include` combined with the dedicated baseline-side inputs,
+  a `.json`-extension `--against` baseline, `--output-file`, and any
+  `--write`/scan-only flag reaching through the general `extra-args`
+  passthrough — each a real shape `compare`'s current flag surface doesn't
+  yet cover identically.
+
+Not fixed here: closing each of these needs a new `compare` CLI flag (or an
+equivalent `.abicheck.yml` key plus Action wiring), which is Click-surface
+work reserved for the CLI-flag-consolidation workstream, not the
+scan/compare *semantics* parity this gap tracks. Tractable per row, in the
+order plan §3 already sequences them — `--budget`/`--risk-rules`/
+`--crosscheck`/`--build-target` first (each already has a named target in
+the plan's migration table), the risk-driven `auto` depth dial last (it
+needs its own scoring model on `compare`'s side, not just a flag rename).
+`_SCAN_NEEDS_LEGACY_CLI`'s own comment in `action/run.sh` names each
+surviving condition against this same list — when the last one closes, the
+predicate (and the ~17 `MODE == "scan"` branches it guards) can finally be
+deleted rather than shrunk further.

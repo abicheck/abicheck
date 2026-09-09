@@ -2259,16 +2259,7 @@ fi
 # `scan`'s baseline-compare path and `compare`'s own pipeline that this
 # routing must stay off of, not just a flag-support gap:
 #
-# - **Cross-source finding severity, and the evidence-contract floor.**
-#   `scan`'s baseline path calls `_strip_automatic_cross_source_findings()`
-#   (`cli_scan_baseline.py`) to keep single-version hygiene findings
-#   (`header_build_context_mismatch`, `odr_type_variant`, ...)
-#   advisory-only -- reported in the crosscheck block, never folded into
-#   the old/new diff or its verdict/exit code. `compare`'s own automatic
-#   cross-source-checks stage has no such stripping: the identical finding
-#   becomes a real API break there, which could turn a
-#   `fail-on-api-break: true` pass into a failure on a hygiene finding the
-#   same scan request previously only reported. Symmetrically, a *pinned*
+# - **The evidence-contract floor.** A *pinned*
 #   `--depth build`/`--depth source` with no evidence to satisfy it is
 #   `scan`'s own hard evidence-contract floor (exit 7,
 #   `EVIDENCE_CONTRACT_ERROR`, ADR-037 D5) -- `compare` has no such floor
@@ -2352,32 +2343,22 @@ _SCAN_HAS_BASELINE=false
 if [[ "$MODE" == "scan" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
   _SCAN_HAS_BASELINE=true
 fi
-# `_SCAN_NEEDS_LEGACY_CLI` is unconditionally true for every `mode: scan`
-# request as of this commit (Codex review, PR #1160, fifth round). The
-# conditions below (kept, not deleted -- see why at the end of this
-# comment) were each a real, independently-discovered, narrower divergence;
-# this last one subsumes all of them, because it isn't depth/evidence-gated
-# at all. Directly verified: even `abicheck compare --depth headers` on a
-# pair with zero build/source evidence retains `exported_not_public` as a
-# real, gating finding (COMPATIBLE_WITH_RISK, exit 2) where the equivalent
-# `scan --against --depth headers` reports NO_CHANGE, exit 0 --
-# `scan`'s baseline path calls `_strip_automatic_cross_source_findings()`
-# to keep every single-version hygiene finding advisory-only regardless of
-# which evidence tier gated it, and `compare --help-all` has no flag at all
-# to disable its own automatic cross-source-checks stage (ADR-068 D4/D5's
-# "no opt-out for a real front end" is deliberate). So there is no
-# remaining baseline-scan case this predicate can safely let through: a
-# baseline comparison always runs cross-source checks on both CLIs, and
-# only `scan`'s strips them.
-#
-# The conditions below are dead code today (`_SCAN_HAS_BASELINE != "true"`
-# already covers audit-only, and every baseline scan now falls through to
-# `_SCAN_NEEDS_LEGACY_CLI=true` regardless) -- left in place, not deleted,
-# because they are exactly the predicate a future change would relax: if
-# `compare` ever grows scan's own advisory-only cross-source-finding
-# stripping for a baseline comparison (the one capability gap this whole
-# section exists to work around), removing this comment block's final
-# clause reactivates every one of them unchanged.
+# `_SCAN_NEEDS_LEGACY_CLI` used to be unconditionally true for every
+# `mode: scan` baseline request (Codex review, PR #1160, fifth round):
+# `scan`'s baseline path called `_strip_automatic_cross_source_findings()`
+# to keep every cross-source finding advisory-only regardless of which
+# evidence tier gated it, while `compare`'s own automatic
+# cross-source-checks stage left the identical finding as a real, gating
+# one -- directly verified as `abicheck compare --depth headers` retaining
+# `exported_not_public` as COMPATIBLE_WITH_RISK/exit 2 where
+# `scan --against --depth headers` reported NO_CHANGE/exit 0. That
+# divergence is closed (ADR-068's 2026-09-09 amendment,
+# `docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md`):
+# `scan --against`'s baseline path no longer strips cross-source findings,
+# so it now gates them exactly as `compare` does. The conditions below are
+# each a real, independently-discovered, still-open divergence unrelated to
+# that one -- see the comment block above this section for what each one
+# guards against.
 _SCAN_NEEDS_LEGACY_CLI=false
 if [[ "$MODE" == "scan" ]]; then
   if [[ "$_SCAN_HAS_BASELINE" != "true" ]] \
@@ -2391,8 +2372,7 @@ if [[ "$MODE" == "scan" ]]; then
      || [[ "${INPUT_AGAINST:-}" == *.json ]] \
      || [[ -n "${INPUT_OUTPUT_FILE:-}" ]] \
      || _extra_args_has_write_flag \
-     || _extra_args_has_scan_only_flag \
-     || [[ "$_SCAN_HAS_BASELINE" == "true" ]]; then
+     || _extra_args_has_scan_only_flag; then
     _SCAN_NEEDS_LEGACY_CLI=true
   fi
 fi
