@@ -260,6 +260,47 @@ def compute_disposition_audit(
     )
 
 
+def supersede_as_suppressed(
+    result: DiffResult,
+    changes: Iterable[object],
+    *,
+    application_point: str,
+    rule_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """Mutate *result*'s ``disposition_ledger`` in place, marking *changes*
+    now ``SUPPRESSED`` (:meth:`~abicheck.policy.disposition_ledger.
+    DispositionLedger.with_suppressed` -- see that method's own docstring
+    for the full rationale: a release-level policy decision made strictly
+    after a per-comparison ledger already closed, e.g.
+    ``cli_compare_release_pairwise._suppress_lockstep_soname_findings``).
+    *rule_id*/*reason* name the synthetic policy decision responsible (there
+    is no real ``Suppression`` from a ``--suppress`` document behind it) --
+    without a rule, the audit's own ``rules()`` tally silently omits the row
+    entirely.
+
+    Exists so a ``frontends``-layer caller needing this crosses through
+    ``report`` rather than importing ``policy.disposition_ledger`` directly
+    (ADR-061 layering: ``frontends -> policy`` is forbidden, ``frontends ->
+    report`` is allowed). A no-op if *result* carries no real ledger yet
+    (a hand-built ``DiffResult`` that never went through ``checker.compare``
+    or ``policy.disposition_close.finalize_ledger``).
+    """
+    from ..policy.disposition_ledger import DispositionLedger
+    from ..policy.rule_provenance import RuleProvenance
+
+    ledger = getattr(result, "disposition_ledger", None)
+    if isinstance(ledger, DispositionLedger):
+        rule = (
+            RuleProvenance(rule_id=rule_id, reason=reason)
+            if rule_id is not None
+            else None
+        )
+        result.disposition_ledger = ledger.with_suppressed(
+            changes, application_point=application_point, rule=rule
+        )
+
+
 def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAudit:
     """ADR-067 C-S2: fold N independent per-comparison audits into one total.
 

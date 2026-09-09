@@ -1428,6 +1428,21 @@ def run_compare(
             use_cases_manifest=use_cases_manifest,
             suppress=suppress,
         )
+        # Codex review, fresh evidence ("Validate release-only view
+        # restrictions before dry-run exit"): --view leaf/root-cause is
+        # rejected for a directory/package operand inside
+        # _dispatch_release_compare, but that check never ran for
+        # --dry-run (emit_dry_run raises SystemExit before dispatch is ever
+        # reached) -- so a dry run reported "ok" (exit 0) for exactly the
+        # combination the identical non-dry-run invocation rejects (exit
+        # 64). Validated here too, ahead of the --dry-run emit below, the
+        # same way every other release-only flag conflict in this block
+        # already is.
+        from .frontends.cli.commands.compare import (
+            reject_release_incompatible_view_mode,
+        )
+
+        reject_release_incompatible_view_mode(report_mode)
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
 

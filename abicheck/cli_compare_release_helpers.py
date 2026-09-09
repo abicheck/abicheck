@@ -1457,7 +1457,7 @@ def _format_release_json(
     # rule is that the raw-versus-effective counts are never dropped, only
     # ever collapsed in detail.
     summary["disposition_audit"] = release_disposition_audit_block(
-        library_results, matrix_result, severity_config
+        library_results, matrix_result, severity_config, bundle_result
     )
     return json.dumps(summary, indent=2)
 
@@ -1598,7 +1598,7 @@ def _format_release_markdown(
     lines += render_disposition_audit_section(
         DispositionAudit.from_dict(
             release_disposition_audit_block(
-                library_results, matrix_result, severity_config
+                library_results, matrix_result, severity_config, bundle_result
             )
         )
     )

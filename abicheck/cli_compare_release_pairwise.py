@@ -312,9 +312,19 @@ def _compare_one_library(
     ``findings``/``findings_view`` split lives one level up, in
     :func:`~abicheck.cli_compare_release_matrix._strip_diff_results_and_adjust_verdict`,
     which has the real live ``DiffResult`` to filter from.
-    *explain_patterns* echoes this library's pattern-verdict modulation
-    ledger to stderr (``cli_audit.echo_pattern_modulations``), same as a
-    single-pair `compare --view patterns`.
+    *explain_patterns* renders this library's pattern-verdict modulation
+    ledger (``cli_audit.render_pattern_modulations``, same content a
+    single-pair `compare --view patterns` echoes) and stashes it under
+    ``"_pattern_modulations_text"`` rather than echoing it directly --
+    this function runs inside a `ThreadPoolExecutor` worker when the
+    release fan-out is parallel (the default), and several independent
+    `click.echo` calls from different worker threads can interleave
+    nondeterministically (Codex review, fresh evidence: "Serialize
+    pattern-ledger output after parallel comparison"). The caller
+    (:func:`_compare_release_libraries`) echoes each library's stashed
+    text after every future has completed, in `matched_keys` order --
+    the same deterministic-ordering guarantee it already gives the rest
+    of the release report.
     """
     old_path = old_map[key]
     new_path = new_map[key]
@@ -347,11 +357,13 @@ def _compare_one_library(
             collapse_versioned_symbols=collapse_versioned_symbols,
         )
         result = compare_result.diff
+        pattern_modulations_text: str | None = None
         if explain_patterns:
-            from .cli_audit import echo_pattern_modulations
+            from .cli_audit import render_pattern_modulations
 
-            click.echo(f"\n== {old_path.name} ==", err=True)
-            echo_pattern_modulations(result)
+            pattern_modulations_text = (
+                f"\n== {old_path.name} ==\n{render_pattern_modulations(result)}"
+            )
         v = result.verdict.value
         # compatible_additions historically counts *all* compatible changes
         # (additions + quality issues). Emit the quality subset separately so
@@ -387,6 +399,8 @@ def _compare_one_library(
                 else {}
             ),  # e.g. same-binary; never reached this entry before (Codex review)
         }
+        if pattern_modulations_text is not None:
+            entry["_pattern_modulations_text"] = pattern_modulations_text
         if collect_diff_results:
             # See this function's own docstring (CodeRabbit review #798;
             # full- vs. compact-evidence split, G38 Phase 9).
@@ -514,14 +528,21 @@ def _suppress_lockstep_soname_findings(
     SONAME in lockstep is the correct, intentional practice — so the per-library
     "unnecessary" signal is a false positive at the release level. Mutates the
     affected per-library results (and re-writes their JSON when ``output_dir`` is
-    set) and returns the number of findings suppressed. *severity_config* is
-    forwarded to that re-write's own ``to_json`` call (Codex review, fresh
-    evidence): without it, a severity-aware release's per-library report file
-    would revert to the legacy exit-code scheme's ``exit`` block on this
-    second write, even though ``_compare_one_library``'s first write already
-    used the severity-aware one — so which scheme a report's ``exit`` block
-    reflects would depend on whether this suppression fired, not on the
-    release's actual configuration.
+    set) and returns the number of findings suppressed. Also records the
+    suppression on the library's own ``disposition_ledger`` and recomputes its
+    ``disposition_audit`` (Codex review, fresh evidence: "Record lockstep
+    SONAME suppression before folding audits") -- without that, the audit
+    already stamped by ``_compare_one_library`` (before this release-wide
+    decision could be made) kept labelling the now-hidden finding
+    ``non_gating`` with no suppression rule or reason at all. *severity_config*
+    is forwarded to both that recomputation and the re-write's own ``to_json``
+    call (Codex review, fresh evidence): without it, a severity-aware
+    release's per-library report file would revert to the legacy exit-code
+    scheme's ``exit`` block on this second write, even though
+    ``_compare_one_library``'s first write already used the severity-aware
+    one — so which scheme a report's ``exit`` block reflects would depend on
+    whether this suppression fired, not on the release's actual
+    configuration.
 
     Only a binary-incompatible (``BREAKING``) finding justifies a SONAME bump; a
     source-only ``API_BREAK`` does not, so the warning is preserved in that case.
@@ -544,6 +565,35 @@ def _suppress_lockstep_soname_findings(
             c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
         suppressed += len(unnecessary)
+        # Codex review, fresh evidence ("Record lockstep SONAME suppression
+        # before folding audits"): this library's own `disposition_audit`
+        # was already stamped (in `_compare_one_library`, before the
+        # release-wide `worst_verdict` this suppression depends on was even
+        # known) against the pre-suppression `result.disposition_ledger` --
+        # left untouched, it kept labelling the now-hidden finding
+        # `non_gating` with no suppression rule or reason at all. Recorded
+        # on a copy of the ledger (`with_suppressed`, mirroring `with_gate`'s
+        # own "return a copy relabelled" shape) before `entry["disposition_
+        # audit"]` is recomputed below, so the release-level fold
+        # (`cli_compare_receipt.release_disposition_audit_block`) sees the
+        # suppression too.
+        from .report.disposition_audit import (
+            compute_disposition_audit,
+            supersede_as_suppressed,
+        )
+
+        supersede_as_suppressed(
+            result, unnecessary,
+            application_point="lockstep_soname_suppression",
+            rule_id="lockstep_soname_bump",
+            reason=(
+                "release contains a coordinated binary ABI break; lockstep "
+                "SONAME bumps across every member are justified"
+            ),
+        )
+        entry["disposition_audit"] = compute_disposition_audit(
+            result, severity_config
+        ).to_dict()
         # Recompute the cached per-library counts after the mutation.
         from .checker_policy import ADDITION_KINDS
 
@@ -694,6 +744,15 @@ def _compare_release_libraries(
     # Post-process all results: compute worst verdict, collect annotations,
     # and optionally collect diff_pairs (for JUnit).
     for entry in library_results:
+        # Echoed here, after every future has completed, in matched_keys
+        # order -- not inside _compare_one_library's own worker thread,
+        # which could interleave with a sibling library's echo
+        # nondeterministically under the parallel (default) fan-out (Codex
+        # review, fresh evidence: "Serialize pattern-ledger output after
+        # parallel comparison").
+        pattern_modulations_text = entry.pop("_pattern_modulations_text", None)
+        if pattern_modulations_text is not None:
+            click.echo(pattern_modulations_text, err=True)
         v = str(entry["verdict"])
         if v == "ERROR":
             if "error" in entry:

@@ -86,24 +86,37 @@ def echo_reconciled(result: DiffResult, *, contract_evaluation: bool = False) ->
         click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}{tag}", err=True)
 
 
-def echo_pattern_modulations(result: DiffResult) -> None:
-    """Print the pattern-aware modulation ledger (ADR-027 A4 --explain-patterns)."""
+def render_pattern_modulations(result: DiffResult) -> str:
+    """Render the pattern-aware modulation ledger (ADR-027 A4
+    --explain-patterns) as text, without printing it.
+
+    Split out of :func:`echo_pattern_modulations` (Codex review, fresh
+    evidence: "Serialize pattern-ledger output after parallel comparison")
+    so a caller that can't safely ``click.echo`` immediately -- a
+    directory/package release fan-out's per-library worker thread, whose
+    several independent echoes could otherwise interleave nondeterministically
+    with a sibling library's -- can capture the text and print it later, in a
+    deterministic order, instead of writing straight to stderr from inside
+    the worker.
+    """
     mods = result.pattern_modulations
     if not mods:
-        click.echo("\nNo pattern-aware modulations applied.", err=True)
-        return
-    click.echo(
-        f"\nPattern-aware modulations ({len(mods)}, --pattern-verdicts):",
-        err=True,
-    )
+        return "\nNo pattern-aware modulations applied."
+    lines = [f"\nPattern-aware modulations ({len(mods)}, --pattern-verdicts):"]
     for m in mods:
         sym = m.get("symbol", "?")
         rule = m.get("rule_id", "?")
         reason = m.get("reason", "")
         oc = m.get("original_category", "?")
         nc = m.get("new_category", "?")
-        click.echo(f"  - {sym}: {oc} -> {nc} [{rule}: {reason}]", err=True)
+        lines.append(f"  - {sym}: {oc} -> {nc} [{rule}: {reason}]")
         edges = m.get("edges_matched") or []
         if isinstance(edges, list):
             for e in edges:
-                click.echo(f"      · {e}", err=True)
+                lines.append(f"      · {e}")
+    return "\n".join(lines)
+
+
+def echo_pattern_modulations(result: DiffResult) -> None:
+    """Print the pattern-aware modulation ledger (ADR-027 A4 --explain-patterns)."""
+    click.echo(render_pattern_modulations(result), err=True)

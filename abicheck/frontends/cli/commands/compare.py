@@ -98,6 +98,33 @@ from .dump import dump_cmd
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
 
 
+def reject_release_incompatible_view_mode(report_mode: str) -> None:
+    """Reject a ``--view`` mode a directory/package release fan-out can't
+    honor: ``leaf``/``root-cause`` restructure a single comparison's own
+    root-cause graph, and the release summary is an aggregate report across
+    every library with no single such graph to restructure. ``full`` and
+    ``impact`` (each library already has its own ``DiffResult`` to compute
+    an impact table from) are the only accepted values here.
+
+    Shared by ``_dispatch_release_compare``'s own check below and
+    ``cli_compare_helpers.py``'s pre-``--dry-run`` rejection point (Codex
+    review, fresh evidence: without the latter, ``compare --dry-run --view
+    leaf`` on a directory/package operand exited 0 while the identical
+    non-dry-run invocation exited 64 -- the one thing ``--dry-run`` promises
+    not to do, per the sibling checks it already sits next to) -- one
+    predicate, so the two call sites cannot silently drift apart.
+    """
+    if report_mode not in ("full", "impact"):
+        raise click.UsageError(
+            f"--view {report_mode} is not available when comparing directories "
+            "or packages: 'leaf'/'root-cause' restructure a single comparison's "
+            "own root-cause graph, and the release summary is an aggregate "
+            "report across every library with no single such graph to "
+            "restructure. Compare one library at a time (a single old/new "
+            f".so pair) to use --view {report_mode}."
+        )
+
+
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     """Fan a directory/package `compare` out to the per-library release engine.
 
@@ -145,18 +172,14 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     kwargs["show_only"] = kwargs.pop("show_only", None)
     kwargs["demangle"] = kwargs.pop("demangle", None)
     kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
+    # Already validated ahead of the --dry-run emit (cli_compare_helpers.py's
+    # pre-dry-run block) -- re-checked here too since _dispatch_release_
+    # compare has its own direct callers/tests and must reject on its own,
+    # not merely rely on an upstream caller having done so.
+    reject_release_incompatible_view_mode(report_mode)
     kwargs["show_impact"] = report_mode == "impact"
     if report_mode == "impact":
         report_mode = "full"
-    if report_mode not in ("full",):
-        raise click.UsageError(
-            f"--view {report_mode} is not available when comparing directories "
-            "or packages: 'leaf'/'root-cause' restructure a single comparison's "
-            "own root-cause graph, and the release summary is an aggregate "
-            "report across every library with no single such graph to "
-            "restructure. Compare one library at a time (a single old/new "
-            f".so pair) to use --view {report_mode}."
-        )
     if fmt not in _RELEASE_FORMATS:
         raise click.UsageError(
             f"--format {fmt} is not available when comparing directories or "

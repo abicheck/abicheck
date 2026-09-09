@@ -1872,3 +1872,114 @@ def test_release_json_omits_severity_block_without_config() -> None:
     )
     assert "severity" not in json.loads(out)
 
+
+class TestLockstepSonameSuppressionUpdatesDispositionAudit:
+    """Codex review, fresh evidence ("Record lockstep SONAME suppression
+    before folding audits"): the umbrella library's own ``disposition_audit``
+    is stamped (by ``_compare_one_library``) before the release-wide
+    ``worst_verdict`` this suppression depends on is even known -- without
+    also updating that audit here, the report hides the ``SONAME_BUMP_
+    UNNECESSARY`` finding while the audit keeps classifying it ``non_gating``
+    with no suppression rule recorded at all."""
+
+    @staticmethod
+    def _entry_with_real_ledger(lib: str, verdict: object) -> dict[str, object]:
+        """Like ``TestLockstepSonameCoupling._entry``, but with a real,
+        finalized ``disposition_ledger`` attached (mirroring what a real
+        ``checker.compare()`` run produces) -- the synthetic ledger-less
+        fixture that class uses can't exercise this fix at all, since
+        ``supersede_as_suppressed`` is a no-op without a real ledger to
+        supersede."""
+        from abicheck.checker import Change, ChangeKind, DiffResult
+        from abicheck.policy.disposition_close import finalize_ledger
+        from abicheck.policy.disposition_ledger import DispositionLedger
+        from abicheck.report.disposition_audit import compute_disposition_audit
+
+        change = Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump")
+        result = DiffResult(
+            old_version="1", new_version="2", library=lib,
+            changes=[change], verdict=verdict,
+        )
+        ledger = DispositionLedger()
+        finalize_ledger(ledger, result)
+        result.disposition_ledger = ledger
+        return {
+            "library": lib,
+            "verdict": verdict.value,
+            "breaking": len(result.breaking),
+            "source_breaks": len(result.source_breaks),
+            "risk_changes": len(result.risk),
+            "compatible_additions": len(result.compatible),
+            "_diff_result": result,
+            # Stamped ahead of the suppression, exactly as
+            # `_compare_one_library` does in the real pipeline.
+            "disposition_audit": compute_disposition_audit(result).to_dict(),
+        }
+
+    def test_suppressed_finding_moves_to_the_suppressed_disposition(self) -> None:
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+
+        umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
+        # Before suppression: the finding is detected and labelled
+        # non_gating, the disposition a compatible/quality-kind finding
+        # gets by default.
+        before = umbrella["disposition_audit"]
+        assert before["detected_total"] == 1
+        assert before["counts"]["non_gating"] == 1
+        assert before["counts"]["suppressed"] == 0
+
+        core_result = DiffResult(
+            old_version="1", new_version="2", library="libonedal_core.so",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        core = {
+            "library": "libonedal_core.so", "verdict": "BREAKING",
+            "breaking": 1, "source_breaks": 0, "risk_changes": 0,
+            "compatible_additions": 0, "_diff_result": core_result,
+        }
+        n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        assert n == 1
+
+        after = umbrella["disposition_audit"]
+        # detected_total is unchanged -- the finding is still an observed
+        # detection, D3's "record before disposing" rule -- but it moved
+        # from non_gating to suppressed, and a rule now names why.
+        assert after["detected_total"] == 1
+        assert after["counts"]["non_gating"] == 0
+        assert after["counts"]["suppressed"] == 1
+        assert len(after["rules"]) == 1
+        assert after["rules"][0]["matched_count"] == 1
+
+    def test_release_level_fold_reflects_the_updated_audit(self) -> None:
+        """The release-wide `release_disposition_audit_block` fold reads
+        each library's already-stamped `disposition_audit` -- if this
+        library's own entry weren't updated, the release-level total would
+        still show the finding as non_gating too."""
+        from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+        from abicheck.cli_compare_receipt import release_disposition_audit_block
+        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+
+        umbrella = self._entry_with_real_ledger("libonedal.so", Verdict.COMPATIBLE)
+        core_result = DiffResult(
+            old_version="1", new_version="2", library="libonedal_core.so",
+            changes=[Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+            verdict=Verdict.BREAKING,
+        )
+        core = {
+            "library": "libonedal_core.so", "verdict": "BREAKING",
+            "breaking": 1, "source_breaks": 0, "risk_changes": 0,
+            "compatible_additions": 0, "_diff_result": core_result,
+            "disposition_audit": {
+                "detected_total": 1, "effective_total": 1,
+                "counts": {"gating": 1},
+            },
+        }
+        _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        folded = release_disposition_audit_block([umbrella, core])
+        assert folded["counts"]["non_gating"] == 0
+        assert folded["counts"]["suppressed"] == 1
+        assert folded["counts"]["gating"] == 1
+        assert folded["detected_total"] == 2
+

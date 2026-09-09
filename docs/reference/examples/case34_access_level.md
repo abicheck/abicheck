@@ -41,13 +41,14 @@ outside the class — the compiler rejects the access.
 ```bash
 g++ -shared -fPIC -g -std=c++17 v1.cpp -o libv1.so
 g++ -shared -fPIC -g -std=c++17 v2.cpp -o libv2.so
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  options: [-std=c++17]
+EOF
 abicheck compare libv1.so libv2.so \
   --header old=v1.hpp --header new=v2.hpp \
   --config .abicheck.yml
-# .abicheck.yml:
-#   compile:
-#     frontend: clang
-#     options: [-std=c++17]
 ```
 
 ## Expected abicheck finding

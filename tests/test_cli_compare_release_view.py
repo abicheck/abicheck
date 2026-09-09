@@ -133,6 +133,31 @@ def _write_struct_size_change_pair(tmp_path: Path) -> tuple[Path, Path]:
     return old_dir, new_dir
 
 
+def _write_removed_function_pair_multi(
+    tmp_path: Path, names: tuple[str, ...]
+) -> tuple[Path, Path]:
+    """Several libraries, each with its own removed public function --
+    exercises the parallel (``jobs=0`` default, > 1 matched library) release
+    fan-out, not just the single-library-falls-back-to-sequential path."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    for name in names:
+        old_snap = AbiSnapshot(
+            library=f"{name}.so",
+            version="1.0",
+            functions=[_fn("api_b", _MANGLED)],
+            from_headers=True,
+        )
+        new_snap = AbiSnapshot(
+            library=f"{name}.so", version="2.0", functions=[], from_headers=True
+        )
+        _write_snap(old_dir / f"{name}.json", old_snap)
+        _write_snap(new_dir / f"{name}.json", new_snap)
+    return old_dir, new_dir
+
+
 def _invoke(*args: str):
     return CliRunner().invoke(main, list(args))
 
@@ -287,6 +312,55 @@ class TestReleaseViewPatterns:
         )
 
 
+class TestReleaseViewPatternsMultiLibraryOrdering:
+    """Codex review, fresh evidence ("Serialize pattern-ledger output after
+    parallel comparison"): with multiple matched libraries, the default
+    parallel (``jobs=0``) fan-out used to echo each library's pattern
+    ledger directly from inside its own ``ThreadPoolExecutor`` worker
+    thread -- several independent ``click.echo`` writes per library, free
+    to interleave nondeterministically with a sibling library's under real
+    thread scheduling. Proves each library's ledger block is now complete
+    and appears in ``matched_keys`` order, not interleaved."""
+
+    def test_pattern_ledger_blocks_appear_complete_and_in_order(
+        self, tmp_path: Path
+    ) -> None:
+        names = ("liba", "libb", "libc", "libd")
+        old_dir, new_dir = _write_removed_function_pair_multi(tmp_path, names)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--view", "patterns",
+        )
+        assert result.exit_code == 4, result.output
+
+        # Each library's own "== <name>.json ==" header (old_path.name --
+        # these are stored snapshot pairs, not real .so binaries) appears
+        # exactly once, and in matched_keys (alphabetical) order -- proves
+        # the echo was collected and replayed by the single-threaded
+        # post-processing loop, not interleaved by several worker threads
+        # racing to write.
+        headers = [f"== {name}.json ==" for name in names]
+        positions = [result.output.index(h) for h in headers]
+        assert positions == sorted(positions), result.output
+        for header in headers:
+            assert result.output.count(header) == 1, result.output
+
+        # Each header is immediately followed by its own complete
+        # "No pattern-aware modulations applied." line before the next
+        # library's header starts -- an interleaved write would instead
+        # show one library's header followed by a foreign line.
+        for i, header in enumerate(headers):
+            start = result.output.index(header)
+            end = (
+                result.output.index(headers[i + 1])
+                if i + 1 < len(headers)
+                else len(result.output)
+            )
+            block = result.output[start:end]
+            assert "No pattern-aware modulations applied." in block, block
+
+
 class TestReleaseViewReportModeRejected:
     """``--view leaf``/``--view root-cause`` restructure a single
     `DiffResult`'s own root-cause graph -- the release summary has no such
@@ -331,6 +405,55 @@ class TestReleaseViewReportModeRejected:
                 "--view", token,
             )
             assert result.exit_code == 4, (token, result.output)
+
+
+class TestReleaseViewReportModeRejectedUnderDryRun:
+    """Codex review, fresh evidence ("Validate release-only view
+    restrictions before dry-run exit"): the rejection above lives inside
+    ``_dispatch_release_compare``, which ``--dry-run`` never reaches
+    (``emit_dry_run`` raises ``SystemExit`` before dispatch runs) -- so
+    ``compare --dry-run --view leaf`` on a directory/package operand used
+    to exit 0 (the dry-run report rendered "ok") while the identical
+    non-dry-run invocation exits 64. A dry run must never validate an
+    invocation the real run would then reject."""
+
+    def test_leaf_is_rejected_under_dry_run_for_a_directory_operand(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--dry-run", "--view", "leaf",
+        )
+        assert result.exit_code == 64, result.output
+        assert "--view leaf is not available" in result.output
+
+    def test_root_cause_is_rejected_under_dry_run_for_a_directory_operand(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--dry-run", "--view", "root-cause",
+        )
+        assert result.exit_code == 64, result.output
+        assert "--view root-cause is not available" in result.output
+
+    def test_full_and_impact_still_succeed_under_dry_run(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion: the fix must not reject the two view modes a
+        directory/package release fan-out genuinely supports."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        for token in ("full", "impact"):
+            result = _invoke(
+                "compare", str(old_dir), str(new_dir),
+                "--dry-run", "--view", token,
+            )
+            assert result.exit_code == 0, (token, result.output)
 
 
 class TestReleaseViewImpactAggregate:
