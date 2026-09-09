@@ -841,6 +841,55 @@ _extra_args_forces_legacy_scan_cli() {
   return 1
 }
 
+# Mirrors `scan_engine._scan_candidate_include_dependencies`'s own baseline
+# peek (sixth Codex review round, P1, fresh evidence): `scan` explicitly
+# extracts a live candidate binary WITHOUT dependency-scope filtering when
+# `--against` resolves to a JSON snapshot that was itself dumped with
+# `dump --include-system-declarations` (`AbiSnapshot.dependency_scope ==
+# "full"`) -- otherwise `comparability.py`'s own dependency-scope check
+# rejects a legitimate pair as `NOT_COMPARABLE` purely because the candidate
+# side was extracted filtered by default while the baseline is unfiltered.
+# `compare` has no equivalent automatic detection of its own (its
+# `--include-system-declarations` must be requested explicitly), so a
+# migrated invocation used to silently drop this workflow to
+# `NOT_COMPARABLE` where the still-available legacy `scan` CLI succeeded
+# (verified directly: identical full-dependency-scope JSON baseline + live
+# native candidate, `scan` exits 0, migrated `compare` exits 16).
+#
+# Reuses the real Python detection logic (binary-format sniffing, gzip/zstd
+# decompression, `ProjectSnapshot` package-directory handling) rather than
+# reimplementing it a second time in bash -- unlike `_config_sets_source_
+# method` above, which is a narrow textual heuristic by design precisely
+# because no real parser is already available for that check, a correct
+# parser already exists here. Runs from the isolated `$_PY_SAFE_DIR` with a
+# cleared `PYTHONPATH`, like every other `abicheck`-importing inline script
+# in this file (see the "Security" comment block above `_PY_SAFE_DIR`'s own
+# creation). Echoes "1" whenever this can't be reliably determined (no
+# usable Python, or the helper itself errors) -- the same fail-closed-to-
+# the-legacy-CLI direction this file already takes for every other
+# undecidable case throughout this gate -- rather than "0", which would
+# silently leave this exact gap open.
+_migrated_compare_against_declares_full_dependency_scope() {
+  local _baseline="$1"
+  if [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    return 0
+  fi
+  if ! _is_path_already_qualified "$_baseline"; then
+    _baseline="$PWD/$_baseline"
+  fi
+  local _result
+  _result=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+try:
+    from abicheck.scan_engine import _scan_candidate_include_dependencies
+    print("1" if _scan_candidate_include_dependencies(Path(sys.argv[1])) else "0")
+except Exception:
+    print("1")
+' "$_baseline" 2>/dev/null)
+  [[ "$_result" == "1" ]]
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -1955,6 +2004,16 @@ elif [[ "$MODE" == "scan" ]]; then
   #     `output_options(["json", "markdown", "sarif", "html", "junit",
   #     "review", "oneline"], ...)` on `compare_cmd`), so a `text`-format
   #     scan step has no `compare` rendering that reproduces its content.
+  #   - `against`/`abi-baseline` resolves to a single JSON snapshot file
+  #     explicitly dumped with `--include-system-declarations`
+  #     (`dependency_scope: "full"`, `_migrated_compare_against_declares_
+  #     full_dependency_scope`, sixth Codex review round, fresh evidence):
+  #     `scan` peeks this and extracts the live candidate unfiltered to
+  #     match (`scan_engine._scan_candidate_include_dependencies`), which
+  #     `compare` has no automatic equivalent for (its own
+  #     `--include-system-declarations` must be requested explicitly) --
+  #     without it, `compare`'s own dependency-scope comparability check
+  #     rejects the pair outright as `NOT_COMPARABLE` where `scan` succeeds.
   #   - `extra-args` itself carries a scan-only flag or a non-`json`
   #     `--format` override (`_extra_args_forces_legacy_scan_cli`, defined
   #     above): every condition in this list so far only inspects a
@@ -2032,6 +2091,7 @@ elif [[ "$MODE" == "scan" ]]; then
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
      || [[ "${INPUT_FORMAT:-text}" != "json" ]] \
+     || _migrated_compare_against_declares_full_dependency_scope "${INPUT_AGAINST}" \
      || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
   fi
@@ -2915,9 +2975,9 @@ query = sys.argv[2]
 if query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
 elif query == "cross_source_finding_present":
-    # Two independent divergences between `compare` and `scan --against`'s
+    # Three independent divergences between `compare` and `scan --against`'s
     # own baseline semantics that a migrated `mode: scan` Action run cannot
-    # yet reproduce inline, checked together since either one means: discard
+    # yet reproduce inline, checked together since any one means: discard
     # this run's result and re-run through the legacy `scan` CLI instead.
     #
     # 1. ADR-068 D3/D4/D5's automatic cross-source-hygiene stage (schema
@@ -2940,16 +3000,37 @@ elif query == "cross_source_finding_present":
     #    all (Codex review, fresh evidence: an opaque-handle idiom
     #    modulation turning a compatible addition into `opaque_invariant_
     #    broken`/BREAKING).
+    # 3. `--abi3`'s stable-ABI audit finding (`python_stable_abi_violation`,
+    #    ADR-068 Phase 2d, sixth Codex review round, fresh evidence): both
+    #    `scan --abi3`/`compare --abi3` emit the identical finding kind, but
+    #    `scan` keeps it in its own advisory crosscheck result (promoted into
+    #    the real diff only via explicit `--crosscheck
+    #    python_stable_abi_violation=error`, `cli_scan.py`'s
+    #    `_PROMOTABLE_FINDING_KINDS`), while a real `compare` invocation
+    #    places it directly in the policy-scored `changes` list -- so a
+    #    policy override that reclassifies this kind to `break` scores
+    #    `BREAKING`/exit 4 under a migrated run for the identical operands
+    #    `scan` itself would have exited 0/`NO_CHANGE` for (verified
+    #    directly: identical ABI3 snapshots + an override to `break`).
+    #    Unlike the first two divergences, this finding carries neither
+    #    `cross_source_evolution` nor a `pattern_modulations` entry of its
+    #    own, so it needs its own, independent check here rather than
+    #    reusing either existing signal.
     changes = report.get("changes")
     cross_source_found = False
+    abi3_finding_found = False
     if isinstance(changes, list):
         cross_source_found = any(
             isinstance(c, dict) and c.get("cross_source_evolution") is not None
             for c in changes
         )
+        abi3_finding_found = any(
+            isinstance(c, dict) and c.get("kind") == "python_stable_abi_violation"
+            for c in changes
+        )
     pattern_modulations = report.get("pattern_modulations")
     pattern_verdicts_found = bool(pattern_modulations)
-    print(1 if (cross_source_found or pattern_verdicts_found) else 0)
+    print(1 if (cross_source_found or pattern_verdicts_found or abi3_finding_found) else 0)
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
     # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
@@ -3177,23 +3258,26 @@ PYQUERY
 # the migrated `compare` invocation (e.g. `API_BREAK`, exit 2) -- verified
 # directly against `catalog/cases/case148_xcheck_header_build_mismatch`.
 #
-# Detected here by reading the compare run's own JSON report for either of
-# two independent divergences (`cross_source_finding_present` above, despite
-# its name, checks both): a `changes[].cross_source_evolution` (present on,
-# and only on, a `Change` the automatic cross-source-hygiene stage itself
-# added), or a non-empty `pattern_modulations` (ADR-068 D4's unconditional
-# pattern-verdict modulation, which `scan`'s own `--pattern-verdicts false`
-# default never runs at all). When either is present, this compare run is
-# NOT scan-baseline-equivalent, so its result is discarded entirely and this
-# exact same logical invocation is re-run through the legacy `abicheck scan`
-# CLI instead -- reusing `_build_legacy_scan_cmd` (the same builder
-# `_SCAN_USES_LEGACY_CLI=true` itself calls above) rather than reimplementing
+# Detected here by reading the compare run's own JSON report for any of
+# three independent divergences (`cross_source_finding_present` above,
+# despite its name, checks all three): a `changes[].cross_source_evolution`
+# (present on, and only on, a `Change` the automatic cross-source-hygiene
+# stage itself added), a non-empty `pattern_modulations` (ADR-068 D4's
+# unconditional pattern-verdict modulation, which `scan`'s own
+# `--pattern-verdicts false` default never runs at all), or a
+# `python_stable_abi_violation` finding (`--abi3`'s stable-ABI audit, which
+# `compare` policy-scores directly but `scan` keeps advisory-only). When any
+# is present, this compare run is NOT scan-baseline-equivalent, so its result
+# is discarded entirely and this exact same logical invocation is re-run
+# through the legacy `abicheck scan` CLI instead -- reusing
+# `_build_legacy_scan_cmd` (the same builder `_SCAN_USES_LEGACY_CLI=true`
+# itself calls above) rather than reimplementing
 # `_strip_automatic_cross_source_findings`'s stripping/verdict-recompute
-# logic (or a pattern-verdict-aware equivalent) a second time in bash. This
-# costs a second `abicheck` invocation only in the uncommon case one of these
-# is actually present; the common case (neither) uses the compare run's own
-# result as-is, since nothing would have differed from scan's own baseline
-# path anyway.
+# logic (or a pattern-verdict-/ABI3-aware equivalent) a second time in bash.
+# This costs a second `abicheck` invocation only in the uncommon case one of
+# these is actually present; the common case (none) uses the compare run's
+# own result as-is, since nothing would have differed from scan's own
+# baseline path anyway.
 #
 # A fifth Codex review round found the original `-n "$_cross_source_report_src"`
 # guard backwards for one real case: a successful run whose effective JSON
@@ -3217,7 +3301,7 @@ if [[ "$MODE" == "scan" && "${_SCAN_MIGRATED_TO_COMPARE:-false}" == "true" ]] \
     echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) produced a result this Action could not read back to verify (the effective JSON destination is unreadable, e.g. output-file/-o pointed at /dev/null or another sink outside this checkout). Re-running via the legacy 'abicheck scan' CLI, whose semantics are already known-correct, rather than trusting an unverifiable compare result."
     _cross_source_fallback_fires=true
   elif [[ "$(_report_query "$_cross_source_report_src" cross_source_finding_present)" == "1" ]]; then
-    echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) found a cross-source hygiene finding, or a pattern-verdict modulation, in this comparison that scan's own default behavior wouldn't have produced (cross-source findings stay advisory-only unless explicitly promoted via --crosscheck KEY=error; pattern-verdict modulation is off by default). Re-running via the legacy 'abicheck scan' CLI to match scan's own semantics, and using that result instead."
+    echo "::notice title=abicheck scan::mode: scan (migrated to 'abicheck compare' internally) found a cross-source hygiene finding, a pattern-verdict modulation, or a policy-scored --abi3 stable-ABI finding in this comparison that scan's own default behavior wouldn't have produced the same way (cross-source findings and the --abi3 audit stay advisory-only unless explicitly promoted via --crosscheck KEY=error; pattern-verdict modulation is off by default). Re-running via the legacy 'abicheck scan' CLI to match scan's own semantics, and using that result instead."
     _cross_source_fallback_fires=true
   else
     _cross_source_fallback_fires=false

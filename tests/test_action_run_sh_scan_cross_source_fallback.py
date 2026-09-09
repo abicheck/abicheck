@@ -54,6 +54,16 @@ that genericity across several independently-chosen
 ``cross_source_evolution`` values/check kinds, not just the one reported
 value, and a sibling class proves the *absence* of a finding takes the cheap
 single-invocation path.
+
+A sixth Codex review round found a third, independent divergence sharing the
+same fallback mechanism: `--abi3`'s stable-ABI audit finding
+(`python_stable_abi_violation`) is policy-scored directly in `compare`'s
+`changes` list, but stays in `scan`'s own advisory crosscheck result unless
+explicitly promoted via `--crosscheck python_stable_abi_violation=error` --
+verified directly against identical ABI3 snapshots plus a policy override to
+`break` (`scan` exits 0/`COMPATIBLE`, migrated `compare` exits 4/`BREAKING`).
+`TestAbi3FindingTriggersLegacyScanFallback` below covers it, following the
+same pattern as the cross-source-evolution class above.
 """
 
 from __future__ import annotations
@@ -653,3 +663,123 @@ class TestUnreadableReportDestinationTriggersFallback:
         _run_action(tmp_path, env, bindir)
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
         assert "scan" not in calls, calls
+
+
+def _compare_report_with_abi3_finding(verdict: str, exit_code: int) -> dict:
+    """A `compare`-shaped report carrying a `--abi3` stable-ABI audit
+    finding (`python_stable_abi_violation`) that a policy override
+    reclassified into a real, policy-scored change -- exactly `compare`'s
+    real, unmigrated behavior for this finding kind (sixth Codex review
+    round, fresh evidence). Unlike a cross-source finding, this `Change`
+    carries neither `cross_source_evolution` nor a `pattern_modulations`
+    ledger entry of its own."""
+    return {
+        "report_schema_version": "2.49",
+        "verdict": verdict,
+        "changes": [
+            {
+                "kind": "python_stable_abi_violation",
+                "symbol": "PyFoo_NewSince313",
+                "description": "symbol newer than the configured Py_LIMITED_API floor",
+                "severity": verdict.lower(),
+            }
+        ],
+    }
+
+
+def _scan_report_with_advisory_abi3_finding() -> dict:
+    """What `scan --abi3` itself really reports for the identical inputs:
+    the same finding kept in its own advisory crosscheck result, not
+    promoted into the real diff (no `--crosscheck
+    python_stable_abi_violation=error` given)."""
+    return {
+        "scan_schema_version": "1.9",
+        "mode": "audit",
+        "verdict": "COMPATIBLE",
+        "exit_code": 0,
+        "diff": {
+            "verdict": "COMPATIBLE",
+            "changes": [],
+        },
+    }
+
+
+class TestAbi3FindingTriggersLegacyScanFallback:
+    """A `python_stable_abi_violation` finding in the migrated `compare` run
+    must not be published as-is -- `scan`'s own `--abi3` audit keeps this
+    finding advisory-only unless explicitly promoted via `--crosscheck
+    python_stable_abi_violation=error`, so the Action must fall back to the
+    legacy `scan` CLI and publish that (advisory) result instead."""
+
+    def test_final_verdict_matches_scan_not_compare(self, tmp_path: Path) -> None:
+        bindir, _log = _stub_abicheck(
+            tmp_path,
+            compare_report=_compare_report_with_abi3_finding("BREAKING", 4),
+            compare_exit=4,
+            scan_report=_scan_report_with_advisory_abi3_finding(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_EXTRA_ARGS"] = "--abi3 3.13"
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "COMPATIBLE", outputs
+        assert outputs["exit-code"] == "0", outputs
+        assert outputs["_exit"] == 0, outputs
+
+    def test_two_invocations_happen_compare_then_scan(self, tmp_path: Path) -> None:
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=_compare_report_with_abi3_finding("BREAKING", 4),
+            compare_exit=4,
+            scan_report=_scan_report_with_advisory_abi3_finding(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_EXTRA_ARGS"] = "--abi3 3.13"
+        _run_action(tmp_path, env, bindir)
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare", "scan"], calls
+
+    def test_notice_is_emitted_explaining_the_fallback(self, tmp_path: Path) -> None:
+        bindir, _log = _stub_abicheck(
+            tmp_path,
+            compare_report=_compare_report_with_abi3_finding("BREAKING", 4),
+            compare_exit=4,
+            scan_report=_scan_report_with_advisory_abi3_finding(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_EXTRA_ARGS"] = "--abi3 3.13"
+        outputs = _run_action(tmp_path, env, bindir)
+        assert "abi3" in outputs["_stdout"].lower(), outputs
+
+    def test_real_break_with_no_abi3_finding_is_not_masked(self, tmp_path: Path) -> None:
+        """A genuine, non-ABI3 API/ABI break must still be published as-is
+        -- this fallback must never suppress a real break, only the
+        specific advisory-vs-policy-scored mismatch it targets."""
+        break_report = {
+            "report_schema_version": "2.49",
+            "verdict": "API_BREAK",
+            "changes": [
+                {
+                    "kind": "function_removed",
+                    "symbol": "foo",
+                    "description": "removed",
+                    "severity": "api_break",
+                }
+            ],
+        }
+        bindir, log = _stub_abicheck(
+            tmp_path,
+            compare_report=break_report,
+            compare_exit=2,
+            scan_report=_scan_report_with_advisory_abi3_finding(),
+            scan_exit=0,
+        )
+        env = _scan_env(tmp_path)
+        env["INPUT_EXTRA_ARGS"] = "--abi3 3.13"
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["verdict"] == "API_BREAK", outputs
+        assert outputs["exit-code"] == "2", outputs
+        calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+        assert calls == ["compare"], calls

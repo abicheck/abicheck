@@ -105,3 +105,17 @@ it should read in CHANGELOG.md. Delete the other sections.
   any real (non-dry-run) invocation whose report can't be read back,
   correctly leaving a genuine dry run's own single-invocation behavior
   unaffected.
+  A sixth review round closed two more gaps: a `python_stable_abi_violation`
+  finding (`--abi3`'s stable-ABI audit) is now included in the
+  cross-source/pattern-verdict fallback's own report check -- `compare`
+  policy-scores this finding directly in its `changes` list, but `scan`
+  keeps it in its own advisory crosscheck result unless explicitly promoted
+  via `--crosscheck python_stable_abi_violation=error`, so a policy override
+  reclassifying it could silently score `BREAKING` under a migrated run for
+  operands `scan` itself would have exited 0/`COMPATIBLE` for; and a JSON
+  `--against`/`abi-baseline` snapshot explicitly tagged `dependency_scope:
+  "full"` (dumped with `--include-system-declarations`) now also stays on
+  the legacy CLI -- `scan` peeks this tag and extracts a live candidate
+  unfiltered to match, but `compare` has no automatic equivalent, so the
+  comparability gate's own dependency-scope check used to reject the pair
+  outright as `NOT_COMPARABLE` where `scan` succeeds.

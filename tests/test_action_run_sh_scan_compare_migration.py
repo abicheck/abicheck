@@ -574,3 +574,49 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
         )
         cmd = self._run_cmd_in(tmp_path, _base_env(INPUT_DEPTH="source"))
         assert cmd[1] == "scan", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForFullDependencyScopeBaseline:
+    """Sixth Codex review round, P1 (fresh evidence): `scan` peeks a JSON
+    ``--against``/``abi-baseline`` snapshot for an explicit
+    ``dependency_scope: "full"`` tag (a baseline `dump`ped with
+    ``--include-system-declarations``) and extracts the live candidate
+    unfiltered to match (`scan_engine._scan_candidate_include_dependencies`)
+    -- otherwise the comparability gate's own dependency-scope check rejects
+    the pair outright as `NOT_COMPARABLE`. `compare` has no equivalent
+    automatic detection (its own ``--include-system-declarations`` must be
+    requested explicitly), so a migrated invocation used to silently drop
+    this legitimate workflow to `NOT_COMPARABLE` where `scan` succeeds
+    (verified directly: identical full-dependency-scope JSON baseline + live
+    native candidate, `scan` exits 0, migrated `compare` exits 16).
+
+    `_migrated_compare_against_declares_full_dependency_scope` shells out to
+    the real `scan_engine._scan_candidate_include_dependencies` rather than
+    reimplementing its detection a second time in bash, so these tests
+    exercise the genuine Python helper via a real (if minimal) JSON baseline
+    file, not a bash-side approximation of it.
+    """
+
+    def test_full_dependency_scope_baseline_stays_on_scan(self, tmp_path: Path) -> None:
+        baseline = tmp_path / "baseline.abicheck.json"
+        baseline.write_text('{"dependency_scope": "full"}', encoding="utf-8")
+        cmd = _run_cmd(_base_env(INPUT_AGAINST=str(baseline)))
+        assert cmd[1] == "scan", cmd
+
+    def test_filtered_dependency_scope_baseline_still_migrates(
+        self, tmp_path: Path
+    ) -> None:
+        baseline = tmp_path / "baseline.abicheck.json"
+        baseline.write_text('{"dependency_scope": "filtered"}', encoding="utf-8")
+        cmd = _run_cmd(_base_env(INPUT_AGAINST=str(baseline)))
+        assert cmd[1] == "compare", cmd
+
+    def test_untagged_baseline_still_migrates(self, tmp_path: Path) -> None:
+        # No `dependency_scope` key at all -- the common case (an ordinary
+        # filtered-by-default baseline, or one dumped by a version predating
+        # this field). Must not spuriously stay on the legacy CLI.
+        baseline = tmp_path / "baseline.abicheck.json"
+        baseline.write_text("{}", encoding="utf-8")
+        cmd = _run_cmd(_base_env(INPUT_AGAINST=str(baseline)))
+        assert cmd[1] == "compare", cmd
