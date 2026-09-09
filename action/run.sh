@@ -4563,17 +4563,24 @@ _blocking_gate_note() {
     | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
   if [[ -n "$_cats" ]]; then
     echo ">"
-    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" || "$_CLI_MODE" == "scan" ]]; then
+    if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" || "$MODE" == "scan" ]]; then
       # `scan` is the second case that bypasses the flags at *every* tier: its
       # final branch detects the real severity category and sets FINAL_EXIT=1
       # unconditionally, so claiming the flags still decide would be the exact
-      # opposite of what happened (Codex review). Keyed on `$_CLI_MODE`, not
-      # the raw `$MODE` input: a `mode: scan` run internally routed through
-      # `compare` (ADR-068 D2, Phase 4 commit 1) hits the generic `compare`
-      # final-dispatch branch below instead, which *does* let the flags
-      # decide except for this same SEVERITY_ERROR tier -- claiming the
-      # legacy `scan` CLI's unconditional-bypass behavior for a run that
-      # never reaches it would misdescribe what actually happened.
+      # opposite of what happened (Codex review). Keyed on the raw `$MODE`
+      # input, not `$_CLI_MODE` (round 19, fresh evidence -- reverting the
+      # prior round's own reasoning here): the *caller's* fail-on-* contract
+      # is what this note describes, and that contract is `mode: scan`'s own
+      # regardless of which CLI a `--pattern-verdicts`-enabled baseline
+      # request happened to route through internally (ADR-068 D2, Phase 4
+      # commit 1) -- the real gate dispatch below applies scan's
+      # unconditional-severity rule to exactly that case too, so this note
+      # must describe the same thing it actually did, not what raw CLI ran.
+      # `$_CLI_MODE` stays correct for the *exit-code interpretation*
+      # dispatch elsewhere in this script (it must know which raw numbering
+      # scheme produced `$ABICHECK_EXIT`) -- this is a different question,
+      # answered from the already-normalized `$GATE_TIER`/`$VERDICT` labels
+      # that dispatch produces, not from the raw exit code itself.
       echo "> ⚠️ Also blocked by severity policy: \`$_cats\` configured as \`error\`. This fails the step independently of \`fail-on-breaking\`/\`fail-on-api-break\`."
     else
       # Only the SEVERITY_ERROR tier bypasses the fail-on flags. At the
@@ -5626,10 +5633,28 @@ elif [[ "$MODE" == "dump" ]]; then
   # dump: a producer — non-zero is always an error (already mapped above)
   :
 
-elif [[ "$_CLI_MODE" == "scan" ]]; then
-  # Keyed on `$_CLI_MODE`, not `$MODE` -- see the exit-code dispatch's own
-  # identical note above. A `mode: scan` run routed through `compare`
-  # reaches the generic `compare` branch (the final `else` below) instead.
+elif [[ "$MODE" == "scan" ]]; then
+  # Keyed on the raw `$MODE` input, not `$_CLI_MODE` (Codex review, round
+  # 19, fresh evidence): this dispatch decides whether the *step* fails --
+  # the caller's own fail-on-* contract, which is `mode: scan`'s regardless
+  # of which CLI actually ran internally. Before this fix, a baseline scan
+  # routed through `compare` (a `--pattern-verdicts`-enabled request,
+  # ADR-068 D2/Phase 4 commit 1) fell through to the generic `compare`
+  # branch below instead -- so an explicit `severity-preset: strict`
+  # already correctly made the underlying `compare` CLI invocation exit
+  # non-zero (the round-14/16 severity-preset-forwarding fixes), but this
+  # *wrapper*-level dispatch still honored `compare`'s own
+  # `fail-on-api-break: false` default and let the Action step pass
+  # anyway -- a false green a `mode: scan` caller's workflow, written
+  # against scan's documented "severity policy is unconditional" contract,
+  # never expected. `$VERDICT`/`$GATE_TIER` were already normalized to
+  # CLI-agnostic labels (API_BREAK/BREAKING/SEVERITY_ERROR/...) by the
+  # earlier exit-code dispatch above by the time this block reads them, so
+  # switching the *selector* here to `$MODE` changes nothing about how
+  # those labels are read -- only which caller's fail-on-* contract applies
+  # to them. `$_CLI_MODE` stays correct where it already is, on that
+  # earlier dispatch: interpreting the *raw* `$ABICHECK_EXIT` genuinely
+  # does need to know which CLI's own numbering scheme produced it.
   #
   # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
   # fails the step (the budget is a guard that must not be silently swallowed).

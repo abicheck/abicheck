@@ -90,3 +90,14 @@
   the fix was meant to let through, failing it with a real "no such option"
   usage error (`compare` has no `--pattern-verdicts` flag at all). It is
   now stripped before the translated command runs.
+- **A `mode: scan` Action step with a `severity-preset`-driven error (e.g.
+  `severity-preset: strict` on a risk/API finding) now unconditionally
+  fails when the request was routed through `compare`'s translation, the
+  same way it always has on the legacy `scan` CLI.** The Action's own
+  wrapper-level pass/fail dispatch (separate from the underlying CLI's own
+  exit code, which already correctly reflected the severity error) was
+  keyed on which CLI actually ran internally rather than on the caller's
+  own `mode: scan` request — so a translated request fell into `compare`'s
+  dispatch, which lets `fail-on-api-break` (default `false`) swallow a
+  severity policy the caller explicitly configured as an error, a false
+  green a `mode: scan` workflow never expected.
