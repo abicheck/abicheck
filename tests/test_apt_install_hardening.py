@@ -553,6 +553,36 @@ def scan_line(line: str, quote: str | None, at_word_start: bool) -> LineScan:
     return LineScan(None, quote, at_word_start, quote is not None)
 
 
+def _ends_in_unescaped_backslash(line: str) -> bool:
+    """Parity, not `endswith`: `a\\\\\\` is an escape plus a continuation."""
+    trailing = len(line) - len(line.rstrip("\\"))
+    return trailing % 2 == 1
+
+
+def _splice_only(script: str) -> list[str]:
+    """Join trailing-backslash continuations and nothing else.
+
+    The fallback used when the lexer meets a construct it will not model.
+    It cannot know whether a given backslash is really a continuation -- that
+    depends on quoting it declined to track -- but joining is the safe guess:
+    it can only put more text on one line, and the unjoined physical lines are
+    kept alongside it anyway.
+    """
+    lines: list[str] = []
+    pending = ""
+    for raw in script.splitlines():
+        if _ends_in_unescaped_backslash(raw):
+            pending += raw[:-1]
+            continue
+        joined = (pending + raw).strip()
+        if joined:
+            lines.append(joined)
+        pending = ""
+    if pending.strip():
+        lines.append(pending.strip())
+    return lines
+
+
 def logical_lines(script: str) -> list[str]:
     """Split a shell script into *logical* lines, as the shell would.
 
@@ -629,6 +659,16 @@ def logical_lines(script: str) -> list[str]:
         flush(pending + raw)
         pending, quote, at_word_start = "", None, True
     flush(pending)
+    if unsure:
+        # Declining to model a construct must not mean losing a continuation
+        # that has nothing to do with it: `echo $(true); sudo apt-get \\` +
+        # `update -qq && ...` is spliced by bash and runs the gating command,
+        # while flushing at the substitution left the two halves apart and
+        # `apt-get\\s+update` matched neither (Codex review, PR #1183).
+        # So the fallback re-splices the whole script on trailing backslashes
+        # alone -- no quote tracking, no comment stripping, nothing that could
+        # discard text -- and that view joins the others below.
+        lines = _splice_only(script)
     if unsure:
         # Once a construct we cannot model appears, the lexical state of every
         # *later* line is guesswork too -- the nested case proved it, since the
@@ -987,6 +1027,11 @@ class TestLogicalLines:
         "echo `printf x` \\\n# c\nsudo apt-get update -qq && sudo apt-get install -y gcc\n",
         "X=$(date) # c \\\nsudo apt-get update -qq && sudo apt-get install -y gcc\n",
         'echo "${x:-$(true)}" \\\n# c\nsudo apt-get update -qq && sudo apt-get install -y gcc\n',
+        # A completed substitution followed by an ordinary wrapped command:
+        # declining to model `$(` must not lose a continuation that has
+        # nothing to do with it (Codex, PR #1183).
+        "echo $(true); sudo apt-get \\\nupdate -qq && sudo apt-get install -y gcc\n",
+        "X=`date`\nsudo apt-get \\\nupdate -qq && sudo apt-get install -y gcc\n",
     )
 
     @pytest.mark.parametrize("script", _UNPARSEABLE)
