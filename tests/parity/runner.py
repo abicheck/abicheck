@@ -29,12 +29,29 @@ from .gaps import EXPECTED_GAPS
 
 @dataclass(frozen=True)
 class Finding:
-    """One finding, projected to the dimensions parity is judged on."""
+    """One finding, projected to the dimensions parity is judged on.
+
+    ``finding_id`` (Codex review, PR #1172, round 16, fresh evidence)
+    disambiguates two same-``kind``/same-``identity`` findings on the same
+    symbol -- a cross-source check like ``private_header_leak`` can
+    legitimately emit several findings for one function, one per leaked
+    type, and without this field they collapsed onto the same
+    ``Finding`` value: a partial capability loss (one of the two rows
+    missing on one side) still hashed identically to the other side's set
+    and silently read as full parity. ``report_finding_id``
+    (``finding_identity.py``) is the shared per-finding fingerprint both
+    ``compare``'s and `scan`'s own report dicts already carry (folding in
+    ``old_value``/``new_value``/``source_location``/``description``, the
+    exact per-instance detail that distinguishes two same-kind occurrences)
+    -- reusing it here means no second identity scheme to keep in sync with
+    the real one every report consumer already relies on.
+    """
 
     kind: str
     identity: str
     severity: str
     evidence_refs: tuple[str, ...] = ()
+    finding_id: str = ""
 
 
 FindingSet = frozenset[Finding]
@@ -68,6 +85,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
     the same production function ``scan_engine.py`` is the sole caller of.
     """
     from abicheck.buildsource.crosscheck import run_crosschecks
+    from abicheck.finding_identity import report_finding_id
 
     result = run_crosschecks(snapshot, config)
     findings = set()
@@ -79,6 +97,7 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
                 identity=c.symbol or "",
                 severity=severity_for_kind(kind),
                 evidence_refs=tuple(result.providers.get(kind, ())),
+                finding_id=report_finding_id(c),
             )
         )
     return frozenset(findings)
@@ -110,6 +129,7 @@ def compare_finding_set(
                 identity=c.get("symbol") or "",
                 severity=severity_for_kind(kind),
                 evidence_refs=tuple(c.get("contract_evidence_refs") or ()),
+                finding_id=c.get("finding_id") or "",
             )
         )
     return frozenset(findings)
@@ -145,6 +165,7 @@ def scan_finding_set(artifact: Path | str, *extra_args: str) -> FindingSet:
                 identity=c.get("symbol") or "",
                 severity=severity_for_kind(kind),
                 evidence_refs=(),
+                finding_id=c.get("finding_id") or "",
             )
         )
     return frozenset(findings)
@@ -176,25 +197,33 @@ class RunOutcome:
     verdict: str | None
     exit_code: int
     findings: FindingSet
-    #: (kind, identity) -> the finding's *actually applied* severity label
-    #: for this run (``changes[]``/``diff.findings[]``'s own ``severity``
-    #: field) -- unlike ``Finding.severity`` above (a static per-kind
-    #: registry default), this can and does vary by run context.
-    severities: dict[tuple[str, str], str]
-    #: (kind, identity) -> ADR-049 D1 ``gate_contribution`` for this run,
-    #: or ``None`` when the raw finding dict never carries the key at all.
-    #: `compare`'s `changes[]` entries always carry it (``reporter.py``'s
-    #: `_change_to_dict` stamps it unconditionally, `0` included -- a real,
-    #: computed "no contribution"). `scan`'s own `diff.findings[]` entries
-    #: (`cli_scan_baseline._baseline_finding_dicts`) never carry the key at
-    #: all -- a genuine, documented gap (CodeRabbit review, PR #1172, round
-    #: 12), not an intentional "not applicable" omission the way the
-    #: contract fields are. `None` here keeps that distinction visible to
-    #: :func:`assert_full_parity` instead of coercing a *missing* value and
-    #: a *real* `0` to the same thing, which would let a genuine scan/compare
-    #: gate_contribution divergence silently read as parity whenever it
-    #: happened to coincide with compare's own value being `0`.
-    gate_contributions: dict[tuple[str, str], int | None]
+    #: (kind, identity, finding_id) -> the finding's *actually applied*
+    #: severity label for this run (``changes[]``/``diff.findings[]``'s own
+    #: ``severity`` field) -- unlike ``Finding.severity`` above (a static
+    #: per-kind registry default), this can and does vary by run context.
+    #: ``finding_id`` (Codex review, PR #1172, round 16, fresh evidence) is
+    #: part of the key, not just ``Finding``'s own dedup fields, for the
+    #: identical reason: a check like ``private_header_leak`` can emit
+    #: several same-``(kind, identity)`` findings for one function (one per
+    #: leaked type), and without it the second finding's severity/gate
+    #: entry silently overwrote the first's in this dict instead of the two
+    #: staying distinguishable.
+    severities: dict[tuple[str, str, str], str]
+    #: (kind, identity, finding_id) -> ADR-049 D1 ``gate_contribution`` for
+    #: this run, or ``None`` when the raw finding dict never carries the key
+    #: at all. `compare`'s `changes[]` entries always carry it
+    #: (``reporter.py``'s `_change_to_dict` stamps it unconditionally, `0`
+    #: included -- a real, computed "no contribution"). `scan`'s own
+    #: `diff.findings[]` entries (`cli_scan_baseline._baseline_finding_dicts`)
+    #: never carry the key at all -- a genuine, documented gap (CodeRabbit
+    #: review, PR #1172, round 12), not an intentional "not applicable"
+    #: omission the way the contract fields are. `None` here keeps that
+    #: distinction visible to :func:`assert_full_parity` instead of coercing
+    #: a *missing* value and a *real* `0` to the same thing, which would let
+    #: a genuine scan/compare gate_contribution divergence silently read as
+    #: parity whenever it happened to coincide with compare's own value
+    #: being `0`.
+    gate_contributions: dict[tuple[str, str, str], int | None]
 
 
 def _outcome_from_findings(
@@ -205,12 +234,13 @@ def _outcome_from_findings(
     evidence_key: str | None,
 ) -> RunOutcome:
     findings = set()
-    severities: dict[tuple[str, str], str] = {}
-    gate: dict[tuple[str, str], int | None] = {}
+    severities: dict[tuple[str, str, str], str] = {}
+    gate: dict[tuple[str, str, str], int | None] = {}
     for c in raw_findings:
         kind = c["kind"]
         identity = c.get("symbol") or ""
-        key = (kind, identity)
+        finding_id = c.get("finding_id") or ""
+        key = (kind, identity, finding_id)
         findings.add(
             Finding(
                 kind=kind,
@@ -219,6 +249,7 @@ def _outcome_from_findings(
                 evidence_refs=(
                     tuple(c.get(evidence_key) or ()) if evidence_key else ()
                 ),
+                finding_id=finding_id,
             )
         )
         # `compare`'s `changes[]` entries carry `severity`; `scan`'s own
