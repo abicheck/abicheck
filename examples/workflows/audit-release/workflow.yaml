@@ -34,6 +34,11 @@ steps:
   - name: build
     run: python3 build_shared_lib.py -fPIC -g -Iinclude greet.c -o libgreet.so
   - name: audit
+    # Still `scan`, not `compare --no-baseline`: ADR-068 D2 makes the latter
+    # the declared spelling for a single-build audit, but run against this
+    # fixture today it exits 0 with an empty `changes` list and never emits
+    # the `exported_not_public` finding this step asserts. Tracked in
+    # docs/contribute/known-gaps.md; this step moves when that closes.
     run: abicheck scan libgreet.so --header include
     expect:
       exit_code: 0

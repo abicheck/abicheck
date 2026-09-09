@@ -12,19 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Scan-*level* scalability sweep over a self-contained synthetic corpus.
+"""Evidence-*depth* scalability sweep over a self-contained synthetic corpus.
 
 ``eval/scaling.py`` times one knob (``ABICHECK_L4_JOBS``) on *one* real tree.
 This harness sweeps the **other** axis the field eval never automated: how each
-``scan`` *level* (``--depth binary|headers|build|source`` plus the
-``--source-method s4`` graph rung) scales as a project's **complexity** grows —
+``--depth binary|headers|build|source`` rung scales as a project's
+**complexity** grows —
 TU count, per-TU symbol count, and C++ template/STL instantiation depth (the
 documented L4 cliff driver, see ``docs/contribute/performance.md`` §"Scan level
 cost model"). Unlike ``scaling.py`` it needs **no network and no real repo**: it
 synthesises C++ trees of tunable size, builds them with the host C++ compiler
 into a ``.so`` + ``compile_commands.json`` (the JSON-compilation-database shape a
-real CMake/Bazel build emits), and runs ``abicheck scan`` at each level against a
-slightly-changed baseline.
+real CMake/Bazel build emits), and runs ``abicheck compare`` at each depth against
+a slightly-changed baseline.
 
 For every (size, level) it records wall time, **peak child RSS** (via
 ``os.wait4`` — the true per-call high-water mark, including clang's native
@@ -238,15 +238,38 @@ def _build(root: Path, *, n_tus: int, cxx: str) -> Path:
 
 
 # ── measurement ─────────────────────────────────────────────────────────────
-# We parse the human ``--format text`` report rather than ``--format json``: the
-# verdict is a structured JSON field, but the per-level L4 coverage counts
-# (``N/M TUs parsed`` + elapsed) live only inside the rendered coverage-row detail
-# string — there is no structured JSON field for them — and exposing them as one
-# would mean changing the shipped ``ScanOutcome`` surface for a manual eval
-# harness. The regexes are intentionally loose so a small text-layout change does
-# not break the sweep (a missing match just leaves the field ``None``).
+# ``--format json``: `compare` accepts no ``text`` format at all (its choices are
+# json/markdown/sarif/html/junit/review/oneline), and markdown renders the verdict
+# as a table cell rather than the ``Verdict: X`` line the old regex expected. So
+# the verdict is read from the parsed document, which is the structured field for
+# it. The per-level L4 coverage counts (``N/M TUs parsed`` + elapsed) still have
+# no structured field of their own — they live inside a ``layer_coverage[].detail``
+# string — so that one stays a regex, applied to the raw response text (the detail
+# string appears in it verbatim). It is intentionally loose: a missing match just
+# leaves the field ``None`` rather than failing the sweep.
 _L4_RE = re.compile(r"(\d+)/(\d+) TUs parsed.*?([\d.]+)s")
-_VERDICT_RE = re.compile(r"Verdict:\s*(\w+)")
+
+
+def _verdict_from(out: str) -> str | None:
+    """Read ``verdict`` out of a captured `compare --format json` response.
+
+    ``out`` is stdout **with stderr merged in** (the harness wants a single
+    stream so a warning cannot be lost), so a plain ``json.loads`` fails on the
+    scope/header warnings abicheck prints alongside the report. Decode from the
+    first ``{`` with ``raw_decode`` instead, which stops at the end of the
+    object and ignores whatever trails it. A usage error, a crash, or a
+    NOT_COMPARABLE abort leaves no parsable object at all -- that returns
+    ``None`` and lets the ``exit`` column carry the story, same as a missing L4
+    match.
+    """
+    start = out.find("{")
+    if start < 0:
+        return None
+    try:
+        doc, _ = json.JSONDecoder().raw_decode(out[start:])
+    except ValueError:
+        return None
+    return doc.get("verdict") if isinstance(doc, dict) else None
 
 
 def _maxrss_to_mb(maxrss: int) -> float:
@@ -280,30 +303,37 @@ def _maxrss_to_mb(maxrss: int) -> float:
 #: ``--depth full`` rung was retired from the public CLI (ADR-043 D2) — it
 #: collapsed into ``source``, since replay *scope* (seeded/changed vs. the
 #: whole compile DB), not evidence depth, was the only thing distinguishing
-#: them, and `scan` itself resolves that scope from whether a change seed
+#: them, and abicheck itself resolves that scope from whether a change seed
 #: (``--since``/``--changed-path``) is present. This sweep's own seedless
 #: ``"source"`` entry *is* that old full-tree-replay shape today — adding a
 #: separate ``"full"`` entry back would just re-measure it under a second
 #: name, with the identical ``--depth`` argv (and, before this fix, with a
 #: literal ``click.BadParameter`` — ``full`` is not a valid ``--depth`` value
 #: anymore).
-LEVELS = ("binary", "headers", "build", "graph", "source_seeded", "source")
+#:
+#: The former ``"graph"`` rung is gone with the ``--source-method s0..s6`` axis
+#: that selected it: that axis was removed outright from the public CLI (ADR-043
+#: D2), so ``--source-method s4`` had become a plain usage error and this rung
+#: measured nothing. ADR-037 D6 keeps L5 an internal level with no user-facing
+#: ``--depth`` rung of its own, so there is nothing to re-point it at; the L5
+#: call-graph cost is still visible as the gap between ``source_seeded`` and
+#: seedless ``source``, which is what the module docstring already reads it as.
+LEVELS = ("binary", "headers", "build", "source_seeded", "source")
 
 #: Levels that need ``clang++`` (skipped when it is absent). Only ``binary`` is
 #: clang-free: ``--depth binary`` suppresses the L2 header AST, so it runs on the
 #: C++ compiler alone. Every other tier — including ``build``, since the harness
-#: always passes ``-H``/``--ast-frontend clang`` and the cumulative depth ladder
-#: puts L2 below L3 — parses headers with clang and fails without it.
-_NEEDS_CLANG = {"headers", "build", "graph", "source_seeded", "source"}
+#: always passes ``-H`` and pins the clang header-AST backend, and the cumulative
+#: depth ladder puts L2 below L3 — parses headers with clang and fails without it.
+_NEEDS_CLANG = {"headers", "build", "source_seeded", "source"}
 
 
 def _level_args(level: str, seed: str) -> list[str]:
-    """Map a sweep *level* name to the ``abicheck scan`` flags that select it."""
+    """Map a sweep *level* name to the ``abicheck compare`` flags that select it."""
     return {
         "binary": ["--depth", "binary"],
         "headers": ["--depth", "headers"],
         "build": ["--depth", "build"],
-        "graph": ["--source-method", "s4"],
         "source": ["--depth", "source"],
         "source_seeded": ["--depth", "source", "--changed-path", seed],
     }[level]
@@ -326,7 +356,16 @@ class Point:
 
 
 def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
-    """Run one ``abicheck scan`` at *level*; time it + capture peak child RSS."""
+    """Run one ``abicheck compare`` at *level*; time it + capture peak child RSS.
+
+    Driven through ``compare`` rather than ``scan`` (ADR-068 D1/D2 retires the
+    latter). The four flags this harness used to pass ``scan`` are gone from the
+    CLI outright, so the old argv had become a plain exit-64 usage error and the
+    sweep measured argument parsing: ``--binary``/``--baseline`` are the
+    ``OLD NEW`` positionals, ``--baseline-header`` is ``--header old=``, and
+    ``--ast-frontend`` moved to ``.abicheck.yml``'s ``compile.frontend`` with
+    ``ABICHECK_AST_FRONTEND`` as its per-process pin (set in ``env`` below).
+    """
     seed = "src/tu0.cpp"
     # Invoke the in-tree CLI via ``-m abicheck`` (not the ``abicheck`` console
     # script): the documented entry point is ``python eval/scan_level_scaling.py``
@@ -336,27 +375,28 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         sys.executable,
         "-m",
         "abicheck",
-        "scan",
-        "--binary",
-        str(new_root / "libsynth.so"),
-        "-H",
-        str(new_root / "include"),
-        "--sources",
-        str(new_root),
-        "--baseline",
+        "compare",
         str(base_so),
+        str(new_root / "libsynth.so"),
         # The old/new trees have *different* public headers (the new side adds a
-        # method + free fn and changes some return types), so the native baseline
-        # must be parsed with the *old* headers — otherwise scan reads the old .so
+        # method + free fn and changes some return types), so the OLD side must be
+        # parsed with the *old* headers — otherwise abicheck reads the old .so
         # through the new headers and can mask/misattribute the very diff the sweep
-        # generates (the CLI even warns about this). Ignored for --depth binary /
-        # snapshot baselines.
-        "--baseline-header",
-        str(base_so.parent / "include"),
-        "--ast-frontend",
-        "clang",
+        # generates. Ignored for --depth binary.
+        "--header",
+        f"old={base_so.parent / 'include'}",
+        "--header",
+        f"new={new_root / 'include'}",
+        # Both sides, not just NEW: `compare` refuses a pair whose two sides were
+        # extracted under different scope contracts (exit 16, NOT_COMPARABLE), so
+        # a NEW-only `--sources` makes every `build`/`source` rung measure a
+        # comparability rejection instead of a replay. Verified directly.
+        "--sources",
+        f"old={base_so.parent}",
+        "--sources",
+        f"new={new_root}",
         "--format",
-        "text",
+        "json",
         *_level_args(level, seed),
     ]
     # ``jobs <= 0`` means "auto": the sweep must measure abicheck's normal auto
@@ -368,6 +408,10 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
     # child and silently defeats auto mode (both feed the scaling/RSS curves this
     # harness validates), despite the --jobs help promising auto scheduling.
     env = dict(os.environ)
+    # `compare` has no `--ast-frontend` flag (ADR-068 D5 demoted the whole
+    # compile-context axis to `.abicheck.yml`'s `compile:` block); the env pin is
+    # the per-process equivalent and is what `header_ast_backend` consults.
+    env["ABICHECK_AST_FRONTEND"] = "clang"
     if jobs > 0:
         env["ABICHECK_L4_JOBS"] = str(jobs)
     else:
@@ -382,7 +426,7 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
     _pid, status, ru = os.wait4(proc.pid, 0)
     wall = time.monotonic() - t0
     l4 = _L4_RE.search(out)
-    verdict = _VERDICT_RE.search(out)
+    verdict = _verdict_from(out)
     return Point(
         level=level,
         n_tus=0,
@@ -390,7 +434,7 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         wall_s=round(wall, 2),
         rss_mb=_maxrss_to_mb(ru.ru_maxrss),
         exit=os.waitstatus_to_exitcode(status),
-        verdict=verdict.group(1) if verdict else None,
+        verdict=verdict,
         l4_parsed=int(l4.group(1)) if l4 else None,
         l4_total=int(l4.group(2)) if l4 else None,
         l4_secs=float(l4.group(3)) if l4 else None,

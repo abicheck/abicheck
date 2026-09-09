@@ -18,7 +18,7 @@ where the *build* emits source facts as it compiles instead.
 - A compile database, or something abicheck can derive one from
   zero-config (CMake configure-only, a Bazel `aquery`, or a Make dry-run
   transcript) — see
-  [Source-Scan Depth § Obtaining a compile database](../../use/scan-levels.md#obtaining-a-compile-database-without-a-full-build).
+  [Evidence Depth § Obtaining a compile database](../../use/evidence-depth.md#obtaining-a-compile-database-without-a-full-build).
 - `clang` on the runner. On the latest published release (`@v0.5.0`, used
   below), the Action's only installer is the legacy `install-deps: true`
   path — on an apt-based Linux runner (e.g. `ubuntu-latest`) this installs
@@ -36,7 +36,7 @@ where the *build* emits source facts as it compiles instead.
   target/compile-unit/source graph still builds from that L3 evidence alone
   — only L4 replay and the clang-backed call/type/include-graph edges of L5
   are skipped, not the whole source scan or the whole L5 graph; see
-  [Source-Scan Depth](../../use/scan-levels.md) for what each layer needs.
+  [Evidence Depth](../../use/evidence-depth.md) for what each layer needs.
   Check the `layers`/coverage output to confirm L4 actually ran. See
   [GitHub Action: dependency-source](../../use/github-action.md).
 - For a PR run: `fetch-depth: 0` on checkout, so the base ref is available to
@@ -93,5 +93,5 @@ full `evidence-producer` contract and how it composes with `collect-facts`.
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
 - [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the canonical `mode: scan` reference.
-- [Source-Scan Depth](../../use/scan-levels.md) — the depth ladder and compile-DB acquisition options.
+- [Evidence Depth](../../use/evidence-depth.md) — the depth ladder and compile-DB acquisition options.
 - [What Each Level Sees](../../learn/what-each-level-sees.md) — a worked example of what L3/L4/L5 actually produce.

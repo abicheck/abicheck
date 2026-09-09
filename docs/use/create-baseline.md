@@ -127,4 +127,4 @@ abicheck scan new/libfoo.so --against old/libfoo.so \
   baseline when you can — it's unambiguous and needs no toolchain at compare
   time.
 
-See [Source-Scan Depth](scan-levels.md) for the full `scan` flag reference.
+See [Evidence Depth](evidence-depth.md) for the full `--depth` reference.

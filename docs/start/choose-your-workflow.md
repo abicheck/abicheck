@@ -37,12 +37,12 @@ command** when you need more confidence or a CI gate.
 | Your situation | Minimum command | Stronger / production command |
 |---|---|---|
 | One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --header old=include/v1/ --header new=include/v2/` — the primary flow |
-| Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
+| Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h --build-info build/`) and compare the snapshots |
 | No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root old=old-debug --debug-root new=new-debug` |
 | Stripped production binaries | `abicheck compare old.so new.so --debug-root old=old-debug --debug-root new=new-debug` (or a `.abicheck.yml` `debug.debuginfod: true` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
 | A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --header new=include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Storing Baselines](../use/baseline-storage.md) |
 | A PR with source/build context (catch source-only & build-flag breaks) | `abicheck compare baseline.json build/libfoo.so -H include/ --sources new=. --since origin/main --depth source` | `compare` already runs the always-on pattern + cross-source checks and the pinned L3/L4/L5 level on every invocation (no separate orchestrator command needed) — see [Source & Build Data](../learn/build-source-data.md) and the [GitHub Action: Source Scans](../use/github-action-source-scans.md) |
-| No baseline yet — single-build hygiene audit (accidental exports, private-header leaks, unversioned symbols) | `abicheck scan build/libfoo.so -H include/` (no `--against`) | `compare --no-baseline` (ADR-068 D2) is not a safe replacement yet — verified it crashes with an unhandled `AssertionError` instead of reporting when the candidate actually has one of these problems (only "worked" for an already-clean candidate) — see [Scenario S5](../integration/scenarios/single-build-audit.md) |
+| No baseline yet — single-build hygiene audit (accidental exports, private-header leaks, unversioned symbols) | `abicheck scan build/libfoo.so -H include/` — the legacy command, still the only spelling that reports these findings today | `abicheck compare --no-baseline build/libfoo.so -H include/` is the declared replacement (ADR-068 D2) but does **not** report them yet — it crashes on a stored snapshot and renders an empty result for a live binary ([known gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings), [Scenario S5](../integration/scenarios/single-build-audit.md)) |
 | Build emits source facts in parallel (combine into one baseline) | `abicheck compare old.so new.so --build-info old=abicheck_inputs/v1 --build-info new=abicheck_inputs/v2` (also auto-detects an `abicheck_inputs/` pack alongside each input with no flag at all) | No standalone merge step — `dump`/`compare` auto-ingest each side's embedded or out-of-band build/source pack directly |
 | Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
 | Several DSOs shipped together | `abicheck compare release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--instantiation-manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
@@ -70,8 +70,8 @@ and **which report** to produce (§4).
 The single biggest lever on what abicheck can *prove* is the quality of the
 inputs you give it — its five additive evidence layers, **L0–L4**. More
 evidence catches more breaks. Start at the layer your artifacts allow, and add
-more when you need more confidence. (The `scan` docs also use a sixth code,
-**`L5`** — the source graph abicheck *derives* from L3/L4; you never provide it.
+more when you need more confidence. (A sixth code, **`L5`**, names the source
+graph abicheck *derives* from L3/L4; you never provide it.
 See [Evidence & Detectability](../learn/evidence-and-detectability.md).) For a
 concrete, side-by-side look at *what each layer actually sees* on one example —
 and where each one goes blind — see the
@@ -82,7 +82,7 @@ and where each one goes blind — see the
 | **L0** | Binaries only | **Low** | Symbol add/remove, SONAME/version changes, basic metadata |
 | **L1** | + debug info | **Medium** | Struct layout, field offsets, enum values, calling convention, emitted-ABI type changes |
 | **L2** | + headers | **High** | Declared public API surface, source-level API breaks, inline/template-related surface |
-| **L3** | + build flags (`-p build/`) | **Higher** | The exact ABI-affecting flags the library was built with (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, …) |
+| **L3** | + build flags (`--build-info build/`) | **Higher** | The exact ABI-affecting flags the library was built with (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, …) |
 | **L4** | + sources (build/source pack) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument values, uninstantiated templates |
 
 abicheck reports the **artifact** depth it reached (L0–L2) as the
@@ -151,8 +151,8 @@ for a raw-shell/other-CI pattern see [CLI Usage](../use/cli-usage.md) and
 [Baseline Management](../use/baseline-management.md).
 
 *How often* to run which depth (PR gate vs. nightly vs. release-amortized) is
-covered by [Source-Scan Depth → Worked examples](../use/scan-levels.md#worked-examples)
-and its [Cost guide](../use/scan-levels.md#cost-guide-rules-of-thumb) — the
+covered by [Evidence Depth → Worked examples](../use/evidence-depth.md#worked-examples)
+and its [Cost guide](../use/evidence-depth.md#cost-guide-rules-of-thumb) — the
 L4/L5 cost cliff means "always run the deepest check on every push" is rarely
 the right default.
 

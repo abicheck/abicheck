@@ -10,48 +10,67 @@ lifecycle: active
 generated: false
 ---
 
-# Source-scan depth (`--depth`)
+# Evidence depth (`--depth`)
 
-`--depth` is one dial, shared by `compare`, `dump`, and `scan` alike: it
-selects how deep the evidence-collection goes (binary → headers → build →
-source). **`abicheck compare OLD NEW` is now the recommended way to run a
-depth-pinned, source-aware comparison against a real baseline** — it runs
-the always-on compiler-free pattern pre-scan and every cross-source check
-(`CROSS_SOURCE_EVOLUTION_CHECKS`) automatically on every invocation, takes
-the same `--depth`/
-`--since`/`--changed-path`/`--sources`/`--build-info` *flags* `scan` does,
-and needs no separate orchestrator command.
+`--depth` is one dial on the two commands that collect evidence — **`compare`
+and `dump`** — selecting how deep the collection goes (binary → headers →
+build → source). `abicheck compare OLD NEW` is the way to run a
+depth-pinned, source-aware comparison: it runs the always-on compiler-free
+pattern pre-scan and every cross-source check
+(`CROSS_SOURCE_EVOLUTION_CHECKS`) automatically on every invocation, and
+takes the `--depth`/`--since`/`--changed-path`/`--sources`/`--build-info`
+inputs directly. `abicheck dump INPUT --depth …` pins the same dial when you
+are capturing a reusable snapshot instead of comparing.
 
-**`compare`'s `--depth` is weaker than `scan`'s in two ways this page's
-later guarantees don't cover** (verified live, not just from `--help`):
-omitting it has no risk-driven `auto` selection (`compare` deterministically
-defaults to `headers`; see [Let risk pick the
-depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
-below), and a *pinned* `--depth build`/`--depth source` with no evidence to
-satisfy it does not fail loudly the way [the warning
-below](#what-each-depth-reaches) describes for `scan` — `compare --depth
-source` on a pair with zero build/source evidence exits `0`/`NO_CHANGE`
-rather than `scan`'s hard evidence-contract error. Everywhere this page
-states a depth guarantee (the fail-loud warning, "an auto depth with a
-diff seed resolves to source" in the PR-gate worked example below), read it
-as `scan`-only unless it says otherwise.
+!!! warning "`scan` is being retired — don't build new workflows on it"
+    The legacy `abicheck scan` command still exists and still accepts
+    `--depth`, but
+    [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+    retires it as a second analysis product. Its removal is a **hard
+    removal with no deprecation window** (ADR-068 D8): once the retirement
+    PR lands, `abicheck scan` exits `64` with `No such command`, naming
+    `compare --no-baseline` in the error. This page shows a `scan`
+    invocation only where `compare` has **no equivalent today** — each such
+    place says so explicitly and links to the tracking gap.
 
-`abicheck scan ARTIFACT [OPTIONS]` remains a fully supported command and is
-still the one to reach for in a few specific cases this page calls out as
-they come up: a single-build audit (`compare --no-baseline` is not a safe
-replacement for this yet — verified it crashes with an unhandled
-`AssertionError` instead of reporting when the candidate actually has a
-hygiene problem, at any depth including binary/header-only; see
-[Scenario S5](../integration/scenarios/single-build-audit.md)),
-`--crosscheck KEY=error` promotion syntax, or `--build-target` scoping
-(`compare` has no equivalent flag yet). `compare` gained its own `--budget`
-wall-clock guard (ADR-068 §3 #19), so that reason no longer applies. Where this
-page shows a `scan` command below, that's why. `abicheck scan ARTIFACT
-[OPTIONS]` takes the scanned binary/snapshot as a **positional** argument
-(not a flag); `--against OLD` is the previous dump/library/directory/package
-to compare against, and omitting it means a one-build audit/hygiene/
-source-consistency scan — `scan` is required for every no-baseline audit
-until that `compare --no-baseline` crash is fixed.
+**Two capabilities on this page are still `scan`-only** (verified live
+against the current build, not read off `--help`), and each is an open
+migration item in
+[`plans/one-comparison-product.md`](../contribute/plans/one-comparison-product.md)
+§3 rather than something `compare` silently covers:
+
+- **Risk-driven `auto` depth.** Omitting `--depth` on `compare`/`dump` is
+  *not* itself risk-based selection: with no `--since` seed and no
+  `--sources`/`--build-info`, it bottoms out at `headers`, but the choice
+  never scores the risk of what changed the way `scan`'s dedicated `auto`
+  rung does — `scan`'s risk-scored `auto` rung has no `compare`/`dump`
+  equivalent (§3 row 13) — see [Let risk pick the
+  depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now).
+- **The single-build audit.** `compare --no-baseline` (ADR-068 D2) exists
+  but does not yet reproduce the audit's findings — see [Single-build
+  audit](#single-build-audit-no-baseline) below and
+  [Scenario S5](../integration/scenarios/single-build-audit.md).
+
+**§3 row 28 is closed**: `compare` now shares `scan`/`dump`'s fail-loud
+evidence-contract floor — a *pinned* `--depth build`/`--depth source` that
+the collected evidence doesn't reach exits `7` (`exit.reasons:
+["evidence_contract_error"]`) on `compare` too, verified live. See the
+warning below for the one remaining difference between the three commands
+(what each writes when it fires).
+
+`--budget` no longer belongs on that list: `compare` gained its own
+`--budget` wall-clock guard (ADR-068 §3 #19) — exit `5` on overflow applies
+to both commands now. `--crosscheck KEY=error` promotion syntax and
+`--build-target` scoping still have no `compare` equivalent (`dump` does
+carry its own `--build-target`; `compare` does not).
+
+`abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
+**positional** argument (not a flag); `--against OLD` is the previous
+dump/library/directory/package to compare against, and omitting it means a
+one-build audit — `scan` is required for every no-baseline audit until
+`compare --no-baseline` reproduces the audit's findings in full: both the
+stored-snapshot crash *and* the live-binary empty-`changes` result above
+have to close, not just one of the two.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -68,25 +87,70 @@ until that `compare --no-baseline` crash is fixed.
 - **`--depth binary|headers|build|source`** — the single knob (ADR-037 D5 /
   ADR-043 D2). `binary` = L0/L1 exported symbols + binary metadata; `headers` =
   +L2 header AST; `build` = +L3 build context; `source` = +L4 replay & the L5
-  graph. On `scan`, **omit it for `auto`** — the default: risk-driven when a
-  `--since`/`--changed-path` seed is present, else a sensible preset. On
-  `compare`, omitting it defaults deterministically to `headers` — the
-  risk-driven `auto` rung is `scan`-only for now (see [Let risk pick the
+  graph. On both `compare` and `dump`, omitting `--depth` is **not** a fixed
+  `headers` default: each command infers the deepest rung its other inputs
+  already justify. With no `--sources`/`--build-info` at all, that inference
+  bottoms out at `headers` (nothing deeper to collect) — but supply
+  `--sources`/`--build-info` with no `--depth`, and `compare` infers
+  `source`/`build` from whichever was given, while `dump` goes further still
+  and always resolves to `source-target` internally, collecting everything
+  the supplied evidence reaches. Pin `--depth` explicitly whenever you want a
+  specific rung regardless of what other inputs are present, rather than
+  relying on this inference. (Legacy
+  `scan` instead defaults to a risk-driven `auto`; that rung has no
+  `compare`/`dump` equivalent — see [Let risk pick the
   depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
-  below).
-- **`--depth source` always analyses *something* real, never a zero-TU no-op**
-  (ADR-043 D3): with a `--since`/`--changed-path` seed it replays the *changed*
-  TUs; without one it replays the **whole current library target** (what an
-  older, now-removed `--depth full` rung used to require explicitly) — so it is
-  never silently empty, just potentially more expensive unseeded.
-- Absence of `--against` is already a single-build, no-baseline hygiene lint;
-  there is no separate `--audit` flag any more.
+  below.)
+- **When `--depth source` actually replays source, it always analyses
+  *something* real, never a zero-TU no-op** (ADR-043 D3): with a
+  `--since`/`--changed-path` seed it replays the *changed* TUs; without one
+  it replays the **whole current library target** (what an older,
+  now-removed `--depth full` rung used to require explicitly) — so a replay
+  that runs is never silently empty, just potentially more expensive
+  unseeded. This guarantee is about the replay *itself*, not about whether
+  the replay runs at all: with no usable `--sources`/`--build-info` at all,
+  `--depth source` never reaches L4 replay in the first place — a *pinned*
+  `--depth source` in that state fails loud (see the warning above), never
+  silently exiting on a shallow verdict.
+- A single-build, no-baseline audit is `compare --no-baseline CANDIDATE`
+  (ADR-068 D2), or legacy `scan CANDIDATE` with no `--against`. There is no
+  separate `--audit` flag on either.
 
-!!! warning "A pinned depth is a contract (fail-loud)"
+!!! warning "A pinned depth is a contract (fail-loud) — all three commands"
     Pinning a deep depth (`--depth build|source`) with **no source input**
-    (`--sources`/`--build-info`) is an error, not a silent shallow scan: there is
-    nothing to collect L3/L4/L5 from. Pass the evidence, or use the default `auto`
-    for a best-effort binary scan. (The `auto` default never errors this way.)
+    (`--sources`/`--build-info`), or with input that doesn't actually reach
+    the requested depth, is a hard evidence-contract error on `scan`,
+    `dump`, and `compare` alike — not a silent shallow run. They differ only
+    in what each one *writes* when it fires:
+
+    - **`scan`** exits `7`, its own dedicated evidence-contract exit code.
+    - **`dump`** raises `DumpDepthNotSatisfiedError`
+      (`cli_dump_helpers.check_requested_depth_satisfied`) and exits `1` —
+      **no snapshot is written**.
+    - **`compare`** exits `7` too (`exit.reasons:
+      ["evidence_contract_error"]`, folded through the same `ExitDecision`
+      precedence rule `scan` uses) — but it still writes a full report, with
+      the top-level `verdict` left at whatever the (unaffected)
+      compatibility comparison produced. Check `exit`, not `verdict`, to
+      detect this on `compare` — see [Exit
+      Codes](../reference/exit-codes.md) for the same caveat on `--abi3`'s
+
+    **This floor applies to `compare` only when at least one side is a live
+    extraction** (a binary/package operand, not a pre-existing
+    `.abi.json`/`.abi.snapshot`). Comparing **two already-serialized
+    snapshots** is exempted even when neither embeds L3/L4 evidence — a
+    pinned `--depth source` over `compare v1.abi.json v1.abi.json` reports
+    whatever the snapshots actually carry and exits `0`/`2`/`4` normally,
+    it does **not** exit `7`. A clean result from a both-snapshot
+    `compare` is therefore not proof the pinned depth was actually
+    reached — only a run with at least one live side, or an explicit look
+    at each snapshot's own recorded depth, tells you that.
+      identical axis.
+
+    `compare --dry-run` does not preview this failure, though: pinning an
+    unsatisfiable depth under `--dry-run` still exits `0` and reports `0
+    TU(s)` for the affected layers — see [Estimate before you
+    spend](#estimate-before-you-spend-dry-run) below.
 
 !!! note "`--mode`/`--source-method` are gone"
     Earlier releases exposed a precise `--source-method s0…s6` axis and
@@ -95,25 +159,21 @@ until that `compare --no-baseline` crash is fixed.
     a plain usage error, exit 64) — use `--depth`. (`--depth symbols` was
     likewise renamed to `--depth binary`, with no alias kept.)
 
-## Headers and includes — ARTIFACT side vs. `--against` side
+## Headers and includes — one side or both
 
 `-H/--header [old=|new=]PATH` and `-I/--include [old=|new=]PATH` are
-repeatable and side-aware. A bare path applies to the current ARTIFACT;
-prefix it with `old=` to scope it to the `--against` side instead (`new=` is
-the explicit, symmetric spelling of the default), e.g.
-`--header old=old/include --header new=new/include`. This replaces the old,
-separate `--baseline-header`/`--baseline-include` flags — there is no longer
-a distinct flag name for the `--against` side, only a prefix on the same flag
-(the same `old=`/`new=` convention `dump`/`compare` already use).
+repeatable and side-aware on `compare`. A bare path applies to **both**
+sides; prefix it with `old=`/`new=` to scope it to one, e.g.
+`--header old=old/include --header new=new/include`. `dump` takes the same
+flags without the prefix, since it has only one side.
 
 ```bash
-# Same header layout works for both ARTIFACT and the --against side
-abicheck scan new/libfoo.so -H include/ --against old/libfoo.abi.json
+# Same header layout for both sides
+abicheck compare old/libfoo.abi.json new/libfoo.so -H include/
 
 # The header layout moved between the old release and the new build
-abicheck scan new/libfoo.so \
-  --header old=old/include --header new=new/include \
-  --against old/libfoo.so
+abicheck compare old/libfoo.so new/libfoo.so \
+  --header old=old/include --header new=new/include
 ```
 
 ## What each depth reaches
@@ -198,7 +258,7 @@ results are structural diagnostics only in that matrix; only the dedicated
 bundle lane scores the single canonical case-level verdict and proves
 findings such as dangling intra-bundle imports and provider drift.
 
-## What input each depth needs — and how to get it
+## What input each depth needs, and how to get it
 
 Every depth needs a specific **input**; without it the matching coverage row is
 `not_collected` (the scan never silently pretends it ran). Pick the row that
@@ -207,7 +267,7 @@ matches your goal, then supply the input named in column 3.
 | Goal (use case) | `--depth` | Input you must provide | How to obtain it | If the input is missing |
 |---|---|---|---|---|
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
-| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **directory** + a C/C++ frontend | `-H include/ --public-header-dir include/`; `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
+| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **file or directory** + a C/C++ frontend | `-H include/` or `-H include/foo.h` on `compare`/`dump` (both establish the boundary identically; legacy `scan` instead takes `--public-header-dir DIRECTORY`, directory-only); `castxml` **or** `clang` on `PATH` | with no `-H` at all, there is no public-header set → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info` | L3 `not_collected`; the scan advises the exact remedy |
 | Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (ADR-043 D3 — never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
 | Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
@@ -222,13 +282,28 @@ the build graph:
 ```bash
 # CMake: configure-only (source also needs --sources . and a diff seed --since)
 cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-abicheck scan new/libfoo.so -H include/ --build-info build --depth source …
+abicheck compare old/libfoo.abi.json new/libfoo.so -H include/ \
+  --build-info new=build --sources new=. --since origin/main --depth source
 
 # Bazel: query the action graph (no build); --build-info sniffs the aquery
 # jsonproto and routes it straight to the Bazel adapter (ADR-037 D5 — no pack step)
 bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
-abicheck scan new/libonedal_core.so -H include/ --build-info aq.json --depth build …
+abicheck compare old/libonedal_core.abi.json new/libonedal_core.so -H include/ \
+  --build-info new=aq.json --depth build
 ```
+
+!!! warning "A stored baseline needs matching evidence on both sides"
+    Every example on this page that compares a stored `.abi.json` baseline
+    against a live NEW build and supplies build/source evidence for NEW
+    alone (the CMake and Bazel commands above, and the `.abicheck.yml`
+    `build.query` example below) only works when that stored baseline was
+    itself `dump`ped with matching `--sources`/`--build-info` at bake time.
+    A baseline with no embedded L3/L4 facts paired with a NEW side that has
+    them gives the two sides different extraction profiles, which can stop
+    the run with exit `16` `NOT_COMPARABLE` instead of performing the
+    advertised comparison. Either bake the same evidence into the baseline
+    at `dump` time, or pass matching `--sources old=`/`--build-info old=`
+    alongside the `new=` one shown.
 
 !!! tip "`--build-info` auto-detects the format (ADR-037 D5)"
     `--build-info` sniffs its argument by content, so each kind "just works":
@@ -288,32 +363,47 @@ tell an *internal* symbol removal (compatible) from a public one (breaking). To
 build it, the frontend must parse your public headers the way your compiler does:
 it needs the include roots they `#include`, the C++ standard they assume, and any
 `-D` feature macros that gate declarations. When that context is missing the
-header parse fails, the scan falls back to a binary-strict scope, and internal
+header parse fails, the run falls back to a binary-strict scope, and internal
 removals get reported as BREAKING.
 
-`scan` now takes the **same** compile-context flags as `dump` (they share one
-definition, so they never drift):
+**On `compare` and `dump` the compile context is a `.abicheck.yml` property,
+not a flag** — the toolchain a project's headers parse under is a stable
+property of the project, not a per-run decision
+([ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+D5). The only per-run compile-context input either command takes on the CLI
+is `-I/--include DIR` (an include root, repeatable). Everything else lives
+in the `compile:` block:
 
-| Flag | Purpose |
+| `compile:` key | Purpose |
 |---|---|
-| `--ast-frontend {auto,castxml,clang,hybrid}` | which frontend parses the headers (env `ABICHECK_AST_FRONTEND`); `hybrid` runs castxml and clang together |
-| `-I/--include DIR` | an include root your headers need (repeatable) |
-| `--compiler-option TOK` | one extra compiler flag verbatim (repeatable), e.g. `--compiler-option -std=c++20 --compiler-option -DFOO=1` |
-| `--compiler` / `--compiler-prefix` | a cross-compiler / cross-toolchain prefix |
-| `--sysroot DIR` | an alternate system root |
-| `--nostdinc` | do not search system includes (and disable the auto-probe below) |
+| `frontend` | which frontend parses the headers — `auto`/`castxml`/`clang`/`hybrid` (env `ABICHECK_AST_FRONTEND`); `hybrid` runs castxml and clang together |
+| `include_dirs` | include roots your headers need |
+| `std` | the C++ standard the headers assume, e.g. `c++20` |
+| `defines` | `-D` feature macros that gate declarations |
+| `options` | extra compiler flags, verbatim |
+| `lang` | force `c` or `c++` header parsing |
+| `compiler` | a cross-compiler / cross-toolchain prefix |
+| `sysroot` | an alternate system root |
+| `nostdinc` | do not search system includes (and disable the auto-probe below) |
+| `frontend_context`, `ast_frontend_fallback`, `allow_unsupported_castxml` | frontend-selection escape hatches |
+
+Legacy `scan` still exposes the same axis as CLI flags
+(`--ast-frontend`, `--compiler-option`, `--compiler`/`--compiler-prefix`,
+`--sysroot`, `--nostdinc`, `--lang`); those spellings retire with the
+command. The full key reference is
+[Config Keys](../reference/config-keys-reference.md); the `compile:` block's
+own semantics are in [Config File](../reference/config-file.md).
 
 ### Where each setting belongs (CLI vs config)
 
-Four layers resolve the context, **highest precedence first**:
+Three layers resolve the context, **highest precedence first**:
 
-1. **Explicit CLI flag** — a per-run override (`--compiler-option`, `--sysroot`, …).
-2. **`.abicheck.yml` `compile:` block** — your project's stable contract,
-   reviewed in PRs (see below). Put include roots, `std`, and `defines` here so
-   every scan/CI run is reproducible without re-typing them.
-3. **Compile-DB-derived flags** — *planned*: per-TU `-I`/`-std`/`-D` taken from a
+1. **`.abicheck.yml` `compile:` block** — your project's stable contract,
+   reviewed in PRs (see below). Put the frontend, include roots, `std`, and
+   `defines` here so every CI run is reproducible without re-typing them.
+2. **Compile-DB-derived flags** — *planned*: per-TU `-I`/`-std`/`-D` taken from a
    `--build-info`. Today the compile DB feeds L3–L5 only.
-4. **Auto-detected system includes** — the default floor (below).
+3. **Auto-detected system includes** — the default floor (below).
 
 ```yaml
 # .abicheck.yml
@@ -333,8 +423,9 @@ compiler to discover its built-in include paths. The `clang` frontend did not �
 so on a minimal container, a non-standard prefix, or a Conda-clang setup it could
 not find `<cstddef>` and the parse failed. The clang backend now **probes the
 host GNU compiler** (`g++ -E -v`) for its system include dirs and injects them, so
-a bare `scan -H include/` finds libstdc++ without extra flags. Disable it with
-`--nostdinc`, an explicit `--sysroot`, or `ABICHECK_AUTO_SYSTEM_INCLUDES=0`.
+a bare `compare … -H include/` finds libstdc++ without extra configuration.
+Disable it with `compile.nostdinc: true`, an explicit `compile.sysroot`, or
+`ABICHECK_AUTO_SYSTEM_INCLUDES=0`.
 
 !!! warning "Auto-detection is partial — know its limits"
     - It recovers **system** headers (libstdc++/libc), **not your project's own**
@@ -348,13 +439,13 @@ a bare `scan -H include/` finds libstdc++ without extra flags. Disable it with
       (`_GLIBCXX_USE_CXX11_ABI`) — and produce exactly the "scope divergence"
       false BREAKINGs this feature exists to remove.
     - Auto-detection reads the **host** toolchain → it is wrong for
-      cross-compiles (use `--compiler-prefix`/`--sysroot` or the config block) and
+      cross-compiles (set `compile.compiler`/`compile.sysroot`) and
       makes results host-dependent (pin context in config for reproducible CI).
 
 ## Worked examples
 
 Each example shows the command, what depth it pins, and what to read in the
-output. Every `compare`/`scan` run ends with a coverage block — always read
+output. Every run ends with a coverage block — always read
 it before trusting the verdict (see [Reading the coverage
 block](#reading-the-coverage-block)).
 
@@ -372,9 +463,12 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
 ```
 
 - **Depth:** pinned explicitly here (`--depth source`) since `compare` has
-  no risk-driven `auto` selection (it defaults to `headers` when omitted,
-  regardless of a diff seed) — on `scan`, by contrast, omitting `--depth`
-  with a diff seed present resolves to `auto`'s risk-driven `source`.
+  no risk-driven `auto` selection — omitting `--depth` never picks a rung by
+  risk, but with `--sources new=.` already given (as above) it would still
+  infer `source-target` from that input, not `headers`; the pin exists for
+  reproducibility, not because omitting it would fall back to `headers`
+  here. On `scan`, by contrast, omitting `--depth` with a diff seed present
+  resolves to `auto`'s risk-driven `source`.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
   break. `--budget` overflow (exit `5`) applies to both `compare` and `scan`
   — see [Exit Codes](../reference/exit-codes.md).
@@ -393,16 +487,18 @@ private-header leaks, and unversioned symbols:
 abicheck scan libfoo.so -H include/
 ```
 
-`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) is not a safe
-replacement for this yet: it only ever "worked" for an already-clean
-candidate, and crashes with an unhandled `AssertionError` instead of
-reporting a finding when the candidate actually has one of the problems
-this audit exists to catch (verified live against the
-[case143](../reference/examples/case143_audit_accidental_export.md)
-fixture below — see [Scenario S5](../integration/scenarios/single-build-audit.md)
-for the full account). It also doesn't yet accept `--sources`/
-`--build-info`, so the two checks below that need L3/L4 evidence need
-`scan` regardless:
+`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) is the declared
+replacement and the flag exists today, but **it does not yet reproduce this
+audit's findings** — verified live against the fixtures below, it either
+crashes (a stored `.abi.json` candidate: an unhandled `AssertionError` from
+`workflows/no_baseline_compare.py`'s `assert not diff.changes`) or renders a
+report with an empty `changes` list (a live binary plus `-H`), never the
+`exported_not_public` finding `scan` reports on the identical input. It also
+doesn't accept `--sources`/`--build-info`/`--depth`, so the L3/L4-dependent
+checks below need `scan` regardless. See
+[Scenario S5](../integration/scenarios/single-build-audit.md) and the
+[known gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)
+for the full account.
 
 Worked example cases for each audit finding:
 [case143](../reference/examples/case143_audit_accidental_export.md) (`exported_not_public`),
@@ -466,11 +562,13 @@ scope, tool availability) and prints the projected per-layer cost for *this*
 project without comparing anything or writing output. On `scan`, exits 0 for a
 resolvable preview; an invalid invocation or an unsatisfiable requested depth
 still exits nonzero, the same as the real run would (`scan`'s evidence-contract
-floor, see the warning above). **`compare` has no equivalent floor to preview**
-(the earlier qualification on `compare`'s `--depth` applies here too, verified
-live): `compare --dry-run --depth source` with no build/source evidence
-resolvable still exits 0 and simply reports `0 TU(s)` for the L3/L4/L5 rows,
-rather than failing the way `scan`'s own preview would.
+floor, see the warning above). **`compare --dry-run` does not preview its own
+real run's floor** (verified live, still true even now that `compare`'s
+real-run floor is closed — see the warning above): `compare --dry-run --depth
+source` with no build/source evidence resolvable still exits `0` and simply
+reports `0 TU(s)` for the L3/L4/L5 rows, where the equivalent real run would
+now exit `7`. Don't trust a clean `--dry-run` as proof the real run will
+succeed on a pinned deep depth.
 
 ```bash
 abicheck compare old.abi.json libfoo.so --sources new=. --depth source --dry-run
@@ -507,7 +605,7 @@ report to `-o`:
 
 ```bash
 abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
-  --sources new=. --depth source -o artifacts/libfoo-1.0-report.json
+  --sources new=. --depth source --format json -o artifacts/libfoo-1.0-report.json
 ```
 
 ### Let risk pick the depth — `auto` (local/dev only, `scan` only for now)
@@ -521,17 +619,26 @@ reproducibility.
 abicheck scan new.so -H include/ --since origin/main
 ```
 
-**`compare --depth` has no risk-driven `auto` rung yet** — omitting it
-defaults deterministically to `headers`, not a risk-based choice (plan §3
-row 13, not yet landed). For a fixed, reproducible CI depth, pin it
-explicitly on `compare` the same way you would on `scan`.
+**`compare --depth` has no risk-driven `auto` rung yet** (plan §3 row 13, not
+yet landed). Omitting `--depth` is never a risk-based choice on `compare`:
+with `--sources`/`--build-info` given it infers `source`/`build` from them
+(see [above](#what-input-each-depth-needs-and-how-to-get-it)); only with
+neither does it bottom out at `headers`. For a fixed, reproducible CI depth
+regardless of what other inputs are present, pin it explicitly on `compare`
+the same way you would on `scan`.
 
 ### Reading the coverage block
 
-`--depth` requests a level but `L` is *evidence*, so a scan can request a deep
+`--depth` requests a level but `L` is *evidence*, so a run can request a deep
 level and only reach a shallow one (clang missing, no sources, a parse error).
-`scan` never reports that as "failed" — it states the depth it **actually
-reached** and, for each disabled check, the input or tool to add:
+On `compare` **with no `--depth` pinned**, this is never reported as
+"failed" — the run states the depth it **actually reached** and, for each
+disabled check, the input or tool to add. (This best-effort behavior does
+not apply once `--depth build|source` is *pinned* and the evidence can't
+reach it: `scan` and `compare` both fail loud there — exit `7` — and `dump`
+raises `DumpDepthNotSatisfiedError` and exits `1` with no snapshot written;
+see the warning above. `compare` is the one exception that still prints a
+coverage block alongside its exit `7`, since it writes a report either way.)
 
 ```text
 Checks enabled for this scan (and why others are not):

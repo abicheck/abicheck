@@ -518,7 +518,7 @@ runs `make all` / `cmake --build`.
 
 The cost of each depth, the rules of thumb for choosing one, and the
 measured numbers are owned by
-[Source-Scan Depth § Cost guide](../use/scan-levels.md#cost-guide-rules-of-thumb)
+[Evidence Depth § Cost guide](../use/evidence-depth.md#cost-guide-rules-of-thumb)
 and [Performance](../contribute/performance.md); this page does not restate
 either.
 

@@ -679,14 +679,41 @@ section's *actual* state, not the target it originally described:
   commit's file ownership (concurrent CLI-flag-consolidation work also
   touches that file) and deferred to its own PR rather than attempted
   piecemeal here.
-- **Docs:** not started — every page listed below still needs the rewrite.
-  `docs/start/choose-your-workflow.md`,
+- **Docs — landed.** `docs/use/scan-levels.md` is renamed
+  `docs/use/evidence-depth.md` (still the evidence trio's third role, no
+  fourth page added) and reworked to lead with `compare`/`dump`, naming each
+  surviving `scan`-only capability explicitly rather than implying `compare`
+  covers it; `docs/start/choose-your-workflow.md`,
   `docs/integration/scenarios/single-build-audit.md`,
-  `docs/use/scan-levels.md`, `docs/use/github-action-source-scans.md`,
-  `docs/reference/exit-codes.md`, the example catalog rows, and the
-  `skills-src/` skill body.
-- **Examples/eval/validation:** not started — corpora still run through
-  `scan`, not re-driven through `compare`.
+  `docs/start/scanning-conda-packages.md`,
+  `docs/use/github-action-source-scans.md` (which gains the full
+  `_SCAN_NEEDS_LEGACY_CLI` routing table), `docs/reference/exit-codes.md`
+  (`compare`'s real exit-`7` rows plus an ADR-068 D8/D9 hard-removal warning
+  on the `scan` section), the nine G20 catalog case READMEs, and
+  `skills-src/` all follow. Two verified-live corrections worth not
+  re-deriving: `compare`/`dump` accept **no** compile-context flags at all
+  (that axis is `.abicheck.yml`'s `compile:` block, D5), and
+  `scanning-conda-packages.md`'s worked command had been unrunnable
+  (`scan --binary`, `--audit`).
+- **Examples/eval/validation — partially landed.**
+  `eval/scan_level_scaling.py` is re-driven onto `compare` (it had been
+  exiting 64 on every rung: `--binary`/`--baseline`/`--baseline-header`/
+  `--source-method` are all removed spellings) and its dead `graph` rung is
+  dropped. `tests/scenarios/ci_gating.yaml`'s SC-SCAN-BINARY-DEPTH-MATRIX-ARGS
+  `flow:` line is corrected to a command that parses.
+  `examples/workflows/audit-release` and the nine G20 audit cases stay on
+  `scan`, annotated as blocked rather than dropped from the coverage
+  denominator; `validation/scripts/run_oneapi_scan.py` stays on `scan` for
+  the network-history reason its own docstring records.
+- **Blocker discovered while doing the above:** `compare --no-baseline`
+  does not reproduce `scan`'s audit-mode findings at all — it aborts on
+  `workflows/no_baseline_compare.py`'s `assert not diff.changes` for a
+  stored snapshot candidate (all eleven G20 fixtures) and renders an empty
+  `changes` list for a live binary. The cause is structural: the audit is a
+  self-diff that asserts the diff is empty, an invariant the per-side
+  cross-source stages Phase 2a/2b moved *into* `compare()` legitimately
+  violate. Recorded in `docs/contribute/known-gaps.md` with the fixtures
+  and the shape of the fix; §3 row 2 is not closed until it is.
 
 ### Phase 5 — Presentation/analysis separation — **done**
 
@@ -896,8 +923,10 @@ regardless of their fate).
 **E. Keep for another reason — not deleted, not scan's:**
 `workflows/pattern_preprocessor_scan.py`, `report/pattern_preprocessor_scan.py`
 (the `compare`-pipeline survivors §3 #6/#8 already produced — distinct from
-the buildsource primitives they call), `docs/use/scan-levels.md`,
-`docs/use/github-action-source-scans.md`, `docs/reference/exit-codes.md`
+the buildsource primitives they call), `docs/use/evidence-depth.md` (renamed
+off `scan` in Phase 4's docs slice; it is the `--depth` dial's page, not
+`scan`'s), `docs/use/github-action-source-scans.md`,
+`docs/reference/exit-codes.md`
 (document the still-live `scan` command's real contract; rewritten only once
 `scan` is actually gone), the example catalog rows and fixture directories
 under `catalog/cases/case14x-151`/`case181` (single-build-audit examples —

@@ -28,8 +28,8 @@ generated: false
     cannot see, and the `--depth` dial that collects them.
     **Worked example** — [What Each Level Sees](what-each-level-sees.md): one
     tiny library walked up every level, with the actual data.
-    **Flags** — [Source-Scan Depth](../use/scan-levels.md): the `scan`
-    command reference with recipes.
+    **Flags** — [Evidence Depth](../use/evidence-depth.md): the `--depth`
+    flag and recipe reference.
 
 This page is the conceptual companion to the practical
 [Limitations](limitations.md) and [Tool Comparison](../reference/tool-comparison.md)
@@ -413,7 +413,7 @@ Three properties of the dial worth internalizing:
   `scan`, a `--since`/`--changed-path` seed keeps that replay to the changed
   TUs (CHANGED scope); without one, `scan` (and always, on `dump`/`compare`)
   pays the cliff for the whole target (TARGET scope). Flag-level detail:
-  [Source-Scan Depth](../use/scan-levels.md); measured numbers:
+  [Evidence Depth](../use/evidence-depth.md); measured numbers:
   [Performance § scan-level cost model](../contribute/performance.md#scan-level-cost-model-one-cliff-at-l4).
 - **Coverage is honest.** A scan can request a deep level and only reach a
   shallow one (clang missing, no sources); abicheck never reports that as
