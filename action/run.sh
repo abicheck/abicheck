@@ -1798,6 +1798,21 @@ elif [[ "$MODE" == "compare" ]]; then
     add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
     add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
     add_single_flag "--depth" "${INPUT_DEPTH:-}"
+    # --since/--changed-path (ADR-068 Phase 2c) were previously silently
+    # dropped in compare mode -- only the scan branches below forwarded
+    # them, despite this page's own docs (github-action-source-scans.md)
+    # already claiming `mode: compare` "takes the identical
+    # depth/since/changed-path/sources/build-info inputs mode: scan does"
+    # (Codex review, fresh evidence: `--since`'s scope-narrowing value was
+    # silently ignored and a pinned `--depth source` replayed the whole
+    # target instead of the PR's changed files, exactly the unrelated-
+    # findings/expensive-CI-run risk the docs were written to avoid).
+    # Single-pair-only, matching --sources/--build-info/--depth build/source
+    # above: the release fan-out doesn't collect build/source evidence for
+    # a directory/package operand at all, so there is nothing for --since/
+    # --changed-path to scope there either.
+    add_single_flag "--since" "${INPUT_SINCE:-}"
+    add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
   fi
 
   # Format — for SARIF, always write to a file so upload-sarif can find it.

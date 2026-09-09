@@ -168,6 +168,29 @@ class TestCompareModeForwardsBuildSourceEvidence:
         assert "--depth" not in cmd
 
 
+class TestCompareModeForwardsChangeFocusInputs:
+    """``since``/``changed-path`` were only ever forwarded to the CLI in
+    scan mode's branch -- github-action-source-scans.md already documents
+    ``mode: compare`` as taking "the identical depth/since/changed-path/
+    sources/build-info inputs mode: scan does", but the compare branch
+    silently dropped both: ``since:``'s scope-narrowing value was ignored
+    and a pinned ``depth: source`` replayed the whole target instead of the
+    PR's changed files (Codex review, fresh evidence)."""
+
+    def test_since_reaches_the_cli(self, tmp_path: Path) -> None:
+        cmd = _run_compare({"INPUT_SINCE": "origin/main"}, tmp_path)
+        assert "--since origin/main" in cmd
+
+    def test_changed_path_reaches_the_cli(self, tmp_path: Path) -> None:
+        cmd = _run_compare({"INPUT_CHANGED_PATH": "src/foo.cpp"}, tmp_path)
+        assert "--changed-path src/foo.cpp" in cmd
+
+    def test_neither_input_adds_no_flags(self, tmp_path: Path) -> None:
+        cmd = _run_compare({}, tmp_path)
+        assert "--since" not in cmd
+        assert "--changed-path" not in cmd
+
+
 def _run_scan(env_extra: dict[str, str], tmp_path: Path) -> str:
     """Like _run_compare, but drives run.sh's scan-mode branch instead."""
     fake_bin = tmp_path / "fakebin"
