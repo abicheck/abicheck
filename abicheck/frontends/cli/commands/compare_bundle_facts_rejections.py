@@ -530,6 +530,29 @@ def reject_unsupported_options(kwargs: dict[str, Any], *, new_is_stored: bool = 
             "with a stored-bundle-facts OLD_INPUT (was --demangle/"
             "--no-demangle)."
         )
+    if kwargs.get("explain_patterns"):
+        # Codex review, fresh evidence ("Honor pattern views for stored-
+        # bundle comparisons"): a per-library stored-BundleFacts comparison
+        # now genuinely can populate DiffResult.pattern_modulations (ADR-068
+        # D4's pattern-verdict modulation is unconditional as of the Tier-2
+        # fix above), but `--view patterns`'s own stderr-echo side channel
+        # (cli_audit.echo_pattern_modulations) is only wired for the live
+        # single-pair/release-fan-out paths -- this dispatcher's own
+        # `_render` never calls it, so the flag was silently accepted and
+        # did nothing. Same "no channel here" class of gap `demangle` above
+        # already has, and the same fix: reject explicitly rather than
+        # silently no-op. The ledger itself is unaffected -- `pattern_
+        # modulations` still appears in this comparison's own JSON output
+        # unconditionally (reporter.to_json's existing, flag-independent
+        # behavior), so no information is lost -- only the diagnostic
+        # stderr echo is unavailable here.
+        raise click.UsageError(
+            "--view patterns is not supported together with a "
+            "stored-bundle-facts OLD_INPUT: there is no per-library stderr "
+            "echo channel for this comparison shape. The pattern-"
+            "modulation ledger itself still appears in this comparison's "
+            "own JSON output unconditionally."
+        )
     if new_is_stored:
         _reject_new_side_extraction_options_for_stored_pair(kwargs)
 

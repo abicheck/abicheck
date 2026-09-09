@@ -226,6 +226,22 @@ def compare_snapshots(
             public_surface_allowlist
         ) | _snapshot_contract_symbols(old)
     query = PublicSurfaceQuery()
+    # Codex review, fresh evidence (PR #1154 follow-up: "Enforce automatic
+    # analysis in public snapshot comparisons"): ADR-068 D4 made pattern-
+    # verdict modulation and surface-metrics computation unconditional --
+    # the same class of AUTO analysis `cross_source_checks` above is never
+    # even a parameter of, for the identical D5 reason ("a flag that merely
+    # enables useful analysis" has no legitimate off position). Forcing it
+    # only at each of this function's own callers (service_compare_pipeline.
+    # classify_compare_pair, the stored-BundleFacts drivers) left this
+    # documented public Tier-2 verb itself -- what `abicheck.service.
+    # compare_snapshots` *is* -- still trusting its own defaultable-False
+    # parameters, so a direct caller of the public API got a different
+    # answer for the same snapshot pair depending on which entry point it
+    # used. Forced unconditionally here instead, at the one chokepoint
+    # every caller of this verb shares; `pattern_verdicts`/`surface_metrics`
+    # stay as accepted, now-ignored parameters (never removed outright, so
+    # no existing caller's keyword argument becomes an error).
     return compare(
         old,
         new,
@@ -235,8 +251,8 @@ def compare_snapshots(
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
         extra_changes=extra_changes,
-        pattern_verdicts=pattern_verdicts,
-        surface_metrics=surface_metrics,
+        pattern_verdicts=True,
+        surface_metrics=True,
         collapse_versioned_symbols=collapse_versioned_symbols,
         public_surface_allowlist=public_surface_allowlist,
         reconcile_build_context=reconcile_build_context,

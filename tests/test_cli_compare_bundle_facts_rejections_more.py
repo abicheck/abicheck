@@ -186,6 +186,57 @@ class TestCompareOldBundleFactsEarlyRejections:
         assert code == 1, out
         assert "--demangle" not in out
 
+    def test_explicit_explain_patterns_is_rejected(self, tmp_path: Path) -> None:
+        # Codex review, fresh evidence ("Honor pattern views for stored-
+        # bundle comparisons"): --view patterns's own stderr-echo channel
+        # (cli_audit.echo_pattern_modulations) is only wired for the live
+        # single-pair/release-fan-out paths -- this dispatcher's own
+        # _render never calls it, so the flag was silently accepted and
+        # did nothing even though DiffResult.pattern_modulations can now
+        # genuinely be populated (pattern-verdict modulation is
+        # unconditional). Same "no channel here" class of gap --demangle
+        # above already has, and the same fix.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--view",
+            "patterns",
+            "--format",
+            "markdown",
+        )
+
+        assert code == 64
+        assert "--view patterns" in out
+
+    def test_default_explain_patterns_is_not_rejected_by_itself(
+        self, tmp_path: Path
+    ) -> None:
+        # The silent default (False, "no echo requested") is left
+        # un-rejected -- confirmed via a malformed OLD_FACTS document that
+        # fails for an unrelated reason first, the same proof shape as
+        # test_default_demangle_is_not_rejected_by_itself above.
+        facts_path = tmp_path / "old.bundlefacts.json"
+        facts_path.write_text(_MALFORMED_BUT_CLASSIFIABLE_JSON)
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--format",
+            "markdown",
+        )
+
+        assert code == 1, out
+        assert "--view patterns" not in out
+
     def test_report_mode_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: every nested per-library report is rendered via
         # reporter.to_json(diff) with no report_mode argument -- always the

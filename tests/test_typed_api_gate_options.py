@@ -913,3 +913,68 @@ class TestPatternVerdictsIsUnconditionalAtTier2:
         run_compare_request(request)
 
         assert seen_pattern_verdicts == [True]
+
+
+class TestPatternVerdictsIsUnconditionalAtTheTier2Verb:
+    """Codex review, fresh evidence (PR #1154 follow-up: "Enforce automatic
+    analysis in public snapshot comparisons"). a9c4880e forced
+    `pattern_verdicts=True` only at `service_compare_pipeline.
+    classify_compare_pair`'s own call and at the stored-BundleFacts
+    drivers -- but all three just forward the value into
+    `workflows.compare_policy.compare_snapshots` (what `abicheck.service.
+    compare_snapshots` *is*, ADR-037 D1's documented public Tier-2 verb),
+    which itself still trusted its own defaultable-``False`` parameters.
+    A direct caller of the public API (bypassing every one of those three
+    call sites) still got modulation disabled. Fixed at the one shared
+    chokepoint instead: `compare_snapshots` now forces both unconditionally
+    regardless of what it's called with, the same "accepted, now-ignored
+    parameter" treatment `cross_source_checks` already established one
+    level up in this exact function for the identical D5 reason."""
+
+    def test_default_call_forwards_true_to_the_core(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import abicheck.workflows.compare_policy as compare_policy_module
+        from abicheck.service import compare_snapshots
+
+        old, new = _breaking_pair()
+
+        real_compare = compare_policy_module.compare
+        seen: list[tuple[object, object]] = []
+
+        def _spy_compare(old_snap, new_snap, *args, **kwargs):
+            seen.append((kwargs.get("pattern_verdicts"), kwargs.get("surface_metrics")))
+            return real_compare(old_snap, new_snap, *args, **kwargs)
+
+        monkeypatch.setattr(compare_policy_module, "compare", _spy_compare)
+
+        # Bare call -- no pattern_verdicts/surface_metrics kwarg at all,
+        # exactly a direct typed-API caller that never learned about either
+        # flag.
+        compare_snapshots(old, new)
+
+        assert seen == [(True, True)]
+
+    def test_explicit_false_is_still_overridden(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The parameters are accepted but ignored -- even an explicit
+        ``False`` cannot turn the analysis off, matching `cross_source_
+        checks`'s own "no legitimate off position" precedent."""
+        import abicheck.workflows.compare_policy as compare_policy_module
+        from abicheck.service import compare_snapshots
+
+        old, new = _breaking_pair()
+
+        real_compare = compare_policy_module.compare
+        seen: list[tuple[object, object]] = []
+
+        def _spy_compare(old_snap, new_snap, *args, **kwargs):
+            seen.append((kwargs.get("pattern_verdicts"), kwargs.get("surface_metrics")))
+            return real_compare(old_snap, new_snap, *args, **kwargs)
+
+        monkeypatch.setattr(compare_policy_module, "compare", _spy_compare)
+
+        compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=False)
+
+        assert seen == [(True, True)]
