@@ -1388,6 +1388,56 @@ def _reclassified_by_for_change(c: object, policy_file: object | None) -> str | 
     return cast(str, rule.label or rule.reason or rule.to_verdict.value)
 
 
+def release_finding_entry(
+    c: Change, bucket: str, policy_file: object | None
+) -> dict[str, object]:
+    """The release fan-out's own minimal finding dict, plus ``reclassified_by``.
+
+    Same ``bucket``/``kind``/``symbol``/``description``/``source_location``
+    shape ``cli_compare_release_matrix._release_finding_dicts`` has always
+    built inline, with one addition: ``reclassified_by`` (schema 2.31) when a
+    ``reclassify:`` rule decided this change's effective verdict, resolved
+    through the identical :func:`_reclassified_by_for_change` helper
+    ``_change_to_dict``/``_leaf_entry``/``cli_scan_baseline.
+    _baseline_finding_dicts`` already use -- so all four entry builders agree
+    on which rule (if any) fired for a shared finding, instead of the release
+    fan-out's own projection never computing the field at all. Lives here
+    (not in ``cli_compare_release_matrix.py``, which sits at its own
+    ``no_growth`` line cap with no headroom) since this module already owns
+    ``_reclassified_by_for_change`` and every other entry builder that calls
+    it.
+    """
+    entry: dict[str, object] = {
+        "bucket": bucket,
+        "kind": c.kind.value,
+        "symbol": c.symbol,
+        "description": c.description,
+        "source_location": c.source_location,
+    }
+    reclassified_by = _reclassified_by_for_change(c, policy_file)
+    if reclassified_by:
+        entry["reclassified_by"] = reclassified_by
+    return entry
+
+
+def release_finding_detail_lines(entry: dict[str, object]) -> list[str]:
+    """Markdown detail bullets (``description``/``reclassified_by``) for one
+    :func:`release_finding_entry` dict -- the Markdown counterpart of that
+    JSON entry, for ``cli_compare_receipt._release_md_library_findings``
+    (Codex review, PR #1176 follow-up: the release Markdown report rendered
+    kind/symbol only, discarding ``reclassified_by`` even after the JSON
+    projection above gained it).
+    """
+    lines: list[str] = []
+    description = entry.get("description")
+    if description:
+        lines.append(f"  - {description}")
+    reclassified_by = entry.get("reclassified_by")
+    if reclassified_by:
+        lines.append(f"  - _Reclassified by:_ {reclassified_by}")
+    return lines
+
+
 def _change_to_dict(
     c: object,
     *,

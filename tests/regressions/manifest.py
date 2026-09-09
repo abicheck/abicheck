@@ -1283,6 +1283,18 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="report.finding_entry_builder_parity",
+        invariant=(
+            "Every per-finding entry-builder for a shared `Change` "
+            "(`compare`'s `changes[]`, `scan --against`'s baseline dicts, "
+            "the release fan-out's capped `findings`) must resolve an "
+            "audit field (e.g. `reclassified_by`) via one canonical helper "
+            "-- never a sibling silently omitting a field another computes."
+        ),
+        fixed_by=(1176,),
+        seed_tests=("tests/test_disposition_reclassification.py",),
+    ),
 )
 
 
