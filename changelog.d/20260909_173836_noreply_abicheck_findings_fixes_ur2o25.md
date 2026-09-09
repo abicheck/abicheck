@@ -146,7 +146,14 @@
   through, matching the native and ABICC-compatible HTML renderers —
   previously an unattributed finding here always read as
   `artifact_proven`, unlike every other HTML surface (Codex review,
-  fresh evidence).
+  fresh evidence). The breaking-for-app (relevant) table additionally
+  stamps `EvidenceStatus.CONSUMER_PROVEN` unconditionally, matching the
+  identical override `reporter.py`'s JSON projection already applies to
+  the same finding set — a `breaking_for_app` finding is proven relevant
+  by the supplied consumer's own import table, independent of the
+  library-to-library comparison's own (possibly thin) evidence tiers, so
+  only the irrelevant-for-app table is tier-derived (Codex review, fresh
+  evidence, round 2).
 - `report/render_markdown.py`'s `_format_change_md` (the root-cause
   Markdown formatter) now takes the caller's already-resolved impact
   *string* instead of an `EvidenceStatus` and calling `impact_for()`

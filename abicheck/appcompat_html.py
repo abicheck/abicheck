@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Shared page chrome (document frame, verdict palette, footer) + the change table.
+from .checker_policy import EvidenceStatus
 from .demangle import demangle_batch, prewarm_demangle_batch
 from .html_report import _abbr_symbol_text, _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
@@ -65,7 +66,12 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
     full_diff = getattr(result, "full_diff", None)
     # Codex review, fresh evidence: threaded into both _changes_table()
     # calls below so an UNATTRIBUTED finding gets the same evidence caveat
-    # here that the native/ABICC HTML renderers already carry.
+    # here that the native/ABICC HTML renderers already carry. The
+    # relevant (breaking_for_app) table's own call additionally passes
+    # EvidenceStatus.CONSUMER_PROVEN -- those findings are proven by the
+    # supplied consumer's own import table, not by evidence_tiers, the
+    # same override reporter.py's JSON projection already stamps for the
+    # identical finding set (Codex review, fresh evidence, round 2).
     evidence_tiers = getattr(full_diff, "evidence_tiers", None) or ()
 
     # Batch-demangle every C++ symbol up front, the same way
@@ -176,7 +182,7 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
   <p style='padding:0 16px; font-size:0.88em; color:#666;'>
     These library changes affect symbols your application uses.
   </p>
-  {_changes_table(list(breaking), demangle, evidence_tiers)}
+  {_changes_table(list(breaking), demangle, evidence_tiers, EvidenceStatus.CONSUMER_PROVEN)}
 </div>"""
     elif total_changes > 0:
         relevant_html = f"""<div class='section section-added'>

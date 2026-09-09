@@ -34,7 +34,12 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .checker_policy import HasKind, evidence_status_for_result, impact_for
+from .checker_policy import (
+    EvidenceStatus,
+    HasKind,
+    evidence_status_for_result,
+    impact_for,
+)
 
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_CSS`` is re-exported via
@@ -101,7 +106,9 @@ _abbr_symbol_text = abbr_symbol_text
 
 
 def compute_full_change_rows(
-    changes: Iterable[object], evidence_tiers: Sequence[str] = ()
+    changes: Iterable[object],
+    evidence_tiers: Sequence[str] = (),
+    evidence_status_override: EvidenceStatus | None = None,
 ) -> tuple[ChangeRow, ...]:
     """Resolve every fact a changes-table row needs for one change: the four
     registry-lookup decisions (kind string, category, impact text, ABICC
@@ -118,6 +125,14 @@ def compute_full_change_rows(
 
     *evidence_tiers* lets an UNATTRIBUTED finding's impact text carry the
     same evidence caveat the JSON/Markdown views already do (Codex review).
+
+    *evidence_status_override*, when given, wins over the tier-derived
+    status for every row -- appcompat's own relevant-changes table (Codex
+    review, fresh evidence) needs this: a finding in `breaking_for_app` is
+    proven by the supplied consumer's own import table, independent of what
+    the library-to-library comparison's evidence_tiers alone show, the same
+    override `reporter.py`'s JSON projection already stamps
+    (`EvidenceStatus.CONSUMER_PROVEN`) for the identical finding set.
     """
     rows = []
     for ch in changes:
@@ -126,7 +141,7 @@ def compute_full_change_rows(
         relevance = getattr(ch, "contract_relevance", None)
         assurance = getattr(ch, "contract_assurance", None)
         decision = getattr(ch, "compatibility_decision", None)
-        evidence_status = (
+        evidence_status = evidence_status_override or (
             evidence_status_for_result(cast(HasKind, ch), evidence_tiers)
             if kind
             else None
@@ -171,6 +186,7 @@ def _changes_table(
     changes: list[object],
     demangle: bool = True,
     evidence_tiers: Sequence[str] = (),
+    evidence_status_override: EvidenceStatus | None = None,
 ) -> str:
     """Native changes table. Kept at its original signature -- `appcompat_html.py`
     imports it, and it has its own direct test coverage -- so the per-change
@@ -184,9 +200,18 @@ def _changes_table(
     artifact-proven, unlike the native/ABICC HTML renderers (Codex
     review, fresh evidence). Omitting it (the default) keeps every other
     caller byte-identical to before this parameter existed.
+
+    *evidence_status_override* (Codex review, fresh evidence) lets
+    appcompat's relevant-changes table stamp ``EvidenceStatus.
+    CONSUMER_PROVEN`` the same way ``reporter.py``'s JSON projection
+    already does for `breaking_for_app` -- a finding proven by the
+    supplied consumer's own import table must not be demoted to
+    "plausible, not confirmed" just because the library-to-library
+    comparison's own evidence_tiers happen to be thin.
     """
     return render_changes_table(
-        compute_full_change_rows(changes, evidence_tiers), demangle
+        compute_full_change_rows(changes, evidence_tiers, evidence_status_override),
+        demangle,
     )
 
 
