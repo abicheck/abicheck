@@ -227,12 +227,15 @@ class TestDebugFormatSelector:
         assert result.exit_code == 64
         assert "No such option" in result.output
 
-    def test_dump_compile_db_hidden(self):
-        # --compile-db-filter is a build-evidence-tier flag, folded behind
-        # --help-all by dump's curated --help (G21.8 M2).
+    def test_dump_compile_db_and_its_filter_are_both_gone(self):
+        # `--compile-db` was folded into `--build-info` long ago, and
+        # one-comparison-product.md Phase 7i removed `--compile-db-filter`
+        # too -- `.abicheck.yml`'s `build.compile_db_filter` is its only
+        # spelling now (a property of the project's layout, not a per-run
+        # value), so neither appears in `dump --help-all` at all.
         out = CliRunner().invoke(main, ["dump", "--help-all"]).output
         assert "--compile-db " not in out
-        assert "--compile-db-filter" in out  # the filter alias stays visible
+        assert "--compile-db-filter" not in out
 
     def test_debug_format_auto_accepted_via_config(self, tmp_path, monkeypatch):
         # Auto-discovered config (cwd-upward), no --config flag.
