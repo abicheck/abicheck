@@ -1216,22 +1216,37 @@ def _run_baseline_compare(
     # D4/D5, "no opt-out for a real front end" -- it is not one), but
     # `scan`'s own `--crosscheck` flag predates that stage and its `off`
     # level is a `scan`-specific contract, not an opt-out on `compare`.
-    # Drop only the findings for checks the caller explicitly disabled,
-    # exactly like scan's dedicated single-snapshot `crosscheck` mechanism
-    # already does via `CrosscheckConfig.enabled`.
+    # Move only the findings for checks the caller explicitly disabled into
+    # `suppressed_changes`, exactly like scan's dedicated single-snapshot
+    # `crosscheck` mechanism already does via `CrosscheckConfig.enabled` --
+    # never a bare delete: AGENTS.md's "record before disposing" rule
+    # (ADR-067) applies here the same as any other suppression, so the
+    # observed finding stays in the audit trail with its own rule/reason
+    # (Codex review, second round) instead of silently vanishing.
     if enabled_checks is not None:
         from .buildsource.crosscheck import ALL_CHECKS
+        from .workflows.disposition import record_suppressed_change
 
         _disabled = frozenset(ALL_CHECKS) - enabled_checks
         if _disabled:
-            _dropped = {
-                id(c)
+            _dropped = [
+                c
                 for c in diff.changes
                 if getattr(c, "cross_source_evolution", None)
                 and getattr(c.kind, "value", None) in _disabled
-            }
+            ]
             if _dropped:
-                diff.changes = [c for c in diff.changes if id(c) not in _dropped]
+                _dropped_ids = {id(c) for c in _dropped}
+                diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
+                for c in _dropped:
+                    c.suppression_rule = f"crosscheck:{c.kind.value}=off"
+                    record_suppressed_change(
+                        getattr(diff, "disposition_ledger", None),
+                        c,
+                        rule=None,
+                        application_point="scan_crosscheck_off",
+                    )
+                diff.suppressed_changes = [*diff.suppressed_changes, *_dropped]
                 if policy_file is not None:
                     diff.verdict = policy_file.compute_verdict(diff.changes)
                 else:

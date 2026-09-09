@@ -683,6 +683,13 @@ class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
         payload = json.loads(result.stdout)
         assert payload["verdict"] == "NO_CHANGE"
         assert not (payload.get("diff") or {}).get("findings")
+        # AGENTS.md's "record before disposing" rule (Codex review, second
+        # round): the finding is not silently erased -- it stays in the
+        # audit trail, disposed under its own recorded rule/reason.
+        suppressed = (payload.get("diff") or {}).get("suppressed") or []
+        assert len(suppressed) == 1
+        assert suppressed[0]["kind"] == "exported_not_public"
+        assert suppressed[0]["suppression_rule"] == "crosscheck:exported_not_public=off"
 
     def test_no_crosscheck_flag_still_gates_by_default(
         self, tmp_path: Path
