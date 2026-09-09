@@ -94,7 +94,6 @@ jobs:
             "inputs/debs/${runtime_deb}" \
             --devel-pkg "old=inputs/debs/${devel_deb}" \
             --devel-pkg "new=inputs/debs/${devel_deb}" \
-            --no-bundle-analysis \
             --format json \
             -o reports/realworld/zlib-deb-self.json
           python - <<'PY'
@@ -109,7 +108,10 @@ jobs:
           # never a real ABI change (ADR-035 D4: these findings are advisory/
           # suppressible by design, not part of the compatibility verdict).
           assert data["verdict"] in {"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"}
-          assert "bundle_findings" not in data
+          # Phase 7d (one-comparison-product.md §4.1): --no-bundle-analysis
+          # is gone -- bundle-level analysis always runs now, so these keys
+          # are always present (a clean self-compare, so an empty list).
+          assert data["bundle_findings"] == []
           PY
 
       - name: Compare a real Debian package against itself, with --contract
@@ -130,7 +132,6 @@ jobs:
             "inputs/debs/${runtime_deb}" \
             --devel-pkg "old=inputs/debs/${devel_deb}" \
             --devel-pkg "new=inputs/debs/${devel_deb}" \
-            --no-bundle-analysis \
             --contract public \
             --format json \
             -o reports/realworld/zlib-deb-self-contract.json

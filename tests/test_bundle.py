@@ -3598,11 +3598,12 @@ class TestCompareReleaseBundleE2E:
             c.kind == ChangeKind.FUNC_REMOVED for c in by_library["libfoo.so.2"].changes
         )
 
-    def test_compare_release_no_bundle_analysis_opts_out(self, tmp_path: Path) -> None:
-        # --no-bundle-analysis must suppress bundle output and report only
-        # per-library results.
-        import json as _json
-
+    def test_no_bundle_analysis_flag_removed(self, tmp_path: Path) -> None:
+        """--no-bundle-analysis is gone outright (Phase 7d,
+        one-comparison-product.md §4.1, ADR-068 D5) -- it was exactly the
+        "escape hatch that disables real analysis" D4/D5 rule out, with
+        suppression policy as the supported route instead. The old
+        spelling exits 64 with no hidden alias."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -3627,10 +3628,43 @@ class TestCompareReleaseBundleE2E:
                 "json",
             ],
         )
+        assert result.exit_code == 64
+        assert "--no-bundle-analysis" in result.output
+
+    def test_compare_release_bundle_analysis_always_runs(self, tmp_path: Path) -> None:
+        """Bundle-level cross-library analysis always runs now -- there is
+        no CLI opt-out (Phase 7d)."""
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(
+            old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n"
+        )
+        _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old),
+                str(new),
+                "--format",
+                "json",
+            ],
+        )
         data = _json.loads(result.stdout)
-        # bundle_verdict / bundle_findings must NOT be present.
-        assert "bundle_verdict" not in data
-        assert "bundle_findings" not in data
+        assert "bundle_verdict" in data
+        # A single-library "bundle" has no sibling to form a cross-library
+        # finding against, so the always-present key is an empty list here
+        # -- not merely present, per the JSON output contract this asserts.
+        assert data["bundle_findings"] == []
 
     def test_compare_release_with_manifest_emits_manifest_finding(
         self,

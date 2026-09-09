@@ -258,6 +258,36 @@ class TestConfigPrecedence:
                 "Phase 7d override was supposed to be deleted, not just hidden"
             )
 
+    def test_resource_limits_default(self) -> None:
+        """Phase 7g (one-comparison-product.md §4.1/§3 #21): unset resolves
+        to `None`, so the caller applies
+        `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`."""
+        r = resolve_compare_config(
+            None,
+            cli_severity_preset=None, cli_scope_public=None,
+        )
+        assert r.resource_limits_max_bundle_facts_decode_nodes is None
+
+    def test_resource_limits_config_beats_default(self) -> None:
+        """Phase 7g: resource_limits.max_bundle_facts_decode_nodes is the
+        only source -- no CLI override at all, same shape as the Phase 7d
+        release/bundle topology knobs above."""
+        cfg = BuildConfig(resource_limits_max_bundle_facts_decode_nodes=5_000_000)
+        r = resolve_compare_config(
+            cfg,
+            cli_severity_preset=None, cli_scope_public=None,
+        )
+        assert r.resource_limits_max_bundle_facts_decode_nodes == 5_000_000
+
+    def test_resource_limits_has_no_cli_override(self) -> None:
+        """Phase 7g: `resolve_compare_config` accepts no `cli_*` argument
+        for the resource-limits knob (ADR-068 D5 guard #2, "no escape
+        hatch")."""
+        import inspect
+
+        params = inspect.signature(resolve_compare_config).parameters
+        assert "cli_max_json_object_nodes" not in params
+
 
 # ── round-trip ─────────────────────────────────────────────────────────────────
 
@@ -296,6 +326,19 @@ class TestConfigRoundtrip:
         assert cfg.debug_debuginfod is True
         assert cfg.debug_debuginfod_url == "https://x.example"
         assert cfg.scope_show_redundant is True
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_resource_limits_block_invalid_type_rejected(self) -> None:
+        with pytest.raises(ValueError, match="resource_limits.max_bundle_facts_decode_nodes"):
+            BuildConfig.from_dict(
+                {"resource_limits": {"max_bundle_facts_decode_nodes": "lots"}}
+            )
+
+    def test_resource_limits_block_parses_and_roundtrips(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {"resource_limits": {"max_bundle_facts_decode_nodes": 5_000_000}}
+        )
+        assert cfg.resource_limits_max_bundle_facts_decode_nodes == 5_000_000
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
     def test_yaml_file_roundtrip(self, tmp_path: Path) -> None:

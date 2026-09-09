@@ -901,8 +901,10 @@ class TestCompareReleaseTarPackages:
         # Should succeed — NO_CHANGE since snapshots are identical
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
 
-    def test_keep_extracted_flag(self, tmp_path: Path) -> None:
-        """Verify --keep-extracted prevents cleanup."""
+    def test_keep_extracted_flag_removed(self, tmp_path: Path) -> None:
+        """--keep-extracted is gone outright (Phase 7d,
+        one-comparison-product.md §4.1, ADR-068 D5): the old spelling exits
+        64 with no hidden alias -- extraction cleanup is now unconditional."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -923,9 +925,7 @@ class TestCompareReleaseTarPackages:
             "compare", str(tar), str(tar),
             "--format", "json", "--keep-extracted",
         ])
-        assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
-        # The stderr should mention kept files
-        # (CliRunner combines output by default)
+        assert result.exit_code == 64, f"Exit {result.exit_code}: {result.output}"
 
 
 class TestCompareReleaseDirectoryPassthrough:
@@ -4113,7 +4113,7 @@ class TestPackageExtractorProtocol:
         assert isinstance(DirExtractor(), PackageExtractor)
 
 
-# ── CLI integration: --dso-only and --keep-extracted ─────────────────────
+# ── CLI integration: --dso-only (config) and extraction cleanup ──────────
 
 
 class TestCompareReleaseDsoOnly:
@@ -4153,9 +4153,12 @@ class TestCompareReleaseDsoOnly:
         assert '"reasons": [\n      "no_comparison_completed"\n    ]' in result.stdout
 
 
-class TestKeepExtractedActuallyKeeps:
-    def test_temp_dirs_survive_with_keep_extracted(self, tmp_path: Path) -> None:
-        """Verify --keep-extracted actually preserves temp dirs after command exits."""
+class TestExtractedTempDirsAlwaysCleanedUp:
+    def test_temp_dirs_removed_without_keep_extracted(self, tmp_path: Path) -> None:
+        """Extraction cleanup is unconditional now (Phase 7d,
+        one-comparison-product.md §4.1, ADR-068 D5): --keep-extracted is
+        gone, so there is no "kept files" message and no surviving tempdir
+        to report."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -4178,11 +4181,10 @@ class TestKeepExtractedActuallyKeeps:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(archive), str(archive),
-            "--format", "json", "--keep-extracted",
+            "--format", "json",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
-        # Check output mentions kept dirs
-        assert "Extracted files kept in:" in result.output
+        assert "Extracted files kept in:" not in result.output
 
 
 # ── RpmExtractor post_validate tests ─────────────────────────────────────

@@ -227,7 +227,7 @@ def _load_library_overrides(
     return overrides.headers, overrides.includes, overrides.compile
 
 
-def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any) -> None:
+def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explicit: bool = False, **kwargs: Any) -> None:
     """Handle a ``compare OLD_FACTS NEW_INPUT`` invocation where OLD_FACTS
     classified as a stored BundleFacts document.
 
@@ -239,6 +239,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     ``compare_release_against_bundle_facts`` (which extracts and dumps
     NEW_INPUT as a live directory/package). The default ``False`` is the
     original stored/live shape, unchanged.
+
+    *config_explicit* is ``compare_cmd``'s own ``_config_explicit``,
+    threaded through unchanged -- by dispatch time ``kwargs["config"]``
+    no longer distinguishes an explicit path from an auto-discovered one.
 
     *kwargs* is ``compare_cmd``'s already-parsed, already-``normalize_sided_
     options``-processed option dict -- the same dict that would otherwise be
@@ -312,7 +316,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
         load_build_config_with_digest as _load_cfg_early,
     )
     from ..options.params import _load_suppression_and_policy
-    from .compare_bundle_facts_rejections import reject_unsupported_options
+    from .compare_bundle_facts_rejections import (
+        reject_unsupported_options,
+        resolve_max_json_object_nodes_cfg,
+    )
 
     _early_cfg_path = kwargs.get("config")
     _early_cfg = None
@@ -402,14 +409,23 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
     include_private_dso_cfg = (
         bool(_bundle_cfg.release_include_private_dso) if _bundle_cfg else False
     )
+    # Phase 7g: --max-json-object-nodes is gone -- resource_limits.
+    # max_bundle_facts_decode_nodes in .abicheck.yml is its only source now
+    # -- see resolve_max_json_object_nodes_cfg()'s own docstring (Codex).
+    max_json_object_nodes_cfg = resolve_max_json_object_nodes_cfg(
+        _bundle_cfg.resource_limits_max_bundle_facts_decode_nodes if _bundle_cfg else None,
+        config_explicit=config_explicit,
+        default=importlib.import_module("abicheck.bundle_facts").DEFAULT_MAX_JSON_OBJECT_NODES,
+    )
 
     if new_is_stored:
         # PR I stored/stored: NEW_INPUT is itself a stored BundleFacts
         # document too -- no extraction, no header AST, no live NEW-side
         # resolution (compare_stored_bundle_facts_pair() is a pure in-memory
         # diff of both sides' already-persisted per-library AbiSnapshots).
-        # --max-json-object-nodes applies to *both* sides' load here (one
-        # unscoped flag), unlike the stored/live branch below.
+        # resource_limits.max_bundle_facts_decode_nodes applies to *both*
+        # sides' load here (one unscoped config key), unlike the
+        # stored/live branch below.
         from ....errors import SnapshotError
 
         try:
@@ -422,8 +438,8 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 policy=kwargs["policy"],
                 policy_file=policy_file,
                 suppress=suppression,
-                old_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
-                new_max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                old_max_json_object_nodes=max_json_object_nodes_cfg,
+                new_max_json_object_nodes=max_json_object_nodes_cfg,
                 depth=kwargs.get("depth"),
             )
         # Same translation the stored/live branch below applies (its own
@@ -555,7 +571,7 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                     policy_file=policy_file,
                     suppress=suppression,
                     include_dependencies=bool(kwargs.get("include_dependencies", False)),
-                    max_json_object_nodes=kwargs.get("max_json_object_nodes"),
+                    max_json_object_nodes=max_json_object_nodes_cfg,
                 )
             except BundleFactsLibraryOverridesError as exc:
                 # Codex review, fresh evidence: compare_release_against_bundle_
@@ -594,18 +610,12 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, **kwargs: Any
                 # to be a directory or otherwise unreadable file.
                 raise click.ClickException(str(exc)) from exc
         finally:
-            # Mirrors the live release fan-out's own --keep-extracted handling
-            # (_cleanup_temp_dirs): remove the package-extraction tempdir unless
-            # the caller asked to keep it for debugging.
+            # Mirrors _cleanup_temp_dirs: always remove the tempdir now --
+            # --keep-extracted is gone (Phase 7d, ADR-068 D5).
             import shutil as _shutil
 
-            if not kwargs.get("keep_extracted"):
-                for _td in _temp_dir_paths:
-                    _shutil.rmtree(_td, ignore_errors=True)
-            elif _temp_dir_paths:
-                click.echo(
-                    f"Extracted files kept in: {', '.join(_temp_dir_paths)}", err=True
-                )
+            for _td in _temp_dir_paths:
+                _shutil.rmtree(_td, ignore_errors=True)
 
     scope_terms = scope_terms_for(
         result,

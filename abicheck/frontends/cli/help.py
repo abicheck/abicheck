@@ -151,15 +151,15 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             # --on-incomplete-scope are gone from this group -- release.
             # dso_only/gate.fail_on_removed_library/release.
             # include_private_dso/scope.on_incomplete in .abicheck.yml are
-            # their only source now, no surviving CLI override.
+            # their only source now, no surviving CLI override. --keep-
+            # extracted/--no-bundle-analysis are gone too, with no config
+            # replacement (ADR-068 D5 -- neither survives its three guards).
             "name": "Release (directory/package inputs)",
             "options": [
                 "--output-dir",
                 "--debug-info",
                 "--devel-pkg",
-                "--keep-extracted",
                 "--instantiation-manifest",
-                "--no-bundle-analysis",
             ],
         },
     ],

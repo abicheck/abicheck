@@ -655,7 +655,8 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         build_config = tmp_path / "my-build-config.yml"
         build_config.write_text(
             "build:\n  query: 'cmake --build .'\n  system: cmake\n"
-            "compile:\n  compiler: /opt/toolchain/bin/g++\n  std: c++20\n",
+            "compile:\n  compiler: /opt/toolchain/bin/g++\n  std: c++20\n"
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 50000000\n",
             encoding="utf-8",
         )
         script = _release_topology_script_with_preexisting_config_flag(
@@ -674,10 +675,12 @@ class TestReleaseTopologyOverlayMergesWithExplicitBuildConfig:
         assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
         assert doc["compile"] == {"compiler": "/opt/toolchain/bin/g++", "std": "c++20"}
         assert doc["gate"] == {"fail_on_removed_library": True}
-        # No stripping warning should have been emitted for the trusted,
-        # explicit case.
+        # Deliberate operator action -- not capped here either (only the
+        # discovered-config merge caps it, PR #1174 third round).
+        assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 50_000_000
         assert "build.query" not in result.stderr
         assert "compile.compiler" not in result.stderr
+        assert "resource_limits.max_bundle_facts_decode_nodes" not in result.stderr
 
     def test_symlinked_explicit_build_config_resolves_against_its_own_logical_location(
         self, tmp_path: Path
@@ -852,6 +855,37 @@ class TestReleaseTopologyOverlayKeepsDiscoveredConfigUntrusted:
         assert "compile_db" not in doc.get("build", {})
         assert doc["build"] == {"system": "cmake"}
         assert "build.compile_db" in result.stderr
+
+    def test_discovered_resource_limits_raise_is_capped(self, tmp_path: Path) -> None:
+        """Codex review, PR #1174, third round: forwarding this key via
+        --config would launder it into operator-authorized-to-raise status,
+        the same risk as build.query/compile.compiler. Capped, not
+        stripped: a lower value (the sibling test below) is no risk."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 50000000\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 1_000_000
+        assert "resource_limits.max_bundle_facts_decode_nodes" in result.stderr
+
+    def test_discovered_resource_limits_lower_value_survives(
+        self, tmp_path: Path
+    ) -> None:
+        """Narrowing the budget below the default is never a decode-bomb
+        risk, so it passes through uncapped -- unlike build.query/
+        compile.compiler, which are always stripped regardless of value."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "resource_limits:\n  max_bundle_facts_decode_nodes: 1\n",
+            encoding="utf-8",
+        )
+        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "true"}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["resource_limits"]["max_bundle_facts_decode_nodes"] == 1
+        assert "resource_limits.max_bundle_facts_decode_nodes" not in result.stderr
 
 
 class TestReleaseTopologyOverlayResolvesRelativePathsAgainstRealProjectRoot:

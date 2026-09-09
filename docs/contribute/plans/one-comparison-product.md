@@ -219,7 +219,7 @@ identity; **DELETE** — leaves the product.
 | 18 | Analysis completeness/assurance | `analysis_assurance`, `--require-complete-analysis` (both commands) | `compare` (already present) | MERGE | Vision E-S1/S2 landed |
 | 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | ADR-064 axis already modelled |
 | 20 | Finding cap (`--max-findings`) | `cli_scan_baseline` summary truncation | — | DELETE | `--write json=` guarantees the full result (ADR-068 D4) |
-| 21 | JSON resource budget (`--max-json-object-nodes` on `compare`) | `bundle_facts` decode | execution/storage config, calibrated `resource_limits:` | CONFIG | A real bytes-per-node calibration (was cli-cleanup PR J) |
+| 21 | JSON resource budget (`--max-json-object-nodes` on `compare`) | `bundle_facts` decode | execution/storage config, calibrated `resource_limits:` | CONFIG | **Landed** (Phase 7g). Real bytes-per-node calibration against a synthetic oneDAL-scale corpus (`scripts/benchmark_scaling._build_onedal_large_surface`, ~9.3 bytes/node, stable across scale) found the existing `DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` already ~6x below the single-library, 25k-function oneDAL-scale case's own 5.8M nodes — the CLI flag's own documented "can need well over this" escape hatch confirmed as the common case, not an edge one, for its own named scenario. The CLI flag is gone; `.abicheck.yml`'s `resource_limits.max_bundle_facts_decode_nodes` (int) is the only way to change the budget now, and only an *explicit* `--config` may *raise* it past the default -- an auto-discovered `.abicheck.yml` may still *lower* it (Codex review, PR #1174, second round; `resolve_max_json_object_nodes_cfg()`). The *default* itself is deliberately left unchanged, not recalibrated up to match the measurement (Codex review, PR #1174: raising the ambient default would raise every unconfigured/untrusted run's own decode-bomb ceiling by the same factor) — see `bundle_facts.py`'s own docstring for the full measurement table and this reasoning. Deliberately kept node-based rather than re-expressed as a memory size (the design cli-cleanup-phase-two.md's own now-superseded text proposed) — converting a memory budget to a node budget via this measured *legitimate-payload* ratio would size the node budget for an adversarial payload's much lower bytes/node density too, silently weakening the exact container-count defense `storage.json_budget` exists to provide |
 | 22 | Public-header boundary (`--public-header-dir`) | `cli_scan_baseline._public_provenance_set` | `-H` directory provenance + `.abicheck.yml` `scope.public_header_dirs` | MERGE | **Landed** for `compare`'s directory/config sources (`provenance.apply_provenance`, fed from a `-H` directory argument and/or the new `scope.public_header_dirs` config key — distinct from the pre-existing `scope.public` boolean). Directory-vs-file provenance rule preserved verbatim; `scan --public-header-dir` itself is untouched |
 | 23 | Per-check severity (`--crosscheck KEY=LEVEL`) | `CrosscheckConfig` | `--policy` / `.abicheck.yml` `policy.overrides` (they are `ChangeKind`s) | MERGE into policy | Each check has a registry entry |
 | 24 | Severity / gate / policy / packs | shared decorators | unchanged on `compare` | MERGE | — |
@@ -298,12 +298,12 @@ debug, or obsolete).
 | `--include-private-dso` | CONFIG | `release.include_private_dso` | as above | — |
 | `--output-dir` | ADV | unchanged | Genuine per-run output location | — |
 | `-j/--jobs` | REMOVE | auto-detect only | Already auto-detects and memory-clamps; the override is a tuning detail | — |
-| `--keep-extracted` | REMOVE | — | Debug detail | — |
-| `--no-bundle-analysis` | REMOVE | — | "Escape hatch" that disables real analysis; policy/suppression is the supported route | — |
-| `--bundle-facts-out` | REMOVE | `dump` writes evidence | Evidence capture belongs to `dump` (D2) | Phase 7 |
-| `--bundle-facts-library-manifest` | CONFIG | `.abicheck.yml` per-library headers | cli-cleanup PR J, unchanged intent | G42 |
+| `--keep-extracted` | REMOVE | — (**done**) | Debug detail | — |
+| `--no-bundle-analysis` | REMOVE | — (**done**) | "Escape hatch" that disables real analysis; policy/suppression is the supported route | — |
+| `--bundle-facts-out` | KEEP (ruled 7d) | unchanged | Per-run operand naming this invocation's evidence-capture output, the same shape as `-o/--output` — `dump` has no directory/package fan-out to hold this instead | — |
+| `--bundle-facts-library-manifest` | KEEP (ruled 7d) | unchanged | Document operand, the same class as `--policy`/`--suppress` — no `.abicheck.yml` home exists for its per-library override shape without inventing one (guard 1) | G42 |
 | `--instantiation-manifest` | CONFIG | contract document | A declared contract is a project property | — |
-| `--max-json-object-nodes` | CONFIG | `resource_limits:` | Internal storage detail (#21) | Calibration |
+| `--max-json-object-nodes` | CONFIG (**done**) | `resource_limits.max_bundle_facts_decode_nodes` | Internal storage detail (#21) | Calibration — done, see #21 |
 | `--debug-info` | ADV | unchanged (side-aware) | Real per-run evidence | — |
 | `--devel-pkg` | ADV | unchanged (side-aware) | Real per-run evidence | — |
 | `--version` | ADV | unchanged | Labels a bare `.so` operand | — |
@@ -838,15 +838,108 @@ compile-context family (`--ast-frontend`, `--allow-ast-frontend-fallback`,
 *visible*, not hidden, flag on `dump` before this phase — removed anyway for
 front-end parity with `compare`, since ADR-037 D8.1 requires the two commands
 not to drift). `scan` is unaffected by any of 7a/7b/7c — it keeps every one
-of these flags as a real CLI option. 7d–7h remain open.
+of these flags as a real CLI option.
+
+**7d: the release-topology demotion (`--on-incomplete-scope`/
+`--fail-on-removed-library`/`--no-fail-on-removed-library`/`--dso-only`/
+`--include-private-dso` → `scope.on_incomplete`/`gate.
+fail_on_removed_library`/`release.dso_only`/`release.include_private_dso`)
+landed in `1e9d59698`.** Four flags from §4.1's table survived that PR
+without a ruling either way — each is now decided explicitly, under D5's
+three guards, rather than left "pending":
+
+- `--keep-extracted` and `--no-bundle-analysis` are **removed outright, no
+  config replacement.** Neither survives D5: `--keep-extracted` is a
+  local-debug retention knob with no per-run evidence content and no
+  stable-property home either (guard 2 — it doesn't disable a decision, it
+  just leaves a tempdir on disk, so there is nothing to re-express in
+  config); `--no-bundle-analysis` is exactly the "escape hatch that
+  disables real analysis" D4/D5 rule out — a bundle finding a user wants
+  gone is a suppression-policy decision, not a flag that silently drops a
+  whole analysis stage. Extraction cleanup is now unconditional; bundle
+  analysis always runs.
+- `--bundle-facts-out` **stays a CLI flag, ruled as a per-run operand.**
+  `dump` has no directory/package fan-out at all today — no `dump`
+  capability produces a multi-library `BundleFacts` document — so this is
+  not a duplicate spelling of a `dump` capability to collapse (§4.1's
+  original REMOVE classification assumed one existed). Under D5's own
+  test it is exactly `-o/--output`'s shape: PATH names where *this
+  invocation's* evidence capture lands, which varies by run/CI job and has
+  no config vocabulary to merge into without inventing one purely to move
+  a path string. Revisit only if `dump` grows a real release fan-out.
+- `--bundle-facts-library-manifest` **stays a CLI flag, ruled as a
+  document operand pending G42.** Its per-library header/include/
+  compile-context override shape has no existing `.abicheck.yml` home —
+  `bundle: {system_providers, cohorts}` is an unrelated concept — and
+  inventing one now would be exactly the ad hoc config plumbing this
+  workstream warns against, not the kind of migration D5 asks for (guard
+  1: "not one-for-one"). It is the same class as `--policy`/`--suppress`:
+  a CLI flag naming a document, which stays CLI even though the document
+  itself is a stable project artifact. Revisit when G42 (named deployment
+  environments and provider resolution) lands.
+
+**7g: done.** `--max-json-object-nodes` is gone from `compare`'s CLI,
+replaced by `resource_limits.max_bundle_facts_decode_nodes` in an
+explicitly-supplied `.abicheck.yml` (`--config`) for *raising* the budget
+past the default; an auto-discovered `.abicheck.yml` may still *lower* it
+(Codex review, PR #1174, second round) (a new `INT_SUBKEYS`-typed config
+key, `buildsource/build_config_schema.py`).
+Measured a real bytes-per-node density first, per this phase's own "do not
+pick a number and call it calibrated" bar — this repo's own fixture corpus
+tops out at ~10 KB, nowhere near the "large, template-heavy SYCL/DPC++
+library" scenario the flag's own help text named, so the corpus is
+synthetic, sized like the actual named use case
+(`scripts/benchmark_scaling._build_onedal_large_surface`, modeling oneDAL's
+~20k-25k-function public header surface): serialize → real
+`bundle_facts_to_dict`/`json.dumps` → real container/scalar-token count via
+`storage.json_budget`'s own token scanner, at 25k/50k functions × 1/3
+libraries — **~9.3 bytes/node, stable across scale**. The existing
+`DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` (~9.3 MB) sits ~6x below the
+single-library, 25k-function case's own 5.8M nodes — confirming the
+documented "can legitimately need well over this" escape hatch is the
+common case for its own stated scenario, not an edge one, exactly as the
+flag's help text already said.
+
+**The default itself is deliberately left unchanged (Codex review, PR
+#1174, fresh evidence)** — an earlier draft of this row recalibrated
+`DEFAULT_MAX_JSON_OBJECT_NODES` up to `20_000_000` to cover that measured
+gap directly, which review correctly flagged as a real security
+regression: this constant also bounds decode of an unconfigured,
+potentially-untrusted `BundleFacts` blob, and raising it 20x raises that
+same blob's worst-case decode RSS by 20x (~75 MB → ~1.5 GB, per the
+constant's own "~150 MB RSS from a 6 MB payload of ~2M empty objects"
+measurement) for every caller, not just the ones who actually have a
+large, trusted payload. The calibration stands as a real, useful
+measurement — it is what motivated the config key existing at all — but
+the fix it justifies is the escape hatch, not a raised ambient default: a
+project with oneDAL-scale bundle facts sets
+`resource_limits.max_bundle_facts_decode_nodes` explicitly in its own
+`.abicheck.yml`, and every other caller keeps the conservative default.
+
+Deliberately node-based, not re-expressed as a memory size, the way
+cli-cleanup-phase-two.md's own now-superseded text proposed (`resources:
+max_decoded_memory: 2GiB`): converting a memory budget to a node budget
+via this measured *legitimate*-payload ratio would size the node budget
+for an adversarial payload's much lower bytes/node density too (a payload
+of millions of tiny scalar tokens runs under 2 bytes/node) — exactly the
+shape `storage.json_budget`'s own pre-`json.loads()` container-count scan
+exists to catch, and the same reasoning the default-value regression
+above turned out to need anyway. A memory-labelled dial that silently
+admits far more real allocations than its own number implies would be
+worse than no memory framing at all, so the unit stays the one the
+underlying check already uses. Full measurement table and reasoning:
+`bundle_facts.py`'s own `DEFAULT_MAX_JSON_OBJECT_NODES` docstring.
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
 7a hidden flags (4) · 7b `compile.*` demotion (shared `compare`+`dump`) ·
 7c `debug.*` demotion · 7d release/bundle topology (absorbs cli-cleanup
-PR J) · 7e `--profile` removal · 7f `dump` provenance merge ·
-7g resource limits (needs the calibration cli-cleanup PR J identified) ·
-7h `--required-symbols`, `-j`, `--keep-extracted`, `--no-bundle-analysis`.
+PR J; **done**, including the explicit four-flag ruling above) ·
+7e `--profile` removal · 7f `dump` provenance merge ·
+7g resource limits (**done**, see above) ·
+7h `--required-symbols` (**done**, folded into `--required-symbol @FILE`),
+`-j` (**done**, removed outright), `--keep-extracted`/
+`--no-bundle-analysis` (**done**, see 7d above).
 
 Every PR in this phase meets the merge criteria recorded in
 `cli-cleanup-phase-two.md` — old spelling exits

@@ -50,6 +50,29 @@ from typing import Any
 import click
 
 
+def resolve_max_json_object_nodes_cfg(
+    configured: int | None, *, config_explicit: bool, default: int
+) -> int | None:
+    """Resolve ``resource_limits.max_bundle_facts_decode_nodes`` for a
+    stored-bundle-facts-OLD_INPUT ``compare`` (Phase 7g; Codex review, PR
+    #1174, both rounds).
+
+    This budget guards a pre-``json.loads()`` decode-bomb defense over
+    content that may itself be attacker-controlled (the BundleFacts
+    documents being decoded), unlike the ordinary policy knobs
+    ``dispatch()`` reads off the same config unconditionally. Only an
+    *explicit* ``--config`` -- an operator's own deliberate choice -- may
+    *raise* the budget past *default*; an auto-discovered ``.abicheck.yml``
+    can come from the same untrusted checkout being decoded (e.g. a PR's
+    own working tree in CI), so raising it that way would let that PR pair
+    a raised budget with a compact decode-bomb payload. An auto-discovered
+    config may still *lower* the budget below *default*, since narrowing a
+    ceiling is never a decode-bomb risk (Codex review, fresh evidence)."""
+    if configured is None or config_explicit:
+        return configured
+    return min(configured, default)
+
+
 def reject_unsupported_options(
     kwargs: dict[str, Any],
     *,
@@ -393,16 +416,11 @@ def reject_unsupported_options(
             "with a stored-bundle-facts OLD_INPUT (was --report-mode/"
             "--show-filtered)."
         )
-    if kwargs.get("no_bundle_analysis"):
-        # Codex review: compare_release_against_bundle_facts() has no
-        # parameter to skip the cross-library BUNDLE_* analysis
-        # (compare_bundle_from_facts always runs), so --no-bundle-analysis
-        # was silently accepted and ignored -- the run could report a
-        # different verdict/exit code than requested (bundle_verdict folds
-        # into result.verdict). Rejected rather than silently unscoped.
-        raise click.UsageError(
-            "--no-bundle-analysis is not supported together with a stored-bundle-facts OLD_INPUT."
-        )
+    # --no-bundle-analysis is gone (Phase 7d, one-comparison-product.md
+    # §4.1, ADR-068 D5) -- bundle-level analysis always runs now, matching
+    # what this stored-bundle-facts path already did unconditionally
+    # (compare_release_against_bundle_facts()/compare_bundle_from_facts()
+    # have no parameter to skip it), so there is nothing left to reject here.
     # Codex review: kwargs["config"] is compare.py's own resolved value --
     # an explicit --config, or (since a later review round) the same
     # cwd-upward auto-discovered .abicheck.yml run_compare's own cfg_path
@@ -670,12 +688,8 @@ def _reject_new_side_extraction_options_for_stored_pair(
             "are stored BundleFacts documents: a persisted document carries "
             "no per-library executable/library distinction to filter by."
         )
-    if kwargs.get("keep_extracted"):
-        raise click.UsageError(
-            "--keep-extracted is not supported when both OLD_INPUT and "
-            "NEW_INPUT are stored BundleFacts documents: neither side is "
-            "ever extracted to a temporary directory."
-        )
+    # --keep-extracted is gone (Phase 7d, one-comparison-product.md §4.1,
+    # ADR-068 D5) -- nothing left to reject here.
     if kwargs.get("new_version") not in (None, "", "new"):
         raise click.UsageError(
             "--version new=... is not supported when both OLD_INPUT and "

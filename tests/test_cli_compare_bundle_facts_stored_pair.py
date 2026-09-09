@@ -279,6 +279,10 @@ class TestStoredPairEarlyRejections:
         assert "release.dso_only" in out
 
     def test_keep_extracted_is_rejected(self, tmp_path: Path) -> None:
+        """--keep-extracted is gone outright (Phase 7d,
+        one-comparison-product.md §4.1, ADR-068 D5) -- rejected as an
+        unknown option now, not by this command's own stored-bundle-facts
+        guard (which no longer needs one)."""
         old_path, new_path = self._both_stored(tmp_path)
 
         code, out = _invoke("compare", str(old_path), str(new_path), "--keep-extracted")

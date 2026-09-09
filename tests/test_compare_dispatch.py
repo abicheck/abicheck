@@ -1155,7 +1155,7 @@ class TestCompareDispatch:
 
         code, out, err = _invoke(
             "compare", str(old_dir), str(new_dir), "--config", str(cfg),
-            "--format", "json", "--no-bundle-analysis",
+            "--format", "json",
         )
 
         assert code == 64
