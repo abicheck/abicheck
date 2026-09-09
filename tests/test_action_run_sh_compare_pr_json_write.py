@@ -549,14 +549,20 @@ def test_both_branches_share_the_same_write_guard() -> None:
     """compare and scan must not drift apart on this.
 
     Only scan carried the guard, which is exactly how compare shipped
-    without it; asserting both call sites reference the shared helper keeps
-    a future edit to one from silently leaving the other behind.
+    without it; asserting every call site references the shared helper keeps
+    a future edit to one from silently leaving the others behind.
+
+    Three call sites since ADR-068 D2 / plan Phase 4 commit 1: `compare`'s
+    own branch, the legacy `scan` CLI branch (unchanged), and the new
+    `compare`-translated `mode: scan` branch's baseline-compare sub-case
+    (its audit-only/`--no-baseline` sub-case has no secondary --write to
+    guard at all -- see that branch's own comment).
     """
     text = RUN_SH.read_text(encoding="utf-8")
     guarded = [
         line for line in text.splitlines() if "_extra_args_has_write_flag" in line
     ]
-    # One definition, one docstring cross-reference per branch, and two
-    # actual call sites -- assert on the calls specifically.
+    # One definition, one or more docstring cross-references per branch, and
+    # three actual call sites -- assert on the calls specifically.
     calls = [line for line in guarded if "! _extra_args_has_write_flag" in line]
-    assert len(calls) == 2, guarded
+    assert len(calls) == 3, guarded

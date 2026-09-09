@@ -532,6 +532,7 @@ def classify_compare_pair(
             else None
         ),
         pattern_verdicts=request.pattern_verdicts,
+        collapse_versioned_symbols=request.collapse_versioned_symbols,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=service.load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
@@ -699,6 +700,7 @@ def run_compare(
     *,
     severity_preset: str | None = None,
     public_header_dirs: list[Path] | None = None,
+    collapse_versioned_symbols: bool = False,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -748,6 +750,17 @@ def run_compare(
     this shim rather than ``cli_resolve._resolve_compare_snapshots``
     (which already threads this config key for a single-pair compare).
     ``None`` is a no-op, matching every pre-existing caller.
+
+    ``collapse_versioned_symbols`` (Codex review, fresh evidence): forwards
+    onto ``CompareRequest``'s identically-named field -- closes the release
+    fan-out's own gap the same way ``public_header_dirs`` above did: a
+    ``scope.collapse_versioned_symbols: true`` project config resolved to
+    this shim's caller previously had no channel to reach a directory/
+    package member's own per-library compare, so each member silently kept
+    the field at its ``False`` default and could report a version-renamed
+    symbol as a spurious removal/addition where the identical scalar
+    comparison collapsed it. ``False`` (the default) is a no-op, matching
+    every pre-existing caller.
 
     Returns:
         A :class:`~abicheck.api_types.CompareResult`. This returned the bare
@@ -807,5 +820,6 @@ def run_compare(
         pack_internal_namespaces=pack_internal_namespaces,
         depth=depth,
         severity_preset=severity_preset,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     return run_compare_request(request)

@@ -401,3 +401,85 @@ def test_no_soname_note_inferred_from_library_name_without_elf():
     adv = _versioned_advisory(compare(old, new, collapse_versioned_symbols=True))
     assert adv is not None
     assert "relink" not in adv.description and "SONAME" not in adv.description
+
+
+def test_compare_request_collapse_versioned_symbols_field_reaches_the_diff(tmp_path):
+    """One-comparison-product Phase 4 commit 2: ``CompareRequest`` gained a
+    ``collapse_versioned_symbols`` field (absorbed from ``ScanRequest``,
+    which already reached this same ``compare()`` parameter). Proves the
+    field is not just resolved into a request nobody reads -- it actually
+    changes the classified verdict, through the real
+    ``classify_compare_pair`` chokepoint every ``CompareRequest`` consumer
+    shares (mirrors ``test_typed_api_gate_options.py``'s regression-class
+    pattern: assert the decision changes, not only that the field exists)."""
+    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.serialization import snapshot_to_json
+    from abicheck.service_compare_evidence import SideEvidence
+    from abicheck.service_compare_pipeline import (
+        ResolvedComparePair,
+        classify_compare_pair,
+    )
+
+    old, new = _snap("75.1", "75"), _snap("78.3", "78")
+    old_p, new_p = tmp_path / "old.json", tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+    request_default = CompareRequest(
+        old=InputSpec(path=old_p), new=InputSpec(path=new_p)
+    )
+    request_collapsed = request_default.replace(collapse_versioned_symbols=True)
+    evidence = SideEvidence(
+        headers=[], compile=None, collect_mode="off", dump_manifest=None
+    )
+    pair = ResolvedComparePair(
+        old=old,
+        new=new,
+        old_fmt=None,
+        new_fmt=None,
+        old_evidence=evidence,
+        new_evidence=evidence,
+    )
+
+    default_result = classify_compare_pair(request_default, pair).diff
+    collapsed_result = classify_compare_pair(request_collapsed, pair).diff
+
+    assert default_result.verdict == Verdict.BREAKING
+    assert collapsed_result.verdict != Verdict.BREAKING
+    kinds = {c.kind.value for c in collapsed_result.changes}
+    assert "versioned_symbol_scheme_detected" in kinds
+    assert "func_removed" not in kinds and "func_added" not in kinds
+
+
+def test_service_run_compare_shim_forwards_collapse_versioned_symbols(tmp_path):
+    """Codex review, fresh evidence: ``service_compare_pipeline.run_compare()``
+    -- the single Tier-2 chokepoint the directory/package release fan-out
+    calls per member (``cli_compare_release_pairwise._run_compare_pair`` ->
+    ``service.run_compare``), not just the typed ``CompareRequest`` path the
+    test above already covers -- had no ``collapse_versioned_symbols``
+    parameter at all, so a ``scope.collapse_versioned_symbols: true``
+    project config resolved by the release CLI had no channel to reach a
+    package member's own comparison: every member silently kept the field
+    at its ``False`` default and could report a version-renamed symbol as a
+    removal/addition where the identical scalar comparison collapsed it.
+    Exercises the real shim end to end (not ``classify_compare_pair``
+    directly), proving the fix actually reaches the function the release
+    fan-out calls."""
+    from abicheck.serialization import snapshot_to_json
+    from abicheck.service_compare_pipeline import run_compare
+
+    old, new = _snap("75.1", "75"), _snap("78.3", "78")
+    old_p, new_p = tmp_path / "old.json", tmp_path / "new.json"
+    old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+    new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+
+    default_result = run_compare(old_p, new_p).diff
+    collapsed_result = run_compare(
+        old_p, new_p, collapse_versioned_symbols=True
+    ).diff
+
+    assert default_result.verdict == Verdict.BREAKING
+    assert collapsed_result.verdict != Verdict.BREAKING
+    kinds = {c.kind.value for c in collapsed_result.changes}
+    assert "versioned_symbol_scheme_detected" in kinds
+    assert "func_removed" not in kinds and "func_added" not in kinds

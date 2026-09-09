@@ -110,7 +110,7 @@ Two abicheck features map directly onto this page:
   ([case145](../reference/examples/case145_audit_unversioned_export.md)), and exported
   RTTI for internal types
   ([case146](../reference/examples/case146_audit_rtti_for_internal.md)). See
-  [Source-Scan Depth § single-build audit](../use/scan-levels.md#single-build-audit-no-against).
+  [Source-Scan Depth § single-build audit](../use/scan-levels.md#single-build-audit-no-baseline).
 
 Both as commands. The one-build audit needs only the build and its public
 headers, and reports the leaking boundary:

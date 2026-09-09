@@ -984,6 +984,43 @@ def test_render_header_no_changes():
     assert "No ABI changes" in body
 
 
+def test_compare_not_comparable_renders_incomplete_not_no_changes():
+    """Codex review, fresh evidence: a `mode: compare` ADR-050 D2
+    comparability-gate refusal (`_report_not_comparable()`) carries no
+    `changes` list at all -- only `{"verdict": null, "reason": {...}}`. Built
+    from the real production report builder (`not_comparable_document`), not
+    a hand-rolled dict, so this exercises the actual JSON shape the CLI
+    emits, not a guess at it. Before the fix, `build_model` silently saw
+    `_bucket_changes(None, ...)` and rendered the generic "No ABI changes"
+    headline for a comparison that never ran at all."""
+    import json
+
+    from abicheck.policy.outcome import OperationalStatus
+    from abicheck.report.not_comparable import render_not_comparable_json
+
+    report = json.loads(
+        render_not_comparable_json(
+            "libfoo",
+            "old",
+            "new",
+            "scope_mismatch",
+            "headers scope differs",
+            report_schema_version="2.17",
+            operational=OperationalStatus.NOT_COMPARABLE,
+        )
+    )
+    model = build_model(report)
+    assert model.has_incomplete
+    assert model.incomplete_blocking
+    assert model.total_changes == 1
+    assert should_post(model, "changes") is True  # not silently empty
+    body = render_comment(model, sha="deadbeef")
+    assert "🛑" in body
+    assert "Source analysis incomplete" in body
+    assert "No ABI changes" not in body
+    assert "headers scope differs" in body
+
+
 def test_summary_detail_has_no_tables():
     body = render_comment(build_model(_compare_report()), sha="x", detail="summary")
     assert "<details" not in body
