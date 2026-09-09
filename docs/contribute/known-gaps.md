@@ -6696,6 +6696,95 @@ reported as `introduced`. The parity harness (`tests/parity/`) already has
 the scan-vs-compare shape needed to gate it, and the eleven fixtures above
 are a ready-made acceptance corpus.
 
+**Closed (2026-09-09).** Both failure shapes were reproduced live against
+`main` at `ed4e70e3` before anything was changed — the stored-fixture crash
+on `catalog/cases/case143_audit_accidental_export/snapshot.abi.json`, and
+the empty document from `compare --no-baseline libgreet.so --header include`
+against `examples/workflows/audit-release`'s own build — and both are fixed.
+The write-up's suggested partition is what landed, plus one root cause it
+did not name:
+
+- **The partition.** `abicheck/policy/no_baseline_findings.py` (new) owns
+  it: `partition_no_baseline_findings` splits `diff.changes` on
+  `Change.cross_source_evolution is not None or
+  Change.candidate_side_enrichment` (the two markers `compare()` itself
+  sets — deliberately not a `ChangeKind` allowlist, since a kind-keyed
+  filter is a second place every new candidate-side kind would need
+  teaching, exactly the drift `no_baseline_compare`'s own docstring already
+  argues against). `check_no_baseline_partition` keeps the original
+  assertion's real intent scoped to the identity half, and adds D3's rule
+  (`NO_BASELINE_EVOLUTION_STATES = {persistent, not_evaluated}`) over the
+  other. Both are **raised errors, not `assert`s**: the original guard was
+  stripped under `python -O`, which would have turned an identity-half
+  violation into a silently wrong report rather than a loud failure.
+  `workflows/no_baseline_compare.py` returns the candidate-side half on
+  `NoBaselineCompareResult.findings`, and `report/no_baseline.py` renders
+  it.
+- **The second root cause the write-up did not name.** Fixing the partition
+  alone still left the live-binary case reporting nothing. The no-baseline
+  CLI passed `-H`/`--header` as *parse* input only, never as public-header
+  **provenance** — where a two-sided `compare` has always folded each
+  side's headers into its public-header sets
+  (`service_compare_pipeline._public_header_sets`, via
+  `header_utils.split_public_header_inputs`). Without that fold every
+  declaration stayed `ScopeOrigin.UNKNOWN`, so the four boundary-dependent
+  checks (`exported_not_public`, `public_not_exported`,
+  `rtti_for_internal_type`, `public_to_internal_dependency`) evidence-gated
+  to `NOT_EVALUATED` and reported nothing — correctly, given what they were
+  told. `frontends/cli/commands/compare_no_baseline.py`'s
+  `_resolve_public_header_sets` now applies the same split-then-tag rule
+  (split before tagging, never after: an unsplit directory entry corrupts
+  `scope_fingerprint`).
+
+**Evidence.** `tests/parity/test_no_baseline_audit_corpus_parity.py` is the
+acceptance lane this entry asked for, over all eleven fixtures (twelve runs
+— `case151` contributes its `thin.abi.json` variant too, the corpus's own
+"weaker evidence narrows conclusions" case). Measured result:
+`compare --no-baseline` and `scan` agree **exactly** on every fixture —
+nothing lost, nothing manufactured:
+
+| Fixture | `scan` `crosscheck.counts_by_check` | `compare --no-baseline` `findings[]` |
+|---|---|---|
+| case143 | `exported_not_public: 1` | `exported_not_public: 1` |
+| case144 | `private_header_leak: 1` | `private_header_leak: 1` |
+| case145 | `unversioned_exported_symbol: 1` | `unversioned_exported_symbol: 1` |
+| case146 | `rtti_for_internal_type: 2` | `rtti_for_internal_type: 2` |
+| case147 | `private_header_leak: 1` | `private_header_leak: 1` |
+| case148 | `header_build_context_mismatch: 1` | `header_build_context_mismatch: 1` |
+| case149 | `odr_type_variant: 1` | `odr_type_variant: 1` |
+| case150 | `exported_not_public: 1`, `public_not_exported: 1` | same |
+| case151 (`snapshot`) | `private_header_leak: 1` | `private_header_leak: 1` |
+| case151 (`thin`) | `private_header_leak: 1` | `private_header_leak: 1` |
+| case181 | `public_to_internal_dependency: 1` | `public_to_internal_dependency: 1` |
+
+The lane asserts the two halves separately, because checking only one is how
+this gap got in: *no capability loss* (every check `scan` fires,
+`compare --no-baseline` fires at least as often) and *nothing manufactured*
+(every reported finding is genuinely candidate-side, in a D3-permitted
+state, with `changes == []` and `verdict == null` still holding).
+
+Per `AGENTS.md`'s bug-class rule the D3 invariant is **also** stated as a
+property test over generated inputs rather than eleven fixed cases:
+`tests/test_no_baseline_d3_properties.py` generates candidate snapshots
+across the whole evidence ladder (export table present or absent,
+declaration origins drawn independently of the export list, versioning
+scheme on or off, private types present or not) and asserts that no
+candidate ever yields `introduced`/`resolved`, that the comparison half is
+always empty, that the reported set is *exactly* the candidate-side one
+(the "no longer crashes but silently drops findings" failure a
+does-not-raise test would miss), and that the audit is deterministic. Its
+oracle is the forbidden-state set written out literally, not derived from
+the implementation's own permitted set, so widening one cannot silently
+widen the other. The partition helpers additionally get primitive-level
+contract tests (totality, disjointness, order preservation) decoupled from
+any snapshot, per `AGENTS.md`'s "Primitive-level property tests" guidance.
+Both suites were mutation-checked: silently dropping candidate-side findings
+fails 14 tests, and permitting `introduced` fails 2.
+
+Registered as bug class `invariant.blanket_assertion_over_widened_population`
+in `tests/regressions/manifest.py` — the general shape being "a whole-set
+emptiness assertion outlives the single population it was ever true of".
+
 ### `compare --no-baseline` accepts `--contract` but never wires it through
 
 Found in the same Phase 4 documentation slice, verified by reading
@@ -6720,6 +6809,176 @@ the two-sided `compare` path already does via
 [`docs/reference/exit-codes.md`](../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact)
 rather than left as a silent behavioral gap in the doc that would otherwise
 claim the axis "applies exactly as it would for a two-sided run."
+
+**Closed (2026-09-09).** Reproduced live first: on `main` at `ed4e70e3`,
+`compare --no-baseline libgreet.so --contract public` against a headerless
+candidate exited `0` where the two-sided `compare libgreet_old.so
+libgreet.so --contract public` exited `1`. `_run_no_baseline_compare_cmd`
+now resolves the flag through the *same two* `cli_options` helpers
+`cli_compare_helpers.run_compare` uses — `resolve_contract_evaluation` (any
+value activates the ADR-049 evaluator) and `resolve_contract_domain`
+(`auto` maps back to `None` so D7's lower tiers decide, and its parameter
+source is demoted from `COMMANDLINE`) — and passes both into
+`run_no_baseline_compare`, whose `contract_evaluation`/`contract_mode`
+parameters already existed and were simply never fed. Sharing the resolvers
+rather than re-deriving is what makes an equivalent one-sided and two-sided
+invocation activate identically.
+
+Nothing downstream needed changing: `report/no_baseline.py`'s
+`no_baseline_exit_code` already folded `coverage_exit_floor(result.diff)`,
+which reads the ledger off the run's own persisted `contract_context` — it
+had simply never been populated. Verified live after the fix:
+`--contract public` on the same headerless candidate now exits `1`, and a
+run without `--contract` still exits `0` (no domain to be short of evidence
+for, so every pre-existing invocation is unchanged). The corpus lane's
+`test_no_baseline_exit_code_is_clean_without_a_contract` pins that second
+half across all eleven fixtures, so the exit-1 case is a real signal rather
+than noise.
+
+### `compare --no-baseline` parsed `--sources`/`--build-info`/`--depth`/`--dry-run` but read none of them
+
+**Closed (2026-09-09), in the same pass that closed the two entries above.**
+Recorded here rather than left unwritten because it is the same failure mode
+as the `--contract` entry above — a flag Click parses and `--help` documents,
+which the command body never reads — and it was found by auditing
+`_run_no_baseline_compare_cmd` against `compare`'s full option set once
+`--contract` turned out to be inert, not by a user report. Verified live on
+`main` at `ed4e70e3` before the fix: `compare --no-baseline libgreet.so
+--depth build` exited `0` where the two-sided `compare libgreet_old.so
+libgreet.so --depth build` exited `7`; `--dry-run` ran a full audit and
+printed a report; `--sources` collected nothing.
+
+Four separate wirings, each reusing the primitive the two-sided path already
+uses rather than growing a parallel one:
+
+- **`--sources`/`--build-info`.** `resolve_no_baseline_candidate` called
+  `workflows.input_resolution.resolve_input` directly, which resolves L0–L2
+  only, so inline L3–L5 evidence was never embedded. It now routes through
+  `workflows.artifact.execute.resolve_side_snapshot` — the *same* per-side
+  primitive `dump` and each side of a two-sided `compare` resolve through —
+  with an `InputSpec` carrying the candidate's `sources`/`build_info` and a
+  `SideEvidence` whose collect mode comes from `collect_mode_for(depth,
+  side)` (already variadic over a single input precisely because `dump` asks
+  it over one operand too).
+- **`--depth`.** Feeds that collect mode, and is separately held to the same
+  evidence-contract floor. `policy/depth_evidence_contract.py` gained
+  `record_no_baseline_depth_evidence_contract_error`, a named one-sided
+  entry point that delegates to the existing two-sided
+  `record_depth_evidence_contract_error` with the OLD side excluded — spelled
+  as its own function rather than leaving each call site to write
+  `old=candidate, new=candidate, old_is_live=False`, which reads as a bug at
+  every call site. The stored-snapshot carve-out (`is_live`) carries over
+  unchanged: a `.abi.json` candidate this run never extracted cannot have
+  fallen short of a depth. Verified live after the fix, one-sided and
+  two-sided now agree exactly: **exit 7** for `--depth build` with no
+  build evidence, and **exit 0** for the same command once a real
+  `compile_commands.json` is present.
+- **`--dry-run`.** `frontends/cli/compare_dry_run.py` gained
+  `build_no_baseline_dry_run_result`, a sibling of the two-sided builder
+  rather than a call into it: that builder's whole shape is two operands, and
+  rendering a single-build audit through it would print the candidate twice
+  under `old:`/`new:` labels — exactly the "a baseline was consulted"
+  misreading ADR-068 D2 forbids. It reuses the shared section titles
+  (`dry_run.SECTION_ORDER`) so both reports still read the same way, and
+  *blocks* (exit 1) on a pinned `--depth build`/`--depth source` with no
+  `--sources`/`--build-info`, since the real run exits 7 on that same
+  condition and a dry run that called it fine would be lying.
+- **Two more silently-inert flags on the same path, found by the same
+  audit.** `--write FORMAT=PATH` was accepted and dropped — a job asking for
+  a JSON artifact alongside a human-readable report got neither the file nor
+  a warning. It now renders from the *same* analysis rather than re-running
+  it (ADR-068 D4's "a complete machine-readable result must always be
+  obtainable without a second run"), reusing the shared
+  `reject_incoherent_secondary_writes` guard rather than a second copy of its
+  two coherence rules, and rejects an unsupported secondary format naming
+  `--write` rather than `--format`. `--include-system-declarations` was
+  dropped too: this path never passed `include_dependencies` at all, so it
+  silently got `resolve_input`'s unfiltered default (`True`) where every
+  two-sided `compare` and every `dump` passes the CLI's own filtered default
+  (`False`). It now reads the flag, so a `--no-baseline` snapshot is scoped
+  the same way a `dump` baseline is — verified live that the finding set is
+  unchanged either way on the `audit-release` example.
+
+- **An `old=`-scoped input is now a usage error, not a silent drop.** A
+  `--no-baseline` run has no OLD side, so `--sources old=…`/`--header old=…`
+  and siblings are rejected with a real message — the same guard
+  `_reject_view_tokens_for_no_baseline` already applies to `--view`. The
+  distinction matters and is easy to get backwards: a *bare* `--sources
+  tree/` populates **both** per-side dests
+  (`cli_options._split_sided_single`), so "the old dest is set" is not "the
+  user scoped this to OLD" — the guard fires only when the old dest holds
+  something the new dest did not also get. Rejecting the bare spelling would
+  break the single most useful invocation on this path.
+
+**`--format` ruling, dated rather than deferred.** The Phase 2e slice
+supported only `json`/`markdown`, with the other five a usage error "until a
+later phase". That is now decided per format rather than left open:
+
+- **`sarif`, `junit`, `oneline` — implemented.** SARIF and JUnit are
+  *findings* formats with no verdict slot to leave empty (a SARIF run is a
+  list of results with rule ids and levels; a JUnit suite is a list of test
+  cases), which is exactly what a single-build audit produces, and both are
+  how a CI job consumes one. Rendered in `report/no_baseline.py` from the new
+  frozen `NoBaselineDocument` rather than through `sarif.to_sarif`/
+  `junit_report.to_junit_xml`, whose `exitCode`/`exitCodeDescription` and
+  suite partitioning are derived from `DiffResult.verdict` — which on a
+  self-compare reads `NO_CHANGE`, a compatibility claim D2 forbids this run
+  from making. The per-finding *metadata* is reused, not reinvented:
+  `sarif._rule_for`/`_parse_source_location` are imported, so a rule id and
+  help URI mean the same thing a code-scanning consumer already expects.
+- **`html`, `review` — remain a usage error, by ruling.** Both are narrative
+  renderings of a *comparison*, not projections of a finding list: HTML's
+  information architecture is a verdict badge, an OLD → NEW version headline
+  and addition/removal/modification tables; `review` is literally "what
+  changed between these two releases, and should you ship it" (verdict,
+  counts by direction, release recommendation, manual-review banner). With no
+  baseline there is no change to review and no release to recommend, so a
+  one-sided rendering of either is a *new page/digest design*, not a
+  projection — genuinely different work from the three above, none of which
+  needed a layout decision. The CLI's error now names this ruling and points
+  at `oneline` as the closest honest equivalent to a review digest, instead
+  of promising an unspecified later phase. The reasoning lives with the code,
+  in `report.no_baseline.NO_BASELINE_UNSUPPORTED_FORMATS`.
+
+**The class, not just the four instances.** "Accepted but never read" is
+the single defect this path has now produced four separate times
+(`--contract`; `--sources`/`--build-info`/`--depth`/`--dry-run`; `--write`;
+`--include-system-declarations`), and every one was found by *reading the
+code*, never by a failing test — a dropped option produces no output to fail
+on. Fixing them one at a time leaves the class open, since the next option
+added to `compare` inherits the same silence. So the rule is inverted:
+`_UNSUPPORTED_OPTIONS` in `frontends/cli/commands/compare_no_baseline.py`
+names every `compare` option this path does *not* implement, passing one is
+a **usage error** rather than a no-op, and
+`tests/test_compare_no_baseline_options.py` fails if any `compare` parameter
+is neither read by that module nor declared in the table. A new flag is
+therefore either wired or declared, never silent.
+
+The table's reasons fall in three families, so the error message tells the
+user which applies: the option *describes a comparison* this run never
+performs (`--used-by`, `--used-by-manifest`, `--required-symbol`,
+`--use-cases`, `--post-manifest`, `--env-matrix`, `--diagnostic-comparison`,
+`--old-variant`/`--new-variant`, `--bundle-facts-*`, `--since`/
+`--changed-path`); it is for the *directory/package fan-out*
+`--no-baseline` does not accept (`--select`, `--select-required`,
+`--output-dir`); or it is genuinely applicable and *not wired yet*
+(`--abi3` — candidate-side by definition and the obvious next one to close
+— `--budget`, `--severity-preset`, `--pack`, `--config`,
+`--instantiation-manifest`, `--follow-deps` and its search-path siblings,
+`--debug-info`, `--devel-pkg`). That last family is recorded here rather
+than left as an accepted no-op precisely so it is a visible decision.
+Writing the test found one the manual audit had missed
+(`--used-by-manifest`), which is the argument for the mechanism in one line.
+
+The whole compute/render split is new in this pass too:
+`report/no_baseline.py` now follows `abicheck/report/AGENTS.md`'s convention
+— one `compute_no_baseline_document` resolving per-finding verdict/category,
+evolution counts, coverage and exit contributions, and pure `render_*` halves
+that format and decide nothing — so a new audit report section goes in the
+document, never into one renderer. The report schema counter moved to `2.0`
+(`findings[]`, `cross_source_evolution` and a candidate-only
+`pattern_preprocessor_scan` block are new; `changes: []` stays, so a consumer
+reading `changes` off any abicheck report still finds it).
 
 ### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
 

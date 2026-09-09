@@ -1314,6 +1314,54 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="invariant.blanket_assertion_over_widened_population",
+        invariant=(
+            'A whole-set assertion ("this collection is always empty") '
+            "is only valid while the collection has exactly one "
+            "population. When a later change adds a second, legitimately "
+            "non-empty population to the same collection, the assertion "
+            "must be split into a scoped invariant per population — never "
+            "left blanket (it then fires on correct behavior) and never "
+            "simply deleted (the original population loses its guard). "
+            "The scoped guard must also survive `python -O`, so it is a "
+            "raised error rather than an `assert`."
+        ),
+        # #1181-era: `compare --no-baseline`'s `assert not diff.changes`
+        # was correct until ADR-068 Phase 2a/2b moved the eleven
+        # cross-source checks and the pattern/preprocessor pre-scan into
+        # `compare()`, which legitimately emit findings on a self-compare.
+        # All eleven G20 audit fixtures then aborted with an unhandled
+        # AssertionError, and a live candidate rendered an empty document.
+        fixed_by=(1181,),
+        seed_tests=(
+            "tests/test_no_baseline_d3_properties.py",
+            "tests/parity/test_no_baseline_audit_corpus_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "population": ("comparison-finding", "candidate-side-finding"),
+            "evolution_state": (
+                "persistent",
+                "not_evaluated",
+                "introduced",
+                "resolved",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The registry has no mechanical sweep for *other* "
+                    "blanket emptiness assertions over collections a "
+                    "later stage may widen — this entry names the class "
+                    "and carries the one instance's generalized tests, "
+                    "but a second instance elsewhere in the codebase "
+                    "would still be found by hand, not by a gate."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="report.finding_entry_builder_parity",
         invariant=(
             "Every per-finding entry-builder for a shared `Change` "

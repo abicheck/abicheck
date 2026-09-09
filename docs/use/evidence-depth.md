@@ -46,10 +46,6 @@ migration item in
   rung does — `scan`'s risk-scored `auto` rung has no `compare`/`dump`
   equivalent (§3 row 13) — see [Let risk pick the
   depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now).
-- **The single-build audit.** `compare --no-baseline` (ADR-068 D2) exists
-  but does not yet reproduce the audit's findings — see [Single-build
-  audit](#single-build-audit-no-baseline) below and
-  [Scenario S5](../integration/scenarios/single-build-audit.md).
 
 **§3 row 28 is closed**: `compare` now shares `scan`/`dump`'s fail-loud
 evidence-contract floor — a *pinned* `--depth build`/`--depth source` that
@@ -67,10 +63,12 @@ carry its own `--build-target`; `compare` does not).
 `abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
 **positional** argument (not a flag); `--against OLD` is the previous
 dump/library/directory/package to compare against, and omitting it means a
-one-build audit — `scan` is required for every no-baseline audit until
-`compare --no-baseline` reproduces the audit's findings in full: both the
-stored-snapshot crash *and* the live-binary empty-`changes` result above
-have to close, not just one of the two.
+one-build audit. `scan` is no longer required for that: as of 2026-09-09
+`compare --no-baseline CANDIDATE` reproduces the audit's findings in full
+(both the stored-snapshot crash and the live-binary empty-`changes` result
+are fixed), takes `--depth`/`--sources`/`--build-info`/`--contract`/
+`--dry-run`, and is pinned against `scan` on all eleven G20 audit fixtures
+by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -114,7 +112,10 @@ have to close, not just one of the two.
   silently exiting on a shallow verdict.
 - A single-build, no-baseline audit is `compare --no-baseline CANDIDATE`
   (ADR-068 D2), or legacy `scan CANDIDATE` with no `--against`. There is no
-  separate `--audit` flag on either.
+  separate `--audit` flag on either. A pinned depth is a contract on the
+  `--no-baseline` path too: `compare --no-baseline CANDIDATE --depth build`
+  with no `--sources`/`--build-info` exits `7`, same as the two-sided form
+  (verified live, both spellings).
 
 !!! warning "A pinned depth is a contract (fail-loud) — all three commands"
     Pinning a deep depth (`--depth build|source`) with **no source input**
@@ -478,27 +479,27 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
 
 ### Single-build audit — no baseline
 
-`abicheck scan CANDIDATE` (no `--against`) runs the intra-version
-cross-source hygiene checks against **one** build — no previous version
-required. With just the binary and headers it catches accidental exports,
-private-header leaks, and unversioned symbols:
+`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) runs the
+intra-version cross-source hygiene checks against **one** build — no
+previous version required. With just the binary and headers it catches
+accidental exports, private-header leaks, and unversioned symbols:
 
 ```bash
-abicheck scan libfoo.so -H include/
+abicheck compare --no-baseline libfoo.so -H include/
 ```
 
-`abicheck compare --no-baseline CANDIDATE` (ADR-068 D2) is the declared
-replacement and the flag exists today, but **it does not yet reproduce this
-audit's findings** — verified live against the fixtures below, it either
-crashes (a stored `.abi.json` candidate: an unhandled `AssertionError` from
-`workflows/no_baseline_compare.py`'s `assert not diff.changes`) or renders a
-report with an empty `changes` list (a live binary plus `-H`), never the
-`exported_not_public` finding `scan` reports on the identical input. It also
-doesn't accept `--sources`/`--build-info`/`--depth`, so the L3/L4-dependent
-checks below need `scan` regardless. See
-[Scenario S5](../integration/scenarios/single-build-audit.md) and the
-[known gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)
-for the full account.
+The findings land under `findings[]` — `changes[]` stays empty and `verdict`
+stays `null`, because an audit reports no addition, removal, or
+compatibility verdict (ADR-068 D2). Legacy `abicheck scan CANDIDATE` (no
+`--against`) still runs the same checks; the two are pinned to the same
+finding set across all eleven G20 audit fixtures below by
+`tests/parity/test_no_baseline_audit_corpus_parity.py`.
+
+`--sources`/`--build-info`/`--depth` work on the `--no-baseline` path too,
+so the L3/L4-dependent checks further down this section no longer need
+`scan`. See
+[Scenario S5](../integration/scenarios/single-build-audit.md) for the full
+CLI account.
 
 Worked example cases for each audit finding:
 [case143](../reference/examples/case143_audit_accidental_export.md) (`exported_not_public`),

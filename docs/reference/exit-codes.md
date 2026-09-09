@@ -171,20 +171,47 @@ there is no prior surface, so `run_outcome.scope` reads `complete` and the
 never emits an addition, a removal, or a compatibility verdict —
 `run_outcome.compatibility` and the top-level `verdict` are JSON `null`,
 and `changes` is always `[]`. The compatibility axis therefore always
-contributes `0` to the exit code; the orthogonal analysis-assurance axis
-still applies as it would for a two-sided run.
+contributes `0` to the exit code.
 
-**The contract-coverage axis does not, yet.** `compare --no-baseline`
-accepts `--contract`, but
-`frontends/cli/commands/compare_no_baseline.py` never forwards it (or a
-resolved `contract_mode`) to `run_no_baseline_compare` — the coverage
-ledger this axis folds from is simply never populated on this path. A
-`compare --no-baseline NEW --contract public` run against a headerless
-candidate exits `0`, where the equivalent two-sided `compare OLD NEW
---contract public` would exit `1` for missing public-header coverage.
-Treat `--contract` on `--no-baseline` as accepted but currently inert
-rather than as an active gate; this is a known gap, not documented
-behavior to rely on.
+The audit's own content is the candidate-side finding set — the eleven
+cross-source hygiene checks and the pattern/preprocessor pre-scan, reported
+under `findings[]` (not `changes[]`, which stays empty by construction).
+These stay advisory (ADR-028 D3 / ADR-035 D1: `RISK`/`API_BREAK`, never
+`BREAKING`), so **a hygiene finding never gates on its own** — an audit that
+reports several findings still exits `0` unless one of the orthogonal axes
+below fires. Every finding carries its ADR-068 D3 evolution state, which
+with a `declared_absent` OLD is always `persistent` or `not_evaluated`,
+never `introduced`.
+
+Three orthogonal axes still apply exactly as they would for a two-sided
+run, folded with the same `max` discipline:
+
+| Axis | Contributes | When |
+|---|---|---|
+| Analysis assurance (P0.4) | `1` | `--require-complete-analysis` and `analysis_assurance.status` is not `complete` |
+| Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
+| Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
+
+The contract-coverage row was inert until 2026-09-09 — `--contract` was
+parsed and documented on this path but never forwarded, so the ledger it
+folds from was never populated and a `compare --no-baseline NEW --contract
+public` run against a headerless candidate exited `0` where the two-sided
+equivalent exited `1`. It is now wired through the same
+`resolve_contract_evaluation`/`resolve_contract_domain` resolvers the
+two-sided path uses, so an equivalent one-sided and two-sided invocation
+activate identically. Without `--contract` the contribution is still always
+`0`, so every pre-existing invocation is unchanged.
+
+The evidence-contract row was added in the same pass, for the same reason:
+`--depth build` with no `--sources`/`--build-info` silently degraded to
+symbols-only evidence and reported a clean audit. It now records ADR-064's
+exit-7 axis, matching the two-sided `compare` path exactly. A *stored*
+snapshot candidate (`.abi.json`) is exempt — this run never extracted it, so
+it cannot have fallen short of a pinned depth.
+
+`--dry-run` reports the same condition ahead of any analysis: a pinned
+`--depth build`/`--depth source` with no evidence input is a dry-run
+*blocker* (exit `1`), never a clean preview of a run that would exit `7`.
 
 ## Analysis-assurance contribution (P0.4)
 

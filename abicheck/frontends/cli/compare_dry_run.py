@@ -89,16 +89,22 @@ def add_compare_cost_preview_section(
 
 def build_compare_dry_run_result(
     *,
-    old_input: Path, new_input: Path,
-    old_kind: str, new_kind: str,
+    old_input: Path,
+    new_input: Path,
+    old_kind: str,
+    new_kind: str,
     depth: str | None,
     collect_mode: str,
     effective_depth_label: str,
     source_method: str | None = None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
+    headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    old_headers_only: tuple[Path, ...],
+    new_headers_only: tuple[Path, ...],
+    old_sources: Path | None,
+    new_sources: Path | None,
+    old_build_info: Path | None,
+    new_build_info: Path | None,
     cfg_path: Path | None,
     fmt: str,
     exit_code_scheme: str | None,
@@ -137,12 +143,18 @@ def build_compare_dry_run_result(
     add_compare_cost_preview_section(
         result,
         *estimate_compare_dry_run_cost(
-            old_input=old_input, new_input=new_input,
-            depth=depth, source_method=source_method,
-            headers=headers, includes=includes,
-            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-            old_sources=old_sources, new_sources=new_sources,
-            old_build_info=old_build_info, new_build_info=new_build_info,
+            old_input=old_input,
+            new_input=new_input,
+            depth=depth,
+            source_method=source_method,
+            headers=headers,
+            includes=includes,
+            old_headers_only=old_headers_only,
+            new_headers_only=new_headers_only,
+            old_sources=old_sources,
+            new_sources=new_sources,
+            old_build_info=old_build_info,
+            new_build_info=new_build_info,
         ),
     )
     all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
@@ -187,7 +199,9 @@ def build_compare_dry_run_result(
                     f"symbol(s), {len(reqs.required_versions)} required version(s)",
                 )
             except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
-                result.warn(f"--used-by {app_label}: could not parse requirements: {exc}")
+                result.warn(
+                    f"--used-by {app_label}: could not parse requirements: {exc}"
+                )
     if required_symbols:
         result.add(
             "Consumer/contract scoping",

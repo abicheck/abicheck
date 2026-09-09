@@ -705,15 +705,49 @@ section's *actual* state, not the target it originally described:
   `scan`, annotated as blocked rather than dropped from the coverage
   denominator; `validation/scripts/run_oneapi_scan.py` stays on `scan` for
   the network-history reason its own docstring records.
-- **Blocker discovered while doing the above:** `compare --no-baseline`
-  does not reproduce `scan`'s audit-mode findings at all — it aborts on
-  `workflows/no_baseline_compare.py`'s `assert not diff.changes` for a
-  stored snapshot candidate (all eleven G20 fixtures) and renders an empty
-  `changes` list for a live binary. The cause is structural: the audit is a
-  self-diff that asserts the diff is empty, an invariant the per-side
-  cross-source stages Phase 2a/2b moved *into* `compare()` legitimately
-  violate. Recorded in `docs/contribute/known-gaps.md` with the fixtures
-  and the shape of the fix; §3 row 2 is not closed until it is.
+- **Blocker discovered while doing the above — now closed (2026-09-09).**
+  `compare --no-baseline` did not reproduce `scan`'s audit-mode findings at
+  all: it aborted on `workflows/no_baseline_compare.py`'s
+  `assert not diff.changes` for a stored snapshot candidate (all eleven G20
+  fixtures) and rendered an empty `changes` list for a live binary. The
+  cause was structural — the audit is a self-diff that asserted the diff is
+  empty, an invariant the per-side cross-source stages Phase 2a/2b moved
+  *into* `compare()` legitimately violate.
+
+  **Fixed**, along with two adjacent gaps the same audit of that path
+  surfaced (`--contract` accepted but never forwarded; `--sources`/
+  `--build-info`/`--depth`/`--dry-run` parsed but never read). All three are
+  written up in full, with live before/after evidence, in
+  `docs/contribute/known-gaps.md`. In short:
+
+  - `abicheck/policy/no_baseline_findings.py` (new) partitions the
+    self-diff's change set into the comparison half (still provably empty,
+    still enforced — as a *raised* error now, so the guard survives
+    `python -O`) and the candidate-side half (the audit's reportable
+    content), and enforces D3's rule that a `declared_absent` OLD may only
+    ever yield `persistent`/`not_evaluated`.
+  - A second root cause the original write-up did not name: this path
+    passed `-H`/`--header` as parse input only, never as public-header
+    *provenance*, so every declaration stayed `ScopeOrigin.UNKNOWN` and the
+    four boundary-dependent checks evidence-gated to `NOT_EVALUATED`.
+  - `report/no_baseline.py` gained the compute/render split this package's
+    `AGENTS.md` requires, a `findings[]` block, and `sarif`/`junit`/
+    `oneline` renderings. `html`/`review` stay a declared usage error, by
+    ruling rather than deferral: both render a *comparison* (verdict badge,
+    OLD → NEW counts, release recommendation) and an audit has none of
+    those. The reasoning lives with the code, in
+    `report.no_baseline.NO_BASELINE_UNSUPPORTED_FORMATS`.
+
+  **§3 row 2 is closed.** `tests/parity/test_no_baseline_audit_corpus_parity.py`
+  is the gate: `compare --no-baseline` and `scan` agree *exactly* on all
+  eleven G20 audit fixtures (twelve runs — `case151` contributes its
+  `thin.abi.json` variant), asserting no capability loss and nothing
+  manufactured as two separate statements. `tests/test_no_baseline_d3_properties.py`
+  states D3 as a property over generated candidates rather than eleven fixed
+  cases, per `AGENTS.md`'s bug-class rule. The nine G20 case READMEs and
+  `examples/workflows/audit-release` are re-driven onto
+  `compare --no-baseline` and their "blocked on this gap" annotations
+  removed.
 
 ### Phase 5 — Presentation/analysis separation — **done**
 
