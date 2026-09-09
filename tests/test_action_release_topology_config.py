@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -249,30 +250,29 @@ def _harness() -> str:
     """A minimal ``run.sh``-shaped script: the real function body plus its
     ``_merge_config_overlay_with_discovered_project_config`` dependency and
     that helper's own ``$_PY_BIN``/``$_PY_SAFE_DIR``/``$_PY_BIN_HAS_ABICHECK``
-    prerequisites (see module docstring), a ``mktemp`` wrapper that only
-    intercepts the plain (no-``-d``) call the real function makes for its
-    own overlay file -- a real ``mktemp -d`` still runs for real, since
-    ``$_PY_SAFE_DIR`` needs an actual directory to ``cd`` into -- and a
-    trailing call plus a dump of the resulting ``CMD`` array. The overlay
-    path is no longer pinned to a caller-supplied marker (the merge step
-    means the real function now calls ``mktemp`` more than once internally
-    on some paths); callers instead read the real path back off the
-    ``--config`` entry in the printed ``CMD`` array, the same convention
-    ``test_action_compile_context_parity.py``'s own
-    ``_read_compile_config_overlay`` uses.
+    prerequisites (see module docstring), and a trailing call plus a dump of
+    the resulting ``CMD`` array. The overlay path is no longer pinned to a
+    caller-supplied marker (the merge step means the real function now calls
+    ``mktemp`` more than once internally on some paths); callers instead
+    read the real path back off the ``--config`` entry in the printed
+    ``CMD`` array, the same convention ``test_action_compile_context_parity.py``'s
+    own ``_read_compile_config_overlay`` uses.
+
+    Deliberately does NOT stub ``mktemp`` (an earlier revision did, to avoid
+    depending on a real writable ``$RUNNER_TEMP`` -- but the stub discarded
+    the real function's own template argument, silently falling back to a
+    bare ``mktemp``'s default location; on Windows/Git-Bash that is MSYS's
+    own internal ``/tmp`` mount, a path this test's own native-Windows
+    Python can never open directly, unlike a real GitHub Actions runner's
+    ``$RUNNER_TEMP``-anchored one. `test_action_compile_context_parity.py`'s
+    own harness never stubbed `mktemp` at all and has never hit this,
+    confirming the stub -- not the production code -- was the bug).
     """
     fn_source = _add_release_topology_config_flags_source()
     merge_fn_source = _merge_config_overlay_fn_source()
     return f"""#!/usr/bin/env bash
 set -uo pipefail
 CMD=(compare)
-mktemp() {{
-  if [[ "${{1:-}}" == "-d" ]]; then
-    command mktemp -d
-  else
-    command mktemp
-  fi
-}}
 _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
@@ -405,9 +405,19 @@ def _release_topology_script_with_preexisting_config_flag(build_config_path: str
     """
     fn_source = _add_release_topology_config_flags_source()
     merge_fn_source = _merge_config_overlay_fn_source()
+    # shlex.quote (not raw interpolation): build_config_path is a real
+    # filesystem path handed straight into bash source text -- unquoted, a
+    # Windows path's own backslashes (e.g. C:\Users\...\my-build-config.yml)
+    # are each read by bash as an escape character and silently stripped
+    # (\U -> U), corrupting the value and tripping the real function's own
+    # "--config already present for a reason other than build-config"
+    # internal-consistency guard below, since the mangled CMD entry no
+    # longer matches $INPUT_BUILD_CONFIG verbatim (Codex review, fresh
+    # evidence from a real Windows CI run).
+    quoted_build_config_path = shlex.quote(build_config_path)
     return f"""#!/usr/bin/env bash
 set -uo pipefail
-CMD=(compare --config {build_config_path})
+CMD=(compare --config {quoted_build_config_path})
 _PY_BIN="{sys.executable}"
 {_py_safe_dir_source()}
 {_py_bin_has_abicheck_source()}
