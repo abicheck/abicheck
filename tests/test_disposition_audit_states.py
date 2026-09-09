@@ -404,7 +404,12 @@ def test_the_plugin_host_entry_point_closes_its_own_scope() -> None:
     diff = scoped.full_diff
     assert diff is not None
     ledger = ledger_for(diff)
-    assert ledger.detected_total == 2, "both removals were still observed"
+    # 3, not 2: `surface_metrics` is unconditional at the shared Tier-2
+    # `compare_snapshots` chokepoint (ADR-027 Phase 5) as of this PR, so the
+    # two removals always come with a `public_surface_shrank` roll-up now --
+    # a real, correctly-observed informational finding this fixture's own
+    # removals produce, not a defect in the contract this test states.
+    assert ledger.detected_total == 3, "both removals plus the roll-up were observed"
     assert ledger.effective_total == len(scoped.breaking_for_host), (
         "the audit gates on exactly the host contract's own relevant set, "
         "not on the whole library"

@@ -74,10 +74,11 @@ verdict modulation are:
   a hidden implementation type. The wrapper's own layout is part of the ABI; only
   the hidden pointee is invisible to callers.
 
-## Pattern-aware verdicts (`--pattern-verdicts`)
+## Pattern-aware verdicts
 
-When enabled, a post-processing pass modulates findings using the idiom
-evidence from **both** snapshots:
+A post-processing pass always modulates findings using the idiom evidence
+from **both** snapshots (unconditional, ADR-068 D4 — there is no flag to
+enable or disable it):
 
 | Rule | Effect | Guard |
 |------|--------|-------|
@@ -102,9 +103,12 @@ Every modulation is disclosed:
   edges_matched}`), and the demoted finding stays in `changes` with its
   `effective_verdict` / `modulation_reason` recorded — re-categorised in place,
   never dropped;
-- `--explain-patterns` prints the idiom evidence behind each modulation;
-- `--no-pattern-verdicts` (the default) disables all modulation, restoring pure
-  kind-based classification.
+- `--view patterns` prints the idiom evidence behind each modulation.
+
+Modulation itself is unconditional (ADR-068 D4): it runs automatically
+wherever idiom evidence exists, and there is no flag to disable it — the
+former `--pattern-verdicts`/`--no-pattern-verdicts` pair (and, later,
+`--explain-patterns` merging into `--view patterns`) are both gone.
 
 Demotion is gated to the `header_aware` evidence tier (idioms need the AST), a
 demotion never overrides a frozen-namespace break, and a break-demotion is
@@ -127,11 +131,13 @@ cross-DSO break. The demotion is carried on the `BundleFinding` and propagated
 onto the lowered `Change`, so the **bundle verdict** and the `compare` exit
 code honour it — the same demote-don't-delete contract as A4.
 
-## Surface-metric drift (A1, `--surface-metrics`)
+## Surface-metric drift (A1)
 
-`compare --surface-metrics` emits aggregate, informational `COMPATIBLE`
+Every `compare` always emits aggregate, informational `COMPATIBLE`
 roll-ups — `public_surface_grew` / `public_surface_shrank` and
 `undocumented_export_ratio_increased` — computed from the same
-`compute_surface_metrics()` used above. They never drive a verdict on their own (the individual
-additions/removals are reported per-symbol); they are a trendable signal for CI
-dashboards and release notes.
+`compute_surface_metrics()` used above (unconditional, ADR-068 D4/Phase 5;
+the `--surface-metrics` flag still exists but is now a no-op, accepted only
+for backward compatibility). They never drive a verdict on their own (the
+individual additions/removals are reported per-symbol); they are a trendable
+signal for CI dashboards and release notes.

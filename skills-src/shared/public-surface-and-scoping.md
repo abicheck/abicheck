@@ -81,7 +81,7 @@ scoped result.
    standard-library upgrade regenerates template instantiation symbols
    wholesale. See
    [compiler-and-build-profiles.md](compiler-and-build-profiles.md).
-3. Group before reading: `--report-mode root-cause`. See
+3. Group before reading: `--view root-cause`. See
    [root-cause-grouping.md](root-cause-grouping.md).
 4. Only then consider whether a policy or suppression is appropriate — and
    never author one just to quiet output

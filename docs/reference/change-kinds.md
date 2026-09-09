@@ -471,9 +471,9 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | `glibcxx_dual_abi_flip_detected` | Mass symbol churn matches a libstdc++ dual ABI toggle (`_GLIBCXX_USE_CXX11_ABI`). Individual removed/added symbols are likely caused by this single root cause rather than intentional API changes — the underlying per-symbol findings are reported separately. |
 | `abi_surface_explosion` | The public ABI surface grew or shrank dramatically (e.g. a lost `-fvisibility=hidden` flag). This is a configuration/packaging signal, not a per-symbol break, but may indicate an unintended visibility regression. |
 
-### Surface-metric drift (ADR-027, opt-in `--surface-metrics`)
+### Surface-metric drift (ADR-027)
 
-Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own and are emitted only with `--surface-metrics`.
+Aggregate roll-up signals computed from the [API surface metrics](../use/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own. Computed unconditionally on every comparison (ADR-068 D4/Phase 5) — `--surface-metrics` is a vestigial, accepted-but-no-op flag kept for backward compatibility.
 
 | Kind | Description |
 |------|-------------|

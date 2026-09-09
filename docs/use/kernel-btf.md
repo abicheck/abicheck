@@ -14,11 +14,17 @@ module's view of a kernel struct still match the kernel it loads into?*
 
 `abicheck` reads BTF directly from any ELF that carries a `.BTF` section
 (`vmlinux`, a `*.ko` module, or a BTF blob). Force the BTF debug format with
-`--debug-format btf`:
+`.abicheck.yml`'s `debug.format: btf`:
+
+```yaml
+# .abicheck.yml
+debug:
+  format: btf
+```
 
 ```bash
 # Two kernels / two module builds — compare their BTF type layout:
-abicheck compare vmlinux-5.10 vmlinux-5.11 --debug-format btf
+abicheck compare vmlinux-5.10 vmlinux-5.11 --config .abicheck.yml
 ```
 
 A kernel struct that **gains or loses a field**, or whose field **type/offset
@@ -33,7 +39,7 @@ module's BTF against the target kernel's BTF for the structs the module touches:
 
 ```bash
 # Old kernel the module was built against vs the new kernel it will load into:
-abicheck compare vmlinux-built-against vmlinux-target --debug-format btf
+abicheck compare vmlinux-built-against vmlinux-target --config .abicheck.yml
 ```
 
 If a struct the module embeds or passes by value changed layout between the two

@@ -78,7 +78,7 @@ class TestScopedCompatFoldDemangle:
         old_p, new_p = _write_pair(tmp_path)
         result = _invoke(
             "compare", str(old_p), str(new_p),
-            "--required-symbol", _MANGLED, "--no-demangle",
+            "--required-symbol", _MANGLED, "--view", "no-demangle",
         )
         assert f"missing entrypoint: `{_MANGLED}`" in result.output
         assert f"missing entrypoint: `{_DEMANGLED}`" not in result.output
@@ -137,7 +137,7 @@ class TestSuppressionAuditFoldDemangle:
         )
         result = _invoke(
             "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--audit-suppressions", "--no-demangle",
+            "--suppress", str(suppress), "--audit-suppressions", "--view", "no-demangle",
         )
         assert f"suppressed func_removed: {_MANGLED}" in result.output
         assert f"suppressed func_removed: {_DEMANGLED}" not in result.output

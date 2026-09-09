@@ -562,7 +562,7 @@ def _emitted_top_level_fields(tmp_path) -> set[str]:
         [],
         ["--severity-preset", "default"],
         ["--contract", "public"],
-        ["--report-mode", "root-cause"],
+        ["--view", "root-cause"],
         ["--scope-public-headers"],
     )
     runner = CliRunner()

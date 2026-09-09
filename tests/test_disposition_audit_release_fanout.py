@@ -156,6 +156,79 @@ class TestReleaseFanOutFoldsPerLibraryAudits:
         assert data["disposition_audit"]["counts"]["suppressed"] == 175
 
 
+class TestReleaseFanOutFoldsBundleFindings:
+    """Codex review, fresh evidence ("Include bundle findings in the
+    release disposition audit"): a release whose only change is a
+    cross-library ``BUNDLE_*`` finding (no per-library change at all) used
+    to report that finding in ``bundle_findings`` while the release-level
+    ``disposition_audit`` showed ``detected_total: 0``/``effective_total:
+    0`` -- the finding was observed and gated (the release's own exit code
+    and ``bundle_verdict`` reflect it), but never accounted for in D3's
+    conservation ledger."""
+
+    def _bundle_result(self, n: int = 1):
+        from abicheck.bundle_models import BundleDiffResult, BundleFinding
+
+        return BundleDiffResult(
+            old_root=Path("/o"),
+            new_root=Path("/n"),
+            bundle_findings=[
+                BundleFinding(
+                    kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
+                    symbol=f"lib{i}.so",
+                    description="library removed from the bundle",
+                )
+                for i in range(n)
+            ],
+        )
+
+    def test_bundle_findings_are_folded_into_the_release_audit(self) -> None:
+        folded = release_disposition_audit_block(
+            [], None, None, self._bundle_result(3)
+        )
+        assert folded["detected_total"] == 3
+        assert folded["effective_total"] == 3
+
+    def test_bundle_findings_sum_alongside_per_library_ones(self) -> None:
+        entries = TestReleaseFanOutFoldsPerLibraryAudits()._library_entries()
+        folded = release_disposition_audit_block(
+            entries, None, None, self._bundle_result(2)
+        )
+        # 175 per-library (all suppressed, per _library_entries) + 2 bundle
+        # (unsuppressed) -- both populations must be visible in one total.
+        assert folded["detected_total"] == 177
+        assert folded["effective_total"] == 2
+
+    def test_no_bundle_result_contributes_nothing(self) -> None:
+        folded = release_disposition_audit_block([], None, None, None)
+        assert folded["detected_total"] == 0
+
+    def test_empty_bundle_findings_contributes_nothing(self) -> None:
+        from abicheck.bundle_models import BundleDiffResult
+
+        empty = BundleDiffResult(old_root=Path("/o"), new_root=Path("/n"))
+        folded = release_disposition_audit_block([], None, None, empty)
+        assert folded["detected_total"] == 0
+
+    def test_format_release_json_carries_the_bundle_contribution(self) -> None:
+        out = _format_release_json(
+            "BREAKING",
+            Path("/o"),
+            Path("/n"),
+            [],
+            [],
+            [],
+            {},
+            {},
+            [],
+            self._bundle_result(1),
+            None,
+        )
+        data = json.loads(out)
+        assert data["disposition_audit"]["detected_total"] == 1
+        assert data["disposition_audit"]["effective_total"] == 1
+
+
 class TestDispositionAuditRoundTripsThroughRelease:
     """`DispositionAudit.from_dict`/`.to_dict()` round-trip the exact shape
     `compute_disposition_audit` produces for a real per-library `DiffResult`

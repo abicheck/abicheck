@@ -1081,7 +1081,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(app),
                 "--contract",
                 "public",
-                "--report-mode",
+                "--view",
                 "root-cause",
             ],
         )
@@ -1115,7 +1115,7 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--report-mode",
+                "--view",
                 "root-cause",
             ],
         )

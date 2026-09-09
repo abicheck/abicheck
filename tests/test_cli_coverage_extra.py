@@ -214,7 +214,7 @@ class TestShowOnlyValidation:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old), str(new),
-            "--show-only", "invalid_token_xyz",
+            "--view", "show=invalid_token_xyz",
         ])
         assert result.exit_code != 0
         assert "Unknown --show-only token" in result.output or "Invalid value" in result.output
@@ -309,7 +309,7 @@ class TestRenderOutputFormats:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", str(old_f), str(new_f), "--report-mode", "impact"]
+            main, ["compare", str(old_f), str(new_f), "--view", "impact"]
         )
         assert result.exit_code == 4  # breaking (struct size changed)
         assert "Impact Summary" in result.output or "impact" in result.output.lower()
@@ -345,7 +345,7 @@ class TestRenderOutputFormats:
         new_f.write_text(snapshot_to_json(new_snap), encoding="utf-8")
 
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(old_f), str(new_f), "--report-mode", "leaf"])
+        result = runner.invoke(main, ["compare", str(old_f), str(new_f), "--view", "leaf"])
         assert result.exit_code == 4
         assert "leaf-change view" in result.output or "Cfg" in result.output
 

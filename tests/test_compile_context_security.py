@@ -41,6 +41,7 @@ from pathlib import Path
 
 import click
 import pytest
+from click.testing import CliRunner
 
 from abicheck.service_scan import CompileContext
 
@@ -107,6 +108,109 @@ def test_merge_compile_config_compiler_cli_still_wins_over_autodiscovered(
     assert merged.gcc_path == "/usr/bin/g++"
 
 
+def test_merge_compile_config_explicit_override_distrusts_a_resolved_path(
+    tmp_path,
+) -> None:
+    """A caller that has *already* resolved ``build_config`` through its
+    own auto-discovery (e.g. ``compare``'s cwd-upward
+    ``discover_project_config()``, run ahead of ``merge_compile_config``
+    for severity/scope/suppression resolution) must be able to say so via
+    ``config_explicit=False`` -- without it, the non-``None`` resolved path
+    reads as "explicitly trusted" and ``compile.compiler`` bypasses the
+    trust gate entirely (Codex review, fresh evidence -- real finding on
+    PR #1154: ``compare``'s own ``resolve_compile_context`` call passed its
+    resolved ``cfg_path`` straight through as ``build_config``, letting an
+    auto-discovered, attacker-controlled ``.abicheck.yml`` select the
+    executable used for header extraction)."""
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / "auto-discovered.yml"
+    cfg.write_text(
+        "compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8"
+    )
+    # Simulates the vulnerable call shape: `build_config` is already a
+    # resolved, non-None path, but it was never bound via an explicit
+    # --config -- config_explicit=False must still gate it as untrusted.
+    merged, _ = _merge_compile_config(
+        CompileContext(), (), cfg, config_explicit=False
+    )
+    assert merged.gcc_path is None
+    assert merged.gcc_prefix is None
+
+    # The converse: a caller that resolved build_config from a genuine
+    # explicit --config can say config_explicit=True even when it didn't
+    # pass the raw CLI value either -- trust follows the flag, not the
+    # parameter's own None-ness.
+    trusted, _ = _merge_compile_config(
+        CompileContext(), (), cfg, config_explicit=True
+    )
+    assert trusted.gcc_path == "/tmp/evil-compiler"
+
+
+def test_merge_compile_config_explicit_override_does_not_break_cfg_selection(
+    tmp_path,
+) -> None:
+    """``config_explicit=False`` only affects the *trust* determination --
+    the resolved ``build_config`` path itself must still be the one loaded
+    (not silently re-discovered from ``sources``, which could differ or
+    resolve to nothing), so every other ``compile:`` setting the caller's
+    own discovery found still applies."""
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / "auto-discovered.yml"
+    cfg.write_text("compile:\n  std: c++20\n", encoding="utf-8")
+    merged, _ = _merge_compile_config(
+        CompileContext(), (), cfg, sources=None, config_explicit=False
+    )
+    assert any("-std=c++20" in tok for tok in merged.gcc_option_tokens)
+
+
+def test_resolve_compile_context_end_to_end_distrusts_a_resolved_autodiscovered_path(
+    tmp_path,
+) -> None:
+    """The same finding one layer up, at ``resolve_compile_context`` itself
+    (what every real ``compare``/``scan``/bundle-facts call site above
+    ``merge_compile_config`` actually calls) -- reproduces the exact
+    vulnerable call shape ``run_compare``'s own real code used before the
+    fix: a caller resolves ``build_config`` through its own cwd-upward
+    auto-discovery (never bound via an explicit ``--config``) and passes
+    the resolved, non-``None`` path straight into ``resolve_compile_context``.
+    Without ``config_explicit=False`` naming that path as untrusted, an
+    attacker-controlled ``compile.compiler`` in that auto-discovered
+    ``.abicheck.yml`` would select the executable used for header
+    extraction (Codex review, fresh evidence -- real finding on PR #1154)."""
+    from abicheck.cli_options import compile_context_options, resolve_compile_context
+
+    cfg = tmp_path / "auto-discovered.yml"
+    cfg.write_text(
+        "compile:\n  compiler: /tmp/evil-compiler\n", encoding="utf-8"
+    )
+
+    @click.command()
+    @compile_context_options()
+    @click.pass_context
+    def probe(ctx: click.Context, **kwargs: object) -> None:
+        cc, _includes = resolve_compile_context(
+            ctx,
+            sysroot=kwargs["sysroot"],  # type: ignore[arg-type]
+            nostdinc=kwargs["nostdinc"],  # type: ignore[arg-type]
+            header_backend=kwargs["header_backend"],  # type: ignore[arg-type]
+            includes=(),
+            # The vulnerable shape: an already-resolved, non-None path
+            # from the caller's own discovery, not the raw CLI --config.
+            build_config=cfg,
+            compiler_path=kwargs["compiler_path"],  # type: ignore[arg-type]
+            compiler_prefix=kwargs["compiler_prefix"],  # type: ignore[arg-type]
+            compiler_option_tokens=kwargs["compiler_option_tokens"],  # type: ignore[arg-type]
+            config_explicit=False,
+        )
+        click.echo(f"path={cc.gcc_path} prefix={cc.gcc_prefix}")
+
+    result = CliRunner().invoke(probe, [])
+    assert result.exit_code == 0, result.output
+    assert "path=None prefix=None" in result.output
+
+
 @pytest.mark.parametrize(
     "options_yaml",
     [
@@ -114,17 +218,30 @@ def test_merge_compile_config_compiler_cli_still_wins_over_autodiscovered(
         "compile:\n  options:\n    - -fplugin=./evil.so\n",
         "compile:\n  options:\n    - -Xclang\n    - -add-plugin\n    - evilpass\n",
         "compile:\n  options:\n    - -load\n",
+        "compile:\n  options:\n    - -Xclang=-load\n    - -Xclang=./evil.so\n",
+        "compile:\n  options:\n    - -Xclang=-add-plugin\n    - -Xclang=evilpass\n",
+        # Indirect forms: Clang's own --config/--config=<file> mechanism and
+        # the GCC/Clang-common @<file> response-file convention both smuggle
+        # a plugin-loading flag hidden inside a SEPARATE file this scan
+        # cannot see the contents of (Codex review, fresh evidence -- real
+        # finding on PR #1154). Rejected unconditionally, same as the
+        # inline forms above.
+        "compile:\n  options:\n    - --config\n    - ./evil.cfg\n",
+        "compile:\n  options:\n    - --config=./evil.cfg\n",
+        "compile:\n  options:\n    - '@./evil.rsp'\n",
     ],
 )
 def test_compile_options_rejects_plugin_loading_sequences(
     tmp_path, options_yaml
 ) -> None:
     """``compile.options`` may not smuggle a compiler-plugin-loading flag,
-    whether as a single ``-fplugin=`` token or the ``-Xclang``-prefixed
-    two-token form -- reassembled from otherwise individually
-    whitespace-free YAML list items, this loads attacker-controlled native
-    code into the compiler process (CodeRabbit review, PR #1146, finding
-    #2). Rejected unconditionally, regardless of config trust tier: no
+    whether as a single ``-fplugin=`` token, the ``-Xclang``-prefixed
+    two-token form, or Clang's own documented ``-Xclang=<arg>`` joined
+    alias for it (``--help-hidden``) -- reassembled from otherwise
+    individually whitespace-free YAML list items, this loads
+    attacker-controlled native code into the compiler process (CodeRabbit
+    review, PR #1146, finding #2; the joined-alias gap, PR #1154 follow-up).
+    Rejected unconditionally, regardless of config trust tier: no
     header-ABI-extraction use case needs it."""
     from abicheck.buildsource.build_config import BuildConfig
 

@@ -1183,9 +1183,9 @@ class TestJUnitCLICompare:
         assert result.exit_code == 0
         root = xml_fromstring(result.output)
         assert root.get("failures") == "0"
-        # Both kept and added functions should appear as testcases
+        # Kept+added, plus the always-on PUBLIC_SURFACE_GREW roll-up (ADR-068 Phase 5).
         tcs = root.findall(".//testcase")
-        assert len(tcs) == 2
+        assert len(tcs) == 3
 
     def test_compare_output_to_file(self, tmp_path: Path) -> None:
         """--format junit -o file.xml writes valid XML to file."""
@@ -1410,8 +1410,8 @@ class TestJUnitCLICompare:
                 str(tmp_path / "new.json"),
                 "--format",
                 "junit",
-                "--show-only",
-                "breaking",
+                "--view",
+                "show=breaking",
             ],
         )
         assert result.exit_code == 4  # BREAKING

@@ -292,10 +292,17 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     if not section_htmls:
         empty_state = d["empty_state"]
         if empty_state is not None and empty_state["kind"] == "filtered":
+            # Codex review (PR #1154 second follow-up: "Render repeated show
+            # groups as repeated view options") -- this "no changes match"
+            # note has the identical raw-separator problem the "Filtered
+            # by" note above does; same fix, same helper.
+            from ..reporter_markdown import render_show_only_cli_hint
+
+            cli_hint = render_show_only_cli_hint(empty_state["show_only"])
             section_htmls.append(
                 "<div class='section'><p class='empty'>"
                 f"No changes match the current filter "
-                f"(<code>--show-only {h(empty_state['show_only'])}</code>). "
+                f"(<code>{h(cli_hint)}</code>). "
                 f"{empty_state['all_changes_count']} change(s) exist but are "
                 f"excluded by the filter."
                 "</p></div>"
@@ -328,9 +335,16 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     show_only = d["show_only"]
     filter_note = ""
     if show_only:
+        # Codex review (PR #1154 second follow-up: "Render repeated show
+        # groups as repeated view options") -- render each `;`-joined
+        # internal group as its own `--view show=...` token, the same
+        # helper the Markdown "Filtered by" notes use.
+        from ..reporter_markdown import render_show_only_cli_hint
+
+        cli_hint = render_show_only_cli_hint(show_only)
         filter_note = (
             f"<div class='section' style='background:#e3f2fd; padding:10px; border-left:4px solid #1976d2;'>"
-            f"<strong>🔍 Filtered by:</strong> <code>--show-only {h(show_only)}</code> "
+            f"<strong>🔍 Filtered by:</strong> <code>{h(cli_hint)}</code> "
             f"({d['display_changes_count']} of {d['all_changes_count']} changes shown)"
             f"</div>"
         )

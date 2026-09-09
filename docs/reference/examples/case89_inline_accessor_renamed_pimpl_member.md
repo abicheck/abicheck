@@ -51,8 +51,12 @@ what the new detail layout actually is.
 ```bash
 g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --ast-frontend clang -H old=v1.h -H new=v2.h --lang c++
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  lang: c++
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding

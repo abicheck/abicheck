@@ -41,9 +41,14 @@ outside the class — the compiler rejects the access.
 ```bash
 g++ -shared -fPIC -g -std=c++17 v1.cpp -o libv1.so
 g++ -shared -fPIC -g -std=c++17 v2.cpp -o libv2.so
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  options: [-std=c++17]
+EOF
 abicheck compare libv1.so libv2.so \
   --header old=v1.hpp --header new=v2.hpp \
-  --ast-frontend clang --compiler-option -std=c++17
+  --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -65,7 +70,7 @@ access (member-variable `DW_AT_accessibility` is emitted regardless of
 headers) as a `field_access_changed` finding, but `helper()`'s method
 access narrowing needs the header AST to resolve reliably — abicheck's
 default AST backend is castxml; clang is a supported alternative frontend
-(`--ast-frontend clang`), used here because castxml isn't installed in
+(`compile.frontend: clang` (via `.abicheck.yml`)), used here because castxml isn't installed in
 this environment. The full `method_access_changed` finding this case is
 named for requires L2.
 

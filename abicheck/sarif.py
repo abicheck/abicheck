@@ -59,10 +59,10 @@ from abicheck.reporter import (
     apply_show_only,
 )
 from abicheck.reporter_markdown import (
-    ShowOnlyFilter,
     _root_cause_key_and_display,
     root_cause_evidence_lookup_for_changes,
     root_cause_lookup_for_changes,
+    show_only_matches_severity_label,
 )
 from abicheck.severity import missing_contract_exit_code
 
@@ -914,10 +914,7 @@ def to_sarif(
             or missing_contract_exit_code(severity_config) != 0
             else "compatible"
         )
-        show_only_severities = (
-            ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
-        )
-        if not show_only_severities or missing_severity in show_only_severities:
+        if show_only_matches_severity_label(show_only, missing_severity):
             for label in getattr(result, "scoped_missing_labels", ()) or ():
                 rule_id = missing_contract_kind(gate_scope)
                 if rule_id not in rules_seen:

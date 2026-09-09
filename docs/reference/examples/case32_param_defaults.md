@@ -42,9 +42,12 @@ arguments fails to compile. `connect`'s changed default and
 ```bash
 g++ -shared -fPIC -g -std=c++17 v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g -std=c++17 v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=v1.hpp --header new=v2.hpp \
-  --ast-frontend clang --compiler-option -std=c++17
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  options: [-std=c++17]
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.hpp --header new=v2.hpp --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -65,7 +68,7 @@ Quality issues:
 (they're never emitted into DWARF or the symbol table), so this class of
 change is invisible below the header/AST evidence layer. abicheck's
 default AST backend is castxml; clang is a supported alternative frontend
-(`--ast-frontend clang`), used here because castxml isn't installed in
+(`compile.frontend: clang` (via `.abicheck.yml`)), used here because castxml isn't installed in
 this environment. `min_evidence` is scoped to `linux` in
 `ground_truth.json` because the castxml build used elsewhere doesn't
 always emit the `default=` attribute on Homebrew/macOS; header-AST default

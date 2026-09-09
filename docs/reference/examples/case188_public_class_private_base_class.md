@@ -37,7 +37,11 @@ without recompilation.
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libv1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libv2.so
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding

@@ -151,7 +151,7 @@ class TestCompareHelpAllDisclosure:
             "--compiler",
             "--ast-frontend",
             "--write",
-            "--report-mode",
+            "--probe-matrix",
             "--pdb-path",
         ):
             assert advanced_flag not in out, (
@@ -165,7 +165,7 @@ class TestCompareHelpAllDisclosure:
             "--include",
             "--output",
             "--format",
-            "--show-only",
+            "--view",
             "--config",
             "--severity-preset",
             "--used-by",
@@ -238,7 +238,7 @@ class TestCompareHelpAllDisclosure:
         out = CliRunner().invoke(main, ["compare", "--help-all"]).output
         for advanced_flag in (
             "--write",
-            "--report-mode",
+            "--probe-matrix",
             "--pdb-path",
         ):
             assert advanced_flag in out

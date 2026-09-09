@@ -531,7 +531,28 @@ def classify_compare_pair(
             if request.public_surface_allowlist is not None
             else None
         ),
+        # Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
+        # before forcing verdict modulation"): a prior fix here forced
+        # `pattern_verdicts=True` unconditionally, citing ADR-068 D4's
+        # "no legitimate off position" principle -- but ADR-068 is
+        # "Proposed -- not implemented", not an accepted decision, and the
+        # ADR that *is* accepted (ADR-027) explicitly defers flipping
+        # `--pattern-verdicts` to default-on until a release cycle's worth
+        # of FP-rate and parity validation. The native single-pair CLI
+        # (cli_compare_helpers.py) and the release fan-out's own
+        # `_compare_one_library` (cli_compare_release_pairwise.py) each
+        # made their own, separately-committed decision to hardcode
+        # `pattern_verdicts=True` at their own call sites -- that predates
+        # this fix and is out of scope for it -- but this shared Tier-2
+        # chokepoint (the typed API's `service.run_compare`, and the
+        # stored-BundleFacts drivers that call it) forwards the request's
+        # own field again, so a bare `CompareRequest()`/`run_compare()` call
+        # keeps the accepted opt-in default instead of a silent, un-reviewed
+        # flip. `surface_metrics=True` stays unconditional here (pre-existing,
+        # ADR-027 Phase 5's `--surface-metrics` findings; unaffected by this
+        # correction).
         pattern_verdicts=request.pattern_verdicts,
+        surface_metrics=True,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
         reconcile_build_context=request.reconcile_build_context,
         env_matrix=service.load_env_matrix(request.env_matrix_path),
