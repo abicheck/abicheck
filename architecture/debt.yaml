@@ -213,12 +213,12 @@
     },
     {
       "path": "abicheck/buildsource/pattern_scan.py",
-      "baseline_lines": 941,
+      "baseline_lines": 963,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "category": "legacy_extraction_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 941 -> 963 (PR #1169, Codex review, fourth round, fresh evidence): `scan_files` now counts a supplied root that is neither a file nor a directory (deleted/renamed after being selected) as skipped, same as an unreadable *found* file -- previously `iter_source_files` dropped it with no accounting at all, so a side with one missing root among several read as a clean, fully-covered scan even though that root contributed no evidence. The process-pool path was split into `_scan_files_parallel` so the new accounting has one shared return value to adjust regardless of which path (serial/parallel/fallback) ran, rather than needing the same fix three times over.",
       "review_by": "2026-11-30"
     },
     {

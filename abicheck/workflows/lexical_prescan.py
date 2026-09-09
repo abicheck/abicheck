@@ -198,14 +198,24 @@ def compute_pattern_prescan_side(
 #: * ``"unreadable_inputs"`` -- headers/``--sources`` were supplied but the
 #:   scan still found nothing to scan: either no changed-path seed narrowed
 #:   anything and every candidate file failed to read/matched no scannable
-#:   extension, a seed *did* select candidate files (``result.
-#:   files_skipped > 0``) and every one of them was unreadable, or a
-#:   supplied root itself does not exist on disk at all (a stale/deleted
-#:   path) -- three different acquisition failures, none of them the
-#:   seed's own empty-by-design scope.
+#:   extension, or a seed *did* select candidate files (``result.
+#:   files_skipped > 0``) and every one of them was unreadable/missing --
+#:   a real acquisition failure, not the seed's own empty-by-design scope.
+#:   ``pattern_scan.scan_files`` itself counts a supplied root that no
+#:   longer exists on disk (deleted/renamed after being selected) as
+#:   skipped, same as an unreadable *found* file, so this function needs no
+#:   separate existence check of its own.
 #:
 #: ``None`` when the side has real coverage (``files_scanned > 0``) -- this
-#: reason exists only to explain an otherwise-ambiguous zero.
+#: reason exists only to explain an otherwise-ambiguous zero. Note this
+#: means a side with SOME roots missing and at least one other root
+#: scanned successfully reads `None` here (real coverage exists) --
+#: `pattern_prescan_review_warnings` catches that case instead, via
+#: `coverage.status == "partial"` (Codex review, fourth round, fresh
+#: evidence: a missing sibling root previously left `files_skipped == 0`
+#: even when a co-supplied root did scan, so `[existing.hpp, missing.hpp]`
+#: read as a clean PRESENT row; fixed at the producer, `scan_files`, so
+#: every consumer of `PatternScanResult.coverage()` inherits it uniformly).
 def _pattern_scan_scope_reason(
     roots: list[Path], seeded: bool, result: PatternScanResult
 ) -> str | None:
@@ -213,17 +223,6 @@ def _pattern_scan_scope_reason(
         return None
     if not roots:
         return "no_inputs"
-    # A missing root (Codex review, third round, fresh evidence) is a THIRD
-    # way to reach `files_scanned == 0, files_skipped == 0` that `seeded`/
-    # `files_skipped` alone cannot tell apart from a real empty diff:
-    # `pattern_scan.iter_source_files` silently drops a root that is
-    # neither a file nor a directory (`rp.is_file()`/`rp.is_dir()` both
-    # False) *before* `_scan_one_file` ever runs, so a selected header/
-    # source path that no longer exists never increments `files_skipped`
-    # either. Checked independently of `seeded`, since an unseeded run can
-    # be pointed at a stale root just as easily.
-    if any(not r.exists() for r in roots):
-        return "unreadable_inputs"
     # A seeded run's own `files_skipped` count (Codex review, second round,
     # fresh evidence) is what actually distinguishes "the seed resolved to
     # a real, valid, empty diff" from "the seed selected files and every

@@ -796,7 +796,31 @@ def test_scan_files_skips_missing_root_gracefully(tmp_path: Path) -> None:
     res = scan_files([tmp_path / "does-not-exist"])
     assert res.files_scanned == 0
     assert res.facts == []
+    # Codex review, fourth round, fresh evidence: `iter_source_files`
+    # silently drops a root that is neither a file nor a directory with no
+    # accounting at all -- `scan_files` itself now counts it as skipped
+    # (same as an unreadable *found* file) so this doesn't read as a
+    # clean, fully-covered scan of zero files.
+    assert res.files_skipped == 1
     assert res.coverage().status is CoverageStatus.NOT_COLLECTED
+
+
+def test_scan_files_counts_missing_sibling_root_even_when_another_scans(
+    tmp_path: Path,
+) -> None:
+    """Codex review, fourth round, fresh evidence: when one of several
+    supplied roots exists and scans successfully while another is missing,
+    the missing root must still downgrade coverage to `partial` -- not
+    read as a clean PRESENT row just because a sibling root produced real
+    evidence. `[existing.hpp, missing.hpp]` previously reported
+    `files_skipped == 0` and `coverage().status == "present"`."""
+    existing = tmp_path / "existing.hpp"
+    existing.write_text("struct S { int x; };")
+    missing = tmp_path / "missing.hpp"
+    res = scan_files([existing, missing])
+    assert res.files_scanned == 1
+    assert res.files_skipped == 1
+    assert res.coverage().status is CoverageStatus.PARTIAL
 
 
 def test_scan_files_counts_unreadable_as_skipped(

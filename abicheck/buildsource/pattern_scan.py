@@ -40,7 +40,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -912,11 +912,33 @@ def scan_files(
     concatenated in that order. Any executor failure falls back to serial so a
     constrained sandbox never turns a scan into an error.
     """
+    roots = list(roots)
+    # Codex review, fourth round, fresh evidence: `iter_source_files` silently
+    # drops a root that is neither a file nor a directory (deleted/renamed
+    # after being selected) with no accounting at all -- `[existing.hpp,
+    # missing.hpp]` previously scanned the one existing root, reported
+    # `files_skipped == 0`, and read as a clean, fully-covered PRESENT row
+    # (`coverage()`) even though one of its two supplied roots contributed
+    # no evidence whatsoever. Counted here, once, so every return path below
+    # (serial, parallel, and the parallel-failure fallback) inherits it
+    # uniformly rather than needing the same fix three times over.
+    missing_roots = sum(1 for r in roots if not Path(r).exists())
     files = iter_source_files(roots, changed_paths)
     jobs = _resolve_scan_jobs(len(files))
     if jobs <= 1:
-        return _scan_files_serial(files)
+        result = _scan_files_serial(files)
+    else:
+        result = _scan_files_parallel(files, jobs)
+    if missing_roots:
+        result = replace(result, files_skipped=result.files_skipped + missing_roots)
+    return result
 
+
+def _scan_files_parallel(files: list[Path], jobs: int) -> PatternScanResult:
+    """The process-pool path split out of :func:`scan_files` (Codex review,
+    fourth round) so the missing-root accounting there has one shared return
+    value to adjust regardless of which path (serial/parallel/fallback) ran.
+    """
     from concurrent.futures import ProcessPoolExecutor
 
     facts: list[PatternFact] = []

@@ -54,13 +54,26 @@
   run whose selected header/source path is missing/deleted read
   `files_scanned == 0, files_skipped == 0` -- indistinguishable from a real
   empty diff by the third round's own `files_skipped`-based check.
-  `_pattern_scan_scope_reason` now also checks each supplied root's own
-  `Path.exists()` independently, before consulting `files_skipped`. (b) the
-  `pattern_prescan`/`preprocessor_prescan` per-side objects were still
-  typed as unconstrained `additionalProperties: true` objects in the
+  (b) the `pattern_prescan`/`preprocessor_prescan` per-side objects were
+  still typed as unconstrained `additionalProperties: true` objects in the
   schema despite the description documenting a `coverage` block and a
   `scope_reason` enum -- a consumer validating against the 3.13 schema
   could not actually catch a malformed value on either field. Added
   `$defs/pattern_prescan_side`/`preprocessor_prescan_side` typing every
   public field (still `additionalProperties: true` for forward
-  compatibility).
+  compatibility). Fifth follow-up round (Codex review, PR #1169, fourth
+  round, fresh evidence): (a)'s own fix (an existence check inside
+  `_pattern_scan_scope_reason`) was itself only a partial, consumer-side
+  patch -- it can only fire when `files_scanned == 0`, so a side supplying
+  *several* roots where one is missing and another scans successfully
+  (`[existing.hpp, missing.hpp]`) still read as a clean, fully-covered
+  `present` row, since the missing root never incremented `files_skipped`
+  at all. Fixed at the true root cause instead: `pattern_scan.scan_files`
+  itself now counts a supplied root that doesn't exist as skipped, the
+  same way it already counts an unreadable *found* file -- so every
+  consumer of `PatternScanResult.coverage()` (the Markdown/JSON pre-scan
+  sections here, and `scan`'s own pre-existing text output) inherits the
+  fix uniformly, and `_pattern_scan_scope_reason`'s own now-redundant
+  existence check was removed. The process-pool path was split into a new
+  `_scan_files_parallel` helper so the accounting has one shared return
+  value to adjust regardless of which path (serial/parallel/fallback) ran.
