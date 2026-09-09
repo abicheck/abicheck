@@ -242,6 +242,26 @@ def _bash_executable() -> str:
     return "bash"
 
 
+def _bash_pwd(cwd: Path) -> str:
+    """The real ``$PWD`` bash itself reports for *cwd* -- not ``str(cwd)``
+    (mirrors ``test_action_run_sh_severity_summary.py::TestReportPathAnchoring
+    ._bash_pwd``: on a Windows Git-Bash runner, ``$PWD`` inside bash is
+    always the MSYS POSIX form (``/c/Users/...``), never the native
+    backslash form Python's ``pathlib.Path`` prints there. Comparing a
+    script's own ``$PWD``-anchored output against ``f"{tmp_path}/..."``
+    would compare two different path *representations* of the same
+    directory, not two different directories. A no-op on POSIX hosts, where
+    both forms already coincide)."""
+    result = subprocess.run(
+        [_bash_executable(), "-c", "printf '%s' \"$PWD\""],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout
+
+
 def _run_bash_script(
     script: str,
     env_extra: dict[str, str] | None = None,
@@ -504,7 +524,10 @@ _PY_BIN="{sys.executable}"
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
-_overlay_path="${{CMD[-1]}}"
+# `${{CMD[-1]}}` (negative array index) needs bash 4.3+ -- macOS's default
+# `/usr/bin/bash` is 3.2 and raises "bad array subscript" on it. This
+# `${{#CMD[@]}}-1` form is the portable "last element" idiom.
+_overlay_path="${{CMD[${{#CMD[@]}}-1]}}"
 STDERR_FILE=$(mktemp)
 {_main_exit_trap_source()}
 printf '%s\\n' "$_overlay_path"
@@ -1013,6 +1036,15 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
     ``test_action_run_sh_severity_summary.py::TestReportPathAnchoring``'s
     own established pattern for the identical helper).
 
+    The two "gets prefixed with ``$PWD``" cases below compare against this
+    module's own ``_bash_pwd(tmp_path)`` rather than ``tmp_path`` itself --
+    a real Windows/Git-Bash CI runner's ``$PWD`` is always the MSYS POSIX
+    form (``/c/Users/...``), never the native backslash form Python's
+    ``pathlib.Path`` prints there, so comparing against a bare ``tmp_path``
+    failed on every Windows CI run regardless of whether the absolutization
+    logic itself was correct (mirrors ``TestReportPathAnchoring``'s own
+    ``_bash_pwd`` fix for the identical mismatch).
+
     These tests exercise just the absolutization if-block in isolation
     (``_base_source_absolutize_source``), not the full merge -- a
     synthetic Windows path has no real file behind it on this (Linux) test
@@ -1070,7 +1102,7 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
         ``$PWD/`` prefix there, unlike the Windows-forced case above."""
         posix_like = "C:/Users/runner/work/repo/config.yml"
         result = self._absolutize(posix_like, tmp_path, windows=False)
-        assert result == f"{tmp_path}/{posix_like}"
+        assert result == f"{_bash_pwd(tmp_path)}/{posix_like}"
 
     def test_ordinary_relative_path_still_gets_pwd_prefix_on_windows(
         self, tmp_path: Path
@@ -1081,7 +1113,7 @@ class TestReleaseTopologyOverlayPreservesWindowsQualifiedBuildConfigPath:
         Windows-qualified forms."""
         relative = ".abicheck.yml"
         result = self._absolutize(relative, tmp_path, windows=True)
-        assert result == f"{tmp_path}/{relative}"
+        assert result == f"{_bash_pwd(tmp_path)}/{relative}"
 
 
 class TestReleaseTopologyOverlayGenerationIsIsolated:
