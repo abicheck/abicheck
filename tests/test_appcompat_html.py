@@ -182,6 +182,38 @@ def test_html_shows_breaking_for_app() -> None:
     assert "removed_func" in out
 
 
+def test_html_carries_the_unattributed_evidence_caveat() -> None:
+    """Codex review, fresh evidence: appcompat's own changes tables
+    (breaking-for-app and irrelevant-for-app alike) called `_changes_table`
+    with no `evidence_tiers` at all, so an unattributed finding from an
+    ELF-plus-header comparison with no binary evidence for *this specific*
+    finding rendered the unconditional impact text -- unlike the native
+    and ABICC HTML renderers, which already thread `evidence_tiers`
+    through. `["header"]` (no `elf`) means `has_binary_evidence` reads
+    False, downgrading an otherwise `ARTIFACT_PROVEN` finding to
+    `UNATTRIBUTED`."""
+    from enum import Enum
+
+    class K(str, Enum):
+        V = "func_removed"
+
+    change = SimpleNamespace(
+        kind=K.V, symbol="removed_func", description="Public function removed",
+        old_value="removed_func", new_value=None, source_location=None,
+        affected_symbols=None, caused_by_type=None, caused_count=0,
+        demangled_symbol="removed_func",
+    )
+    r = _appcompat_result(verdict=Verdict.BREAKING, breaking=[change])
+    r.full_diff.evidence_tiers = ["header"]
+    out = appcompat_to_html(r)
+    assert "available evidence does not fully confirm" in out
+
+    irrelevant_r = _appcompat_result(irrelevant=[change])
+    irrelevant_r.full_diff.evidence_tiers = ["header"]
+    irrelevant_out = appcompat_to_html(irrelevant_r)
+    assert "available evidence does not fully confirm" in irrelevant_out
+
+
 def test_html_escapes_xss_in_app_path() -> None:
     """Malicious app_path must be escaped in output."""
     r = _appcompat_result()

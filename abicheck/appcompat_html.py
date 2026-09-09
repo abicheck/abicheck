@@ -63,6 +63,10 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
     irrelevant = getattr(result, "irrelevant_for_app", [])
     total_changes = len(breaking) + len(irrelevant)
     full_diff = getattr(result, "full_diff", None)
+    # Codex review, fresh evidence: threaded into both _changes_table()
+    # calls below so an UNATTRIBUTED finding gets the same evidence caveat
+    # here that the native/ABICC HTML renderers already carry.
+    evidence_tiers = getattr(full_diff, "evidence_tiers", None) or ()
 
     # Batch-demangle every C++ symbol up front, the same way
     # generate_html_report() does -- _changes_table()/_symbol_cell() below
@@ -172,7 +176,7 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
   <p style='padding:0 16px; font-size:0.88em; color:#666;'>
     These library changes affect symbols your application uses.
   </p>
-  {_changes_table(list(breaking), demangle)}
+  {_changes_table(list(breaking), demangle, evidence_tiers)}
 </div>"""
     elif total_changes > 0:
         relevant_html = f"""<div class='section section-added'>
@@ -188,7 +192,7 @@ def appcompat_to_html(result: object, *, demangle: bool = True) -> str:
   <p style='padding:0 16px; font-size:0.85em; color:#999;'>
     These library changes do NOT affect your application.
   </p>
-  {_changes_table(list(irrelevant), demangle)}
+  {_changes_table(list(irrelevant), demangle, evidence_tiers)}
 </div>"""
 
     body = f"""

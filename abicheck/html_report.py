@@ -167,11 +167,27 @@ def compute_full_change_rows(
     return tuple(rows)
 
 
-def _changes_table(changes: list[object], demangle: bool = True) -> str:
+def _changes_table(
+    changes: list[object],
+    demangle: bool = True,
+    evidence_tiers: Sequence[str] = (),
+) -> str:
     """Native changes table. Kept at its original signature -- `appcompat_html.py`
     imports it, and it has its own direct test coverage -- so the per-change
-    fact resolution happens here rather than being pushed onto every caller."""
-    return render_changes_table(compute_full_change_rows(changes), demangle)
+    fact resolution happens here rather than being pushed onto every caller.
+
+    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets
+    ``compute_full_change_rows`` qualify an ``UNATTRIBUTED`` finding's
+    impact text -- appcompat's own changes tables (`appcompat_html.py`)
+    previously called this with no tiers at all, leaving an unbound
+    finding from an ELF-plus-header comparison reading as
+    artifact-proven, unlike the native/ABICC HTML renderers (Codex
+    review, fresh evidence). Omitting it (the default) keeps every other
+    caller byte-identical to before this parameter existed.
+    """
+    return render_changes_table(
+        compute_full_change_rows(changes, evidence_tiers), demangle
+    )
 
 
 def _change_bucket(

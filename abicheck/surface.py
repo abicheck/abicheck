@@ -616,9 +616,28 @@ def classify_change_surface(
         # regardless of the class's real visibility, while a developer
         # machine with cxxfilt installed correctly demotes it.
         owner_scope = itanium_special_name_owner_scope_components(sym)
-        sym_for_types = (
-            "::".join(owner_scope[0]) if owner_scope else (demangle(sym) or sym)
+        # Codex review, fresh evidence: the structural parser deliberately
+        # keeps a template owner's *raw encoded* argument list (see
+        # itanium_scope_components's own docstring -- "the raw
+        # template-argument encoding is kept so distinct specializations
+        # stay distinct", e.g. Box<int> -> "BoxIiE") rather than a
+        # canonical spelling like the model's own "Box<int>", so an owner
+        # whose own component carries a template-argument list can never
+        # match `all_types`/`public_types` -- unlike the non-template case
+        # this parser exists for, this is not "unmatched, conservatively
+        # kept" by design; it is a real match failure a demangler would
+        # resolve, on any host where one happens to be installed. Falling
+        # back to `demangle()` only for that specific shape keeps the
+        # dependency-free path for every ordinary (non-template) owner
+        # while not leaving a templated one strictly worse off than before
+        # this parser existed.
+        owner_has_template_args = (
+            owner_scope is not None and (len(owner_scope[0]) - 1) in owner_scope[1]
         )
+        if owner_scope is not None and not owner_has_template_args:
+            sym_for_types = "::".join(owner_scope[0])
+        else:
+            sym_for_types = demangle(sym) or sym
         return _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type
         )

@@ -200,3 +200,48 @@ class TestMangledVtableSymbolSurfaceClassification:
             assert classify_change_surface(c, s, s) is not None
         finally:
             surface_mod.demangle = original
+
+    def test_mangled_vtable_symbol_of_a_template_specialization_demotes_correctly(
+        self,
+    ):
+        """Codex review, fresh evidence: the structural parser deliberately
+        keeps a template owner's *raw encoded* argument list (e.g.
+        ``Box<int>`` -> ``"BoxIiE"``, see
+        ``itanium_scope_components``'s own docstring), which can never
+        match the model's own canonical spelling (``"Box<int>"`` /
+        the bare ``"Box"`` token ``_type_identifiers`` extracts from it).
+        Left unhandled, a templated vtable/RTTI owner was silently *worse*
+        off than before this parser existed: not merely "unmatched,
+        conservatively kept" but never even attempted, since the raw
+        structural spelling opaquely mismatches every real type name. The
+        fix falls back to ``demangle()`` specifically when the owner's own
+        component carries a template-argument list.
+
+        Real GCC manglings (verified against a real ``c++filt``):
+        ``_ZTV3BoxIiE`` demangles to ``"vtable for Box<int>"``, from which
+        ``_type_identifiers`` extracts the bare ``"Box"`` token.
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("Box")],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTV3BoxIiE",
+            description="",
+        )
+        # "Box" is declared (in all_types) but never reachable from a public
+        # function/variable -- a real non-public type, correctly demoted
+        # only because the template-argument list forced the demangler
+        # fallback instead of the unmatchable raw structural spelling.
+        assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
+        c_pub = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTV6ResultIiE",
+            description="",
+        )
+        assert classify_change_surface(c_pub, s, s) == (True, None)

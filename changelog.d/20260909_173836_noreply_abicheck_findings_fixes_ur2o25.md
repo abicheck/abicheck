@@ -132,3 +132,18 @@
   that `_classify_symbol_level` resolves on its own still forked a
   `c++filt` (via `demangle()`) for a value it never used (CodeRabbit
   review).
+- `surface.py`'s vtable/RTTI/VTT owner resolution now falls back to
+  `demangle()` specifically when the owner's own component carries a
+  template-argument list. The dependency-free structural parser
+  deliberately keeps a template owner's *raw encoded* arguments (e.g.
+  `Box<int>` -> `"BoxIiE"`) so distinct specializations stay distinct,
+  but that raw spelling can never match the model's own canonical type
+  names — a templated vtable/RTTI owner was therefore never actually
+  matched at all, even on a host with a demangler installed (Codex
+  review, fresh evidence).
+- Appcompat's own HTML changes tables (`--app`'s breaking-for-app and
+  irrelevant-for-app sections) now thread `DiffResult.evidence_tiers`
+  through, matching the native and ABICC-compatible HTML renderers —
+  previously an unattributed finding here always read as
+  `artifact_proven`, unlike every other HTML surface (Codex review,
+  fresh evidence).
