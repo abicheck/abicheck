@@ -44,6 +44,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
 | `depth` | `str \| None` | `None` |
+| `budget_s` | `float \| None` | `None` |
 | `dwarf_only` | `bool` | `False` |
 | `debug_format` | `str \| None` | `None` |
 | `include_labels` | `tuple[tuple[Path, str], ...]` | `()` |

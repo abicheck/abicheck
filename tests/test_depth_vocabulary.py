@@ -265,7 +265,15 @@ def _fn(name: str):  # type: ignore[no-untyped-def]
 @pytest.mark.parametrize("depth", ["binary", "headers", "source"])
 def test_compare_accepts_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
     """``compare`` folds ``--depth`` into the collect mode for snapshot inputs;
-    ``binary`` clears headers, deeper rungs resolve without error."""
+    ``binary`` clears headers, deeper rungs resolve without error.
+
+    ADR-068 §3 #28's evidence-contract floor (exit 7) deliberately does not
+    apply here: neither ``old``/``new`` is a live artifact this run itself
+    extracted (both are pre-serialized JSON snapshots, see ``_snap``), so
+    there is no "under-collected" side to blame -- the floor only fires for
+    a side ``compare`` resolves from a live binary and see
+    ``policy.depth_evidence_contract``'s own "Live extraction only" note.
+    """
     old = _snap(tmp_path, "libx", "1.0", [_fn("a"), _fn("b")])
     new = _snap(tmp_path, "libx", "2.0", [_fn("a"), _fn("b")])
     res = CliRunner().invoke(main, ["compare", str(old), str(new), "--depth", depth])
@@ -755,3 +763,46 @@ def test_dump_depth_headers_with_hybrid_frontend_not_rejected(tmp_path) -> None:
          "--config", str(cfg), "-o", str(tmp_path / "out4.json")],
     )
     assert "compile.frontend: hybrid" not in _all_output(res)
+
+
+@pytest.mark.integration
+def test_compare_depth_build_over_live_binaries_without_evidence_fails() -> None:  # type: ignore[no-untyped-def]
+    """ADR-068 §3 #28: a pinned ``--depth build``/``--depth source`` that a
+    *live* binary's own extraction never reached must fail loudly (exit 7,
+    ``EVIDENCE_CONTRACT_ERROR``) instead of silently degrading to
+    symbols-only evidence and reporting ``NO_CHANGE``/exit 0 -- verified
+    live (not from documentation) to have been a real, previously-
+    undocumented gap in the native ``compare`` CLI's own resolution
+    (``cli_resolve._resolve_compare_snapshots`` never called
+    ``workflows.artifact.execute.enforce_requested_depth``, unlike the
+    typed-API path). Distinct from
+    ``test_compare_accepts_depth_over_snapshots`` above, which pins the same
+    depth over pre-serialized *snapshot* inputs -- the floor deliberately
+    does not apply there (see ``policy.depth_evidence_contract``'s own "Live
+    extraction only" note); a real, live ``.so`` with no ``--build-info``/
+    ``--sources`` at all is the case the floor exists for.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc not found in PATH")
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        old_c = tmp_path / "old.c"
+        new_c = tmp_path / "new.c"
+        old_c.write_text("int foo(int x) { return x + 1; }\n")
+        new_c.write_text("int foo(int x) { return x + 2; }\n")
+        old_so = tmp_path / "old.so"
+        new_so = tmp_path / "new.so"
+        for src, so in ((old_c, old_so), (new_c, new_so)):
+            subprocess.run(
+                ["gcc", "-shared", "-fPIC", "-o", str(so), str(src)],
+                check=True,
+            )
+        res = CliRunner().invoke(
+            main, ["compare", "--depth", "build", str(old_so), str(new_so)]
+        )
+        assert res.exit_code == 7, _all_output(res)

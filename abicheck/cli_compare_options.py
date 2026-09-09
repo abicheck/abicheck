@@ -68,6 +68,7 @@ def _reject_set_input_flags(
     suppress: Path | None = None,
     include_labels: dict[Path, str] | None = None,
     require_complete_analysis: bool = False,
+    budget: str | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -177,6 +178,15 @@ def _reject_set_input_flags(
             "fan-out has no single analysis_assurance result to gate on. "
             "Compare the specific library individually to use it, or see "
             "P0.6 (run-plan-aware aggregation) for the tracked follow-up."
+        )
+    if budget is not None:
+        raise click.UsageError(
+            "--budget is not supported for directory/package (release) "
+            "comparisons yet (ADR-068 §3 #19, Codex review): the per-library "
+            "fan-out dispatches each member through its own process/thread, "
+            "so a single ambient deadline set here would not reach any of "
+            "them, silently ignoring the budget instead of enforcing it. "
+            "Compare a specific library individually to use --budget."
         )
 
 
