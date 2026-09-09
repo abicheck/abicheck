@@ -801,6 +801,41 @@ def iter_source_files(
     OS-level failure mode a best-effort advisory pre-scan (ADR-035 D2/D3:
     "never fatal") already degrades gracefully from, unlike the two shapes
     above which are ordinary, everyday outcomes of a real PR's own edits.
+
+    **Also deliberately NOT attempted** (Codex review, twelfth round, fresh
+    evidence): :func:`scan_files`'s own missing-root exemption (the
+    ``SOURCE_SUFFIXES``-based check just above this function) only resolves
+    the ambiguity for a root carrying a *known* header/source suffix -- a
+    missing root that is itself an explicit, extensionless FILE (e.g.
+    ``include/mylib/Core``, the libstdc++-style extensionless-header shape
+    :func:`_is_scannable` already documents as a legitimate, supported
+    input) still has no suffix to match `SOURCE_SUFFIXES`, so it falls
+    through to the unconditional "ambiguous, count it" branch the same way
+    a missing DIRECTORY root does -- even when `changed_paths` demonstrably
+    would never have selected it, misreporting a real, valid `empty_seed`
+    as `unreadable_inputs` for this one shape. This is the identical
+    ambiguity the eighth/tenth rounds already closed for a *suffixed* file
+    root and a *directory* root respectively, but here it is structurally
+    unresolvable from the path string alone: given only ``roots`` (plain
+    strings/`Path`s, no file/directory tag) and the fact that the path
+    doesn't exist, there is no textual signal distinguishing "a missing
+    extensionless header FILE" from "a missing DIRECTORY" -- both are real,
+    legitimate shapes this function's own `roots` parameter accepts, and
+    `SOURCE_SUFFIXES` can only ever guess right by accident of naming
+    convention (a project could equally name a source subdirectory
+    `include/mylib/Impl` with no extension). A structurally sound fix needs
+    real file-vs-directory *provenance* threaded through from the two call
+    sites that already know it at the point `roots` is assembled
+    (`scan_engine.py`'s and `workflows/lexical_prescan.py`'s own root
+    construction) -- through `scan_files`'s and `iter_source_files`'s
+    shared, deliberately simple `Iterable[str | Path]` signature, which
+    would be a materially larger, more invasive change than any fix in this
+    chain so far. Per this repo's own "attempted twice, reverted twice"
+    discipline (already invoked once in this same docstring, for the
+    seventh round's revert), a third heuristic patch on top of the same
+    suffix-based guess is not attempted; this narrow shape (a missing,
+    extensionless, explicit file root that `changed_paths` would have
+    excluded) stays a documented, accepted gap alongside the two above.
     """
     changed_suffixes: set[str] | None = None
     if changed_paths is not None:

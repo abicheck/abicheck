@@ -884,6 +884,26 @@ def test_scan_files_missing_directory_root_still_counted_under_changed_paths(
     assert res.files_skipped == 1
 
 
+def test_scan_files_missing_extensionless_file_root_is_a_known_gap(
+    tmp_path: Path,
+) -> None:
+    """Documents the accepted, deliberately-NOT-fixed limitation
+    :func:`iter_source_files`'s own docstring records (Codex review, twelfth
+    round, fresh evidence): a missing root that is itself an explicit,
+    extensionless FILE (the libstdc++-style header shape `_is_scannable`
+    documents as legitimate) has no `SOURCE_SUFFIXES` entry to match, so it
+    falls through to the unconditional "ambiguous, count it" branch the
+    same way a missing DIRECTORY root does -- even though `changed_paths`
+    here would never have selected it. There is no textual signal
+    distinguishing this from a missing directory root, so (per this repo's
+    "attempted twice, reverted twice" discipline) it stays a known,
+    documented gap rather than a third heuristic patch."""
+    missing = tmp_path / "Core"  # extensionless explicit file root
+    res = scan_files([missing], changed_paths=["different.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1  # accepted gap: should be 0 (empty_seed)
+
+
 def test_scan_files_missing_directory_root_exempted_under_a_truly_empty_seed(
     tmp_path: Path,
 ) -> None:

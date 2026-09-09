@@ -164,4 +164,28 @@
   dedupes existing candidates into a `set[Path]`, so the same missing
   file listed twice (duplicate `--header` values, a directly-constructed
   API input) inflated `files_skipped` by however many times it repeated.
-  Added a `seen_roots: set[Path]` guard.
+  Added a `seen_roots: set[Path]` guard. Twelfth follow-up round
+  (Codex review, PR #1169, twelfth round, fresh evidence), two more
+  findings: (a) `docs/use/output-formats.md`'s worked JSON example
+  hard-coded the current `"report_schema_version": "3.13"` literal even
+  though `abicheck.schemas.REPORT_SCHEMA_VERSION` is the canonical fact
+  owner -- recreating the exact doc/schema drift class this PR exists to
+  fix. Replaced with a `"<REPORT_SCHEMA_VERSION>"` placeholder plus an
+  explanatory paragraph pointing back at the real constant. (b) the
+  eighth round's `SOURCE_SUFFIXES`-based missing-root exemption only
+  resolves the file-vs-directory ambiguity for a root carrying a known
+  header/source suffix -- a missing, extensionless, explicit FILE root
+  (the libstdc++-style header shape `_is_scannable` already documents as
+  legitimate, e.g. `include/mylib/Core`) has no suffix to match, so it
+  still falls through to the unconditional "ambiguous, count it" branch
+  even when `changed_paths` would never have selected it. Structurally
+  undecidable from the path string alone -- both a missing extensionless
+  file and a missing directory are legitimate `roots` shapes, and
+  resolving it needs real file-vs-directory provenance threaded through
+  from the two call sites that already know it, a materially larger
+  change than any fix in this chain. Per this repo's own "attempted
+  twice, reverted twice" discipline, documented as a third accepted,
+  deliberately-not-fixed gap in `iter_source_files`'s own docstring
+  (alongside the deleted-changed-path and `os.walk`-error gaps already
+  there) rather than a third heuristic patch, with a pinning regression
+  test.
