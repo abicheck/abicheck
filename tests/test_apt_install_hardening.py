@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -372,6 +373,42 @@ class TestPackagesAreNotInterpolatedIntoTheShell:
         assert "${{" not in step["run"]
 
 
+#: Commands that genuinely *absorb* a failure: each exits 0 no matter what
+#: preceded it, so a step ending in one cannot abort. Deliberately a small
+#: allowlist rather than "the line contains `||`" — that weaker rule accepts
+#: `apt-get update || exit 1`, `|| false`, or `|| apt-get update` (a retry
+#: whose own failure still aborts), which reintroduce the exact gating this
+#: whole change removes while keeping the guard green (Codex review, P2 on
+#: PR #1182).
+_NON_FAILING_SINKS = frozenset({"true", ":", "echo", "printf"})
+
+
+def update_failure_is_absorbed(line: str) -> bool:
+    """True when this line's ``apt-get update`` cannot abort its step.
+
+    The status a shell line exits with is the status of its *last* command,
+    so a chain `a || b || c` is absorbed only if `c` is. Anything this cannot
+    parse is reported as NOT absorbed: for a guard, an unreadable line is a
+    line to look at, not one to wave through.
+    """
+    if "||" not in line:
+        return False
+    tail = line.rsplit("||", 1)[1].strip().rstrip(";&").strip()
+    if not tail:
+        return False
+    try:
+        words = shlex.split(tail)
+    except ValueError:
+        return False
+    if not words:
+        return False
+    # `sudo true` absorbs exactly as `true` does; skip a leading sudo.
+    head = words[0]
+    if head == "sudo" and len(words) > 1:
+        head = words[1]
+    return head in _NON_FAILING_SINKS
+
+
 class TestNoWorkflowGatesInstallOnUpdate:
     """The class invariant, over every workflow at once.
 
@@ -402,9 +439,7 @@ class TestNoWorkflowGatesInstallOnUpdate:
                     continue
                 if stripped.lstrip().startswith("#"):
                     continue
-                # Tolerated iff the line cannot abort the step: its failure
-                # is absorbed by `||`.
-                if "||" not in stripped:
+                if not update_failure_is_absorbed(stripped):
                     offenders.append(f"{name}: {stripped}")
         assert not offenders, (
             "`apt-get update`'s exit status must never gate a step -- an "
@@ -431,3 +466,53 @@ class TestNoWorkflowGatesInstallOnUpdate:
     def test_install_sh_is_executable_and_syntactically_valid(self) -> None:
         assert os.access(INSTALL_SH, os.X_OK)
         assert subprocess.run(["bash", "-n", str(INSTALL_SH)]).returncode == 0
+
+
+class TestUpdateFailureAbsorptionPredicate:
+    """The guard's own primitive, tested directly.
+
+    A repository-wide structural scan is only as good as the predicate
+    deciding what counts as an offender, and that predicate is exactly the
+    kind of reusable rule AGENTS.md asks to be stated as invariants rather
+    than trusted because one caller happens to pass.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "sudo apt-get update -qq || true",
+            "sudo apt-get update || :",
+            'sudo apt-get update || echo "::warning::index stale, continuing"',
+            "sudo apt-get update -qq || sudo apt-get update -qq || true",
+            "apt-get update||true",
+            "sudo apt-get update || sudo true",
+            "sudo apt-get update -qq || printf 'stale\\n'",
+        ],
+    )
+    def test_absorbed_forms_are_accepted(self, line: str) -> None:
+        assert update_failure_is_absorbed(line)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # The bare gating form this whole change exists to remove.
+            "sudo apt-get update -qq && sudo apt-get install -y gcc",
+            "sudo apt-get update -qq",
+            # Forms a bare `"||" in line` check would have wrongly accepted.
+            "sudo apt-get update || exit 1",
+            "sudo apt-get update || false",
+            "sudo apt-get update || sudo apt-get update",
+            "sudo apt-get update -qq || apt-get install -y gcc",
+            "sudo apt-get update || return 1",
+            "sudo apt-get update ||",
+            # Unparseable is not a pass.
+            "sudo apt-get update || 'unterminated",
+        ],
+    )
+    def test_gating_forms_are_rejected(self, line: str) -> None:
+        assert not update_failure_is_absorbed(line)
+
+    def test_only_the_last_link_of_a_chain_decides(self) -> None:
+        """`a || b || c` exits with c's status, so only c can absorb."""
+        assert update_failure_is_absorbed("apt-get update || false || true")
+        assert not update_failure_is_absorbed("apt-get update || true || false")
