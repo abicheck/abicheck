@@ -736,24 +736,35 @@ class TestLogicalLines:
     """
 
     def test_a_continued_command_becomes_one_line(self) -> None:
+        """The reported bypass: two physical lines, one shell command."""
         script = "sudo apt-get \\\n  update -qq && sudo apt-get install -y gcc\n"
         assert logical_lines(script) == [
             "sudo apt-get update -qq && sudo apt-get install -y gcc"
         ]
 
     def test_multiple_continuations_join(self) -> None:
+        """Joining is not a one-shot: a command may wrap several times."""
         script = "sudo apt-get \\\n  update \\\n  -qq\n"
         assert logical_lines(script) == ["sudo apt-get update -qq"]
 
     def test_uncontinued_lines_are_untouched(self) -> None:
+        """Ordinary scripts must survive the rewrite unchanged -- the scan
+        sees every other line through this function too."""
         script = "sudo apt-get update -qq || true\necho done\n"
         assert logical_lines(script) == ["sudo apt-get update -qq || true", "echo done"]
 
     def test_an_escaped_backslash_does_not_continue(self) -> None:
+        """`\\\\` is a literal backslash, not a continuation.
+
+        Getting this wrong would swallow the *following* line into the
+        current one and hide whatever command it holds -- the same
+        blind spot as the bug this function exists to close, in reverse.
+        """
         script = "echo 'a\\\\'\nsudo apt-get update || true\n"
         assert logical_lines(script) == ["echo 'a\\\\'", "sudo apt-get update || true"]
 
     def test_a_trailing_continuation_still_yields_its_line(self) -> None:
+        """A script ending mid-continuation must not drop its last command."""
         assert logical_lines("sudo apt-get update \\\n") == ["sudo apt-get update"]
 
     def test_the_scan_catches_a_continued_gating_chain(self) -> None:
