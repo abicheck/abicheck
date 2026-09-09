@@ -93,6 +93,7 @@ def _write_release_summary_file(
     from ...cli_compare_receipt import _release_summary_effective_config_block
     from ...cli_compare_release_helpers import (
         _release_completed_compatibility_verdict,
+        _release_findings_for_render,
         _release_global_verdict,
     )
     from ...report.not_comparable import run_outcome_dict_for_release
@@ -130,9 +131,23 @@ def _write_release_summary_file(
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
     ).to_dict()
     record = terms.record
+    # This sidecar is documented/contracted to always be full and
+    # unfiltered, mirroring a secondary `--write`'s own contract -- so the
+    # projection below is computed with `show_only=None` regardless of
+    # whether the primary render was filtered (`_release_findings_for_
+    # render`'s existing no-op-when-unfiltered behaviour), which also
+    # strips the private `findings_view`/`findings_total_count`/
+    # `findings_total_count_view`/`impact_table_view` accounting keys
+    # `_strip_diff_results_and_adjust_verdict` stashes on each entry --
+    # without this, the raw `library_results` list (never otherwise
+    # cleaned for this sidecar) leaked those internal keys straight into
+    # `summary.json`'s per-library entries (Codex review, fresh evidence,
+    # discovered while fixing the adjacent "uncapped release filter
+    # totals" finding).
+    display_library_results = _release_findings_for_render(library_results, None)
     summary_data: dict[str, object] = {
         "verdict": worst_verdict,
-        "libraries": library_results,
+        "libraries": display_library_results,
         # ADR-065 S4: read off the acquisition record, never off the deleted
         # set difference; a driver with no record reports nothing here.
         "unmatched_old": unmatched_names(record, side="old") if record else [],

@@ -90,6 +90,26 @@ def _write_removed_function_pair(tmp_path: Path) -> tuple[Path, Path]:
     return old_dir, new_dir
 
 
+def _write_removed_functions_pair(tmp_path: Path, *, count: int) -> tuple[Path, Path]:
+    """One library, *count* removed public functions -- *count* independent
+    BREAKING, function-kind findings, past `_MAX_RELEASE_FINDINGS_PER_
+    LIBRARY`'s per-library display cap for a large enough *count*."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    functions = [_fn(f"api_{i}", f"_Z{len(f'api_{i}')}api_{i}v") for i in range(count)]
+    old_snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", functions=functions, from_headers=True
+    )
+    new_snap = AbiSnapshot(
+        library="libfoo.so", version="2.0", functions=[], from_headers=True
+    )
+    _write_snap(old_dir / "libfoo.json", old_snap)
+    _write_snap(new_dir / "libfoo.json", new_snap)
+    return old_dir, new_dir
+
+
 def _write_struct_size_change_pair(tmp_path: Path) -> tuple[Path, Path]:
     """One library whose ``Point`` struct grows a field, with a function
     taking it by value -- a ``TYPE_SIZE_CHANGED`` root-type change whose
@@ -256,7 +276,12 @@ class TestReleaseViewShowOnly:
         counts, leaving a filtered-to-empty ``findings`` list next to
         ``verdict: BREAKING`` indistinguishable from missing/truncated
         detail -- unlike scalar `compare` JSON, which has always carried
-        `show_only_filter`/`filtered_summary` for exactly this reason."""
+        `show_only_filter`/`filtered_summary` for exactly this reason.
+        `release_filtered_summary` (not `filtered_summary` -- Codex review,
+        fresh evidence, second round: "Preserve the scalar filtered_summary
+        schema") is a deliberately separately-named/-shaped structure, since
+        the release-level aggregate has no per-severity-bucket breakdown
+        the way one scalar `DiffResult` does."""
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         result = _invoke(
@@ -270,7 +295,12 @@ class TestReleaseViewShowOnly:
         # Two real findings (the removed function plus the resulting
         # public-surface-shrank note) existed before the filter; neither
         # is a variable-element finding, so none survive it.
-        assert doc["filtered_summary"] == {"displayed": 0, "total": 2}
+        assert doc["release_filtered_summary"] == {"displayed": 0, "total": 2}
+        # The scalar schema's own field name/shape is untouched -- no
+        # `filtered_summary` key is added to the release document at all,
+        # so a consumer expecting that name/shape off a release report
+        # gets neither a wrong shape nor a silent collision.
+        assert "filtered_summary" not in doc
 
     def test_release_json_omits_the_filter_fields_without_view_show(
         self, tmp_path: Path
@@ -286,7 +316,7 @@ class TestReleaseViewShowOnly:
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
         assert "show_only_filter" not in doc
-        assert "filtered_summary" not in doc
+        assert "release_filtered_summary" not in doc
 
     def test_release_json_filtered_summary_counts_bundle_and_matrix_too(
         self, tmp_path: Path
@@ -312,7 +342,68 @@ class TestReleaseViewShowOnly:
         assert doc["show_only_filter"] == "breaking"
         assert doc["matrix_findings"] == []
         assert doc["libraries"][0]["findings"] != []
-        assert doc["filtered_summary"] == {"displayed": 1, "total": 3}
+        assert doc["release_filtered_summary"] == {"displayed": 1, "total": 3}
+
+    def test_release_json_filtered_summary_counts_findings_past_the_display_cap(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence, third round ("Count uncapped
+        findings in release filter totals"): a library with more than
+        `_MAX_RELEASE_FINDINGS_PER_LIBRARY` (10) real findings has its
+        `findings` display list capped at 10, but `release_filtered_
+        summary`'s `total` must still report the true, uncapped count --
+        summing the already-capped display list under-reports past the
+        cap (25 real findings would read as 10)."""
+        old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json", "--view", "show=functions",
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(result.output)
+        lib = doc["libraries"][0]
+        assert lib.get("findings_truncated") is True
+        assert len(lib["findings"]) <= 10
+        # 25 real removed-function findings (plus 1 compatible
+        # public-surface-shrank note, element `surface` -- not `functions`,
+        # so it doesn't match `show=functions`) existed before the filter;
+        # `displayed` (25) and `total` (26) both reflect the true, uncapped
+        # pool -- neither is capped at the per-library display limit the
+        # raw `findings` list itself is capped to.
+        assert doc["release_filtered_summary"] == {"displayed": 25, "total": 26}
+
+    def test_output_dir_summary_json_never_leaks_the_internal_accounting_keys(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence (discovered while fixing the
+        adjacent "uncapped release filter totals" finding): the
+        `--output-dir` `summary.json` sidecar serializes `library_results`
+        directly, unlike the primary `--format` render, which always routes
+        through `_release_findings_for_render`'s private-key stripping --
+        so the internal `findings_view`/`findings_total_count`/
+        `findings_total_count_view`/`impact_table_view` accounting keys
+        `_strip_diff_results_and_adjust_verdict` stashes on each entry used
+        to leak straight into this sidecar's per-library JSON."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        out_dir = tmp_path / "out"
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--view", "show=functions", "--view", "impact",
+            "--output-dir", str(out_dir),
+        )
+        assert result.exit_code == 4, result.output
+        summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+        lib_keys = set(summary["libraries"][0].keys())
+        leaked = lib_keys & {
+            "findings_view",
+            "findings_view_truncated",
+            "findings_total_count",
+            "findings_total_count_view",
+            "impact_table_view",
+        }
+        assert not leaked, lib_keys
 
 
 class TestReleaseViewDemangle:

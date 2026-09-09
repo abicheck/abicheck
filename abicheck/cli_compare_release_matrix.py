@@ -676,6 +676,19 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["findings"] = findings
                 if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
                     entry["findings_truncated"] = True
+            # Codex review, fresh evidence ("Count uncapped findings in
+            # release filter totals"): the uncapped pool size behind
+            # `findings` above -- `len(entry["findings"])` alone
+            # under-reports once a library crosses
+            # `_MAX_RELEASE_FINDINGS_PER_LIBRARY` (e.g. 25 findings reports
+            # as 10). This is the one place the real, uncapped
+            # `total_gating` is still available before `diff` is discarded
+            # below; a private, `findings_view`-shaped key (popped by
+            # `_release_findings_for_render`, never rendered) so
+            # `_format_release_json`'s `filtered_summary`-equivalent totals
+            # can read the true pre-filter count instead of re-deriving it
+            # from the already-capped display list.
+            entry["findings_total_count"] = total_gating
             if show_only:
                 # The filtered *view*, alongside (never instead of) the full
                 # projection above -- see this function's own docstring.
@@ -697,6 +710,9 @@ def _strip_diff_results_and_adjust_verdict(
                 entry["findings_view"] = findings_view
                 if total_gating_view > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
                     entry["findings_view_truncated"] = True
+                # The filtered counterpart of `findings_total_count` above --
+                # same rationale, same private/popped contract.
+                entry["findings_total_count_view"] = total_gating_view
             # CLI cleanup phase two, PR E: the uncapped, always-classified
             # counterpart to the capped `findings` list above -- the exact
             # same shape single-library `compare --format json` persists at

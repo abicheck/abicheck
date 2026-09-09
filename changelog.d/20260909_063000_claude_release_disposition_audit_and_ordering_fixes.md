@@ -48,7 +48,18 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   combination.
 - `compare --format json --view show=...` on a directory/package release
   now records the active filter (`show_only_filter`) and the pre/post
-  finding counts (`filtered_summary`) in the release JSON document, the
-  same fields scalar `compare` JSON has always carried for this — a
-  filtered-to-empty `findings` list next to `verdict: BREAKING` used to be
-  indistinguishable from missing or truncated detail.
+  finding counts (`release_filtered_summary`) in the release JSON document
+  — a filtered-to-empty `findings` list next to `verdict: BREAKING` used
+  to be indistinguishable from missing or truncated detail. The counts
+  use each library's real, uncapped finding total rather than its
+  display-capped `findings` list (which previously under-reported past
+  the per-library display limit), and live under a new field name rather
+  than reusing scalar `compare` JSON's own differently-shaped
+  `filtered_summary`.
+- The `--output-dir` `summary.json` sidecar no longer leaks the
+  release engine's private per-library accounting keys
+  (`findings_view`, `impact_table_view`, and similar) into its
+  per-library JSON entries.
+- The pattern-aware modulation ledger's own text (`compare --view
+  patterns`) referenced the retired `--pattern-verdicts` flag; it now
+  names the flag's actual replacement.
