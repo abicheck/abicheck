@@ -154,6 +154,154 @@ def kinds_of(finding_set: FindingSet) -> frozenset[str]:
     return frozenset(f.kind for f in finding_set)
 
 
+@dataclass(frozen=True)
+class RunOutcome:
+    """The whole-invocation outcome of one real CLI run -- not just its
+    finding set.
+
+    A finding-set diff alone cannot see two tools disagree on the number
+    that actually governs CI: a finding can be present on *both* sides (or
+    silently missing from *both*, e.g. stripped before it ever reaches
+    ``diff.findings``/``changes``) while the two tools still compute a
+    different overall verdict, exit code, or per-finding gate contribution
+    -- because one tool demoted or removed the finding's *contribution*
+    to the gate rather than the finding's presence. ``scan --against``'s
+    baseline path has exactly this shape
+    (``cli_scan_baseline._strip_automatic_cross_source_findings``): the
+    finding disappears from ``diff.findings`` entirely, so a bare kind-set
+    diff reads it as "compare_only" (unconstrained, always allowed) and
+    never looks at the verdict/exit code the stripping produced.
+    """
+
+    verdict: str | None
+    exit_code: int
+    findings: FindingSet
+    #: (kind, identity) -> the finding's *actually applied* severity label
+    #: for this run (``changes[]``/``diff.findings[]``'s own ``severity``
+    #: field) -- unlike ``Finding.severity`` above (a static per-kind
+    #: registry default), this can and does vary by run context.
+    severities: dict[tuple[str, str], str]
+    #: (kind, identity) -> ADR-049 D1 ``gate_contribution`` for this run.
+    #: ``scan`` deliberately never stamps this field (it computes its own
+    #: exit code from its own verdict/budget rules, not `compare`'s
+    #: severity gate -- see ``_baseline_finding_dict``'s own docstring), so
+    #: every scan-side entry reads ``0``, matching the reporter's own
+    #: "unstamped means not applicable" convention.
+    gate_contributions: dict[tuple[str, str], int]
+
+
+def _outcome_from_findings(
+    result: Any,
+    verdict: object,
+    raw_findings: list[dict[str, Any]],
+    *,
+    evidence_key: str | None,
+) -> RunOutcome:
+    findings = set()
+    severities: dict[tuple[str, str], str] = {}
+    gate: dict[tuple[str, str], int] = {}
+    for c in raw_findings:
+        kind = c["kind"]
+        identity = c.get("symbol") or ""
+        key = (kind, identity)
+        findings.add(
+            Finding(
+                kind=kind,
+                identity=identity,
+                severity=severity_for_kind(kind),
+                evidence_refs=(
+                    tuple(c.get(evidence_key) or ()) if evidence_key else ()
+                ),
+            )
+        )
+        severities[key] = c.get("severity", "unknown")
+        gate[key] = c.get("gate_contribution", 0)
+    return RunOutcome(
+        verdict=verdict if verdict is None else str(verdict),
+        exit_code=result.exit_code,
+        findings=frozenset(findings),
+        severities=severities,
+        gate_contributions=gate,
+    )
+
+
+def compare_outcome(old: Path | str, new: Path | str, *extra_args: str) -> RunOutcome:
+    """The full ``compare OLD NEW`` outcome: verdict, exit code, and every
+    finding's actually-applied severity/gate_contribution -- not just which
+    findings appeared."""
+    result = invoke_cli("compare", str(old), str(new), "--format", "json", *extra_args)
+    if result.exit_code not in (0, 1, 2, 4, 6, 64):
+        raise AssertionError(
+            f"compare failed unexpectedly (exit={result.exit_code}):\n{result.output}"
+        )
+    data = json.loads(result.stdout)
+    return _outcome_from_findings(
+        result,
+        data.get("verdict"),
+        list(data.get("changes", [])),
+        evidence_key="contract_evidence_refs",
+    )
+
+
+def scan_outcome(artifact: Path | str, *extra_args: str) -> RunOutcome:
+    """The full ``scan ARTIFACT ...`` outcome: verdict, exit code, and every
+    finding's actually-applied severity/gate_contribution -- not just which
+    findings appeared."""
+    result = invoke_cli("scan", str(artifact), "--format", "json", *extra_args)
+    if result.exit_code not in (0, 1, 2, 4, 5, 6, 7, 64):
+        raise AssertionError(
+            f"scan failed unexpectedly (exit={result.exit_code}):\n{result.output}"
+        )
+    data = json.loads(result.stdout)
+    diff = data.get("diff") or {}
+    return _outcome_from_findings(
+        result, data.get("verdict"), list(diff.get("findings", [])), evidence_key=None
+    )
+
+
+def assert_full_parity(
+    *, scan: RunOutcome, compare: RunOutcome, context: str
+) -> ParityReport:
+    """Everything :func:`assert_no_capability_loss` checks over the two
+    outcomes' finding sets, plus the axes a finding-set diff alone cannot
+    see: the overall verdict, the process exit code, and -- for a finding
+    present under both tools -- whether its actually-applied severity and
+    ADR-049 gate contribution agree. See :class:`RunOutcome` for why this is
+    a distinct check from a finding-set diff, not a superset expressible
+    through one.
+    """
+    report = assert_no_capability_loss(
+        scan_findings=scan.findings, compare_findings=compare.findings, context=context
+    )
+    mismatches: list[str] = []
+    if scan.verdict != compare.verdict:
+        mismatches.append(f"verdict: scan={scan.verdict!r} compare={compare.verdict!r}")
+    if scan.exit_code != compare.exit_code:
+        mismatches.append(
+            f"exit_code: scan={scan.exit_code!r} compare={compare.exit_code!r}"
+        )
+    shared_keys = sorted(set(scan.severities) & set(compare.severities))
+    for key in shared_keys:
+        if scan.severities[key] != compare.severities[key]:
+            mismatches.append(
+                f"{key}: severity scan={scan.severities[key]!r} "
+                f"compare={compare.severities[key]!r}"
+            )
+        scan_gate = scan.gate_contributions.get(key, 0)
+        compare_gate = compare.gate_contributions.get(key, 0)
+        if scan_gate != compare_gate:
+            mismatches.append(
+                f"{key}: gate_contribution scan={scan_gate!r} compare={compare_gate!r}"
+            )
+    if mismatches:
+        raise AssertionError(
+            f"{context}: scan/compare parity mismatch beyond finding-set "
+            "presence (verdict/exit_code/severity/gate_contribution):\n  "
+            + "\n  ".join(mismatches)
+        )
+    return report
+
+
 def write_snapshot(snapshot: Any, path: Path) -> Path:
     """Serialize *snapshot* to *path* for a CLI invocation to consume."""
     from abicheck.serialization import snapshot_to_json
