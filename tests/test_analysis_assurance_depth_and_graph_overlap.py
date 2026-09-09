@@ -135,7 +135,13 @@ class TestRequestedDepthPropagation:
         """End-to-end: `compare --depth source` on two plain header-scoped
         JSON snapshots, with no --sources/--build-info given at all (so no
         L4/L5 evidence is ever collected and the effective depth stays
-        'headers') must not read status='complete'."""
+        'headers') must not read status='complete'.
+
+        ADR-068 §3 #28's evidence-contract floor (exit 7) does not apply
+        here: `old_p`/`new_p` are pre-serialized JSON snapshots this run
+        never live-extracted (see `policy.depth_evidence_contract`'s "Live
+        extraction only" note), so this stays exactly the
+        `analysis_assurance`-only incompleteness signal it always was."""
         old, new = _header_pair()
         old_p, new_p = _write(tmp_path, old, new)
 

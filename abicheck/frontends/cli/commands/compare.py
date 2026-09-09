@@ -722,6 +722,10 @@ def _embed_inline_source_side(
 # one, so an opt-in switch could only mean "leave a known false positive in
 # because you forgot a flag". Forced on at the Tier-2 chokepoint
 # (workflows/compare_policy.compare_snapshots): CLI, API and Action alike.
+@click.option("--budget", "budget", default=None,
+              help="ADR-068 §3 #19: a wall-clock guard on this run's deadline-aware "
+                   "stages, so a CI job fails clearly (exit 5) instead of running "
+                   "unbounded. A duration like 15m/900s/1h; unset means no budget.")
 @click.option("--dry-run", "dry_run", is_flag=True, default=False,
               help="Resolve and validate the invocation -- classify inputs, resolve "
                    "depth/scope, show tool/config resolution -- and print a report "

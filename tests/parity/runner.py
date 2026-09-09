@@ -106,7 +106,12 @@ def crosscheck_finding_set(snapshot: Any, config: Any = None) -> FindingSet:
 def compare_json(old: Path | str, new: Path | str, *extra_args: str) -> dict[str, Any]:
     """Invoke ``compare OLD NEW --format json`` and return the parsed report."""
     result = invoke_cli("compare", str(old), str(new), "--format", "json", *extra_args)
-    if result.exit_code not in (0, 1, 2, 4, 6):
+    # 5/7 (ADR-068 §3 #19/#28, Phase 4 commit 2): `--budget` overflow and the
+    # `--depth build`/`--depth source` evidence-contract floor are both
+    # legitimate, reported axes now -- a real result still renders (this
+    # helper reads its JSON below), not a crash to fail this helper's own
+    # sanity check over.
+    if result.exit_code not in (0, 1, 2, 4, 5, 6, 7):
         raise AssertionError(
             f"compare failed unexpectedly (exit={result.exit_code}):\n{result.output}"
         )

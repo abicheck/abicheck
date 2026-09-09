@@ -195,6 +195,35 @@ class TestCompareRequestValidate:
         with pytest.raises(ValidationError, match="gccxml"):
             req.validate()
 
+    # ── ADR-068 §3 #19: budget_s finite/non-negative floor (Codex review,
+    #    fresh evidence, PR #1178) ──────────────────────────────────────────
+
+    @pytest.mark.parametrize("budget_s", [0, 0.0, 1, 900.5, None])
+    def test_valid_budget_s_accepted(self, budget_s):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), budget_s=budget_s
+        )
+        assert req.validation_errors() == []
+
+    @pytest.mark.parametrize(
+        "budget_s", [float("nan"), float("inf"), float("-inf"), -1.0, -0.5]
+    )
+    def test_non_finite_or_negative_budget_s_rejected(self, budget_s):
+        # The typed API reaches the identical deadline_scope(request.budget_s)
+        # call `run_compare_request` enters with no CLI in between, so it
+        # needs the same math.isfinite floor the CLI's own --budget parser
+        # (_parse_budget) already applies -- an infinite deadline never trips
+        # deadline.check()'s `left <= 0` test, and nan never compares true
+        # either way, so both would otherwise silently disable the guard.
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), budget_s=budget_s
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "budget_s" in errors[0]
+        with pytest.raises(ValidationError, match="budget_s"):
+            req.validate()
+
     def test_android_frontend_without_sources_rejected(self):
         # 'android' is source-ABI only (no header-AST path) — a header-only run
         # can't use it (ADR-037 D8/D9).
@@ -384,6 +413,33 @@ class TestCompareRequestRuntimeResolvableAnnotations:
         hints = typing.get_type_hints(CompareRequest)
         assert "pack_policy_overrides" in hints
         assert "pack_internal_namespaces" in hints
+
+
+class TestCompareRequestRemovedFieldDoesNotShiftPositionalArgs:
+    """Codex review, PR #1180 ("Prevent positional CompareRequest arguments
+    from shifting"): removing ``reconcile_build_context`` from the middle of
+    this dataclass used to silently rebind every field after it for a
+    positional caller (a later ``bool`` landing in ``env_matrix_path``'s
+    slot, a later ``Path`` in ``diagnostic_comparison``'s). A ``KW_ONLY``
+    sentinel now sits exactly where that field used to be, so such a call
+    fails loudly at construction instead.
+    """
+
+    def test_documented_short_positional_shape_still_works(self):
+        old = InputSpec(path=Path("old"))
+        new = InputSpec(path=Path("new"))
+        req = CompareRequest(old, new, "c++", "clang")
+        assert req.lang == "c++"
+        assert req.frontend == "clang"
+
+    def test_reaching_past_the_removed_fields_old_slot_fails_at_construction(self):
+        old = InputSpec(path=Path("old"))
+        new = InputSpec(path=Path("new"))
+        with pytest.raises(TypeError):
+            CompareRequest(
+                old, new, "c++", "clang", False, "strict_abi", None, None,
+                True, None, None, False, False, None, "env-matrix.yaml",
+            )
 
 
 class TestOutputSpec:

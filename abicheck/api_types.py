@@ -54,8 +54,9 @@ D4 adds ``InputSpec.follow_linker_scripts`` — see each one's own docstring.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import KW_ONLY, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -619,6 +620,22 @@ class CompareRequest:
     # Tier-2 ``compare_snapshots`` chokepoint, so neither this request nor
     # the CLI carries a switch for it (still evidence-gated: a no-op without
     # ``build_context_defines`` + per-field ``guard`` annotations).
+    #
+    # Codex review, PR #1180 ("Prevent positional CompareRequest arguments
+    # from shifting"): removing a field from the *middle* of a positional
+    # dataclass silently rebinds every field after it for a positional
+    # caller instead of failing loudly — the exact PR #582 lesson the
+    # ``lang_explicit``/``pack_policy_overrides`` fields below already
+    # guard against for a *new* field, but nothing protected a *removed*
+    # one until now. A ``KW_ONLY`` sentinel right here, at the boundary
+    # ``reconcile_build_context`` itself used to sit on, makes every field
+    # from this point on keyword-only: a positional caller who used to
+    # reach as far as ``reconcile_build_context`` now gets an immediate
+    # ``TypeError`` at construction instead of a silently shifted value,
+    # while every caller within the documented ``CompareRequest(old, new,
+    # "c++", "clang", ...)`` shape (this file's own example, well short of
+    # this boundary) is unaffected.
+    _: KW_ONLY
     # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML). When
     # its ``runtime_floors`` are set, new symbol-version requirements classify
     # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)
@@ -659,6 +676,11 @@ class CompareRequest:
     # since a binary-only depth request that still carries headers would
     # otherwise silently keep running L2.
     depth: str | None = None
+    # ADR-068 §3 #19, absorbed from `ScanRequest.budget`: a wall-clock guard
+    # (seconds; `None` = unbounded); `run_compare_request` raises
+    # `deadline.DeadlineExceeded` on overflow. `kw_only` (CodeRabbit review)
+    # since it's inserted before positional fields below (`dwarf_only` etc).
+    budget_s: float | None = field(default=None, kw_only=True)
     # ADR-055 D1, second slice: the last four concepts `compare`'s own
     # resolution (`cli_resolve._resolve_compare_snapshots`) could express and
     # this request could not, so a Python/MCP caller had to drop to loose
@@ -898,6 +920,24 @@ class CompareRequest:
                     f"invalid severity_preset {self.severity_preset!r}; "
                     f"must be one of {sorted(SEVERITY_PRESETS)} or None"
                 )
+        # Codex review (fresh evidence, PR #1178): the CLI's `--budget` parser
+        # (`cli_compare_helpers._parse_budget`) already rejects non-finite
+        # (`nan`/`inf`/`-inf`) and negative values via `math.isfinite` before
+        # ever calling `deadline.deadline_scope`, because `deadline.check()`/
+        # `bounded_timeout()` both test `left <= 0` -- a value that is never
+        # `<= 0` (an infinite deadline) or never compares meaningfully at all
+        # (`nan`) makes the promised wall-clock guard silently inert. A typed
+        # caller reaches the identical `deadline_scope(request.budget_s)` call
+        # in `run_compare_request` with no CLI in between, so the same floor
+        # belongs here too -- otherwise this documented public field could
+        # disable its own guard.
+        if self.budget_s is not None and (
+            not math.isfinite(self.budget_s) or self.budget_s < 0
+        ):
+            errors.append(
+                f"budget_s must be a finite, non-negative number of seconds "
+                f"or None; got {self.budget_s!r}"
+            )
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)

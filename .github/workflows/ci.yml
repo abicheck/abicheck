@@ -386,13 +386,14 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
-        run: |
-          # Don't let a flaky pre-baked third-party apt repo (e.g. the runner's
-          # packages.microsoft.com returning 403/"no longer signed") fail the lane:
-          # tolerate `update` errors — the `install` below still fails loudly if any
-          # of the packages it needs are genuinely unavailable.
-          sudo apt-get update -qq || sudo apt-get update -qq || true
-          sudo apt-get install -y gcc g++ cmake clang curl ca-certificates
+        # Routed through the shared action rather than a hand-rolled
+        # `update || true` here: tolerating a flaky pre-baked third-party apt
+        # repo is the *general* rule for every apt lane in this repo, not a
+        # local workaround for the one that happened to trip first (this step
+        # previously carried its own copy of it).
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake clang curl ca-certificates
       - name: Set up pinned CastXML (Linux)
         if: runner.os == 'Linux'
         uses: ./.github/actions/setup-castxml
@@ -466,9 +467,9 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y zlib1g-dev curl ca-certificates
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: zlib1g-dev curl ca-certificates
       - uses: ./.github/actions/setup-castxml
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
@@ -607,10 +608,16 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ curl ca-certificates
-          sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ curl ca-certificates
+      - name: Install abidiff
+        # Spelled `abigail-tools` on some releases, `libabigail-tools` on
+        # others -- kept as its own either/or step rather than a package in
+        # the list above, which has no way to express an alternative. If
+        # neither lands, the lane's own ABICHECK_MIN_EXECUTED guard fails it
+        # loudly rather than skipping every test (tests/conftest.py).
+        run: sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
       - uses: ./.github/actions/setup-castxml
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
@@ -637,9 +644,9 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
       - name: Install system deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc g++ abi-compliance-checker curl ca-certificates
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ abi-compliance-checker curl ca-certificates
       - uses: ./.github/actions/setup-castxml
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:

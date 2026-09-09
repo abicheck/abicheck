@@ -64,6 +64,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # unconditional), --pdb-path (debug.pdb_path) and
         # --support-promise (release.support_promise).
         "--abi3",
+        "--budget",
         "--bundle-facts-library-manifest",
         "--bundle-facts-out",
         "--changed-path",
