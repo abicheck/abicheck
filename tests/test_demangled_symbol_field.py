@@ -371,3 +371,41 @@ class TestDemanglePrewarmScoping:
         prewarmed = [n for call in calls for n in call]
         assert removed in prewarmed
         assert stable not in prewarmed
+
+
+class TestSuppressedRemovalCarriesDemangledSymbol:
+    """Codex review, fresh evidence: the report schema declares
+    ``suppressed_changes[].demangled_symbol`` (schema 3.14), but
+    ``reporter._suppressed_change_entry`` -- the one function that
+    projects a suppressed ``Change`` into that shape -- never read the
+    field, so a suppressed elf_only removal still serialized with only
+    its raw mangled symbol, contradicting its own schema.
+    """
+
+    def test_suppressed_elf_only_removal_carries_demangled_symbol(
+        self, deterministic_demangle
+    ) -> None:
+        from abicheck.reporter import to_json
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old = _snapshot(
+            [
+                Function(
+                    name=_MANGLED,
+                    mangled=_MANGLED,
+                    return_type="?",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ]
+        )
+        new = _snapshot([])
+        sl = SuppressionList(
+            [Suppression(symbol=_MANGLED, change_kind="func_removed_elf_only")]
+        )
+        result = compare(old, new, suppression=sl)
+        assert result.suppressed_count == 1
+
+        report = json.loads(to_json(result))
+        entries = report["suppression"]["suppressed_changes"]
+        assert len(entries) == 1
+        assert entries[0]["demangled_symbol"] == _DEMANGLED

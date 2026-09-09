@@ -1021,6 +1021,14 @@ def _suppressed_change_entry(
         entry["impact_assessment"] = assessment.to_dict()
     if getattr(c, "symbol_binding", None):
         entry["symbol_binding"] = c.symbol_binding
+    # Codex review, fresh evidence: an elf_only-visibility removal's
+    # demangled_symbol (schema 3.14) reaches every other machine-format
+    # projection of this same Change -- a suppressed one must not lose it
+    # just because it's rendered through this narrower audit-entry shape
+    # instead of _change_to_dict.
+    demangled_symbol = getattr(c, "demangled_symbol", None)
+    if demangled_symbol:
+        entry["demangled_symbol"] = demangled_symbol
     # ADR-049 Phase 3 (Codex review, fresh evidence): suppression is a
     # display/gate decision, not a reason to erase the contract-relevance
     # decision checker._apply_contract_evaluation_shadow already stamped on

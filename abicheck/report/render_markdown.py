@@ -44,7 +44,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..checker_policy import EvidenceStatus, impact_for
 from ..checker_types import Change
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
 from .surface_changes import SurfaceChangeSection, render_surface_changes_lines
@@ -92,10 +91,14 @@ def _format_change_md_oneline(c: object) -> str:
     return line
 
 
-def _format_change_md(c: object, evidence_status: EvidenceStatus | None = None) -> str:
-    """Markdown list item with impact/metadata; *evidence_status*, already
-    resolved by the caller (never derived here -- a render module makes no
-    policy decision, Codex review), qualifies an UNATTRIBUTED impact."""
+def _format_change_md(c: object, impact: str | None = None) -> str:
+    """Markdown list item with impact/metadata; *impact* is the caller's
+    already-resolved display string, never a registry lookup made here
+    (Codex review: ``report/AGENTS.md`` L78-L89 treats ``impact_for()``
+    itself as a report decision, not a render-side formatting choice).
+    Resolved by ``reporter_markdown.compute_root_cause_section``, matching
+    every other projection's ``row["impact"]`` shape.
+    """
     kind = getattr(c, "kind", None)
     kind_val = kind.value if kind else ""
     desc = getattr(c, "description", "")
@@ -120,10 +123,8 @@ def _format_change_md(c: object, evidence_status: EvidenceStatus | None = None) 
         line += f" — `{loc}`"
 
     # Impact
-    if kind:
-        impact = impact_for(kind, evidence_status)
-        if impact:
-            line += f"\n  > {impact}"
+    if impact:
+        line += f"\n  > {impact}"
 
     # Collapsed derived changes
     if caused_count > 0:

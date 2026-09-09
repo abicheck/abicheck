@@ -41,6 +41,7 @@ from .checker_policy import (
     EvidenceStatus,
     HasKind,
     evidence_status_for_result,
+    impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_gating import is_evaluated
@@ -1011,10 +1012,18 @@ def compute_root_cause_section(
     section at all) only when there is neither a real group nor a missing
     label to show.
 
-    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets
-    ``_format_change_md`` qualify an ``UNATTRIBUTED`` finding's impact text
-    here too (Codex review, fresh evidence: this root-cause path kept the
-    unconditional text even after the full/leaf Markdown views were fixed).
+    *evidence_tiers* (``DiffResult.evidence_tiers``), when given, lets this
+    function qualify an ``UNATTRIBUTED`` finding's impact text here too
+    (Codex review, fresh evidence: this root-cause path kept the
+    unconditional text even after the full/leaf Markdown views were
+    fixed). The resolved impact string -- not just the evidence status --
+    is computed here and handed to ``_format_change_md`` as a plain
+    value: the earlier fix passed a resolved ``EvidenceStatus`` in and let
+    the renderer call ``impact_for()`` itself, which still left that
+    registry lookup on the render side (Codex review, fresh evidence --
+    ``report/AGENTS.md``'s compute/render split treats a per-change
+    ``impact_for()`` call as a report decision the compute half owes the
+    renderer, not a formatting choice).
 
     A *scoped_only* member keeps its ``EvidenceStatus.CONSUMER_PROVEN``
     override rather than being re-scored from *evidence_tiers* like an
@@ -1037,16 +1046,23 @@ def compute_root_cause_section(
     root_by_key: dict[str, str] = {}
     finding_lines_by_key: dict[str, list[str]] = {}
     count_by_key: dict[str, int] = {}
+
+    def _resolved_impact(c: Change) -> str | None:
+        kind = getattr(c, "kind", None)
+        if kind is None:
+            return None
+        evidence_status = (
+            EvidenceStatus.CONSUMER_PROVEN
+            if _finding_id(c) in scoped_only_ids
+            else evidence_status_for_result(c, evidence_tiers)
+        )
+        return impact_for(kind, evidence_status)
+
     for key, root_display, group_changes in groups:
         order.append(key)
         root_by_key[key] = root_display
         finding_lines_by_key[key] = [
-            _format_change_md(
-                c,
-                EvidenceStatus.CONSUMER_PROVEN
-                if _finding_id(c) in scoped_only_ids
-                else evidence_status_for_result(c, evidence_tiers),
-            )
+            _format_change_md(c, _resolved_impact(c))
             + _cross_source_evolution_md_suffix(c)
             for c in group_changes
         ]

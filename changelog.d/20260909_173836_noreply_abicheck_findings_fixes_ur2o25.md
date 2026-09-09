@@ -147,3 +147,17 @@
   previously an unattributed finding here always read as
   `artifact_proven`, unlike every other HTML surface (Codex review,
   fresh evidence).
+- `report/render_markdown.py`'s `_format_change_md` (the root-cause
+  Markdown formatter) now takes the caller's already-resolved impact
+  *string* instead of an `EvidenceStatus` and calling `impact_for()`
+  itself — an earlier fix moved the evidence-status resolution to the
+  compute half but still left the `impact_for()` registry lookup on the
+  render side, which `report/AGENTS.md`'s compute/render split treats as
+  a report decision, not a render-side formatting choice (Codex review,
+  fresh evidence).
+- Suppressed-finding JSON entries (`suppression.suppressed_changes[]`)
+  now carry `demangled_symbol` for a suppressed `elf_only`-visibility
+  removal — the schema already declared the field there (schema 3.14),
+  but `reporter._suppressed_change_entry` never populated it, so a
+  suppressed finding's audit-trail entry contradicted its own schema
+  (Codex review, fresh evidence).
