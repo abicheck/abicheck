@@ -450,7 +450,14 @@ def _clang_header_dump(
             header_roots=pruning_header_roots if pruning_header_roots is not None else tuple(str(h) for h in headers),
         )
         if identities_stable and _memoize:
-            dumper_cache.store_cached_ast(write_key, "clang", root)
+            # Kept under the ORIGINAL `key`, not `write_key` (Codex review, P1):
+            # the memo is a one-shot HANDOFF to `_attach_header_graph`'s own
+            # follow-up call, which independently recomputes this same
+            # pre-retry key -- storing under `write_key` would miss that
+            # lookup, repeating both clang attempts and leaking the handed-off
+            # tree in this thread's slot forever. Safe: that consumer discards
+            # `resolved_force_cpp`, unlike the disk path keyed correctly above.
+            dumper_cache.store_cached_ast(key, "clang", root)
         return root, resolved_kind, cur_fcpp
     finally:
         agg_path.unlink(missing_ok=True)

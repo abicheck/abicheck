@@ -50,8 +50,9 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper, dumper_clang
+from abicheck import dumper, dumper_ast_config, dumper_cache, dumper_clang
 from abicheck.dumper import _clang_header_dump
+from abicheck.dumper_ast_config import _cache_key
 
 
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0):
@@ -103,3 +104,85 @@ def test_self_healed_dump_never_returns_a_stale_cache_hit(
         assert root == {"kind": "TranslationUnitDecl", "inner": []}
         assert resolved_force_cpp is True
     assert len(cmds) == 4  # one C attempt + one C++ retry, TWICE independently
+
+
+def test_self_heal_preserves_the_memo_handoff_under_the_lookup_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence, P1: the in-process memo (``dumper_cache.
+    store_cached_ast``) is a one-shot, same-thread HANDOFF to
+    ``service._attach_header_graph``'s own follow-up call, which
+    independently recomputes the identical PRE-retry lookup key from the
+    same original inputs -- it has no way to know a self-heal happened.
+    Storing the memo entry under the corrected post-retry key (matching the
+    disk-cache write fixed above) would make that follow-up lookup MISS,
+    repeating both clang attempts and leaking the handed-off AST in this
+    thread's slot forever (its own call uses ``memoize=False``, so nothing
+    would ever pop it). The memo must stay keyed by the pre-retry `key` --
+    safe, since that consumer discards `resolved_force_cpp` entirely."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(dumper_clang, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    header = tmp_path / "umbrella.h"
+    header.write_text('#include "detail/impl.h"\n')
+    ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
+
+    def _run(cmd, **kwargs):
+        if cmd[cmd.index("-x") + 1] == "c":
+            return _fake_proc(
+                stderr="fatal error: 'cstddef' file not found", returncode=1
+            )
+        _write_stdout_file(kwargs, ast_json)
+        return _fake_proc(returncode=0)
+
+    calls = {"n": 0}
+    real_run = _run
+
+    def _counted_run(cmd, **kwargs):
+        calls["n"] += 1
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(dumper.deadline, "run_bounded", _counted_run)
+    with dumper_cache.ast_memoize_scope():
+        # The primary snapshot pass (`service_dump_native.py` wraps both this
+        # call and the follow-up below in one `ast_memoize_scope()`).
+        root, _resolved_kind, resolved_force_cpp = _clang_header_dump(
+            [header], [], memoize=True
+        )
+        assert resolved_force_cpp is True
+        assert calls["n"] == 2  # one C attempt + one C++ retry
+        # Mirrors `service._attach_header_graph`'s own follow-up: identical
+        # inputs, its own fresh (pre-retry) `key` computation, memoize=False.
+        # A working handoff pops the memo slot without running clang again;
+        # a broken one (the memo stored under the corrected post-retry key
+        # instead) would miss and redo the whole two-step self-heal here.
+        graph_root, _rk2, _rfc2 = _clang_header_dump([header], [], memoize=False)
+    assert graph_root == root
+    assert calls["n"] == 2  # unchanged: the follow-up call ran no subprocess
+
+
+def test_clang_cache_schema_version_actually_changes_the_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Codex review, fresh evidence, P2: without a schema bump, a pre-
+    existing on-disk entry an OLDER binary wrote for a self-healed dump
+    (stored under the pre-retry key, which this hash still computes for the
+    identical input) would stay silently reachable, reintroducing the exact
+    stale `resolved_force_cpp=False` bug the write-side key fix closes only
+    for entries written from here on. Monkeypatching the version constant
+    down by one simulates exactly that "older binary" -- if the key were
+    unaffected by it (e.g. the line were accidentally deleted or the
+    constant stopped being read), this would fail, which is the real
+    property this fix depends on: bumping the constant is what invalidates
+    every previously-written clang entry. Verified independent of `backend`
+    ever mattering for castxml, which never had this problem and must stay
+    unaffected by a clang-only constant."""
+    header = tmp_path / "h.h"
+    header.write_text("void f(void);\n")
+    kwargs = dict(headers=[header], extra_includes=[], compiler="c++", force_cpp=False)
+    clang_key_v2 = _cache_key(**kwargs, backend="clang")
+    castxml_key = _cache_key(**kwargs, backend="castxml")
+    monkeypatch.setattr(dumper_ast_config, "_CLANG_CACHE_SCHEMA_VERSION", 1)
+    assert _cache_key(**kwargs, backend="clang") != clang_key_v2
+    assert _cache_key(**kwargs, backend="castxml") == castxml_key
