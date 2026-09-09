@@ -490,6 +490,45 @@ class TestScanStaysOnLegacyCliForScanOnlyExtraArgs:
         cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--build-info new=./build"))
         assert cmd[1] == "scan", cmd
 
+    def test_single_write_via_extra_args_does_not_force_legacy_cli(self) -> None:
+        # A single, non-`text` `--write` is valid on both commands and must
+        # not itself force the legacy CLI -- the negative control for the
+        # repeated-`--write` case below.
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--write json=extra.json"))
+        assert cmd[1] == "compare", cmd
+
+    def test_repeated_write_via_extra_args_stays_on_scan(self) -> None:
+        # Sixth Codex review round, P2 (fresh evidence): `scan --write` is
+        # singular (a repeated occurrence just keeps the last value, per
+        # Click's own default), but `compare --write` is repeatable and
+        # rejects two occurrences naming the same PATH as a real usage
+        # error (`reject_incoherent_secondary_writes`'s per-write
+        # PATH-uniqueness check) -- a previously valid `--write
+        # json=report.json --write json=report.json` scan step would
+        # otherwise start hard-failing (exit 64) under a migrated
+        # invocation.
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_EXTRA_ARGS="--write json=report.json --write json=report.json"
+            )
+        )
+        assert cmd[1] == "scan", cmd
+
+    def test_repeated_write_different_paths_via_extra_args_stays_on_scan(
+        self,
+    ) -> None:
+        # The over-inclusive direction this tokenizer already takes
+        # everywhere else it can't fully reproduce compare's own
+        # validation: two *different* `--write` destinations is a real
+        # `compare`-only multi-artifact capability `scan` never had, not a
+        # shape this migration should try to guess is safe.
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_EXTRA_ARGS="--write json=one.json --write markdown=two.md"
+            )
+        )
+        assert cmd[1] == "scan", cmd
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForSourceMethodConfig:

@@ -798,7 +798,7 @@ _config_sets_source_method() {
 }
 
 _extra_args_forces_legacy_scan_cli() {
-  local _name _value
+  local _name _value _write_count=0
   while IFS=$'\t' read -r _name _value; do
     case "$_name" in
       --against | --artifact-set | --budget | --build-target | --crosscheck | \
@@ -829,6 +829,22 @@ _extra_args_forces_legacy_scan_cli() {
         # evidence: an existing successful `--write text=report.txt` scan
         # workflow would otherwise start hard-failing).
         [[ "$_value" == text=* ]] && return 0
+        # `scan --write` is singular (a repeated occurrence just keeps the
+        # last value, per Click's own default), but `compare --write` is
+        # repeatable and rejects two occurrences naming the same PATH as a
+        # real usage error (`reject_incoherent_secondary_writes`'s own
+        # per-write PATH-uniqueness check) -- a previously valid
+        # `--write json=report.json --write json=report.json` scan step
+        # would otherwise start hard-failing under a migrated invocation
+        # (Codex review, sixth round, fresh evidence). Any second `--write`
+        # occurrence forces the legacy CLI outright, not just a same-PATH
+        # repeat: this tokenizer already takes the safe, over-inclusive
+        # direction everywhere else it can't fully reproduce compare's own
+        # validation, and two *different* destinations is exactly the
+        # ADR-068 D4/Phase 5 multi-artifact capability `scan` never had at
+        # all -- not a shape this migration should try to guess is safe.
+        _write_count=$((_write_count + 1))
+        [[ "$_write_count" -gt 1 ]] && return 0
         ;;
       --sources | --build-info | --compile-db)
         # These three share a name with a `compare` option that means

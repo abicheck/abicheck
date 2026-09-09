@@ -130,4 +130,12 @@ it should read in CHANGELOG.md. Delete the other sections.
   applies only when it's omitted, per `scan --help-all`), so a
   `source.method` living in a `build-config`-named file elsewhere went
   undetected. The check now inspects the effective config (`build-config`
-  when given, else cwd auto-discovery) rather than always the latter.
+  when given, else cwd auto-discovery) rather than always the latter. A
+  fresh Codex finding on the same round closed one more gap: a repeated
+  `--write` reaching a migrated invocation through `extra-args` now also
+  stays on the legacy CLI -- `scan --write` is singular (a repeat just
+  keeps the last value), but `compare --write` is repeatable and rejects
+  two occurrences naming the same destination as a real usage error, so a
+  previously valid `--write json=report.json --write json=report.json`
+  scan step would otherwise start hard-failing under a migrated
+  invocation.
