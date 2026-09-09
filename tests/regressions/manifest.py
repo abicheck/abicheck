@@ -1328,11 +1328,13 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="cli_surface.retired_spelling_in_remediation",
         invariant=(
-            "A user-facing message may only name flags the command it is "
-            "advising actually accepts -- every `--flag` token in an error, "
-            "warning or help string must be a live option of that command, "
-            "so following the tool's own remediation can never itself be a "
-            "usage error."
+            "Remediation a tool prints must actually work when run: every "
+            "`--flag` token in a user-facing message must be a live option "
+            "of the command being advised, AND any concrete example it "
+            "offers must resolve the condition it is offered for -- so "
+            "following the tool's own advice can never itself be a usage "
+            "error. Flag existence alone is not the invariant: a live flag "
+            "aimed at the wrong operand fails just as hard."
         ),
         fixed_by=(1184,),
         seed_tests=(
@@ -1346,7 +1348,8 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                 "empty-variant-id",
                 "unknown-both-sides-id",
                 "zero-variants-declared",
-            )
+            ),
+            "ambiguous_side": ("old", "new"),
         },
         known_gaps=(
             KnownGap(

@@ -1111,23 +1111,73 @@ class TestRemediationNamesOnlyLiveFlags:
         )
         write_project_manifest(root, combined)
 
-    def test_the_ambiguous_variant_error_advises_a_flag_compare_accepts(
-        self, tmp_path: Path
+    @staticmethod
+    def _suggested_example(message: str) -> list[str]:
+        """The argv fragment the message tells the user to run, if any.
+
+        Parsed out of the `(e.g. --variant new=v1)` form the remediation
+        uses, so the test can *execute* the advice rather than merely
+        eyeballing it.
+        """
+        import re
+
+        m = re.search(r"e\.g\. (--\S+ \S+|--\S+=\S+|--\S+)\)", message)
+        return m.group(1).split() if m else []
+
+    @pytest.mark.parametrize("ambiguous_side", ["old", "new"])
+    def test_following_the_suggested_remediation_actually_works(
+        self, tmp_path: Path, ambiguous_side: str
     ) -> None:
-        """The reported instance, checked through the real CLI rather than
-        by reading the source string."""
-        _, new_libs = _old_new_libraries()
+        """The strongest form of the invariant, and the one that catches
+        what flag-existence alone cannot: **run the advice**.
+
+        Codex review, PR #1184, second round. The first fix named the live
+        `--variant` flag but hard-coded the side to `old=`, so when NEW was
+        the multi-variant operand the message told the user to run
+        something that fails just as hard -- a live flag pointed at the
+        wrong side. A test that only checks "the suggested flag exists"
+        passes on that bug, which is exactly what happened. So this one
+        takes the message's own example, re-invokes `compare` with it, and
+        asserts the variant ambiguity is actually resolved.
+
+        Parametrized over which side is ambiguous, because the asymmetry
+        *is* the defect: a bare `--variant ID` is not a safe fallback
+        either (it applies to both sides, and the non-ambiguous side does
+        not declare that id).
+        """
+        old_libs, new_libs = _old_new_libraries()
         old_pkg = tmp_path / "old_pkg"
         new_pkg = tmp_path / "new_pkg"
-        self._multi_variant_package(old_pkg)
-        _write_package(new_pkg, new_libs)
+        if ambiguous_side == "old":
+            self._multi_variant_package(old_pkg)
+            _write_package(new_pkg, new_libs)
+        else:
+            _write_package(old_pkg, {"liba.so": old_libs["liba.so"]})
+            self._multi_variant_package(new_pkg)
 
         ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
-        assert ec == 64
-        suggested = self._assert_advice_lands(out, "compare")
-        # Not merely "names no dead flag" -- it must actually route the
-        # user somewhere, which an error naming no flag at all would not.
-        assert "--variant" in suggested
+        assert ec == 64, out
+        self._assert_advice_lands(out, "compare")
+
+        example = self._suggested_example(out)
+        assert example, f"the error offered no runnable remediation: {out}"
+        assert example[0] == "--variant"
+        # The side must be the ambiguous operand's, not a hard-coded one.
+        assert example[1].startswith(f"{ambiguous_side}="), (
+            f"advice names the wrong side: {example} while {ambiguous_side.upper()} "
+            "is the ambiguous operand"
+        )
+
+        # Execute it. The ambiguity must be gone -- the run may still fail
+        # for unrelated reasons, but never again on variant selection.
+        ec2, out2 = _invoke(
+            "compare", str(old_pkg), str(new_pkg), *example, "--format", "json"
+        )
+        assert "declares" not in out2 or "variant(s)" not in out2, (
+            f"following the tool's own advice {example} still hit a variant "
+            f"error:\n{out2}"
+        )
+        assert ec2 != 64, f"the suggested remediation is itself a usage error:\n{out2}"
 
     @pytest.mark.parametrize(
         "extra",

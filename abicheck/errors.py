@@ -156,6 +156,35 @@ class AmbiguousLibraryMatchError(AbicheckError, ValueError):
     """
 
 
+class AmbiguousVariantSelectionError(AbicheckError, ValueError):
+    """Raised by :func:`abicheck.project_snapshot_legacy.
+    materialize_release_variant_artifacts` when a stored ``ProjectSnapshot``
+    package operand does not declare exactly one variant and the caller
+    named none -- there is nothing to select from (zero declared) or no way
+    to choose (several declared), so this fails closed rather than guessing.
+
+    Deliberately states the *fact* and carries :attr:`variant_ids`, without
+    naming any CLI flag: which side of a comparison this package is (and so
+    whether the fix is ``--variant old=`` or ``--variant new=``) is knowable
+    only at the front end that resolved the two operands, not in the engine
+    (Codex review, PR #1184, second round -- an earlier fix hard-coded
+    ``old=`` here and so misdirected a caller whose *NEW* operand was the
+    ambiguous one). ``cli_compare_release_matrix._resolve_release_package_
+    side`` catches this and re-raises ``click.UsageError`` with the
+    side-correct example appended, the same engine-error/CLI-wrapper split
+    :class:`AmbiguousLibraryMatchError` already uses.
+
+    A plain :class:`ValueError` subclass, so every pre-existing
+    ``except ValueError`` handler around variant resolution keeps catching
+    it unchanged.
+    """
+
+    def __init__(self, message: str, variant_ids: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        #: The variant ids the package *does* declare -- possibly empty.
+        self.variant_ids = variant_ids
+
+
 class TuMergeError(SnapshotError):
     """Raised by :func:`abicheck.tu_merge.merge_fragments` when two
     translation-unit fragments from one manifest-driven dump declare the

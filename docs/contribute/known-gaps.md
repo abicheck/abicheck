@@ -6896,12 +6896,26 @@ multi-variant ambiguity error still telling the caller to "pass an explicit
 variant id (`--old-variant`/`--new-variant`)" after plan Phase 7j retired
 both spellings with no alias. A user who followed the tool's own advice
 landed straight in an exit-64 usage error — the CLI actively misdirecting
-them. Fixed, and generalized as far as it soundly goes: the seed test
-extracts every `--flag` token from the message a *real* `compare`
-invocation produces and asserts each is a live option of that command
-(an oracle independent of the option tables the implementation reads),
-across five sibling error paths in the variant family, with both a positive
-and a negative control on the oracle itself.
+them. Fixed — twice. The first fix named the live `--variant` flag but
+hard-coded the side to `old=`, so a caller whose *NEW* operand was the
+ambiguous one was told to run something that fails just as hard (Codex
+review, second round). The flag-existence oracle passed on that bug,
+which is the lesson: **a live flag aimed at the wrong operand is still
+broken advice.** The invariant is now the stronger one — *run the
+advice*: the seed test takes the message's own `(e.g. --variant new=v1)`
+example, re-invokes `compare` with it, and asserts the ambiguity is
+actually resolved, parametrized over which side is ambiguous. A bare
+`--variant ID` is not a safe fallback either, since it applies to both
+sides and the unambiguous side does not declare that id — which is why
+the side must reach the message at all.
+
+The layering fix that makes it possible: the engine
+(`AmbiguousVariantSelectionError`) states the fact and carries the
+declared ids but names **no CLI flag**, because only the front end that
+resolved both operands knows which side this package is;
+`cli_compare_release_matrix._resolve_release_package_side` appends the
+side-correct example. That is the same engine-error/CLI-wrapper split
+`AmbiguousLibraryMatchError` already uses.
 
 **What is not closed.** An AST sweep of non-docstring string literals under
 `abicheck/` against every spelling in `scripts/retired_surfaces.py`'s

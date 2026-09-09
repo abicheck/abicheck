@@ -358,10 +358,14 @@ def _finalize_release_output(
         severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
         incomplete_scope_exit_contribution=(
-            scope_terms.decision.incomplete_scope_exit_contribution if scope_terms else 0
+            scope_terms.decision.incomplete_scope_exit_contribution
+            if scope_terms
+            else 0
         ),
         no_comparison_completed_exit_contribution=(
-            scope_terms.decision.no_comparison_completed_exit_contribution if scope_terms else 0
+            scope_terms.decision.no_comparison_completed_exit_contribution
+            if scope_terms
+            else 0
         ),
     )
 
@@ -508,7 +512,10 @@ def _release_display_buckets(
         return [
             (name, cat_changes_by_name[name])
             for name in (
-                "abi_breaking", "potential_breaking", "quality_issues", "addition",
+                "abi_breaking",
+                "potential_breaking",
+                "quality_issues",
+                "addition",
             )
         ]
     return [
@@ -729,7 +736,9 @@ def _strip_diff_results_and_adjust_verdict(
 
                 from .reporter_markdown import compute_impact_table
 
-                full_changes = [c for _, cat_changes in display_buckets for c in cat_changes]
+                full_changes = [
+                    c for _, cat_changes in display_buckets for c in cat_changes
+                ]
                 impact_table = compute_impact_table(diff, full_changes)
                 if impact_table is not None:
                     entry["impact_table"] = dataclasses.asdict(impact_table)
@@ -782,6 +791,8 @@ def _resolve_release_package_side(
     side_dir: Path,
     variant_id: str | None,
     make_temp_dir: Callable[[str], Path],
+    *,
+    side: str,
 ) -> dict[str, Path] | None:
     """``None`` when *side_dir* is not a stored `ProjectSnapshot` package
     directory -- the caller falls back to its existing live-discovery path
@@ -791,6 +802,11 @@ def _resolve_release_package_side(
     live directory of `.so` files (ADR-062 A1.7), so `_match_release_keys`'s
     own ``set(old_map) & set(new_map)`` matches a stored-side library
     against a live-side or another stored-side one by the identical key.
+
+    *side* is ``"old"`` or ``"new"`` -- the `--variant` prefix naming *this*
+    operand. It is used only to render an ambiguous-variant error's
+    remediation example, which is why it lives here and not in the engine:
+    see :class:`~abicheck.errors.AmbiguousVariantSelectionError`.
     """
     if not side_dir.is_dir():
         return None
@@ -799,13 +815,25 @@ def _resolve_release_package_side(
 
     if not is_project_snapshot_package_dir(side_dir):
         return None
-    from .errors import SnapshotError
+    from .errors import AmbiguousVariantSelectionError, SnapshotError
 
     dest_root = make_temp_dir("abicheck_relpkg_")
     try:
         return resolve_release_package_map(
             side_dir, variant_id=variant_id, dest_root=dest_root
         )
+    except AmbiguousVariantSelectionError as exc:
+        # The engine states the fact and carries the ids but names no flag,
+        # because only here is it known *which side* this package is --
+        # and a bare `--variant ID` would apply to both sides, so it is not
+        # safe advice when only one side is ambiguous (Codex review, PR
+        # #1184, second round). Append the side-correct example, and only
+        # when there is a real id to name: a package declaring zero
+        # variants has nothing to select.
+        example = (
+            f" (e.g. --variant {side}={exc.variant_ids[0]})" if exc.variant_ids else ""
+        )
+        raise click.UsageError(f"{exc}{example}") from exc
     except (KeyError, ValueError, OSError, SnapshotError) as exc:
         # Ambiguous variant, a same-key collision (ValueError), a missing/
         # unreadable ref (OSError), an object absent from objects/ entirely
@@ -883,12 +911,12 @@ def _prepare_compare_release_inputs(
     branch taken instead of the other's.
     """
     old_pkg_map = (
-        _resolve_release_package_side(old_dir, old_variant, make_temp_dir)
+        _resolve_release_package_side(old_dir, old_variant, make_temp_dir, side="old")
         if make_temp_dir is not None
         else None
     )
     new_pkg_map = (
-        _resolve_release_package_side(new_dir, new_variant, make_temp_dir)
+        _resolve_release_package_side(new_dir, new_variant, make_temp_dir, side="new")
         if make_temp_dir is not None
         else None
     )
