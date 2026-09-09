@@ -1560,7 +1560,19 @@ _extra_args_has_scan_only_flag() {
     case "$_name" in
     --crosscheck | --risk-rules | --budget | --build-target | --artifact-set | \
       --max-findings | --show-suppressed | --manifest | --public-header-dir | \
-      --against | --pattern-verdicts | --no-pattern-verdicts)
+      --against | --pattern-verdicts | --no-pattern-verdicts | \
+      --lang | --ast-frontend | --compiler | --compiler-prefix | \
+      --compiler-option | --sysroot | --nostdinc | --no-nostdinc | \
+      --frontend-context | --allow-ast-frontend-fallback | \
+      --allow-unsupported-castxml)
+      # `compile_context_options()` (Codex review, PR #1172): `scan` is the
+      # only command that still carries the whole L2 compile-context flag
+      # family (`abicheck/cli_options.py`'s own comment: 7b removed it from
+      # `compare`/`dump` as one unit, ADR-037 D8.1) -- `action.yml` itself
+      # directs users to reach every one of these through `extra-args`
+      # (there is no dedicated Action input for any of them), so a `compare`
+      # translation would fail on the first one with an unknown-option
+      # usage error instead of running the scan it asked for.
       return 0
       ;;
     # `--format text` (Codex review P2, PR #1160, four rounds): a

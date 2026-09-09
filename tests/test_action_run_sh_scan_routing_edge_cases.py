@@ -188,3 +188,55 @@ class TestCompressedBaselineSuffix:
         # _BASE_INPUTS) is the already-tested compare-translation shape.
         cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
         assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestCompileContextFlagsViaExtraArgs:
+    """`compile_context_options()` (`abicheck/cli_options.py`) is the whole
+    L2 compile-context flag family (`--lang`, `--ast-frontend`, `--compiler`,
+    `--compiler-prefix`, `--compiler-option`, `--sysroot`, `--nostdinc`/
+    `--no-nostdinc`, `--frontend-context`, `--allow-ast-frontend-fallback`,
+    `--allow-unsupported-castxml`) -- CLI cleanup phase two PR 7b (ADR-037
+    D8.1) removed it from `compare`/`dump` as one unit, leaving it only on
+    `scan`. `action.yml` has no dedicated input for any of them, so a user
+    reaches them only through `extra-args` -- a `compare` translation would
+    fail on the first one with an unknown-option usage error instead of
+    running the scan it asked for."""
+
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            "--lang c++",
+            "--ast-frontend clang",
+            "--compiler clang++",
+            "--compiler-prefix arm-linux-gnueabihf-",
+            "--compiler-option -DFOO=1",
+            "--sysroot /opt/sysroot",
+            "--nostdinc",
+            "--no-nostdinc",
+            "--frontend-context strict",
+            "--allow-ast-frontend-fallback",
+            "--allow-unsupported-castxml",
+        ],
+    )
+    def test_compile_context_flag_stays_on_legacy_cli(self, flag: str) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": flag,
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_no_compile_context_flag_still_routes_to_compare(self) -> None:
+        # Negative control: extra-args with no scan-only flag at all is the
+        # already-tested compare-translation shape.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--verbose",
+            }
+        )
+        assert cmd[1] == "compare"
