@@ -79,3 +79,9 @@ Uncomment the section that is right (remove the HTML comment wrapper).
   sandbox never had a `tools/` directory to scan, so the new
   tools-README retired-surfaces test failed in that lane alone (the
   real repository tree it validates against has always had `tools/`).
+- `TestReleaseTopologyOverlayCleansUpOnExit`'s own bash test harness used
+  `${CMD[-1]}` (negative array indexing, requires bash ≥ 4.3) to read
+  back a value from the flags it built for asserting on, which fails
+  deterministically under macOS's system `/bin/bash` (3.2) with `set
+  -u` — a pre-existing, unrelated-to-this-PR gap now fixed with a
+  portable `${CMD[${#CMD[@]}-1]}` equivalent.
