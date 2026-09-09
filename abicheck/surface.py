@@ -567,15 +567,25 @@ def classify_change_surface(
     # constructor/destructor/helper symbol named ``Foo``. In that case the
     # layout change's ``symbol`` still denotes the type, so reachability decides.
     type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
-    if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
-        # Member-level findings are owner-qualified: ``Type::field`` (struct/union
-        # field) or ``Enum::member`` (enum member). Classifying the full string as
-        # a type keeps a private member's churn in-surface as an "unknown" type;
-        # use the owner type for reachability/provenance decisions. (Membership in
-        # this set implies type_level_finding — see the import-time assert above —
-        # so a qualified *type name* like ``ns::Foo`` is never mis-split here.)
-        candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
-    else:
+
+    def _resolve_type_candidates() -> set[str]:
+        # CodeRabbit review: this used to run unconditionally before the
+        # symbol-level early return below, forking a `c++filt` (via
+        # `demangle()`, in the mangled-owner branch) for every finding this
+        # function classifies, including an ordinary symbol-level
+        # FUNC_REMOVED/VAR_REMOVED that `_classify_symbol_level` resolves
+        # and returns from without ever consulting `candidates`. Computed
+        # lazily now, only when actually needed for `_classify_type_level`.
+        if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
+            # Member-level findings are owner-qualified: ``Type::field``
+            # (struct/union field) or ``Enum::member`` (enum member).
+            # Classifying the full string as a type keeps a private
+            # member's churn in-surface as an "unknown" type; use the
+            # owner type for reachability/provenance decisions.
+            # (Membership in this set implies type_level_finding — see
+            # the import-time assert above — so a qualified *type name*
+            # like ``ns::Foo`` is never mis-split here.)
+            return {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
         # Codex review, item 3: a finding whose `symbol` is a raw mangled
         # Itanium name (e.g. `diff_elf_layout.py`'s ELF-layout-only
         # VTABLE_SLOT_COUNT_CHANGED/RTTI_INHERITANCE_CHANGED/
@@ -609,7 +619,7 @@ def classify_change_surface(
         sym_for_types = (
             "::".join(owner_scope[0]) if owner_scope else (demangle(sym) or sym)
         )
-        candidates = _type_identifiers(sym_for_types) | _type_identifiers(
+        return _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type
         )
 
@@ -628,7 +638,7 @@ def classify_change_surface(
             return verdict
 
     return _classify_type_level(
-        candidates,
+        _resolve_type_candidates(),
         all_types,
         public_types,
         surf_old,

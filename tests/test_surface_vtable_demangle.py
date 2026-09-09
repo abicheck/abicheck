@@ -165,3 +165,38 @@ class TestMangledVtableSymbolSurfaceClassification:
             assert classify_change_surface(c_pub, s, s) == (True, None)
         finally:
             surface_mod.demangle = original
+
+    def test_symbol_level_finding_never_computes_type_candidates(self):
+        """CodeRabbit review: the demangle-aware `candidates` computation
+        used to run unconditionally before the symbol-level early return,
+        so an ordinary FUNC_REMOVED that `_classify_symbol_level` resolves
+        on its own forked a `c++filt` (via `demangle()`) for a value it
+        never used. Patch `demangle` to raise if called at all, proving a
+        symbol-level finding that `_classify_symbol_level` can resolve
+        never reaches the type-candidate computation."""
+        import abicheck.surface as surface_mod
+
+        def _boom(*a, **k):
+            raise AssertionError("demangle() must not be called")
+
+        original = surface_mod.demangle
+        surface_mod.demangle = _boom
+        try:
+            snap = AbiSnapshot(
+                library="l",
+                version="1",
+                functions=[_fn("api", ret="Result *"), _fn("removed_fn")],
+                types=[_rec("Result")],
+            )
+            s = self._surf(snap)
+            c = Change(
+                kind=ChangeKind.FUNC_REMOVED,
+                symbol=_fn("removed_fn").mangled,
+                description="",
+            )
+            # Not in public_symbols on either side (removed) -> a definite
+            # symbol-level verdict, resolved without ever touching
+            # candidates/demangle().
+            assert classify_change_surface(c, s, s) is not None
+        finally:
+            surface_mod.demangle = original

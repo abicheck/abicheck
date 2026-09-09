@@ -125,3 +125,10 @@
   rendered no impact text at all for a type-kind finding (e.g.
   `type_size_changed`), unlike the non-type-change row renderer, which
   already did (CodeRabbit review).
+- `surface.py`'s demangle-aware type-candidate resolution is now computed
+  lazily, only when a finding actually reaches `_classify_type_level` —
+  previously it ran unconditionally for every finding this module
+  classifies, so an ordinary symbol-level `FUNC_REMOVED`/`VAR_REMOVED`
+  that `_classify_symbol_level` resolves on its own still forked a
+  `c++filt` (via `demangle()`) for a value it never used (CodeRabbit
+  review).
