@@ -116,6 +116,9 @@ def _render_leaf_type_change_row(row: Mapping[str, Any]) -> list[str]:
     from .render_markdown_document import _row_contract_tag
 
     lines = [f"### {row['symbol']} — {row['description']}"]
+    impact = row.get("impact")
+    if impact:
+        lines.append(f"\n> {impact}")
     affected = row.get("affected_symbols")
     if affected:
         lines.append(f"\n**Affected interfaces ({len(affected)}):**")

@@ -36,6 +36,9 @@ from abicheck.model import AbiSnapshot, Function, Variable, Visibility
 
 _MANGLED = "_ZN3Foo3barEv"
 _DEMANGLED = "Foo::bar()"
+_VAR_MANGLED = "_ZN3Foo7counterE"
+_VAR_DEMANGLED = "Foo::counter"
+_DEMANGLE_TABLE = {_MANGLED: _DEMANGLED, _VAR_MANGLED: _VAR_DEMANGLED}
 
 
 def _snapshot(functions: list[Function] | None = None) -> AbiSnapshot:
@@ -47,8 +50,38 @@ def _snapshot(functions: list[Function] | None = None) -> AbiSnapshot:
     )
 
 
+@pytest.fixture
+def deterministic_demangle(monkeypatch):
+    """Stub ``compare.elf_only_demangle``'s ``demangle``/``demangle_batch``
+    with a small, deterministic lookup table instead of depending on a real
+    ``cxxfilt``/``c++filt`` being present on the host -- neither is
+    guaranteed (Windows CI in particular ships neither by default: no
+    ``cxxfilt`` package in ``[dev]``, and ``c++filt`` is a GNU binutils tool,
+    not part of the MSVC toolchain), so a test asserting a *specific*
+    demangled spelling must not depend on one (CodeRabbit review). Only the
+    tests that assert an exact demangled string use this -- the "stays
+    None"/"omitted" tests need no demangler at all (visibility short-circuits
+    before ``demangle()`` is ever called), and
+    ``TestDemanglePrewarmScoping`` deliberately wraps the *real*
+    ``demangle_batch`` since it is testing the real batching behavior, not a
+    specific demangled spelling.
+    """
+    import abicheck.compare.elf_only_demangle as elf_only_demangle_mod
+
+    def fake_demangle(mangled, **kwargs):
+        return _DEMANGLE_TABLE.get(mangled)
+
+    def fake_demangle_batch(names, **kwargs):
+        return {n: _DEMANGLE_TABLE[n] for n in names if n in _DEMANGLE_TABLE}
+
+    monkeypatch.setattr(elf_only_demangle_mod, "demangle", fake_demangle)
+    monkeypatch.setattr(elf_only_demangle_mod, "demangle_batch", fake_demangle_batch)
+
+
 class TestFunctionRemovedElfOnly:
-    def test_demangled_symbol_is_populated_for_an_elf_only_removal(self) -> None:
+    def test_demangled_symbol_is_populated_for_an_elf_only_removal(
+        self, deterministic_demangle
+    ) -> None:
         old = _snapshot(
             [
                 Function(
@@ -90,9 +123,9 @@ class TestFunctionRemovedElfOnly:
 
 class TestVarRemovedElfOnly:
     def test_demangled_symbol_is_populated_for_an_elf_only_variable_removal(
-        self,
+        self, deterministic_demangle
     ) -> None:
-        mangled = "_ZN3Foo7counterE"
+        mangled = _VAR_MANGLED
         old = AbiSnapshot(
             library="libx.so",
             version="1.0",
@@ -114,7 +147,9 @@ class TestVarRemovedElfOnly:
 
 
 class TestReportSurfacing:
-    def test_json_carries_demangled_symbol_for_an_elf_only_removal(self) -> None:
+    def test_json_carries_demangled_symbol_for_an_elf_only_removal(
+        self, deterministic_demangle
+    ) -> None:
         from abicheck.reporter import to_json
 
         old = _snapshot(
@@ -160,7 +195,9 @@ class TestReportSurfacing:
         assert len(removed) == 1
         assert "demangled_symbol" not in removed[0]
 
-    def test_sarif_carries_demangled_symbol_for_an_elf_only_removal(self) -> None:
+    def test_sarif_carries_demangled_symbol_for_an_elf_only_removal(
+        self, deterministic_demangle
+    ) -> None:
         from abicheck.sarif import to_sarif
 
         old = _snapshot(
@@ -186,7 +223,9 @@ class TestReportSurfacing:
 
 
 class TestSchema:
-    def test_demangled_symbol_is_declared_in_the_report_schema(self) -> None:
+    def test_demangled_symbol_is_declared_in_the_report_schema(
+        self, deterministic_demangle
+    ) -> None:
         # Codex review, fresh evidence: the field existed in JSON output
         # before the schema declared it -- additionalProperties kept
         # validation permissive, but a schema-driven consumer couldn't

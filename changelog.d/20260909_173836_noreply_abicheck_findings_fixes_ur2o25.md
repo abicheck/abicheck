@@ -119,3 +119,9 @@
   so the un-fixed root-cause path could describe empirical consumer
   evidence and then call its own consequence merely plausible (Codex
   review).
+- `--report-mode leaf`'s type-change section renderer
+  (`_render_leaf_type_change_row`) now renders the evidence-qualified
+  `impact` text `_change_row` already computes for it — it previously
+  rendered no impact text at all for a type-kind finding (e.g.
+  `type_size_changed`), unlike the non-type-change row renderer, which
+  already did (CodeRabbit review).

@@ -330,6 +330,30 @@ def test_html_report_impact_carries_the_unattributed_caveat() -> None:
     assert "available evidence does not fully confirm" in html
 
 
+def test_leaf_mode_type_change_row_carries_the_unattributed_caveat() -> None:
+    """CodeRabbit review: `_change_row` computes the evidence-qualified
+    `impact` for every row, but `--report-mode leaf`'s *type*-change section
+    renderer (`_render_leaf_type_change_row`, for a `ChangeKind` in
+    `_ROOT_TYPE_CHANGE_KINDS`) never read `row["impact"]` at all -- unlike
+    the non-type-change row renderer (`_render_change_row`), which does. So
+    a type-kind finding's leaf-mode heading carried no impact text
+    whatsoever, evidence-qualified or otherwise, even though the JSON/full
+    Markdown/HTML/SARIF surfaces for the identical finding all did."""
+    from abicheck.report.dispatch_markdown import to_markdown
+
+    c = _change(ChangeKind.TYPE_SIZE_CHANGED)  # symbol_binding left unset
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libx.so",
+        changes=[c],
+        verdict=Verdict.BREAKING,
+        evidence_tiers=["header"],  # no binary evidence -> UNATTRIBUTED
+    )
+    md = to_markdown(result, report_mode="leaf")
+    assert "available evidence does not fully confirm" in md
+
+
 def test_html_compat_report_impact_carries_the_unattributed_caveat() -> None:
     """Same wiring gap as above, but through the `compat_html=True` (ABICC
     clone) layout's own `_build_compat_problem_data` path. That layout's own
