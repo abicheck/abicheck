@@ -494,24 +494,44 @@ def test_workflows_pattern_scan_scope_reason_distinguishes_all_three_cases(
         == "unreadable_inputs"
     )
 
-    # (d) a seeded run whose selected root doesn't exist on disk at all --
-    # Codex review, third round, fresh evidence: `pattern_scan.
-    # iter_source_files` silently drops a root that is neither a file nor
-    # a directory with no accounting of its own. Fixed at the producer
-    # (`scan_files`, fourth round): a missing root is now counted as
-    # skipped there, so this side's own `files_skipped` already reflects
-    # it by the time it reaches `_pattern_scan_scope_reason` -- exercised
-    # through the REAL `compute_pattern_prescan_side` producer (not a
-    # hand-built `PatternScanResult`).
+    # (d) a seeded run whose selected root doesn't exist on disk at all,
+    # AND the seed's own changed-path selection actually names it -- Codex
+    # review, third round, fresh evidence: `pattern_scan.iter_source_files`
+    # silently drops a root that is neither a file nor a directory with no
+    # accounting of its own. Fixed at the producer (`scan_files`, fourth
+    # round): a missing root is now counted as skipped there, so this
+    # side's own `files_skipped` already reflects it by the time it reaches
+    # `_pattern_scan_scope_reason` -- exercised through the REAL
+    # `compute_pattern_prescan_side` producer (not a hand-built
+    # `PatternScanResult`). The seed must genuinely SELECT the missing root
+    # (eighth round, fresh evidence): a missing root the seed's own
+    # `changed_paths` filter would never have selected anyway is correctly
+    # exempted (see (d2) below) -- a bare `changed_paths=()` selects
+    # nothing at all, so it no longer exercises this case.
     missing_root = tmp_path / "deleted-header.hpp"
     seeded_missing_root_result = compute_pattern_prescan_side(
-        [missing_root], None, None, (), seeded=True
+        [missing_root], None, None, ("deleted-header.hpp",), seeded=True
     )
     assert seeded_missing_root_result.files_scanned == 0
     assert seeded_missing_root_result.files_skipped == 1
     assert (
         _pattern_scan_scope_reason([missing_root], True, seeded_missing_root_result)
         == "unreadable_inputs"
+    )
+
+    # (d2) a seeded run whose missing root the seed's OWN changed-path
+    # filter would never have selected -- Codex review, eighth round, fresh
+    # evidence: this is a real, valid `empty_seed` (nothing in scope was
+    # touched), not an acquisition failure, even though `roots` happens to
+    # name a file that doesn't exist.
+    out_of_scope_result = compute_pattern_prescan_side(
+        [missing_root], None, None, ("different-header.hpp",), seeded=True
+    )
+    assert out_of_scope_result.files_scanned == 0
+    assert out_of_scope_result.files_skipped == 0
+    assert (
+        _pattern_scan_scope_reason([missing_root], True, out_of_scope_result)
+        == "empty_seed"
     )
 
     # A side that actually scanned something needs no reason at all.

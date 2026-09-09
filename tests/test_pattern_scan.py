@@ -854,6 +854,36 @@ def test_scan_files_missing_root_and_matching_changed_path_not_double_counted(
     assert res.files_skipped == 1
 
 
+def test_scan_files_missing_root_out_of_changed_scope_is_not_counted(
+    tmp_path: Path,
+) -> None:
+    """Codex review, eighth round, fresh evidence: an unconditional
+    missing-root check counted `roots=[missing.hpp]` even when
+    `changed_paths=["different.hpp"]` would never have selected
+    `missing.hpp` anyway -- misreporting a real, valid `empty_seed` as
+    `unreadable_inputs`. A missing root with an unambiguous source suffix
+    that the changed-path filter would exclude must not be counted."""
+    missing = tmp_path / "missing.hpp"
+    res = scan_files([missing], changed_paths=["different.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+
+
+def test_scan_files_missing_directory_root_still_counted_under_changed_paths(
+    tmp_path: Path,
+) -> None:
+    """Sibling case to the one above: a missing DIRECTORY root (no suffix,
+    ambiguous) must stay unconditionally counted even under a seeded
+    changed_paths filter -- its own path never matches an individual
+    changed-path entry, so exempting it the same way a file root is
+    exempted would silently swallow a genuine directory-acquisition
+    failure."""
+    missing_dir = tmp_path / "missing_sources"
+    res = scan_files([missing_dir], changed_paths=["some/file.hpp"])
+    assert res.files_scanned == 0
+    assert res.files_skipped == 1
+
+
 def test_scan_files_empty_changed_paths_reports_no_skips(
     tmp_path: Path,
 ) -> None:

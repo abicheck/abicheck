@@ -784,6 +784,23 @@ def iter_source_files(
     otherwise-existing, in-scope root) stays a documented, accepted gap
     rather than a third attempt -- see :func:`scan_files`'s own missing-root
     accounting (a *root* that no longer exists) for the shape that IS fixed.
+
+    **Also deliberately NOT attempted** (Codex review, eighth round, fresh
+    evidence): a directory root that exists (``Path.exists()``/``is_dir()``
+    both succeed) but whose ``os.walk`` traversal hits an ``OSError``
+    (permission denied, a broken mount, an I/O error) partway through --
+    ``os.walk``'s default error handling silently swallows such errors
+    (yielding whatever it already found, never raising) unless given an
+    ``onerror`` callback, so this reads identically to "this directory
+    genuinely contains nothing in scope," the same `empty_seed`-vs-failure
+    ambiguity the fourth/eighth rounds close for a *missing* root. Left
+    unfixed deliberately rather than threading an `onerror` callback through
+    (which would need either a second, duplicate walk purely to detect the
+    error, or restructuring this function's return shape the same way the
+    reverted sixth-round attempt did) -- this is an adversarial-only,
+    OS-level failure mode a best-effort advisory pre-scan (ADR-035 D2/D3:
+    "never fatal") already degrades gracefully from, unlike the two shapes
+    above which are ordinary, everyday outcomes of a real PR's own edits.
     """
     changed_suffixes: set[str] | None = None
     if changed_paths is not None:
@@ -942,7 +959,36 @@ def scan_files(
     # no evidence whatsoever. Counted here, once, so every return path below
     # (serial, parallel, and the parallel-failure fallback) inherits it
     # uniformly rather than needing the same fix three times over.
-    missing_roots = sum(1 for r in roots if not Path(r).exists())
+    #
+    # Eighth round, fresh evidence: that check is unconditional, so a missing
+    # root the seed's OWN `changed_paths` filter would never have selected
+    # anyway (`roots=[missing.hpp]`, `changed_paths=["different.hpp"]`) was
+    # still counted, misreporting a real, valid `empty_seed` as
+    # `unreadable_inputs`. Exempted here only for a root whose suffix is an
+    # unambiguous known source/header suffix (`SOURCE_SUFFIXES`) AND the
+    # changed-path filter would exclude it -- a root with no suffix (or a
+    # non-source suffix) is ambiguous (it could be the `sources` DIRECTORY
+    # root, whose own path never itself matches an individual changed-path
+    # entry) and stays unconditionally counted, so a genuine missing/
+    # unreadable directory root is never silently exempted just because its
+    # own path doesn't happen to appear in the changed-path list.
+    changed_suffixes = (
+        {str(p).replace("\\", "/") for p in changed_paths}
+        if changed_paths is not None
+        else None
+    )
+    missing_roots = 0
+    for r in roots:
+        rp = Path(r)
+        if rp.exists():
+            continue
+        if (
+            changed_suffixes is not None
+            and rp.suffix.lower() in SOURCE_SUFFIXES
+            and not _path_changed(rp, changed_suffixes)
+        ):
+            continue
+        missing_roots += 1
     files = iter_source_files(roots, changed_paths)
     jobs = _resolve_scan_jobs(len(files))
     if jobs <= 1:

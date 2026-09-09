@@ -117,4 +117,25 @@
   narrow residual (a `changed_paths` entry naming a file deleted from
   within an otherwise-existing, in-scope root reads as a real, valid empty
   diff rather than an acquisition failure) as an accepted, deliberately-
-  not-fixed gap rather than attempting a third heuristic.
+  not-fixed gap rather than attempting a third heuristic. Eighth follow-up
+  round (Codex review, PR #1169, eighth round, fresh evidence), two more
+  gaps: (a) the fourth round's missing-root check was itself unconditional,
+  so a missing root the seed's own `changed_paths` filter would never have
+  selected anyway (`roots=[missing.hpp]`, `changed_paths=
+  ["different.hpp"]`) was still counted, misreporting a real, valid
+  `empty_seed` as `unreadable_inputs`. Exempted only for a root with an
+  unambiguous known source/header suffix (`SOURCE_SUFFIXES`) that the
+  changed-path filter would exclude -- an ambiguous no-suffix root (the
+  `sources` directory) stays unconditionally counted, since exempting it
+  the same way would silently swallow a genuine directory-acquisition
+  failure. (b) a directory root that exists but whose `os.walk` traversal
+  hits an `OSError` (permission denied, a broken mount) partway through
+  reads identically to "this directory genuinely contains nothing in
+  scope," since `os.walk`'s default error handling silently swallows such
+  errors. Investigated and documented as an accepted, deliberately-not-
+  fixed gap (same docstring) rather than fixed, since a sound fix needs
+  either a second, duplicate directory walk purely for error detection or
+  the same kind of return-shape restructuring the reverted sixth-round fix
+  attempted -- disproportionate to an adversarial-only, OS-level failure
+  mode a best-effort advisory pre-scan (ADR-035 D2/D3) already degrades
+  gracefully from.
