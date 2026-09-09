@@ -389,6 +389,11 @@ _NON_FAILING_SINKS = frozenset({"true", ":", "echo"})
 #: so no later fallback in the chain is reachable at all.
 _CONTROL_TERMINATORS = frozenset({"exit", "return", "exec"})
 
+#: Characters that introduce a shell expansion. An expansion is evaluated
+#: *before* the command runs and can fail on its own (`$((1/0))`,
+#: `${x:?msg}`), so a sink carrying one is not something this can vouch for.
+_EXPANSION_MARKERS = frozenset({"$", "`"})
+
 
 def update_failure_is_absorbed(line: str) -> bool:
     """True when this line's ``apt-get update`` cannot abort its step.
@@ -452,6 +457,14 @@ def update_failure_is_absorbed(line: str) -> bool:
         if head == "sudo" and len(segment) > 1:
             head = segment[1]
         if head in _NON_FAILING_SINKS:
+            # ...but only when the whole command is literal. An expansion can
+            # abort the command before it ever runs: `echo "$((1/0))"` exits
+            # 1 on the arithmetic error and `echo "${UNSET:?boom}"` exits 127,
+            # both while *looking* like a plain echo (Codex review, fourth P2
+            # on PR #1182). shlex strips the quotes but leaves the expansion
+            # in the token, so this catches it.
+            if any(_EXPANSION_MARKERS & set(tok) for tok in segment):
+                return False
             return True
         if head in _CONTROL_TERMINATORS:
             # Nothing after this runs, so a later sink is unreachable:
@@ -611,6 +624,14 @@ class TestUpdateFailureAbsorptionPredicate:
         "sudo true",
         "false && true",
         "true && false",
+        # Expansions: evaluated before the command runs, and able to fail on
+        # their own. The first two really do abort (1 and 127); the rest are
+        # harmless and are here so the matrix covers both outcomes.
+        'echo "$((1/0))"',
+        'echo "${UNSET:?boom}"',
+        'echo "$(false)"',
+        "echo `false`",
+        'echo "$UNSET"',
     )
 
     @requires_apt_harness
