@@ -81,7 +81,7 @@ lowered; no finding's decision is rewritten):
   other side and that side's inventory is not proven complete
   (`not_supplied`), this build cannot analyze it (`unsupported`), or its
   extraction failed (`failed`). Contributes `0` under the default
-  `--on-incomplete-scope warn` and `1` under `--on-incomplete-scope block`.
+  `.abicheck.yml` `scope.on_incomplete: warn` and `1` under `scope.on_incomplete: block`.
   Under `warn` the run still reports the scope as incomplete: the JSON
   `run_outcome.scope` reads `incomplete`, the `comparison_scope` block names
   every unchecked member and why, and the Markdown/PR-comment views say the
@@ -95,8 +95,9 @@ Both appear in the report's `exit` block (`incomplete_scope_contribution`,
 `no_comparison_completed_contribution`) and, when they decide the code, in
 `exit.reasons`. A scalar `compare` never sets either.
 
-**Migration note (exit `8`).** Before ADR-065 S2, `--fail-on-removed-library`
-exited `8` on the raw old-minus-new filename set difference, so a partial
+**Migration note (exit `8`).** Before ADR-065 S2, the (now-removed)
+`--fail-on-removed-library` flag (today `.abicheck.yml`'s
+`gate.fail_on_removed_library: true`) exited `8` on the raw old-minus-new filename set difference, so a partial
 local build compared against a full baseline read as "N libraries removed".
 Exit `8` now requires the removal to be *proven*: the NEW side's inventory
 must be proven complete. Two things prove it, and nothing else does — a
@@ -117,8 +118,8 @@ members stay unchecked, so `block` still gates — discovered cardinality is
 never read as intent.
 
 **Migration note (exit `8`, second step — ADR-065 S3).** S3 makes a package
-*archive* pair a completeness proof, so `--fail-on-removed-library` reaches
-exit `8` again for `abicheck compare old.rpm new.rpm` (or `.deb`/`.tar.*`/
+*archive* pair a completeness proof, so `gate.fail_on_removed_library: true`
+reaches exit `8` again for `abicheck compare old.rpm new.rpm` (or `.deb`/`.tar.*`/
 `.whl`/`.conda`) where S2 had left it reachable only for a stored snapshot.
 This is the correction S2's note anticipated, not a reversal of it: a
 directory pair still exits `0`, because a directory proves nothing. If a
@@ -402,8 +403,8 @@ below, plus a dedicated code for removed libraries:
 | `0` | All libraries compatible (no API/ABI break) |
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
-| `1` | No compatibility break, but the completeness axis contributed (ADR-065): `--on-incomplete-scope block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
-| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`; ADR-065 D2) and `--fail-on-removed-library` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
+| `1` | No compatibility break, but the completeness axis contributed (ADR-065): `.abicheck.yml`'s `scope.on_incomplete: block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
+| `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`; ADR-065 D2) and `.abicheck.yml`'s `gate.fail_on_removed_library: true` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
 | `16` | `not_comparable` (ADR-050 D2) — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the
@@ -590,7 +591,7 @@ Phase 7), and the exit code is the worst contribution across them:
   see "The completeness axis" above) and folds their `max` the same way
   (aggregate schema `1.8`); `aggregate` never recomputes them. A release that
   exited `1` because a selected member went unchecked under
-  `--on-incomplete-scope block`, or because it completed no comparison at
+  `.abicheck.yml`'s `scope.on_incomplete: block`, or because it completed no comparison at
   all, therefore aggregates to `1` as well — its `run_outcome.gate` and
   `operational` axes read `none` for that case, so without this axis the
   target read green. Reported as its own `scope_completeness` block and a
@@ -601,7 +602,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `--require-complete-analysis`; a release target's comparison scope gated (`--on-incomplete-scope block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `--require-complete-analysis`; a release target's comparison scope gated (`.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |

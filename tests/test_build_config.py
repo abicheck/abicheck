@@ -299,6 +299,44 @@ class TestBuildConfigBundleBlock:
         assert "bundle" not in BuildConfig().to_dict()
 
 
+class TestBuildConfigPhase7dBlocks:
+    """Codecov patch-coverage gap: Phase 7d (one-comparison-product.md
+    §4.1) added `gate:`/`release:` and `scope.on_incomplete` to `BuildConfig`
+    but `to_dict()`'s own serialization half (`_gate_block()`/
+    `_release_block()`, and the `scope["on_incomplete"] = ...` line) had no
+    test at all -- mirrors `TestBuildConfigBundleBlock`'s own identical gap
+    and fix for the `bundle:` block."""
+
+    def test_to_dict_round_trips_the_gate_block(self) -> None:
+        cfg = BuildConfig.from_dict({"gate": {"fail_on_removed_library": True}})
+        assert cfg.to_dict()["gate"] == {"fail_on_removed_library": True}
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_to_dict_omits_gate_block_when_empty(self) -> None:
+        assert "gate" not in BuildConfig().to_dict()
+
+    def test_to_dict_round_trips_the_release_block(self) -> None:
+        cfg = BuildConfig.from_dict(
+            {"release": {"dso_only": True, "include_private_dso": True}}
+        )
+        assert cfg.to_dict()["release"] == {
+            "dso_only": True,
+            "include_private_dso": True,
+        }
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_to_dict_omits_release_block_when_empty(self) -> None:
+        assert "release" not in BuildConfig().to_dict()
+
+    def test_to_dict_round_trips_scope_on_incomplete(self) -> None:
+        cfg = BuildConfig.from_dict({"scope": {"on_incomplete": "block"}})
+        assert cfg.to_dict()["scope"] == {"on_incomplete": "block"}
+        assert BuildConfig.from_dict(cfg.to_dict()) == cfg
+
+    def test_to_dict_omits_scope_on_incomplete_when_unset(self) -> None:
+        assert "on_incomplete" not in BuildConfig().to_dict().get("scope", {})
+
+
 # ── end-to-end: a bad .abicheck.yml exits 64 through a real command ─────────
 
 

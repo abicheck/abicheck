@@ -167,24 +167,6 @@ if TYPE_CHECKING:
     help="Require every suppression rule to have a non-empty 'reason' field.",
 )
 @click.option(
-    "--fail-on-removed-library/--no-fail-on-removed-library",
-    "fail_on_removed",
-    default=False,
-    help="Exit 8 when a library present in old_dir is proven removed in new_dir "
-    "(ADR-065 D2: NEW's inventory must be proven complete; an unmatched "
-    "library under an unproven inventory is an incomplete scope instead).",
-)
-@click.option(
-    "--on-incomplete-scope",
-    "on_incomplete_scope",
-    type=click.Choice(["warn", "block"]),
-    default="warn",
-    show_default=True,
-    help="What an incompletely checked comparison scope does to the exit code "
-    "(ADR-065 D6): 'warn' reports every unchecked member and contributes 0; "
-    "'block' contributes 1, folded with max() like the contract-coverage axis.",
-)
-@click.option(
     "--support-promise",
     "support_promise",
     type=click.Choice(["off", "declared"]),

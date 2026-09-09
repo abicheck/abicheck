@@ -34,6 +34,7 @@ from test_release_scope_completeness import (
     _facts_file,
     _invoke_json,
     _maps,
+    _release_config,
     _results,
     _write,
     _write_stored_package,
@@ -128,8 +129,9 @@ class TestBundleAnalysisScope:
         new = _facts_file(
             tmp_path, "new.bundlefacts.json", {"libalgo.so": libs["libalgo.so"]}
         )
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         assert _removal_findings(doc) == []
         assert doc["verdict"] != "BREAKING"
@@ -662,8 +664,9 @@ class TestStoredPackageDegradedMember:
         else:
             _write_stored_package(old, healthy)
             _write_stored_package(new, degraded, degraded=marker)
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
-            "compare", str(old), str(new), "--on-incomplete-scope", policy
+            "compare", str(old), str(new), "--config", str(cfg)
         )
         by_name = {lib["library"].split("-")[0]: lib for lib in doc["libraries"]}
         assert by_name["libfoo.so"]["verdict"] == "failed"
@@ -928,7 +931,7 @@ class TestExplicitNullMarkerIsRejected:
 
 
 class TestNoticeAttributesTheFailureToTheRightPolicy:
-    """`comparison_scope_notice` names `--on-incomplete-scope block` only
+    """`comparison_scope_notice` names `scope.on_incomplete: block` only
     when the D6 policy is what fails the run. A zero-comparison run (D7)
     fails under either policy through its own contribution, so it is never
     attributed to `block`, which the user may not have selected (Codex
@@ -976,7 +979,7 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
         assert notice is not None
         assert notice.startswith("No comparison completed")
         assert "never a clean pass" in notice and "D7" in notice
-        assert "(--on-incomplete-scope block)" not in notice
+        assert "(scope.on_incomplete: block)" not in notice
         assert "accepted as a warning" not in notice
 
     @pytest.mark.parametrize("policy", ["warn", "block"])
@@ -994,9 +997,9 @@ class TestNoticeAttributesTheFailureToTheRightPolicy:
         assert notice.startswith("Comparison scope incompletely checked")
         assert "never a clean pass" not in notice
         if policy == "block":
-            assert notice.endswith("fails the run (--on-incomplete-scope block)")
+            assert notice.endswith("fails the run (scope.on_incomplete: block)")
         else:
-            assert notice.endswith("accepted as a warning (--on-incomplete-scope warn)")
+            assert notice.endswith("accepted as a warning (scope.on_incomplete: warn)")
 
 
 class TestScopeMarkdownEscapesUncontrolledValues:

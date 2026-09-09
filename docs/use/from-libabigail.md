@@ -123,9 +123,9 @@ abicheck compare foo-1.rpm foo-2.rpm \
 ```
 
 Multi-library inputs are compared as a co-versioned bundle, with per-library
-verdicts and a bundle-level worst-wins verdict; add `--fail-on-removed-library`
-to exit `8` when a library disappeared — see
-[Multi-Binary Releases](multi-binary.md).
+verdicts and a bundle-level worst-wins verdict; set `.abicheck.yml`'s
+`gate.fail_on_removed_library: true` to exit `8` when a library disappeared
+— see [Multi-Binary Releases](multi-binary.md).
 
 ## Translating suppression files
 

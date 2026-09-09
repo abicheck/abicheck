@@ -58,12 +58,12 @@ def release_options(func: F) -> F:
 
     The release-only options the removed ``compare-release`` command exposed:
     package extraction (``--debug-info*``/``--devel-pkg*``), DSO selection
-    (``--include-private-dso``/``--keep-extracted``), the removed-library gate, and
-    the ADR-023 instantiation-manifest analysis. They bite only when ``compare``'s
-    operands are directories or packages (the per-library fan-out); on single-file
-    inputs they are inert. Declared once here so ``compare`` and the internal
-    release engine share one surface (ADR-037 D7). Applied bottom-up, so listed in
-    reverse of displayed order.
+    (``--keep-extracted``), and the ADR-023 instantiation-manifest analysis.
+    They bite only when ``compare``'s operands are directories or packages
+    (the per-library fan-out); on single-file inputs they are inert. Declared
+    once here so ``compare`` and the internal release engine share one
+    surface (ADR-037 D7). Applied bottom-up, so listed in reverse of
+    displayed order.
 
     CLI cleanup phase two, PR J: ``--bundle-system-providers``/
     ``--bundle-cohort`` are gone from this group -- topology, not a per-run
@@ -72,6 +72,19 @@ def release_options(func: F) -> F:
     (:data:`abicheck.buildsource.build_config.BuildConfig.bundle_system_providers`/
     ``bundle_cohorts``, resolved onto
     :class:`abicheck.cli_helpers_compare.ResolvedCompareConfig`).
+
+    Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): ``--fail-on-
+    removed-library``/``--on-incomplete-scope``/``--include-private-dso``
+    are gone from this group too -- ``gate.fail_on_removed_library``
+    (prerequisite vision A-S4/ADR-065 S4 landed 2026-09-06),
+    ``scope.on_incomplete``, and ``release.include_private_dso`` in
+    ``.abicheck.yml`` are their only source now, no surviving CLI override,
+    resolved the same way onto :class:`abicheck.cli_helpers_compare.
+    ResolvedCompareConfig`. ``--dso-only`` (the fourth Phase 7d topology
+    flag, ``release.dso_only``) lived in ``cli_options.set_input_options``
+    instead, not here. ``--instantiation-manifest``/``--bundle-facts-out``/
+    ``--bundle-facts-library-manifest`` stay CLI flags this phase -- see
+    each option's own docstring below for why.
     """
     func = click.option(
         "--no-bundle-analysis",
@@ -93,7 +106,20 @@ def release_options(func: F) -> F:
         "phase two, PR J): the bare spelling collided with aggregate's own "
         "--manifest and the product's several other manifest-shaped concepts "
         "(dump manifest, run plan, bundle facts, project config). "
-        "(directory/package inputs only)",
+        "(directory/package inputs only)\n\n"
+        "Phase 7d (one-comparison-product.md §4.1) classes this CONFIG ("
+        "\"a declared contract is a project property\") with no stated "
+        "prerequisite, but its natural home -- a project-config document "
+        "-- already has an owner: ADR-049's CompatibilityEvaluationConfig "
+        "resolves a whole `contract.*` namespace through its own D7 "
+        "precedence tiers (compatibility_evaluation_frontend.py), separate "
+        "from this plain BuildConfig/.abicheck.yml schema. Adding a second, "
+        "uncoordinated top-level `contract:` block here -- with no D7 "
+        "resolver, no receipt, no pack-conflict detection -- would be "
+        "exactly the ad hoc config plumbing this workstream's own task "
+        "instructions warn against inventing casually, not a mechanical "
+        "rename. Kept as a CLI flag pending a real ADR-049-coordinated "
+        "design for where a declared instantiation manifest belongs.",
     )(func)
     func = click.option(
         "--bundle-facts-out",
@@ -104,7 +130,16 @@ def release_options(func: F) -> F:
         "plus the instantiation manifest, if any) to PATH (G38 Phase 2, "
         "ADR-023 amendment) for a later stored-baseline bundle comparison. "
         "Additive output alongside the ordinary live-vs-live comparison; "
-        "no-op with --no-bundle-analysis. (directory/package inputs only)",
+        "no-op with --no-bundle-analysis. (directory/package inputs only)\n\n"
+        "Phase 7d (one-comparison-product.md §4.1) classes this REMOVE "
+        "(\"evidence capture belongs to dump (D2)\"), but `dump` has no "
+        "directory/package fan-out at all today -- its operand is a single "
+        "binary/header input, with no equivalent that walks a release tree "
+        "and writes a multi-library BundleFacts document. Removing this "
+        "flag now would be a real capability loss (there is no other way "
+        "to produce a stored-baseline bundle-facts document for a later "
+        "`compare OLD_FACTS NEW_INPUT` bundle comparison), so it stays a "
+        "`compare` flag pending that `dump` capability actually landing.",
     )(func)
     func = click.option(
         "--keep-extracted",
@@ -113,14 +148,6 @@ def release_options(func: F) -> F:
         default=False,
         help="Keep extracted temporary files for debugging. "
         "(directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--include-private-dso",
-        "include_private_dso",
-        is_flag=True,
-        default=False,
-        help="Include private (non-public) shared objects from non-standard "
-        "paths. (directory/package inputs only)",
     )(func)
     func = click.option(
         "--devel-pkg",
@@ -139,27 +166,6 @@ def release_options(func: F) -> F:
         help="Debug info package (RPM/Deb/tar), scoped per side with an "
         "'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info "
         "new=b-dbg.rpm). Directory/package inputs only (ADR-040).",
-    )(func)
-    func = click.option(
-        "--fail-on-removed-library/--no-fail-on-removed-library",
-        "fail_on_removed",
-        default=False,
-        help="Exit 8 when a library present in old_dir is proven removed in "
-        "new_dir -- NEW's inventory must be proven complete (ADR-065 D2); an "
-        "unmatched library under an unproven inventory is reported as an "
-        "incomplete scope instead. (directory/package inputs only)",
-    )(func)
-    func = click.option(
-        "--on-incomplete-scope",
-        "on_incomplete_scope",
-        type=click.Choice(["warn", "block"]),
-        default="warn",
-        show_default=True,
-        help="What an incompletely checked comparison scope does to the exit "
-        "code (ADR-065 D6): 'warn' reports every unchecked member and "
-        "contributes 0; 'block' contributes 1, folded with max() like the "
-        "contract-coverage axis. A run that completed no comparison at all "
-        "contributes 1 under either setting. (directory/package inputs only)",
     )(func)
     func = click.option(
         "--support-promise",

@@ -200,7 +200,7 @@ _EXIT_USAGE_ERROR = 64
 # verdict was ever produced). Identical across the legacy (0/2/4) and
 # severity-aware (0/1/2/4) single-library schemes, since the gate runs before
 # either classification, and deliberately not ``8`` — that already means
-# ``--fail-on-removed-library`` in the release/multi-library table. ``16``
+# ``gate.fail_on_removed_library`` in the release/multi-library table. ``16``
 # continues that table's own doubling pattern one step further and sits
 # outside every existing compare exit code in all three tables.
 _EXIT_NOT_COMPARABLE = 16
@@ -219,7 +219,7 @@ _EXIT_USAGE_ERROR = 64
 # verdict was ever produced). Identical across the legacy (0/2/4) and
 # severity-aware (0/1/2/4) single-library schemes, since the gate runs before
 # either classification, and deliberately not ``8`` — that already means
-# ``--fail-on-removed-library`` in the release/multi-library table. ``16``
+# ``gate.fail_on_removed_library`` in the release/multi-library table. ``16``
 # continues that table's own doubling pattern one step further and sits
 # outside every existing compare exit code in all three tables.
 _EXIT_NOT_COMPARABLE = 16

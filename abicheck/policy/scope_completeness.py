@@ -71,9 +71,9 @@ DEFAULT_INCOMPLETE_SCOPE_POLICY = "warn"
 #: How a CLI user turns the warning into a gate, or closes the gap.
 CLI_MITIGATION = (
     "Supply the missing members (or compare one artifact against its own "
-    "counterpart), or pass --on-incomplete-scope block to fail the run on "
-    "an incompletely checked scope. --format json carries the full "
-    "comparison_scope record."
+    "counterpart), or set scope.on_incomplete: block in .abicheck.yml to "
+    "fail the run on an incompletely checked scope. --format json carries "
+    "the full comparison_scope record."
 )
 
 
@@ -210,13 +210,14 @@ def incomplete_scope_diagnostic(
     if record.no_comparison_completed:
         what += " No comparison completed (ADR-065 D7), which is never a clean pass."
     cause = (
-        "no comparison completed (never accepted by --on-incomplete-scope)"
+        "no comparison completed (never accepted under any scope.on_incomplete "
+        "setting)"
         if record.no_comparison_completed
-        else "--on-incomplete-scope block"
+        else "scope.on_incomplete: block"
     )
     if floor == 0:
         effect = (
-            f"Accepted by --on-incomplete-scope {effective}, so the scope axis "
+            f"Accepted under scope.on_incomplete: {effective}, so the scope axis "
             "contributes 0 to the exit code"
         )
     elif base_exit < floor:

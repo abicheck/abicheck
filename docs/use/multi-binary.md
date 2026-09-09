@@ -204,7 +204,7 @@ affected symbol/library before firing: `bundle_intra_dep_removed` (an import
 with no provider at all), `bundle_library_removed` (a removed library, gated
 on whether a surviving sibling actually imported one of its exports — a
 standalone removal with no internal consumer there is by design left to the
-directory/package CLI's separate `--fail-on-removed-library` flow),
+directory/package CLI's separate `.abicheck.yml`'s `gate.fail_on_removed_library` flow),
 `bundle_intra_dep_signature_changed` and `bundle_intra_type_changed` (each
 gated on `new.resolution.consumers_of(...)`/a sibling's own symbols, as
 described above), and `bundle_intra_dep_resolved_to_different_version`
@@ -543,8 +543,8 @@ Same as before, but a bundle finding can promote the verdict:
 | 0 | All clear — no per-library or bundle findings above COMPATIBLE_WITH_RISK |
 | 2 | At least one library or bundle finding is API_BREAK |
 | 4 | At least one library or bundle finding is BREAKING |
-| 1 | No compatibility break, but the completeness axis contributed (ADR-065): `--on-incomplete-scope block` with an unchecked member, or a run that completed no comparison at all (under either setting) |
-| 8 | Library **proven** removed from the bundle (only with `--fail-on-removed-library`, and only when NEW's inventory is proven complete — see [Comparison scope and completeness](#comparison-scope-and-completeness-adr-065)) |
+| 1 | No compatibility break, but the completeness axis contributed (ADR-065): `.abicheck.yml`'s `scope.on_incomplete: block` with an unchecked member, or a run that completed no comparison at all (under either setting) |
+| 8 | Library **proven** removed from the bundle (only with `.abicheck.yml`'s `gate.fail_on_removed_library: true`, and only when NEW's inventory is proven complete — see [Comparison scope and completeness](#comparison-scope-and-completeness-adr-065)) |
 
 If you previously had a green CI on a release and bundle analysis now
 flips it red, the finding section in the markdown / JSON tells you what
@@ -584,23 +584,23 @@ single-variant build compared against a twelve-variant baseline no longer
 reads as eleven removals. The intent has to be in the operand shape: the
 same one library supplied as a *directory* is treated like any other
 directory, so the eleven unmatched members are unchecked and
-`--on-incomplete-scope block` still gates. Otherwise a pull request that
+`.abicheck.yml`'s `scope.on_incomplete: block` still gates. Otherwise a pull request that
 controls the NEW tree could trim it to one library and turn a blocking
 incomplete scope into a clean pass.
 
-**Policy.** `--on-incomplete-scope warn` (the default) reports every
+**Policy.** `.abicheck.yml`'s `scope.on_incomplete: warn` (the default) reports every
 unchecked member and contributes `0` to the exit code; `block` contributes
 `1`, folded with `max` exactly like the contract-coverage axis (a clean `0`
 becomes `1`; a real `2`/`4` is never lowered). A run that completed **no**
 comparison at all exits `1` under either setting: a permissive policy can
 downgrade missing members, never "nothing compared".
 
-**Removals need proof.** `--fail-on-removed-library`'s exit `8` fires only
+**Removals need proof.** `.abicheck.yml`'s `gate.fail_on_removed_library: true` exit `8` fires only
 for a *proven* removal: NEW's inventory must be proven complete, which in
 this release means a stored baseline whose capture **asserted** it — a
 `--bundle-facts-out` document, or a `ProjectSnapshot` package imported from
 one, carrying `inventory_complete: true` (the fan-out asserts it when its
-capture covered every library the OLD release enumerated and `--dso-only`
+capture covered every library the OLD release enumerated and `.abicheck.yml`'s `release.dso_only: true`
 left none unclassified). Being stored proves nothing by itself: a package
 or document without the assertion is as unproven as a live directory, and
 the same document decides identically whether compared directly or after

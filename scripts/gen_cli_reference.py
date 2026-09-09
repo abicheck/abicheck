@@ -71,9 +71,26 @@ def _escape(text: str) -> str:
     return text.replace("|", "\\|").replace("_", "\\_")
 
 
+def _collapse_whitespace(text: str) -> str:
+    """Fold any run of whitespace -- including a blank-line paragraph
+    break -- to a single space.
+
+    Every row this generator emits is one Markdown table cell, and a raw
+    blank line inside a cell terminates the table (GFM has no cell-internal
+    block structure): a multi-paragraph ``help=`` string like
+    ``--instantiation-manifest``'s rendered as loose pipe-delimited text for
+    every option listed after it, not just its own row (Codex review). Must
+    run before ``_escape``, not after -- escaping doesn't touch whitespace,
+    so order doesn't matter for correctness, but this mirrors
+    ``_first_paragraph``'s own ``" ".join(text.split())`` collapse for
+    consistency between the two Markdown-cell producers in this file.
+    """
+    return " ".join(text.split())
+
+
 def _help_with_choices(param: Any) -> str:
     choices = getattr(getattr(param, "type", None), "choices", None)
-    help_text = _escape(getattr(param, "help", None) or "")
+    help_text = _escape(_collapse_whitespace(getattr(param, "help", None) or ""))
     if choices:
         help_text = (
             f"{help_text} Choices: {', '.join(f'`{c}`' for c in choices)}.".strip()

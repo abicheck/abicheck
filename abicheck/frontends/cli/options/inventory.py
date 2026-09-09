@@ -175,7 +175,21 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: RAISES`` entries for this same family (``--allow-ast-frontend-fallback``/
 #: ``--allow-unsupported-castxml``/``--frontend-context``) are removed in
 #: the same change, not folded into ``BASE``.
-COMPARE_FLAG_BUDGET_BASE = 48
+#: Lowered 48→44 by Phase 7d (one-comparison-product.md §4.1): ``--dso-only``
+#: (``release.dso_only``), ``--fail-on-removed-library``/``--no-fail-on-
+#: removed-library`` (one Click param -- ``gate.fail_on_removed_library``,
+#: prerequisite vision A-S2/S4 landed 2026-09-06 as ADR-065 S4),
+#: ``--include-private-dso`` (``release.include_private_dso``), and
+#: ``--on-incomplete-scope`` (``scope.on_incomplete``) are all gone from
+#: ``compare``'s CLI entirely -- no escape hatch, same shape as this
+#: ledger's own "Lowered 57→55" bundle-topology note above (−4).
+#: ``--instantiation-manifest``/``--bundle-facts-out``/
+#: ``--bundle-facts-library-manifest`` stay CLI flags this phase (a real
+#: ADR-049-coordinated config home, an equivalent ``dump`` capability, and
+#: the G42 named-environments prerequisite respectively have not landed --
+#: see each option's own docstring in ``frontends/cli/options/release.py``/
+#: ``bundle_facts.py``).
+COMPARE_FLAG_BUDGET_BASE = 44
 
 #: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
 #: flag spelling → rationale (why it is a per-run analysis input, not a stable

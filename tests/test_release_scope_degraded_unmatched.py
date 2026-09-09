@@ -20,7 +20,11 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings, strategies as st
 from test_release_scope_bundle import _lib
-from test_release_scope_completeness import _invoke_json, _write_stored_package
+from test_release_scope_completeness import (
+    _invoke_json,
+    _release_config,
+    _write_stored_package,
+)
 
 from abicheck.bundle_facts import capture_bundle_facts
 from abicheck.model import AbiSnapshot
@@ -54,13 +58,15 @@ class TestUnmatchedDegradedMemberIsFailedNotProven:
         self, tmp_path: Path, degraded_side: str, policy: str
     ) -> None:
         old, new = _packages(tmp_path, degraded_side=degraded_side)
+        cfg = _release_config(
+            tmp_path, fail_on_removed_library=True, on_incomplete_scope=policy
+        )
         code, doc = _invoke_json(
             "compare",
             str(old),
             str(new),
-            "--fail-on-removed-library",
-            "--on-incomplete-scope",
-            policy,
+            "--config",
+            str(cfg),
         )
         scope = doc["comparison_scope"]
         assert isinstance(scope, dict)

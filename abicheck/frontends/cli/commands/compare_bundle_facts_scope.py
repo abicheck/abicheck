@@ -43,15 +43,23 @@ __all__ = [
 ]
 
 
-def scope_terms_for(result: Any, kwargs: Mapping[str, Any]) -> ComparisonScopeTerms:
-    """The dispatch's resolved terms, under `compare`'s own
-    `--on-incomplete-scope` value (absent -> the default `warn`): the
-    decision is policy's (`resolve_scope_decision`), the projection the
-    report's."""
+def scope_terms_for(
+    result: Any,
+    kwargs: Mapping[str, Any],
+    *,
+    on_incomplete_scope: str | None = None,
+) -> ComparisonScopeTerms:
+    """The dispatch's resolved terms, under the project's resolved
+    ``scope.on_incomplete`` value (Phase 7d, one-comparison-product.md
+    §4.1 -- the former `compare --on-incomplete-scope`, gone as a CLI flag;
+    absent -> the default `warn`): the decision is policy's
+    (`resolve_scope_decision`), the projection the report's.
+
+    *kwargs* is unused now that the value comes from *on_incomplete_scope*
+    directly (kept for call-site back-compat -- both fallback call sites in
+    this module's callers pass ``{}``)."""
     return comparison_scope_terms(
-        resolve_scope_decision(
-            getattr(result, "scope_record", None), kwargs.get("on_incomplete_scope")
-        )
+        resolve_scope_decision(getattr(result, "scope_record", None), on_incomplete_scope)
     )
 
 

@@ -134,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "The nested root Action's own real process exit code (mode: "
             "augment only). Some root-Action gates (e.g. "
-            "--fail-on-removed-library on a directory/package compare) take "
+            "gate.fail_on_removed_library on a directory/package compare) take "
             "effect as a dedicated exit code that overrides the persisted "
             "severity scheme rather than feeding into it, so the report "
             "body alone can under-report the real outcome."

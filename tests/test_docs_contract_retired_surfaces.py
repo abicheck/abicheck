@@ -192,14 +192,16 @@ def test_retired_surfaces_exempts_migration_lifecycle(
 
 @pytest.fixture(autouse=True)
 def _isolated_examples_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Point the retired-surface sweep's examples arm at an empty tree.
+    """Point the retired-surface sweep's examples/root arms at an empty tree.
 
     Both sweeps read ``examples/case*/README.md`` and
-    ``tests/scenarios/*.yaml`` alongside ``docs/``. Every test here already
-    redirects ``DOCS`` to a fixture tree; without the same redirect for those
-    two they would keep scanning the real trees, so an unrelated stale flag in
-    one case README or scenario would fail assertions about a fixture page.
-    Tests exercising those arms override this.
+    ``tests/scenarios/*.yaml`` alongside ``docs/``, and the root sweep also
+    reads ``README.md``/``AGENTS.md`` straight off ``ROOT``. Every test here
+    already redirects ``DOCS`` to a fixture tree; without the same redirect
+    for these three they would keep scanning the real trees, so an
+    unrelated stale flag in one case README, scenario, or the real root
+    README/AGENTS.md would fail assertions about a fixture page. Tests
+    exercising those arms override this.
     """
     empty = tmp_path / "_no_examples"
     empty.mkdir()
@@ -207,6 +209,7 @@ def _isolated_examples_tree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     no_scenarios = tmp_path / "_no_scenarios"
     no_scenarios.mkdir()
     monkeypatch.setattr(dc, "SCENARIOS", no_scenarios)
+    monkeypatch.setattr(dc, "ROOT", tmp_path / "_no_root")
 
 
 def test_retired_surfaces_scans_example_case_readmes(
@@ -442,3 +445,66 @@ def test_the_real_scenario_catalog_is_in_the_target_set(
     scenario_keys = {k for k in keys if k.startswith("tests/scenarios/")}
     assert scenario_keys, sorted(keys)[:5]
     assert "tests/scenarios/ci_gating.yaml" in scenario_keys
+
+
+def test_retired_surfaces_scans_the_root_readme(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The root README is swept, not just ``docs/``.
+
+    It is the first page a user reads and is entirely outside ``docs/`` --
+    PR #1159's own compare release/bundle-topology flag removal left it
+    advertising ``--fail-on-removed-library`` and ``--on-incomplete-scope``
+    well after both started exiting 64, invisible to every check above
+    because they scan ``docs/``/case-README/scenario/registry/ground-truth
+    sources only, never the root README (Codex review, fresh evidence).
+    """
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "README.md").write_text(
+        "Run `abicheck compare old.so new.so --on-incomplete-scope block`.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "README.md" in f.warnings[0][1]
+
+
+def test_retired_surfaces_scans_the_root_agents_md(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The root AGENTS.md is swept too, for the identical reason README.md
+    is: entirely outside ``docs/``, and it kept describing exit-code `8`'s
+    meaning via the retired ``--fail-on-removed-library`` spelling after
+    Phase 7d's removal, invisible to every check above (Codex review,
+    fresh evidence).
+    """
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "AGENTS.md").write_text(
+        "Exit `8` means `--fail-on-removed-library` is set.\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert "AGENTS.md" in f.warnings[0][1]
+
+
+def test_the_real_root_readme_and_agents_md_are_in_the_target_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring half: the real root README/AGENTS.md are actually
+    reached, not just the autouse fixture's empty stand-in ``ROOT``.
+
+    A regression that dropped this arm entirely (e.g. a typo'd key) would
+    still leave the whole file green without an explicit check that
+    ``README.md``/``AGENTS.md`` are among the returned target keys.
+    """
+    monkeypatch.undo()
+    keys = {rel for _, rel in dc._retired_surface_scan_targets()}
+    assert "README.md" in keys
+    assert "AGENTS.md" in keys

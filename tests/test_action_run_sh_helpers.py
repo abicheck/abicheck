@@ -859,3 +859,112 @@ class TestExtraArgsExpandShortClusters:
 # fallbacks, both of which the track removed as prose reconstruction of a
 # real gate decision. With no caller left, the function itself was deleted
 # rather than kept dead.
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsHasConfigFlag:
+    """Codex review, PR #1159, round 12: a synthesized ``--config`` (from a
+    dso-only/fail-on-removed-library/compile-context input) already in
+    ``$CMD`` collides with the user's own ``extra-args --config``, and
+    Click keeps the *last* repeated flag -- silently dropping whichever one
+    lost, exactly the ``_extra_args_has_write_flag`` shape above.
+    ``_extra_args_has_config_flag`` detects the user's half of that
+    collision so the caller can fail loud instead.
+    """
+
+    def _predicate(self, extra_args: str) -> bool:
+        return _run_predicate(
+            f"INPUT_EXTRA_ARGS={extra_args!r} _extra_args_has_config_flag"
+        )
+
+    def test_absent_extra_args(self) -> None:
+        assert not self._predicate("")
+
+    def test_unrelated_extra_args(self) -> None:
+        assert not self._predicate("--verbose --gate-api-break")
+
+    def test_config_space_separated(self) -> None:
+        assert self._predicate("--config ci.yml")
+
+    def test_config_equals_form(self) -> None:
+        assert self._predicate("--config=ci.yml")
+
+    def test_config_flag_at_the_end_of_extra_args(self) -> None:
+        assert self._predicate("--verbose --config ci.yml")
+
+
+_EXTRA_ARGS_CONFIG_GUARD_START = "# Append extra-args (pass-through CLI arguments)"
+_EXTRA_ARGS_CONFIG_GUARD_END = "\nfi\n"
+
+
+def _extra_args_config_guard_source() -> str:
+    """The real, shipped ``extra-args`` append block, including the
+    ``--config`` collision guard just above it -- not just the two
+    predicate helpers it calls (see ``TestExtraArgsConfigCollisionGuard``
+    below)."""
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_EXTRA_ARGS_CONFIG_GUARD_START)
+    end = text.index(_EXTRA_ARGS_CONFIG_GUARD_END, start) + len(
+        _EXTRA_ARGS_CONFIG_GUARD_END
+    )
+    return text[start:end]
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsConfigCollisionGuard:
+    """End-to-end proof for the real, shipped guard block (not just its two
+    predicate helpers in isolation): a synthesized ``--config`` already in
+    ``$CMD`` combined with the user's own ``extra-args --config`` must fail
+    loud, and every other combination must pass through unaffected."""
+
+    def _run(
+        self, cmd_has_config: bool, extra_args: str
+    ) -> subprocess.CompletedProcess[str]:
+        cmd_seed = (
+            "CMD=(compare --config /tmp/overlay.yml)"
+            if cmd_has_config
+            else "CMD=(compare)"
+        )
+        script = (
+            _helpers_region()
+            + f"\n{cmd_seed}\n"
+            + _extra_args_config_guard_source()
+            + '\nprintf "%s\\n" "${CMD[@]}"\n'
+        )
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n"
+        ) as f:
+            f.write(script)
+            script_path = f.name
+        env = {**os.environ, "INPUT_EXTRA_ARGS": extra_args}
+        try:
+            return subprocess.run(
+                [_bash_executable(), script_path],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        finally:
+            os.unlink(script_path)
+
+    def test_synthesized_config_plus_extra_args_config_fails_loud(self) -> None:
+        result = self._run(cmd_has_config=True, extra_args="--config ci.yml")
+        assert result.returncode == 1, result.stdout
+        assert "::error::" in result.stdout
+        assert "extra-args" in result.stdout and "--config" in result.stdout
+
+    def test_synthesized_config_alone_is_unaffected(self) -> None:
+        result = self._run(cmd_has_config=True, extra_args="--verbose")
+        assert result.returncode == 0, result.stdout
+        assert "--verbose" in result.stdout.splitlines()
+
+    def test_extra_args_config_alone_is_unaffected(self) -> None:
+        # No synthesized --config in $CMD -- extra-args's own --config is
+        # the only one, so there is no collision to guard against.
+        result = self._run(cmd_has_config=False, extra_args="--config ci.yml")
+        assert result.returncode == 0, result.stdout
+        assert "ci.yml" in result.stdout
+
+    def test_neither_config_is_unaffected(self) -> None:
+        result = self._run(cmd_has_config=False, extra_args="--verbose")
+        assert result.returncode == 0, result.stdout

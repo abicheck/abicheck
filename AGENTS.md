@@ -1219,7 +1219,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   `compare` (the per-library release fan-out) applies the same flag to
   each library and `max`s every library's own contribution into the
   release's exit code, stated in the release JSON summary under the same
-  `contract_coverage_exit_contribution` field. `--fail-on-removed-library`'s
+  `contract_coverage_exit_contribution` field. `gate.fail_on_removed_library`'s
   exit `8` is checked ahead of this coverage-only fallback when both could
   apply, so a removed library's own signal is never masked by an unrelated
   coverage gap
@@ -1227,7 +1227,7 @@ Once a root command genuinely clears the bar above, pick the right home:
   `compare` only:** a selected, expected member that never reached a
   completed comparison (`not_supplied` with no completeness proof on the
   lacking side, `unsupported`, `failed`) makes `run_outcome.scope` read
-  `incomplete` and contributes **`1`** under `--on-incomplete-scope block`
+  `incomplete` and contributes **`1`** under `scope.on_incomplete: block`
   (`0` under the default `warn`), folded with `max` like the coverage axis;
   a run that completed no comparison at all contributes `1` under either
   setting (`no_comparison_completed`). Exit `8` requires a *proven*

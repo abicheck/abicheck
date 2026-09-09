@@ -28,6 +28,19 @@ and forwards it via ``--config`` instead
 (:func:`add_compile_context_flags`, extracted verbatim below). ``scan``
 is unaffected: it keeps every one of these flags, so its own region below
 is untouched and still asserts literal flag forwarding.
+
+``add_compile_context_flags`` no longer writes its synthesized overlay
+directly (Codex review, PR #1159 P1): an explicit ``--config`` fully
+replaces ``_resolve_compare_config``'s own auto-discovery of the
+repository's ``.abicheck.yml``, so it now routes through the shared
+``_merge_config_overlay_with_discovered_project_config`` helper (also
+extracted below), which discovers and merges in the real project config
+before writing the file ``--config`` points at -- see
+``test_action_release_topology_config.py``'s module docstring for the full
+account (that module carries the dedicated merge-behavior regression
+tests; this one stays focused on flag-forwarding parity, isolating its own
+harness's working directory from any real ``.abicheck.yml`` purely so the
+merge step degrades to its pre-merge no-op base case here).
 """
 
 from __future__ import annotations
@@ -184,6 +197,58 @@ def _py_bin_has_abicheck_source() -> str:
     return text[start:end]
 
 
+# The merge helper add_compile_context_flags now routes its overlay through
+# (module docstring) -- extracted verbatim, same markers
+# test_action_release_topology_config.py's own
+# `_merge_config_overlay_fn_source` uses.
+_MERGE_FN_START = "_merge_config_overlay_with_discovered_project_config() {"
+_MERGE_FN_END = "\n_COMPILE_CONTEXT_CONFIG_OVERLAY="
+
+
+def _merge_config_overlay_fn_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_MERGE_FN_START)
+    end = text.index(_MERGE_FN_END, start)
+    return text[start:end]
+
+
+# `_merge_config_overlay_with_discovered_project_config`'s own
+# `base_source` absolutization (Codex review, PR #1159, fourth round) now
+# delegates to `_is_path_already_qualified` (a real Windows drive/UNC/
+# root-relative path must not get a `$PWD/` prefix) rather than a
+# POSIX-only `!= /*` test -- so any harness including the merge function
+# must also define this helper (and the `$OSTYPE`-derived
+# `$_RUNNING_ON_WINDOWS` it reads), the same verbatim-extraction discipline
+# `test_action_run_sh_py_safe_path.py`'s own
+# `_path_qualified_helper_source` already established, and
+# `test_action_release_topology_config.py`'s own sibling copy mirrors.
+_PATH_QUALIFIED_HELPER_START = 'case "$OSTYPE" in'
+_PATH_QUALIFIED_HELPER_END = "\n}\n"
+
+
+def _path_qualified_helper_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_PATH_QUALIFIED_HELPER_START)
+    end = text.index(_PATH_QUALIFIED_HELPER_END, start) + len(
+        _PATH_QUALIFIED_HELPER_END
+    )
+    return text[start:end]
+
+
+# add_compile_context_flags's overlay `mktemp` result is now canonicalized
+# via `_mktemp_canonical` (relative $TMPDIR broke the merge subprocess,
+# Codex review PR #1159 sixth round); mirrors the sibling topology module.
+_MKTEMP_CANONICAL_START = "_mktemp_canonical() {"
+_MKTEMP_CANONICAL_END = "\n}\n"
+
+
+def _mktemp_canonical_source() -> str:
+    text = RUN_SH.read_text(encoding="utf-8")
+    start = text.index(_MKTEMP_CANONICAL_START)
+    end = text.index(_MKTEMP_CANONICAL_END, start) + len(_MKTEMP_CANONICAL_END)
+    return text[start:end]
+
+
 _END_MARKER_FOR_START: dict[str, str] = {
     _COMPARE_COMPILE_CONTEXT_START: _COMPARE_COMPILE_CONTEXT_END,
     _DUMP_COMPILE_CONTEXT_START: _DUMP_COMPILE_CONTEXT_END,
@@ -309,6 +374,9 @@ def _run_region(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _path_qualified_helper_source()
+        + _mktemp_canonical_source()
+        + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + _add_compile_context_flags_source()
@@ -320,7 +388,14 @@ def _run_region(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    out = _run_bash_script(script, env, check=True)
+    # add_compile_context_flags now discovers a project .abicheck.yml from
+    # its caller's own working directory and merges it into the synthesized
+    # overlay (module docstring) -- an isolated, freshly created directory
+    # keeps every parity test here exercising the pre-merge "no project
+    # config found" base case, regardless of what happens to exist above
+    # wherever this test process's own CWD is.
+    with tempfile.TemporaryDirectory() as isolated_cwd:
+        out = _run_bash_script(script, env, check=True, cwd=Path(isolated_cwd))
     return out.stdout.splitlines(), out.stderr
 
 
@@ -344,6 +419,9 @@ def _run_region_raw(
         '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
         + _py_safe_dir_source()
         + _py_bin_has_abicheck_source()
+        + _path_qualified_helper_source()
+        + _mktemp_canonical_source()
+        + _merge_config_overlay_fn_source()
         + _add_flag_source()
         + _is_release_style_operand_source()
         + _add_compile_context_flags_source()
@@ -355,7 +433,9 @@ def _run_region_raw(
         + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **env_extra}
-    return _run_bash_script(script, env, check=False)
+    # See _run_region's identical isolation comment above.
+    with tempfile.TemporaryDirectory() as isolated_cwd:
+        return _run_bash_script(script, env, check=False, cwd=Path(isolated_cwd))
 
 
 def _read_compile_config_overlay(cmd: list[str]) -> dict[str, Any]:
@@ -435,19 +515,18 @@ class TestCompileContextInputsTravelViaStdinNotEnvVars:
 
     def test_helper_invocation_pipes_data_via_stdin(self) -> None:
         source = self._function_source()
-        # `${_PY_BIN:-python3}`, not a bare `python3` (CodeRabbit review,
-        # fresh evidence): the script resolves a canonical interpreter into
-        # $_PY_BIN elsewhere (PWD-anchored, abicheck-importable-checked) and
-        # every other Python invocation in this file already uses it -- a
-        # bare `python3` here was the one inconsistent holdout.
-        needle = '"${_PY_BIN:-python3}" "$_COMPILE_CONTEXT_HELPER_PY" "$_COMPILE_CONTEXT_CONFIG_OVERLAY"'
+        needle = 'PYTHONPATH= "$_PY_BIN" "$_compile_context_helper_py"'
         assert needle in source, source
-        # The invocation is fed by a `printf ... | ${_PY_BIN:-python3} ...`
-        # pipe, not a bare call -- confirms the eight values really travel
-        # on stdin.
+        # The invocation is fed by a `printf ... | (cd ... && "$_PY_BIN"
+        # ...)` pipe, not a bare call -- confirms the eight values really
+        # travel on stdin, not baked into the environment.
         idx = source.index(needle)
         preceding = source[:idx]
-        assert preceding.rstrip().endswith("|"), preceding[-200:]
+        # "printf ... | (cd \"$_PY_SAFE_DIR\" && PYTHONPATH= ...)" -- the
+        # pipe feeds the whole subshell, not just the trailing PYTHONPATH=
+        # assignment, so the immediately-preceding token is "&&", not "|".
+        assert preceding.rstrip().endswith("&&"), preceding[-200:]
+        assert "|" in preceding, preceding
         assert "printf " in preceding, preceding
 
 
@@ -1017,3 +1096,498 @@ class TestCompileContextForwardingParity:
         )
         assert result.returncode != 0
         assert "not support" in result.stdout
+
+
+class TestCompileContextMergesWithExplicitBuildConfig:
+    """Codex review, PR #1159 (P1, second round): combining an explicit
+    ``build-config`` input with a compile-context input (``ast-frontend``/
+    ``gcc-path``/``gcc-prefix``/``gcc-options``/``sysroot``/``nostdinc``/
+    ``lang``) used to be a hard rejection ("cannot combine ... with
+    build-config") -- the identical regression
+    ``test_action_release_topology_config.py`` found and fixed for
+    ``add_release_topology_config_flags``, confirmed present here too since
+    the two functions have shared every bug found this session. The fix
+    merges the synthesized ``compile:`` overlay into a COPY of the user's
+    own explicit build-config instead, Action input winning on a genuine
+    conflict -- and, since an explicit build-config is a deliberate operator
+    action (not passively discovered, untrusted content), the merge must
+    NOT strip ``build.query``/``compile.compiler`` from it."""
+
+    def test_explicit_build_config_settings_survive_alongside_compile_context(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "severity:\n  abi_breaking: error\ncompile:\n  std: c++17\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_BUILD_CONFIG": str(build_config),
+            },
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        # Exactly one --config -- no leftover unmerged build-config entry.
+        assert cmd.count("--config") == 1
+        path = cmd[cmd.index("--config") + 1]
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert doc["severity"] == {"abi_breaking": "error"}
+        # The user's own compile.std passes through, alongside the
+        # synthesized compile.compiler -- not replaced by it.
+        assert doc["compile"]["std"] == "c++17"
+        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
+
+    def test_compile_context_input_wins_on_a_genuine_conflict(
+        self, tmp_path: Path
+    ) -> None:
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "compile:\n  sysroot: /old/sysroot\n  std: c++17\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_SYSROOT": "/opt/sysroot", "INPUT_BUILD_CONFIG": str(build_config)},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # sysroot: the Action input wins over the explicit build-config's own.
+        assert doc["compile"]["sysroot"] == "/opt/sysroot"
+        # std: not named by any compile-context input, so it passes through.
+        assert doc["compile"]["std"] == "c++17"
+
+    def test_explicit_build_config_query_and_compiler_are_not_stripped(
+        self, tmp_path: Path
+    ) -> None:
+        """Unlike the discovered-config merge, an explicit build-config is a
+        deliberate operator action -- the same trust an explicit
+        ``--config`` already carries for ``cli_options.py``'s own
+        ``compile.compiler``/``build.query`` gates -- so neither key is
+        stripped here."""
+        build_config = tmp_path / "my-build-config.yml"
+        build_config.write_text(
+            "build:\n  query: 'cmake --build .'\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        cmd, stderr = _run_region(
+            _DUMP_MODE_MARKER,
+            {"INPUT_SYSROOT": "/opt/sysroot", "INPUT_BUILD_CONFIG": str(build_config)},
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"query": "cmake --build .", "system": "cmake"}
+        assert "build.query" not in stderr
+
+
+def _run_region_with_cwd(
+    mode_marker: str,
+    env_extra: dict[str, str],
+    cwd: Path,
+    start_marker: str = _COMPILE_CONTEXT_START,
+) -> tuple[list[str], str]:
+    """Like :func:`_run_region`, but the caller supplies the working
+    directory instead of a fresh, isolated one -- needed to exercise a
+    ``build-config`` path that is relative to the Action's real working
+    directory rather than ``$_PY_SAFE_DIR`` (see
+    ``TestCompileContextMergesWithRelativeBuildConfig`` below)."""
+    harness = (
+        f'MODE="{_mode_value_for_marker(mode_marker)}"\n'
+        'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
+        '_PY_BIN="$(command -v python3 || command -v python || true)"\n'
+        + _py_safe_dir_source()
+        + _py_bin_has_abicheck_source()
+        + _path_qualified_helper_source()
+        + _mktemp_canonical_source()
+        + _merge_config_overlay_fn_source()
+        + _add_flag_source()
+        + _is_release_style_operand_source()
+        + _add_compile_context_flags_source()
+        + "\nCMD=()\n"
+    )
+    script = (
+        harness
+        + _compile_context_region(mode_marker, start_marker)
+        + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
+    )
+    env = {**os.environ, **env_extra}
+    out = _run_bash_script(script, env, check=True, cwd=cwd)
+    return out.stdout.splitlines(), out.stderr
+
+
+class TestCompileContextMergesWithRelativeBuildConfig:
+    """Codex review, PR #1159 (P1, third round): ``build-config`` is
+    normally a checkout-relative path (``build-config: .abicheck.yml``), and
+    the merge helper's Python invocation runs inside ``(cd "$_PY_SAFE_DIR"
+    && ...)`` -- an unrelated scratch directory -- so a relative
+    ``base_source`` handed straight into that subprocess used to resolve
+    against ``$_PY_SAFE_DIR`` instead of the real Action working directory,
+    failing with "does not exist" even though the file is right there.
+    ``add_compile_context_flags`` shares ``_merge_config_overlay_with_
+    discovered_project_config`` with ``add_release_topology_config_flags``
+    (``test_action_release_topology_config.py`` carries the same regression
+    class for that function), so this confirms the shared fix covers this
+    call site too. Deliberately does NOT use ``_run_region``'s own isolated
+    ``TemporaryDirectory`` cwd -- the whole point is a real mismatch between
+    the Action's working directory (here, the caller-supplied ``cwd``) and
+    ``$_PY_SAFE_DIR`` (a distinct ``mktemp -d`` directory), the same
+    mismatch a real Action step has between its checkout and this script's
+    isolation directory."""
+
+    def test_relative_build_config_resolves_against_action_cwd_not_py_safe_dir(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_BUILD_CONFIG": ".abicheck.yml",
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        assert "does not exist" not in stderr
+        assert cmd.count("--config") == 1
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["severity"] == {"abi_breaking": "error"}
+        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
+
+    def test_nested_relative_build_config_resolves_against_action_cwd(
+        self, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "ci.yml").write_text("compile:\n  std: c++17\n", encoding="utf-8")
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_SYSROOT": "/opt/sysroot",
+                "INPUT_BUILD_CONFIG": "config/ci.yml",
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        assert "does not exist" not in stderr
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["std"] == "c++17"
+        assert doc["compile"]["sysroot"] == "/opt/sysroot"
+
+
+class TestCompileContextPreservesUsableDiscoveredCompileDb:
+    """Codex review, PR #1159 (P1, second round): a discovered
+    ``build.compile_db`` is stripped from the merged overlay by default
+    (``buildsource/embed.py``'s ``compile_db_explicit`` would otherwise
+    treat a miss as a hard failure purely because an unrelated Action input
+    triggered this overlay's synthesis) -- but stripping a compile_db that
+    demonstrably *does* resolve is its own real cost: ``inline.py``'s own
+    fallback chain (auto-discovered ``compile_commands.json``, then an
+    inferred build-system query) may collect different or no L3-L5
+    evidence than the config's own setting would have. When ``sources``
+    names a real root and the discovered glob resolves under it, the field
+    now survives untouched."""
+
+    def test_resolving_compile_db_survives_the_merge(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(tmp_path),
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
+        assert "build.compile_db" not in stderr
+
+    def test_nonresolving_compile_db_is_still_stripped(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: nonexistent_compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": str(tmp_path),
+            },
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert "compile_db" not in doc.get("build", {})
+        assert doc["build"] == {"system": "cmake"}
+        assert "build.compile_db" in stderr
+
+    def test_relative_sources_root_still_resolves(self, tmp_path: Path) -> None:
+        """``sources`` is normally a checkout-relative path too (e.g.
+        ``sources: src``) -- the same relative-path-vs-``$_PY_SAFE_DIR``
+        bug class ``TestCompileContextMergesWithRelativeBuildConfig``
+        covers for ``build-config``."""
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"compile_db": "compile_commands.json"}
+
+
+class TestCompileContextDiscoversSourcesRootOwnConfig:
+    """Codex review, PR #1159 (P1, fresh evidence): ``embed_build_source()``
+    (``abicheck/buildsource/embed.py``) reads ``build:``/``compile:``/
+    ``source:``/``debug:`` from ``build_config or discover_build_config(
+    raw_sources)`` -- a SEPARATE, narrower lookup than ``discover_project_
+    config()``'s own checkout-root walk this merge helper already performs.
+    ``discover_build_config`` is non-recursive and anchored at ``--sources``
+    itself: when that directory carries its own ``.abicheck.yml``, the
+    native CLI uses it EXCLUSIVELY for those four blocks whenever no
+    explicit ``--config`` is given, never even consulting the checkout-root
+    config for them. Because this Action always ends up passing an explicit
+    ``--config`` once any compile-context input is set, that discovery
+    previously never ran at all (``build_config is not None``), silently
+    dropping the sources root's own build settings the moment an unrelated
+    input (e.g. ``gcc-path``) triggered this overlay's synthesis."""
+
+    def test_sources_root_build_block_is_discovered_and_merged(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # The checkout-root config's own (non-build) settings still survive...
+        assert doc["severity"] == {"abi_breaking": "error"}
+        # ...and the sources root's own build: block is present, not the
+        # checkout-root config's (which had none) or silently dropped.
+        assert doc["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
+        assert "build.compile_db" not in stderr
+
+    def test_sources_root_build_block_wins_over_a_conflicting_checkout_root_one(
+        self, tmp_path: Path
+    ) -> None:
+        """The two files' build: blocks are not merged key-by-key -- the
+        sources root's own file REPLACES the checkout-root one wholesale,
+        exactly matching embed_build_source()'s own exclusive-use-of-one-
+        file semantics (a real project should not expect its top-level
+        .abicheck.yml's build: block to influence a --sources subtree's own
+        L3-L5 embedding when that subtree names its own build config)."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: make\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
+
+    def test_no_sources_root_config_falls_back_to_checkout_root(
+        self, tmp_path: Path
+    ) -> None:
+        """When --sources carries no config of its own, behavior is
+        unchanged from before this fix -- the checkout-root config (if any)
+        is used as-is."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: make\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"system": "make"}
+
+    def test_sources_root_sources_block_is_also_carried(self, tmp_path: Path) -> None:
+        """Codex review, PR #1159 (P1, second round, fresh evidence): ``sources``
+        (plural -- ``public_headers``/``exclude``/``graph``) is a DISTINCT
+        top-level block from ``source`` (singular) -- both are read by
+        ``embed_build_source()``'s ``BuildConfig``, but the block-replacement
+        list only carried ``source`` (singular), silently narrowing a source
+        root's own ``sources.graph: full`` back to the checkout-root's (or
+        the default ``summary``) before ``collect_inline_pack()`` reads
+        ``cfg.graph_detail``."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "sources:\n  graph: full\n  exclude:\n    - vendor/**\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["sources"] == {"graph": "full", "exclude": ["vendor/**"]}
+        assert doc["severity"] == {"abi_breaking": "error"}
+
+    def test_empty_sources_root_config_clears_the_checkout_root_blocks(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1159 (P1, third round, fresh evidence): an
+        EMPTY (or non-mapping) --sources-root ``.abicheck.yml`` is not "no
+        config found" -- the file still exists, so ``discover_build_config``
+        still selects it, and ``load_build_config``'s own ``if not
+        isinstance(raw, dict): return BuildConfig()`` treats that as an
+        empty (all-default) ``BuildConfig`` -- never a fallback to the
+        checkout-root document's own ``build:``/``compile:``/``source:``/
+        ``debug:`` blocks, since ``discover_build_config``'s selection is
+        exclusive. Gating the whole replacement on ``isinstance(...,
+        dict)`` skipped it entirely for this case, silently leaving the
+        checkout-root's own settings in place instead of clearing them."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n"
+            "build:\n  system: make\n"
+            "compile:\n  sysroot: /opt/checkout-sysroot\n",
+            encoding="utf-8",
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        # An empty file -- yaml.safe_load returns None for it.
+        (src_dir / ".abicheck.yml").write_text("", encoding="utf-8")
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # The checkout-root's own build:/compile.sysroot must NOT survive --
+        # the empty sources-root config clears them, exactly as the native
+        # CLI's own embed_build_source() would (an empty BuildConfig, not
+        # the checkout-root's settings).
+        assert "build" not in doc
+        assert "sysroot" not in doc.get("compile", {})
+        # This Action's own synthesized compile.compiler still applies --
+        # the overlay is merged in afterward, on top of the (now-empty)
+        # sources-root base.
+        assert doc["compile"]["compiler"] == "/opt/gcc-14/bin/g++"
+        # Unrelated checkout-root-only keys (severity:) still survive.
+        assert doc["severity"] == {"abi_breaking": "error"}
+
+
+class TestCompileContextOverlayGenerationIsIsolated:
+    """Codex review, PR #1159 (P1, fourth round): confirmed
+    ``add_compile_context_flags`` had the identical bare-``python3``
+    isolation gap ``add_release_topology_config_flags`` did (see
+    ``test_action_release_topology_config.py``'s sibling test class of the
+    same name) -- both were fixed the same way, routing through
+    ``$_PY_BIN``/``$_PY_SAFE_DIR`` with ``PYTHONPATH`` cleared instead of a
+    bare same-directory ``python3``."""
+
+    def test_source_uses_isolated_interpreter_not_bare_python3(self) -> None:
+        fn_source = _add_compile_context_flags_source()
+        assert '(cd "$_PY_SAFE_DIR"' in fn_source
+        # The overlay-generation script itself is a real file (not a
+        # heredoc fed to "$_PY_BIN" -) since PR #1162's own fix needs
+        # stdin free for the piped NUL-separated data -- see
+        # TestCompileContextInputsTravelViaStdinNotEnvVars. Isolation is
+        # still $_PY_BIN/$_PY_SAFE_DIR with PYTHONPATH cleared, just
+        # invoked against that file instead of "-".
+        assert 'PYTHONPATH= "$_PY_BIN" "$_compile_context_helper_py"' in fn_source
+        for line in fn_source.splitlines():
+            stripped = line.strip()
+            assert not stripped.startswith("python3 ") and stripped != "python3"
+            assert not stripped.startswith("python ") and stripped != "python"
+
+    def test_overlay_generation_ignores_a_poisoned_pythonpath(
+        self, tmp_path: Path
+    ) -> None:
+        poison_dir = tmp_path / "poison"
+        poison_dir.mkdir()
+        # A `json.py` shadowing the stdlib module: if this function's own
+        # Python invocation inherited $PYTHONPATH instead of clearing it,
+        # `import json` would pick this up and crash instead of the real
+        # stdlib module the overlay-generation script needs.
+        (poison_dir / "json.py").write_text(
+            "raise ImportError('POISONED: PYTHONPATH leaked into an "
+            "isolated invocation')\n",
+            encoding="utf-8",
+        )
+        env = {**_FULL_ENV, "PYTHONPATH": str(poison_dir)}
+        cmd, stderr = _run_region(_DUMP_MODE_MARKER, env, _DUMP_COMPILE_CONTEXT_START)
+        assert "POISONED" not in stderr
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"]["frontend"] == "clang"

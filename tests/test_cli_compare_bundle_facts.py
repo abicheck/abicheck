@@ -269,6 +269,14 @@ class TestCompareOldBundleFacts:
         assert "not available" in out
 
     def test_fail_on_removed_library_is_rejected(self, tmp_path: Path) -> None:
+        """Phase 7d (one-comparison-product.md §4.1): --fail-on-removed-
+        library is gone from `compare`'s CLI entirely now -- exit 64 comes
+        from Click's own 'No such option', not this module's custom
+        UsageError, but the exit code and the flag name in the message are
+        unchanged (see test_config_rebalance.py's own exit-64 coverage for
+        the general case; gate.fail_on_removed_library's own out-of-scope
+        rejection for this dispatch path is covered by
+        test_gate_fail_on_removed_library_config_is_rejected below)."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -291,6 +299,39 @@ class TestCompareOldBundleFacts:
 
         assert code == 64
         assert "--fail-on-removed-library" in out
+
+    def test_gate_fail_on_removed_library_config_is_rejected(self, tmp_path: Path) -> None:
+        """Phase 7d: gate.fail_on_removed_library is a project-wide
+        .abicheck.yml setting now, not a per-invocation flag -- a project
+        that sets it still gets this dispatch's own out-of-scope
+        UsageError (module docstring: computing it here would mean
+        re-scanning OLD_FACTS a second time), rather than silently never
+        being honored."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("gate:\n  fail_on_removed_library: true\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        assert code == 64
+        assert "gate.fail_on_removed_library" in out
 
     def test_bundle_facts_out_together_with_stored_old_input_is_rejected(
         self, tmp_path: Path

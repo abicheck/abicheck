@@ -526,6 +526,16 @@ class ResolvedCompareConfig:
     #: ``show_redundant`` above.
     bundle_system_providers: tuple[str, ...] = ()
     bundle_cohorts: tuple[str, ...] = ()
+    #: Phase 7d (one-comparison-product.md §4.1): the release/bundle
+    #: topology knobs demoted off the CLI entirely -- ``.abicheck.yml`` is
+    #: their only source now, same shape as ``bundle_system_providers``/
+    #: ``bundle_cohorts`` above. ``on_incomplete_scope`` keeps its CLI
+    #: default (``"warn"``) as the config default too, so an unconfigured
+    #: project's behavior is unchanged.
+    on_incomplete_scope: str = "warn"
+    fail_on_removed_library: bool = False
+    release_dso_only: bool = False
+    release_include_private_dso: bool = False
 
     @property
     def exit_code_scheme(self) -> str:
@@ -632,6 +642,12 @@ def resolve_compare_config(
     show_redundant = bool(cfg.scope_show_redundant) if cfg else False
     bundle_system_providers = tuple(cfg.bundle_system_providers) if cfg else ()
     bundle_cohorts = tuple(cfg.bundle_cohorts) if cfg else ()
+    # Phase 7d: no surviving CLI override for any of these four -- resolved
+    # straight off cfg, same shape as the debug-resolution/bundle knobs above.
+    on_incomplete_scope = (cfg.scope_on_incomplete if cfg else None) or "warn"
+    fail_on_removed_library = bool(cfg.gate_fail_on_removed_library) if cfg else False
+    release_dso_only = bool(cfg.release_dso_only) if cfg else False
+    release_include_private_dso = bool(cfg.release_include_private_dso) if cfg else False
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -655,6 +671,10 @@ def resolve_compare_config(
         merged_severity_addition=eff_add,
         bundle_system_providers=bundle_system_providers,
         bundle_cohorts=bundle_cohorts,
+        on_incomplete_scope=on_incomplete_scope,
+        fail_on_removed_library=fail_on_removed_library,
+        release_dso_only=release_dso_only,
+        release_include_private_dso=release_include_private_dso,
     )
 
 

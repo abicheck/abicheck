@@ -49,17 +49,31 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 | `format` | str |
 | `pdb_path` | str |
 
+### `gate:`
+
+| Sub-key | Type |
+|---|---|
+| `fail_on_removed_library` | bool |
+
 ### `python:`
 
 | Sub-key | Type |
 |---|---|
 | `abi3_floor` | str |
 
+### `release:`
+
+| Sub-key | Type |
+|---|---|
+| `dso_only` | bool |
+| `include_private_dso` | bool |
+
 ### `scope:`
 
 | Sub-key | Type |
 |---|---|
 | `collapse_versioned_symbols` | bool |
+| `on_incomplete` | str |
 | `public` | bool |
 | `public_header_dirs` | list[str] (or a single str) |
 | `public_symbols` | list[str] (or a single str) |

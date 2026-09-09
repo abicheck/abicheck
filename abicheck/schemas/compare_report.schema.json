@@ -1698,7 +1698,7 @@
         "gate.severity.potential_breaking": { "type": "string" },
         "gate.severity.quality_issues": { "type": "string" },
         "gate.severity.addition": { "type": "string" },
-        "gate.on_incomplete_scope": { "type": "string", "description": "ADR-065 D6 (schema 2.50): the --on-incomplete-scope policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart." },
+        "gate.on_incomplete_scope": { "type": "string", "description": "ADR-065 D6 (schema 2.50): the scope.on_incomplete policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart." },
         "assurance.require_evidence": { "type": "string" },
         "suppressions": { "type": "string" },
         "packs": { "type": "string" }
@@ -2030,7 +2030,7 @@
             "warn",
             "block"
           ],
-          "description": "The resolved --on-incomplete-scope policy."
+          "description": "The resolved scope.on_incomplete policy."
         },
         "incomplete_scope_exit_contribution": {
           "type": "integer",
@@ -2079,7 +2079,7 @@
                 "proven",
                 "unproven"
               ],
-              "description": "ADR-065 D2: proven only when this side's inventory is declared complete by a source of record (a stored ProjectSnapshot package); a live directory/archive listing, a bundle-facts capture, or a stored package with a member --dso-only could not classify is unproven, and an unmatched counterpart on the other side is then never a removal/addition."
+              "description": "ADR-065 D2: proven only when this side's inventory is declared complete by a source of record (a stored ProjectSnapshot package); a live directory/archive listing, a bundle-facts capture, or a stored package with a member release.dso_only could not classify is unproven, and an unmatched counterpart on the other side is then never a removal/addition."
             },
             "provenance": {
               "type": "string",
@@ -2101,7 +2101,7 @@
                 "proven",
                 "unproven"
               ],
-              "description": "ADR-065 D2: proven only when this side's inventory is declared complete by a source of record (a stored ProjectSnapshot package); a live directory/archive listing, a bundle-facts capture, or a stored package with a member --dso-only could not classify is unproven, and an unmatched counterpart on the other side is then never a removal/addition."
+              "description": "ADR-065 D2: proven only when this side's inventory is declared complete by a source of record (a stored ProjectSnapshot package); a live directory/archive listing, a bundle-facts capture, or a stored package with a member release.dso_only could not classify is unproven, and an unmatched counterpart on the other side is then never a removal/addition."
             },
             "provenance": {
               "type": "string",
@@ -2231,7 +2231,7 @@
           "items": {
             "type": "string"
           },
-          "description": "ADR-065 D2: OLD-only not_supplied members whose absence NEW's proven-complete inventory establishes -- the set --fail-on-removed-library's exit 8 reads."
+          "description": "ADR-065 D2: OLD-only not_supplied members whose absence NEW's proven-complete inventory establishes -- the set gate.fail_on_removed_library's exit 8 reads."
         },
         "proven_added": {
           "type": "array",

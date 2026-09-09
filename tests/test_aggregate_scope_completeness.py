@@ -244,7 +244,11 @@ class TestScopeCompletenessFromARealRelease:
         self, tmp_path: Path, policy: str
     ) -> None:
         from click.testing import CliRunner
-        from test_release_scope_completeness import _write, _write_stored_package
+        from test_release_scope_completeness import (
+            _release_config,
+            _write,
+            _write_stored_package,
+        )
 
         from abicheck.cli import main
         from abicheck.model import AbiSnapshot
@@ -261,14 +265,15 @@ class TestScopeCompletenessFromARealRelease:
         _write(new, "liba.so.json", AbiSnapshot(library="liba.so", version="2"))
         reports = tmp_path / "reports"
         reports.mkdir()
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         result = CliRunner().invoke(
             main,
             [
                 "compare",
                 str(old),
                 str(new),
-                "--on-incomplete-scope",
-                policy,
+                "--config",
+                str(cfg),
                 "--format",
                 "json",
                 "-o",
@@ -436,7 +441,11 @@ class TestStoredDispatchShapeAndAcceptedGaps:
         self, tmp_path: Path, policy: str
     ) -> None:
         from click.testing import CliRunner
-        from test_release_scope_completeness import _elf_snap, _facts_file
+        from test_release_scope_completeness import (
+            _elf_snap,
+            _facts_file,
+            _release_config,
+        )
 
         from abicheck.cli import main
 
@@ -447,14 +456,15 @@ class TestStoredDispatchShapeAndAcceptedGaps:
         new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
         reports = tmp_path / "reports"
         reports.mkdir()
+        cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         result = CliRunner().invoke(
             main,
             [
                 "compare",
                 str(old),
                 str(new),
-                "--on-incomplete-scope",
-                policy,
+                "--config",
+                str(cfg),
                 "--format",
                 "json",
                 "-o",
@@ -477,7 +487,11 @@ class TestIncompleteScopePolicyIsInTheDigest:
         the two policies, so their effective-config digests must differ
         (Codex review, eleventh round)."""
         from click.testing import CliRunner
-        from test_release_scope_completeness import _write, _write_stored_package
+        from test_release_scope_completeness import (
+            _release_config,
+            _write,
+            _write_stored_package,
+        )
 
         from abicheck.cli import main
         from abicheck.model import AbiSnapshot
@@ -495,14 +509,15 @@ class TestIncompleteScopePolicyIsInTheDigest:
         docs = {}
         for policy in ("warn", "block"):
             out = tmp_path / f"{policy}.json"
+            cfg = _release_config(tmp_path, on_incomplete_scope=policy, name=f"{policy}.abicheck.yml")
             CliRunner().invoke(
                 main,
                 [
                     "compare",
                     str(old),
                     str(new),
-                    "--on-incomplete-scope",
-                    policy,
+                    "--config",
+                    str(cfg),
                     "--format",
                     "json",
                     "-o",
