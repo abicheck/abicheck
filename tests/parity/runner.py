@@ -181,13 +181,20 @@ class RunOutcome:
     #: field) -- unlike ``Finding.severity`` above (a static per-kind
     #: registry default), this can and does vary by run context.
     severities: dict[tuple[str, str], str]
-    #: (kind, identity) -> ADR-049 D1 ``gate_contribution`` for this run.
-    #: ``scan`` deliberately never stamps this field (it computes its own
-    #: exit code from its own verdict/budget rules, not `compare`'s
-    #: severity gate -- see ``_baseline_finding_dict``'s own docstring), so
-    #: every scan-side entry reads ``0``, matching the reporter's own
-    #: "unstamped means not applicable" convention.
-    gate_contributions: dict[tuple[str, str], int]
+    #: (kind, identity) -> ADR-049 D1 ``gate_contribution`` for this run,
+    #: or ``None`` when the raw finding dict never carries the key at all.
+    #: `compare`'s `changes[]` entries always carry it (``reporter.py``'s
+    #: `_change_to_dict` stamps it unconditionally, `0` included -- a real,
+    #: computed "no contribution"). `scan`'s own `diff.findings[]` entries
+    #: (`cli_scan_baseline._baseline_finding_dicts`) never carry the key at
+    #: all -- a genuine, documented gap (CodeRabbit review, PR #1172, round
+    #: 12), not an intentional "not applicable" omission the way the
+    #: contract fields are. `None` here keeps that distinction visible to
+    #: :func:`assert_full_parity` instead of coercing a *missing* value and
+    #: a *real* `0` to the same thing, which would let a genuine scan/compare
+    #: gate_contribution divergence silently read as parity whenever it
+    #: happened to coincide with compare's own value being `0`.
+    gate_contributions: dict[tuple[str, str], int | None]
 
 
 def _outcome_from_findings(
@@ -199,7 +206,7 @@ def _outcome_from_findings(
 ) -> RunOutcome:
     findings = set()
     severities: dict[tuple[str, str], str] = {}
-    gate: dict[tuple[str, str], int] = {}
+    gate: dict[tuple[str, str], int | None] = {}
     for c in raw_findings:
         kind = c["kind"]
         identity = c.get("symbol") or ""
@@ -221,7 +228,10 @@ def _outcome_from_findings(
         # different key name. Prefer `severity` when both are present (a
         # `compare`-shaped entry never carries `bucket`).
         severities[key] = c.get("severity", c.get("bucket", "unknown"))
-        gate[key] = c.get("gate_contribution", 0)
+        # `None` (not `0`) when the key is genuinely absent -- see
+        # RunOutcome.gate_contributions' own docstring for why the two must
+        # not be conflated.
+        gate[key] = c.get("gate_contribution")
     return RunOutcome(
         verdict=verdict if verdict is None else str(verdict),
         exit_code=result.exit_code,
@@ -314,9 +324,20 @@ def assert_full_parity(
                 f"{key}: severity scan={scan.severities[key]!r} "
                 f"compare={compare.severities[key]!r}"
             )
-        scan_gate = scan.gate_contributions.get(key, 0)
-        compare_gate = compare.gate_contributions.get(key, 0)
-        if scan_gate != compare_gate:
+        # `None` means "this side's raw finding dict never carries the key"
+        # (see RunOutcome.gate_contributions), not "computed as 0" -- scan's
+        # own JSON structurally never carries it yet (a real, tracked gap,
+        # not something this harness can verify until that's fixed), so a
+        # `None` on either side skips the comparison rather than coercing
+        # it to 0 and risking a real divergence reading as parity by
+        # coincidence.
+        scan_gate = scan.gate_contributions.get(key)
+        compare_gate = compare.gate_contributions.get(key)
+        if (
+            scan_gate is not None
+            and compare_gate is not None
+            and scan_gate != compare_gate
+        ):
             mismatches.append(
                 f"{key}: gate_contribution scan={scan_gate!r} compare={compare_gate!r}"
             )

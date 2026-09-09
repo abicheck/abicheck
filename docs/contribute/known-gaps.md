@@ -6675,3 +6675,46 @@ needs its own scoring model on `compare`'s side, not just a flag rename).
 surviving condition against this same list — when the last one closes, the
 predicate (and the ~17 `MODE == "scan"` branches it guards) can finally be
 deleted rather than shrunk further.
+
+### `scan`'s JSON `diff.findings[]` entries never carry `gate_contribution`
+
+Found in CodeRabbit review round 12 on PR #1172, while building
+`tests/parity/runner.py`'s scan-vs-compare parity harness (ADR-068 plan
+Phase 4). `compare`'s JSON `changes[]` always stamps a per-finding
+`gate_contribution` field (ADR-049 D1, unconditionally — 0 included —
+via `reporter.py`'s `_change_to_dict` calling
+`severity.gate_contribution_for_change`). `cli_scan_baseline.py`'s
+`_baseline_finding_dicts`, the equivalent builder for `scan --against`'s
+`diff.findings[]`, never calls it and never emits the key at all — not "always
+0", genuinely absent from the dict.
+
+Not fixed here: `gate_contribution_for_change` needs the same
+`severity_config`/`policy`/`kind_sets`/`policy_file` context `compare`'s
+renderer already threads through, and `_baseline_finding_dicts` has five call
+sites in `cli_scan_baseline.py` that would each need that context passed
+in — CodeRabbit's own review flagged this as a "Heavy lift" beyond the scope
+of a review-response round, and this PR's file ownership is scoped to
+`checker.py`/`policy/**`/`cli_scan_baseline.py`/`service_scan.py`/
+`action/run.sh`/`tests/parity/**`, not a redesign of that builder's call
+graph. What *is* fixed here, within `tests/parity/**` ownership: the harness
+itself no longer silently defaults a missing scan-side `gate_contribution` to
+`0` before comparing it against compare's real (possibly nonzero) value, which
+would have let a genuine divergence on this field read as false parity.
+`RunOutcome.gate_contributions` is typed `dict[tuple[str, str], int | None]` —
+`None` means "the raw finding dict never had the key" (scan's current
+across-the-board state), a real `int` means the field was present and its
+value read (compare's state, and scan's future state once this gap closes);
+`assert_full_parity()` skips the comparison for a key where either side reads
+`None` rather than coercing both to `0` first.
+
+Tractable when picked up: thread the same evaluation context (severity
+config, policy, kind sets, resolved policy file) `cli_scan_baseline.py`
+already has in scope for the compare-parity verdict recompute into each of
+`_baseline_finding_dicts`'s five call sites, and call
+`severity.gate_contribution_for_change` per finding the way `reporter.py`
+does. Once real values are emitted, the parity harness's own `None`-skip
+becomes dead code (no test result changes, since a value that now compares
+equal was previously skipped, not marked passing under a false default) — at
+that point drop the skip and go back to an unconditional comparison so a
+*future* regression on this field is caught structurally rather than by an
+absent key silently reading as "no divergence".
