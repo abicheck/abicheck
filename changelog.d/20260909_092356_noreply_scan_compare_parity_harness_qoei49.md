@@ -49,4 +49,20 @@
   `ChangeKind`'s own default severity under both the legacy verdict scheme
   and `--severity-preset`/`.abicheck.yml`'s `severity:` scheme, so an
   explicit `=info`/`=warning` override could still fail a run the same
-  flag on the sibling single-snapshot mechanism would pass.
+  flag on the sibling single-snapshot mechanism would pass. A first fix
+  attempt introduced two further regressions, also fixed here: the
+  demotion was folded into the *technical verdict* itself
+  (`--crosscheck exported_not_public=warning --severity-preset strict`
+  reported root `NO_CHANGE` while still listing the finding — an
+  info/warning override is a gating-only knob and must never launder the
+  real, observed compatibility classification), and the persisted
+  `diff.exit` block could disagree with the actual exit code/
+  `diff.severity.exit_code` for the identical run.
+- **A one-sided `scan`/`scan --artifact-set` audit request with an explicit
+  `--crosscheck KEY=warning`/`=info` override no longer raises a usage
+  error (exit 64).** A first attempt at the fix above mistakenly treated
+  the underlying `severities` field as meaningful only for a baseline
+  `--against` comparison, when it is also the audit-only, single-snapshot
+  crosscheck mechanism's own input — exactly the documented, pre-existing
+  shape a plain `scan --crosscheck KEY=warning` (no baseline at all)
+  builds.

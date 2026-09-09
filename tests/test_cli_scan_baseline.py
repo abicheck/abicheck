@@ -663,6 +663,83 @@ class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
         p.write_text(snapshot_to_json(snap), encoding="utf-8")
         return p
 
+    def _self_compared_header_mismatch_case(self, tmp_path: Path) -> Path:
+        """An API_BREAK-kind cross-source check (unlike the RISK-kind
+        ``exported_not_public`` case above), so the *legacy* verdict->exit
+        mapping alone (COMPATIBLE=0/API_BREAK=2/BREAKING=4, no severity
+        preset needed) already gates it -- the case the round-16 report's
+        own repro used."""
+        import sys
+
+        repo = Path(__file__).resolve().parent.parent
+        if str(repo / "scripts") not in sys.path:
+            sys.path.insert(0, str(repo / "scripts"))
+        import example_catalog
+
+        from abicheck.serialization import load_snapshot, snapshot_to_json
+
+        snap = load_snapshot(
+            example_catalog.case_dir("case148_xcheck_header_build_mismatch")
+            / "snapshot.abi.json"
+        )
+        p = tmp_path / "snap.abi.json"
+        p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return p
+
+    @pytest.mark.parametrize("level", ["info", "warning"])
+    def test_info_and_warning_levels_never_gate_under_legacy_scheme(
+        self, tmp_path: Path, level: str
+    ) -> None:
+        # Codex review, PR #1172, round 16, second review round (fresh
+        # evidence): the legacy exit-code scheme has no separate gate
+        # computation to filter the way the severity-preset scheme does --
+        # its exit code *is* `_verdict_exit_code(diff.verdict)` -- so this
+        # is the one path where honoring "info/warning never gate" without
+        # corrupting the real technical verdict needed its own, second
+        # gate-only verdict computation (`_gate_verdict`).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_header_mismatch_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(p),
+                "--against",
+                str(p),
+                "--crosscheck",
+                f"header_build_context_mismatch={level}",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        diff_block = payload.get("diff") or {}
+        kinds = [f["kind"] for f in diff_block.get("findings", [])]
+        assert "header_build_context_mismatch" in kinds, "finding stays fully visible"
+        # The real, observed compatibility fact must survive -- only the
+        # exit code the caller demoted may change.
+        assert payload.get("verdict") == "API_BREAK"
+        assert diff_block["exit"]["code"] == 0, diff_block["exit"]
+
+    def test_no_crosscheck_flag_still_gates_under_legacy_scheme(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control for the test above.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_header_mismatch_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(p), "--against", str(p), "--format", "json"],
+        )
+        assert result.exit_code == 2, result.output
+
     def test_off_drops_the_automatic_stage_finding_too(
         self, tmp_path: Path
     ) -> None:
@@ -774,6 +851,25 @@ class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
         payload = json.loads(result.stdout)
         kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
         assert "exported_not_public" in kinds, "finding stays fully visible"
+        # Codex review, PR #1172, round 16, second review round (fresh
+        # evidence): the first attempt at this fix filtered the demoted
+        # finding out of the *technical verdict* recompute too, not just
+        # the gate/exit code -- so this same request reported root
+        # `NO_CHANGE` even while still listing the `exported_not_public`
+        # risk finding above. AGENTS.md's "Policy decides acceptance, not
+        # facts": an info/warning demotion is a gating-only knob, and must
+        # never launder the real, observed compatibility classification.
+        assert payload.get("verdict") == "COMPATIBLE_WITH_RISK", (
+            "the technical verdict must still reflect the real observation "
+            "-- only gating/exit code may be demoted"
+        )
+        # Codex review, same round, P2 finding: the persisted `diff.exit`
+        # block was resolved before the gate-filtering logic ran, so it
+        # could disagree with the real exit code / `diff.severity.exit_code`
+        # for the identical run.
+        diff_block = payload.get("diff") or {}
+        assert diff_block["exit"]["code"] == 0, diff_block["exit"]
+        assert diff_block["severity"]["exit_code"] == 0, diff_block["severity"]
 
     def test_no_crosscheck_flag_still_gates_under_strict(
         self, tmp_path: Path

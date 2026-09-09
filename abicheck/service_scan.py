@@ -1167,7 +1167,6 @@ _COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
     "policy_file": lambda r: r.policy_file is not None,
     "scope_to_public_surface": lambda r: r.scope_to_public_surface is not True,
     "force_public_symbols": lambda r: bool(r.force_public_symbols),
-    "severities": lambda r: bool(r.severities),
     "pattern_verdicts": lambda r: r.pattern_verdicts,
     "env_matrix": lambda r: r.env_matrix is not None,
     "collapse_versioned_symbols": lambda r: r.collapse_versioned_symbols,

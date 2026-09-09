@@ -1320,6 +1320,48 @@ def _run_baseline_compare(
     # but `rule=None` also erased the provenance `DispositionLedger.rules()`
     # needs, even though `Change.suppression_rule` carried the string.
     # `rule_id` matches that string exactly.
+    # `--crosscheck KEY=info`/`=warning` (Codex review, PR #1172, round 16;
+    # corrected same PR, next round): the check stays enabled and its
+    # finding stays fully visible in `diff.changes`/the report -- it must
+    # not gate on *any* axis, the same unconditional "`info`/`warning`
+    # never gate" contract `scan_engine._crosscheck_severity_exit` already
+    # enforces for the dedicated single-snapshot `crosscheck` mechanism.
+    # Defined unconditionally (not nested under `if enabled_checks is not
+    # None:` below, as the first attempt had it) -- `enabled_checks=None`
+    # is a real, documented case ("every check stays enabled"), and this
+    # name is read again further down regardless of which branch of that
+    # `if` ran.
+    #
+    # **Deliberately never folded into `diff.verdict`** (round-16 second
+    # review round, fresh evidence): unlike `_dropped` below -- a check the
+    # caller genuinely disabled, so its finding is suppressed and rightly
+    # excluded from the technical verdict the same way any other
+    # suppression is -- `info`/`warning` is a *gating* demotion only, per
+    # AGENTS.md's "Policy decides acceptance, not facts": the finding is
+    # still a real, present observation, so `diff.verdict` (the technical
+    # compatibility classification every consumer reads as "what did
+    # compare/scan observe") must report it exactly as `compare()` itself
+    # would, unchanged. Only the exit-code/gate computation further down
+    # may exclude it -- see `_gate_verdict`/`_non_gating`'s other read
+    # sites below for where that exclusion actually happens.
+    _non_gating = frozenset(
+        k for k, level in (severities or {}).items() if level in ("info", "warning")
+    )
+
+    def _crosscheck_non_gating(c: Any) -> bool:
+        return bool(
+            getattr(c, "cross_source_evolution", None)
+            and getattr(c.kind, "value", None) in _non_gating
+        )
+
+    # Read unconditionally (not only inside the `if _dropped:` recompute
+    # below) -- `_gate_verdict` (legacy exit-code scheme, further down)
+    # needs the identical disposition-ledger/redundant-changes inputs
+    # `verdict_scored_changes` takes, whether or not a `--crosscheck
+    # KEY=off` also fired this run.
+    _ledger = getattr(diff, "disposition_ledger", None)
+    _redundant = getattr(diff, "redundant_changes", None) or []
+
     if enabled_checks is not None:
         from .buildsource.crosscheck import ALL_CHECKS
         from .workflows.disposition import RuleProvenance, override_suppressed_change
@@ -1352,35 +1394,6 @@ def _run_baseline_compare(
             # (set to `len(suppressed)` at construction time), not derived
             # from `len(suppressed_changes)` -- must stay in sync.
             diff.suppressed_count = len(diff.suppressed_changes)
-        # `--crosscheck KEY=info`/`=warning` (Codex review, PR #1172, round
-        # 16): the check stays enabled and its finding stays fully visible
-        # in `diff.changes`/the report -- unlike `_dropped` above, nothing
-        # here is suppressed -- but it must not gate on *any* axis, the same
-        # unconditional "`info`/`warning` never gate" contract
-        # `scan_engine._crosscheck_severity_exit` already enforces for the
-        # dedicated single-snapshot `crosscheck` mechanism. `_non_gating`
-        # (a plain local, not a `diff` mutation) is read again much further
-        # down, in the `exit_code_scheme == "severity"` branch -- that
-        # branch's `gate_decision_for_result`/`compute_gate_decision` always
-        # read `result.changes`/a changes list directly (deliberately, by
-        # that module's own docstring, so a display-only filter can never
-        # change the exit code), so the exclusion has to be applied at each
-        # of those two call sites, not by mutating `diff.changes` itself or
-        # stamping a per-finding `effective_verdict` override (tried first;
-        # rejected because `Verdict.COMPATIBLE` still classifies as
-        # `quality_issues`, which `--severity-preset strict` itself treats
-        # as `error` -- contradicting "never gate").
-        _non_gating = frozenset(
-            k for k, level in (severities or {}).items() if level in ("info", "warning")
-        )
-
-        def _crosscheck_non_gating(c: Any) -> bool:
-            return bool(
-                getattr(c, "cross_source_evolution", None)
-                and getattr(c.kind, "value", None) in _non_gating
-            )
-
-        if _dropped or _non_gating:
             # Codex review (PR #1172, round 12): `verdict_scored_changes`
             # also excludes a `CrossSourceEvolution.RESOLVED` finding --
             # it stays visible in `diff.changes` but must not drive this
@@ -1388,14 +1401,17 @@ def _run_baseline_compare(
             # `all_unsuppressed` already excludes it (plan F-9); without
             # that, disabling an unrelated crosscheck here could
             # resurrect an already-fixed cross-source issue into a
-            # failing verdict.
-            _ledger = getattr(diff, "disposition_ledger", None)
-            _redundant = getattr(diff, "redundant_changes", None) or []
-            _verdict_population = [
-                c
-                for c in verdict_scored_changes(diff.changes, _redundant, _ledger)
-                if not _crosscheck_non_gating(c)
-            ]
+            # failing verdict. Deliberately *not* also filtered by
+            # `_crosscheck_non_gating` (round-16 second review round) --
+            # see this block's own `_non_gating` docstring above for why
+            # an info/warning demotion must never reach `diff.verdict`.
+            # (`_ledger`/`_redundant` computed once above this whole `if
+            # enabled_checks is not None:` block; `diff.changes` was just
+            # mutated above, but neither ledger nor redundant-changes
+            # reads off it, so the pre-computed values are still correct.)
+            _verdict_population = verdict_scored_changes(
+                diff.changes, _redundant, _ledger
+            )
             if policy_file is not None:
                 diff.verdict = policy_file.compute_verdict(_verdict_population)
             else:
@@ -1585,7 +1601,61 @@ def _run_baseline_compare(
         assert isinstance(gate_exit, int)  # compute_gate_decision.exit_code
         base_exit = gate_exit
     else:
-        base_exit = _verdict_exit_code(diff.verdict)
+        # `--crosscheck KEY=info`/`=warning` under the *legacy* scheme
+        # (round-16 second review round): unlike the severity branch above,
+        # this scheme has no separate gate computation to filter -- the
+        # exit code *is* `_verdict_exit_code(diff.verdict)` -- so honoring
+        # "info/warning never gate" here without corrupting `diff.verdict`
+        # itself (see `_non_gating`'s own docstring above) means computing
+        # a second, gate-only verdict over the demoted population and
+        # deriving the exit code from *that*, instead of from the real,
+        # unfiltered technical verdict every other consumer reads.
+        if _non_gating:
+            _gate_population = [
+                c
+                for c in verdict_scored_changes(diff.changes, _redundant, _ledger)
+                if not _crosscheck_non_gating(c)
+            ]
+            if policy_file is not None:
+                _gate_verdict = policy_file.compute_verdict(_gate_population)
+            else:
+                from .checker_policy import compute_verdict
+
+                _gate_verdict = compute_verdict(_gate_population, policy=policy)
+        else:
+            _gate_verdict = diff.verdict
+        base_exit = _verdict_exit_code(_gate_verdict)
+    if _non_gating:
+        # Codex review (PR #1172, round 16, third round, P2 finding):
+        # `summary["exit"]` (`diff.exit`, the persisted `ExitDecision`) was
+        # already resolved above, from `resolve_compare_exit_decision`,
+        # before `base_exit` above ever applied the `_non_gating`
+        # demotion -- so a structured JSON consumer could see the process
+        # exit at 0 (or the `severity` block's own `exit_code` at 0) while
+        # `diff.exit.code` still named `COMPATIBILITY_GATE` at a nonzero
+        # value for the identical run. Rebuild it from the *same*
+        # `base_exit` this function's own process exit code is about to
+        # fold coverage/assurance onto, reusing `resolve_exit_decision`'s
+        # coverage/assurance defaults the exact same way
+        # `resolve_compare_exit_decision` computed them the first time (the
+        # two axes below are unaffected by `_non_gating`, so recomputing
+        # them again here is not a second, independently-drifting
+        # calculation -- it is the identical one, over the identical
+        # `diff`) so every structured consumer of `diff.exit` sees one
+        # decision, consistent with the actually-returned exit code.
+        from .workflows.gate import (
+            analysis_assurance_exit_contribution,
+            coverage_exit_floor,
+            resolve_exit_decision,
+        )
+
+        summary["exit"] = resolve_exit_decision(
+            compatibility_contribution=base_exit,
+            contract_coverage_contribution=coverage_exit_floor(diff),
+            analysis_assurance_contribution=analysis_assurance_exit_contribution(
+                diff, require_complete=require_complete_analysis
+            ),
+        ).to_dict()
     # ADR-049 §7/§6.4: the coverage axis is orthogonal to the verdict/severity
     # exit code and is folded identically here and in `compare`. Parity is
     # the point -- a ledger that gated one command and not the other would be

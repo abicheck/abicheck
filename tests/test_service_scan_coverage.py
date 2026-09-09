@@ -278,6 +278,19 @@ class TestRejectComparisonOnlyFields:
     def test_plain_audit_request_is_accepted(self) -> None:
         assert _reject_comparison_only_fields(self._audit_request()) is None
 
+    def test_severities_without_a_baseline_is_accepted(self) -> None:
+        """Codex review, PR #1172, round 16, third review round (fresh
+        evidence): `severities` is *not* comparison-only -- it is also the
+        audit-only, single-snapshot `_crosscheck_severity_exit()`'s own
+        input, exactly the shape a documented `--crosscheck KEY=warning`
+        audit-only `scan`/`scan --artifact-set` request builds. An earlier
+        revision of this fix added `severities` to
+        `_COMPARISON_ONLY_FIELD_PREDICATES` instead, which made this raise
+        `ValidationError` for that legitimate, pre-existing usage.
+        """
+        req = self._audit_request(severities={"exported_not_public": "warning"})
+        assert _reject_comparison_only_fields(req) is None
+
 
 class TestCliApiParity:
     """Structural regression tests generalizing two gaps a PR #724 review
@@ -304,6 +317,14 @@ class TestCliApiParity:
     #: `--crosscheck KEY=off` set already governs `run_crosschecks`' own
     #: audit-only single-snapshot pass regardless of whether `--against` is
     #: given, so it is exactly as "always relevant" as `headers`/`includes`.
+    #: `severities` joined the same way, one round later (round 16, Codex
+    #: review, fresh evidence): it was first added to
+    #: `_COMPARISON_ONLY_FIELD_PREDICATES` instead, which made
+    #: `_run_artifact_set()`'s own long-standing, documented
+    #: `--crosscheck KEY=warning` usage (consumed by the audit-only
+    #: `scan_engine._crosscheck_severity_exit`, with no baseline in sight)
+    #: raise `ValidationError`/exit 64 -- the same "shared, not
+    #: baseline-only" mistake `enabled_checks` avoided by living here.
     _ALWAYS_RELEVANT_FIELDS = frozenset(
         {
             "headers",
@@ -312,6 +333,7 @@ class TestCliApiParity:
             "lang",
             "baseline",
             "enabled_checks",
+            "severities",
         }
     )
 
@@ -335,6 +357,25 @@ class TestCliApiParity:
             "without --against and get a silent no-op instead of a "
             "ValidationError."
         )
+
+    def test_severities_is_not_falsely_treated_as_baseline_only(self) -> None:
+        """Codex review, PR #1172, round 16, third review round (fresh
+        evidence): `severities` was briefly added to
+        `_COMPARISON_ONLY_FIELD_PREDICATES` (the previous round's own fix),
+        which made it comparison-only -- but `severities` is *also* the
+        audit-only, single-snapshot `_crosscheck_severity_exit()`'s own
+        input (`run_scan_core`'s `severities` parameter, threaded from a
+        one-sided `scan`/`scan --artifact-set` request with no baseline at
+        all). That made a `ScanRequest(severities=..., baseline=None)` --
+        exactly what a documented `--crosscheck KEY=warning` audit-only
+        scan builds -- raise `ValidationError`/exit 64 instead of running.
+        `severities` belongs in `_ALWAYS_RELEVANT_FIELDS` instead, the same
+        home `enabled_checks` already has for the identical reason.
+        """
+        from abicheck.service_scan import _COMPARISON_ONLY_FIELD_PREDICATES
+
+        assert "severities" not in _COMPARISON_ONLY_FIELD_PREDICATES
+        assert "severities" in self._ALWAYS_RELEVANT_FIELDS
 
     def test_every_run_scan_core_kwarg_matching_a_scan_request_field_is_forwarded(
         self,

@@ -75,7 +75,11 @@ from ..policy.contract_coverage_exit import (
     coverage_exit_for_context,
     fold_coverage_exit,
 )
-from ..policy.exit_decision import ExitDecision, resolve_compare_exit_decision
+from ..policy.exit_decision import (
+    ExitDecision,
+    resolve_compare_exit_decision,
+    resolve_exit_decision,
+)
 from ..policy.exit_decision_precedence import (
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
@@ -157,6 +161,7 @@ __all__ = [
     "note_if_same_binary_compared",
     "resolve_compare_exit_decision",
     "resolve_compare_exit_decision_with_abort_axes",
+    "resolve_exit_decision",
     "resolve_release_exit_decision",
     "resolve_release_exit_decision_for_report",
     "resolve_release_gate_options",
