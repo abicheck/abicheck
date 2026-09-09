@@ -33,10 +33,12 @@ what was skipped.
 **`mode: scan` remains the one to reach for** when this step also needs: a
 single-release audit with no baseline at all (see [Single-release
 audit](#single-release-audit-no-baseline) below — `mode: compare` has no
-no-baseline input yet), a `budget` wall-clock guard, `crosscheck`'s
-`KEY=error` promotion syntax, `build-target` scoping, or `new-library-set`
-(multi-library audit). None of those inputs are read by `mode: compare`
-today.
+no-baseline input yet), `crosscheck`'s `KEY=error` promotion syntax,
+`build-target` scoping, or `new-library-set` (multi-library audit) — none of
+those has a `compare` equivalent at all. A `budget` wall-clock guard is
+different: `compare` itself now has `--budget`, but the Action's `mode:
+compare` input still doesn't read it (a translation gap, not a missing CLI
+capability — see the table below).
 
 ### `mode: scan` is being retired — and is already translated where it can be
 
@@ -60,7 +62,8 @@ is tracked in
 |---|---|
 | no `against`/`abi-baseline` (audit-only) | `compare --no-baseline` does not reproduce the audit's findings yet |
 | `new-library-set` | no `compare` equivalent for the multi-library audit mode |
-| `budget`, `risk-rules`, `crosscheck`, `build-target` | no `compare` flag equivalent |
+| `budget` | `compare` has its own `--budget` flag now (exit `5` on overflow applies to both commands) — this is an Action-translation gap (`action/run.sh` still forces `INPUT_BUDGET` onto the legacy route), not a missing CLI capability, and closes once that translation is updated |
+| `risk-rules`, `crosscheck`, `build-target` | no `compare` flag equivalent |
 | no `depth` at all | `scan`'s risk-driven `auto` selection has no `compare` equivalent; `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers` — either way, never the risk-scored choice `auto` makes |
 | `depth: build` or `depth: source` | `scan`'s hard evidence-contract floor (exit `7`) has no `compare` equivalent — routing it would drop a real, actionable error |
 | a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |

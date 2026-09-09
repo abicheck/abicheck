@@ -60,10 +60,11 @@ abicheck compare old/lib/libtbb.so.12.17 new/lib/libtbb.so.12.18 \
   --depth headers
 ```
 
-Passing `-H` an **include directory** (rather than a single umbrella header)
-is what establishes the public/internal boundary, so the cross-source
-hygiene checks — which `compare` runs automatically on every invocation —
-have a "public" side to reconcile against. A project can declare the same
+The umbrella header shown above already establishes the public/internal
+boundary — a lone `-H` **file** enters the same public-header set as a
+directory would, so the cross-source hygiene checks (which `compare` runs
+automatically on every invocation) already have a "public" side to
+reconcile against with no extra flag. A project can declare the same
 boundary once in `.abicheck.yml` instead:
 
 ```yaml
