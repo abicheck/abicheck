@@ -523,11 +523,40 @@ from pathlib import Path
 
 import yaml
 
+from abicheck.buildsource.build_config import BuildConfig
 from abicheck.config_paths import (
     discover_build_config,
     find_config_in_dir,
     project_root_for_config,
 )
+
+
+def _validate_or_exit(doc: dict[str, object], source_path: Path) -> None:
+    # Codex review, fresh evidence: a base document is loaded here via a
+    # bare `yaml.safe_load` -- syntactically valid YAML, but never run
+    # through the real strict-schema check (`BuildConfig._validate_
+    # structure`, unknown keys/wrong-typed values) the native CLI's own
+    # `load_build_config`/`discover_project_config` loading path always
+    # applies. Left unchecked, a structurally invalid document (e.g.
+    # `release: []` instead of a mapping, `compile.lang: 7` instead of a
+    # string) can have its own invalid key silently REPLACED by this
+    # Action's own overlay merge below (an Action input sharing the same
+    # top-level key wins unconditionally) -- masking a real user config
+    # error as if it had been valid all along, instead of the loud usage
+    # error the equivalent native CLI invocation would raise. Validating
+    # here, before any merge happens, surfaces the same error the user
+    # would see running abicheck directly against this file.
+    try:
+        BuildConfig.from_dict(doc)
+    except ValueError as exc:
+        print(
+            f"::error::the config at {source_path} is invalid: {exc}. "
+            "Refusing to silently proceed with (or merge on top of) a "
+            "malformed project config -- fix the file or remove it.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 
 out_path = sys.argv[1]
 overlay = json.loads(os.environ["ABICHECK_OVERLAY_JSON"])
@@ -574,6 +603,7 @@ if merge_mode == "explicit":
         )
         sys.exit(1)
     if isinstance(loaded, dict):
+        _validate_or_exit(loaded, found_path)
         base = loaded
 else:
     start = Path(base_source or ".").resolve()
@@ -601,6 +631,7 @@ else:
             )
             sys.exit(1)
         if isinstance(loaded, dict):
+            _validate_or_exit(loaded, found)
             base = loaded
         break
 
@@ -640,6 +671,7 @@ else:
                 )
                 sys.exit(1)
             if isinstance(sources_loaded, dict):
+                _validate_or_exit(sources_loaded, sources_found)
                 # "sources" (plural -- public_headers/exclude/graph) is a
                 # DISTINCT top-level block from "source" (singular,
                 # BuildConfig's own build.source_replay-facing settings) --
@@ -789,6 +821,12 @@ PYEOF
     else
       echo "::error::failed to merge this Action's synthesized config overlay with the repository's own auto-discovered .abicheck.yml (see the error above). Refusing to silently proceed."
     fi
+    # Codex review, fresh evidence: this exit happens after the caller's own
+    # mktemp (out_path already exists, possibly partially written by the
+    # failed subprocess) and before the main EXIT trap further down installs
+    # -- the same early-exit leak window _rm_overlay_on_early_exit exists to
+    # close at every other such site in this file.
+    _rm_overlay_on_early_exit "$out_path"
     exit 1
   fi
 }
