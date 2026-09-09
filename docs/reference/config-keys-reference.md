@@ -72,7 +72,7 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 
 | Sub-key | Type |
 |---|---|
-| `max_bundle_facts_decode_nodes` | unspecified |
+| `max_bundle_facts_decode_nodes` | int |
 
 ### `scope:`
 

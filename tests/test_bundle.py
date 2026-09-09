@@ -3661,6 +3661,10 @@ class TestCompareReleaseBundleE2E:
         )
         data = _json.loads(result.stdout)
         assert "bundle_verdict" in data
+        # A single-library "bundle" has no sibling to form a cross-library
+        # finding against, so the always-present key is an empty list here
+        # -- not merely present, per the JSON output contract this asserts.
+        assert data["bundle_findings"] == []
 
     def test_compare_release_with_manifest_emits_manifest_finding(
         self,
