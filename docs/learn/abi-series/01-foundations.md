@@ -273,10 +273,10 @@ resolvable at runtime via a `debuginfod` server; macOS ships the equivalent as a
     itself is unstripped, or on directory/package inputs you feed a
     package-level split-debug pair with `compare`'s side-aware
     `--debug-info old=<pkg> --debug-info new=<pkg>` (resolved by build-id).
-    `dump`/`compare`'s `--debug-root`/`--debuginfod` — for a bare stripped
-    `.so` plus a separate `.debug` file, not a package — currently locate that
-    debug file and print where they found it, but do not yet feed it into the
-    DWARF parse — see [Stripped Production
+    `dump`/`compare`'s `--debug-root` (or a `.abicheck.yml` `debug.debuginfod:
+    true`) — for a bare stripped `.so` plus a separate `.debug` file, not a
+    package — currently locate that debug file and print where they found it,
+    but do not yet feed it into the DWARF parse — see [Stripped Production
     Binaries](../limitations.md#stripped-production-binaries) for the current
     status. Full walk-through, `nm`/`readelf` output included, in the
     level-by-level [L0 section](../what-each-level-sees.md#level-0-the-shipped-binary-symbols-only)

@@ -78,7 +78,7 @@ the severity-aware scheme).
 | `--no-default-suppression` | *(not needed)* | abicheck applies no default suppression specs |
 | `--debug-info-dir1 DIR` / `--d1` | `--debug-root old=DIR` | Sidecar/split debug trees |
 | `--debug-info-dir2 DIR` / `--d2` | `--debug-root new=DIR` | `--debug-root DIR` applies to both sides |
-| *(no equivalent)* | `--debuginfod` | Fetch debug info from a debuginfod server |
+| *(no equivalent)* | `.abicheck.yml` `debug.debuginfod: true` | Fetch debug info from a debuginfod server |
 | `--stat` | `--format oneline` | One-line summary instead of the full report; purely a rendering choice — pair with whatever `--depth` you already use, since `--format` never changes coverage/findings |
 | `--leaf-changes-only` / `-l` | `--view leaf` | Root-type-grouped leaf view |
 | `--impacted-interfaces` | `--view impact` | Impact summary appended to the report |

@@ -46,8 +46,8 @@ abicheck compare old/libfoo.so new/libfoo.so -H include/ \
   --debug-root old=old/debug --debug-root new=new/debug
 ```
 
-`--debuginfod` fetches by build-id when a server has them. If the finding
-survives with equal evidence, go to 2.
+A `.abicheck.yml` `debug.debuginfod: true` fetches by build-id when a server
+has them. If the finding survives with equal evidence, go to 2.
 
 ### 2. Were the headers the binary's headers?
 
