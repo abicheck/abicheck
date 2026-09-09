@@ -41,8 +41,23 @@ def _bash_executable() -> str:
     return "bash"
 
 
+#: Printed immediately before the ``CMD`` array payload, so the payload can
+#: be located precisely even when the sourced script emitted its own stdout
+#: first -- e.g. `run.sh`'s documented `::warning::` when the `python3` this
+#: harness resolves cannot import `abicheck` (a real condition in an
+#: environment where pytest's own interpreter differs from `run.sh`'s
+#: resolved one, Codex review, PR #1172, round 5). A naive
+#: ``result.stdout.split(...)`` would fold that warning text into what
+#: becomes ``cmd[0]``.
+_CMD_MARKER = "__ABICHECK_TEST_CMD_START__"
+
+
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
-    script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
+    script = (
+        _mode_branches_region()
+        + f"\nprintf '%s' '{_CMD_MARKER}'"
+        + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
+    )
     with tempfile.NamedTemporaryFile(
         "w",
         suffix=".sh",
@@ -69,7 +84,14 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
             f"harness script failed (exit {result.returncode})\n"
             f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
         )
-    return [item for item in result.stdout.split("\x1f") if item]
+    marker_index = result.stdout.rfind(_CMD_MARKER)
+    if marker_index == -1:
+        raise AssertionError(
+            f"harness script never reached the CMD marker -- did the mode "
+            f"branches region change shape?\n--- stdout ---\n{result.stdout}"
+        )
+    payload = result.stdout[marker_index + len(_CMD_MARKER) :]
+    return [item for item in payload.split("\x1f") if item]
 
 
 _BASE_INPUTS = {

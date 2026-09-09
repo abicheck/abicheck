@@ -275,10 +275,31 @@ def assert_full_parity(
     ADR-049 gate contribution agree. See :class:`RunOutcome` for why this is
     a distinct check from a finding-set diff, not a superset expressible
     through one.
+
+    Unlike :func:`assert_no_capability_loss` (a one-way check: `scan`
+    findings `compare` doesn't reproduce are a loss, but `compare` findings
+    `scan` lacks are always allowed -- "richer" is fine there), *this*
+    function requires the two finding sets to be exactly equal (Codex
+    review, PR #1172, round 5): every caller uses it to justify routing a
+    baseline `scan` through `compare`'s translation, so a `compare_only`
+    finding here would mean the translated request silently produces a
+    *different* report than the one it replaces, not just a richer one --
+    the same class of user-visible regression a `scan`-only loss is, just
+    facing the other direction.
     """
     report = assert_no_capability_loss(
         scan_findings=scan.findings, compare_findings=compare.findings, context=context
     )
+    if report.compare_only:
+        names = ", ".join(
+            f"{f.kind}({f.identity!r})"
+            for f in sorted(report.compare_only, key=lambda f: (f.kind, f.identity))
+        )
+        raise AssertionError(
+            f"{context}: `compare` reports finding(s) `scan` does not -- not "
+            "full parity, since this check is used to justify routing scan "
+            f"through compare's translation, not merely richer output: {names}"
+        )
     mismatches: list[str] = []
     if scan.verdict != compare.verdict:
         mismatches.append(f"verdict: scan={scan.verdict!r} compare={compare.verdict!r}")
