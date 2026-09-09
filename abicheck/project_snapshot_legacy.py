@@ -387,10 +387,20 @@ def materialize_release_variant_artifacts(
     summary = read_manifest_summary(root_path)
     if variant_id is None:
         if len(summary.variant_ids) != 1:
+            known = sorted(summary.variant_ids)
+            # The remediation names the *current* spelling: plan Phase 7j
+            # retired `--old-variant`/`--new-variant` with no alias, so
+            # advice pointing at those would send the caller straight into
+            # an exit-64 usage error (Codex review, PR #1184). The example
+            # is only shown when there is a real id to show -- a package
+            # declaring *zero* variants has nothing to select, and
+            # indexing an empty list here would turn a clear ValueError
+            # into an IndexError.
+            example = f" (e.g. --variant old={known[0]})" if known else ""
             raise ValueError(
                 f"{root_path} declares {len(summary.variant_ids)} variant(s) "
-                f"({sorted(summary.variant_ids)}) -- pass an explicit "
-                "variant id (--old-variant/--new-variant) to select one"
+                f"({known}) -- pass an explicit variant id to select "
+                f"one{example}"
             )
         variant_id = summary.variant_ids[0]
     elif variant_id not in summary.variant_ids:

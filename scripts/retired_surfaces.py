@@ -166,6 +166,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         # flag only in the sentence explaining its own fold into --view.
         frozenset(
             {
+                "contribute/known-gaps.md",
                 "AGENTS.md",
                 "contribute/config-key-review.md",
                 "contribute/goals.md",
@@ -500,6 +501,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         # --no-bundle-analysis, plus multi-binary.md's own "gone now" prose.
         frozenset(
             {
+                "contribute/known-gaps.md",
                 "reference/config-file.md",
                 "reference/exit-codes.md#L99",
                 "contribute/plans/g35-multi-artifact-scan.md",
@@ -563,6 +565,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--pdb-path",),
         frozenset(
             {
+                "contribute/known-gaps.md",
                 "AGENTS.md",
                 "contribute/config-key-review.md",
                 "contribute/plans/one-comparison-product.md",
@@ -581,6 +584,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--reconcile-build-context",),
         frozenset(
             {
+                "contribute/known-gaps.md",
                 "AGENTS.md",
                 "contribute/config-key-review.md",
                 "contribute/plans/one-comparison-product.md",
@@ -606,6 +610,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--old-variant", "--new-variant"),
         frozenset(
             {
+                "contribute/known-gaps.md",
                 "contribute/plans/one-comparison-product.md",
                 "contribute/plans/storage-format-v2.md",
                 "contribute/adr/062-project-snapshot-storage-v2.md",
@@ -620,6 +625,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ("--support-promise",),
         frozenset(
             {
+                "contribute/known-gaps.md",
                 "contribute/plans/one-comparison-product.md",
                 "contribute/plans/vision-api-abi-evolution.md",
                 "contribute/adr/065-comparison-scope-selection-and-completeness.md",

@@ -1019,3 +1019,182 @@ class TestVariantFlagSurface:
         assert [o.opts for o in opts] == [["--variant"]]
         assert opts[0].multiple is True
         assert "[old=|new=]" in opts[0].type.get_metavar(opts[0])
+
+
+class TestRemediationNamesOnlyLiveFlags:
+    """Codex review, PR #1184: a retired CLI spelling still named in a
+    runtime remediation message.
+
+    `project_snapshot_legacy.resolve_release_package_map`'s
+    multi-variant ambiguity error told the caller to "pass an explicit
+    variant id (--old-variant/--new-variant)". Phase 7j retired both
+    spellings with no alias, so a user who followed the tool's own advice
+    landed straight in an exit-64 usage error -- the CLI actively
+    misdirecting them.
+
+    The bug *class* is "a user-facing message advises a flag the command
+    it is advising does not accept", so that is what these tests assert,
+    not the one string. The oracle is independent of the implementation:
+    every ``--flag`` token appearing in a message is checked against the
+    live Click command's own accepted option set, which is where the
+    message's advice actually has to land. A test pinned to the exact new
+    wording would pass again the next time the wording changes to name
+    some other dead flag.
+    """
+
+    @staticmethod
+    def _suggested_flags(message: str) -> set[str]:
+        """Every ``--flag`` token a message names.
+
+        Deliberately a plain lexical sweep rather than anything that
+        consults the option tables: an oracle built from the same source
+        the implementation reads could not falsify it.
+        """
+        import re
+
+        return set(re.findall(r"--[A-Za-z0-9][A-Za-z0-9-]*", message))
+
+    @staticmethod
+    def _accepted_options(command: str) -> set[str]:
+        import click
+
+        from abicheck.cli import main
+
+        return {
+            spelling
+            for p in main.commands[command].params
+            if isinstance(p, click.Option)
+            for spelling in (*p.opts, *p.secondary_opts)
+        }
+
+    def _assert_advice_lands(self, message: str, command: str) -> set[str]:
+        suggested = self._suggested_flags(message)
+        accepted = self._accepted_options(command)
+        dead = sorted(suggested - accepted)
+        assert not dead, (
+            f"the {command} run's own message advises {dead}, which "
+            f"{command} does not accept -- following this remediation "
+            "exits 64. Name a live spelling."
+        )
+        return suggested
+
+    def test_the_oracle_itself_catches_a_retired_spelling(self) -> None:
+        """Negative control. Without this, every assertion below would
+        pass just as happily against a message naming nothing at all, or
+        against an oracle whose set difference silently came out empty."""
+        retired = "pass an explicit variant id (--old-variant/--new-variant)"
+        assert self._suggested_flags(retired) == {"--old-variant", "--new-variant"}
+        with pytest.raises(AssertionError, match="does not accept"):
+            self._assert_advice_lands(retired, "compare")
+
+    def test_the_oracle_accepts_a_live_spelling(self) -> None:
+        """The complementary control: the check is not vacuously strict."""
+        assert self._assert_advice_lands("try --variant old=v1", "compare") == {
+            "--variant"
+        }
+
+    def _multi_variant_package(self, root: Path) -> None:
+        from abicheck.project_snapshot_store import (
+            read_project_manifest,
+            write_project_manifest,
+        )
+        from abicheck.storage.package import PackageManifest, VariantRef
+
+        old_libs, _ = _old_new_libraries()
+        _write_package(root, {"liba.so": old_libs["liba.so"]}, variant_id="gcc13")
+        existing = read_project_manifest(root)
+        combined = PackageManifest(
+            versions=existing.versions,
+            variant_refs=existing.variant_refs
+            + (VariantRef(variant_id="gcc14", artifact_ids=()),),
+            artifact_refs=existing.artifact_refs,
+        )
+        write_project_manifest(root, combined)
+
+    def test_the_ambiguous_variant_error_advises_a_flag_compare_accepts(
+        self, tmp_path: Path
+    ) -> None:
+        """The reported instance, checked through the real CLI rather than
+        by reading the source string."""
+        _, new_libs = _old_new_libraries()
+        old_pkg = tmp_path / "old_pkg"
+        new_pkg = tmp_path / "new_pkg"
+        self._multi_variant_package(old_pkg)
+        _write_package(new_pkg, new_libs)
+
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
+        assert ec == 64
+        suggested = self._assert_advice_lands(out, "compare")
+        # Not merely "names no dead flag" -- it must actually route the
+        # user somewhere, which an error naming no flag at all would not.
+        assert "--variant" in suggested
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            (),
+            ("--variant", "old=nope"),
+            ("--variant", "old="),
+            ("--variant", "both=nope"),
+        ],
+        ids=["ambiguous", "unknown-id", "empty-id", "unknown-both"],
+    )
+    def test_every_variant_error_path_advises_only_live_flags(
+        self, tmp_path: Path, extra: tuple[str, ...]
+    ) -> None:
+        """Several independently-chosen sibling paths through the same
+        family, not just the one that was reported: ambiguity, an
+        unknown per-side id, an empty id, and an unknown both-sides id
+        each produce a different message from a different call site."""
+        _, new_libs = _old_new_libraries()
+        old_pkg = tmp_path / "old_pkg"
+        new_pkg = tmp_path / "new_pkg"
+        self._multi_variant_package(old_pkg)
+        _write_package(new_pkg, new_libs)
+
+        ec, out = _invoke(
+            "compare", str(old_pkg), str(new_pkg), *extra, "--format", "json"
+        )
+        assert ec != 0
+        self._assert_advice_lands(out, "compare")
+
+    def test_a_package_declaring_zero_variants_still_errors_cleanly(
+        self, tmp_path: Path
+    ) -> None:
+        """The empty-list guard on the remediation example. `len != 1`
+        covers zero as well as many, so building the example by indexing
+        the known ids would turn a clear ValueError into an IndexError on
+        a package that declares none."""
+        from abicheck.project_snapshot_legacy import (
+            materialize_release_variant_artifacts,
+        )
+        from abicheck.project_snapshot_store import (
+            read_project_manifest,
+            write_project_manifest,
+        )
+        from abicheck.storage.package import PackageManifest
+
+        old_libs, _ = _old_new_libraries()
+        pkg = tmp_path / "pkg"
+        _write_package(pkg, {"liba.so": old_libs["liba.so"]}, variant_id="v1")
+        existing = read_project_manifest(pkg)
+        write_project_manifest(
+            pkg,
+            PackageManifest(
+                versions=existing.versions,
+                variant_refs=(),
+                # artifact_refs must go too: PackageManifest rejects an
+                # artifact naming an undeclared variant, so "zero
+                # variants" is only representable as an empty package.
+                artifact_refs=(),
+            ),
+        )
+
+        with pytest.raises(ValueError, match="declares 0 variant") as excinfo:
+            materialize_release_variant_artifacts(
+                pkg, variant_id=None, dest_root=tmp_path / "out"
+            )
+        # No example is offered when there is nothing to select, and the
+        # message still names no dead flag.
+        assert "e.g." not in str(excinfo.value)
+        self._assert_advice_lands(str(excinfo.value), "compare")

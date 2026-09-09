@@ -1325,6 +1325,59 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1176,),
         seed_tests=("tests/test_disposition_reclassification.py",),
     ),
+    BugClass(
+        id="cli_surface.retired_spelling_in_remediation",
+        invariant=(
+            "A user-facing message may only name flags the command it is "
+            "advising actually accepts -- every `--flag` token in an error, "
+            "warning or help string must be a live option of that command, "
+            "so following the tool's own remediation can never itself be a "
+            "usage error."
+        ),
+        fixed_by=(1184,),
+        seed_tests=(
+            "tests/test_cli_compare_release_project_snapshot_package.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "error_path": (
+                "ambiguous-variant",
+                "unknown-variant-id",
+                "empty-variant-id",
+                "unknown-both-sides-id",
+                "zero-variants-declared",
+            )
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The seed test applies the oracle only to the variant "
+                    "family's own error paths. A repo-wide AST sweep run "
+                    "while fixing this (non-docstring string literals under "
+                    "`abicheck/` containing any spelling in "
+                    "`scripts/retired_surfaces.py`'s RETIRED_SURFACES) "
+                    "reports 44 hits across 25 modules, and several look "
+                    "like the same defect already sitting in the tree -- "
+                    "`pdb_utils.py`'s 'use --pdb-path to override', "
+                    "`reporter_markdown.py`'s 'Unknown --show-only token', "
+                    "`dumper.py`'s '--dwarf-only requested but ...'. They "
+                    "are NOT mechanically decidable: a flag retired from "
+                    "`compare`/`dump` can still be live on `scan` (which "
+                    "kept the whole compile-context and debug-resolution "
+                    "families), and `cli_compare_release.py`'s unregistered "
+                    "release engine legitimately still *defines* several of "
+                    "them, so a sweep-turned-gate would need ~25 "
+                    "hand-judged allowlist entries -- the shape AGENTS.md "
+                    "warns is itself a smell. Each site needs reading "
+                    "against the command that emits it. Deliberately not "
+                    "attempted in PR #1184: it is a separate change from "
+                    "the CLI option audit, and a hasty sweep would ship a "
+                    "large unreviewed allowlist rather than close the class."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
 
 
