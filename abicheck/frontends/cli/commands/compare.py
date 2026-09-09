@@ -573,7 +573,7 @@ def _embed_inline_source_side(
                 "--format markdown for a human alongside --write json=abi.json "
                 "for tooling). FORMAT is one of {formats}; PATH must differ from "
                 "--output/-o. Always renders the full, unfiltered report "
-                "(ignores --show-only). For a directory/package (release) "
+                "(ignores --view show=...). For a directory/package (release) "
                 "comparison, only json/markdown/junit are available, and only "
                 "one --write is supported there.",
 )
