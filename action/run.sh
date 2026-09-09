@@ -1068,34 +1068,34 @@ _old_library_is_stored_snapshot() {
 # --sources tree's own compile:/debug: could leak into, so both stay
 # single-sided.
 #
-# `scan --against` internally routed through `compare` (ADR-068 D2; the
-# `elif [[ "$MODE" == "scan" ]]; then` branch below, reached only when
-# `$_SCAN_NEEDS_LEGACY_CLI` is false) is, structurally, a genuine two-sided
-# `compare $INPUT_AGAINST $SCAN_ARTIFACT` -- if `--against` is itself a
-# LIVE binary (not the common stored-baseline-snapshot case), it undergoes
-# real header/debug extraction under the SAME shared compile context as
-# the scanned artifact, exactly like `compare`'s own OLD operand (Codex
-# review, fresh evidence, PR #1171, ninth round: this was still
-# unconditionally single-sided for every `scan`, keyed on `$MODE` alone,
-# which silently discarded the candidate's own sources-root compile:/
-# source:/debug: settings whenever `--against` genuinely had none of its
-# own to leak them into, i.e. was itself live). The *legacy* `scan` CLI
-# branch (`$_SCAN_NEEDS_LEGACY_CLI == "true"`) never reaches this helper at
-# all -- it keeps every one of these flags as literal CLI options instead
-# of synthesizing a `--config` overlay -- so `$MODE == "scan"` here always
-# means the translated-to-`compare` branch.
+# `scan --against` -- both its *legacy* CLI branch and the branch
+# internally routed through `compare` (ADR-068 D2) -- stays single-sided
+# UNCONDITIONALLY, regardless of whether `--against` is itself live: unlike
+# `compare`'s genuinely independent, two-sided OLD/NEW model, native scan
+# resolves ONE shared `compile_context` for the whole invocation
+# (`resolve_compile_context()`, `cli_scan.py`) and applies it to BOTH the
+# baseline and the candidate -- `cli_scan_baseline.py`'s own
+# `_run_baseline_compare` threads that same `compile_context` into the
+# baseline's own `InputSpec`/`SideEvidence` too (a bare `-H`/`--include`
+# applies to both sides per ADR-040; even a genuinely live `--against`
+# reuses the candidate's own headers/compile context, with a warning, when
+# no `old=`-scoped ones are given). So the `--sources`-root's own
+# `compile:`/`source:`/`debug:` block being the intended, single source for
+# that ONE shared context is scan's own real, native, already-established
+# behavior -- NOT a "no other side to leak into" special case the way
+# dump's true single operand is (Codex review, fresh evidence, PR #1171,
+# tenth round: a ninth-round fix mistakenly modeled scan's translated branch
+# on `compare`'s asymmetric OLD/NEW liveness distinction, which does NOT
+# apply to scan at all -- excluding the sources-root promotion for a live
+# `--against` would have made the translated route silently diverge from
+# what `_discover_scan_project_config()` already does on the untranslated,
+# legacy route for the exact same `scan --against` request).
 #
 # The release-style directory/package `compare` fan-out never calls
 # add_compile_context_flags at all (it rejects every compile-context input
 # outright), so it never reaches this helper either.
 _compile_context_sources_pairwise() {
-  local old_like_operand
-  case "$MODE" in
-    compare) old_like_operand="${INPUT_OLD_LIBRARY:-}" ;;
-    scan) old_like_operand="${INPUT_AGAINST:-}" ;;
-    *) return ;;
-  esac
-  if ! _old_library_is_stored_snapshot "$old_like_operand"; then
+  if [[ "$MODE" == "compare" ]] && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
     echo "pairwise"
   fi
 }

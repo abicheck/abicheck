@@ -603,23 +603,31 @@ class TestCompileContextPairwiseOldLibraryClassification:
         assert "debug" not in doc
 
 
-class TestCompileContextPairwiseCoversTranslatedScan:
-    """Codex review, PR #1171 (P1, fresh evidence, ninth round): ``scan
-    --against`` internally routed through ``compare`` (ADR-068 D2) is,
-    structurally, a genuine two-sided ``compare $INPUT_AGAINST
-    $SCAN_ARTIFACT`` -- if ``--against`` is itself a LIVE binary, it
-    undergoes real header/debug extraction under the SAME shared compile
-    context as the scanned artifact, exactly like ``compare``'s own OLD
-    operand. ``_compile_context_sources_pairwise()`` used to be keyed on
-    ``$MODE`` alone (pairwise only for ``compare``, always single-sided for
-    ``scan``), which silently discarded the candidate's own sources-root
-    compile:/source:/debug: settings whenever a live ``--against`` had none
-    of its own to leak them into. Fixed by keying the decision on the
-    OLD-like operand for whichever mode actually has one
-    (``$INPUT_OLD_LIBRARY`` for ``compare``, ``$INPUT_AGAINST`` for the
-    translated ``scan`` branch), so both branches share one rule."""
+class TestCompileContextTranslatedScanStaysSingleSidedRegardlessOfLiveness:
+    """Codex review, PR #1171 (P1, fresh evidence, ninth AND tenth rounds).
 
-    def test_translated_scan_is_pairwise_when_against_is_a_live_binary(
+    The ninth round argued ``scan --against`` internally routed through
+    ``compare`` (ADR-068 D2) should be treated pairwise whenever
+    ``--against`` is itself a live binary, by analogy with ``compare``'s own
+    OLD/NEW liveness distinction. That analogy does not hold: unlike
+    ``compare``'s genuinely independent, two-sided model, native ``scan``
+    resolves ONE shared ``compile_context`` for the whole invocation
+    (``resolve_compile_context()``, ``abicheck/cli_scan.py``) and applies it
+    to BOTH the baseline and the candidate regardless of whether the
+    baseline is live -- ``cli_scan_baseline.py``'s own
+    ``_run_baseline_compare`` threads that identical ``compile_context``
+    into the baseline's own ``InputSpec``/``SideEvidence`` too. So the
+    ``--sources``-root's own ``compile:``/``source:``/``debug:`` block being
+    the intended, single source for that one shared context is scan's own
+    real, native, already-established behavior for a live baseline just as
+    much as for a stored one -- the tenth round found the ninth round's fix
+    would have made the Action's translated route silently diverge from
+    that native behavior for the exact same user-facing `scan --against`
+    request. Reverted: ``scan``'s translated branch is single-sided
+    UNCONDITIONALLY, the same as before the ninth round, proven here for
+    both operand shapes so neither direction regresses silently again."""
+
+    def test_translated_scan_is_single_sided_when_against_is_a_live_binary(
         self, tmp_path: Path
     ) -> None:
         (tmp_path / ".abicheck.yml").write_text(
@@ -628,7 +636,7 @@ class TestCompileContextPairwiseCoversTranslatedScan:
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
-            "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
+            "compile:\n  sysroot: /opt/sources-root-sysroot\n"
             "source:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
@@ -647,11 +655,12 @@ class TestCompileContextPairwiseCoversTranslatedScan:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        # Pairwise: the checkout-root's own compile.sysroot survives, and
-        # the sources-root's source:/debug: never reach the shared config.
-        assert doc["compile"]["sysroot"] == "/opt/checkout-sysroot"
-        assert "source" not in doc
-        assert "debug" not in doc
+        # Single-sided even though --against is a live binary: matches
+        # native scan's own one-shared-compile_context behavior, which
+        # applies the sources-root config to the baseline too.
+        assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
+        assert doc["source"] == {"method": "s6"}
+        assert doc["debug"] == {"format": "dwarf"}
 
     def test_translated_scan_is_single_sided_when_against_is_a_stored_baseline(
         self, tmp_path: Path
