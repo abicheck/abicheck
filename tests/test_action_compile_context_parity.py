@@ -1086,7 +1086,10 @@ class TestCompileContextMergesWithExplicitBuildConfig:
         )
         cmd, _ = _run_region(
             _DUMP_MODE_MARKER,
-            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_BUILD_CONFIG": str(build_config)},
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_BUILD_CONFIG": str(build_config),
+            },
             _DUMP_COMPILE_CONTEXT_START,
         )
         # Exactly one --config -- no leftover unmerged build-config entry.
@@ -1227,9 +1230,7 @@ class TestCompileContextMergesWithRelativeBuildConfig:
     ) -> None:
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        (config_dir / "ci.yml").write_text(
-            "compile:\n  std: c++17\n", encoding="utf-8"
-        )
+        (config_dir / "ci.yml").write_text("compile:\n  std: c++17\n", encoding="utf-8")
         cmd, stderr = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {
@@ -1278,7 +1279,10 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        assert doc["build"] == {"compile_db": "compile_commands.json", "system": "cmake"}
+        assert doc["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
         assert "build.compile_db" not in stderr
 
     def test_nonresolving_compile_db_is_still_stripped(self, tmp_path: Path) -> None:
@@ -1367,7 +1371,10 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         assert doc["severity"] == {"abi_breaking": "error"}
         # ...and the sources root's own build: block is present, not the
         # checkout-root config's (which had none) or silently dropped.
-        assert doc["build"] == {"compile_db": "compile_commands.json", "system": "cmake"}
+        assert doc["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
         assert "build.compile_db" not in stderr
 
     def test_sources_root_build_block_wins_over_a_conflicting_checkout_root_one(
@@ -1398,7 +1405,10 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        assert doc["build"] == {"compile_db": "compile_commands.json", "system": "cmake"}
+        assert doc["build"] == {
+            "compile_db": "compile_commands.json",
+            "system": "cmake",
+        }
 
     def test_no_sources_root_config_falls_back_to_checkout_root(
         self, tmp_path: Path
@@ -1421,6 +1431,36 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
         assert doc["build"] == {"system": "make"}
+
+    def test_sources_root_sources_block_is_also_carried(self, tmp_path: Path) -> None:
+        """Codex review, PR #1159 (P1, second round, fresh evidence): ``sources``
+        (plural -- ``public_headers``/``exclude``/``graph``) is a DISTINCT
+        top-level block from ``source`` (singular) -- both are read by
+        ``embed_build_source()``'s ``BuildConfig``, but the block-replacement
+        list only carried ``source`` (singular), silently narrowing a source
+        root's own ``sources.graph: full`` back to the checkout-root's (or
+        the default ``summary``) before ``collect_inline_pack()`` reads
+        ``cfg.graph_detail``."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "sources:\n  graph: full\n  exclude:\n    - vendor/**\n",
+            encoding="utf-8",
+        )
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["sources"] == {"graph": "full", "exclude": ["vendor/**"]}
+        assert doc["severity"] == {"abi_breaking": "error"}
 
 
 class TestCompileContextOverlayGenerationIsIsolated:

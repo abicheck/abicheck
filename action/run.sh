@@ -640,7 +640,15 @@ else:
                 )
                 sys.exit(1)
             if isinstance(sources_loaded, dict):
-                for _blk_key in ("build", "compile", "source", "debug"):
+                # "sources" (plural -- public_headers/exclude/graph) is a
+                # DISTINCT top-level block from "source" (singular,
+                # BuildConfig's own build.source_replay-facing settings) --
+                # both are read by embed_build_source()'s BuildConfig and
+                # both belong to whichever ONE file backs it (Codex review,
+                # fresh evidence: a source-root sources.graph: full silently
+                # narrowing to the checkout-root's/default summary before
+                # collect_inline_pack() reads cfg.graph_detail).
+                for _blk_key in ("build", "sources", "compile", "source", "debug"):
                     if _blk_key in sources_loaded:
                         base[_blk_key] = sources_loaded[_blk_key]
                     else:
