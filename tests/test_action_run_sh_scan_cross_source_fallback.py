@@ -647,8 +647,17 @@ class TestUnreadableReportDestinationTriggersFallback:
         # The negative control this fix must not break: a genuine dry run
         # never writes a real report either (nothing ran to check), but
         # must NOT be mistaken for the unreadable-destination case above --
-        # a dry run stays a single (or zero) invocation, never a real
-        # second `scan` call.
+        # a dry run stays a single invocation, never a real second call.
+        #
+        # An eighth Codex review round separately found scan's own dry-run
+        # preview genuinely diverges from compare's (different collect-mode
+        # resolver, different cost model), so an effective dry run now
+        # stays on the legacy `scan` CLI from the start (one `scan`
+        # invocation, not a `compare` invocation this fallback mechanism
+        # would then need to react to at all) -- this test's own assertion
+        # was `"scan" not in calls` before that fix (when dry runs still
+        # migrated to `compare`); now exactly one `scan` call is the
+        # correct single-invocation outcome.
         bindir, log = _stub_abicheck(
             tmp_path,
             compare_report=_compare_report_with_finding(
@@ -662,7 +671,7 @@ class TestUnreadableReportDestinationTriggersFallback:
         env["INPUT_DRY_RUN"] = "true"
         _run_action(tmp_path, env, bindir)
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert "scan" not in calls, calls
+        assert calls == ["scan"], calls
 
 
 def _compare_report_with_abi3_finding(verdict: str) -> dict:

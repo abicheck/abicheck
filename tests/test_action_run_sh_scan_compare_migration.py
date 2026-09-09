@@ -221,12 +221,6 @@ class TestScanMigratesToCompare:
         cmd = _run_cmd(_base_env(INPUT_PR_COMMENT="true"))
         assert "--write" not in cmd, cmd
 
-    def test_dry_run_maps_to_dry_run_flag_no_output(self) -> None:
-        cmd = _run_cmd(_base_env(INPUT_DRY_RUN="true", INPUT_OUTPUT_FILE="out.json"))
-        assert "--dry-run" in cmd
-        assert "-o" not in cmd
-
-
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForUnmigratedCapabilities:
     """Every capability `compare` cannot reach yet keeps `mode: scan`
@@ -566,6 +560,12 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
     auto-discovery applies only when it's omitted) -- and it required
     `method` to start a line, missing YAML's flow-style spelling
     (`source: {method: auto}`, on one line).
+
+    An eighth review round found one more spelling gap: valid YAML permits
+    quoting any mapping key (`source: {"method": auto}`, or an indented
+    `"method": auto`), which the project-config loader accepts and `scan`
+    resolves identically to the unquoted spelling, but the check's own
+    pattern required a bare `method` immediately after its prefix.
     """
 
     def _run_cmd_in(self, cwd: Path, env_extra: dict[str, str]) -> list[str]:
@@ -607,6 +607,27 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
         (tmp_path / ".abicheck.yml").write_text(
             f"source: {{method: {method}}}\n", encoding="utf-8"
         )
+        cmd = self._run_cmd_in(tmp_path, _base_env())
+        assert cmd[1] == "scan", cmd
+
+    @pytest.mark.parametrize(
+        "config_text",
+        [
+            'source: {"method": auto}\n',
+            "source: {'method': auto}\n",
+            'source:\n  "method": auto\n',
+            "source:\n  'method': s1\n",
+        ],
+    )
+    def test_quoted_source_method_key_stays_on_scan(
+        self, tmp_path: Path, config_text: str
+    ) -> None:
+        # Eighth Codex review round, P1, fresh evidence: valid YAML permits
+        # quoting any mapping key -- the project-config loader accepts it
+        # and `scan` resolves it identically to the unquoted spelling, but
+        # the original pattern required a bare `method` immediately after
+        # its prefix.
+        (tmp_path / ".abicheck.yml").write_text(config_text, encoding="utf-8")
         cmd = self._run_cmd_in(tmp_path, _base_env())
         assert cmd[1] == "scan", cmd
 
@@ -813,3 +834,100 @@ class TestMigratedCompareReusesHeadersForNativeBaseline:
         cmd = _run_cmd(_base_env(INPUT_AGAINST=_native_lib(tmp_path)))
         assert cmd[1] == "compare", cmd
         assert not any(tok.startswith("old=") for tok in cmd), cmd
+
+    def test_new_include_reused_for_old_side_alongside_header(
+        self, tmp_path: Path
+    ) -> None:
+        # Eighth Codex review round, P1, fresh evidence:
+        # `_resolve_baseline_header_scope` reuses the candidate's own
+        # includes for the old side in this exact branch too, not just its
+        # headers -- reproduced directly (the un-fixed migrated command
+        # failed parsing the old header with a "types.h not found" error
+        # scan itself did not hit, since the reused header's own include
+        # path never reached the old side).
+        header = str(tmp_path / "api.h")
+        include_dir = str(tmp_path / "include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=header,
+                INPUT_NEW_INCLUDE=include_dir,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={include_dir}" in cmd, cmd
+        assert f"new={include_dir}" in cmd, cmd
+
+    def test_explicit_old_include_is_not_overridden(self, tmp_path: Path) -> None:
+        # A deliberate refinement over scan's own literal behavior (which
+        # ignores `old-include` entirely whenever `old-header` is absent):
+        # an explicitly-given `old-include` must still win here.
+        header = str(tmp_path / "api.h")
+        new_include = str(tmp_path / "new-include")
+        old_include = str(tmp_path / "old-include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=header,
+                INPUT_NEW_INCLUDE=new_include,
+                INPUT_OLD_INCLUDE=old_include,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={old_include}" in cmd, cmd
+        assert f"old={new_include}" not in cmd, cmd
+
+    def test_no_include_reuse_without_new_include(self, tmp_path: Path) -> None:
+        # No `new-include` at all -- only the header gets reused for the
+        # old side (covered above), no `-I old=...` is added.
+        header = str(tmp_path / "api.h")
+        cmd = _run_cmd(
+            _base_env(INPUT_AGAINST=_native_lib(tmp_path), INPUT_NEW_HEADER=header)
+        )
+        assert cmd[1] == "compare", cmd
+        old_tokens = [tok for tok in cmd if tok.startswith("old=")]
+        assert old_tokens == [f"old={header}"], cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForDryRun:
+    """Eighth Codex review round, P2 (fresh evidence): scan's own dry-run
+    preview (``action.yml``'s documented "scan preview" contract) reports
+    the PR preset's risk-resolved collect mode and scan-specific per-layer
+    candidate cost, which ``compare --dry-run``'s own preview does not
+    reproduce (a different collect-mode resolver, a different cost model,
+    an old-plus-new comparison cost rather than a single-candidate one) --
+    the same class of collect-mode/cost divergence the ``since``/
+    ``changed-path`` and ``build-info``-without-``sources`` conditions
+    already guard, just for the dry-run preview's own content."""
+
+    def test_dry_run_true_stays_on_scan(self) -> None:
+        cmd = _run_cmd(_base_env(INPUT_DRY_RUN="true"))
+        assert cmd[1] == "scan", cmd
+
+    def test_estimate_alias_stays_on_scan(self) -> None:
+        cmd = _run_cmd(_base_env(INPUT_ESTIMATE="true"))
+        assert cmd[1] == "scan", cmd
+
+    def test_dry_run_via_extra_args_stays_on_scan(self) -> None:
+        cmd = _run_cmd(_base_env(INPUT_EXTRA_ARGS="--dry-run"))
+        assert cmd[1] == "scan", cmd
+
+    def test_dry_run_false_still_migrates(self) -> None:
+        cmd = _run_cmd(_base_env(INPUT_DRY_RUN="false"))
+        assert cmd[1] == "compare", cmd
+
+    def test_no_dry_run_still_migrates(self) -> None:
+        cmd = _run_cmd(_base_env())
+        assert cmd[1] == "compare", cmd
+
+    def test_dry_run_maps_to_dry_run_flag_no_output(self) -> None:
+        # Relocated from `TestScanMigratesToCompare` once this round's fix
+        # kept an effective dry run on the legacy CLI -- `scan`'s own
+        # `--dry-run` handling maps identically (flag forwarded, `-o`
+        # skipped entirely, mutually exclusive on both commands), so this
+        # assertion still holds, just via the legacy builder now.
+        cmd = _run_cmd(_base_env(INPUT_DRY_RUN="true", INPUT_OUTPUT_FILE="out.json"))
+        assert cmd[1] == "scan", cmd
+        assert "--dry-run" in cmd
+        assert "-o" not in cmd

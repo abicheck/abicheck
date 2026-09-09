@@ -794,7 +794,18 @@ _config_sets_source_method() {
   # (`,`/`{` immediately before `method` even outside a real `source:`
   # mapping) is safe by this function's own established principle -- it
   # only ever costs staying on the already-correct legacy CLI.
-  grep -Eq '(^|[[:space:]{,])method[[:space:]]*:[[:space:]]*[^[:space:]#]' "$_cfg" 2>/dev/null
+  #
+  # Also matches a quoted key (`"method"`/`'method'`, e.g. `source:
+  # {"method": auto}` or an indented `"method": auto` -- eighth Codex
+  # review round, fresh evidence: valid YAML permits quoting any mapping
+  # key, the project-config loader accepts it, and `scan --dry-run`
+  # resolves it same as the unquoted spelling, but the original pattern
+  # required a bare `method` immediately after the prefix). Double-quoted
+  # bash string here (not single-quoted, unlike every other inline pattern
+  # in this file) so the literal `"` inside the character class doesn't
+  # need a fragile escape-and-concatenate dance; the pattern itself
+  # contains no `$`/backtick that bash would otherwise expand.
+  grep -Eq "(^|[[:space:]{,])[\"']?method[\"']?[[:space:]]*:[[:space:]]*[^[:space:]#]" "$_cfg" 2>/dev/null
 }
 
 _extra_args_forces_legacy_scan_cli() {
@@ -2122,6 +2133,19 @@ elif [[ "$MODE" == "scan" ]]; then
   #     `--include-system-declarations` must be requested explicitly) --
   #     without it, `compare`'s own dependency-scope comparability check
   #     rejects the pair outright as `NOT_COMPARABLE` where `scan` succeeds.
+  #   - `dry-run: true` (or the `estimate` alias, already normalized to it
+  #     above) or an effective `--dry-run` reaching a migrated invocation
+  #     through `extra-args` (eighth Codex review round, P2, fresh
+  #     evidence): scan's own dry-run preview (`action.yml`'s documented
+  #     "scan preview" contract) reports the PR preset's risk-resolved
+  #     collect mode and scan-specific per-layer candidate cost, which
+  #     `compare --dry-run`'s own preview does not reproduce (a different
+  #     collect-mode resolver, a different cost model, an old-plus-new
+  #     comparison cost rather than a single-candidate one) -- the same
+  #     class of collect-mode/cost divergence the `since`/`changed-path`
+  #     and `build-info`-without-`sources` conditions above already guard,
+  #     just for the dry-run preview's own content rather than a real run's
+  #     findings.
   #   - `extra-args` itself carries a scan-only flag or a non-`json`
   #     `--format` override (`_extra_args_forces_legacy_scan_cli`, defined
   #     above): every condition in this list so far only inspects a
@@ -2199,6 +2223,8 @@ elif [[ "$MODE" == "scan" ]]; then
      || [[ -z "${INPUT_AGAINST:-}" ]] \
      || _is_release_style_operand "${INPUT_AGAINST:-}" \
      || [[ "${INPUT_FORMAT:-text}" != "json" ]] \
+     || [[ "${INPUT_DRY_RUN:-false}" == "true" ]] \
+     || _extra_args_has_dry_run_flag \
      || _migrated_compare_against_declares_full_dependency_scope "${INPUT_AGAINST}" \
      || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
@@ -2633,6 +2659,22 @@ elif [[ "$MODE" == "scan" ]]; then
     echo "::warning::mode: scan (migrated to 'abicheck compare' internally): --against '${INPUT_AGAINST}' is a native library parsed with the new build's header(s) (new-header/public-header-dir) -- reusing them for the old side too, matching scan's own fallback. If the old library's real public headers differ from the new build's, pass old-header explicitly (the diff may otherwise be wrong/noisy)."
     add_sided_flag "-H" "old" "${INPUT_NEW_HEADER:-}"
     add_sided_flag "-H" "old" "${INPUT_PUBLIC_HEADER_DIR:-}"
+    # Eighth Codex review round, P1, fresh evidence: the reused header(s)
+    # can themselves depend on an include path only given via
+    # `new-include` -- `_resolve_baseline_header_scope` reuses the
+    # candidate's OWN includes for the old side in this exact branch too,
+    # not just its headers (reproduced directly: the migrated command
+    # failed parsing the old header with a "types.h not found" error scan
+    # itself did not hit). Only fills `old=` when no `old-include` was
+    # separately given -- a real user-provided old-include is honored, a
+    # deliberate refinement over scan's own literal behavior (which
+    # ignores `old-include` entirely whenever `old-header` is absent, per
+    # `_resolve_baseline_header_scope`'s own branching on `baseline_headers`
+    # alone); this direction only ever adds precision an explicit user
+    # input deserves, never discards one silently.
+    if [[ -z "${INPUT_OLD_INCLUDE:-}" && -n "${INPUT_NEW_INCLUDE:-}" ]]; then
+      add_sided_flag "-I" "old" "${INPUT_NEW_INCLUDE:-}"
+    fi
   fi
 
   add_single_flag "--lang" "${INPUT_LANG:-}"

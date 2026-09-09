@@ -152,3 +152,19 @@ it should read in CHANGELOG.md. Delete the other sections.
   leaving it a headerless binary next to a header-evidenced new side, and
   the un-fixed migrated `compare` invocation left the old side with no
   header at all in exactly this shape, changing findings.
+  An eighth review round closed three more gaps: the native-baseline
+  header-reuse fallback above now also reuses the candidate's own
+  `new-include` for the old side (unless an explicit `old-include` was
+  given) -- the reused header can itself depend on an include path only
+  given via `new-include`, and without this the migrated invocation could
+  fail parsing the old header entirely where `scan` succeeded; the
+  `.abicheck.yml`/`.abicheck.yaml` `source.method` detection now also
+  matches a quoted YAML key (`source: {"method": auto}`, or an indented
+  `"method": auto`), which valid YAML permits and the project-config
+  loader accepts, but the original pattern required a bare `method`; and
+  an effective `dry-run: true` (or the `estimate` alias, or `--dry-run` via
+  `extra-args`) now also stays on the legacy CLI -- scan's own dry-run
+  preview (`action.yml`'s documented "scan preview" contract) reports the
+  PR preset's risk-resolved collect mode and scan-specific per-layer
+  candidate cost, which `compare --dry-run`'s own preview does not
+  reproduce.
