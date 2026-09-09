@@ -813,6 +813,57 @@ _config_sets_source_method() {
   grep -Eq "(^|[[:space:]{,])[\"']?method[\"']?[[:space:]]*:[[:space:]]*[^[:space:]#]" "$_cfg" 2>/dev/null
 }
 
+# Ninth Codex review round, P1, fresh evidence: a sided `new=` header value
+# reaching the migrated `compare` invocation only through
+# `extra-args: -H new=PATH`/`--header new=PATH` -- appended to `CMD` only at
+# the very end of this script (`CMD+=($INPUT_EXTRA_ARGS)`), well AFTER
+# `_build_migrated_compare_cmd`'s own native-baseline header-reuse fallback
+# already ran and decided whether OLD needs a reused header at all. `scan`'s
+# own `_resolve_baseline_header_scope` folds `extra-args`' `-H`/`--header`
+# values into the SAME candidate `headers` list the dedicated `new-header`/
+# `public-header-dir` inputs populate, with no distinction between the two
+# sources -- so this is the identical class of gap `--config` reaching
+# through `extra-args` already had fixed for it (a seventh-round finding), a
+# few branches above. Prints each sided `new=`-scoped value found, one per
+# line; a BARE (unsided) `-H`/`--header` value needs no help here and is
+# deliberately not returned -- `compare` already applies an unsided value to
+# BOTH sides on its own (ADR-040's base/old/new fan-out), so OLD is never
+# left headerless in that shape to begin with.
+_extra_args_new_side_header_values() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      -H | --header)
+        case "$_value" in
+          new=*)
+            printf '%s\n' "${_value#new=}"
+            ;;
+        esac
+        ;;
+    esac
+  done <<<"$(_extra_args_options)"
+}
+
+# Sibling of `_extra_args_new_side_header_values` above, same reasoning, for
+# `-I`/`--include`: a reused header can itself depend on an include path only
+# given via `extra-args: -I new=PATH`/`--include new=PATH`, the exact
+# same-shaped gap the eighth review round already closed for the dedicated
+# `new-include` input.
+_extra_args_new_side_include_values() {
+  local _name _value
+  while IFS=$'\t' read -r _name _value; do
+    case "$_name" in
+      -I | --include)
+        case "$_value" in
+          new=*)
+            printf '%s\n' "${_value#new=}"
+            ;;
+        esac
+        ;;
+    esac
+  done <<<"$(_extra_args_options)"
+}
+
 _extra_args_forces_legacy_scan_cli() {
   local _name _value _write_count=0
   while IFS=$'\t' read -r _name _value; do
@@ -2768,12 +2819,25 @@ elif [[ "$MODE" == "scan" ]]; then
   # `existing`, a new library exporting `existing`+`added`, only
   # `new-header` given -- `scan` reports no change, migrated `compare`
   # reported `func_added`).
+  local _extra_new_headers _extra_new_header _extra_new_includes _extra_new_include
+  _extra_new_headers="$(_extra_args_new_side_header_values)"
   if [[ -z "${INPUT_OLD_HEADER:-}" ]] \
-     && { [[ -n "${INPUT_NEW_HEADER:-}" ]] || [[ -n "${INPUT_PUBLIC_HEADER_DIR:-}" ]]; } \
+     && { [[ -n "${INPUT_NEW_HEADER:-}" ]] || [[ -n "${INPUT_PUBLIC_HEADER_DIR:-}" ]] \
+          || [[ -n "$_extra_new_headers" ]]; } \
      && _migrated_compare_against_is_native_library "${INPUT_AGAINST}"; then
-    echo "::warning::mode: scan (migrated to 'abicheck compare' internally): --against '${INPUT_AGAINST}' is a native library parsed with the new build's header(s) (new-header/public-header-dir) -- reusing them for the old side too, matching scan's own fallback. If the old library's real public headers differ from the new build's, pass old-header explicitly (the diff may otherwise be wrong/noisy)."
+    echo "::warning::mode: scan (migrated to 'abicheck compare' internally): --against '${INPUT_AGAINST}' is a native library parsed with the new build's header(s) (new-header/public-header-dir/extra-args -H new=) -- reusing them for the old side too, matching scan's own fallback. If the old library's real public headers differ from the new build's, pass old-header explicitly (the diff may otherwise be wrong/noisy)."
     add_sided_flag "-H" "old" "${INPUT_NEW_HEADER:-}"
     add_sided_flag "-H" "old" "${INPUT_PUBLIC_HEADER_DIR:-}"
+    # Ninth Codex review round, P1, fresh evidence: a sided `new=` header
+    # value reaching this invocation only through `extra-args -H new=PATH`/
+    # `--header new=PATH` (see `_extra_args_new_side_header_values`'s own
+    # docstring) is reused for OLD here too, the same way the dedicated
+    # `new-header`/`public-header-dir` inputs already are just above.
+    if [[ -n "$_extra_new_headers" ]]; then
+      while IFS= read -r _extra_new_header; do
+        [[ -n "$_extra_new_header" ]] && add_sided_flag "-H" "old" "$_extra_new_header"
+      done <<<"$_extra_new_headers"
+    fi
     # Eighth Codex review round, P1, fresh evidence: the reused header(s)
     # can themselves depend on an include path only given via
     # `new-include` -- `_resolve_baseline_header_scope` reuses the
@@ -2789,6 +2853,20 @@ elif [[ "$MODE" == "scan" ]]; then
     # input deserves, never discards one silently.
     if [[ -z "${INPUT_OLD_INCLUDE:-}" && -n "${INPUT_NEW_INCLUDE:-}" ]]; then
       add_sided_flag "-I" "old" "${INPUT_NEW_INCLUDE:-}"
+    fi
+    # Ninth Codex review round (same finding, generalized to -I/--include):
+    # a sided `new=` include value reaching this invocation only through
+    # `extra-args -I new=PATH`/`--include new=PATH` is reused for OLD here
+    # too, for the same reason the dedicated `new-include` input is above --
+    # only when no `old-include` was separately given, same non-discarding
+    # direction as the dedicated-input case.
+    if [[ -z "${INPUT_OLD_INCLUDE:-}" ]]; then
+      _extra_new_includes="$(_extra_args_new_side_include_values)"
+      if [[ -n "$_extra_new_includes" ]]; then
+        while IFS= read -r _extra_new_include; do
+          [[ -n "$_extra_new_include" ]] && add_sided_flag "-I" "old" "$_extra_new_include"
+        done <<<"$_extra_new_includes"
+      fi
     fi
   fi
 

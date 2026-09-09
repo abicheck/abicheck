@@ -211,3 +211,23 @@ it should read in CHANGELOG.md. Delete the other sections.
   (timestamp/pid/ppid/full argv per stub invocation, harmless and left in
   place) is what surfaced the real third command line and made this
   traceable at all.
+  A tenth review round closed one more gap in the native-baseline
+  header-reuse fallback: a sided `new=` header/include value reaching the
+  migrated invocation only through `extra-args: -H new=PATH`/`--header
+  new=PATH` (or `-I new=PATH`/`--include new=PATH`) was invisible to the
+  reuse check, since `extra-args` is appended to the real command line only
+  at the very end of this script -- well after the fallback already decided
+  whether OLD needs a reused header at all. `scan`'s own
+  `_resolve_baseline_header_scope` folds `extra-args`' `-H`/`--header`
+  values into the SAME candidate `headers` list the dedicated `new-header`/
+  `public-header-dir` inputs populate, with no distinction between the two
+  sources, so the migrated `compare` invocation left OLD headerless in
+  exactly this shape too. Fixed by two new helpers
+  (`_extra_args_new_side_header_values`/`_extra_args_new_side_include_values`)
+  that extract any sided `new=`-scoped `-H`/`--header`/`-I`/`--include`
+  value from `extra-args` and fold it into the same reuse fallback the
+  dedicated inputs already trigger. A BARE (unsided) `-H`/`--header` value
+  in `extra-args` deliberately needs no such help -- `compare` already
+  applies an unsided value to BOTH sides on its own (ADR-040's own
+  base/old/new fan-out), so OLD is never left headerless in that shape to
+  begin with.

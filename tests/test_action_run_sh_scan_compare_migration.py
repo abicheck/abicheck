@@ -1039,6 +1039,96 @@ class TestMigratedCompareReusesHeadersForNativeBaseline:
         old_tokens = [tok for tok in cmd if tok.startswith("old=")]
         assert old_tokens == [f"old={header}"], cmd
 
+    def test_extra_args_sided_new_header_reused_for_old_side(
+        self, tmp_path: Path
+    ) -> None:
+        # Ninth Codex review round, P1, fresh evidence: a sided `new=` header
+        # value reaching the migrated invocation only through
+        # `extra-args: -H new=PATH` is invisible to the dedicated `new-header`
+        # input check above -- it is appended to the real command line only
+        # at the very end of this script, well after this reuse fallback
+        # already decided whether OLD needs a header. Without accounting for
+        # it, OLD was left headerless in exactly the same shape the dedicated
+        # `new-header` input already fixed for.
+        header = str(tmp_path / "api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_EXTRA_ARGS=f"-H new={header}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={header}" in cmd, cmd
+
+    def test_extra_args_bare_header_needs_no_reuse(self, tmp_path: Path) -> None:
+        # A BARE (unsided) `-H`/`--header` value in extra-args needs no
+        # reuse help -- `compare` already applies it to both sides on its
+        # own (ADR-040's base/old/new fan-out), so the fallback must not add
+        # a redundant/conflicting sided `old=` entry for it.
+        header = str(tmp_path / "api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_EXTRA_ARGS=f"-H {header}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert not any(tok.startswith("old=") for tok in cmd), cmd
+
+    def test_extra_args_sided_old_header_already_present_not_overridden(
+        self, tmp_path: Path
+    ) -> None:
+        # An explicit dedicated `old-header` still wins over a sided `new=`
+        # value arriving through extra-args -- the same non-overriding
+        # direction the dedicated-input case already guarantees.
+        new_header = str(tmp_path / "new-api.h")
+        old_header = str(tmp_path / "old-api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_OLD_HEADER=old_header,
+                INPUT_EXTRA_ARGS=f"-H new={new_header}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={old_header}" in cmd, cmd
+        assert f"old={new_header}" not in cmd, cmd
+
+    def test_extra_args_sided_new_include_reused_for_old_side(
+        self, tmp_path: Path
+    ) -> None:
+        # Same class of gap as the header case above, for `-I`/`--include`:
+        # a sided `new=` include value reaching this invocation only through
+        # `extra-args: -I new=PATH` is reused for OLD too, mirroring the
+        # dedicated `new-include` input's own reuse.
+        header = str(tmp_path / "api.h")
+        include_dir = str(tmp_path / "include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_NEW_HEADER=header,
+                INPUT_EXTRA_ARGS=f"-I new={include_dir}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={include_dir}" in cmd, cmd
+
+    def test_extra_args_new_header_alone_does_not_force_legacy_cli(
+        self, tmp_path: Path
+    ) -> None:
+        # The reuse fallback firing must not itself force the legacy CLI --
+        # this stays on the migrated `compare` path, just with the reused
+        # header added.
+        header = str(tmp_path / "api.h")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_EXTRA_ARGS=f"--header new={header}",
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={header}" in cmd, cmd
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForDryRun:
