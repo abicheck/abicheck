@@ -386,6 +386,49 @@ class TestScanPolicyFlagsOmittedWithoutBaseline:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestLegacyScanSeverityPresetForwarding:
+    """Codex review, PR #1172, round 14: this legacy-CLI branch never
+    forwarded ``INPUT_SEVERITY_PRESET`` at all, even though `severity_preset`
+    is in `cli_scan.py`'s own `_COMPARISON_ONLY_FLAGS` (the same "--against
+    only" set `--policy`/`--suppress` belong to, see
+    ``TestScanPolicyFlagsOmittedWithoutBaseline`` above) -- while the
+    translated `compare` branches (both the general one and the native-
+    baseline live-comparison one) already forward it. The identical `mode:
+    scan` request with `severity-preset: strict`/`info-only` set therefore
+    changed gate labels/exit code solely depending on whether the routing
+    predicate picked the legacy branch (e.g. a stored-JSON baseline) or a
+    translated `compare` branch (e.g. a live baseline) for the same nominal
+    request.
+    """
+
+    def test_scan_with_baseline_forwards_severity_preset(self) -> None:
+        # No INPUT_DEPTH -- forces the legacy-CLI branch (same as every
+        # other test in TestScanPolicyFlagsOmittedWithoutBaseline above).
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_AGAINST": "old.so",
+                "INPUT_SEVERITY_PRESET": "strict",
+            }
+        )
+        i = cmd.index("--severity-preset")
+        assert cmd[i + 1] == "strict"
+
+    def test_audit_only_scan_omits_severity_preset(self) -> None:
+        # Same "--against only" contract as --policy/--suppress: no
+        # baseline means cli_scan.py rejects this flag outright.
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_SEVERITY_PRESET": "strict",
+            }
+        )
+        assert "--severity-preset" not in cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareBundleSystemProvidersForwarding:
     """CLI cleanup phase two, PR J: --bundle-system-providers and its Action
     input were both removed -- the system-provider allow-list extension is

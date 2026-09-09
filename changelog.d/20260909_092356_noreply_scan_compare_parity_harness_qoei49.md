@@ -27,3 +27,12 @@
   surface-metrics flags specifically — silently *succeeded* against a
   different finding set/gate scope than the caller's `scan`-shaped workflow
   was written against.
+- **A `mode: scan` step's `severity-preset` input now applies consistently
+  whichever internal route the Action picks for it.** The legacy `scan` CLI
+  branch (selected for, e.g., a stored-JSON baseline) never forwarded
+  `severity-preset` at all, while the translated `compare` branches
+  (selected for a live baseline) already did — so the identical `mode:
+  scan` request with `severity-preset: strict`/`info-only` set could change
+  gate labels and exit code solely because of which route the baseline
+  shape happened to select, not because of anything the step itself asked
+  for differently.

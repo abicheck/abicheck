@@ -3268,6 +3268,18 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
     # the profile, exactly as the removed `--policy-file` flag did.
     add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
     add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
+    # `severity_preset` is in `_COMPARISON_ONLY_FLAGS` too, same as
+    # `--policy`/`--suppress` above -- this legacy-CLI branch never forwarded
+    # it at all (Codex review, PR #1172, round 14), so the identical `mode:
+    # scan` request with `severity-preset: strict` set changed gate
+    # labels/exit code depending solely on whether the routing predicate
+    # picked this branch (a stored-JSON baseline) or the translated `compare`
+    # branch (a live baseline) -- the latter already forwards it (see the two
+    # `add_single_flag "--severity-preset" ...` call sites in this file's own
+    # compare-command assembly). Forwarding it here closes that divergence
+    # instead of making `severity-preset` itself force the legacy route,
+    # which would just be a second, needless capability loss.
+    add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
     # P0.4, same "--against only" contract: cli_scan.py rejects this flag
     # outright without a baseline (_COMPARISON_ONLY_FLAGS).
     if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
