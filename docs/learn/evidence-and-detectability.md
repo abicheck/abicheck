@@ -28,8 +28,8 @@ generated: false
     cannot see, and the `--depth` dial that collects them.
     **Worked example** — [What Each Level Sees](what-each-level-sees.md): one
     tiny library walked up every level, with the actual data.
-    **Flags** — [Evidence Depth](../use/evidence-depth.md): the `scan`
-    command reference with recipes.
+    **Flags** — [Evidence Depth](../use/evidence-depth.md): the `--depth`
+    flag and recipe reference.
 
 This page is the conceptual companion to the practical
 [Limitations](limitations.md) and [Tool Comparison](../reference/tool-comparison.md)
