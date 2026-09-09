@@ -373,7 +373,10 @@ The calibrated JSON decode resource limit, demoted off the CLI (Phase 7g,
 one-comparison-product.md §4.1/§3 #21) — **no CLI spelling any more**. One
 key today: `max_bundle_facts_decode_nodes:` (default unset, applying
 [`bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`](../reference/python-api-reference.md),
-`20,000,000`) — the former `compare --max-json-object-nodes`: overrides the
+`1,000,000` — deliberately kept conservative rather than raised to cover
+a real large-blob need, since raising the *default* would widen every
+unconfigured/untrusted run's own decode-bomb ceiling) — the former
+`compare --max-json-object-nodes`: overrides the
 JSON container/scalar-token budget when decoding a stored `BundleFacts`
 document (`OLD_INPUT`, from a prior `compare --bundle-facts-out`). A real
 per-library facts blob for a large, template-heavy library (e.g.

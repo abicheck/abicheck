@@ -509,9 +509,12 @@ analysis ran:
 ```
 
 `bundle_findings` is `[]` (empty list) when bundle analysis found nothing.
-Bundle analysis always runs on a directory/package `compare` (Phase 7d,
-one-comparison-product.md §4.1) — there is no run that omits these keys any
-more.
+Bundle analysis is always *attempted* on a directory/package `compare`
+now — there is no flag to opt out any more (Phase 7d, one-comparison-
+product.md §4.1). The keys are still omitted in two narrower cases that
+predate this change and are unrelated to it: no libraries matched on
+either side (and no manifest), or the bundle-level snapshot build itself
+failed (a warning is printed; the run does not abort).
 
 Each finding has:
 

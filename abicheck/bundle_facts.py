@@ -114,11 +114,11 @@ DEFAULT_MAX_LIBRARY_COUNT = 20_000
 #: payload of ~2M empty objects; an array-only payload bypassed an
 #: earlier, object-only cap identically -- both confirmed empirically).
 #: See `storage.json_budget` for the shared object+array pre-scan (Codex).
-#: **Calibrated** (one-comparison-product.md §4.1/§3 #21, Phase 7g),
-#: replacing the never-measured `1_000_000`. A real facts blob (SYCL/DPC++,
-#: oneDAL-scale headers) can need well over this -- `read_bundle_facts_archive`
-#: and friends accept a `max_json_object_nodes` override, from `.abicheck.yml`.
-DEFAULT_MAX_JSON_OBJECT_NODES = 20_000_000
+#: Kept conservative (Codex review, PR #1174): a real oneDAL-scale blob
+#: can need ~5.8-17M nodes (one-comparison-product.md §4.1/§3 #21), but
+#: raising the *default* would widen every untrusted run's decode-bomb
+#: ceiling. Set `resource_limits.max_bundle_facts_decode_nodes` instead.
+DEFAULT_MAX_JSON_OBJECT_NODES = 1_000_000
 
 #: The fingerprint value used when no multibuild variant applies (every
 #: caller today) -- G38 Phase 3 populates a real per-variant fingerprint;

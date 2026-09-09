@@ -219,7 +219,7 @@ identity; **DELETE** — leaves the product.
 | 18 | Analysis completeness/assurance | `analysis_assurance`, `--require-complete-analysis` (both commands) | `compare` (already present) | MERGE | Vision E-S1/S2 landed |
 | 19 | Budget guard (`--budget`) | `scan_engine._check_scan_budget`, `_BudgetOverflow`, exit `5` | `compare --budget`, `ExitDecision` operational axis | ADVANCED KEEP; default in CONFIG | ADR-064 axis already modelled |
 | 20 | Finding cap (`--max-findings`) | `cli_scan_baseline` summary truncation | — | DELETE | `--write json=` guarantees the full result (ADR-068 D4) |
-| 21 | JSON resource budget (`--max-json-object-nodes` on `compare`) | `bundle_facts` decode | execution/storage config, calibrated `resource_limits:` | CONFIG | **Landed** (Phase 7g). Real bytes-per-node calibration against a synthetic oneDAL-scale corpus (`scripts/benchmark_scaling._build_onedal_large_surface`, ~9.3 bytes/node, stable across scale) found the previous `DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` already below the single-library, 25k-function oneDAL-scale case's own 5.8M nodes by ~6x — recalibrated to `20_000_000` (covers a 50k-function single library and a 25k-function/3-library bundle with real headroom; see `bundle_facts.py`'s own docstring for the full measurement table). The CLI flag is gone; `.abicheck.yml`'s `resource_limits.max_bundle_facts_decode_nodes` (int) is its only source now. Deliberately kept node-based rather than re-expressed as a memory size (the design cli-cleanup-phase-two.md's own now-superseded text proposed) — converting a memory budget to a node budget via this measured *legitimate-payload* ratio would size the node budget for an adversarial payload's much lower bytes/node density too, silently weakening the exact container-count defense `storage.json_budget` exists to provide |
+| 21 | JSON resource budget (`--max-json-object-nodes` on `compare`) | `bundle_facts` decode | execution/storage config, calibrated `resource_limits:` | CONFIG | **Landed** (Phase 7g). Real bytes-per-node calibration against a synthetic oneDAL-scale corpus (`scripts/benchmark_scaling._build_onedal_large_surface`, ~9.3 bytes/node, stable across scale) found the existing `DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` already ~6x below the single-library, 25k-function oneDAL-scale case's own 5.8M nodes — the CLI flag's own documented "can need well over this" escape hatch confirmed as the common case, not an edge one, for its own named scenario. The CLI flag is gone; `.abicheck.yml`'s `resource_limits.max_bundle_facts_decode_nodes` (int) is the only way to raise the budget now. The *default* itself is deliberately left unchanged, not recalibrated up to match the measurement (Codex review, PR #1174: raising the ambient default would raise every unconfigured/untrusted run's own decode-bomb ceiling by the same factor) — see `bundle_facts.py`'s own docstring for the full measurement table and this reasoning. Deliberately kept node-based rather than re-expressed as a memory size (the design cli-cleanup-phase-two.md's own now-superseded text proposed) — converting a memory budget to a node budget via this measured *legitimate-payload* ratio would size the node budget for an adversarial payload's much lower bytes/node density too, silently weakening the exact container-count defense `storage.json_budget` exists to provide |
 | 22 | Public-header boundary (`--public-header-dir`) | `cli_scan_baseline._public_provenance_set` | `-H` directory provenance + `.abicheck.yml` `scope.public_header_dirs` | MERGE | **Landed** for `compare`'s directory/config sources (`provenance.apply_provenance`, fed from a `-H` directory argument and/or the new `scope.public_header_dirs` config key — distinct from the pre-existing `scope.public` boolean). Directory-vs-file provenance rule preserved verbatim; `scan --public-header-dir` itself is untouched |
 | 23 | Per-check severity (`--crosscheck KEY=LEVEL`) | `CrosscheckConfig` | `--policy` / `.abicheck.yml` `policy.overrides` (they are `ChangeKind`s) | MERGE into policy | Each check has a registry entry |
 | 24 | Severity / gate / policy / packs | shared decorators | unchanged on `compare` | MERGE | — |
@@ -698,40 +698,54 @@ three guards, rather than left "pending":
   itself is a stable project artifact. Revisit when G42 (named deployment
   environments and provider resolution) lands.
 
-**7g: done.** `--max-json-object-nodes` is gone from `compare`'s CLI.
-Calibrated a real replacement default first, per this phase's own "do not
-pick a number and call it calibrated" bar: the previous
-`DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` was never measured against
-anything — this repo's own fixture corpus tops out at ~10 KB, nowhere near
-the "large, template-heavy SYCL/DPC++ library" scenario the flag's own help
-text named. Measured real bytes-per-node density (serialize → real
+**7g: done.** `--max-json-object-nodes` is gone from `compare`'s CLI,
+replaced by `.abicheck.yml`'s `resource_limits.max_bundle_facts_decode_nodes`
+(a new `INT_SUBKEYS`-typed config key, `buildsource/build_config_schema.py`).
+Measured a real bytes-per-node density first, per this phase's own "do not
+pick a number and call it calibrated" bar — this repo's own fixture corpus
+tops out at ~10 KB, nowhere near the "large, template-heavy SYCL/DPC++
+library" scenario the flag's own help text named, so the corpus is
+synthetic, sized like the actual named use case
+(`scripts/benchmark_scaling._build_onedal_large_surface`, modeling oneDAL's
+~20k-25k-function public header surface): serialize → real
 `bundle_facts_to_dict`/`json.dumps` → real container/scalar-token count via
-`storage.json_budget`'s own token scanner) against a synthetic corpus sized
-like the actual named use case —
-`scripts/benchmark_scaling._build_onedal_large_surface`, modeling oneDAL's
-~20k-25k-function public header surface — at 25k/50k functions × 1/3
-libraries: **~9.3 bytes/node, stable across scale**. The old 1M-node default
-(~9.3 MB) was already ~6x below the single-library, 25k-function case's own
-5.8M nodes — confirming the documented "can legitimately need well over
-this" escape hatch was in fact the common case for its own stated scenario,
-not an edge one. Recalibrated `DEFAULT_MAX_JSON_OBJECT_NODES` to
-`20_000_000` (covers the 50k-function single-library case, 11.6M nodes,
-with ~1.7x headroom, and the 25k-function/3-library bundle case, 17.4M
-nodes, with ~1.15x headroom). The CLI flag is replaced by `.abicheck.yml`'s
-`resource_limits.max_bundle_facts_decode_nodes` (a new `INT_SUBKEYS`-typed
-config key, `buildsource/build_config_schema.py`) — **deliberately kept
-node-based, not re-expressed as a memory size** the way
-cli-cleanup-phase-two.md's own now-superseded text proposed
-(`resources: max_decoded_memory: 2GiB`): converting a memory budget to a
-node budget via this measured *legitimate*-payload ratio would size the
-node budget for an adversarial payload's much lower bytes/node density too
-(a payload of millions of tiny scalar tokens runs under 2 bytes/node) —
-exactly the shape `storage.json_budget`'s own pre-`json.loads()` container-
-count scan exists to catch. A memory-labelled dial that silently admits far
-more real allocations than its own number implies would be worse than no
-memory framing at all, so the unit stays the one the underlying check
-already uses. Full measurement table and reasoning: `bundle_facts.py`'s own
-`DEFAULT_MAX_JSON_OBJECT_NODES` docstring.
+`storage.json_budget`'s own token scanner, at 25k/50k functions × 1/3
+libraries — **~9.3 bytes/node, stable across scale**. The existing
+`DEFAULT_MAX_JSON_OBJECT_NODES=1_000_000` (~9.3 MB) sits ~6x below the
+single-library, 25k-function case's own 5.8M nodes — confirming the
+documented "can legitimately need well over this" escape hatch is the
+common case for its own stated scenario, not an edge one, exactly as the
+flag's help text already said.
+
+**The default itself is deliberately left unchanged (Codex review, PR
+#1174, fresh evidence)** — an earlier draft of this row recalibrated
+`DEFAULT_MAX_JSON_OBJECT_NODES` up to `20_000_000` to cover that measured
+gap directly, which review correctly flagged as a real security
+regression: this constant also bounds decode of an unconfigured,
+potentially-untrusted `BundleFacts` blob, and raising it 20x raises that
+same blob's worst-case decode RSS by 20x (~75 MB → ~1.5 GB, per the
+constant's own "~150 MB RSS from a 6 MB payload of ~2M empty objects"
+measurement) for every caller, not just the ones who actually have a
+large, trusted payload. The calibration stands as a real, useful
+measurement — it is what motivated the config key existing at all — but
+the fix it justifies is the escape hatch, not a raised ambient default: a
+project with oneDAL-scale bundle facts sets
+`resource_limits.max_bundle_facts_decode_nodes` explicitly in its own
+`.abicheck.yml`, and every other caller keeps the conservative default.
+
+Deliberately node-based, not re-expressed as a memory size, the way
+cli-cleanup-phase-two.md's own now-superseded text proposed (`resources:
+max_decoded_memory: 2GiB`): converting a memory budget to a node budget
+via this measured *legitimate*-payload ratio would size the node budget
+for an adversarial payload's much lower bytes/node density too (a payload
+of millions of tiny scalar tokens runs under 2 bytes/node) — exactly the
+shape `storage.json_budget`'s own pre-`json.loads()` container-count scan
+exists to catch, and the same reasoning the default-value regression
+above turned out to need anyway. A memory-labelled dial that silently
+admits far more real allocations than its own number implies would be
+worse than no memory framing at all, so the unit stays the one the
+underlying check already uses. Full measurement table and reasoning:
+`bundle_facts.py`'s own `DEFAULT_MAX_JSON_OBJECT_NODES` docstring.
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
