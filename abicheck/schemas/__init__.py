@@ -850,7 +850,15 @@ from typing import Any
 #:       automatic, no front end flag (D4/D5); never a verdict on its own,
 #:       so no existing finding, verdict, or exit code moves.
 #: 3.13 -- additive ``summary.quality_issues``: the non-addition subset of unchanged ``summary.compatible_additions``, mirroring the release fan-out's per-library field of the same name; no verdict moves.
-REPORT_SCHEMA_VERSION = "3.13"  #: 3.13 -- see the comment immediately above.
+#: 3.14 -- additive per-change ``demangled_symbol`` (Codex review): a
+#:       human-readable demangling of ``symbol``/``old_value``, present only
+#:       on an ``elf_only``-visibility removal (``func_removed_elf_only``, or
+#:       ``var_removed`` on an ``elf_only`` variable) whose old-side
+#:       declaration has no header-derived pretty name to source one from.
+#:       ``symbol``/``old_value`` stay the raw mangled spelling unchanged
+#:       (machine formats never demangle those); this is display-only and
+#:       moves no verdict, severity, or exit code.
+REPORT_SCHEMA_VERSION = "3.14"  #: 3.14 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of both public scan dict shapes:

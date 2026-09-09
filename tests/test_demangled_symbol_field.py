@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Variable, Visibility
@@ -181,3 +183,39 @@ class TestReportSurfacing:
         ]
         assert len(results) == 1
         assert results[0]["properties"]["demangledSymbol"] == _DEMANGLED
+
+
+class TestSchema:
+    def test_demangled_symbol_is_declared_in_the_report_schema(self) -> None:
+        # Codex review, fresh evidence: the field existed in JSON output
+        # before the schema declared it -- additionalProperties kept
+        # validation permissive, but a schema-driven consumer couldn't
+        # discover or type the field. Assert both the canonical schema and
+        # a real report carrying demangled_symbol validate together.
+        pytest.importorskip("jsonschema")
+        import jsonschema
+
+        from abicheck.schemas import load_compare_report_schema
+
+        schema = load_compare_report_schema()
+        change_props = schema["$defs"]["change"]["properties"]
+        assert "demangled_symbol" in change_props
+        assert change_props["demangled_symbol"]["type"] == "string"
+
+        old = _snapshot(
+            [
+                Function(
+                    name=_MANGLED,
+                    mangled=_MANGLED,
+                    return_type="?",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ]
+        )
+        new = _snapshot([])
+        result = compare(old, new)
+
+        from abicheck.reporter import to_json
+
+        report = json.loads(to_json(result))
+        jsonschema.validate(instance=report, schema=schema)

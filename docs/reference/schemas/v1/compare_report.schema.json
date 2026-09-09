@@ -778,6 +778,9 @@
               },
               "symbol_binding": {
                 "$ref": "#/$defs/change/properties/symbol_binding"
+              },
+              "demangled_symbol": {
+                "$ref": "#/$defs/change/properties/demangled_symbol"
               }
             }
           }
@@ -2391,6 +2394,10 @@
           "type": "string",
           "description": "The removed symbol's ELF linkage (schema 2.32), present only on func_removed/func_removed_elf_only/var_removed/func_deleted_elf_fallback findings whose binding was captured (non-ELF platforms, older snapshots, and an unmatched .dynsym entry all omit this key). A WEAK/COMDAT symbol usually \u2014 but not always \u2014 means every consumer already carries its own copy (see the binding: suppression selector's documentation for the extern-template counterexample); this is provider-side evidence about the library's own build, not proof a removal is safe.",
           "enum": ["global", "weak", "local", "unique", "other"]
+        },
+        "demangled_symbol": {
+          "type": "string",
+          "description": "Schema 3.14: a human-readable demangling of `symbol`/`old_value`, present only on a func_removed_elf_only finding, or a var_removed finding whose old-side variable is elf_only-visibility \u2014 the one case where the old-side declaration has no header-derived pretty name to source one from, so `symbol`/`old_value` stay the raw mangled spelling. Omitted for every other finding, including a header-backed removal (whose old_value is already demangled text) and any case where demangling the mangled name produces nothing new. `symbol`/`old_value` themselves are never demangled (machine formats keep raw symbols for matching); this field is the one deliberate exception."
         },
         "cross_source_evolution": {
           "type": "string",

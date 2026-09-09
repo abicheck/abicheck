@@ -47,6 +47,21 @@ def test_msvc_scope_components_basic() -> None:
     assert mangled_name.msvc_scope_components("not a mangled name") is None
 
 
+def test_itanium_special_name_owner_scope_components() -> None:
+    # Codex review, fresh evidence: surface.py's vtable/RTTI/VTT owner-scope
+    # resolution must not depend on an external demangler -- this is the
+    # in-process structural parser it uses instead.
+    fn = mangled_name.itanium_special_name_owner_scope_components
+    assert fn("_ZTV13InternalCache") == (["InternalCache"], frozenset())
+    assert fn("_ZTVN2ns3FooE") == (["ns", "Foo"], frozenset())
+    assert fn("_ZTI6Result") == (["Result"], frozenset())
+    assert fn("_ZTTN2ns3FooE") == (["ns", "Foo"], frozenset())
+    # An ordinary member mangling (no TV/TI/TT special-name code) is not a
+    # vtable/typeinfo/VTT symbol at all -- must not be misread as one.
+    assert fn("_ZN3Foo3barEv") is None
+    assert fn("not a mangled name") is None
+
+
 def test_diff_cxx_rules_reexports_the_identical_function_object() -> None:
     assert (
         diff_cxx_rules.itanium_scope_components is mangled_name.itanium_scope_components

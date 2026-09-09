@@ -129,3 +129,39 @@ class TestMangledVtableSymbolSurfaceClassification:
             kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description=""
         )
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+
+    def test_mangled_vtable_symbol_resolves_without_an_external_demangler(self):
+        # Codex review, fresh evidence: the vtable/RTTI/VTT owner-scope
+        # resolution must not depend on the optional cxxfilt/c++filt tool
+        # -- a policy-affecting classification (public-surface scoping)
+        # would otherwise silently vary by whether that tool happens to be
+        # installed on the host. Patching demangle() to always fail (as it
+        # already does on a host with neither cxxfilt nor c++filt) proves
+        # the in-process structural parser, not demangle(), is what
+        # resolves this shape.
+        import abicheck.surface as surface_mod
+
+        original = surface_mod.demangle
+        surface_mod.demangle = lambda *a, **k: None
+        try:
+            snap = AbiSnapshot(
+                library="l",
+                version="1",
+                functions=[_fn("api", ret="Result *")],
+                types=[_rec("Result"), _rec("InternalCache")],
+            )
+            s = self._surf(snap)
+            c = Change(
+                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+                symbol="_ZTV13InternalCache",
+                description="",
+            )
+            assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
+            c_pub = Change(
+                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+                symbol="_ZTV6Result",
+                description="",
+            )
+            assert classify_change_surface(c_pub, s, s) == (True, None)
+        finally:
+            surface_mod.demangle = original

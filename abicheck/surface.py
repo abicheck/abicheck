@@ -67,6 +67,7 @@ from typing import TYPE_CHECKING
 
 from .demangle import demangle
 from .model import ScopeOrigin
+from .model.mangled_name import itanium_special_name_owner_scope_components
 from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_closure import resolve_public_surface
 
@@ -593,7 +594,22 @@ def classify_change_surface(
         # (returns None, so `or sym` keeps the original) for a finding
         # whose `symbol` is already a plain type/member spelling, so this
         # is a strict fix, not a behavior change, for every other case.
-        candidates = _type_identifiers(demangle(sym) or sym) | _type_identifiers(
+        #
+        # The `_ZTV`/`_ZTI`/`_ZTT` shape specifically is resolved via the
+        # in-process, dependency-free structural parser instead of
+        # `demangle()` (Codex review, fresh evidence): `demangle()` needs
+        # an optional external tool (`cxxfilt`/`c++filt`) that isn't
+        # installed on every host, so a policy-affecting classification
+        # (public-surface scoping) must not silently vary by whether that
+        # tool happens to be present -- a minimal CI image or Windows
+        # without it would otherwise keep every such finding in-surface
+        # regardless of the class's real visibility, while a developer
+        # machine with cxxfilt installed correctly demotes it.
+        owner_scope = itanium_special_name_owner_scope_components(sym)
+        sym_for_types = (
+            "::".join(owner_scope[0]) if owner_scope else (demangle(sym) or sym)
+        )
+        candidates = _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type
         )
 

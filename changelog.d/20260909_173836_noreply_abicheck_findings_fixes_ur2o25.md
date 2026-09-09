@@ -39,11 +39,16 @@
   `SYMBOL_RENAMED_BATCH`) never stamped `Change.symbol_binding`, so it
   always read `ARTIFACT_PROVEN` regardless of whether every rolled-up
   pair was actually matched against a real ELF symbol-table entry.
-  `emit_prefix_batch_rename`/`emit_namespace_move_batches` now take the
-  old-side symbol map and stamp `symbol_binding` only when *every*
-  constituent pair's old side carries a real observed ELF binding, so a
-  batch with even one header-reconstructed (non-ELF-backed) pair
-  correctly downgrades to `unattributed` on an `elf`-tiered run.
+  `emit_prefix_batch_rename`/`emit_namespace_move_batches` now resolve
+  each constituent pair against its real declaration in the old-side
+  symbol map (by demangled name for the prefix-rename shape, by scope-
+  component identity for the namespace-move shape — an identity mismatch
+  against the map's own mangled keys previously made the check vacuously
+  pass regardless of real evidence) and stamp `symbol_binding` only when
+  *every* constituent's old side carries a real observed ELF binding, so
+  a batch with even one header-reconstructed (non-ELF-backed) or
+  unresolved pair correctly downgrades to `unattributed` on an
+  `elf`-tiered run.
 - **An `elf_only`-visibility removal's report now carries a demangled
   companion to its raw mangled symbol.** `func_removed_elf_only` and an
   `elf_only`-visibility `var_removed` previously showed only the raw
@@ -51,11 +56,13 @@
   produce a pretty name, unlike every other visibility) — unreadable in
   a machine format (JSON/SARIF), which deliberately never demangles
   `symbol`/`old_value` themselves. A new `Change.demangled_symbol`
-  field (JSON `demangled_symbol`, SARIF `properties.demangledSymbol`)
-  carries the demangled form when it differs from the raw name; `None`/
-  omitted for every ordinary, already-demangled finding.
+  field (JSON `demangled_symbol`, schema 3.14; SARIF
+  `properties.demangledSymbol`) carries the demangled form when it
+  differs from the raw name; `None`/omitted for every ordinary,
+  already-demangled finding.
 - **Public-surface scoping can now demote genuinely internal-only
-  vtable/RTTI churn.** `VTABLE_SLOT_COUNT_CHANGED`/
+  vtable/RTTI churn, on every host regardless of whether an optional
+  external demangler is installed.** `VTABLE_SLOT_COUNT_CHANGED`/
   `RTTI_INHERITANCE_CHANGED`/`VTT_SLOT_COUNT_CHANGED`
   (`diff_elf_layout.py`) carry a raw mangled `_ZTV`/`_ZTI`/`_ZTT` symbol in
   `Change.symbol`, not a plain type spelling. `surface.py`'s type-level
@@ -63,7 +70,17 @@
   out of that mangled blob, which could never match a real type — so
   these three kinds always fell back to the conservative "unknown, keep"
   default regardless of whether the class was actually public. The
-  fallback now demangles a mangled `symbol` first (a no-op for every
-  already-demangled case), so scoping treats these the same as every
-  other type-level finding about the same class. Verified against the
-  FP-rate and per-tier-accuracy gates (no drift).
+  fallback now resolves the symbol's owning class via a new in-process,
+  dependency-free structural parser
+  (`model.mangled_name.itanium_special_name_owner_scope_components`) for
+  this exact shape, rather than the optional `cxxfilt`/`c++filt`-backed
+  `demangle()` — a policy-affecting classification must not silently vary
+  by whether that external tool happens to be installed on the host.
+  Verified against the FP-rate and per-tier-accuracy gates (no drift).
+- The Markdown root-cause report's per-change evidence-caveat resolution
+  moved out of the render layer (`report/render_markdown.py`'s
+  `_format_change_md`) and into the compute half
+  (`reporter_markdown.compute_root_cause_section`), matching every other
+  report projection's compute/render split — the renderer now takes an
+  already-resolved `EvidenceStatus`, never deriving one itself from raw
+  evidence tiers.
