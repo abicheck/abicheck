@@ -34,7 +34,11 @@ from abicheck.cli import compare_cmd, dump_cmd
 from abicheck.cli_scan import scan_cmd
 
 _DOCS = Path(__file__).resolve().parent.parent / "docs"
-_DOC_FILES = ("start/real-world-example.md", "use/evidence-depth.md", "use/cli-usage.md")
+_DOC_FILES = (
+    "start/real-world-example.md",
+    "use/evidence-depth.md",
+    "use/cli-usage.md",
+)
 
 #: subcommand name → click command object whose options are authoritative.
 #: `collect` was removed (ADR-043 D1): dump/compare now auto-collect/ingest
