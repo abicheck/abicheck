@@ -131,6 +131,40 @@ def test_render_pattern_prescan_markdown_shows_per_side_status():
     assert "NEW" in text and "2 file(s) scanned" in text and "1 construct(s)" in text
 
 
+def test_render_pattern_prescan_markdown_flags_partial_coverage():
+    """Codex review, PR #1169, fifth round, fresh evidence: a side with
+    `coverage.status == "partial"` (a missing sibling root even though
+    another root scanned successfully -- `scope_reason` itself is `None`
+    since real coverage exists) previously rendered identically to a
+    fully-covered scan in full/leaf/root-cause Markdown, mirroring the
+    exact gap `_preprocessor_side_markdown_line` was already fixed for."""
+    summary = compute_pattern_prescan_summary(
+        {
+            "old": {
+                "files_scanned": 1,
+                "facts": [],
+                "escalation_triggers": [],
+                "coverage": {
+                    "status": "partial",
+                    "detail": "1 file(s), 1 unreadable skipped",
+                },
+            },
+            "new": {
+                "files_scanned": 1,
+                "facts": [],
+                "escalation_triggers": [],
+                "coverage": {"status": "present"},
+            },
+        }
+    )
+    lines = render_pattern_prescan_markdown(summary)
+    old_line = next(line for line in lines if line.startswith("- **OLD**"))
+    assert "partial coverage" in old_line
+    assert "1 unreadable skipped" in old_line
+    new_line = next(line for line in lines if line.startswith("- **NEW**"))
+    assert "partial coverage" not in new_line
+
+
 def test_render_preprocessor_prescan_markdown_shows_per_side_status():
     summary = compute_preprocessor_prescan_summary(
         {

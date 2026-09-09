@@ -129,11 +129,23 @@ def _pattern_side_markdown_line(label: str, side: Mapping[str, Any]) -> str:
         return f"- **{label}**: not evaluated (no headers/`--sources` in scope)"
     facts = side.get("facts") or []
     triggers = side.get("escalation_triggers") or []
-    return (
+    line = (
         f"- **{label}**: {side.get('files_scanned', 0)} file(s) scanned, "
         f"{len(facts)} construct(s) found, {len(triggers)} escalation "
         "trigger(s)"
     )
+    if coverage.get("status") == "partial":
+        # Codex review, fifth round, fresh evidence: `scan_files` now counts
+        # a missing sibling root as skipped even when another root scans
+        # successfully (`coverage.status == "partial"` with `scope_reason`
+        # itself `None`, since real coverage exists) -- this full/leaf/
+        # root-cause Markdown line bypassed the `scope_reason` branch
+        # entirely and printed only the plain counts, indistinguishable
+        # from a fully-covered scan. Mirrors `_preprocessor_side_markdown_
+        # line`'s own `partial` handling.
+        detail = coverage.get("detail") or "incomplete coverage"
+        line += f" -- ⚠️ **partial coverage** ({detail})"
+    return line
 
 
 def render_pattern_prescan_markdown(

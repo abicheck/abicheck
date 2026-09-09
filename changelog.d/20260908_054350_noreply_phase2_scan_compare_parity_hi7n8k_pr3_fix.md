@@ -77,3 +77,13 @@
   existence check was removed. The process-pool path was split into a new
   `_scan_files_parallel` helper so the accounting has one shared return
   value to adjust regardless of which path (serial/parallel/fallback) ran.
+  Sixth follow-up round (Codex review, PR #1169, fifth round, fresh
+  evidence): the fifth round's own producer-level fix surfaced a `partial`
+  `coverage.status` correctly to the review digest, but `--report-mode`
+  full/leaf/root-cause Markdown's own per-side line
+  (`_pattern_side_markdown_line`) never examined `coverage.status` at
+  all -- a side with a missing sibling root still rendered as plain file/
+  fact counts, indistinguishable from a fully-covered scan, in every mode
+  except the review digest. Now mirrors `_preprocessor_side_markdown_
+  line`'s own pre-existing `partial` handling (a visible "⚠️ partial
+  coverage (...)" suffix).
