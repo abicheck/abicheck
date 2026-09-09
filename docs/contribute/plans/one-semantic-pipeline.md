@@ -12813,7 +12813,7 @@ sibling:
   existing readers, not on a type-contract decision a planning document can
   make in the abstract. Second: moving the L5 graph's attachment point off
   `BuildSourcePack.source_graph` has real existing readers —
-  `internal_leak.py`, `buildsource/crosscheck.py`, `buildsource/
+  `internal_leak.py`, `buildsource/cross_source_checks.py`, `buildsource/
   evidence_report.py`, `evidence_depth.py`, and `cli_graph.py` among them —
   each would observe
   no graph at all the moment the L5 builder stops writing to the old
@@ -12901,7 +12901,7 @@ sibling:
   triggering `resolve_public_surface()`'s own designed fallback correctly;
   `build_source.source_graph` is decoded from its own nested key exactly as
   it always was, unaffected, so the five pre-existing L5 readers
-  (`internal_leak.py`/`crosscheck.py`/`evidence_report.py`/
+  (`internal_leak.py`/`cross_source_checks.py`/`evidence_report.py`/
   `evidence_depth.py`/`cli_graph.py`) see the identical graph they always
   did. The "one object, two attribute paths" guarantee is therefore scoped
   to what this phase's own assembly step actually produces — a freshly
@@ -13691,7 +13691,7 @@ CLI path still exits 64.
 
 **A *fourth* round found the third fix's own placement inside
 `_build_new_snapshot` was still too late.** `run_scan_core` runs its S3
-pattern scan (`scan_files`) and points-of-interest build
+pattern scan (`find_pattern_facts`) and points-of-interest build
 (`_build_scan_poi`, which reads both sides' L0 export tables) *before* ever
 calling `_build_new_snapshot` — real, if cheap, work a typed `run_scan()`/
 `run_scan_subprocess()` caller (no `cli_scan.py` pre-flight ahead of it) paid
@@ -13714,7 +13714,7 @@ build_targets=(...))` was wrongly rejected by the unguarded check, the exact
 false-positive class the `depth=binary` exemption exists to prevent.
 `tests/test_bazel_root_targets_scan.py` gained two more cases:
 `test_run_scan_rejects_before_wasted_pattern_scan_and_poi_work` (monkeypatches
-`scan_files` to raise if called, proving the check now runs first) and
+`find_pattern_facts` to raise if called, proving the check now runs first) and
 `test_run_scan_depth_binary_exempts_the_early_bazel_scoping_check`
 (monkeypatches `bazel_target_scoping_failure` itself to raise if called,
 proving the moved check's exemption actually fires rather than merely
@@ -13933,7 +13933,7 @@ fact: what a side's resolved snapshot actually turned out to carry, not
 knowable at the point a `ResolvedExecutionContext` is first assembled).
 `EvidenceView` always carries `requested_depth` (knowable pre-execution,
 via `EvidenceView.for_request`) and `available_depths` (the static
-four-rung `--depth` ladder, `buildsource.scan_levels.USER_DEPTHS` restated
+four-rung `--depth` ladder, `model.evidence_depth_levels.USER_DEPTHS` restated
 as plain values -- build-time vocabulary, not a per-run computed fact, so
 stating it duplicates nothing); `effective_depth`/`depth_satisfied` stay
 `None` until `EvidenceView.from_assurance()` copies them verbatim off a
@@ -16962,7 +16962,7 @@ not new design.
   every caller reads them from `model/graph.py` instead of the re-export
   shim. **A second, separate row for the same phase**: `BuildSourcePack.
   source_graph`'s own live-alias mechanism is removed once the five named
-  readers (`internal_leak.py`, `buildsource/crosscheck.py`, `buildsource/
+  readers (`internal_leak.py`, `buildsource/cross_source_checks.py`, `buildsource/
   evidence_report.py`, `evidence_depth.py`, `cli_graph.py`) are migrated to
   read `AbiSnapshot.surface_graph` directly — a review round correctly
   found the alias's own Phase 3 text named this migration as "real, scoped,

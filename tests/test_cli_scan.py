@@ -1820,7 +1820,7 @@ def test_malformed_risk_rules_yaml_is_click_error(
 # (_DEPTH_TO_METHOD has no S2 entry, nor does any --mode preset or the auto
 # risk ladder), so the preprocessor tier is no longer reachable from the scan
 # CLI at all. It stays covered at the engine level by
-# tests/test_preprocessor_scan.py and tests/test_scan_levels.py.
+# tests/test_preprocessor_scan.py and tests/test_evidence_depth_levels.py.
 
 
 def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):
@@ -3200,7 +3200,7 @@ def test_export_delta_poi_load_is_symbols_only(monkeypatch, tmp_path):
 
 def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
     from abicheck import cli_scan as cs
-    from abicheck.buildsource.scan_levels import EvidenceDepth
+    from abicheck.model.evidence_depth_levels import EvidenceDepth
 
     header = tmp_path / "include"
     baseline_header = tmp_path / "old-include"

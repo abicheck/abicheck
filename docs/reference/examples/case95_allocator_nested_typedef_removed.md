@@ -44,8 +44,12 @@ sibling case that classifies the identical pattern as `API_BREAK`.
 ```bash
 g++ -shared -fPIC -g -std=c++17 -I. v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --ast-frontend clang -H old=v1.h -H new=v2.h --lang c++
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  lang: c++
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -68,7 +72,7 @@ parameter type differs from the removed `size_type` alias.)
 `min_evidence: L1` per `ground_truth.json` — DWARF carries typedef DIEs in
 principle, but this environment's headerless DWARF-only extraction does not
 surface *class-member* typedefs (only namespace/global-scope ones), so the
-command above supplies header/AST evidence (`--ast-frontend clang`, since
+command above supplies header/AST evidence (`compile.frontend: clang` (via `.abicheck.yml`), since
 `castxml` is unavailable here) to reach the same fact a production
 `castxml` install would recover from headers directly.
 

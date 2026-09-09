@@ -12,8 +12,8 @@ additive example cases + test scenarios; no detector or policy change.
 
 ADR-035 (G19) landed the engine for cheap PR source scans, intra-version
 cross-source validation, single-release audit, and evidence-directed focusing.
-The detection code exists and is unit-tested (`tests/test_crosscheck.py`,
-`tests/test_pattern_scan.py`, `tests/test_poi.py`, `tests/test_cli_scan.py`).
+The detection code exists and is unit-tested (`tests/test_cross_source_checks.py`,
+`tests/test_pattern_facts.py`, `tests/test_poi.py`, `tests/test_cli_scan.py`).
 What does **not** exist is a *demonstration corpus* — cases a maintainer can read
 to understand what the multi-source machinery buys them.
 
@@ -31,7 +31,7 @@ The `examples/` catalog (143 cases) still tells exactly one story: a `v1`→`v2`
 
 **Zero** catalog cases produce any of the eight ADR-035 cross-check / audit
 `ChangeKind`s, even though all eight are defined in `checker_policy.py`,
-implemented in `buildsource/crosscheck.py`, and already mapped in
+implemented in `buildsource/cross_source_checks.py`, and already mapped in
 `scripts/evidence_tiers.py`:
 
 | ChangeKind | partition | evidence tier (already mapped) |
@@ -66,7 +66,7 @@ Per the maintainer decision (both locations): **flagship demos** land as
 first-class `examples/caseNN` entries (visible in the encyclopedia);
 **edge/integrity/plan** cases land as test-only scenario suites (compiler-free,
 fast lane) modelled on `tests/test_pattern_audit_scenarios.py` and the
-`_snap(**kw)` synthetic-snapshot pattern in `tests/test_crosscheck.py`.
+`_snap(**kw)` synthetic-snapshot pattern in `tests/test_cross_source_checks.py`.
 
 - **G20.1 — Single-release audit corpus (D8).** ≥4 catalog cases reach a verdict
   from **one artifact, no baseline**, covering `exported_not_public`,
@@ -250,7 +250,7 @@ from the *combination*" as an **output property**, but with a precise scope: the
 current engine records the **provider list** per check
 (`ScanResult.confidence["exported_not_public"]`, copied from
 `crosscheck.providers`) and **always** stamps each `exported_not_public` finding
-`Confidence.HIGH` regardless of provider count (`crosscheck.py`). So:
+`Confidence.HIGH` regardless of provider count (`cross_source_checks.py`). So:
 
 - **What case151 asserts today (no engine change):** the rich fixture lists three
   providers (`binary_exports` + `public_header_ast` + `build_config`) and the thin
@@ -363,13 +363,13 @@ engine entry and the ADR-035 decision it demonstrates (D2/D4/D7/D8).
 ## 10. Relationship to existing work
 
 - **G19 / ADR-035** — consumes the engine G19 shipped; **no detector or policy
-  change**. `buildsource/crosscheck.py`, `poi.py`, `risk.py`, `service.run_scan`
+  change**. `buildsource/cross_source_checks.py`, `poi.py`, `risk.py`, `service.run_scan`
   are used as-is for every case except one scoped reporting/plumbing task
   (§3.3): extending `_layers_from_coverage` to carry the D4 integrity counters
   onto `ScanResult` so the *rendered* report (not just an internal object) shows
   them. Tracked as the single engine touch in this plan; all other cases assert
   against existing objects.
-- **`tests/test_crosscheck.py`** — the `_snap(**kw)` synthetic-snapshot + `_coverage`/`_findings_of`
+- **`tests/test_cross_source_checks.py`** — the `_snap(**kw)` synthetic-snapshot + `_coverage`/`_findings_of`
   helpers Phase 2/3 reuse directly.
 - **`tests/test_pattern_audit_scenarios.py`** — the model for the test-only
   scenario suites.

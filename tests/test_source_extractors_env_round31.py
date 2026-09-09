@@ -25,7 +25,7 @@ recognized an EXTENSIONLESS source file paired with an explicit
 explicitly rather than inferred from a suffix it does not have). Left
 un-rebased under ``env -C``, such an operand resolves to the wrong
 (raw-directory) path downstream in ``include_graph.py``/
-``preprocessor_scan.py``, losing the TU's include graph or macro evidence.
+``preprocessor_facts.py``, losing the TU's include graph or macro evidence.
 """
 
 from __future__ import annotations

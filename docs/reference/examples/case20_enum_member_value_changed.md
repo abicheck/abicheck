@@ -68,7 +68,7 @@ referenced by any function or variable's *type* (`get_result()` returns
 plain `int`) — with no header evidence to confirm the enum is genuinely
 part of the public API, abicheck's default public-surface scoping
 conservatively withholds the finding rather than guess; passing headers (L2,
-`--ast-frontend clang` since this sandbox has no castxml) reports the same
+`compile.frontend: clang` (via `.abicheck.yml`) since this sandbox has no castxml) reports the same
 finding without needing that flag, since a header-declared enum is
 recognized as public even without a signature reference.
 

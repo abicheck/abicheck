@@ -46,7 +46,7 @@
   `old_value`/`new_value`/`affected_symbols` mangled.** `_changes_table`
   only ever applied `demangle_text` to the description and primary symbol
   cell, so a finding carrying mangled names in `old_value`/`new_value`
-  (as `buildsource/crosscheck.py` does) or `affected_symbols` (as
+  (as `buildsource/cross_source_checks.py` does) or `affected_symbols` (as
   `diff_cpp_patterns.py` does) could show a demangled Symbol column right
   next to a still-mangled Affected list or value pair for the identical
   name. All three are now demangled the same way, before `html.escape`,

@@ -33,11 +33,11 @@ reports under its own name.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from ..bundle import render_bundle_findings_markdown
 from ..bundle_models import BundleDiffResult
-from ..checker_types import DiffResult
+from ..checker_types import Change, DiffResult
 
 __all__ = [
     "_release_md_bundle_findings",
@@ -99,29 +99,56 @@ def _release_md_changed_libraries(
     return lines
 
 
-def _release_md_bundle_findings(bundle_result: BundleDiffResult | None) -> list[str]:
-    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two."""
+def _release_md_bundle_findings(
+    bundle_result: BundleDiffResult | None, findings: list[Any]
+) -> list[str]:
+    """Markdown section for cross-library (bundle) findings. G38 P0-D: a partial ``analysis_errors`` warning is rendered even when ``bundle_findings`` is empty -- an empty finding list after a raised exception means "nothing was checked", not "nothing was found", and a reader must not conflate the two.
+
+    *findings* (Codex review, fresh evidence, PR #1154 follow-up: "Move
+    release filtering out of the Markdown renderer") is *bundle_result*'s
+    ``--view show=``-filtered finding list, already computed by the caller
+    (``cli_compare_release_helpers.release_bundle_findings_for_view``) --
+    this renderer only ever formats it. `report/AGENTS.md`'s renderer
+    contract forbids a renderer from filtering findings itself (an earlier
+    revision called that filter function from here directly); the caller
+    computes the identical projection its own JSON rendering uses, so the
+    two formats still can never disagree about which bundle findings a
+    given ``show_only`` selection keeps -- only which layer decides that
+    now differs.
+    """
     lines: list[str] = []
     if bundle_result is not None and bundle_result.analysis_errors:
         lines += ["", "## ⚠️ Bundle Analysis Warnings", ""]
         lines += [f"- {msg}" for msg in bundle_result.analysis_errors]
-    if bundle_result is None or not bundle_result.bundle_findings:
+    if not findings:
         return lines
     lines += [
         "",
         "## 🔗 Bundle (Cross-Library) Findings",
         "",
-        *render_bundle_findings_markdown(bundle_result.bundle_findings),
+        *render_bundle_findings_markdown(findings),
     ]
     return lines
 
 
-def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:
-    """Markdown section for build-configuration (matrix) findings."""
+def _release_md_matrix_findings(
+    matrix_result: DiffResult | None, changes: list[Change]
+) -> list[str]:
+    """Markdown section for build-configuration (matrix) findings.
+
+    *changes* (Codex review, fresh evidence, PR #1154 follow-up: "Move
+    release filtering out of the Markdown renderer") is *matrix_result*'s
+    ``--view show=``-filtered change list, already computed by the caller
+    (``cli_compare_release_helpers.release_matrix_changes_for_view``) --
+    see :func:`_release_md_bundle_findings`'s own docstring for the full
+    rationale; this renderer no longer calls that filter itself.
+    """
     if matrix_result is None or not matrix_result.changes:
         return []
+    if not changes:
+        return []
     lines = ["", "## 🛠️ Build-Configuration (Matrix) Findings", ""]
-    for c in matrix_result.changes:
+    for c in changes:
         lines.append(
             f"- **{c.kind.value}**" + (f" — `{c.symbol}`" if c.symbol else ""),
         )

@@ -163,7 +163,7 @@ class TestEvidenceDepthOutOfBandPack:
                 main,
                 [
                     "compare", str(old_p), str(new_p),
-                    "--format", "json", "--report-mode", mode,
+                    "--format", "json", "--view", mode,
                 ],
             )
             assert result.exit_code in (0, 1, 2, 4), result.output

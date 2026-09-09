@@ -103,8 +103,12 @@ cmake -S examples -B /tmp/abicheck-examples-build
 cmake --build /tmp/abicheck-examples-build --target \
     case185_inherited_override_reuses_slot_v1 case185_inherited_override_reuses_slot_v2
 
+cat > .abicheck.yml <<'EOF'
+compile:
+  lang: c++
+EOF
 python3 -m abicheck.cli compare \
     /tmp/abicheck-examples-build/case185_inherited_override_reuses_slot/libv1.so \
     /tmp/abicheck-examples-build/case185_inherited_override_reuses_slot/libv2.so \
-    --header old=v1.hpp --header new=v2.hpp --lang c++
+    --header old=v1.hpp --header new=v2.hpp --config .abicheck.yml
 ```

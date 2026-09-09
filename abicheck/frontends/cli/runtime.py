@@ -294,6 +294,29 @@ def _validate_show_only(
     return value
 
 
+def _validate_view(
+    ctx: click.Context, param: click.Parameter, value: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Eagerly validate ``--view`` tokens (ADR-068 D4/Phase 5) so an
+    unrecognized token or a malformed ``show=...`` filter surfaces before
+    any work runs, the same eagerness ``--show-only`` already had.
+
+    Returns the raw token tuple unchanged (Click needs a value on this
+    dest); the real derived values are computed once more, cheaply, by
+    :func:`abicheck.frontends.cli.options.view.parse_view_tokens` right
+    before ``run_compare`` is called, so there is exactly one place that
+    ever turns tokens into ``report_mode``/``show_only``/``demangle``/
+    ``explain_patterns``.
+    """
+    from .options.view import parse_view_tokens
+
+    try:
+        parse_view_tokens(value)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from exc
+    return value
+
+
 def _render_output(
     fmt: str,
     result: DiffResult,

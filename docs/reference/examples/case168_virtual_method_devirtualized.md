@@ -39,7 +39,11 @@ of `flush()` stops being reached at all. Recompilation is mandatory.
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libv1.so
 g++ -shared -fPIC -g v2.cpp -o libv2.so
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -70,7 +74,7 @@ changed (`type_vtable_changed`, `vtable_slot_count_changed`), but naming
 `virtual`/non-`virtual` declaration for `flush()` on both sides — DWARF's
 `DW_AT_virtuality` on the surviving `flush` symbol is not reliably present
 once it drops out of the vtable. castxml is the documented default backend
-for this evidence layer; clang (`--ast-frontend clang`, used above) is a
+for this evidence layer; clang (`compile.frontend: clang` (via `.abicheck.yml`), used above) is a
 supported alternative AST frontend for hosts without castxml installed.
 
 ## Why abicheck catches it

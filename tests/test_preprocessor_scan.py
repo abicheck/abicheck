@@ -22,14 +22,14 @@ detection, and the honest coverage-skip when L3/clang are absent.
 
 from __future__ import annotations
 
-from abicheck.buildsource.preprocessor_scan import (
+from abicheck.buildsource.preprocessor_facts import (
     IncludeClass,
     classify_include,
+    collect_preprocessor_facts,
     find_macro_divergence,
     find_private_header_leaks,
     is_abi_macro,
     parse_defined_macros,
-    run_preprocessor_scan,
     select_abi_macros,
 )
 
@@ -163,7 +163,7 @@ def test_no_leak_when_only_public_and_system() -> None:
 
 
 def test_run_skips_without_build_evidence() -> None:
-    result = run_preprocessor_scan(None, ["include/foo.h"])
+    result = collect_preprocessor_facts(None, ["include/foo.h"])
     assert result.ran is False
     assert "no L3 build evidence" in result.skipped_reason
     assert result.coverage().status.value == "not_collected"
@@ -186,7 +186,7 @@ def test_classify_basename_match_only_for_basename_only_public_input() -> None:
 def test_capture_header_includes_makes_header_absolute(monkeypatch) -> None:
     # The -I context is relative to the build dir (cwd), so the header path must
     # be absolute or clang looks for it under the build dir (Codex review).
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     captured: dict[str, object] = {}
 
@@ -207,14 +207,14 @@ def test_capture_header_includes_makes_header_absolute(monkeypatch) -> None:
 
 
 def test_run_skips_when_clang_absent(monkeypatch) -> None:
-    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_facts as ps
 
     build = be.BuildEvidence(
         compile_units=[be.CompileUnit(id="cu://a", source="a.cpp", language="CXX")]
     )
     # Force the extractor to report clang unavailable.
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "available", lambda self: False)
-    result = run_preprocessor_scan(build, ["include/foo.h"], clang_bin="clang++")
+    result = collect_preprocessor_facts(build, ["include/foo.h"], clang_bin="clang++")
     assert result.ran is False
     assert "not found" in result.skipped_reason
 
@@ -222,7 +222,7 @@ def test_run_skips_when_clang_absent(monkeypatch) -> None:
 def test_coverage_downgraded_when_all_clang_runs_fail(monkeypatch) -> None:
     # clang present but every invocation fails → nothing inspected; the coverage
     # row must NOT read as a clean PRESENT scan (Codex review).
-    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_facts as ps
 
     build = be.BuildEvidence(
         compile_units=[
@@ -239,7 +239,7 @@ def test_coverage_downgraded_when_all_clang_runs_fail(monkeypatch) -> None:
         return None
 
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fail_run)
-    result = ps.run_preprocessor_scan(build, ["include/foo.h"])
+    result = ps.collect_preprocessor_facts(build, ["include/foo.h"])
     assert result.ran is True
     assert result.all_failed is True
     assert result.attempted > 0 and result.succeeded == 0
@@ -247,7 +247,7 @@ def test_coverage_downgraded_when_all_clang_runs_fail(monkeypatch) -> None:
 
 
 def test_coverage_partial_when_some_clang_runs_fail(monkeypatch) -> None:
-    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_facts as ps
 
     build = be.BuildEvidence(
         compile_units=[
@@ -269,7 +269,7 @@ def test_coverage_partial_when_some_clang_runs_fail(monkeypatch) -> None:
         return None
 
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _mixed_run)
-    result = ps.run_preprocessor_scan(build, ["include/foo.h"])
+    result = ps.collect_preprocessor_facts(build, ["include/foo.h"])
     assert result.coverage().status.value == "partial"
 
 
@@ -282,7 +282,7 @@ def test_run_uses_deadline_bounded_not_raw_subprocess(monkeypatch) -> None:
     # (shrinking --budget deadline + process-group kill on timeout), not a
     # bare subprocess.run(timeout=120) with no process-group isolation.
     from abicheck import deadline
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     class _P:
         stdout = "#define NDEBUG 1\n"
@@ -311,7 +311,7 @@ def test_run_nests_local_cap_deadline_scope_not_full_scan_budget(monkeypatch) ->
     # instead of this pre-scan's own 120s per-unit cap. Must nest a
     # narrower deadline_scope bound by whichever is tighter.
     from abicheck import deadline
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     class _P:
         stdout = "#define NDEBUG 1\n"
@@ -340,7 +340,7 @@ def test_run_local_cap_timeout_with_generous_budget_is_ordinary_per_unit_failure
     # ordinary per-unit diagnostic -- not scan-budget exhaustion, which
     # would wrongly stop processing every remaining compile unit too.
     from abicheck import deadline
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     def _raise(cmd, **kwargs):
         raise deadline.DeadlineExceeded(-1.0)
@@ -366,7 +366,7 @@ def test_deadline_exceeded_degrades_to_diagnostic_not_crash(monkeypatch) -> None
     # PR #591, round 5, mirrors the include-map/build-query classification
     # fix).
     from abicheck import deadline
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     def _raise(cmd, **kwargs):
         raise deadline.DeadlineExceeded(-1.0)
@@ -389,7 +389,7 @@ def test_capture_macros_stops_after_deadline_exhausted(monkeypatch) -> None:
     # forcing serial jobs (ABICHECK_PREPROCESSOR_SCAN_JOBS=1) keeps the
     # assertion deterministic regardless of that dedup detail.
     from abicheck import deadline
-    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     build = be.BuildEvidence(
@@ -424,7 +424,7 @@ def test_capture_header_includes_stops_after_deadline_exhausted(monkeypatch) -> 
     # -M depfile pass. Forced serial (ABICHECK_PREPROCESSOR_SCAN_JOBS=1) so
     # the "exactly one attempt" assertion isn't racing a thread pool.
     from abicheck import deadline
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     calls = {"n": 0}
@@ -449,7 +449,7 @@ def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     # Relative -I flags from a CMake/Ninja compile DB only resolve when the
     # depfile pass runs from the CU's directory — that dir must reach the live
     # header-include capture as cwd (Codex review).
-    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_facts as ps
 
     build = be.BuildEvidence(
         compile_units=[
@@ -478,7 +478,7 @@ def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
         ps.ClangPreprocessorExtractor, "capture_header_includes", _fake_includes
     )
 
-    result = ps.run_preprocessor_scan(build, ["include/foo.h"])
+    result = ps.collect_preprocessor_facts(build, ["include/foo.h"])
     assert result.ran is True
     assert captured["cwd"] == "/work/build"
     # The source token is stripped from the reused include context.
@@ -508,7 +508,7 @@ def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
     # reaches the replay. Guards against the macro pass drifting off the shared
     # sanitizer and re-opening the field "clang -E failed every invocation" shape.
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     build = be.BuildEvidence(
         compile_units=[
@@ -550,7 +550,7 @@ def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
     assert out["cu://a"] == {"NDEBUG": "1"}
 
 
-# ── scan_engine's clang-binary resolution for run_preprocessor_scan ────────────
+# ── scan_engine's clang-binary resolution for collect_preprocessor_facts ────────────
 
 
 def test_scan_engine_clang_bin_defaults_to_clang_plusplus() -> None:
@@ -659,7 +659,7 @@ def test_capture_macros_never_dedups_by_flags_even_with_identical_context(
     # implementation would collapse this to one probed value and silently
     # hide the divergence.
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     n = 50
@@ -699,7 +699,7 @@ def test_capture_macros_never_dedups_by_flags_even_with_identical_context(
 def test_capture_macros_probes_each_distinct_compile_context(monkeypatch) -> None:
     # Two genuinely different flag sets must each get their own probe.
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     build = be.BuildEvidence(
@@ -733,7 +733,7 @@ def test_capture_macros_probes_each_distinct_compile_context(monkeypatch) -> Non
 
 
 def test_preprocessor_scan_jobs_env_override(monkeypatch) -> None:
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     monkeypatch.delenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", raising=False)
     assert ps._preprocessor_scan_jobs(1) == 1
@@ -753,7 +753,7 @@ def test_capture_macros_respects_max_probes_cap(monkeypatch) -> None:
     # A build with many compile units still bounds worst-case cost; the
     # truncation is reported, never silent (AGENTS.md "No silent caps").
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "3")
@@ -786,7 +786,7 @@ def test_capture_header_includes_respects_max_probes_cap(monkeypatch) -> None:
     # (the clang -M half of the pre-scan), not only capture_macros -- else
     # a project with hundreds/thousands of public headers still reproduces
     # the excessive scan time this cap exists to prevent.
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "3")
@@ -807,11 +807,11 @@ def test_capture_header_includes_respects_max_probes_cap(monkeypatch) -> None:
 def test_capture_macros_and_header_includes_truncation_accumulates(
     monkeypatch,
 ) -> None:
-    # A single extractor instance used for both passes (run_preprocessor_scan's
+    # A single extractor instance used for both passes (collect_preprocessor_facts's
     # shape) must accumulate truncation from both, not overwrite one with the
     # other.
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "2")
@@ -843,7 +843,7 @@ def test_coverage_downgrades_to_partial_when_probes_truncated(monkeypatch) -> No
     # public headers at all -- their macro values/divergences/leaks are
     # genuinely unknown, not absent, so the coverage row must not read as a
     # clean PRESENT even when every ATTEMPTED probe succeeded.
-    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES", "1")
@@ -864,7 +864,7 @@ def test_coverage_downgrades_to_partial_when_probes_truncated(monkeypatch) -> No
 
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "available", lambda self: True)
     monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
-    result = ps.run_preprocessor_scan(build, [], clang_bin="clang++")
+    result = ps.collect_preprocessor_facts(build, [], clang_bin="clang++")
 
     assert result.probes_truncated == 2
     assert result.attempted == result.succeeded  # every attempted probe "succeeded"
@@ -884,7 +884,7 @@ def test_capture_macros_probes_per_tu_even_with_source_looking_flag_operand(
     # at all, but pinned as a regression guard against a future dedup
     # attempt reintroducing exactly this collision.
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     build = be.BuildEvidence(
@@ -926,7 +926,7 @@ def test_capture_macros_probe_returns_parsed_dict_not_raw_text(monkeypatch) -> N
     # previous serial loop did. See tests/test_parallel_probe.py for the
     # generalized version of this contract, decoupled from this module.
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     build = be.BuildEvidence(
@@ -958,7 +958,7 @@ def test_capture_header_includes_probe_returns_parsed_list_not_raw_text(
     monkeypatch,
 ) -> None:
     # Same memory-shape guard as capture_macros', for the -M depfile pass.
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "1")
     real_run_parallel_probes = ps.run_parallel_probes
@@ -988,7 +988,7 @@ def test_diagnostics_property_reflects_live_underlying_list() -> None:
     # moved `diagnostics` from a plain field to a property backed by
     # OrderedDiagnostics; back-compat direct mutation (`.append`/`.clear()`)
     # must still work exactly like a plain list attribute would.
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     ex = ps.ClangPreprocessorExtractor()
     assert ex.diagnostics == []
@@ -1011,7 +1011,7 @@ def test_capture_macros_diagnostics_deterministic_under_real_thread_pool(
     import time
 
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
     from abicheck import deadline
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "4")
@@ -1047,7 +1047,7 @@ def test_capture_macros_diagnostics_deterministic_under_real_thread_pool(
     for _ in range(5):
         ex = ps.ClangPreprocessorExtractor()
         ex.capture_macros(build)
-        result = ps.PreprocessorScanResult(
+        result = ps.PreprocessorFactsResult(
             ran=True, attempted=ex.runs_attempted, succeeded=ex.runs_ok
         )
         result.diagnostics = list(ex.diagnostics)
@@ -1065,10 +1065,10 @@ def test_preprocessor_scan_version_bumped_for_probes_truncated() -> None:
     # Codex review: the additive probes_truncated field needs its schema
     # version bumped so a consumer negotiating either version can detect
     # the changed shape.
-    from abicheck.buildsource.preprocessor_scan import PREPROCESSOR_SCAN_VERSION
+    from abicheck.buildsource.preprocessor_facts import PREPROCESSOR_FACTS_VERSION
     from abicheck.schemas import SCAN_SCHEMA_VERSION
 
-    assert PREPROCESSOR_SCAN_VERSION >= 2
+    assert PREPROCESSOR_FACTS_VERSION >= 2
     assert SCAN_SCHEMA_VERSION != "1.10"
 
 
@@ -1081,7 +1081,7 @@ def test_run_preprocessor_scan_disabled_via_env(monkeypatch) -> None:
             be.CompileUnit(id="cu://a", source="a.cpp", language="CXX", argv=["a.cpp"])
         ]
     )
-    result = run_preprocessor_scan(build, [])
+    result = collect_preprocessor_facts(build, [])
     assert result.ran is False
     assert "ABICHECK_PREPROCESSOR_SCAN=0" in result.skipped_reason
     cov = result.coverage()
@@ -1098,7 +1098,7 @@ def test_capture_macros_parallel_probe_counts_are_race_free(monkeypatch) -> None
     import time
 
     import abicheck.buildsource.build_evidence as be
-    import abicheck.buildsource.preprocessor_scan as ps
+    import abicheck.buildsource.preprocessor_facts as ps
     from abicheck import deadline
 
     monkeypatch.setenv("ABICHECK_PREPROCESSOR_SCAN_JOBS", "8")
@@ -1134,7 +1134,7 @@ def test_capture_macros_parallel_probe_counts_are_race_free(monkeypatch) -> None
 
 
 def test_preprocessor_scan_enabled_default_and_falsy_values(monkeypatch) -> None:
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import preprocessor_facts as ps
 
     monkeypatch.delenv("ABICHECK_PREPROCESSOR_SCAN", raising=False)
     assert ps.preprocessor_scan_enabled() is True

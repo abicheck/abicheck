@@ -47,7 +47,7 @@ looked like the obvious fix and wasn't.
   before the library adopted symbol versioning stay on the base version
   forever, and retroactively assigning one a named version tag would
   itself be an ABI break. `_check_unversioned_exported_symbol`
-  (`buildsource/crosscheck.py`) cannot currently distinguish "bound to the
+  (`buildsource/cross_source_checks.py`) cannot currently distinguish "bound to the
   base version" from "genuinely absent from `.gnu.version`" — both leave
   `ElfSymbol.version == ""` (`elf_metadata.py`'s `_apply_version_to_symbol`
   intentionally never populates `version`/`is_default` for `ver_idx < 2`,
@@ -68,7 +68,7 @@ looked like the obvious fix and wasn't.
   matching by `(name, version)`, and others) — an unbounded blast radius
   for a targeted fix.
 
-  **Why it stands regardless.** `buildsource/crosscheck.py`'s own module
+  **Why it stands regardless.** `buildsource/cross_source_checks.py`'s own module
   docstring states the design tolerance this falls squarely inside: these
   findings "are never BREAKING on their own... default to RISK or
   API_BREAK and are advisory/suppressible until a check earns its
@@ -3409,7 +3409,7 @@ looked like the obvious fix and wasn't.
   `abicheck_inputs/` ingest path in `inputs_pack.py`, the pack's own `root:
   Path` already used for `_safe_pack_path` containment) through several
   call layers in `inline.py` (already WARN-flagged oversized) and
-  `preprocessor_scan.py`. The functional impact of the current gap is
+  `preprocessor_facts.py`. The functional impact of the current gap is
   narrower than it first appears: `build_context.py`'s own `@file`
   expansion (correctly jailed to the compile database's own directory since
   the first response-file fix in this PR) already expands a
@@ -6504,7 +6504,7 @@ looked like the obvious fix and wasn't.
   `*_removed`/`*_removed_elf_only` finding for a declaration no real
   binary-only dump would ever have seen as a symbol at all. Fixed with a
   new `_exported_symbol_names` (a small, local copy of the same "raw
-  export table" read this codebase's `crosscheck_base.py`/
+  export table" read this codebase's `cross_source_checks_base.py`/
   `snapshot_exports.py`/`post_manifest.py`/`diff_unnamed_types.py` each
   already keep their own independent copy of, since a `policy`-layer
   caller may import `model`/`compare` but not `extract`, ADR-061, where

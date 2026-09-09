@@ -94,9 +94,12 @@ from .reporter_markdown import (
     _suppress_dangling_correlation_notes as _suppress_dangling_correlation_notes,
     apply_show_only as apply_show_only,
     operation_for_kind as operation_for_kind,
+    parse_show_only_groups as parse_show_only_groups,
     root_cause_evidence_lookup_for_changes as root_cause_evidence_lookup_for_changes,
     root_cause_for_change as root_cause_for_change,
     root_cause_lookup_for_changes as root_cause_lookup_for_changes,
+    show_only_matches as show_only_matches,
+    show_only_matches_severity_label as show_only_matches_severity_label,
     to_stat as to_stat,
 )
 from .root_cause_evidence import (

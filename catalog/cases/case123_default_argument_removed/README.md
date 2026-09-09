@@ -25,9 +25,12 @@ existing call sites.
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libnet_v1.so
 g++ -shared -fPIC -g v2.cpp -o libnet_v2.so
-abicheck compare libnet_v1.so libnet_v2.so \
-  --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --compiler "$(command -v clang)"
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  compiler: clang
+EOF
+abicheck compare libnet_v1.so libnet_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -52,7 +55,7 @@ DWARF, or anywhere else in the compiled object, so object/DWARF comparison
 alone (L0/L1) cannot see it — both `.so` files really are ABI-identical.
 castxml is the documented default header/AST backend and exposes the
 `default="5000"` attribute on the `<Argument>` element; this environment
-used the supported alternative Clang AST frontend (`--ast-frontend clang`)
+used the supported alternative Clang AST frontend (`compile.frontend: clang` (via `.abicheck.yml`))
 since castxml itself isn't installed here, and it surfaces the same removed
 default. This case is scoped to Linux in `ground_truth.json`: castxml on
 macOS/Homebrew is documented not to emit that `default=` attribute at all,

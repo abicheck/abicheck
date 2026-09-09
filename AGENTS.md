@@ -1114,7 +1114,7 @@ python scripts/check_ai_readiness.py 2>&1 | grep "exceeds soft limit"
 ```
 
 That sentence is load-bearing: this paragraph previously named the WARN set as
-"`cli.py`, `dumper.py`, and `buildsource/crosscheck.py`" long after it had
+"`cli.py`, `dumper.py`, and `buildsource/cross_source_checks.py`" long after it had
 stopped being true (`cli.py` is now a 131-line registration facade), which is
 exactly the drift the "don't trust hard-coded line counts" warning above is
 about. As a shape rather than a list: the WARN set is **large — roughly 100

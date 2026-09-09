@@ -25,8 +25,11 @@ fine. Recompilation is mandatory for every already-linked consumer.
 ```bash
 gcc -shared -fPIC -g -I. bad.c  -o libfoo_v1.so
 gcc -shared -fPIC -g -I. good.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=bad.h --header new=good.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=bad.h --header new=good.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding

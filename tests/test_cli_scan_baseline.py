@@ -17,9 +17,9 @@ import pytest
 
 from abicheck import cli_scan_baseline as csb, cli_scan_helpers as csh
 from abicheck.buildsource.risk import RiskRules
-from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
+from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
 
 
 class TestPackCoverage:

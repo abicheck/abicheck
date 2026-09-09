@@ -186,7 +186,7 @@ class CrossSourceEvolution(str, Enum):
     Not to be confused with :class:`FindingEvolution` above, which tracks a
     finding's identity across a *chain* of separate ``compare()`` calls over
     time — this enum instead states how a cross-source hygiene check
-    (``buildsource.crosscheck.run_crosschecks`` and siblings), which
+    (``buildsource.cross_source_checks.run_crosschecks`` and siblings), which
     evaluates one snapshot's evidence sources against each other and
     carries no baseline of its own, behaves when that check is run
     independently on OLD and NEW *inside the same* ``compare()`` call. Same

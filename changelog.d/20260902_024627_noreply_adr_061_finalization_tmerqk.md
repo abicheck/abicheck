@@ -4,7 +4,7 @@
   responsibility-package migration document (`docs/contribute/adr/
   061-responsibility-package-architecture.md`) still recorded `cli_params.py`'s
   physical move into `frontends/cli/options/` as blocked, even though the
-  move (and its two prerequisite classifications — `buildsource.scan_levels`
+  move (and its two prerequisite classifications — `model.evidence_depth_levels`
   as `model`, and `abicheck/policies/__init__.py` as `policy`, reached
   through `workflows.policy_file.builtin_policy_names`) had already landed
   and been verified clean against `scripts/check_architecture.py`. Added the

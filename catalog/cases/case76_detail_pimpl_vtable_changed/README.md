@@ -30,7 +30,11 @@ any symbol-name-only tool.
 ```bash
 g++ -std=c++17 -shared -fPIC -g v1.cpp -o libfoo_v1.so
 g++ -std=c++17 -shared -fPIC -g v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -61,7 +65,7 @@ reported changed too, not just the "internal" base's.
 public `svm_algorithm` inherits `detail::algorithm_iface`, so a vtable
 change on the base is understood to reach the public class's own dispatch
 table. castxml is the documented default backend for this evidence layer;
-clang (`--ast-frontend clang`) is a supported alternative AST frontend used
+clang (`compile.frontend: clang` (via `.abicheck.yml`)) is a supported alternative AST frontend used
 above.
 
 ## Why abicheck catches it

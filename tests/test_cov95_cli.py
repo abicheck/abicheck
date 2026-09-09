@@ -810,7 +810,7 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--report-mode",
+            "--view",
             "impact",
         )
         # Breaking pair still exits 4; the report renders without error.
@@ -839,7 +839,8 @@ class TestCompareCommand:
             "compare",
             str(old_f),
             str(new_f),
-            "--no-demangle",
+            "--view",
+            "no-demangle",
         )
         assert result.exit_code == 0
 
@@ -959,12 +960,15 @@ class TestCompareReleaseFormatHelpers:
         assert "libfoo.so" in text
 
     def test_md_bundle_findings_empty(self) -> None:
-        assert _release_md_bundle_findings(None) == []
+        assert _release_md_bundle_findings(None, []) == []
 
     def test_md_matrix_findings_empty(self) -> None:
-        assert _release_md_matrix_findings(None) == []
+        assert _release_md_matrix_findings(None, []) == []
 
     def test_md_matrix_findings_with_change(self) -> None:
+        # PR #1154 follow-up ("Move release filtering out of the Markdown
+        # renderer"): the renderer no longer filters -- the caller passes
+        # the already-selected view (here, mr.changes unfiltered) directly.
         mr = DiffResult(
             old_version="1",
             new_version="2",
@@ -975,7 +979,7 @@ class TestCompareReleaseFormatHelpers:
                 ),
             ],
         )
-        lines = _release_md_matrix_findings(mr)
+        lines = _release_md_matrix_findings(mr, mr.changes)
         assert any("Matrix" in ln for ln in lines)
         assert any("foo" in ln for ln in lines)
 
@@ -1558,8 +1562,8 @@ class TestUsedByScoping:
         )
         data = json.loads(result.stdout)
         sarif_results = data["runs"][0]["results"]
-        assert len(sarif_results) == 1
-        assert sarif_results[0]["ruleId"] == "func_removed"
+        rule_ids = [r["ruleId"] for r in sarif_results]
+        assert (rule_ids.count("func_removed"), set(rule_ids)) == (1, {"func_removed", "public_surface_shrank"})
 
     def test_severity_missing_symbols_only_does_not_affect_exit_code(
         self, tmp_path, monkeypatch
@@ -1875,8 +1879,18 @@ class TestUsedByScoping:
         # reports the same thing it would for an unscoped run: the removed
         # symbol was detected but is not one of this ADR-067 disposition
         # ledger's "gating" findings for the supplied consumer.
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
-        assert "1 detected, 0 gating, 1 non_gating" in result.stdout
+        #
+        # PR #1154 merge follow-up: `--surface-metrics` is now unconditional
+        # (ADR-068 D4/Phase 5), so this fixture's own public-symbol-count
+        # shrink (1 public func old -> 0 new) now also emits a
+        # `public_surface_shrank` COMPATIBLE finding alongside the real
+        # `func_removed` -- asserting the new, correct finding set rather
+        # than weakening the assertion, matching this same PR's own fix
+        # pattern for the other surface-metrics-affected tests in this file.
+        assert result.stdout.strip().startswith(
+            "BREAKING: 1 breaking, 1 compatible (2 total)"
+        )
+        assert "2 detected, 0 gating, 2 non_gating" in result.stdout
 
     def test_oneline_format_does_not_count_a_scoped_only_finding(
         self, tmp_path, monkeypatch
@@ -1937,7 +1951,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "oneline", "--show-only", "compatible",
+            "--format", "oneline", "--view", "show=compatible",
         )
         assert result.exit_code == 0
         assert result.stdout.strip().startswith("NO_CHANGE: no changes (0 total)")
@@ -2001,8 +2015,8 @@ class TestUsedByScoping:
             "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking (1 total)")
-        assert "1 detected, 1 gating" in result.stdout
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking, 1 compatible (2 total)")
+        assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(
         self, tmp_path, monkeypatch
@@ -2177,7 +2191,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -2196,7 +2210,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         data = json.loads(result.stdout)
         assert data["root_cause_count"] == 1
@@ -2234,13 +2248,12 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["root_cause_count"] == 1
-        group = data["root_causes"][0]
-        assert group["root"] == "_Z3barv"
+        assert data["root_cause_count"] == 2
+        group = next(g for g in data["root_causes"] if g["root"] == "_Z3barv")
         assert group["finding_count"] == 2
         assert {f["kind"] for f in group["findings"]} == {
             "func_removed", "pe_ordinal_retargeted",
@@ -2281,8 +2294,8 @@ class TestUsedByScoping:
         assert result.exit_code == 4
         data = json.loads(result.stdout)
         entries = {c["kind"]: c for c in data["changes"]}
-        assert set(entries) == {"func_removed", "consumer_required_symbol_removed"}
-        for entry in entries.values():
+        assert set(entries) == {"func_removed", "consumer_required_symbol_removed", "public_surface_shrank"}
+        for entry in (e for k, e in entries.items() if k != "public_surface_shrank"):
             evidence = entry["impact_assessment"]["root_cause_evidence"]
             assert evidence["strongest_evidence_level"] == "consumer_proven"
             assert evidence["evidence_levels"] == [
@@ -2320,16 +2333,16 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old_p), str(new_p), "--used-by", str(app_path),
-            "--format", "json", "--report-mode", "root-cause",
+            "--format", "json", "--view", "root-cause",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)
-        assert data["root_cause_count"] == 2
-        groups = {
-            group["findings"][0]["kind"]: group for group in data["root_causes"]
-        }
-        assert set(groups) == {"func_removed", "consumer_required_symbol_removed"}
-        for group in groups.values():
+        assert data["root_cause_count"] == 3
+        groups = {group["findings"][0]["kind"]: group for group in data["root_causes"]}
+        assert set(groups) == {"func_removed", "consumer_required_symbol_removed", "public_surface_shrank"}
+        for kind, group in groups.items():
+            if kind == "public_surface_shrank":
+                continue
             assert group["finding_count"] == 1
             assert group["strongest_evidence_level"] == "consumer_proven"
             assert group["evidence_levels"] == ["artifact_proven", "consumer_proven"]
@@ -2365,11 +2378,11 @@ class TestUsedByScoping:
             str(new_p),
             "--used-by",
             str(app_path),
-            "--report-mode",
+            "--view",
             "root-cause",
         )
         assert result.exit_code == 4
-        assert "## Root Causes (1)" in result.output
+        assert "## Root Causes (2)" in result.output
         # Markdown demangles by default -- the group's display root is the
         # demangled `bar()`, not the raw mangled `_Z3barv`.
         assert "### `bar()` (2 finding" in result.output
@@ -2402,7 +2415,7 @@ class TestUsedByScoping:
             str(new),
             "--used-by",
             str(app),
-            "--report-mode",
+            "--view",
             "root-cause",
         )
         assert result.exit_code == 0
@@ -2448,7 +2461,7 @@ class TestUsedByScoping:
             str(new),
             "--used-by",
             str(app),
-            "--report-mode",
+            "--view",
             "root-cause",
             "--config",
             str(_severity_config(tmp_path, abi_breaking="error")),
@@ -2501,7 +2514,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--show-only", "compatible",
+            "--view", "show=compatible",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2579,7 +2592,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--show-only", "compatible",
+            "--view", "show=compatible",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2593,7 +2606,7 @@ class TestUsedByScoping:
         self._patch_scope(monkeypatch, res)
         result = _invoke(
             "compare", str(old), str(new), "--used-by", str(app), "--format", "json",
-            "--show-only", "breaking",
+            "--view", "show=breaking",
         )
         data = json.loads(result.stdout)
         kinds = [c["kind"] for c in data["changes"]]
@@ -2829,7 +2842,11 @@ class TestReleaseFormatWithBundleAndMatrix:
         }
 
     def test_md_bundle_findings_rendered(self) -> None:
-        lines = _release_md_bundle_findings(_bundle_with_findings())
+        # PR #1154 follow-up ("Move release filtering out of the Markdown
+        # renderer"): pass the unfiltered findings view directly, matching
+        # the real call site's own no-show_only default.
+        bundle = _bundle_with_findings()
+        lines = _release_md_bundle_findings(bundle, bundle.bundle_findings)
         assert any("Bundle" in ln for ln in lines)
         assert any("foo" in ln for ln in lines)
         assert any("consumer" in ln for ln in lines)

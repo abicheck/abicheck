@@ -60,6 +60,7 @@ from typing import TYPE_CHECKING, Any, cast
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
 
 if TYPE_CHECKING:
+    from .bundle_models import BundleDiffResult
     from .checker_types import DiffResult
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
@@ -822,10 +823,10 @@ def _release_summary_effective_config_block(
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
         on_incomplete_scope=on_incomplete_scope,  # ADR-065 D6: warn/block exit differently
-        # ADR-068 D4/Phase 5: modulation is unconditional on every `compare`-
-        # family run now (`_run_compare_pair`'s own default agrees) -- this
-        # stand-in must too, rather than default to the pre-Phase-5 "off".
+        # ADR-068 D4/Phase 5: modulation/surface-metrics are unconditional
+        # now -- this stand-in must agree, not default to the old "off".
         pattern_verdicts_enabled=True,
+        surface_metrics_enabled=True,
     )
     ec_scheme = gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(
@@ -874,10 +875,18 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
     lines: list[str] = []
     for lib in library_results:
         findings = lib.get("findings")
-        if not findings:
+        impact_table = lib.get("impact_table")
+        impact_root_entries = (
+            impact_table.get("root_entries") if isinstance(impact_table, dict) else None
+        ) or []
+        impact_direct_removals = (
+            impact_table.get("direct_removals", 0) if isinstance(impact_table, dict) else 0
+        )
+        has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
+        if not findings and not has_impact:
             continue
         lines += ["", f"### `{lib['library']}` Findings", ""]
-        for f in cast(list[dict[str, object]], findings):
+        for f in cast(list[dict[str, object]], findings or []):
             symbol = f.get("symbol")
             lines.append(
                 f"- **{f.get('kind')}**" + (f" — `{symbol}`" if symbol else "")
@@ -898,6 +907,23 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
                 "(or compare this library individually) for the complete "
                 "list._"
             )
+        if has_impact:
+            # `--view impact`'s aggregate counterpart (Codex review, PR
+            # #1154 follow-up: "Reject unsupported impact views instead of
+            # silently dropping them") -- same shape
+            # `reporter_markdown.compute_impact_table` produces for a
+            # single-pair `compare` report, rendered per library here since
+            # a release has one impact table per library, not one overall.
+            lines.append("")
+            lines.append(f"**Impact** for `{lib['library']}`:")
+            for entry in impact_root_entries:
+                lines.append(
+                    f"- `{entry.get('symbol')}` ({entry.get('kind')}): "
+                    f"{entry.get('iface_count', 0)} interface(s), "
+                    f"{entry.get('caused', 0)} caused change(s)"
+                )
+            if impact_direct_removals:
+                lines.append(f"- {impact_direct_removals} direct removal(s)")
     return ["", "## Per-Library Findings", *lines] if lines else []
 
 
@@ -905,20 +931,37 @@ def release_disposition_audit_block(
     library_results: list[dict[str, object]],
     matrix_result: DiffResult | None = None,
     severity_config: SeverityConfig | None = None,
+    bundle_result: BundleDiffResult | None = None,
 ) -> dict[str, object]:
     """ADR-067 C-S2: the release/bundle fan-out's own ``disposition_audit``.
 
     Folds every library's already-computed per-library block (each library
     entry carries one, set alongside ``entry["findings"]`` in
     ``cli_compare_release_pairwise._compare_one_library`` -- the identical
-    scalar-``compare`` shape, so a consumer parses one shape everywhere) plus
-    the release-global probe-matrix comparison's own audit, into one
-    release-level total via :func:`~abicheck.report.disposition_audit.
-    fold_disposition_audits`. A library entry with no ``disposition_audit``
-    (an operational-error/not-comparable/unsupported outcome that never
-    reached a real comparison) contributes nothing, the same way such a
-    library contributes no ``findings`` either -- it is not a comparison the
+    scalar-``compare`` shape, so a consumer parses one shape everywhere),
+    the release-global probe-matrix comparison's own audit, and the
+    cross-library bundle-analysis findings (*bundle_result*, Codex review,
+    fresh evidence: "Include bundle findings in the release disposition
+    audit" -- without this, a release whose only change is a
+    ``bundle_library_removed``-shaped bundle finding reported a breaking
+    ``bundle_findings`` entry alongside a ``detected_total: 0``/
+    ``effective_total: 0`` audit, breaking D3's "every observed change is
+    accounted for" conservation rule), into one release-level total via
+    :func:`~abicheck.report.disposition_audit.fold_disposition_audits`. A
+    library entry with no ``disposition_audit`` (an operational-error/
+    not-comparable/unsupported outcome that never reached a real
+    comparison) contributes nothing, the same way such a library
+    contributes no ``findings`` either -- it is not a comparison the
     audit's raw total should silently pretend happened.
+
+    ``BundleDiffResult`` carries no ``changes``/``redundant_changes``/etc.
+    buckets of its own (only ``bundle_findings``, a distinct ``BundleFinding``
+    type) -- unlike ``matrix_result``, a real ``DiffResult`` `checker.compare`
+    already built -- so a real (not merely duck-typed) minimal ``DiffResult``
+    is built here with ``changes`` set from ``bundle_findings.to_change()``,
+    scored under the bundle's own policy/policy_file, for
+    :func:`~abicheck.report.disposition_audit.compute_disposition_audit` to
+    read.
 
     Lives here rather than in ``cli_compare_release_helpers.py``/
     ``cli_compare_release_matrix.py`` for the identical reason
@@ -928,6 +971,7 @@ def release_disposition_audit_block(
     module is the established shared home for a release-summary-wide fold
     neither has room for.
     """
+    from .checker_types import DiffResult as _DiffResult
     from .report.disposition_audit import (
         DispositionAudit,
         compute_disposition_audit,
@@ -941,4 +985,17 @@ def release_disposition_audit_block(
             audits.append(DispositionAudit.from_dict(block))
     if matrix_result is not None:
         audits.append(compute_disposition_audit(matrix_result, severity_config))
+    if bundle_result is not None and bundle_result.bundle_findings:
+        bundle_as_diff_result = _DiffResult(
+            old_version="",
+            new_version="",
+            library="<bundle>",
+            changes=[f.to_change() for f in bundle_result.bundle_findings],
+            verdict=bundle_result.bundle_verdict,
+            policy=bundle_result.policy,
+            policy_file=bundle_result.policy_file,
+        )
+        audits.append(
+            compute_disposition_audit(bundle_as_diff_result, severity_config)
+        )
     return fold_disposition_audits(audits).to_dict()

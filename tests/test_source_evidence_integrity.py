@@ -17,7 +17,10 @@ Pure-Python; default lane.
 
 from __future__ import annotations
 
-from abicheck.buildsource.crosscheck import CHECK_ODR_TYPE_VARIANT, run_crosschecks
+from abicheck.buildsource.cross_source_checks import (
+    CHECK_ODR_TYPE_VARIANT,
+    run_crosschecks,
+)
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import (
     SourceAbiSurface,

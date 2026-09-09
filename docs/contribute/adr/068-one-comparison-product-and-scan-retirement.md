@@ -52,16 +52,16 @@ engine", but it is not thin: it owns ~10,000 lines
 under `diff`), a separate Action mode with ~40 branches in `action/run.sh`,
 and 40 test modules. Most damagingly it owns **capabilities `compare` cannot
 reach at all**: the eleven cross-source checks
-(`buildsource/crosscheck.py` — `private_header_leak`, `public_not_exported`,
+(`buildsource/cross_source_checks.py` — `private_header_leak`, `public_not_exported`,
 `exported_not_public`, `rtti_for_internal_type`, `odr_type_variant`,
 `unversioned_exported_symbol`, `compile_context_conflict`,
 `header_build_context_mismatch`, `source_surface_dso_mismatch`,
 `public_to_internal_dependency`, `identity_collision_detected`), the lexical
-pattern pre-scan (`buildsource/pattern_scan.py`), the preprocessor scan
-(`buildsource/preprocessor_scan.py`), changed-path localization
+pattern pre-scan (`buildsource/pattern_facts.py`), the preprocessor scan
+(`buildsource/preprocessor_facts.py`), changed-path localization
 (`--since`/`--changed-path`), and the `abi3` limited-API audit. Verified by
-call site, not by import: the only production callers of `scan_files`,
-`run_preprocessor_scan` and `run_crosschecks` anywhere under `abicheck/` are
+call site, not by import: the only production callers of `find_pattern_facts`,
+`collect_preprocessor_facts` and `run_crosschecks` anywhere under `abicheck/` are
 three lines in `scan_engine.py`. (`workflows/extraction.py` *imports* the
 first two, but only re-exports them — it never calls either, which is
 exactly the kind of near-miss that makes an import-graph reading alone

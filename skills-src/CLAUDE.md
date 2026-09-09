@@ -69,7 +69,7 @@ Generated output, per skill, per target tree:
    `importlib.metadata` reports the *last published* version, so calibrating
    the range to it would approve an installation lacking the surface: that is
    how the range first came to say `>=0.5.0` while every workflow depended on
-   `aggregate`, `project plan`, `--report-mode root-cause`,
+   `aggregate`, `project plan`, `--view root-cause`,
    `--diagnostic-comparison`, and `--contract`, none of which
    0.5.0 shipped. `tests/test_agent_skills_structural.py` enforces the
    minimum against its own `SURFACE_FLOOR` constant — a stated fact about

@@ -99,9 +99,9 @@ items stay closed and are not re-opened.
 Three findings from the audit of `main`, each verified directly:
 
 **1. `compare` cannot reach `scan`'s checks.** Verified by call site: the
-only production callers of `buildsource.crosscheck.run_crosschecks`,
-`buildsource.pattern_scan.scan_files` and
-`buildsource.preprocessor_scan.run_preprocessor_scan` anywhere under
+only production callers of `buildsource.cross_source_checks.run_crosschecks`,
+`buildsource.pattern_facts.find_pattern_facts` and
+`buildsource.preprocessor_facts.collect_preprocessor_facts` anywhere under
 `abicheck/` are `scan_engine.py:1292`, `:1126` and `:1275`. Check by call
 site, not import: `workflows/extraction.py` imports two of the three and
 calls neither. The eleven cross-source checks —
@@ -202,17 +202,17 @@ identity; **DELETE** — leaves the product.
 |---|---|---|---|---|---|
 | 1 | Baseline comparison (`--against`) | `cli_scan_baseline.py`, `scan_engine.run_scan_core` | `compare OLD NEW` | DELETE (it *is* `compare`) | Parity suite (Phase 3) |
 | 2 | Audit-only mode (no `--against`) | `scan_engine._audit_exit_code` | `compare --no-baseline` | COMPARE-STAGE | ADR-065 `declared_absent` acquisition state (Phase 1) |
-| 3 | Cross-source checks (11) | `buildsource/crosscheck.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). **Update (2026-09-09, Phase 4 commit 1, ADR-068 amendment):** `scan --against`'s own baseline-compare path no longer strips these findings back out of its diff — the stripping was itself the bug (D3's own authority rule: these findings stay `RISK`/`API_BREAK`, never advisory-only), not a preserved invariant; `cli_scan_baseline._strip_automatic_cross_source_findings` is deleted. A baseline `scan` now gates a cross-source finding exactly as `compare` does — same verdict, same severity, same exit-code contribution; `scan`'s dedicated `crosscheck` report block and `--crosscheck KEY=error` promotion are unaffected (still scan-only surface). This is a documented breaking change to `scan --against`'s baseline-comparison result, not merely an internal refactor |
+| 3 | Cross-source checks (11) | `buildsource/cross_source_checks.py`, run only from `scan_engine` | `compare` pipeline, per side | COMPARE-STAGE | Evolution-state model (Phase 1); `not_evaluated` correctness (F-7). **11 of 11 landed**: `unversioned_exported_symbol` and `private_header_leak` landed first, then `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, and `public_to_internal_dependency`, and finally `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` (this PR) — all eleven run automatically inside `compare()` (`cross_source_checks`, default `True`, no flag — ADR-068 D4/D5). **Update (2026-09-09, Phase 4 commit 1, ADR-068 amendment):** `scan --against`'s own baseline-compare path no longer strips these findings back out of its diff — the stripping was itself the bug (D3's own authority rule: these findings stay `RISK`/`API_BREAK`, never advisory-only), not a preserved invariant; `cli_scan_baseline._strip_automatic_cross_source_findings` is deleted. A baseline `scan` now gates a cross-source finding exactly as `compare` does — same verdict, same severity, same exit-code contribution; `scan`'s dedicated `crosscheck` report block and `--crosscheck KEY=error` promotion are unaffected (still scan-only surface). This is a documented breaking change to `scan --against`'s baseline-comparison result, not merely an internal refactor |
 | 4 | Private-header leakage | `crosscheck.private_header_leak` | as #3 | COMPARE-STAGE | **Landed.** Public/internal boundary from `-H` provenance + `.abicheck.yml` `scope.public_header_dirs` (#22, now solved for both sources) |
 | 5 | public-vs-exported (`public_not_exported`, `exported_not_public`) | `crosscheck` | as #3 | COMPARE-STAGE | **Landed.** As #4 |
-| 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — `checker.compare`'s `pattern_preprocessor_scan` keyword, default `True`, no flag (ADR-068 D4/D5), via `workflows/pattern_preprocessor_scan.py`; folded through `CrossSourceEvolution`, surfaced as the new `pattern_preprocessor_scan` report block (advisory, no `ChangeKind`, since the primitive never produced one under `scan` either) |
+| 6 | Pattern checks (lexical pre-scan) | `buildsource/pattern_facts.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — `checker.compare`'s `pattern_preprocessor_scan` keyword, default `True`, no flag (ADR-068 D4/D5), via `workflows/pattern_preprocessor_scan.py`; folded through `CrossSourceEvolution`, surfaced as the new `pattern_preprocessor_scan` report block (advisory, no `ChangeKind`, since the primitive never produced one under `scan` either) |
 | 7 | Pattern verdict modulation | `compare --pattern-verdicts` (already on `compare`) | `compare`, always-on where evidence exists | AUTOMATIC | Decouple `--explain-patterns` (ADR-068 D4) |
-| 8 | Preprocessor checks | `buildsource/preprocessor_scan.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — as #6 |
+| 8 | Preprocessor checks | `buildsource/preprocessor_facts.py` | `compare` pipeline, per side | COMPARE-STAGE | **Landed** (Phase 2b) — as #6 |
 | 9 | Build-context analysis / reconciliation | `scan` L3 collection; `compare --reconcile-build-context` | `compare --depth build`, reconciliation always-on when build context is present | AUTOMATIC + MERGE | ADR-039 reconciliation already shipped |
 | 10 | Source-ABI replay (L4) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | Parity on POI scoping (#11) |
 | 11 | Source-graph analysis (L5) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | ADR-037 D6 keeps L5 internal |
 | 12 | Changed-path localization (`--since`, `--changed-path`) | `cli_scan.py`, `buildsource/poi.py` | `compare --since` / `--changed-path` | COMPARE-STAGE (per-run input, ADVANCED KEEP) | Phase 2 |
-| 13 | Risk-driven evidence selection (`--depth auto`) | `risk.py`, `buildsource/scan_levels.py` | `compare --depth` (`auto` rung) | AUTOMATIC | Depth resolution shared (already `scan_levels.resolve_level`) |
+| 13 | Risk-driven evidence selection (`--depth auto`) | `risk.py`, `model/evidence_depth_levels.py` | `compare --depth` (`auto` rung) | AUTOMATIC | Depth resolution shared (already `evidence_depth_levels.resolve_level`) |
 | 14 | Risk rule overrides (`--risk-rules`) | `cli_scan_baseline._load_risk_rules` | `.abicheck.yml` `risk:` | CONFIG | Phase 7 |
 | 15 | CPython/`abi3` audit (`--abi3`) | `scan_abi3_resolve.py`, `scan_engine._run_abi3_audit` | `compare` candidate-side enrichment stage | COMPARE-STAGE; floor value is CONFIG (`python.abi3_floor`) | Phase 2 |
 | 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | ADR-065 S3 component inventories |
@@ -233,9 +233,9 @@ identity; **DELETE** — leaves the product.
 | 31 | `ScanRequest` / `ScanResult` typed API | `service_scan.py` | `CompareRequest` / `CompareResult` | DELETE (fields absorbed) | ADR-055 registry update |
 | 32 | Action `mode: scan` | `action/run.sh` (~40 branches) | `mode: compare` (+ `baseline-channel: none`) | DELETE after absorption | Phase 4; Action input lifecycle (ADR-047) |
 | 33 | `pr-comment` scan projection | `pr_comment_scan.py`, `pr_comment_scan_abort.py` | one PR-comment projection over `ReportDocument` | INTERNAL (merged) | Phase 4 |
-| 34 | Depth vocabulary/resolution | `buildsource/scan_levels.py` | keep as engine primitive, renamed off `scan` | INTERNAL | Rename only after callers move |
+| 34 | Depth vocabulary/resolution | `model/evidence_depth_levels.py` (was `buildsource/scan_levels.py`) | keep as engine primitive, renamed off `scan` | INTERNAL | **Done** — Phase 6's rename step landed ahead of the command's own deletion; see Phase 6's own section for the full rename list and the `poi.py`/`risk.py` correction |
 | 35 | Cost/dry-run estimation | `frontends/cli/scan_dry_run.py`, `artifact_set_dry_run.py` | `compare --dry-run` (ADR-043 D9 shared model) | MERGE | Phase 2 |
-| 36 | `scan`-specific tests (40 modules) | `tests/test_*scan*` | rewritten against `compare`, or deleted with the mode | DELETE last | Phase 6 |
+| 36 | `scan`-specific tests (33 modules — corrected from "40"; see Phase 6's own deletion-order checklist for the exact list and the false positives the glob over-counted) | `tests/test_*scan*` | rewritten against `compare`, or deleted with the mode | DELETE last | Phase 6 |
 
 **Nothing in this table is classified DELETE for a capability a user
 currently gets.** The five DELETE rows are: a mode that duplicates
@@ -409,8 +409,12 @@ The number is a consequence of the model, not the goal.
 | Modern-CLI accepted total (excl. `compat`) | ~180 | **≤95** | — |
 
 Deleted implementation surface, once Phase 6 completes: ~10,000 lines of
-`scan`-specific CLI/engine/service/report code, one JSON schema, one typed
-request/result pair, ~40 `action/run.sh` branches.
+`scan`-specific CLI/engine/service/report code (verified: 10,074 lines
+across 16 modules, 2026-09-09), one JSON schema, one typed request/result
+pair, and `action/run.sh`'s `MODE == "scan"` branches (17 explicit
+conditionals verified 2026-09-09 — "~40" over-counted by including every
+substring mention of "scan", not just branch points; see Phase 6's own
+deletion-order checklist).
 
 ---
 
@@ -551,8 +555,8 @@ One PR per capability group, each landing with parity tests going green:
   recomputes its verdict, for every migrated check, restoring the
   documented invariant;
 - **2b** pattern + preprocessor scans (#6, #8) — **landed**: both
-  `buildsource/pattern_scan.py`'s lexical pre-scan and
-  `buildsource/preprocessor_scan.py`'s preprocessor pre-scan now run
+  `buildsource/pattern_facts.py`'s lexical pre-scan and
+  `buildsource/preprocessor_facts.py`'s preprocessor pre-scan now run
   automatically inside `compare()`'s pipeline (`checker.compare`'s
   `pattern_preprocessor_scan`, default `True`, no CLI/API/Action opt-in
   flag — ADR-068 D4/D5), via `workflows/pattern_preprocessor_scan.py`'s
@@ -568,8 +572,8 @@ One PR per capability group, each landing with parity tests going green:
   `pattern_preprocessor_scan` report block (`report_schema_version` 3.12)
   rather than new `ChangeKind`s — read-only, never reaching the verdict,
   severity, or exit code. Both entries are gone from
-  `tests/parity/gaps.py`, and `scan_files`/`run_preprocessor_scan` are no
-  longer tracked in `test_engine_primitive_call_sites.py`'s
+  `tests/parity/gaps.py`, and `find_pattern_facts`/`collect_preprocessor_facts`
+  are no longer tracked in `test_engine_primitive_call_sites.py`'s
   gap-cross-referenced table (neither backs any remaining scan-only row),
   though their exact two-caller sets stay pinned there;
 - **2c** changed-path localization `--since`/`--changed-path` (#12) and POI
@@ -673,17 +677,140 @@ section's *actual* state, not the target it originally described:
 
 The command, `cli_scan*.py`, `scan_engine.py`, `service_scan.py`,
 `workflows/scan_*.py`, `frontends/cli/scan_*.py`, `pr_comment_scan*.py`,
-`SCAN_SCHEMA_VERSION`, the Action's `scan` mode branches, and the 40
-`scan` test modules — deleted in that order, only after Phases 3 and 4 have
-proven no caller remains. `buildsource/crosscheck.py`,
-`pattern_scan.py`, `preprocessor_scan.py`, `poi.py`, `risk.py` and
-`scan_levels.py` **survive** as engine primitives (§3 #34) and are renamed
-off the `scan` identity in the same PR. `tests/test_cli_root_surface.py` is
-updated to the six-verb set in the same commit as the registration removal
-(ADR-043 D12 / ADR-054 #6).
+`SCAN_SCHEMA_VERSION`, the Action's `scan` mode branches, and the `scan`
+test modules — deleted in that order, only after Phases 3 and 4 have
+proven no caller remains. **Step 4 of this phase — the rename below — has
+landed** (pulled forward ahead of the deletion itself, since it can land
+independently and the deletion's own semantics blocker, Phase 3/4, is still
+open): `buildsource/crosscheck.py`, `crosscheck_base.py`, and
+`crosscheck_coherence.py` are renamed to `cross_source_checks.py`/
+`cross_source_checks_base.py`/`cross_source_checks_coherence.py`
+(stay physically in `buildsource/`, since the main file's own dependencies —
+`export_accounting.py` (`extract`-classified), `source_graph_query.py`
+(unclassified) — forbid a physical move into `abicheck/compare/` under that
+package's `may_import: [model]` restriction without also reclassifying or
+moving those two modules first, out of scope for a pure rename);
+`buildsource/pattern_scan.py`/`preprocessor_scan.py` are renamed to
+`pattern_facts.py`/`preprocessor_facts.py` (stay in `buildsource/` — reading
+build/source evidence is what that legacy package already owns); and
+`buildsource/scan_levels.py` physically moved to
+`abicheck/model/evidence_depth_levels.py` (a value-type vocabulary with zero
+buildsource-specific dependency, consumed at least as widely by `compare`'s
+own evidence-depth resolution as by `scan`). **Correction to this section's
+own prior text:** `poi.py` and `risk.py` were also named here as surviving
+engine primitives, but a call-site audit (AST scan, not grep — see
+`tests/parity/test_engine_primitive_call_sites.py`) found neither has a real
+`compare`-pipeline caller today; every production caller of both is
+scan-only (`scan_engine.py`, plus `service_scan.py`/`cli_scan*.py`/
+`workflows/scan_config.py` for `risk.py`). They are **not** renamed in this
+slice — see the deletion-order checklist below, which reclassifies them from
+"rename" to "delete with `scan`" pending a genuine `compare`-side caller.
+`tests/test_cli_root_surface.py` is updated to the six-verb set in the same
+commit as the registration removal (ADR-043 D12 / ADR-054 #6) — that removal
+itself has not landed yet.
 
 No deprecated alias is kept. `abicheck scan` exits `64` with `No such
 command`, with an error message naming `compare --no-baseline`.
+
+#### Deletion-order checklist (pre-staged; nothing below is deleted by this PR)
+
+Verified against `main` at `3930cfce` on 2026-09-09 by direct file
+enumeration (`find`/`grep`, not the plan's own prior prose), cross-checked
+against this section's own historical claims:
+
+- The prior "~10,000 lines... 40 test modules... ~40 `action/run.sh`
+  branches" figures (§1 item 2, §4.5) are **not fully reproducible** today.
+  The line-count figure holds almost exactly (10,074 lines across the 16
+  scan-only `abicheck/` modules below). The test-module count and the
+  `run.sh` branch count do not: `tests/test_*scan*.py` matches 43 files, of
+  which 33 are scan-only (7 fewer than "40" — the glob also catches renamed
+  primitive tests, a mixed file, and unrelated matches; see below) — and
+  `action/run.sh` has 17 explicit `mode == "scan"` conditionals, not ~40 (286
+  total substring mentions of "scan", which is what the original count likely
+  measured). Use the lists below as the checklist, not the historical prose.
+
+**A. Delete — scan-only, no other purpose (16 files, 10,074 lines under
+`abicheck/`):**
+
+`cli_scan.py`, `cli_scan_baseline.py`, `cli_scan_helpers.py`,
+`cli_scan_receipt.py`, `scan_engine.py`, `service_scan.py`,
+`scan_abi3_resolve.py`, `pr_comment_scan.py`, `pr_comment_scan_abort.py`,
+`frontends/cli/scan_against.py`, `frontends/cli/scan_dry_run.py`,
+`workflows/scan_abi3_dry_run.py`, `workflows/scan_abort_result.py`,
+`workflows/scan_config.py`, `workflows/scan_gate_options.py`,
+`workflows/scan_subprocess.py`. Plus, outside `abicheck/`:
+`eval/scan_level_scaling.py`, `validation/scripts/run_oneapi_scan.py`.
+
+**B. Delete — scan-only tests (33 files, 21,111 lines):**
+
+`tests/test_cli_scan.py`, `test_cli_scan_abort_report.py`,
+`test_cli_scan_baseline.py`, `test_cli_scan_helpers_coverage.py`,
+`test_cli_scan_receipt_unit.py`, `test_pr494_scan_regressions.py`,
+`test_pr_comment_scan.py`, `test_pr_comment_scan_abort.py`,
+`test_service_scan_coverage.py`, `test_scan_abort_result.py`,
+`test_scan_artifact_set.py`, `test_scan_artifact_set_coverage.py`,
+`test_scan_artifact_set_manifest.py`, `test_scan_baseline_finding_projection.py`,
+`test_scan_baseline_headers.py`, `test_scan_compare_parity.py`,
+`test_scan_dry_run_abi3.py`, `test_scan_estimate.py`,
+`test_scan_l2_cleanup_ordering.py`, `test_scan_writers_run_outcome.py`,
+`test_scan_adr039_build_context.py`, `test_scan_analysis_assurance.py`,
+`test_scan_same_binary_coverage_warning.py`, `test_scan_levels_integration.py`,
+`test_dump_scan_l3_comparability.py`, `test_bazel_root_targets_scan.py`,
+`test_perf_binary_scan.py`, `test_action_run_sh_scan_evidence_contract_error.py`,
+`test_action_run_sh_scan_not_comparable.py`, `test_action_run_sh_scan_pr_comment.py`,
+`test_action_run_sh_scan_pr_json_write.py`, `test_action_run_sh_scan_summary.py`,
+`test_action_run_sh_public_header_dir_scan_scope.py`.
+
+**C. Rename, not delete — already done in this PR:**
+`buildsource/cross_source_checks.py`/`cross_source_checks_base.py`/
+`cross_source_checks_coherence.py`, `buildsource/pattern_facts.py`,
+`buildsource/preprocessor_facts.py`, `model/evidence_depth_levels.py`, and
+their test siblings `tests/test_cross_source_checks.py`,
+`tests/test_pattern_facts.py`, `tests/test_evidence_depth_levels.py`,
+`tests/parity/test_cross_source_checks_parity.py`,
+`tests/parity/test_pattern_facts_behavior.py`,
+`tests/parity/test_preprocessor_facts_behavior.py`,
+`tests/test_pattern_preprocessor_scan_coverage.py` (tests
+`workflows/pattern_preprocessor_scan.py`, a `compare`-side survivor, not
+scan-only), and `tests/_scan_fixtures.py` (a non-`test_` shared-fixture
+helper over `cross_source_checks`/`poi`, survives regardless of `poi.py`'s
+own fate below since `cross_source_checks` alone keeps it alive).
+
+**D. Reclassified by this PR's own audit — was "rename" in this section's
+prior text, corrected to "delete with `scan` unless a `compare`-side caller
+appears first":** `buildsource/poi.py`, `buildsource/risk.py`, and their
+tests `tests/test_poi.py`, `tests/test_poi_scenarios.py`,
+`tests/test_risk.py` (all scan-only per the same call-site audit —
+`tests/test_providers.py` also imports both but tests the still-`extract`-
+classified `providers.py` contract, not `poi`/`risk` themselves, so it stays
+regardless of their fate).
+
+**E. Keep for another reason — not deleted, not scan's:**
+`workflows/pattern_preprocessor_scan.py`, `report/pattern_preprocessor_scan.py`
+(the `compare`-pipeline survivors §3 #6/#8 already produced — distinct from
+the buildsource primitives they call), `docs/use/scan-levels.md`,
+`docs/use/github-action-source-scans.md`, `docs/reference/exit-codes.md`
+(document the still-live `scan` command's real contract; rewritten only once
+`scan` is actually gone), the example catalog rows and fixture directories
+under `catalog/cases/case14x-151`/`case181` (single-build-audit examples —
+`scan`'s one case `compare --no-baseline` doesn't cover yet), `docs/start/
+scanning-conda-packages.md` (names a still-current CLI command), the
+`skills-src/` skill body's own `scan libfoo.so` (no `--against`) mention,
+and every `changelog.d/*scan*.md` fragment (historical record).
+
+**Mixed — needs splitting before deletion, not a clean row either way:**
+`tests/test_preprocessor_scan.py` imports both the survivor
+`buildsource.preprocessor_facts` and the scan-only `cli_scan`/`scan_engine`/
+`service_scan` — split its scan-only cases into a scan-only file before
+Phase 6's deletion pass, or the survivor's own coverage goes with it.
+
+**False positives in the naming sweep (kept, unrelated to `scan` mode):**
+`tests/test_scan_accuracy.py` (property/mutation tests over
+`checker.compare`, never touches `scan`), `tests/test_realworld_scan.py`
+(a local helper happens to be named `_scan()`), `tests/
+test_header_scan_deadline_integration.py` (L2 header-*scan* deadline, an
+unrelated extraction-path meaning of "scan"), `tests/scenarios/
+compliance_scanning.yaml` (persona prose, no `mode: scan`).
 
 ### Phase 7 — CLI/config cleanup
 

@@ -135,12 +135,20 @@ def test_resolved_pair_reaches_both_boundaries_through_compare_snapshots(
     assert csm_calls == [(old, expected_old_ids), (new, expected_new_ids)]
 
 
-def test_pair_stays_none_when_pattern_verdicts_and_surface_metrics_both_off(
+def test_pattern_verdicts_boundary_is_not_reached_when_off(
     monkeypatch,
 ) -> None:
-    """The opt-in flags gate everything -- neither boundary is even reached
-    when both features are off (the pre-Phase-3 default for every existing
-    caller)."""
+    """``pattern_verdicts`` stays a real, gated opt-in (ADR-027 explicitly
+    defers flipping it to default-on; Codex review, PR #1154 follow-up:
+    "Obtain ADR approval before forcing verdict modulation") -- its own
+    boundary is not reached when the caller leaves it off.
+
+    ``surface_metrics`` no longer has an equivalent test: ADR-027 Phase 5
+    later made it unconditional at this same ``compare_snapshots`` chokepoint
+    (`TestSurfaceMetricsIsUnconditionalAtTheTier2Verb` in
+    ``test_typed_api_gate_options.py`` covers that contract directly), so
+    asserting its boundary stays unreached when ``surface_metrics=False`` is
+    passed would pin behavior this codebase no longer has."""
     old = _snap("old")
     new = _snap("new")
 
@@ -150,12 +158,7 @@ def test_pair_stays_none_when_pattern_verdicts_and_surface_metrics_both_off(
         "apply_pattern_verdicts",
         lambda *a, **kw: calls.append(1),
     )
-    monkeypatch.setattr(
-        diff_surface_metrics_module,
-        "diff_surface_metrics",
-        lambda *a, **kw: calls.append(1),
-    )
 
-    compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=False)
+    compare_snapshots(old, new, pattern_verdicts=False, surface_metrics=True)
 
     assert calls == []

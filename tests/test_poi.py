@@ -21,7 +21,7 @@ builder consumes to focus the expensive scan. Default lane.
 from __future__ import annotations
 
 from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.buildsource.pattern_scan import (
+from abicheck.buildsource.pattern_facts import (
     EscalationTrigger,
     PatternCategory,
     PatternKind,

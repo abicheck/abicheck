@@ -8,7 +8,7 @@ ADR-061 Phase 3's recorded blocker was that this vocabulary had no owner:
 either imported *through the CLI layer* — the ``workflows -> frontends``
 inversion that blocks moving the service pipelines into ``workflows/`` — or
 kept a private copy. Both happened. Before this module the ladder existed
-four times (``buildsource.scan_levels.USER_DEPTHS`` plus three separate
+four times (``model.evidence_depth_levels.USER_DEPTHS`` plus three separate
 ``_DEPTH_RANK`` dicts in ``cli_dump_helpers.py``, ``analysis_assurance.py``,
 and ``buildsource/check_report.py``), and ``analysis_assurance`` additionally
 carried a hand-copied ``_effective_depth_label``, whose own comment recorded
@@ -18,7 +18,7 @@ this leaf-ish module."
 So this is the leaf both sides may depend on. It imports no CLI module, no
 service module, and nothing that reaches ``cli.py``/``checker.py``.
 
-:data:`DEPTH_RANK` is *derived* from :data:`~abicheck.buildsource.scan_levels.
+:data:`DEPTH_RANK` is *derived* from :data:`~abicheck.model.evidence_depth_levels.
 USER_DEPTHS` rather than restating it. That is the point: the ordering is
 declared once, on the enum that already owns it, so adding or reordering a
 public rung cannot leave a rank map silently disagreeing with the ladder.
@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .buildsource.scan_levels import USER_DEPTHS
+from .model.evidence_depth_levels import USER_DEPTHS
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack

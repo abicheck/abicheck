@@ -48,7 +48,7 @@ def _g20_snapshot(case_name: str, filename: str = "snapshot.abi.json") -> AbiSna
 
 
 #: check name -> (snapshot factory, source, F-row). Empty now: all eleven
-#: crosscheck.ALL_CHECKS entries have migrated onto compare()'s automatic
+#: cross_source_checks.ALL_CHECKS entries have migrated onto compare()'s automatic
 #: pipeline (ADR-068 §3), so there is no remaining scan-only check to table
 #: here -- see each check's own "reaches_compare" test below instead.
 _SCENARIOS: dict[str, tuple[object, str]] = {}
@@ -68,7 +68,7 @@ def test_scenarios_cover_every_crosscheck() -> None:
     see ``test_unversioned_exported_symbol_reaches_compare`` and its ten
     siblings below instead.
     """
-    from abicheck.buildsource.crosscheck import ALL_CHECKS
+    from abicheck.buildsource.cross_source_checks import ALL_CHECKS
 
     assert set(_SCENARIOS) == set(ALL_CHECKS) - set(ALL_CHECKS)
     assert set(_SCENARIOS) == set()

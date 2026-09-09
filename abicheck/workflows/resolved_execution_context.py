@@ -117,7 +117,7 @@ __all__ = ["EvidenceView", "ResolvedExecutionContext"]
 #: round), the one shared leaf `workflows/AGENTS.md` names for this exact
 #: vocabulary ("Shared vocabulary ... lives in leaves any layer may depend
 #: on: `abicheck/evidence_depth.py` (the depth ladder) ... Prefer them over
-#: re-deriving") -- not `buildsource.scan_levels.USER_DEPTHS` directly, which
+#: re-deriving") -- not `model.evidence_depth_levels.USER_DEPTHS` directly, which
 #: would restore the workflow-to-buildsource coupling that module exists to
 #: isolate. `DEPTH_RANK`'s keys are already this exact ordered ladder (that
 #: module derives it from `USER_DEPTHS` itself, once); a plain `dict`

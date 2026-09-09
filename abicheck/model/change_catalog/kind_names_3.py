@@ -57,7 +57,7 @@ KIND_NAMES_3: tuple[tuple[str, str, str | None], ...] = (
     (
         "EXPORTED_NOT_PUBLIC",
         "exported_not_public",
-        '── Cross-source validation (ADR-035 D4 / G19.2) ──────────────────────── -- Emitted by the intra-version cross-source engine (buildsource/crosscheck.py) -- which diffs ONE merged snapshot\'s evidence sources against each other -- (binary exports ↔ header decls ↔ build flags ↔ include graph) — no baseline -- compare. Per ADR-035 D1/D4 these are "bad ABI hygiene" findings, never -- BREAKING on their own: they default to RISK or API_BREAK and are advisory -- (suppressible) until a check earns its FP-rate-gate corpus and is promoted. -- symbol exported by the binary but declared in no public header → RISK',
+        '── Cross-source validation (ADR-035 D4 / G19.2) ──────────────────────── -- Emitted by the intra-version cross-source engine (buildsource/cross_source_checks.py) -- which diffs ONE merged snapshot\'s evidence sources against each other -- (binary exports ↔ header decls ↔ build flags ↔ include graph) — no baseline -- compare. Per ADR-035 D1/D4 these are "bad ABI hygiene" findings, never -- BREAKING on their own: they default to RISK or API_BREAK and are advisory -- (suppressible) until a check earns its FP-rate-gate corpus and is promoted. -- symbol exported by the binary but declared in no public header → RISK',
     ),
     (
         "PUBLIC_NOT_EXPORTED",

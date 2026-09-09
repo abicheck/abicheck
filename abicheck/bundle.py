@@ -917,10 +917,10 @@ def artifact_set_member_exports(
     member's full scan so each member's own ``public_not_exported``
     cross-check can be told the union of what its *siblings* export (a shared
     umbrella header commonly declares more than one member's own public API —
-    see :class:`~abicheck.buildsource.crosscheck.CrosscheckConfig`'s
+    see :class:`~abicheck.buildsource.cross_source_checks.CrosscheckConfig`'s
     ``sibling_exported_symbols`` field for what consumes this). Mirrors the
     same ``is_default``-only filter
-    :func:`~abicheck.buildsource.crosscheck_base._exported_symbol_names`
+    :func:`~abicheck.buildsource.cross_source_checks_base._exported_symbol_names`
     applies to a live snapshot's own ELF export table, so "satisfied by a
     sibling" uses the identical default/unversioned-binding notion of
     "exported" as "satisfied by this member itself" — a symbol that exists

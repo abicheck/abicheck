@@ -5,7 +5,7 @@ cover on its own (``examples/case14x-18x``, see ``tests/test_g20_catalog.py``):
 ``compile_context_conflict``, ``source_surface_dso_mismatch``, and
 ``identity_collision_detected``.
 
-Adapted from the minimal fixtures ``tests/test_crosscheck.py`` already uses
+Adapted from the minimal fixtures ``tests/test_cross_source_checks.py`` already uses
 for the same three checks (its own ``_pack_with_units``/``_cu``/
 ``_surface_with_mapping``/``_pack_with_identity_collisions`` helpers) — kept
 here as a separate, smaller module rather than importing test internals
@@ -62,7 +62,7 @@ def source_surface_dso_mismatch_snapshot() -> AbiSnapshot:
     # These map to symbols that never appear in *this* binary's own export
     # table (below) -- the exact mis-scoped-surface shape
     # test_source_surface_dso_mismatch_flags_stale_surface_mapped_to_other_dso
-    # exercises in tests/test_crosscheck.py.
+    # exercises in tests/test_cross_source_checks.py.
     surface.mappings["source_decl_to_binary_symbol"] = {
         "d0": "_Z9otherlibv",
         "d1": "_Z9otherfn2v",

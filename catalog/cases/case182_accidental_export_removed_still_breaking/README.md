@@ -29,7 +29,11 @@ lookup time once v2 removes it.
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so -H v1.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so -H v1.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding

@@ -36,10 +36,12 @@ the public surface is affected.
 ```bash
 gcc -shared -fPIC -g v1.c -o libfoo_v1.so
 gcc -shared -fPIC -g v2.c -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=v1.h --header new=v2.h \
-  --ast-frontend clang --compiler "$(command -v clang)" \
-  --scope-public-headers --show-filtered
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+  compiler: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --show-filtered --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -63,7 +65,7 @@ auditing the full exported surface rather than just the public-header API.
 type requires the public header AST: DWARF alone (L1) has no notion of
 which structs are reachable from an exported declaration and which aren't.
 castxml is the documented default header/AST backend; this environment used
-the supported alternative Clang AST frontend (`--ast-frontend clang`) to
+the supported alternative Clang AST frontend (`compile.frontend: clang` (via `.abicheck.yml`)) to
 produce that evidence, since castxml itself isn't installed here.
 
 ## Why abicheck catches it (and doesn't report it)

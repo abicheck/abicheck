@@ -38,10 +38,10 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.scan_levels import EvidenceDepth
+from .model.evidence_depth_levels import EvidenceDepth
 
 if TYPE_CHECKING:
-    from .buildsource.scan_levels import SourceMethod
+    from .model.evidence_depth_levels import SourceMethod
 
 
 # --- operand/flag validation (click-free, no ScanOutcome dependency) --------

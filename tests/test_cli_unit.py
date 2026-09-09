@@ -121,7 +121,7 @@ class TestCompareSarif:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "sarif",
-            "--report-mode", "root-cause", "-o", str(out),
+            "--view", "root-cause", "-o", str(out),
         ])
         assert result.exit_code == 4
         content = json.loads(out.read_text(encoding="utf-8"))
@@ -278,7 +278,7 @@ class TestCompareWrite:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--show-only", "added",
+            "--view", "show=added",
             "--write", f"json={secondary_out}",
         ])
         assert result.exit_code == 4
@@ -295,7 +295,7 @@ class TestCompareWrite:
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_p), str(new_p), "--format", "markdown",
-            "--report-mode", "leaf",
+            "--view", "leaf",
             "--write", f"json={secondary_out}",
         ])
         assert result.exit_code == 4

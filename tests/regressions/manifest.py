@@ -260,7 +260,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
             # workflows/cross_source_evolution.py's own per-side OLD/NEW
             # lookup was keyed by a bare `Change.symbol` -- non-injective
             # for `private_header_leak`, whose findings are keyed by
-            # `(mangled_or_name, leaked_type)` in crosscheck.py, so one
+            # `(mangled_or_name, leaked_type)` in cross_source_checks.py, so one
             # function leaking two distinct private types silently
             # collided into one `Change`. Fixed by generalizing to a
             # per-check identity function (`_IDENTITY_FUNCS`), defaulting

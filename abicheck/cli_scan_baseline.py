@@ -40,9 +40,9 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
-from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 from .checker_policy import ADDITION_KINDS
 from .errors import SnapshotError
+from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
 from .workflows.scan_config import RiskRules
 
 if TYPE_CHECKING:
@@ -1363,7 +1363,7 @@ def _run_baseline_compare(
     _redundant = getattr(diff, "redundant_changes", None) or []
 
     if enabled_checks is not None:
-        from .buildsource.crosscheck import ALL_CHECKS
+        from .buildsource.cross_source_checks import ALL_CHECKS
         from .workflows.disposition import RuleProvenance, override_suppressed_change
 
         _disabled = frozenset(ALL_CHECKS) - enabled_checks

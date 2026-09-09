@@ -44,6 +44,8 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # --no-fail-on-removed-library (gate.fail_on_removed_library),
         # --include-private-dso (release.include_private_dso),
         # --on-incomplete-scope (scope.on_incomplete).
+        # ADR-068 D4/Phase 5 collapsed --report-mode/--show-only/--demangle/
+        # --no-demangle/--explain-patterns into one repeatable --view option.
         # --instantiation-manifest, --bundle-facts-out, and
         # --bundle-facts-library-manifest stay CLI flags this phase (see
         # frontends/cli/options/release.py and bundle_facts.py's own
@@ -58,14 +60,12 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--debug-root",
         "--build-info",
         "--debug-info",
-        "--demangle",
         "--depth",
         "--devel-pkg",
         "--diagnostic-comparison",
         "--dry-run",
         "--dump-manifest",
         "--env-matrix",
-        "--explain-patterns",
         "--follow-deps",
         "--format",
         "--header",
@@ -79,7 +79,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--max-json-object-nodes",
         "--no-baseline",
         "--no-bundle-analysis",
-        "--no-demangle",
         "--no-scope-public-headers",
         "--new-variant",
         "--old-variant",
@@ -91,7 +90,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--post-manifest",
         "--probe-matrix",
         "--reconcile-build-context",
-        "--report-mode",
         "--require-complete-analysis",
         "--required-symbol",
         "--scope-public-headers",
@@ -100,7 +98,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--select-required",
         "--severity-preset",
         "--show-filtered",
-        "--show-only",
         "--since",
         "--sources",
         "--support-promise",
@@ -110,6 +107,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--used-by",
         "--used-by-manifest",
         "--verbose",
+        "--view",
         "--write",
         "--version",
         "-H",

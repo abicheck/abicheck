@@ -9,13 +9,13 @@ contract in test form.
 
 Pure-Python synthetic ``AbiSnapshot``s (no compiler/castxml); runs in the default
 lane. Mirrors the ``_snap``/``_findings_of``/``_coverage`` pattern of
-``tests/test_crosscheck.py``.
+``tests/test_cross_source_checks.py``.
 """
 
 from __future__ import annotations
 
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
-from abicheck.buildsource.crosscheck import (
+from abicheck.buildsource.cross_source_checks import (
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
     CHECK_ODR_TYPE_VARIANT,
     CHECK_PRIVATE_HEADER_LEAK,

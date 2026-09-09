@@ -21,8 +21,11 @@ is removed. New consumers can migrate to `lib::sort()` at their own pace.
 ```bash
 g++ -shared -fPIC -g -std=c++17 old/lib.cpp -Iold -o libfoo_v1.so
 g++ -shared -fPIC -g -std=c++17 new/lib.cpp -Inew -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=old/lib.h --header new=new/lib.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=old/lib.h --header new=new/lib.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -49,7 +52,7 @@ from `.dynsym` alone: `g++ -shared -fPIC -std=c++17 ... && abicheck compare`
 with no headers reports a plain `func_added` for it. Classifying that
 addition specifically as an `experimental_graduated` migration event (rather
 than a bare addition) needs namespace-qualified name evidence; this
-reproduction supplies that via header/AST evidence (`--ast-frontend clang`,
+reproduction supplies that via header/AST evidence (`compile.frontend: clang` (via `.abicheck.yml`),
 since castxml isn't installed in this environment — castxml is the
 documented default AST backend where available).
 

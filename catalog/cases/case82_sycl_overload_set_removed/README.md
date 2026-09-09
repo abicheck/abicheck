@@ -51,7 +51,7 @@ Verdict: BREAKING (exit 4)
 
 `min_evidence: L0` — the exported-symbol table alone is enough: all four
 `sycl::queue&`-taking mangled symbols are present in v1's `.dynsym` and
-absent from v2's. Adding public headers (`-H` + `--ast-frontend clang`)
+absent from v2's. Adding public headers (`-H` + `compile.frontend: clang` (via `.abicheck.yml`))
 lets the dedicated overload-family detector collapse these four
 `func_removed_elf_only` findings (plus the incidental `sycl::queue` type
 removal) into a single grouped `sycl_overload_set_removed` finding naming
