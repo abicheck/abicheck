@@ -884,6 +884,23 @@ def test_scan_files_missing_directory_root_still_counted_under_changed_paths(
     assert res.files_skipped == 1
 
 
+def test_scan_files_missing_directory_root_exempted_under_a_truly_empty_seed(
+    tmp_path: Path,
+) -> None:
+    """Codex review, tenth round, fresh evidence: a genuinely EMPTY (but
+    non-`None`) `changed_paths` selects nothing at all, unambiguously -- no
+    root, file OR directory, could ever have been selected by it. The
+    suffix heuristic above only resolves ambiguity for a NON-empty
+    changed-path set; with zero entries there is nothing to be ambiguous
+    about, so even a missing, no-suffix directory root must be exempted
+    here (unlike the sibling case above, whose changed_paths names a real,
+    unrelated entry)."""
+    missing_dir = tmp_path / "missing_sources"
+    res = scan_files([missing_dir], changed_paths=())
+    assert res.files_scanned == 0
+    assert res.files_skipped == 0
+
+
 def test_scan_files_accepts_a_one_shot_changed_paths_iterable(
     tmp_path: Path,
 ) -> None:

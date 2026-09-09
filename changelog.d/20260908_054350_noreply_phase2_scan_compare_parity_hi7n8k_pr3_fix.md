@@ -145,4 +145,11 @@
   the SAME, now-exhausted object to `iter_source_files`, silently excluding
   every real candidate even when the generator genuinely named one.
   `scan_files` now materializes `changed_paths` into a list once, up
-  front, so both consumers see the same entries.
+  front, so both consumers see the same entries. Tenth follow-up round
+  (Codex review, PR #1169, tenth round, fresh evidence): the eighth
+  round's suffix-based exemption only resolves ambiguity for a NON-empty
+  changed-path set; a genuinely empty (but non-`None`) `changed_paths`
+  selects nothing at all, unambiguously, so a missing, no-suffix
+  directory root under `changed_paths=()` still read `unreadable_inputs`
+  instead of `empty_seed`. Added a short-circuit exemption for a truly
+  empty changed-path set before the suffix heuristic runs.

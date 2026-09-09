@@ -990,6 +990,15 @@ def scan_files(
         rp = Path(r)
         if rp.exists():
             continue
+        if changed_suffixes is not None and not changed_suffixes:
+            # Ninth round, fresh evidence: a truly EMPTY (but non-`None`)
+            # `changed_paths` selects nothing at all, unambiguously -- no
+            # root, file OR directory, could ever have been selected by it,
+            # so a missing root's absence is irrelevant regardless of
+            # suffix. This is the one case the suffix heuristic below
+            # doesn't need at all: there is no ambiguity to resolve when
+            # the changed-path set has zero entries to match against.
+            continue
         if (
             changed_suffixes is not None
             and rp.suffix.lower() in SOURCE_SUFFIXES
