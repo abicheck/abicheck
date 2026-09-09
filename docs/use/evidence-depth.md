@@ -77,8 +77,16 @@ one-build audit.
 - **`--depth binary|headers|build|source`** — the single knob (ADR-037 D5 /
   ADR-043 D2). `binary` = L0/L1 exported symbols + binary metadata; `headers` =
   +L2 header AST; `build` = +L3 build context; `source` = +L4 replay & the L5
-  graph. On `compare` and `dump`, omitting it defaults deterministically to
-  `headers` — pin it explicitly whenever you want anything deeper. (Legacy
+  graph. On both `compare` and `dump`, omitting `--depth` is **not** a fixed
+  `headers` default: each command infers the deepest rung its other inputs
+  already justify. With no `--sources`/`--build-info` at all, that inference
+  bottoms out at `headers` (nothing deeper to collect) — but supply
+  `--sources`/`--build-info` with no `--depth`, and `compare` infers
+  `source`/`build` from whichever was given, while `dump` goes further still
+  and always resolves to `source-target` internally, collecting everything
+  the supplied evidence reaches. Pin `--depth` explicitly whenever you want a
+  specific rung regardless of what other inputs are present, rather than
+  relying on this inference. (Legacy
   `scan` instead defaults to a risk-driven `auto`; that rung has no
   `compare`/`dump` equivalent — see [Let risk pick the
   depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
@@ -224,7 +232,7 @@ matches your goal, then supply the input named in column 3.
 | Goal (use case) | `--depth` | Input you must provide | How to obtain it | If the input is missing |
 |---|---|---|---|---|
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
-| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **directory** + a C/C++ frontend | `-H include/ --public-header-dir include/`; `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
+| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **directory** + a C/C++ frontend | `-H include/` on `compare`/`dump` (legacy `scan` instead takes `--public-header-dir include/`); `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info` | L3 `not_collected`; the scan advises the exact remedy |
 | Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (ADR-043 D3 — never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
 | Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
