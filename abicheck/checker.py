@@ -34,6 +34,7 @@ from .checker_policy import (
     EvidenceTier,
     Verdict,
     compute_verdict,
+    is_cross_source_resolved,
 )
 from .checker_types import (  # noqa: F401
     Change,
@@ -1109,7 +1110,11 @@ def compare(
         ledger=ledger,
     )
 
-    all_unsuppressed = kept + verdict_redundant
+    # ADR-068 plan F-9 (Codex review, PR #1172, round 12): a RESOLVED
+    # finding must stay visible in `kept` but never drive the verdict --
+    # excluded here only, the same shape opaque_filtered/rename above use.
+    all_unsuppressed = [c for c in kept if not is_cross_source_resolved(c)]
+    all_unsuppressed += verdict_redundant
     verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file, stage)
     effective_policy = policy_file.base_policy if policy_file is not None else policy
 

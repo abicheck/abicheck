@@ -208,16 +208,44 @@ class CrossSourceEvolution(str, Enum):
       the evidence to evaluate it would be a manufactured finding, which
       ``vision.md`` forbids outright.
 
-    Authority is unchanged (ADR-028 D3 / ADR-035 D1): a finding carrying
-    this field stays whatever ``RISK``/``API_BREAK`` severity its
-    ``ChangeKind`` already defaults to — this axis is purely descriptive
-    and never promotes a finding toward ``BREAKING`` on its own.
+    Authority is unchanged (ADR-028 D3 / ADR-035 D1): a finding's *category*
+    -- which severity/kind bucket it belongs to -- stays whatever its
+    ``ChangeKind`` already defaults to; this axis never promotes a finding
+    toward ``BREAKING`` on its own. That is a *different* axis from whether
+    it *gates* at all: a ``RESOLVED`` finding is deliberately excluded from
+    the change gate outright (plan §7 F-9, "visible on a passing run") --
+    the problem it names no longer exists on the candidate, so it must stay
+    visible in the report and every disposition ledger without failing a
+    run that has already fixed it. See :func:`is_cross_source_resolved`,
+    the one predicate every gate/exit-code chokepoint
+    (``checker.compare``'s ``all_unsuppressed``,
+    ``policy.severity.gate_eligible_changes``,
+    ``policy.severity.gate_contribution_for_change``) shares for that
+    exclusion (Codex review, PR #1172, round 12: this state used to reach
+    the gate exactly like ``PERSISTENT``/``INTRODUCED``, contradicting F-9).
     """
 
     INTRODUCED = "introduced"
     RESOLVED = "resolved"
     PERSISTENT = "persistent"
     NOT_EVALUATED = "not_evaluated"
+
+
+def is_cross_source_resolved(change: object) -> bool:
+    """Whether *change*'s :class:`CrossSourceEvolution` state alone excludes
+    it from the change gate (plan §7 F-9).
+
+    The one shared predicate every gate/exit-code chokepoint applies --
+    duck-typed (``getattr``) so a lightweight test stub or a
+    :class:`Change` reconstructed from JSON (which may not carry the
+    attribute at all) both answer ``False`` rather than raising. A
+    ``RESOLVED`` finding still keeps its normal ``ChangeKind`` category and
+    stays fully present in ``DiffResult.changes``/every disposition
+    ledger -- only its gate/exit-code contribution is zeroed.
+    """
+    return (
+        getattr(change, "cross_source_evolution", None) == CrossSourceEvolution.RESOLVED
+    )
 
 
 class EvidenceStatus(str, Enum):
