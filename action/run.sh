@@ -2414,14 +2414,25 @@ fi
 # Resolves to an absolute path first (`_is_path_already_qualified`'s own
 # established idiom): the Python call below runs inside a
 # `$_PY_SAFE_DIR`-scoped subshell, so a checkout-relative `INPUT_AGAINST`
-# would otherwise resolve against the wrong directory. Answers "not JSON"
-# (never forces legacy) when no working Python interpreter with abicheck
-# importable is available -- a best-effort refinement must not hard-fail
-# the whole routing decision.
+# would otherwise resolve against the wrong directory.
+#
+# Conservatively answers "yes, force legacy" -- not "not JSON" -- when
+# classification itself cannot run (Codex review, PR #1172, round 9): a
+# self-hosted runner can expose an `abicheck`-importable executable while
+# the separately-resolved `$_PY_BIN` (this Action's own preflight
+# explicitly anticipates the two diverging, see the `$_PY_BIN_HAS_ABICHECK`
+# warning above) cannot import it. In that state this function cannot rule
+# out that a real *existing* `INPUT_AGAINST` file is exactly the neutral-
+# name JSON snapshot this whole check exists to catch -- defaulting to "not
+# JSON" there would silently reopen the very regression round 8 closed
+# whenever the two interpreters differ, defeating the fix for the runner
+# shape it names as the reason to make this best-effort at all. A
+# nonexistent path (or no baseline at all) is a real, definitive "no" --
+# not a classification failure -- so that case alone still answers false.
 _against_is_json_snapshot_by_content() {
   [[ -z "${INPUT_AGAINST:-}" ]] && return 1
-  [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]] && return 1
   [[ -f "${INPUT_AGAINST}" ]] || return 1
+  [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]] && return 0
   local _against_abs="${INPUT_AGAINST}"
   _is_path_already_qualified "$_against_abs" || _against_abs="$PWD/$_against_abs"
   local _fmt

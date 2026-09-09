@@ -52,9 +52,29 @@ def _bash_executable() -> str:
 _CMD_MARKER = "__ABICHECK_TEST_CMD_START__"
 
 
-def _run_cmd(env_extra: dict[str, str]) -> list[str]:
+#: Markers bracketing `_PY_BIN_HAS_ABICHECK`'s own computation (same spelling
+#: `test_action_release_topology_config.py`'s `_py_bin_has_abicheck_source`
+#: uses) -- lets a test splice in a forced override right after real
+#: detection ran, rather than fighting the resolution itself (e.g. by
+#: manipulating `PATH`, which would also break coreutils this region needs).
+_PY_BIN_HAS_ABICHECK_START = '_PY_BIN_HAS_ABICHECK="false"'
+_PY_BIN_HAS_ABICHECK_END = "\nfi\n"
+
+
+def _region_with_py_bin_forced_unavailable() -> str:
+    region = _mode_branches_region()
+    start = region.index(_PY_BIN_HAS_ABICHECK_START)
+    end = region.index(_PY_BIN_HAS_ABICHECK_END, start) + len(_PY_BIN_HAS_ABICHECK_END)
+    return (
+        region[:end]
+        + '_PY_BIN_HAS_ABICHECK="false"  # test override: force unavailable\n'
+        + region[end:]
+    )
+
+
+def _run_cmd(env_extra: dict[str, str], *, region: str | None = None) -> list[str]:
     script = (
-        _mode_branches_region()
+        (region if region is not None else _mode_branches_region())
         + f"\nprintf '%s' '{_CMD_MARKER}'"
         + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     )
@@ -387,3 +407,57 @@ class TestBaselineDetectedByContentStaysOnLegacyCli:
         # _BASE_INPUTS) -- only a real, readable JSON file does.
         cmd = _run_cmd({**_BASE_INPUTS, "INPUT_DEPTH": "headers"})
         assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestBaselineSniffFallsBackToLegacyWhenPythonUnavailable:
+    """When `$_PY_BIN_HAS_ABICHECK` is false -- a self-hosted runner
+    exposing an `abicheck`-importable executable while the separately
+    resolved `$_PY_BIN` cannot import it, exactly the divergence the
+    `$_PY_BIN_HAS_ABICHECK` warning elsewhere in this script already
+    anticipates -- content sniffing cannot run at all (Codex review, PR
+    #1172, round 9). Defaulting to "not JSON" there would silently reopen
+    round 8's own regression for a neutral-name snapshot whenever the two
+    interpreters differ. `_against_is_json_snapshot_by_content()` must
+    instead conservatively force the legacy CLI for any *existing*
+    `INPUT_AGAINST` file it cannot classify."""
+
+    def test_an_existing_baseline_stays_on_legacy_cli_when_unclassifiable(
+        self, tmp_path: Path
+    ) -> None:
+        # Even a plain, non-JSON file: with no way to classify it, the safe
+        # answer is "assume it could be the neutral-name snapshot".
+        baseline = tmp_path / "baseline.so"
+        baseline.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 24)
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_AGAINST": str(baseline),
+            },
+            region=_region_with_py_bin_forced_unavailable(),
+        )
+        assert cmd[1] == "scan"
+
+    def test_a_nonexistent_baseline_path_still_routes_to_compare(self) -> None:
+        # Negative control: a definitively nonexistent path is a real "no"
+        # -- not a classification failure -- so it must not itself force
+        # the legacy CLI even with sniffing unavailable.
+        cmd = _run_cmd(
+            {**_BASE_INPUTS, "INPUT_DEPTH": "headers"},
+            region=_region_with_py_bin_forced_unavailable(),
+        )
+        assert cmd[1] == "compare"
+
+    def test_json_suffix_still_stays_on_legacy_cli_when_unclassifiable(self) -> None:
+        # Negative control: the pre-existing suffix check must still catch
+        # its own cases independent of content sniffing being available.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_AGAINST": "baseline.abicheck.json",
+            },
+            region=_region_with_py_bin_forced_unavailable(),
+        )
+        assert cmd[1] == "scan"
