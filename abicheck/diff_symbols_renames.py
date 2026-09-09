@@ -34,7 +34,7 @@ from __future__ import annotations
 import bisect
 import logging
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from functools import lru_cache
 
 from .binary_fingerprint import (
@@ -48,6 +48,7 @@ from .compare.namespace_move import (  # noqa: F401  (public-surface re-exports)
     emit_namespace_move_batches as emit_namespace_move_batches,
     find_namespace_move_groups as find_namespace_move_groups,
 )
+from .compare.rename_evidence import all_constituents_elf_bound
 from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_helpers import make_change
@@ -782,47 +783,6 @@ def find_prefix_rename_pairs(
     return pairs
 
 
-def _all_constituents_elf_bound(
-    old_names: Iterable[str], old_map: Mapping[str, Function] | None
-) -> bool:
-    """True when every constituent's OLD-side declaration carries a real
-    observed ELF binding (``Function.elf_binding``) — the same source
-    ``diff_symbols._check_removed_function`` stamps ``Change.symbol_binding``
-    from for a standalone ``FUNC_REMOVED`` finding.
-
-    A ``SYMBOL_RENAMED_BATCH`` rolls up several individually-matched removed/
-    added pairs, so its own evidence is only as strong as its weakest
-    constituent: one pair matched purely from header-reconstructed names with
-    no corresponding ELF symbol-table entry means the batch claim isn't fully
-    artifact-backed either, even if every other pair is. *old_map* being
-    ``None`` (a caller with no map to offer) conservatively answers ``True``
-    -- the same "assume evidence was examined" default
-    ``evidence_status_for_result``'s own ``evidence_tiers=()`` fallback uses
-    -- so a caller that can't thread the map through gets prior behavior.
-
-    *old_names* are :func:`find_prefix_rename_pairs`'s display-name output
-    (``Function.name``, demangled), not ``old_map``'s own mangled-symbol
-    keys -- a direct ``name in old_map`` test against a mangled-keyed map
-    silently matched nothing for ordinary C++ names, making ``all(...)``
-    over the resulting empty generator vacuously ``True`` regardless of
-    real evidence (Codex review, fresh evidence). Resolved here via a
-    name -> Function reverse index built from *old_map*'s own values; an
-    ambiguous (2+ declarations sharing one demangled spelling) or
-    unresolved name counts as *not* bound, never silently promoted to
-    "confirmed bound".
-    """
-    if old_map is None:
-        return True
-    by_name: dict[str, list[Function]] = {}
-    for f in old_map.values():
-        by_name.setdefault(f.name, []).append(f)
-    for name in old_names:
-        matches = by_name.get(name)
-        if matches is None or len(matches) != 1 or not matches[0].elf_binding:
-            return False
-    return True
-
-
 def emit_prefix_batch_rename(
     rename_pairs: list[tuple[str, str]],
     old_map: Mapping[str, Function] | None = None,
@@ -831,8 +791,8 @@ def emit_prefix_batch_rename(
 
     *old_map*, when given, is consulted so the emitted change's
     ``symbol_binding`` reflects whether *every* constituent pair is actually
-    ELF-backed (:func:`_all_constituents_elf_bound`) -- ``SYMBOL_RENAMED_BATCH``
-    is a member of ``_ELF_BINDING_STAMPED_KINDS``
+    ELF-backed (:func:`compare.rename_evidence.all_constituents_elf_bound`) --
+    ``SYMBOL_RENAMED_BATCH`` is a member of ``_ELF_BINDING_STAMPED_KINDS``
     (``checker_policy.py``), so an unset ``symbol_binding`` on an
     ``"elf"``-tiered run downgrades the whole batch to
     ``EvidenceStatus.UNATTRIBUTED`` -- the correct outcome when even one
@@ -856,7 +816,9 @@ def emit_prefix_batch_rename(
     # constituents can legitimately differ.
     binding = (
         "global"
-        if _all_constituents_elf_bound((o for o, _ in rename_pairs), old_map)
+        if all_constituents_elf_bound(
+            (o for o, _ in rename_pairs), old_map, lambda f: f.name
+        )
         else None
     )
     return [

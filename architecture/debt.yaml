@@ -723,12 +723,12 @@
     },
     {
       "path": "abicheck/diff_symbols_renames.py",
-      "baseline_lines": 872,
+      "baseline_lines": 834,
       "target": "compare",
       "rule": "no_growth",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Namespace-move batch-rename detection moved to compare/namespace_move.py; the remainder (prefix-rename detection, ELF fingerprint-based rename detector) still predates ADR-061 and awaits its own behavior-preserving compare-package slice. Raised from 807 for emit_prefix_batch_rename's old_map-aware evidence aggregation (Codex review, Finding C(i)): SYMBOL_RENAMED_BATCH now stamps symbol_binding from the weakest-link ELF-backing of its constituent pairs instead of leaving it unset unconditionally. Raised 854 -> 872 (Codex review, fresh evidence): the evidence-aggregation lookup was matching find_prefix_rename_pairs's demangled Function.name output against old_map's mangled-symbol keys, which vacuously resolved to always-bound regardless of real evidence -- fixed by resolving through a name -> Function reverse index built from old_map's own values, with an ambiguous or unresolved name treated as unbound.",
+      "rationale": "Namespace-move batch-rename detection moved to compare/namespace_move.py; the remainder (prefix-rename detection, ELF fingerprint-based rename detector) still predates ADR-061 and awaits its own behavior-preserving compare-package slice. Raised from 807 for emit_prefix_batch_rename's old_map-aware evidence aggregation (Codex review, Finding C(i)): SYMBOL_RENAMED_BATCH now stamps symbol_binding from the weakest-link ELF-backing of its constituent pairs instead of leaving it unset unconditionally. Raised 854 -> 872 (Codex review, fresh evidence): the evidence-aggregation lookup was matching find_prefix_rename_pairs's demangled Function.name output against old_map's mangled-symbol keys, which vacuously resolved to always-bound regardless of real evidence -- fixed by resolving through a name -> Function reverse index built from old_map's own values, with an ambiguous or unresolved name treated as unbound. Lowered 872 -> 834 (Codex review: growing this no_growth monolith to hold new aggregation logic bypassed the migration rule instead of following it): the reverse-index resolution helper moved to the new leaf module abicheck/compare/rename_evidence.py (all_constituents_elf_bound, parametrized by a per-shape key_fn), which compare/namespace_move.py's own near-duplicate helper now shares too -- this file keeps only the thin call site.",
       "review_by": "2026-11-30"
     },
     {

@@ -84,3 +84,21 @@
   report projection's compute/render split — the renderer now takes an
   already-resolved `EvidenceStatus`, never deriving one itself from raw
   evidence tiers.
+- `SYMBOL_RENAMED_BATCH`'s constituent-evidence resolution moved out of the
+  no-growth `diff_symbols_renames.py` legacy monolith into a new leaf module,
+  `compare/rename_evidence.py` (`all_constituents_elf_bound`, parametrized by
+  a per-shape identity key), which `compare/namespace_move.py`'s own
+  near-duplicate helper now shares too instead of reimplementing the same
+  reverse-index-then-lookup shape a second time — per ADR-061 D1, new
+  comparison behavior belongs in `compare/`, not in a `no_growth`-tracked
+  legacy module whose baseline gets raised to make room for it (Codex
+  review).
+- An `elf_only`-visibility removal's `demangled_symbol` resolution now
+  batches every such removal's demangling into one `c++filt`/`cxxfilt` call
+  per comparison (`demangle.demangle_batch`, the same warm-then-reuse
+  pattern the rename detector already relies on) instead of forking one
+  subprocess per removed symbol when the faster `cxxfilt` binding isn't
+  installed — a library with many distinct ELF-only C++ removals could
+  previously add seconds to minutes of pure process-launch overhead even
+  when the selected report format never reads `demangled_symbol` at all
+  (Codex review).

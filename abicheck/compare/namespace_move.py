@@ -32,7 +32,7 @@ external caller of ``from abicheck.diff_symbols import ...`` keep working.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
@@ -51,6 +51,7 @@ from ..model.synthetic_key import (
     is_synthetic_dtor_key,
 )
 from .rename_ambiguity import added_side_ambiguity_resolver
+from .rename_evidence import all_constituents_elf_bound
 
 #: Sentinel standing in for the one scope component a candidate namespace
 #: substitution replaces. A real Itanium component can never contain a NUL,
@@ -468,43 +469,18 @@ def _declaring_entity(qualified: str) -> str:
     return qualified
 
 
-def _all_constituents_elf_bound(
-    old_scope_ids: Iterable[str], old_map: Mapping[str, Function] | None
-) -> bool:
-    """True when every constituent's OLD-side declaration carries a real
-    observed ELF binding -- the namespace-move counterpart of
-    ``diff_symbols_renames._all_constituents_elf_bound``.
-
-    *old_scope_ids* are :func:`find_namespace_move_groups`'s own pair
-    identities (``"::".join(r_comps)``, the parsed scope-component chain),
-    which are neither ``old_map``'s mangled-symbol keys nor
-    ``Function.name`` -- a direct ``old in old_map``/``Function.name``
-    lookup against either silently matches nothing for an ordinary
-    mangled C++ symbol, the identical mismatch Codex review found in the
-    prefix-rename sibling. Resolved instead by rebuilding the same
-    ``"::"``-joined scope-chain identity :func:`_scope_components` derives
-    from each candidate's own ``Function.mangled`` and indexing on that,
-    so the lookup key space matches exactly what
-    :func:`find_namespace_move_groups` used to construct *old_scope_ids* in
-    the first place. A scope id that resolves to more than one declaration,
-    or to none, is unresolved evidence and -- like an unresolved prefix-
-    rename constituent -- counts as *not* bound (root `AGENTS.md`: "weaker
-    evidence narrows conclusions").
+def _old_scope_id(f: Function) -> str | None:
+    """Rebuild :func:`find_namespace_move_groups`'s own pair-identity key
+    (``"::".join(scope_components)``) for one OLD-side declaration, so
+    :func:`.rename_evidence.all_constituents_elf_bound` can index this
+    shape's constituents by the same scope-chain identity the group-finder
+    used to construct them -- not ``old_map``'s mangled-symbol keys, nor
+    ``Function.name``, either of which silently matches nothing for an
+    ordinary mangled C++ symbol (Codex review; the identical mismatch this
+    module's prefix-rename sibling had).
     """
-    if old_map is None:
-        return True
-    by_scope_id: dict[str, list[Function]] = {}
-    for f in old_map.values():
-        resolved = _scope_components(f.mangled)
-        if resolved is None:
-            continue
-        scope_id = "::".join(resolved[0])
-        by_scope_id.setdefault(scope_id, []).append(f)
-    for scope_id in old_scope_ids:
-        matches = by_scope_id.get(scope_id)
-        if matches is None or len(matches) != 1 or not matches[0].elf_binding:
-            return False
-    return True
+    resolved = _scope_components(f.mangled)
+    return "::".join(resolved[0]) if resolved is not None else None
 
 
 def emit_namespace_move_batches(
@@ -568,7 +544,9 @@ def emit_namespace_move_batches(
         # granularity, since constituents can legitimately differ.
         binding = (
             "global"
-            if _all_constituents_elf_bound((old for old, _new in pairs), old_map)
+            if all_constituents_elf_bound(
+                (old for old, _new in pairs), old_map, _old_scope_id
+            )
             else None
         )
         changes.append(

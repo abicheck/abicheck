@@ -24,7 +24,7 @@ from typing import Any
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.constants import constant_index_pair, diff_constants
-from .demangle import demangle
+from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -306,6 +306,30 @@ def _elf_only_demangled_name(mangled: str, visibility: Visibility) -> str | None
         return None
     demangled = demangle(mangled)
     return demangled if demangled and demangled != mangled else None
+
+
+def _prewarm_elf_only_demangling(
+    old_map: dict[str, Function] | dict[str, Variable],
+) -> None:
+    """Batch-demangle every ``ELF_ONLY``-visibility OLD-side mangled name in
+    one ``c++filt``/``cxxfilt`` call before the per-symbol removal loop below
+    runs :func:`_elf_only_demangled_name` one entity at a time.
+
+    Without this, a library with many distinct ELF-only C++ removals forked
+    one ``c++filt`` subprocess *per removed symbol* whenever ``cxxfilt`` isn't
+    installed -- seconds to minutes of pure process-launch overhead, entirely
+    wasted whenever the selected report format never reads
+    ``demangled_symbol`` at all (Codex review, fresh evidence). ``demangle()``
+    already checks :func:`demangle.demangle_batch`'s own module-level cache
+    before doing any work of its own (see its docstring's "field-eval P11"
+    note; :func:`diff_symbols_renames`'s rename gate relies on the identical
+    warm-then-reuse pattern), so this call turns every later
+    ``demangle(mangled)`` in this pass into a cache hit rather than a fresh
+    subprocess, without changing what any single lookup returns.
+    """
+    demangle_batch(
+        [m for m, decl in old_map.items() if decl.visibility == Visibility.ELF_ONLY]
+    )
 
 
 def _check_removed_function(
@@ -947,6 +971,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
     old_map = _public_functions(old)
+    _prewarm_elf_only_demangling(old_map)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``_public_functions`` returns -- so every loop below is
     # unchanged and each function is still visited once -- plus the
@@ -1274,8 +1299,10 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     and one ambiguity contract.
     """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
+    old_vars = _public_variables(old)
+    _prewarm_elf_only_demangling(old_vars)
     return diff_by_key(
-        SymbolIdentityIndex.for_variables(_public_variables(old)),
+        SymbolIdentityIndex.for_variables(old_vars),
         SymbolIdentityIndex.for_variables(_public_variables(new)),
         on_removed=_var_removed,
         on_added=_var_added,
@@ -1631,9 +1658,7 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         find_prefix_rename_pairs(removed, added, old_map, new_map), old_map
     )
     changes.extend(
-        emit_namespace_move_batches(
-            find_namespace_move_groups(removed, added), old_map
-        )
+        emit_namespace_move_batches(find_namespace_move_groups(removed, added), old_map)
     )
     return changes
 
