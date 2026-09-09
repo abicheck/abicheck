@@ -65,6 +65,9 @@ from .cross_source_evolution import (
 from .finding import build_report_findings
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from ..checker_types import Change
     from ..policy.scope_completeness import ScopeDecision
     from ..workflows.no_baseline_compare import NoBaselineCompareResult
     from .cross_source_evolution import CrossSourceEvolutionSummary
@@ -239,6 +242,29 @@ def no_baseline_exit_code(
     )
 
 
+def _finding_resolver(
+    diff: Any,
+) -> Callable[[Sequence[Change]], tuple[ReportFinding, ...]]:
+    """A resolver bound to *diff*'s policy, for any list of its findings.
+
+    One place reads ``DiffResult._effective_kind_sets()`` -- the report layer
+    has no public accessor for it, and every renderer in this package reaches
+    for it the same way -- so the reported and suppressed halves are resolved
+    against provably identical policy inputs rather than by two call sites
+    that must be kept in step.
+    """
+
+    def resolve(changes: Sequence[Change]) -> tuple[ReportFinding, ...]:
+        return build_report_findings(
+            changes,
+            policy=diff.policy,
+            kind_sets=diff._effective_kind_sets(),  # noqa: SLF001
+            policy_file=diff.policy_file,
+        )
+
+    return resolve
+
+
 def compute_no_baseline_document(
     result: NoBaselineCompareResult, *, require_complete_analysis: bool = False
 ) -> NoBaselineDocument:
@@ -247,24 +273,14 @@ def compute_no_baseline_document(
     from .pattern_preprocessor_scan import compute_pattern_preprocessor_scan_json
 
     diff = result.diff
-    findings = build_report_findings(
-        result.findings,
-        policy=diff.policy,
-        kind_sets=diff._effective_kind_sets(),
-        policy_file=diff.policy_file,
-    )
+    resolve = _finding_resolver(diff)
     return NoBaselineDocument(
         library=diff.library,
         new_version=diff.new_version,
         old_acquisition_state=result.acquisition.members[0].state.value,
         evidence_tiers=tuple(diff.evidence_tiers),
-        findings=findings,
-        suppressed=build_report_findings(
-            result.suppressed_findings,
-            policy=diff.policy,
-            kind_sets=diff._effective_kind_sets(),
-            policy_file=diff.policy_file,
-        ),
+        findings=resolve(result.findings),
+        suppressed=resolve(result.suppressed_findings),
         evolution=compute_cross_source_evolution_summary(result.findings),
         pattern_preprocessor_scan=_candidate_side_scan(
             compute_pattern_preprocessor_scan_json(diff)
@@ -477,6 +493,61 @@ def render_no_baseline_oneline(doc: NoBaselineDocument) -> str:
     )
 
 
+#: The SARIF 2.1.0 schema this document declares. Named rather than inlined
+#: only so the literal does not force a 116-column line.
+_SARIF_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master"
+    "/Schemata/sarif-schema-2.1.0.json"
+)
+
+
+def _sarif_result(
+    finding: ReportFinding, *, rule_id: str, suppressed: bool
+) -> dict[str, Any]:
+    """One SARIF ``result`` for a candidate-side finding.
+
+    Split out of :func:`render_no_baseline_sarif` so the envelope there reads
+    as the run it describes, and the per-finding shape sits next to its JUnit
+    counterpart (:func:`_junit_finding_case`) rather than buried in a loop.
+    """
+    from ..sarif import _parse_source_location
+
+    change = finding.change
+    entry: dict[str, Any] = {
+        "ruleId": rule_id,
+        "level": _SEVERITY_TO_SARIF_LEVEL.get(finding.category.value, "warning"),
+        "message": {
+            "text": change.description or f"{change.kind.value}: {change.symbol or ''}"
+        },
+        "properties": {
+            "noBaseline": True,
+            "crossSourceEvolution": change_cross_source_evolution_field(change),
+            "candidateSideEnrichment": change.candidate_side_enrichment,
+            "symbol": change.symbol,
+        },
+    }
+    if suppressed:
+        entry["suppressions"] = [
+            {
+                "kind": "external",
+                "justification": getattr(change, "suppression_rule", None)
+                or "suppressed by an abicheck --suppress rule",
+            }
+        ]
+    if change.source_location:
+        uri, line, column = _parse_source_location(change.source_location)
+        region: dict[str, Any] = {}
+        if line is not None:
+            region["startLine"] = line
+        if column is not None:
+            region["startColumn"] = column
+        physical: dict[str, Any] = {"artifactLocation": {"uri": uri}}
+        if region:
+            physical["region"] = region
+        entry["locations"] = [{"physicalLocation": physical}]
+    return entry
+
+
 def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     """SARIF 2.1.0 projection of *doc*.
 
@@ -490,7 +561,7 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     exactly what they mean in a two-sided SARIF document and a code-scanning
     consumer needs no special case.
     """
-    from ..sarif import _parse_source_location, _rule_for, _tool_version
+    from ..sarif import _rule_for, _tool_version
 
     rules: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
@@ -502,45 +573,13 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     for finding, suppressed in [(f, False) for f in doc.findings] + [
         (f, True) for f in doc.suppressed
     ]:
-        change = finding.change
-        rule = _rule_for(change.kind)
+        rule = _rule_for(finding.change.kind)
         rules.setdefault(rule["id"], rule)
-        entry: dict[str, Any] = {
-            "ruleId": rule["id"],
-            "level": _SEVERITY_TO_SARIF_LEVEL.get(finding.category.value, "warning"),
-            "message": {
-                "text": change.description
-                or f"{change.kind.value}: {change.symbol or doc.library}"
-            },
-            "properties": {
-                "noBaseline": True,
-                "crossSourceEvolution": change_cross_source_evolution_field(change),
-                "candidateSideEnrichment": change.candidate_side_enrichment,
-                "symbol": change.symbol,
-            },
-        }
-        if suppressed:
-            entry["suppressions"] = [
-                {
-                    "kind": "external",
-                    "justification": getattr(change, "suppression_rule", None)
-                    or "suppressed by an abicheck --suppress rule",
-                }
-            ]
-        if change.source_location:
-            uri, line, column = _parse_source_location(change.source_location)
-            region: dict[str, Any] = {}
-            if line is not None:
-                region["startLine"] = line
-            if column is not None:
-                region["startColumn"] = column
-            physical: dict[str, Any] = {"artifactLocation": {"uri": uri}}
-            if region:
-                physical["region"] = region
-            entry["locations"] = [{"physicalLocation": physical}]
-        results.append(entry)
+        results.append(
+            _sarif_result(finding, rule_id=rule["id"], suppressed=suppressed)
+        )
     return {
-        "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+        "$schema": _SARIF_SCHEMA_URL,
         "version": "2.1.0",
         "runs": [
             {

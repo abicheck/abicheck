@@ -373,6 +373,54 @@ def _reject_unsupported_options(kwargs: dict[str, Any]) -> None:
 
 
 @dataclass(frozen=True)
+class _OutputPlan:
+    """Where this invocation's report goes, and in what shape."""
+
+    fmt: str
+    output: Path | None
+    dry_run: bool
+    secondary_writes: tuple[tuple[str, Path], ...]
+    require_complete_analysis: bool
+
+
+@dataclass(frozen=True)
+class _HeaderInputs:
+    """The candidate's header surface, split for provenance tagging."""
+
+    headers: list[Path]
+    includes: list[Path]
+    public_headers: list[Path]
+    public_header_dirs: list[Path]
+
+
+@dataclass(frozen=True)
+class _EvidenceInputs:
+    """The L3-L5 evidence this run may collect, and the depth pinned over it."""
+
+    sources: Path | None
+    build_info: Path | None
+    build_config: Path | None
+    depth: str | None
+
+
+@dataclass(frozen=True)
+class _CompileChoices:
+    """How the candidate's own declarations are parsed and scoped."""
+
+    lang: str
+    lang_explicit: bool
+    include_dependencies: bool
+
+
+@dataclass(frozen=True)
+class _ContractChoices:
+    """ADR-049's two resolved answers: evaluate at all, and against what."""
+
+    mode: str | None
+    evaluation: bool
+
+
+@dataclass(frozen=True)
 class _ResolvedInvocation:
     """One ``--no-baseline`` invocation, already validated and resolved.
 
@@ -381,26 +429,19 @@ class _ResolvedInvocation:
     sequence in which a guard and a resolution step look alike. Frozen, and
     holding only values (no ``kwargs`` dict), so a later phase cannot reach
     back for a raw parameter the validation phase already ruled on.
+
+    Grouped by *lifecycle* rather than kept as one flat record: each nested
+    struct is consumed by a different phase (headers and evidence by the
+    resolve step, contract and compile choices by the run, the output plan
+    by the report), which is also what keeps any one of them small enough
+    to read at a glance.
     """
 
-    fmt: str
-    output: Path | None
-    dry_run: bool
-    secondary_writes: tuple[tuple[str, Path], ...]
-    headers: list[Path]
-    includes: list[Path]
-    public_headers: list[Path]
-    public_header_dirs: list[Path]
-    lang: str
-    lang_explicit: bool
-    sources: Path | None
-    build_info: Path | None
-    build_config: Path | None
-    depth: str | None
-    include_dependencies: bool
-    contract_mode: str | None
-    contract_evaluation: bool
-    require_complete_analysis: bool
+    output: _OutputPlan
+    headers: _HeaderInputs
+    evidence: _EvidenceInputs
+    compile: _CompileChoices
+    contract: _ContractChoices
 
 
 def _validate_no_baseline_invocation(kwargs: dict[str, Any]) -> None:
@@ -477,28 +518,40 @@ def _resolve_no_baseline_invocation(
     contract_mode_raw = kwargs.get("contract_mode")
 
     return _ResolvedInvocation(
-        fmt=kwargs.get("fmt") or "markdown",
-        output=kwargs.get("output"),
-        dry_run=bool(kwargs.get("dry_run", False)),
-        secondary_writes=tuple(kwargs.get("secondary_writes") or ()),
-        headers=headers,
-        includes=includes,
-        public_headers=public_headers,
-        public_header_dirs=public_header_dirs,
-        lang=kwargs.get("lang") or "c++",
-        lang_explicit=lang_src == click.core.ParameterSource.COMMANDLINE,
-        # A bare/`both=` --sources/--build-info lands on *both* per-side dests
-        # (`cli_options._split_sided_single`); the validation phase has
-        # already rejected an explicitly OLD-scoped one, so reading the NEW
-        # dest here is exactly "the candidate's evidence".
-        sources=kwargs.get("new_sources"),
-        build_info=kwargs.get("new_build_info"),
-        build_config=kwargs.get("build_config"),
-        depth=kwargs.get("depth"),
-        include_dependencies=bool(kwargs.get("include_dependencies", False)),
-        contract_mode=resolve_contract_domain(contract_mode_raw, ctx),
-        contract_evaluation=resolve_contract_evaluation(contract_mode_raw),
-        require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
+        output=_OutputPlan(
+            fmt=kwargs.get("fmt") or "markdown",
+            output=kwargs.get("output"),
+            dry_run=bool(kwargs.get("dry_run", False)),
+            secondary_writes=tuple(kwargs.get("secondary_writes") or ()),
+            require_complete_analysis=bool(
+                kwargs.get("require_complete_analysis", False)
+            ),
+        ),
+        headers=_HeaderInputs(
+            headers=headers,
+            includes=includes,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+        ),
+        evidence=_EvidenceInputs(
+            # A bare/`both=` --sources/--build-info lands on *both* per-side
+            # dests (`cli_options._split_sided_single`); the validation phase
+            # has already rejected an explicitly OLD-scoped one, so reading
+            # the NEW dest here is exactly "the candidate's evidence".
+            sources=kwargs.get("new_sources"),
+            build_info=kwargs.get("new_build_info"),
+            build_config=kwargs.get("build_config"),
+            depth=kwargs.get("depth"),
+        ),
+        compile=_CompileChoices(
+            lang=kwargs.get("lang") or "c++",
+            lang_explicit=lang_src == click.core.ParameterSource.COMMANDLINE,
+            include_dependencies=bool(kwargs.get("include_dependencies", False)),
+        ),
+        contract=_ContractChoices(
+            mode=resolve_contract_domain(contract_mode_raw, ctx),
+            evaluation=resolve_contract_evaluation(contract_mode_raw),
+        ),
     )
 
 
@@ -507,10 +560,10 @@ def _emit_no_baseline_report(
 ) -> None:
     """Render the audit in every requested format, then exit accordingly."""
     text, exit_code = render_no_baseline(
-        result, inv.fmt, require_complete_analysis=inv.require_complete_analysis
+        result, inv.output.fmt, require_complete_analysis=inv.output.require_complete_analysis
     )
-    _write_or_echo(inv.output, text)
-    for write_fmt, write_path in inv.secondary_writes:
+    _write_or_echo(inv.output.output, text)
+    for write_fmt, write_path in inv.output.secondary_writes:
         # Rendered from the *same* result, never a second run -- ADR-068 D4's
         # "presentation never changes analysis" applies here exactly as it
         # does to the two-sided path, and the exit code is the primary
@@ -520,7 +573,7 @@ def _emit_no_baseline_report(
         # clean Click error rather than a traceback on an otherwise-complete
         # run (Codex review, P2).
         rendered, _ = render_no_baseline(
-            result, write_fmt, require_complete_analysis=inv.require_complete_analysis
+            result, write_fmt, require_complete_analysis=inv.output.require_complete_analysis
         )
         _safe_write_output(write_path, rendered)
     if exit_code != 0:
@@ -538,20 +591,20 @@ def _run_no_baseline_compare_cmd(
     _validate_no_baseline_invocation(kwargs)
     inv = _resolve_no_baseline_invocation(ctx, kwargs)
 
-    if inv.dry_run:
+    if inv.output.dry_run:
         from ....dry_run import emit_dry_run
         from ..no_baseline_dry_run import build_no_baseline_dry_run_result
 
         emit_dry_run(
             build_no_baseline_dry_run_result(
                 candidate=candidate,
-                depth=inv.depth,
-                headers=tuple(inv.headers),
-                includes=tuple(inv.includes),
-                public_header_dirs=tuple(inv.public_header_dirs),
-                sources=inv.sources,
-                build_info=inv.build_info,
-                fmt=inv.fmt,
+                depth=inv.evidence.depth,
+                headers=tuple(inv.headers.headers),
+                includes=tuple(inv.headers.includes),
+                public_header_dirs=tuple(inv.headers.public_header_dirs),
+                sources=inv.evidence.sources,
+                build_info=inv.evidence.build_info,
+                fmt=inv.output.fmt,
                 contract_mode=kwargs.get("contract_mode"),
                 # The same carve-out the real run applies below, from the
                 # same helper -- so the preview and the run can never
@@ -562,17 +615,17 @@ def _run_no_baseline_compare_cmd(
 
     new_snapshot = resolve_no_baseline_candidate(
         candidate,
-        headers=inv.headers,
-        includes=inv.includes,
-        lang=inv.lang,
-        lang_explicit=inv.lang_explicit,
-        public_headers=inv.public_headers,
-        public_header_dirs=inv.public_header_dirs,
-        sources=inv.sources,
-        build_info=inv.build_info,
-        build_config=inv.build_config,
-        depth=inv.depth,
-        include_dependencies=inv.include_dependencies,
+        headers=inv.headers.headers,
+        includes=inv.headers.includes,
+        lang=inv.compile.lang,
+        lang_explicit=inv.compile.lang_explicit,
+        public_headers=inv.headers.public_headers,
+        public_header_dirs=inv.headers.public_header_dirs,
+        sources=inv.evidence.sources,
+        build_info=inv.evidence.build_info,
+        build_config=inv.evidence.build_config,
+        depth=inv.evidence.depth,
+        include_dependencies=inv.compile.include_dependencies,
     )
 
     suppression, policy_file_obj = _load_suppression_and_policy(
@@ -594,14 +647,14 @@ def _run_no_baseline_compare_cmd(
         collapse_versioned_symbols=bool(
             kwargs.get("collapse_versioned_symbols", False)
         ),
-        contract_evaluation=inv.contract_evaluation,
-        contract_mode=inv.contract_mode,
+        contract_evaluation=inv.contract.evaluation,
+        contract_mode=inv.contract.mode,
         # ADR-064's exit-7 axis: a pinned --depth build/source that this
         # run's evidence did not reach. Recorded by the workflow (after
         # classification, the same point the two-sided native CLI path
         # records it) rather than here, so a front end cannot pick up the
         # audit and forget the orthogonal axis.
-        depth=inv.depth,
+        depth=inv.evidence.depth,
         candidate_is_live=candidate_is_live_artifact(candidate),
     )
 
