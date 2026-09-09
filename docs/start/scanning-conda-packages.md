@@ -94,10 +94,11 @@ compile:
     a `compile.options: [-DXXX_PREVIEW]` entry to parse. The umbrella header
     includes only the library's curated, default-public surface, so it
     sidesteps both. Use the umbrella unless you specifically want a
-    preview/backend header analysed — but note that an umbrella *file* does
-    not establish the public-header boundary the way a directory does, so
-    declare `scope.public_header_dirs` alongside it when you want the
-    cross-source checks to have a public side.
+    preview/backend header analysed — a `-H` header *file* establishes the
+    public-header boundary just as a directory does (both are split into
+    the same public-header set that feeds provenance classification), so
+    the umbrella alone is enough for the cross-source checks to have a
+    public side.
 
 ## 4. Going deeper needs a build
 

@@ -263,7 +263,7 @@ The whole CLI is seven root commands. Most single-library projects only ever nee
 | Compare a co-versioned **multi-library release** as one bundle (bundle-level analysis is [ELF/Linux-only](https://abicheck.github.io/abicheck/use/multi-binary/#platform-support)) | [`abicheck compare old-release/ new-release/`](https://abicheck.github.io/abicheck/use/multi-binary/) |
 | Check whether **my application** survives a library upgrade | [`abicheck compare --used-by ./myapp`](https://abicheck.github.io/abicheck/use/appcompat/) |
 | Check whether a **plugin** still satisfies its host's entrypoints | [`abicheck compare --required-symbol SYM`](https://abicheck.github.io/abicheck/use/plugin-systems/) |
-| Check a PR with source and build context, against a baseline | [`abicheck compare baseline.json build/libfoo.so --depth source --sources new=.`](https://abicheck.github.io/abicheck/use/evidence-depth/) |
+| Check a PR with source and build context, against a baseline | [`abicheck compare baseline.json build/libfoo.so --depth source --sources new=.`](https://abicheck.github.io/abicheck/use/evidence-depth/) (the stored baseline must already embed matching L3/L4 evidence from its own `dump --sources`/`--build-info`, or the mismatched extraction profiles between sides can exit `16` `NOT_COMPARABLE`) |
 | Validate a binary's whole dependency stack across two sysroots | [`abicheck deps compare`](https://abicheck.github.io/abicheck/use/cli-usage/) |
 | Save a reusable ABI snapshot | [`abicheck dump`](https://abicheck.github.io/abicheck/use/create-baseline/) |
 | Replace `abi-compliance-checker` without changing flags | [`abicheck compat`](https://abicheck.github.io/abicheck/use/from-abicc/) |

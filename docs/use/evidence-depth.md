@@ -237,7 +237,7 @@ matches your goal, then supply the input named in column 3.
 | Goal (use case) | `--depth` | Input you must provide | How to obtain it | If the input is missing |
 |---|---|---|---|---|
 | Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `binary` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
-| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **directory** + a C/C++ frontend | `-H include/` on `compare`/`dump` (legacy `scan` instead takes `--public-header-dir include/`); `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
+| Header-aware API surface + internal-vs-public scoping + cross-source checks | `headers` | a public-header **file or directory** + a C/C++ frontend | `-H include/` or `-H include/foo.h` on `compare`/`dump` (both establish the boundary identically; legacy `scan` instead takes `--public-header-dir DIRECTORY`, directory-only); `castxml` **or** `clang` on `PATH` | with no `-H` at all, there is no public-header set → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift (+ macro/include divergence) | `build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info` | L3 `not_collected`; the scan advises the exact remedy |
 | Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) + L5 graph | `source` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `source` replays the **whole current library target** instead of just the changed TUs (ADR-043 D3 — never a zero-TU no-op, but more expensive); missing generated headers → L4 `partial` |
 | Full-library source replay (an amortized release baseline) | `source` (unseeded — no `--since`/`--changed-path`) | as above, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
@@ -560,7 +560,7 @@ report to `-o`:
 
 ```bash
 abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
-  --sources new=. --depth source -o artifacts/libfoo-1.0-report.json
+  --sources new=. --depth source --format json -o artifacts/libfoo-1.0-report.json
 ```
 
 ### Let risk pick the depth — `auto` (local/dev only, `scan` only for now)
