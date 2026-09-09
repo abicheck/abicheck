@@ -16,8 +16,9 @@ generated: false
 selects how deep the evidence-collection goes (binary → headers → build →
 source). **`abicheck compare OLD NEW` is now the recommended way to run a
 depth-pinned, source-aware comparison against a real baseline** — it runs
-the always-on compiler-free pattern pre-scan and the eleven cross-source
-checks automatically on every invocation, takes the same `--depth`/
+the always-on compiler-free pattern pre-scan and every cross-source check
+(`CROSS_SOURCE_EVOLUTION_CHECKS`) automatically on every invocation, takes
+the same `--depth`/
 `--since`/`--changed-path`/`--sources`/`--build-info` *flags* `scan` does,
 and needs no separate orchestrator command.
 
@@ -423,8 +424,9 @@ abicheck scan libfoo.so -H include/ \
   --build-info build/compile_commands.json
 ```
 
-This reports the eleven ADR-035 cross-source / single-release findings rather than
-a two-version diff. The flagship cross-source cases —
+This reports the full ADR-035 cross-source / single-release finding set
+(`CROSS_SOURCE_EVOLUTION_CHECKS`) rather than a two-version diff. The
+flagship cross-source cases —
 [case148](../reference/examples/case148_xcheck_header_build_mismatch.md)
 (`header_build_context_mismatch`, L2 macros ↔ L3 flags) and
 [case149](../reference/examples/case149_xcheck_odr_variant.md) (`odr_type_variant`, L4

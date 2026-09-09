@@ -22,8 +22,9 @@ the underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
 
 `mode: compare` (the default) is the **recommended entry point** for source
 intelligence against a real baseline. It always runs the compiler-free
-pattern pre-scan and the eleven intra-version cross-source checks, and takes
-the identical `depth`/`since`/`changed-path`/`sources`/`build-info` inputs
+pattern pre-scan and every intra-version cross-source check
+(`CROSS_SOURCE_EVOLUTION_CHECKS`), and takes the identical
+`depth`/`since`/`changed-path`/`sources`/`build-info` inputs
 `mode: scan` does — running the pinned evidence level (L3 build context / L4
 source-ABI replay / L5 source graph) and comparing against `old-library`. It
 emits a single coverage-annotated report saying, per layer, what ran versus
@@ -66,6 +67,7 @@ jobs:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
+          depth: source   # pin the source-ABI replay -- compare has no risk-driven auto (see below)
           since: origin/${{ github.base_ref }}   # focus on changed files
           fail-on-api-break: true       # gate on source/API breaks too
 ```

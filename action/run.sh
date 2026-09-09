@@ -2416,17 +2416,19 @@ elif [[ "$MODE" == "scan" ]]; then
   # the baseline/old side's own header parse.
   add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
 
-  add_single_flag "--lang" "${INPUT_LANG:-}"
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
 
-  add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"
-  add_single_flag "--compiler" "${INPUT_GCC_PATH:-}"
-  add_single_flag "--compiler-prefix" "${INPUT_GCC_PREFIX:-}"
-  add_flag_shlex_split "--compiler-option" "${INPUT_GCC_OPTIONS:-}"
-  add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--nostdinc)
-  fi
+  # Phase 7 (main, merged into this branch after this section was first
+  # written): --lang/--ast-frontend/--compiler/--compiler-prefix/
+  # --compiler-option/--sysroot/--nostdinc are gone from `compare`'s CLI
+  # entirely -- `.abicheck.yml`'s `compile:` block is their only source now
+  # (see `add_compile_context_flags`'s own docstring above). This branch
+  # always resolves a single-pair `compare AGAINST ARTIFACT` (scan never
+  # accepted a directory/package operand, rejected above), so it can call
+  # the same single-pair helper the real `compare`/`dump` branches use,
+  # unconditionally -- no release-style-operand gate needed here the way
+  # the real `compare` branch has one.
+  add_compile_context_flags true
 
   # scan's own --build-info/--compile-db mutual-exclusivity guard --
   # shared with the legacy `scan` CLI branch's identical check, see
