@@ -108,6 +108,14 @@ def _stub_abicheck(
     scan_payload.write_text(json.dumps(scan_report), encoding="utf-8")
     call_log = tmp_path / "call_log.txt"
     call_log.write_text("", encoding="utf-8")
+    # Diagnostic sibling of call_log (CI-only 3-invocation investigation,
+    # PR #1158): one line per real stub invocation with a timestamp, PID,
+    # and the full argv -- not read by any existing assertion, but lets a
+    # failing test surface exactly what the mystery extra invocation's
+    # actual command line was, since call_log alone only ever recorded the
+    # bare mode string.
+    argv_log = tmp_path / "argv_log.txt"
+    argv_log.write_text("", encoding="utf-8")
     stub = bindir / "abicheck"
     stub.write_text(
         "#!/usr/bin/env bash\n"
@@ -124,6 +132,7 @@ def _stub_abicheck(
         '  prev="$arg"\n'
         "done\n"
         f'echo "$mode" >> "{call_log}"\n'
+        f'echo "[$(date +%s.%N)] pid=$$ ppid=$PPID argv=$*" >> "{argv_log}"\n'
         'if [[ "$mode" == "compare" ]]; then\n'
         f'  payload="{compare_payload}"\n'
         f"  exitcode={compare_exit}\n"
@@ -283,7 +292,13 @@ class TestCrossSourceFindingTriggersLegacyScanFallback:
         )
         _run_action(tmp_path, _scan_env(tmp_path), bindir)
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert calls == ["compare", "scan"], calls
+        argv_log = tmp_path / "argv_log.txt"
+        assert calls == ["compare", "scan"], (
+            calls,
+            outputs["_stdout"],
+            outputs["_stderr"],
+            argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
+        )
 
     def test_notice_is_emitted_explaining_the_fallback(self, tmp_path: Path) -> None:
         bindir, _log = _stub_abicheck(
@@ -479,7 +494,13 @@ class TestCrossSourceFallbackFindsReportBehindExtraArgsOutputOverride:
         assert outputs["exit-code"] == "0", outputs
         assert outputs["_exit"] == 0, outputs
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert calls == ["compare", "scan"], calls
+        argv_log = tmp_path / "argv_log.txt"
+        assert calls == ["compare", "scan"], (
+            calls,
+            outputs["_stdout"],
+            outputs["_stderr"],
+            argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
+        )
 
     def test_finding_behind_redirected_output_with_no_dedicated_output_file(
         self, tmp_path: Path
@@ -505,7 +526,13 @@ class TestCrossSourceFallbackFindsReportBehindExtraArgsOutputOverride:
         assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
         assert outputs["_exit"] == 0, outputs
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert calls == ["compare", "scan"], calls
+        argv_log = tmp_path / "argv_log.txt"
+        assert calls == ["compare", "scan"], (
+            calls,
+            outputs["_stdout"],
+            outputs["_stderr"],
+            argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
+        )
 
     def test_real_break_behind_redirected_output_is_still_published(
         self, tmp_path: Path
@@ -599,7 +626,13 @@ class TestUnreadableReportDestinationTriggersFallback:
         assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["exit-code"] == "0", outputs
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert calls == ["compare", "scan"], calls
+        argv_log = tmp_path / "argv_log.txt"
+        assert calls == ["compare", "scan"], (
+            calls,
+            outputs["_stdout"],
+            outputs["_stderr"],
+            argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
+        )
 
     def test_extra_args_output_to_dev_null_also_falls_back(
         self, tmp_path: Path
@@ -639,7 +672,13 @@ class TestUnreadableReportDestinationTriggersFallback:
         assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["exit-code"] == "0", outputs
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert calls == ["compare", "scan"], calls
+        argv_log = tmp_path / "argv_log.txt"
+        assert calls == ["compare", "scan"], (
+            calls,
+            outputs["_stdout"],
+            outputs["_stderr"],
+            argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
+        )
 
     def test_dry_run_with_no_report_does_not_trigger_a_second_invocation(
         self, tmp_path: Path
@@ -747,7 +786,13 @@ class TestAbi3FindingTriggersLegacyScanFallback:
         env["INPUT_EXTRA_ARGS"] = "--abi3 3.13"
         _run_action(tmp_path, env, bindir)
         calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
-        assert calls == ["compare", "scan"], calls
+        argv_log = tmp_path / "argv_log.txt"
+        assert calls == ["compare", "scan"], (
+            calls,
+            outputs["_stdout"],
+            outputs["_stderr"],
+            argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
+        )
 
     def test_notice_is_emitted_explaining_the_fallback(self, tmp_path: Path) -> None:
         bindir, _log = _stub_abicheck(
