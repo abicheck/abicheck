@@ -89,7 +89,7 @@ compare` (the default), with `since` as a real compare-mode input:
 
 What each depth reaches, and the exact command for every other
 combination, is owned by
-[Source-Scan Depth § Worked examples](../use/scan-levels.md#worked-examples);
+[Evidence Depth § Worked examples](../use/evidence-depth.md#worked-examples);
 the levels themselves are defined in
 [Evidence & Detectability](evidence-and-detectability.md).
 
@@ -171,7 +171,7 @@ guides carry the exact commands, flags and CI YAML:
 | You want to… | Go to |
 |--------------|-------|
 | Pick the right command for your situation (binary compare → full source scan → combine evidence → plugin) | [Choose Your Workflow](../start/choose-your-workflow.md) |
-| Pin a `--depth` on `compare` (or `scan` for the cases it still owns) | [Source-Scan Depth](../use/scan-levels.md) |
+| Pin a `--depth` on `compare` (or `scan` for the cases it still owns) | [Evidence Depth](../use/evidence-depth.md) |
 | *Produce* the source facts — post-build replay, the `abicheck-cc` wrapper, or the Clang plugin | [Producing Source Facts](../use/producing-source-facts.md) |
 | Fold build/source evidence into a baseline snapshot | [Source & Build Data](build-source-data.md) |
 | Wire a **full source scan into GitHub Actions** — `sources`/`build-info`/`depth`, audit, estimate, cross-check gating | [GitHub Action: Source Scans](../use/github-action-source-scans.md) |

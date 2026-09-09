@@ -7,7 +7,7 @@ evidence from CI, pinning the `depth` dial, single-release audits, cost
 estimation, cross-check gating, and the three ways to feed L3/L4/L5
 build/source evidence into a baseline. For what the evidence layers *are*,
 see [Evidence & Detectability](../learn/evidence-and-detectability.md); for
-the underlying CLI flags, see [Source-Scan Depth](scan-levels.md).
+the underlying CLI flags, see [Evidence Depth](evidence-depth.md).
 
 > **See also.** If this check is one of several a project-wide
 > `.abicheck.yml` `targets:`/`profiles:` block declares (not a standalone
@@ -92,7 +92,7 @@ comparing (exit 7, "pinned depth 'source' ... needs source evidence, but no
 back it is an error, not a silent downgrade. `compare --depth source` has no
 such floor: with the same missing evidence it degrades silently to a
 binary-only comparison and can still exit 0 (verified live — see the gap
-table in [`docs/use/scan-levels.md`](scan-levels.md)). A copied
+table in [`docs/use/evidence-depth.md`](evidence-depth.md)). A copied
 `mode: compare` workflow that stops supplying `sources:`/`build-info:` (or
 never had it) will keep reporting green without ever running the L3-L5
 analysis it asked for, where the equivalent `mode: scan` workflow would fail
