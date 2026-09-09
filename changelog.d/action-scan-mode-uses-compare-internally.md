@@ -307,3 +307,27 @@ it should read in CHANGELOG.md. Delete the other sections.
   evidence` gate condition -- a native `--against` library combined with
   any of `--sources`/`--build-info`/`--compile-db` now stays on the legacy
   CLI outright.
+  A fifteenth review round raised a genuine `scan`/`compare` provenance
+  asymmetry (a lone `-H`/`--header` *file* with no directory leaves every
+  declaration `UNKNOWN` on `scan`, per `workflows.scan_config.
+  public_provenance_set`'s own docstring, but still opts `compare` into
+  classification via `provenance.build_public_set`'s `have_public_set =
+  bool(headers or dirs)`) that could move a change into `out_of_surface`
+  before verdict computation, invisible to this file's own cross-source-
+  hygiene fallback. Investigated and NOT fixed here: tracing the code
+  confirmed this predates this migration entirely and is already
+  documented as a deliberate, accepted `compare`-specific behavior in
+  `workflows/cross_source_evolution.py`'s own module docstring ("that PR
+  left that `compare`-specific behavior exactly as it found it rather than
+  retroactively tightening it") -- any direct `abicheck compare` invocation
+  with a file-only header already has this behavior, independent of this
+  Action. A first attempt at forcing the legacy CLI whenever header
+  evidence was file-only with no directory had to be reverted: it disabled
+  the migration's own primary, documented use case (the file-only
+  `new-header` reproduction the seventh review round itself is built on)
+  and broke the majority of the native-baseline header-reuse test suite.
+  A correct fix would mean either reproducing `out_of_surface`'s full
+  computation in bash, or retroactively tightening `compare`'s own
+  provenance rule to match `scan`'s -- a real product change to `compare`
+  itself, previously and deliberately declined, out of scope for an
+  Action-migration PR.
