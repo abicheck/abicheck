@@ -92,9 +92,13 @@ __all__ = [
 #: rather than borrowing one that promises a shape this report doesn't have.
 #:
 #: ``2.0``: the audit's cross-source/candidate-side findings reach the
-#: document (``findings``, ``cross_source_evolution``,
-#: ``pattern_preprocessor_scan``). ``1.0`` always emitted ``"changes": []``,
-#: which was the gap, not the schema's intent.
+#: document (``findings``, ``suppressed_findings``, ``suppressed_count``,
+#: ``cross_source_evolution``, ``pattern_preprocessor_scan``). ``1.0``
+#: always emitted ``"changes": []``, which was the gap, not the schema's
+#: intent. ``suppressed_findings`` landed in the same unreleased ``2.0``
+#: rather than as a ``2.1``: a suppressed finding disappearing entirely was
+#: a defect in this shape, not a later addition to a shipped one, and
+#: version numbers exist to warn consumers of a *published* change.
 NO_BASELINE_REPORT_SCHEMA_VERSION = "2.0"
 
 #: Formats a ``--no-baseline`` audit renders one-sided.
@@ -153,6 +157,11 @@ class NoBaselineDocument:
     evidence_tiers: tuple[str, ...]
     #: One entry per candidate-side finding, in emission order.
     findings: tuple[ReportFinding, ...]
+    #: The findings a ``--suppress`` rule matched, same resolution, kept
+    #: alongside rather than dropped: ``vision.md``'s "Record before
+    #: disposing" rule requires "detected, then suppressed by rule X" to
+    #: stay visible on a passing run, never to read as "nothing found".
+    suppressed: tuple[ReportFinding, ...]
     evolution: CrossSourceEvolutionSummary | None
     pattern_preprocessor_scan: dict[str, Any] | None
     run_outcome: dict[str, Any]
@@ -250,6 +259,12 @@ def compute_no_baseline_document(
         old_acquisition_state=result.acquisition.members[0].state.value,
         evidence_tiers=tuple(diff.evidence_tiers),
         findings=findings,
+        suppressed=build_report_findings(
+            result.suppressed_findings,
+            policy=diff.policy,
+            kind_sets=diff._effective_kind_sets(),
+            policy_file=diff.policy_file,
+        ),
         evolution=compute_cross_source_evolution_summary(result.findings),
         pattern_preprocessor_scan=_candidate_side_scan(
             compute_pattern_preprocessor_scan_json(diff)
@@ -314,6 +329,20 @@ def _finding_json(finding: ReportFinding) -> dict[str, Any]:
     return row
 
 
+def _suppressed_json(finding: ReportFinding) -> dict[str, Any]:
+    """One suppressed finding's JSON row: the finding, plus what hid it.
+
+    ``suppression_rule`` is the reason text the matching rule carried, so a
+    reader can answer "which rule, and why" without re-running with the
+    suppression file removed -- ADR-067's disposition-audit principle
+    applied to this report's own shape.
+    """
+    row = _finding_json(finding)
+    row["disposition"] = "suppressed"
+    row["suppression_rule"] = getattr(finding.change, "suppression_rule", None)
+    return row
+
+
 def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
     return {
         "report_schema_version": NO_BASELINE_REPORT_SCHEMA_VERSION,
@@ -328,6 +357,12 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         # KeyError, while `findings` below carries the audit's own content.
         "changes": [],
         "findings": [_finding_json(f) for f in doc.findings],
+        # Never omitted, even when empty: an absent key and "nothing was
+        # suppressed" must not look the same to a consumer checking whether
+        # policy hid anything (the same convention `contract_coverage_
+        # failures` follows -- `[]` rather than omitted).
+        "suppressed_findings": [_suppressed_json(f) for f in doc.suppressed],
+        "suppressed_count": len(doc.suppressed),
         "cross_source_evolution": render_cross_source_evolution_json(doc.evolution),
         "pattern_preprocessor_scan": doc.pattern_preprocessor_scan,
         "evidence_tiers": list(doc.evidence_tiers),
@@ -388,6 +423,26 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
                 f"{finding.category.value} | {_EVOLUTION_NOTE.get(state, state)} | "
                 f"{change.description or ''} |"
             )
+    if doc.suppressed:
+        lines += [
+            "",
+            "## Suppressed findings",
+            "",
+            f"{len(doc.suppressed)} finding(s) were detected and then hidden by a "
+            "`--suppress` rule. They are listed because a suppressed finding is "
+            "a *disposition*, not an absence -- a passing audit must still show "
+            "what policy hid, and which rule hid it.",
+            "",
+            "| Finding | Symbol | Severity | Suppressed by |",
+            "| --- | --- | --- | --- |",
+        ]
+        for finding in doc.suppressed:
+            change = finding.change
+            rule = getattr(change, "suppression_rule", None) or "(rule gave no reason)"
+            lines.append(
+                f"| `{change.kind.value}` | `{change.symbol or '-'}` | "
+                f"{finding.category.value} | {rule} |"
+            )
     if doc.coverage_exit_contribution:
         lines += [
             "",
@@ -407,12 +462,18 @@ def render_no_baseline_oneline(doc: NoBaselineDocument) -> str:
     """The one-sentence ``--format oneline`` projection of *doc*."""
     count = len(doc.findings)
     noun = "finding" if count == 1 else "findings"
+    # A suppressed finding is named even in the one-line view: "0 findings"
+    # on a run that detected and hid three is the exact misreading
+    # "Record before disposing" exists to prevent, and this is the view most
+    # likely to be the only thing a reader sees.
+    suppressed = f", {len(doc.suppressed)} suppressed" if doc.suppressed else ""
     coverage = (
         "; contract coverage incomplete" if doc.coverage_exit_contribution else ""
     )
     return (
         f"{doc.library or '(unnamed)'} audit (no baseline): {count} candidate-side "
-        f"{noun}, no compatibility verdict{coverage} [exit {doc.exit_code}]\n"
+        f"{noun}{suppressed}, no compatibility verdict{coverage} "
+        f"[exit {doc.exit_code}]\n"
     )
 
 
@@ -433,7 +494,14 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
 
     rules: dict[str, dict[str, Any]] = {}
     results: list[dict[str, Any]] = []
-    for finding in doc.findings:
+    # A suppressed finding is emitted as a real result carrying SARIF's own
+    # `suppressions` array -- the format's native way to say "found, then
+    # dispositioned" -- rather than dropped. A code-scanning consumer then
+    # shows it as suppressed instead of never learning it existed
+    # (``vision.md``'s "Record before disposing"; Codex review, P1).
+    for finding, suppressed in [(f, False) for f in doc.findings] + [
+        (f, True) for f in doc.suppressed
+    ]:
         change = finding.change
         rule = _rule_for(change.kind)
         rules.setdefault(rule["id"], rule)
@@ -451,6 +519,14 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
                 "symbol": change.symbol,
             },
         }
+        if suppressed:
+            entry["suppressions"] = [
+                {
+                    "kind": "external",
+                    "justification": getattr(change, "suppression_rule", None)
+                    or "suppressed by an abicheck --suppress rule",
+                }
+            ]
         if change.source_location:
             uri, line, column = _parse_source_location(change.source_location)
             region: dict[str, Any] = {}
@@ -521,21 +597,42 @@ _SEVERITY_TO_SARIF_LEVEL = {
 def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
     """JUnit XML projection of *doc*.
 
-    One ``<testcase>`` per candidate-side finding, failing -- the audit's
-    whole output is "this build has a hygiene problem", which is exactly
-    what a failing test case says. Built here rather than through
-    ``junit_report.to_junit_xml`` for the same reason as SARIF above: that
-    builder partitions its suite by compatibility verdict and emits a
-    verdict property block this run must not claim.
+    **A finding is never a ``<failure>`` here.** An audit's cross-source
+    hygiene findings are advisory by construction (ADR-028 D3 / ADR-035 D1:
+    they stay ``RISK``/``API_BREAK`` and never become ``BREAKING``), and
+    ADR-068 D2 gives this run no compatibility contribution at all -- so
+    they contribute nothing to the exit code, and a run reporting several
+    of them still exits ``0``. Emitting a ``<failure>`` per finding made the
+    JUnit file fail a build the CLI said passed, which is precisely the bug
+    ``junit_report._is_failure`` records having already been fixed once for
+    the two-sided report ("reporting one ``<failure>`` beside a
+    ``NO_CHANGE`` verdict and a clean exit was the bug"). Each finding
+    instead gets its own **passing** ``<testcase>``, carrying its severity
+    and evolution as properties, because D9 requires the fact to stay
+    visible -- it just is not a failure.
+
+    What *can* fail is the run itself: a single ``exit code`` testcase
+    fails when, and only when, one of the audit's orthogonal axes actually
+    gated the run (contract coverage, analysis assurance, the evidence
+    contract). So the suite's failure count and the process exit code agree
+    by construction rather than by coincidence -- the invariant
+    ``tests/test_no_baseline_report_formats.py`` pins.
+
+    Built here rather than through ``junit_report.to_junit_xml`` for the
+    same reason as SARIF above: that builder partitions its suite by
+    compatibility verdict and emits a verdict property block this run must
+    not claim.
     """
+    gate_failed = doc.exit_code != 0
+    cases = len(doc.findings) + len(doc.suppressed) + 1
     suite = ET.Element(
         "testsuite",
         {
             "name": f"abicheck audit: {doc.library}",
-            "tests": str(max(len(doc.findings), 1)),
-            "failures": str(len(doc.findings)),
+            "tests": str(cases),
+            "failures": "1" if gate_failed else "0",
             "errors": "0",
-            "skipped": "0",
+            "skipped": str(len(doc.suppressed)),
         },
     )
     props = ET.SubElement(suite, "properties")
@@ -545,49 +642,81 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
         ("candidate_version", doc.new_version),
         ("old_acquisition_state", doc.old_acquisition_state),
         ("evidence_tiers", ",".join(doc.evidence_tiers)),
+        ("findings", str(len(doc.findings))),
+        ("suppressed_findings", str(len(doc.suppressed))),
         ("contract_coverage_exit_contribution", str(doc.coverage_exit_contribution)),
         ("exit_code", str(doc.exit_code)),
     ):
         ET.SubElement(props, "property", {"name": name, "value": value or ""})
-    if not doc.findings:
-        # A suite with no test cases at all reads as "nothing ran" in most
-        # CI report viewers, which is the opposite of what a clean audit
-        # means -- so a clean run gets one passing case saying so.
-        ET.SubElement(
-            suite,
-            "testcase",
-            {"classname": "abicheck.audit", "name": "no candidate-side findings"},
-        )
+
     for finding in doc.findings:
-        change = finding.change
-        case = ET.SubElement(
-            suite,
-            "testcase",
-            {
-                "classname": f"abicheck.audit.{change.kind.value}",
-                "name": change.symbol or change.kind.value,
-            },
-        )
+        _junit_finding_case(suite, finding, suppressed=False)
+    for finding in doc.suppressed:
+        # `<skipped>`, not a silent omission and not a failure: SARIF has a
+        # `suppressions` array for this and JUnit's nearest honest
+        # equivalent is a skipped case -- the finding is reported, and its
+        # disposition is legible, without claiming it broke anything.
+        _junit_finding_case(suite, finding, suppressed=True)
+
+    gate = ET.SubElement(
+        suite,
+        "testcase",
+        {"classname": "abicheck.audit", "name": "exit code"},
+    )
+    if gate_failed:
         failure = ET.SubElement(
-            case,
+            gate,
             "failure",
             {
-                "type": change.kind.value,
-                "message": change.description
-                or f"{change.kind.value}: {change.symbol or doc.library}",
+                "type": "audit_gate",
+                "message": f"audit exited {doc.exit_code}",
             },
         )
-        state = change_cross_source_evolution_field(change) or "candidate-side"
         failure.text = (
-            f"{change.description or change.kind.value}\n"
-            f"severity: {finding.category.value}\n"
-            f"evolution: {state}\n"
-            "note: single-build audit (--no-baseline); no baseline was consulted."
+            f"exit code: {doc.exit_code}\n"
+            f"contract coverage contribution: {doc.coverage_exit_contribution}\n"
+            "note: a candidate-side hygiene finding never gates on its own "
+            "(ADR-028 D3 / ADR-035 D1); this is one of the orthogonal axes "
+            "(contract coverage, analysis assurance, evidence contract)."
         )
     ET.indent(suite, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
         suite, encoding="unicode"
     )
+
+
+def _junit_finding_case(
+    suite: ET.Element, finding: ReportFinding, *, suppressed: bool
+) -> None:
+    """One passing (or skipped) ``<testcase>`` for a candidate-side finding."""
+    change = finding.change
+    case = ET.SubElement(
+        suite,
+        "testcase",
+        {
+            "classname": f"abicheck.audit.{change.kind.value}",
+            "name": change.symbol or change.kind.value,
+        },
+    )
+    state = change_cross_source_evolution_field(change) or "candidate-side"
+    detail = (
+        f"{change.description or change.kind.value}\n"
+        f"severity: {finding.category.value}\n"
+        f"verdict: {finding.verdict.value}\n"
+        f"evolution: {state}\n"
+        "note: single-build audit (--no-baseline); no baseline was consulted, "
+        "and a hygiene finding is advisory -- it does not gate."
+    )
+    if suppressed:
+        rule = getattr(change, "suppression_rule", None)
+        skipped = ET.SubElement(
+            case,
+            "skipped",
+            {"message": f"suppressed: {rule or 'a --suppress rule matched'}"},
+        )
+        skipped.text = detail
+    else:
+        ET.SubElement(case, "system-out").text = detail
 
 
 def render_no_baseline(

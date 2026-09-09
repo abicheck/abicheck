@@ -278,11 +278,24 @@ class NoBaselineCompareResult:
     once per renderer that asks. The complementary *comparison* half is
     never carried at all: it is provably empty, so there is nothing for a
     consumer to read.
+
+    *suppressed_findings* is the same partition applied to
+    ``diff.suppressed_changes`` -- the candidate-side findings a
+    ``--suppress`` rule matched. ``checker.compare()`` moves a suppressed
+    finding *out* of ``diff.changes``, so reading only ``changes`` made a
+    suppressed audit indistinguishable from a clean one: the finding was
+    detected, then vanished, with no way for a reader to tell that policy
+    hid it or which rule did (Codex review, P1). ``vision.md``'s "Record
+    before disposing" rule forbids exactly that -- "100 removals detected,
+    100 suppressed by rule X" must stay visible on a passing run -- so the
+    suppressed half is carried here and projected by every renderer,
+    with each finding's own ``suppression_rule`` alongside it.
     """
 
     diff: DiffResult
     acquisition: ScopeAcquisitionRecord
     findings: tuple[Change, ...] = ()
+    suppressed_findings: tuple[Change, ...] = ()
 
 
 def declared_absent_acquisition_record(new: AbiSnapshot) -> ScopeAcquisitionRecord:
@@ -372,8 +385,18 @@ def run_no_baseline_compare(
     )
     partition = partition_no_baseline_findings(diff.changes)
     check_no_baseline_partition(partition)
+    # The suppressed half gets the identical partition -- a suppressed
+    # comparison finding would be just as impossible on a self-diff, and D3
+    # applies to a finding's evolution state whether or not policy later
+    # hid it, so the same invariants are checked rather than waived for
+    # anything a rule happened to match.
+    suppressed = partition_no_baseline_findings(
+        getattr(diff, "suppressed_changes", ()) or ()
+    )
+    check_no_baseline_partition(suppressed)
     return NoBaselineCompareResult(
         diff=diff,
         acquisition=declared_absent_acquisition_record(new),
         findings=partition.one_sided,
+        suppressed_findings=suppressed.one_sided,
     )

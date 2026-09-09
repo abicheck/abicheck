@@ -52,6 +52,29 @@
   `--config`, `--instantiation-manifest`, `--follow-deps`, `--search-path`,
   `--ld-library-path`, `--debug-info` and `--devel-pkg`.
 
+- **A suppressed finding no longer disappears from a `--no-baseline`
+  audit.** `compare()` moves a matched finding out of the change set, and
+  the audit read only what remained — so a run that detected and hid a
+  finding was indistinguishable from a clean one. Suppressed findings are
+  now reported as a *disposition*, with the rule that hid each one: a
+  `suppressed_findings[]`/`suppressed_count` pair in JSON, a table in
+  Markdown, a count in `oneline`, SARIF's native `suppressions` array, and a
+  `<skipped>` case in JUnit.
+- **`--format junit` no longer fails a build the CLI passed.** Every finding
+  was rendered as a `<failure>` while the same audit reported exit `0` —
+  hygiene findings are advisory and never gate on their own. Each finding is
+  now a passing `<testcase>` (the fact stays visible), and a single
+  `exit code` case fails only when one of the orthogonal axes actually gated
+  the run, so the JUnit file and the process exit code agree by
+  construction.
+- **`--write` under a missing parent directory no longer ends in a
+  traceback.** It now uses the same writer `-o/--output` does, which creates
+  parents and reports a write failure as a clean error.
+- **`--dry-run` no longer disagrees with the run it previews.** A pinned
+  `--depth build`/`--depth source` on a *stored* snapshot candidate was
+  reported as a blocker, while the real run exempts that operand (it
+  performs no extraction, so it cannot fall short of a depth) and exits `0`.
+
 ### Added
 
 - **`compare --no-baseline --format` accepts `sarif`, `junit` and `oneline`**

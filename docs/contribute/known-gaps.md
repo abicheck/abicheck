@@ -6940,6 +6940,59 @@ later phase". That is now decided per format rather than left open:
   of promising an unspecified later phase. The reasoning lives with the code,
   in `report.no_baseline.NO_BASELINE_UNSUPPORTED_FORMATS`.
 
+**Four review findings on the first push, all real, all fixed.** Recorded
+because two of them are the *same* defect class this entry is about — a
+derived answer disagreeing with the answer it derives from — and one
+reproduces a bug this repository had already fixed once elsewhere:
+
+- **A suppressed finding vanished (P1).** `checker.compare()` moves a
+  matched finding out of `diff.changes` into `diff.suppressed_changes`; the
+  partition read only the former, so a suppressed audit was
+  indistinguishable from a clean one — no way to tell that policy hid a
+  finding, or which rule did. That is precisely what `vision.md`'s "Record
+  before disposing" forbids ("100 removals detected, 100 suppressed by rule
+  X" stays visible on a passing run). The suppressed half now gets the
+  *identical* partition and D3 check (a suppressed comparison finding would
+  be just as impossible), rides on `NoBaselineCompareResult.
+  suppressed_findings`, and is projected by every format with its own
+  `suppression_rule`: a `suppressed_findings[]`/`suppressed_count` pair in
+  JSON, a table in Markdown, a count in `oneline`, SARIF's own native
+  `suppressions` array, and a `<skipped>` case in JUnit.
+- **JUnit failed a build the CLI passed (P1).** Every finding got a
+  `<failure>` while the same document reported exit `0` — audit hygiene
+  findings are advisory (ADR-028 D3 / ADR-035 D1) and ADR-068 D2 gives the
+  run no compatibility contribution at all. This is the identical bug
+  `junit_report._is_failure`'s docstring records having already been fixed
+  once for the two-sided report ("reporting one `<failure>` beside a
+  `NO_CHANGE` verdict and a clean exit was the bug"). Failure is now
+  derived from the run's own gate: each finding gets a **passing**
+  `<testcase>` (D9 — the fact stays visible, it just is not a failure) and
+  one `exit code` case fails when, and only when, an orthogonal axis
+  actually gated the run.
+- **`--write` bypassed the shared safe writer (P2).** A raw
+  `Path.write_text()` raised `FileNotFoundError` after the analysis and the
+  primary render had already completed, when the target's parent directory
+  did not exist. Now routed through `_safe_write_output`, the same writer
+  `-o/--output` uses, which creates parents and translates a failure into a
+  clean Click error.
+- **The dry run disagreed with the run it previews (P2).** A pinned
+  `--depth build` on a *stored* candidate was reported as a blocker (exit
+  1) while the real run exempts that operand from the depth floor
+  (`candidate_is_live=False` — no extraction happened, so nothing can have
+  fallen short) and exits `0`. The preview now takes the same carve-out
+  from the same helper, so the two cannot diverge.
+
+Generalized rather than patched per instance:
+`tests/test_no_baseline_report_formats.py` states the invariants over every
+format and every fixture — conservation (suppression only ever *moves* a
+finding between the two lists, checked over generated rules that match all,
+some and none), JUnit's failure count equalling the exit code exactly,
+every format disclosing a suppression, every format agreeing on the exit
+code, and JSON and SARIF agreeing on the finding set. Mutation-checked
+against all four regressions, including the over-correction (making JUnit
+pass by *dropping* findings satisfies the failure-count invariant while
+losing the audit's whole content — a separate test catches that).
+
 **The class, not just the four instances.** "Accepted but never read" is
 the single defect this path has now produced four separate times
 (`--contract`; `--sources`/`--build-info`/`--depth`/`--dry-run`; `--write`;

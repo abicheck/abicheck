@@ -47,7 +47,7 @@ from ....workflows.no_baseline_compare import (
 )
 from ..options.contract import resolve_contract_domain, resolve_contract_evaluation
 from ..options.params import _load_suppression_and_policy
-from ..runtime import _write_or_echo
+from ..runtime import _safe_write_output, _write_or_echo
 
 __all__ = ["maybe_dispatch_no_baseline_compare"]
 
@@ -444,6 +444,10 @@ def _run_no_baseline_compare_cmd(
                 build_info=build_info,
                 fmt=fmt,
                 contract_mode=kwargs.get("contract_mode"),
+                # The same carve-out the real run applies below, from the
+                # same helper -- so the preview and the run can never
+                # disagree about whether the depth floor bites.
+                candidate_is_live=candidate_is_live_artifact(candidate),
             )
         )
 
@@ -517,7 +521,13 @@ def _run_no_baseline_compare_cmd(
         rendered, _ = render_no_baseline(
             result, write_fmt, require_complete_analysis=require_complete
         )
-        write_path.write_text(rendered, encoding="utf-8")
+        # The same writer `-o/--output` goes through, not a bare
+        # `Path.write_text` -- it creates a missing parent directory and
+        # translates a write failure into a clean Click error, so a
+        # `--write json=out/dir/x.json` under a directory that does not
+        # exist yet does not end an otherwise-complete analysis in a
+        # FileNotFoundError traceback (Codex review, P2).
+        _safe_write_output(write_path, rendered)
     if exit_code != 0:
         sys.exit(exit_code)
 

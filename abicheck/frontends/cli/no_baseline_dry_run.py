@@ -59,6 +59,7 @@ def build_no_baseline_dry_run_result(
     build_info: Path | None,
     fmt: str,
     contract_mode: str | None,
+    candidate_is_live: bool = True,
 ) -> Any:
     """Build the ``compare --no-baseline --dry-run`` report (ADR-068 D2).
 
@@ -78,6 +79,14 @@ def build_no_baseline_dry_run_result(
     that called it fine would be lying), and ``--contract`` naming a domain
     whose evidence this candidate may not carry (a note, since only the real
     evidence collection can answer it).
+
+    *candidate_is_live* carries the real run's own live/stored carve-out
+    (``policy.depth_evidence_contract``'s "Live extraction only" note): a
+    stored ``.abi.json`` candidate was never extracted by this run, so it
+    cannot fall short of a pinned depth and the real run exempts it. Without
+    the same exemption here the preview claimed a blocker (exit 1) for an
+    invocation that really exits 0 -- a dry run that disagrees with the run
+    it previews is worse than no dry run (Codex review, P2).
     """
     from ...dry_run import DryRunResult, tool_status
 
@@ -87,10 +96,16 @@ def build_no_baseline_dry_run_result(
         f"candidate: {candidate} ({'directory' if candidate.is_dir() else 'file'})",
         "baseline: (none -- OLD declared absent via --no-baseline)",
     )
-    collects_source = depth is not None and depth.lower() in ("build", "source")
+    collects_source = (
+        depth is not None and depth.lower() in ("build", "source") and candidate_is_live
+    )
     result.add(
         "Resolved depth and source scope",
         f"requested depth: {depth or '(not given)'}",
+        "candidate is a stored snapshot: the depth floor does not apply "
+        "(this run performs no extraction)"
+        if not candidate_is_live
+        else None,
         "source scope: candidate only (an audit has no second side to scope against)",
     )
     result.add(
