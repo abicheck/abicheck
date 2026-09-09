@@ -931,6 +931,77 @@ class TestScanStaysOnLegacyCliForDebugOptionsConfig:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForNativeBaselineWithBuildEvidence:
+    """Fourteenth Codex review round, P1, fresh evidence: `scan_engine.py`'s
+    own native-baseline reuse goes deeper than the literal ``-H``/``-I``
+    values the migrated invocation's own reuse fallback forwards -- when
+    ``--sources``/``--build-info``/a compile database resolves the
+    candidate's headers, `scan` always feeds the candidate's OWN *resolved*
+    ``effective_includes`` (seeded from the compile database, not just the
+    literal ``new-include`` value) into the baseline's native parse, and
+    further reuses the candidate's own folded compile context when the
+    baseline reuses its header/include scope. Reproduced directly: a header
+    depending on ``types.h``, found only through the compile database's own
+    include path (never a literal ``new-include``) -- `scan` exits 0, the
+    migrated invocation exited 1 with OLD unable to find ``types.h``. This
+    resolution cannot be reproduced by forwarding literal flags in bash, so
+    a native ``--against`` library combined with build evidence stays on
+    the legacy CLI outright.
+    """
+
+    @pytest.mark.parametrize(
+        "build_evidence_env",
+        [
+            {"INPUT_SOURCES": "src"},
+            {"INPUT_BUILD_INFO": "build"},
+            {"INPUT_COMPILE_DB": "compile_commands.json"},
+        ],
+    )
+    def test_native_baseline_with_build_evidence_stays_on_scan(
+        self, tmp_path: Path, build_evidence_env: dict[str, str]
+    ) -> None:
+        cmd = _run_cmd(
+            _base_env(INPUT_AGAINST=_native_lib(tmp_path), **build_evidence_env)
+        )
+        assert cmd[1] == "scan", cmd
+
+    def test_native_baseline_with_both_sources_and_build_info_stays_on_scan(
+        self, tmp_path: Path
+    ) -> None:
+        # `--sources` together with `--build-info` sidesteps the unrelated,
+        # pre-existing auto-depth-mismatch condition (which only fires when
+        # `--sources` is ABSENT) -- isolating this class's own new
+        # `_migrated_compare_against_native_baseline_has_build_evidence`
+        # check as the one actually responsible for staying on `scan` here.
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_SOURCES="src",
+                INPUT_BUILD_INFO="build",
+            )
+        )
+        assert cmd[1] == "scan", cmd
+
+    def test_json_baseline_with_build_evidence_still_migrates(
+        self, tmp_path: Path
+    ) -> None:
+        # The build-evidence gate is scoped to a NATIVE baseline (the shape
+        # `scan_engine.py`'s deeper reuse actually applies to) -- a JSON/
+        # ABICC-dump snapshot baseline already carries its own headers, so
+        # `--sources` alongside it must not itself force the legacy CLI.
+        baseline = tmp_path / "baseline.abicheck.json"
+        baseline.write_text("{}", encoding="utf-8")
+        cmd = _run_cmd(_base_env(INPUT_AGAINST=str(baseline), INPUT_SOURCES="src"))
+        assert cmd[1] == "compare", cmd
+
+    def test_native_baseline_without_build_evidence_still_migrates(
+        self, tmp_path: Path
+    ) -> None:
+        cmd = _run_cmd(_base_env(INPUT_AGAINST=_native_lib(tmp_path)))
+        assert cmd[1] == "compare", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForFullDependencyScopeBaseline:
     """Sixth Codex review round, P1 (fresh evidence): `scan` peeks a JSON
     ``--against``/``abi-baseline`` snapshot for an explicit

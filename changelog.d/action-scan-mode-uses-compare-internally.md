@@ -291,3 +291,19 @@ it should read in CHANGELOG.md. Delete the other sections.
   its value char unexpanded, so the previous round's own `-H?*`/`-I?*`
   patterns never matched it. Fixed by widening those patterns to `-v*H?*`/
   `-v*I?*` in `_extra_args_forces_legacy_scan_cli`.
+  A fourteenth review round found a deeper native-baseline reuse gap this
+  migration cannot safely close by forwarding literal flags: `scan_engine.
+  py`'s own reuse always feeds the candidate's OWN *resolved*
+  `effective_includes` (seeded from a `--sources`/`--build-info`/compile-
+  database match, not just the literal `new-include` value) into the
+  baseline's native parse, and further reuses the candidate's own folded
+  compile context when the baseline reuses its header/include scope.
+  Verified directly: a header depending on `types.h`, found only through
+  the compile database's own include path (never a literal `new-include`)
+  -- `scan` exits 0, the migrated invocation exited 1 with OLD unable to
+  find `types.h`. Reproducing this would mean re-running the same compile-
+  database matching logic in bash, which this migration does not attempt;
+  fixed with a new `_migrated_compare_against_native_baseline_has_build_
+  evidence` gate condition -- a native `--against` library combined with
+  any of `--sources`/`--build-info`/`--compile-db` now stays on the legacy
+  CLI outright.

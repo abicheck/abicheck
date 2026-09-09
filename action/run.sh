@@ -1162,6 +1162,34 @@ except Exception:
   [[ "$_result" == "1" ]]
 }
 
+# Fourteenth Codex review round, P1, fresh evidence: `scan_engine.py`'s own
+# native-baseline reuse goes deeper than the literal `-H`/`-I` values this
+# file's own reuse fallback (`_build_migrated_compare_cmd`, below) forwards
+# -- when `--sources`/`--build-info`/a compile database resolves the
+# candidate's headers, `scan` always feeds the candidate's OWN *resolved*
+# `effective_includes` (`_candidate.effective_includes`, seeded from the
+# compile database, not just the literal `new-include` value) into the
+# baseline's native parse, and further reuses the candidate's own folded
+# `compile_context` when the baseline reuses its header/include scope
+# (`BaselineReuseContext`/`resolve_baseline_compile_context`, PR 3A blocker
+# 6). Reproduced directly: a header depending on `types.h`, found only
+# through the compile database's own include path (never a literal
+# `new-include`) -- `scan` exits 0, the migrated invocation exited 1 with
+# OLD unable to find `types.h`. This resolution genuinely cannot be
+# reproduced by forwarding literal flags in bash (it requires running the
+# same compile-database matching logic `_seeded_includes_and_compile_
+# context` does) -- so, matching this file's own established direction for
+# a capability gap it cannot safely close by guessing, a native `--against`
+# library combined with ANY of `--sources`/`--build-info`/`--compile-db`
+# stays on the legacy CLI outright, rather than risk an incomplete reuse
+# that could leave OLD unable to parse a header the real `scan` handles
+# correctly.
+_migrated_compare_against_native_baseline_has_build_evidence() {
+  { [[ -n "${INPUT_SOURCES:-}" ]] || [[ -n "${INPUT_BUILD_INFO:-}" ]] \
+    || [[ -n "${INPUT_COMPILE_DB:-}" ]]; } \
+    && _migrated_compare_against_is_native_library "${INPUT_AGAINST:-}"
+}
+
 # Ninth Codex review round, P1, fresh evidence (two related findings):
 # `cli_scan.py`'s own `_discover_scan_project_config` resolves the
 # effective project config through THREE tiers -- an explicit
@@ -2518,6 +2546,7 @@ elif [[ "$MODE" == "scan" ]]; then
      || _migrated_compare_against_declares_full_dependency_scope "${INPUT_AGAINST}" \
      || _config_sets_abi3_floor \
      || _config_sets_debug_options \
+     || _migrated_compare_against_native_baseline_has_build_evidence \
      || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
   fi
