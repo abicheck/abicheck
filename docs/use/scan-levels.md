@@ -462,9 +462,14 @@ abicheck compare old/libfoo.abi.json new/libfoo.so --depth binary
 L4 cost scales with C++ template depth, so on a heavy library project the per-TU
 replay cost first. `--dry-run` resolves and validates the invocation (depth,
 scope, tool availability) and prints the projected per-layer cost for *this*
-project without comparing anything or writing output. Exits 0 for a resolvable
-preview; an invalid invocation or an unsatisfiable requested depth still
-exits nonzero, the same as the real run would.
+project without comparing anything or writing output. On `scan`, exits 0 for a
+resolvable preview; an invalid invocation or an unsatisfiable requested depth
+still exits nonzero, the same as the real run would (`scan`'s evidence-contract
+floor, see the warning above). **`compare` has no equivalent floor to preview**
+(the earlier qualification on `compare`'s `--depth` applies here too, verified
+live): `compare --dry-run --depth source` with no build/source evidence
+resolvable still exits 0 and simply reports `0 TU(s)` for the L3/L4/L5 rows,
+rather than failing the way `scan`'s own preview would.
 
 ```bash
 abicheck compare old.abi.json libfoo.so --sources new=. --depth source --dry-run

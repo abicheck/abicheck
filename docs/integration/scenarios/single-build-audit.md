@@ -11,12 +11,13 @@ to gate CI on in the first place.
 ## The recommended CLI path: `scan` (no `--against`)
 
 `abicheck scan CANDIDATE` with no `--against` is the way to run a
-single-build audit from the CLI today — it runs the same eleven ADR-035
-cross-source/single-release checks (`exported_not_public`,
-`private_header_leak`, `unversioned_exported_symbol`,
-`rtti_for_internal_type`, `public_not_exported`,
-`public_to_internal_dependency`, and five more) and reports whatever it
-finds, cleanly, whether the candidate is clean or not:
+single-build audit from the CLI today — it runs the same ADR-035
+cross-source/single-release checks (`CROSS_SOURCE_EVOLUTION_CHECKS`, e.g.
+`exported_not_public`, `private_header_leak`,
+`unversioned_exported_symbol`, `rtti_for_internal_type`,
+`public_not_exported`, `public_to_internal_dependency`, and the rest of the
+registered set) and reports whatever it finds, cleanly, whether the
+candidate is clean or not:
 
 ```bash
 abicheck scan build/libfoo.so -H include/

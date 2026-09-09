@@ -77,9 +77,15 @@ from abicheck.model import (  # noqa: E402
     Visibility,
 )
 
-# The five collection depths the ``abicheck compare --depth`` dial exposes
-# (ADR-068 D2 -- `compare` absorbed `scan`'s depth dial in Phase 4), and the
-# evidence layer each one reaches (see docs/concepts/evidence-and-detectability).
+# The four real collection depths the ``abicheck compare --depth`` dial
+# exposes (ADR-068 D2 -- `compare` absorbed `scan`'s depth dial in Phase 4:
+# `binary`/`headers`/`build`/`source`, confirmed against `compare --help-all`
+# — there is no `--depth full`), plus one internal, synthetic fifth column
+# this script adds on top of `source`'s own evidence to also exercise the L5
+# source-graph/call-graph fold (not a depth a user can request; see
+# _collect() below for what actually differs). Never present it to a reader
+# as a real `--depth` value. The evidence layer each one reaches is per
+# docs/concepts/evidence-and-detectability.
 DEPTHS: tuple[str, ...] = ("binary", "headers", "build", "source", "full")
 DEPTH_LAYER = {
     "binary": "L0",
@@ -88,6 +94,11 @@ DEPTH_LAYER = {
     "source": "L4",
     "full": "L5",
 }
+# Table-header labels (`render()` below): the first four are real `--depth`
+# values and print verbatim; "full" prints as "source+L5" so a reader can't
+# mistake it for a fifth `--depth` choice (Codex review, fresh evidence --
+# `compare --depth full`/`scan --depth full` both reject with exit 64).
+_DEPTH_LABEL = {d: d for d in DEPTHS} | {"full": "source+L5"}
 # Scoping (public/internal surface resolution) becomes available once headers
 # are present — exactly the depths at/above "headers".
 _SCOPED_DEPTHS = frozenset({"headers", "build", "source", "full"})
@@ -337,7 +348,9 @@ def render(markdown: bool) -> str:
             "`FP` = depth over-calls (flags a break that isn't); `FN` = depth "
             "under-calls (misses a real break). Truth is the ground-truth band.",
             "",
-            "| Case | Axis | Truth | " + " | ".join(DEPTHS) + " |",
+            "| Case | Axis | Truth | "
+            + " | ".join(_DEPTH_LABEL[d] for d in DEPTHS)
+            + " |",
             "|------|------|-------|" + "|".join([":--:"] * len(DEPTHS)) + "|",
         ]
         for c in CORPUS:
@@ -351,12 +364,14 @@ def render(markdown: bool) -> str:
                     f"- `{trans}`: {len(names)} FP cleared ({', '.join(names)})"
                 )
     else:
-        header = f"{'case':<28} {'truth':<12} " + " ".join(f"{d:>7}" for d in DEPTHS)
+        header = f"{'case':<28} {'truth':<12} " + " ".join(
+            f"{_DEPTH_LABEL[d]:>10}" for d in DEPTHS
+        )
         lines.append(header)
         lines.append("-" * len(header))
         for c in CORPUS:
             row = f"{c.name:<28} {_BAND_NAME[c.truth]:<12} " + " ".join(
-                f"{_CELL[results[c.name][d]]:>7}" for d in DEPTHS
+                f"{_CELL[results[c.name][d]]:>10}" for d in DEPTHS
             )
             lines.append(row)
         lines.append("")
