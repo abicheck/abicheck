@@ -50,6 +50,7 @@ from abicheck.model import (
 )
 from abicheck.probe_harness import MatrixSnapshot
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.findings import matrix_snapshot_to_json
 
 # The real Itanium mangling of `api_b()` (matches test_cli_compare_fold_demangle.py's
 # own fixture, confirmed against real `c++filt`).
@@ -152,8 +153,8 @@ def _write_matrix_pair(tmp_path: Path, old_std: int, new_std: int) -> tuple[Path
     )
     old_path = tmp_path / "matrix_old.json"
     new_path = tmp_path / "matrix_new.json"
-    old_path.write_text(old_matrix.to_json(), encoding="utf-8")
-    new_path.write_text(new_matrix.to_json(), encoding="utf-8")
+    old_path.write_text(matrix_snapshot_to_json(old_matrix), encoding="utf-8")
+    new_path.write_text(matrix_snapshot_to_json(new_matrix), encoding="utf-8")
     return old_path, new_path
 
 
