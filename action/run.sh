@@ -1057,28 +1057,54 @@ _old_library_is_stored_snapshot() {
 # function's docstring. Only single-pair `compare OLD NEW` with a genuinely
 # *live* OLD operand is pairwise: both operands are then independently-
 # parsed live headers under the SAME resolved compile context. `dump` has
-# one operand; `scan --against`'s own -H/-I have always applied only to the
-# scanned ARTIFACT, never to --against (never live headers on that side at
-# all); and a `compare` whose OLD operand is a stored snapshot or resolved
-# ABI baseline (_old_library_is_stored_snapshot) does no header/debug
-# extraction on that side either (Codex review, fresh evidence, PR #1171,
-# fifth round: the earlier `$MODE == "compare"` check alone was too coarse
-# and silently discarded a live NEW-with-`--sources` operand's own
-# compile:/source:/debug: settings whenever OLD was a stored/baseline
-# snapshot) -- none of these three shapes has an "other side" a --sources
-# tree's own compile:/debug: could leak into, so all three stay
-# single-sided. The release-style directory/package `compare` fan-out never
-# calls add_compile_context_flags at all (it rejects every compile-context
-# input outright), so it never reaches this helper.
+# one operand, period, live or not; a `compare` (or a translated `scan
+# --against`, see below) whose OLD-like operand is a stored snapshot or
+# resolved ABI baseline (_old_library_is_stored_snapshot) does no
+# header/debug extraction on that side either (Codex review, fresh
+# evidence, PR #1171, fifth round: the earlier `$MODE == "compare"` check
+# alone was too coarse and silently discarded a live NEW-with-`--sources`
+# operand's own compile:/source:/debug: settings whenever OLD was a
+# stored/baseline snapshot) -- neither shape has an "other side" a
+# --sources tree's own compile:/debug: could leak into, so both stay
+# single-sided.
+#
+# `scan --against` internally routed through `compare` (ADR-068 D2; the
+# `elif [[ "$MODE" == "scan" ]]; then` branch below, reached only when
+# `$_SCAN_NEEDS_LEGACY_CLI` is false) is, structurally, a genuine two-sided
+# `compare $INPUT_AGAINST $SCAN_ARTIFACT` -- if `--against` is itself a
+# LIVE binary (not the common stored-baseline-snapshot case), it undergoes
+# real header/debug extraction under the SAME shared compile context as
+# the scanned artifact, exactly like `compare`'s own OLD operand (Codex
+# review, fresh evidence, PR #1171, ninth round: this was still
+# unconditionally single-sided for every `scan`, keyed on `$MODE` alone,
+# which silently discarded the candidate's own sources-root compile:/
+# source:/debug: settings whenever `--against` genuinely had none of its
+# own to leak them into, i.e. was itself live). The *legacy* `scan` CLI
+# branch (`$_SCAN_NEEDS_LEGACY_CLI == "true"`) never reaches this helper at
+# all -- it keeps every one of these flags as literal CLI options instead
+# of synthesizing a `--config` overlay -- so `$MODE == "scan"` here always
+# means the translated-to-`compare` branch.
+#
+# The release-style directory/package `compare` fan-out never calls
+# add_compile_context_flags at all (it rejects every compile-context input
+# outright), so it never reaches this helper either.
 _compile_context_sources_pairwise() {
-  if [[ "$MODE" == "compare" ]] && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
+  local old_like_operand
+  case "$MODE" in
+    compare) old_like_operand="${INPUT_OLD_LIBRARY:-}" ;;
+    scan) old_like_operand="${INPUT_AGAINST:-}" ;;
+    *) return ;;
+  esac
+  if ! _old_library_is_stored_snapshot "$old_like_operand"; then
     echo "pairwise"
   fi
 }
 
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
-  # (dump and single-pair compare take --lang here; scan keeps its own
+  # (dump, single-pair compare, and scan's translated-to-compare branch --
+  # see _compile_context_sources_pairwise's own docstring above -- all take
+  # --lang here; only the *legacy* scan CLI branch keeps its own literal
   # --lang flag and never calls this function at all).
   local include_lang="${1:-true}"
   # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is the
