@@ -1208,6 +1208,34 @@ _config_sets_abi3_floor() {
   grep -Eq "(^|[[:space:]{,])[\"']?abi3_floor[\"']?[[:space:]]*:[[:space:]]*[^[:space:]#]" "$_cfg" 2>/dev/null
 }
 
+# Eleventh Codex review round, P1, fresh evidence: a project config's
+# `debug:` namespace (`dwarf_only`/`format`/`debuginfod`/`debuginfod_url` --
+# `buildsource/build_config.py`'s own parsing) is resolved and applied by
+# `compare`'s operand extraction (`cli_helpers_compare.py`'s enrichment),
+# but `scan`'s own baseline resolver (`_resolve_baseline_header_scope`/
+# `resolve_side_snapshot`) never reads any of these four keys at all --
+# reproduced directly: a stripped ELF pair with headers and a config
+# `debug: {dwarf_only: true}`, `scan` reports `COMPATIBLE` reading the
+# header AST (it never even sees the DWARF-only request), while the
+# migrated `compare` invocation honors the config and reports
+# `COMPATIBLE_WITH_RISK` from a completely different evidence source --
+# with real DWARF available, `compare` instead honors `dwarf_only` and
+# ignores the supplied headers entirely, the opposite direction of
+# divergence. Same narrow textual check and same effective-config
+# resolution (`_resolve_scan_effective_config_path`) as `_config_sets_
+# abi3_floor` above: `format`/`debuginfod`/`debuginfod_url` are only ever
+# documented under this exact `debug:` namespace in the project-config
+# schema (no unrelated top-level `format` key exists to collide with), so
+# an unscoped keyword match carries the same "over-match only ever costs
+# staying on the legacy CLI" safety this file's other config checks rely
+# on.
+_config_sets_debug_options() {
+  local _cfg
+  _cfg="$(_resolve_scan_effective_config_path)" || return 0
+  [[ -n "$_cfg" && -f "$_cfg" ]] || return 1
+  grep -Eq "(^|[[:space:]{,])[\"']?(dwarf_only|format|debuginfod|debuginfod_url)[\"']?[[:space:]]*:[[:space:]]*[^[:space:]#]" "$_cfg" 2>/dev/null
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -2441,6 +2469,7 @@ elif [[ "$MODE" == "scan" ]]; then
      || _extra_args_has_dry_run_flag \
      || _migrated_compare_against_declares_full_dependency_scope "${INPUT_AGAINST}" \
      || _config_sets_abi3_floor \
+     || _config_sets_debug_options \
      || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
   fi
@@ -2896,43 +2925,43 @@ elif [[ "$MODE" == "scan" ]]; then
         [[ -n "$_extra_new_header" ]] && add_sided_flag "-H" "old" "$_extra_new_header"
       done <<<"$_extra_new_headers"
     fi
-    # Eighth Codex review round, P1, fresh evidence: the reused header(s)
-    # can themselves depend on an include path only given via
-    # `new-include` -- `_resolve_baseline_header_scope` reuses the
-    # candidate's OWN includes for the old side in this exact branch too,
-    # not just its headers (reproduced directly: the migrated command
-    # failed parsing the old header with a "types.h not found" error scan
-    # itself did not hit). Only fills `old=` when no `old-include` was
-    # separately given -- a real user-provided old-include is honored, a
-    # deliberate refinement over scan's own literal behavior (which
-    # ignores `old-include` entirely whenever `old-header` is absent, per
-    # `_resolve_baseline_header_scope`'s own branching on `baseline_headers`
-    # alone); this direction only ever adds precision an explicit user
-    # input deserves, never discards one silently.
-    # Eleventh Codex review round: the identical repeatable-flag guard as the
-    # `-H`/`--header` case above, for `-I`/`--include` -- an
-    # `extra-args: -I old=...` already scopes OLD's own include path, so the
-    # reuse fallback below must not also inject a reused `-I old=` from
-    # `new-include`/extra-args' own `new=` value alongside it.
-    if [[ -z "${INPUT_OLD_INCLUDE:-}" ]] \
-       && ! _extra_args_has_old_side_value "-I" "--include" \
-       && [[ -n "${INPUT_NEW_INCLUDE:-}" ]]; then
+  fi
+  # Eighth Codex review round, P1, fresh evidence: the candidate's own
+  # includes can be needed to parse a reused header. Eleventh Codex review
+  # round, P1, fresh evidence (real reproduction: `old-header` given,
+  # `new-include` given, no `old-include` -- legacy `scan` exits 0, the
+  # migrated invocation exited 1 on a "types.h not found" error): this
+  # include reuse is deliberately a SEPARATE condition from the header
+  # reuse above, not nested inside it -- `cli_scan_baseline._resolve_
+  # baseline_header_scope`'s own `bl_includes = baseline_includes or
+  # includes` fallback fires whenever `old-include` is absent, REGARDLESS
+  # of whether `baseline_headers` (`old-header`) was given (only the
+  # *header* half of that function's return value depends on
+  # `baseline_headers` being empty; the include half does not). Nesting
+  # this inside the header-reuse `if` (as an earlier revision did) made it
+  # unreachable whenever `old-header` was explicitly given -- exactly the
+  # shape the reported reproduction needs to fail. Only fills `old=` when
+  # no `old-include` was separately given -- a real user-provided
+  # `old-include` is honored, a deliberate refinement over scan's own
+  # literal behavior (which ignores `old-include` entirely whenever
+  # `old-header` is ALSO absent, per `_resolve_baseline_header_scope`'s own
+  # early-return branch); this direction only ever adds precision an
+  # explicit user input deserves, never discards one silently.
+  if _migrated_compare_against_is_native_library "${INPUT_AGAINST}" \
+     && [[ -z "${INPUT_OLD_INCLUDE:-}" ]] \
+     && ! _extra_args_has_old_side_value "-I" "--include"; then
+    if [[ -n "${INPUT_NEW_INCLUDE:-}" ]]; then
       add_sided_flag "-I" "old" "${INPUT_NEW_INCLUDE:-}"
     fi
     # Ninth Codex review round (same finding, generalized to -I/--include):
     # a sided `new=` include value reaching this invocation only through
     # `extra-args -I new=PATH`/`--include new=PATH` is reused for OLD here
-    # too, for the same reason the dedicated `new-include` input is above --
-    # only when no `old-include` was separately given, same non-discarding
-    # direction as the dedicated-input case.
-    if [[ -z "${INPUT_OLD_INCLUDE:-}" ]] \
-       && ! _extra_args_has_old_side_value "-I" "--include"; then
-      _extra_new_includes="$(_extra_args_new_side_include_values)"
-      if [[ -n "$_extra_new_includes" ]]; then
-        while IFS= read -r _extra_new_include; do
-          [[ -n "$_extra_new_include" ]] && add_sided_flag "-I" "old" "$_extra_new_include"
-        done <<<"$_extra_new_includes"
-      fi
+    # too, for the same reason the dedicated `new-include` input is above.
+    _extra_new_includes="$(_extra_args_new_side_include_values)"
+    if [[ -n "$_extra_new_includes" ]]; then
+      while IFS= read -r _extra_new_include; do
+        [[ -n "$_extra_new_include" ]] && add_sided_flag "-I" "old" "$_extra_new_include"
+      done <<<"$_extra_new_includes"
     fi
   fi
 

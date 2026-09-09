@@ -864,6 +864,63 @@ class TestScanStaysOnLegacyCliForAbi3FloorConfig:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForDebugOptionsConfig:
+    """Eleventh Codex review round, P1, fresh evidence: a project config's
+    ``debug:`` namespace (``dwarf_only``/``format``/``debuginfod``/
+    ``debuginfod_url``) is resolved and applied by ``compare``'s operand
+    extraction, but ``scan``'s own baseline resolver never reads any of
+    these four keys at all -- reproduced directly: a stripped ELF pair with
+    headers and a config ``debug: {dwarf_only: true}``, ``scan`` reports
+    ``COMPATIBLE`` reading the header AST (never even seeing the DWARF-only
+    request), while the migrated ``compare`` invocation honors the config
+    and reports ``COMPATIBLE_WITH_RISK`` from a completely different
+    evidence source -- with real DWARF available, ``compare`` instead
+    honors ``dwarf_only`` and ignores the supplied headers entirely, the
+    opposite direction of divergence.
+    """
+
+    @pytest.mark.parametrize(
+        "config_yaml",
+        [
+            "debug:\n  dwarf_only: true\n",
+            "debug:\n  format: btf\n",
+            "debug:\n  debuginfod: true\n",
+            'debug:\n  debuginfod_url: "https://example.test"\n',
+        ],
+    )
+    def test_cwd_config_with_debug_option_stays_on_scan(
+        self, tmp_path: Path, config_yaml: str
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(config_yaml, encoding="utf-8")
+        cmd = _run_cmd(_base_env(), cwd=tmp_path)
+        assert cmd[1] == "scan", cmd
+
+    def test_sources_tree_config_with_debug_option_stays_on_scan(
+        self, tmp_path: Path
+    ) -> None:
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            "debug:\n  dwarf_only: true\n", encoding="utf-8"
+        )
+        cmd = _run_cmd(_base_env(INPUT_SOURCES=str(sources_dir)), cwd=tmp_path)
+        assert cmd[1] == "scan", cmd
+
+    def test_config_without_debug_options_still_migrates(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "scope:\n  public: true\n", encoding="utf-8"
+        )
+        cmd = _run_cmd(_base_env(), cwd=tmp_path)
+        assert cmd[1] == "compare", cmd
+
+    def test_no_config_still_migrates(self, tmp_path: Path) -> None:
+        cmd = _run_cmd(_base_env(), cwd=tmp_path)
+        assert cmd[1] == "compare", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForFullDependencyScopeBaseline:
     """Sixth Codex review round, P1 (fresh evidence): `scan` peeks a JSON
     ``--against``/``abi-baseline`` snapshot for an explicit
@@ -1057,6 +1114,33 @@ class TestMigratedCompareReusesHeadersForNativeBaseline:
         assert cmd[1] == "compare", cmd
         old_tokens = [tok for tok in cmd if tok.startswith("old=")]
         assert old_tokens == [f"old={header}"], cmd
+
+    def test_new_include_reused_even_with_explicit_old_header(
+        self, tmp_path: Path
+    ) -> None:
+        # Eleventh Codex review round, P1, fresh evidence (real
+        # reproduction): `cli_scan_baseline._resolve_baseline_header_scope`'s
+        # own `bl_includes = baseline_includes or includes` fallback fires
+        # whenever `old-include` is absent, REGARDLESS of whether
+        # `old-header` was explicitly given -- only the *header* half of
+        # that function's return value depends on `old-header` being empty.
+        # An earlier revision nested the include-reuse fallback inside the
+        # header-reuse `if` (gated on `old-header` being ABSENT), making it
+        # unreachable whenever `old-header` was explicitly given -- verified
+        # directly: legacy `scan` exits 0, the un-fixed migrated invocation
+        # exited 1 on a "types.h not found" error because the reused old
+        # header's own include dependency never reached OLD.
+        old_header = str(tmp_path / "old-api.h")
+        include_dir = str(tmp_path / "include")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_AGAINST=_native_lib(tmp_path),
+                INPUT_OLD_HEADER=old_header,
+                INPUT_NEW_INCLUDE=include_dir,
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert f"old={include_dir}" in cmd, cmd
 
     def test_extra_args_sided_new_header_reused_for_old_side(
         self, tmp_path: Path

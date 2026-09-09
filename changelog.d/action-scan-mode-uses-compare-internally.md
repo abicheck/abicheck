@@ -247,3 +247,28 @@ it should read in CHANGELOG.md. Delete the other sections.
   Fixed the same way the pre-existing `-oPATH` case already handles this:
   `-H?*`/`-I?*` now force the legacy CLI outright rather than risk
   guessing, in `_extra_args_forces_legacy_scan_cli`.
+  A twelfth review round closed two more gaps: a project config's `debug:`
+  namespace (`dwarf_only`/`format`/`debuginfod`/`debuginfod_url`) is
+  resolved and applied by `compare`'s operand extraction, but `scan`'s own
+  baseline resolver never reads any of these four keys at all -- verified
+  directly: a stripped ELF pair with headers and `debug: {dwarf_only:
+  true}`, `scan` reports `COMPATIBLE` reading the header AST (never even
+  seeing the DWARF-only request), while the migrated `compare` invocation
+  honors the config and reports `COMPATIBLE_WITH_RISK` from a completely
+  different evidence source -- with real DWARF available, `compare`
+  instead honors `dwarf_only` and ignores the supplied headers entirely,
+  the opposite direction of divergence. Fixed with a new
+  `_config_sets_debug_options` check, the same narrow textual match and
+  effective-config resolution as `_config_sets_abi3_floor`. Separately, the
+  native-baseline include-reuse fallback was nested inside the header-reuse
+  `if` (gated on `old-header` being absent), but
+  `cli_scan_baseline._resolve_baseline_header_scope`'s own `bl_includes =
+  baseline_includes or includes` fallback fires whenever `old-include` is
+  absent REGARDLESS of whether `old-header` was given -- only the *header*
+  half of that function's return value depends on `old-header` being
+  empty. Verified directly: `old-header` given, `new-include` given, no
+  `old-include` -- legacy `scan` exits 0, the un-fixed migrated invocation
+  exited 1 on a "types.h not found" error because the reused header's own
+  include dependency never reached OLD. Fixed by making the include-reuse
+  fallback its own condition, independent of whether the header-reuse
+  fallback fired.
