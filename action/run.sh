@@ -958,21 +958,59 @@ _rm_overlay_on_early_exit() {
   rm -f "${1:-}"
 }
 
-# Codex review, fresh evidence, PR #1171: whether the caller's own $MODE
-# resolves a --sources tree's compile:/source:(singular)/debug: blocks
-# PAIR-WIDE (echoes "pairwise") or SINGLE-SIDED (echoes ""), for
+# Codex review, fresh evidence, PR #1171: whether $INPUT_OLD_LIBRARY, as
+# resolved by the time this runs (a direct operand, or an --abi-baseline
+# auto-fetch's $BASELINE_FILE already folded into it above), is a stored
+# snapshot rather than a live binary -- a stored *.abicheck.json[.gz|.zst]
+# snapshot (whether the caller named one directly, or it's what an
+# auto-fetched baseline always resolves to) does no header/debug extraction
+# at all, so it has nothing for a --sources tree's own compile:/source:/
+# debug: settings to reach. Extension-based, matching this script's own
+# established bar for the identical class of decision: the bare
+# `[[ "${INPUT_AGAINST:-}" == *.json ]]` snapshot check used for `scan`'s
+# legacy-CLI routing above, and the `*.abicheck.json`/`.gz`/`.zst` glob
+# triple already used twice for baseline-asset discovery -- resolve_input()
+# itself only ever content-sniffs (magic bytes/`{`-prefix), but this Action
+# has no cheap way to run that dispatch ahead of the CLI, and a stored
+# snapshot's filename is the signal this script already relies on elsewhere
+# for the same question. Deliberately narrow: an ABICC Perl dump old-library
+# (also stored, also live-extraction-free) has no comparably reliable
+# extension convention to key off, so it is not detected here and stays on
+# the prior, safe-by-construction "pairwise" side -- not a generalized
+# live/stored classifier, just this one already-precedented signal.
+_old_library_is_stored_snapshot() {
+  local lower
+  lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    *.json | *.json.gz | *.json.zst)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Whether the caller's own $MODE resolves a --sources tree's compile:/
+# source:(singular)/debug: blocks PAIR-WIDE (echoes "pairwise") or
+# SINGLE-SIDED (echoes ""), for
 # _merge_config_overlay_with_discovered_project_config's own $6 -- see that
-# function's docstring. Only single-pair `compare OLD NEW` is pairwise:
-# both operands are independently-parsed live headers under the SAME
-# resolved compile context. `dump` has one operand; `scan --against`'s own
-# -H/-I have always applied only to the scanned ARTIFACT, never to
-# --against (never live headers on that side at all) -- neither has an
-# "other side" a --sources tree's own compile:/debug: could leak into, so
-# both stay single-sided. The release-style directory/package `compare`
-# fan-out never calls add_compile_context_flags at all (it rejects every
-# compile-context input outright), so it never reaches this helper.
+# function's docstring. Only single-pair `compare OLD NEW` with a genuinely
+# *live* OLD operand is pairwise: both operands are then independently-
+# parsed live headers under the SAME resolved compile context. `dump` has
+# one operand; `scan --against`'s own -H/-I have always applied only to the
+# scanned ARTIFACT, never to --against (never live headers on that side at
+# all); and a `compare` whose OLD operand is a stored snapshot or resolved
+# ABI baseline (_old_library_is_stored_snapshot) does no header/debug
+# extraction on that side either (Codex review, fresh evidence, PR #1171,
+# fifth round: the earlier `$MODE == "compare"` check alone was too coarse
+# and silently discarded a live NEW-with-`--sources` operand's own
+# compile:/source:/debug: settings whenever OLD was a stored/baseline
+# snapshot) -- none of these three shapes has an "other side" a --sources
+# tree's own compile:/debug: could leak into, so all three stay
+# single-sided. The release-style directory/package `compare` fan-out never
+# calls add_compile_context_flags at all (it rejects every compile-context
+# input outright), so it never reaches this helper.
 _compile_context_sources_pairwise() {
-  if [[ "$MODE" == "compare" ]]; then
+  if [[ "$MODE" == "compare" ]] && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
     echo "pairwise"
   fi
 }
