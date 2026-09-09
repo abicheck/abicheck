@@ -1224,7 +1224,7 @@ rather than read off §4.5:**
 
 | Command | Before | After | Target | Residual, itemized |
 |---|---|---|---|---|
-| `compare` | 56 | **50** | ≤40 | `--scope-public-headers`, `--post-manifest` (Phase 9) · `--env-matrix`, `--require-complete-analysis` (`scan`, Phase 6) · `--instantiation-manifest`, `--use-cases` (prerequisite) · `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--old-variant`/`--new-variant` merge (−1, declined) = 10 |
+| `compare` | 56 | **50** | ≤40 | `--scope-public-headers`, `--post-manifest` (Phase 9) · `--env-matrix`, `--require-complete-analysis` (`scan`, Phase 6) · `--instantiation-manifest`, `--use-cases` (prerequisite) · `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--old-variant`/`--new-variant` merge (−1, declined here; **done in 7j**) = 10. Re-derived after `--budget` landed and 7j merged the variant pair: **50** again, with `--budget` replacing the merged pair in the residual set |
 | `dump` | 24 | **21** | ≤16 | `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--compression`, `--build-target` (Action input) = 5 |
 
 `compare` reaches **40** and `dump` reaches **16** exactly once those two
@@ -1236,6 +1236,77 @@ reading of §4.5's numbers is that they were set before Phase 2 added five
 flags to `compare` and before the dependency-walk measurement existed;
 they are recorded here as still-useful pressure, not as arithmetic that
 survives contact with the per-flag rulings above.
+
+**7j: `--old-variant`/`--new-variant` → one side-scoped `--variant`.**
+7i examined this MERGE and *declined* it, on the grounds that it is "a
+rename of a user-visible pair with no analysis consequence, which makes it
+the lowest-value change in this list and the one most likely to churn
+unrelated tests in a PR that is already changing the meaning of six flags",
+and left it as a standalone follow-up. That decline is reversed here, for
+two reasons the original ruling did not weigh:
+
+1. **Its stated rationale is an effort argument, which AGENTS.md's own
+   decision-making principles rule out of technical decisions** ("Don't
+   scope, simplify, defer, or pick an implementation approach because it's
+   faster or quicker to ship"). "Churns unrelated tests in a PR already
+   doing six things" is a reason to make it *its own* PR — which is what
+   7i itself proposed and what this slice is — not a reason not to do it.
+2. **"No analysis consequence" understates what the pair costs.** Every
+   other two-sided input on `compare` — `--header`, `--include`,
+   `--version`, `--sources`, `--build-info`, `--debug-info`, `--devel-pkg`,
+   `--debug-root`, `--probe-matrix`, `--dump-manifest` — is one option
+   carrying an `old=`/`new=` prefix, a convention ADR-040 Lever 1
+   established by retiring exactly this shape of pair (`--old-header`/
+   `--new-header`, `--old-version`/`--new-version`). The variant pair was
+   the last two-sided input still spelled the old way, so it was not a
+   neutral naming difference but a live exception to a convention a user
+   has already had to learn: one concept represented twice, which is D5's
+   guard 2 as literally as the surface has left.
+
+Ruled a **per-run operand throughout** — variant selection is comparison
+scope (ADR-065), not a project property, so nothing here moves to
+`.abicheck.yml`. What retires is the spelling: `--variant
+[old=|new=]VARIANT_ID` (`SIDED_STR_PARAM`, repeatable, bare value applies
+to both sides, last-one-wins per bucket). Both old spellings exit `64` with
+no alias and no deprecation window; both are registered in
+`scripts/retired_surfaces.py`. The *unregistered* release engine
+(`cli_compare_release.py`) keeps its own per-side `--old-variant`/
+`--new-variant`, exactly as it kept per-side `--old-version`/`--new-version`
+through ADR-040 Lever 1 — that engine is not public CLI surface and is not
+what this workstream's counts measure.
+
+Two details worth not rediscovering. First, an **empty variant id**
+(`--variant old=`, or a bare `--variant ""`) is now a usage error rather
+than a silently-`None` selection: the pair's old `default=None` made "flag
+absent" and "flag given an empty value" indistinguishable, so a package
+declaring several variants would have failed much later with a message
+naming neither the empty value nor the flag that supplied it. This follows
+7f's `--provenance` precedent — validate the grammar eagerly in the Click
+callback, exit 64 before any extraction runs. Second, the resolution rule
+lives in a standalone `_resolve_sided_variant` with a **property-test
+class** (`TestResolveSidedVariantProperties`) stating its contract as
+invariants — last-writer-wins per bucket, a later `both=` re-basing both
+sides, a per-side override surviving an earlier base, the two buckets
+independent under any interleaving, and unset staying `None` rather than
+gaining a synthesized per-side default the way `--version` has. The oracle
+is an independently-stated "last token addressing this side" rule, not the
+implementation's own loop, and the enumeration is exhaustive over every
+token sequence up to length three. AGENTS.md requires this for a reusable
+ordering primitive, and the repo's own `_paired_stable_indices` history is
+why: order-dependence in a small merge helper is exactly the defect class a
+fixed-example test cannot reach.
+
+Front-end parity in the same PR: `action/run.sh`'s two hand-maintained flag
+tables (the `extra-args` value-option tokenizer and the scan-only-flag
+routing predicate) both move to `--variant`. No typed-API change exists to
+make — `variant_options` has always used `expose_value=False`, stashing the
+resolved per-side values on `ctx.meta` for the release fan-out alone, so
+`CompareRequest`/`run_compare` never carried a variant parameter. No schema
+changes: nothing machine-readable moved.
+
+**Count after 7j: `compare` 50** (from 51 — 7i's own table recorded 50, but
+Phase 4 commit 2's `--budget` landed between that slice and this one).
+`dump` is untouched at **21**.
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
@@ -1250,7 +1321,10 @@ PR J; **done**, including the explicit four-flag ruling above) ·
 7i the whole-surface per-flag audit (**done**, see above) — every surviving
 `compare` and `dump` option ruled against D5's three guards, with
 `--reconcile-build-context`, `--pdb-path`, `--support-promise` and
-`dump --compile-db-filter` removed and every keep or deferral named.
+`dump --compile-db-filter` removed and every keep or deferral named ·
+7j the `--variant` merge (**done**, see above) — 7i's own declined
+follow-up, reversed on the grounds that its stated rationale was an effort
+argument.
 
 Every PR in this phase meets the merge criteria recorded in
 `cli-cleanup-phase-two.md` — old spelling exits

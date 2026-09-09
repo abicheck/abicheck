@@ -63,6 +63,10 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # --reconcile-build-context (AUTO -- ADR-039 reconciliation is
         # unconditional), --pdb-path (debug.pdb_path) and
         # --support-promise (release.support_promise).
+        # Phase 7j collapsed the last two-sided input still spelled as two
+        # flags: --old-variant/--new-variant -> one side-scoped --variant
+        # ([old=|new=]VARIANT_ID), the same ADR-040 Lever 1 shape --header/
+        # --version already use. No alias: the old pair exits 64.
         "--abi3",
         "--budget",
         "--bundle-facts-library-manifest",
@@ -90,8 +94,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--ld-library-path",
         "--no-baseline",
         "--no-scope-public-headers",
-        "--new-variant",
-        "--old-variant",
         "--output",
         "--output-dir",
         "--pack",
@@ -111,6 +113,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--use-cases",
         "--used-by",
         "--used-by-manifest",
+        "--variant",
         "--verbose",
         "--view",
         "--write",

@@ -591,6 +591,29 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        # one-comparison-product.md Phase 7j: variant selection stays a
+        # per-run operand (ADR-065) -- what retired is the *spelling*. It was
+        # the last two-sided `compare` input still represented by two flags
+        # instead of one `old=`/`new=`-prefixed option, i.e. one concept
+        # spelled twice (ADR-068 D5 guard 2). Collapsed into `--variant
+        # [old=|new=]VARIANT_ID`, the same ADR-040 Lever 1 shape that already
+        # retired `--old-header`/`--new-header` and `--old-version`/
+        # `--new-version`. The *unregistered* release engine
+        # (`cli_compare_release.py`) keeps its own per-side pair, exactly as
+        # it kept `--old-version`/`--new-version` through that lever, so the
+        # sweep's allowlist below covers the pages describing that engine.
+        "compare --old-variant/--new-variant (one side-scoped --variant)",
+        ("--old-variant", "--new-variant"),
+        frozenset(
+            {
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/storage-format-v2.md",
+                "contribute/adr/062-project-snapshot-storage-v2.md",
+                "contribute/adr/040-compare-surface-reduction.md",
+            }
+        ),
+    ),
+    (
         # one-comparison-product.md Phase 7i: a proven inventory change is a
         # stable project promise, not a per-invocation operand (ADR-065 D1).
         "compare --support-promise (release.support_promise in .abicheck.yml)",

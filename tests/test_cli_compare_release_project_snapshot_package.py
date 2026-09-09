@@ -572,9 +572,7 @@ class TestVariantSelection:
         _write_package(old_pkg, old_libs, variant_id="gcc13")
         _write_package(new_pkg, new_libs, variant_id="gcc13")
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         assert ec == 4
         outcomes = _sorted_outcomes(out)
         assert any(o[0] == "BREAKING" and o[1] == 1 for o in outcomes)
@@ -630,9 +628,7 @@ class TestVariantSelection:
         self._multi_variant_package(old_pkg)
         _write_package(new_pkg, new_libs)
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         assert ec == 64
         assert "variant" in out.lower()
 
@@ -647,8 +643,8 @@ class TestVariantSelection:
             "compare",
             str(old_pkg),
             str(new_pkg),
-            "--old-variant",
-            "gcc13",
+            "--variant",
+            "old=gcc13",
             "--format",
             "json",
         )
@@ -666,7 +662,7 @@ class TestMultiVariantSingleArtifactClassification:
     single-artifact reader (`project_snapshot_legacy.
     read_legacy_snapshot_document`) has no variant-selection logic at all
     -- it always reads the package's sole artifact unconditionally -- so an
-    explicit `--old-variant v2` was silently ignored rather than honored:
+    explicit `--variant old=v2` was silently ignored rather than honored:
     the comparison ran against `v1`'s real content regardless of which
     variant was actually requested."""
 
@@ -703,7 +699,7 @@ class TestMultiVariantSingleArtifactClassification:
     def test_old_variant_selecting_the_empty_variant_is_honored(
         self, tmp_path: Path
     ) -> None:
-        """Before the fix, `--old-variant v2` against this package silently
+        """Before the fix, `--variant old=v2` against this package silently
         compared `v1`'s real `liba.so` (function `foo` removed -- a real
         BREAKING finding, exit 4) since the flag was never consulted at
         all. After the fix, the release fan-out actually resolves `v2` --
@@ -721,8 +717,8 @@ class TestMultiVariantSingleArtifactClassification:
             "compare",
             str(old_pkg),
             str(new_pkg),
-            "--old-variant",
-            "v2",
+            "--variant",
+            "old=v2",
             "--format",
             "json",
         )
@@ -891,3 +887,135 @@ class TestMaterializationPreservesBundleComposition:
         document = read_legacy_snapshot_document(sub_dir)
         assert document["library"] == "liba.so"
         assert [f["name"] for f in document["functions"]] == ["foo"]
+
+
+class TestResolveSidedVariantProperties:
+    """Primitive-level property tests for ``_resolve_sided_variant``.
+
+    AGENTS.md's "Primitive-level property tests" rule: the ADR-068 Phase 7j
+    merge of ``--old-variant``/``--new-variant`` into one side-scoped
+    ``--variant`` rests entirely on this reusable base-plus-override
+    resolver, so its contract is stated here as invariants over generated
+    input rather than only through the two ``compare`` invocations above --
+    a fixed-example test would only foreclose the exact token order it
+    happens to name, and order-dependence is precisely the defect class
+    this repo's own merge-primitive history (`_paired_stable_indices`)
+    records.
+
+    The oracle is deliberately *not* the implementation's own loop: each
+    invariant is checked against an independently-stated rule about the
+    last token that can reach a side ("the last ``both=``/``old=`` token
+    wins for OLD"), computed by filtering the input, not by re-running the
+    resolver.
+    """
+
+    @staticmethod
+    def _resolve(pairs: list[tuple[str, str]]) -> tuple[str | None, str | None]:
+        from abicheck.frontends.cli.options.release import _resolve_sided_variant
+
+        return _resolve_sided_variant(pairs)
+
+    @staticmethod
+    def _oracle(pairs: list[tuple[str, str]]) -> tuple[str | None, str | None]:
+        """Independent statement of the rule: for each side, the value of the
+        last token that *addresses* that side (``both`` addresses both)."""
+        old = next((v for s, v in reversed(pairs) if s in ("both", "old")), None)
+        new = next((v for s, v in reversed(pairs) if s in ("both", "new")), None)
+        return old, new
+
+    @pytest.mark.parametrize(
+        "pairs",
+        [
+            [],
+            [("both", "v1")],
+            [("old", "v1")],
+            [("new", "v2")],
+            [("old", "v1"), ("new", "v2")],
+            [("new", "v2"), ("old", "v1")],
+            [("both", "v1"), ("old", "v2")],
+            [("old", "v2"), ("both", "v1")],
+            [("both", "v1"), ("both", "v2")],
+            [("old", "a"), ("old", "b")],
+            [("new", "a"), ("new", "b")],
+            [("both", "base"), ("old", "o"), ("new", "n")],
+            [("old", "o"), ("both", "base"), ("new", "n")],
+            [("old", "o"), ("new", "n"), ("both", "base")],
+        ],
+    )
+    def test_matches_an_independently_stated_last_writer_rule(
+        self, pairs: list[tuple[str, str]]
+    ) -> None:
+        assert self._resolve(pairs) == self._oracle(pairs)
+
+    def test_exhaustive_over_every_short_token_sequence(self) -> None:
+        """Small-domain exhaustive enumeration: every sequence of up to three
+        tokens drawn from the full side vocabulary, with distinct values so a
+        wrong-bucket write cannot coincidentally look correct."""
+        import itertools
+
+        sides = ("both", "old", "new")
+        for length in range(4):
+            for combo in itertools.product(sides, repeat=length):
+                pairs = [(s, f"v{i}") for i, s in enumerate(combo)]
+                assert self._resolve(pairs) == self._oracle(pairs), pairs
+
+    def test_a_later_both_rebases_both_sides(self) -> None:
+        assert self._resolve([("old", "o"), ("new", "n"), ("both", "b")]) == (
+            "b",
+            "b",
+        )
+
+    def test_a_per_side_override_survives_an_earlier_base(self) -> None:
+        assert self._resolve([("both", "b"), ("new", "n")]) == ("b", "n")
+
+    def test_the_two_side_buckets_are_independent(self) -> None:
+        """Interleaving OLD-only and NEW-only tokens never lets one bucket's
+        ordering affect the other's outcome."""
+        olds = [("old", "o1"), ("old", "o2")]
+        news = [("new", "n1"), ("new", "n2")]
+        for interleaved in (
+            olds + news,
+            news + olds,
+            [olds[0], news[0], olds[1], news[1]],
+            [news[0], olds[0], news[1], olds[1]],
+        ):
+            assert self._resolve(interleaved) == ("o2", "n2"), interleaved
+
+    def test_unset_stays_none_rather_than_a_synthesized_default(self) -> None:
+        """Unlike ``--version`` (per-side defaults ``old``/``new``), an unset
+        variant must stay ``None`` -- that is what selects a package's sole
+        declared variant downstream, and a synthesized label would instead
+        request a variant no package declares."""
+        assert self._resolve([]) == (None, None)
+        assert self._resolve([("old", "v1")]) == ("v1", None)
+
+
+class TestVariantFlagSurface:
+    """ADR-068 D5 / Phase 7j: the retired pair has no alias, and the new
+    spelling is side-scoped exactly like every other two-sided input."""
+
+    @pytest.mark.parametrize("flag", ["--old-variant", "--new-variant"])
+    def test_retired_spellings_are_usage_errors(self, flag: str) -> None:
+        ec, out = _invoke("compare", flag, "v1", "a", "b")
+        assert ec == 64
+        assert "no such option" in out.lower() or "usage" in out.lower()
+
+    @pytest.mark.parametrize("value", ["", "old=", "new=", "both="])
+    def test_an_empty_variant_id_is_a_usage_error(self, value: str) -> None:
+        ec, out = _invoke("compare", "--variant", value, "a", "b")
+        assert ec == 64
+        assert "--variant" in out
+
+    def test_the_flag_is_registered_once_and_side_scoped(self) -> None:
+        import click
+
+        from abicheck.cli import main
+
+        opts = [
+            p
+            for p in main.commands["compare"].params
+            if isinstance(p, click.Option) and p.name == "variant"
+        ]
+        assert [o.opts for o in opts] == [["--variant"]]
+        assert opts[0].multiple is True
+        assert "[old=|new=]" in opts[0].type.get_metavar(opts[0])

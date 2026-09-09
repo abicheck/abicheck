@@ -36,7 +36,7 @@ unaffected.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TypeVar
 
@@ -48,6 +48,7 @@ from .params import (
     SIDED_EXISTING_PATH_PARAM,
     SIDED_PATH_PARAM,
     SIDED_SOURCES_PARAM,
+    SIDED_STR_PARAM,
 )
 
 F = TypeVar("F", bound=Callable[..., object])
@@ -437,69 +438,132 @@ def evidence_options(func: F) -> F:
 build_source_compare_options = evidence_options
 
 
-def _stash_variant_in_context(
-    ctx: click.Context, param: click.Parameter, value: str | None
-) -> None:
-    """``--old-variant``/``--new-variant``'s click ``callback=``: stashes
-    *value* on ``ctx.meta`` under *param*'s own name instead of exposing it
-    to the decorated command's own ``**kwargs`` (``expose_value=False``).
+def _resolve_sided_variant(
+    pairs: Sequence[tuple[str, str]],
+) -> tuple[str | None, str | None]:
+    """Resolve ``--variant``'s ``(side, variant_id)`` pairs to ``(old, new)``.
 
-    Neither flag means anything to a single-pair `compare`/`run_compare`
-    call -- only the directory/package release fan-out
-    (`frontends.cli.commands.compare._dispatch_release_compare`) reads them
-    back via `variant_kwargs_from_context`, off the identical `ctx` -- so
-    routing them through `ctx.meta` instead of `**kwargs` means `run_compare`
-    (whose own typed signature has no matching parameters) never has to see
-    or strip them.
+    The same "base + per-side override" model every other side-aware option
+    on ``compare`` uses (``--header``, ``--include``, ``--version``,
+    ``--sources``, ``--build-info``, ``--debug-info``, ``--devel-pkg``,
+    ``--debug-root``, ``--probe-matrix``, ``--dump-manifest``): a bare or
+    ``both=`` value applies to *both* sides, ``old=``/``new=`` override that
+    one side, and the last value wins per bucket. Unset stays ``None`` --
+    unlike ``--version``, a variant id has no per-side default to fall back
+    on (the package's sole declared variant is the default, resolved much
+    later by the release fan-out, and "no variant stated" is what selects
+    it).
+
+    A standalone function rather than an inline loop inside the callback
+    because it is the reusable ordering primitive the behavior actually
+    rests on: ``TestResolveSidedVariantProperties`` in
+    ``tests/test_cli_compare_release_project_snapshot_package.py`` states
+    its contract as invariants (last-wins per bucket, a later ``both=``
+    re-basing both sides, a per-side override surviving an earlier base,
+    and independence from how the two buckets interleave) rather than only
+    exercising it through one ``compare`` invocation -- AGENTS.md's
+    "Primitive-level property tests" rule for exactly this shape of helper.
     """
-    ctx.meta[f"abicheck.variant.{param.name}"] = value
+    old: str | None = None
+    new: str | None = None
+    for side, variant in pairs:
+        if side in ("both", "old"):
+            old = variant
+        if side in ("both", "new"):
+            new = variant
+    return old, new
+
+
+def _stash_variant_in_context(
+    ctx: click.Context, param: click.Parameter, value: Sequence[tuple[str, str]]
+) -> None:
+    """``--variant``'s click ``callback=``: resolves *value*'s side-scoped
+    pairs and stashes the per-side result on ``ctx.meta`` instead of exposing
+    it to the decorated command's own ``**kwargs`` (``expose_value=False``).
+
+    ``--variant`` means nothing to a single-pair `compare`/`run_compare`
+    call -- only the directory/package release fan-out
+    (`frontends.cli.commands.compare._dispatch_release_compare`) reads it
+    back via `variant_kwargs_from_context`, off the identical `ctx` -- so
+    routing it through `ctx.meta` instead of `**kwargs` means `run_compare`
+    (whose own typed signature has no matching parameter) never has to see
+    or strip it.
+
+    An empty variant id (``--variant old=``, or a bare ``--variant ""``) is
+    a usage error here rather than a silently-``None`` selection, matching
+    how `dump --provenance` (Phase 7f) validates its own grammar eagerly in
+    a callback: a package declaring several variants would otherwise fall
+    back to "no variant stated" and fail much later with a message naming
+    neither the empty value nor the flag that supplied it.
+    """
+    for side, variant in value:
+        if not variant:
+            raise click.UsageError(
+                f"--variant: empty variant id in "
+                f"{'' if side == 'both' else side + '='}"
+                f"'' -- give a VARIANT_ID declared by the stored "
+                f"ProjectSnapshot package (e.g. --variant old=v1).",
+                ctx=ctx,
+            )
+    old, new = _resolve_sided_variant(value)
+    ctx.meta["abicheck.variant.old_variant"] = old
+    ctx.meta["abicheck.variant.new_variant"] = new
 
 
 def variant_options(func: F) -> F:
-    """``--old-variant``/``--new-variant`` (ADR-062 A1.7): which `VariantRef`
-    to compare when a stored `ProjectSnapshot` package operand declares more
-    than one -- release-fanout-specific, same as this module's other option
-    groups (a plain directory/package release comparison, ADR-054's own
-    admission bar for what belongs here). Not applied via ``@variant_options``
-    on ``compare_cmd`` itself -- ``cli.py`` calls it directly on the already-
+    """``--variant`` (ADR-062 A1.7): which `VariantRef` to compare when a
+    stored `ProjectSnapshot` package operand declares more than one --
+    release-fanout-specific, same as this module's other option groups (a
+    plain directory/package release comparison, ADR-054's own admission bar
+    for what belongs here). Not applied via ``@variant_options`` on
+    ``compare_cmd`` itself -- ``cli.py`` calls it directly on the already-
     registered ``compare`` command instead, once `frontends/cli/commands/
     compare.py` is fully loaded, so that already-at-cap module owes this
     flag family neither an import nor a decorator line. See
     `variant_kwargs_from_context`/`frontends/cli/commands/compare.py`'s own
     use for the full read-back contract.
+
+    **ADR-068 D5 / plan Phase 7j:** this was the pair ``--old-variant``/
+    ``--new-variant`` until that slice. Variant selection is genuinely
+    per-run scope (ADR-065), so it stays on the CLI -- but it was the last
+    two-sided input on ``compare`` still spelled as two flags instead of one
+    ``old=``/``new=``-prefixed option, i.e. one concept represented twice.
+    The pair is gone with no alias (exit 64), the same way ADR-040 Lever 1
+    collapsed ``--old-header``/``--new-header`` and ``--old-version``/
+    ``--new-version`` before it. The *unregistered* release engine
+    (`cli_compare_release.py`) keeps its own per-side
+    ``--old-variant``/``--new-variant``, exactly as it kept per-side
+    ``--old-version``/``--new-version`` through that same lever.
     """
     func = click.option(
-        "--old-variant",
-        "old_variant",
-        default=None,
-        metavar="VARIANT_ID",
+        "--variant",
+        "variant",
+        multiple=True,
+        type=SIDED_STR_PARAM,
         expose_value=False,
         callback=_stash_variant_in_context,
-        help="Which build variant to compare when OLD is a stored "
-        "ProjectSnapshot package directory declaring more than one. "
-        "Defaults to the package's only variant when it declares exactly "
-        "one; a usage error otherwise. No-op for a live directory/archive/"
-        "single-file operand.",
-    )(func)
-    func = click.option(
-        "--new-variant",
-        "new_variant",
-        default=None,
-        metavar="VARIANT_ID",
-        expose_value=False,
-        callback=_stash_variant_in_context,
-        help="The --old-variant counterpart for NEW.",
+        help="Which build variant to compare when an operand is a stored "
+        "ProjectSnapshot package directory declaring more than one. Scope "
+        "to one side with an 'old='/'new=' prefix, repeating the flag per "
+        "side (e.g. --variant old=v1 --variant new=v2); a bare value "
+        "applies to both. Defaults to the package's only variant when it "
+        "declares exactly one; a usage error otherwise. No-op for a live "
+        "directory/archive/single-file operand.",
     )(func)
     return func
 
 
 def variant_kwargs_from_context(ctx: click.Context) -> dict[str, str | None]:
-    """``--old-variant``/``--new-variant``'s current values, stashed on
-    *ctx* by `_stash_variant_in_context` -- what
+    """``--variant``'s resolved per-side values, stashed on *ctx* by
+    `_stash_variant_in_context` -- what
     `frontends.cli.commands.compare._dispatch_release_compare` merges into
     its own kwargs before calling `compare_release_cmd.callback` (ADR-062
-    A1.7), since `variant_options`' `expose_value=False` means neither flag
-    ever reaches a decorated command's own `**kwargs`.
+    A1.7), since `variant_options`' `expose_value=False` means the flag
+    never reaches a decorated command's own `**kwargs`.
+
+    The *keys* stay ``old_variant``/``new_variant``: the unregistered
+    release engine's own per-side parameters are unchanged by Phase 7j's
+    CLI-spelling merge, so only the user-facing flag collapsed.
     """
     return {
         "old_variant": ctx.meta.get("abicheck.variant.old_variant"),
