@@ -1325,6 +1325,104 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         assert doc["build"] == {"compile_db": "compile_commands.json"}
 
 
+class TestCompileContextDiscoversSourcesRootOwnConfig:
+    """Codex review, PR #1159 (P1, fresh evidence): ``embed_build_source()``
+    (``abicheck/buildsource/embed.py``) reads ``build:``/``compile:``/
+    ``source:``/``debug:`` from ``build_config or discover_build_config(
+    raw_sources)`` -- a SEPARATE, narrower lookup than ``discover_project_
+    config()``'s own checkout-root walk this merge helper already performs.
+    ``discover_build_config`` is non-recursive and anchored at ``--sources``
+    itself: when that directory carries its own ``.abicheck.yml``, the
+    native CLI uses it EXCLUSIVELY for those four blocks whenever no
+    explicit ``--config`` is given, never even consulting the checkout-root
+    config for them. Because this Action always ends up passing an explicit
+    ``--config`` once any compile-context input is set, that discovery
+    previously never ran at all (``build_config is not None``), silently
+    dropping the sources root's own build settings the moment an unrelated
+    input (e.g. ``gcc-path``) triggered this overlay's synthesis."""
+
+    def test_sources_root_build_block_is_discovered_and_merged(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "severity:\n  abi_breaking: error\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, stderr = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        # The checkout-root config's own (non-build) settings still survive...
+        assert doc["severity"] == {"abi_breaking": "error"}
+        # ...and the sources root's own build: block is present, not the
+        # checkout-root config's (which had none) or silently dropped.
+        assert doc["build"] == {"compile_db": "compile_commands.json", "system": "cmake"}
+        assert "build.compile_db" not in stderr
+
+    def test_sources_root_build_block_wins_over_a_conflicting_checkout_root_one(
+        self, tmp_path: Path
+    ) -> None:
+        """The two files' build: blocks are not merged key-by-key -- the
+        sources root's own file REPLACES the checkout-root one wholesale,
+        exactly matching embed_build_source()'s own exclusive-use-of-one-
+        file semantics (a real project should not expect its top-level
+        .abicheck.yml's build: block to influence a --sources subtree's own
+        L3-L5 embedding when that subtree names its own build config)."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: make\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "build:\n  compile_db: compile_commands.json\n  system: cmake\n",
+            encoding="utf-8",
+        )
+        (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"compile_db": "compile_commands.json", "system": "cmake"}
+
+    def test_no_sources_root_config_falls_back_to_checkout_root(
+        self, tmp_path: Path
+    ) -> None:
+        """When --sources carries no config of its own, behavior is
+        unchanged from before this fix -- the checkout-root config (if any)
+        is used as-is."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "build:\n  system: make\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        cmd, _ = _run_region_with_cwd(
+            _DUMP_MODE_MARKER,
+            {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
+            tmp_path,
+            _DUMP_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["build"] == {"system": "make"}
+
+
 class TestCompileContextOverlayGenerationIsIsolated:
     """Codex review, PR #1159 (P1, fourth round): confirmed
     ``add_compile_context_flags`` had the identical bare-``python3``

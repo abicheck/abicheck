@@ -405,12 +405,24 @@ _merge_config_overlay_with_discovered_project_config() {
   #     the base document directly, no discovery/walk.
   # $4: optional; "explicit" selects explicit-build-config mode described
   #     above. Omitted (or any other value) is the default discovery mode.
-  # $5: optional; the --sources root a discovered build.compile_db glob
-  #     resolves against (inline.py: `sorted(sources.glob(cfg.compile_db))`)
-  #     -- passed by add_compile_context_flags (which knows $INPUT_SOURCES),
-  #     omitted by add_release_topology_config_flags (compare's release
-  #     fan-out never reads build.compile_db, so there is no root to check
-  #     against and the field is always stripped there, same as before).
+  # $5: optional; the --sources root, used two ways: (a) the root a
+  #     discovered build.compile_db glob resolves against (inline.py:
+  #     `sorted(sources.glob(cfg.compile_db))`), and (b) in "discover" mode,
+  #     the root this function ALSO checks -- non-recursively, no walk-up --
+  #     for its own separate .abicheck.yml, mirroring embed_build_source()'s
+  #     own `build_config or discover_build_config(raw_sources)` selection
+  #     (Codex review, fresh evidence): when --sources names a directory
+  #     with its own config, the native CLI would use THAT file exclusively
+  #     for build:/compile:/source:/debug: whenever no explicit --config is
+  #     given -- but this Action always ends up passing an explicit --config
+  #     once any compile-context input is set, which permanently short-
+  #     circuits that discovery (`build_config is not None`), silently
+  #     dropping the sources root's own build settings. Passed by
+  #     add_compile_context_flags (which knows $INPUT_SOURCES), omitted by
+  #     add_release_topology_config_flags (compare's release fan-out never
+  #     reads build.compile_db and never resolves a --sources tree at all, so
+  #     there is no root to check against and the field is always stripped
+  #     there, same as before).
   local overlay_json="$1"
   local out_path="$2"
   local base_source="$3"
@@ -511,7 +523,11 @@ from pathlib import Path
 
 import yaml
 
-from abicheck.config_paths import find_config_in_dir, project_root_for_config
+from abicheck.config_paths import (
+    discover_build_config,
+    find_config_in_dir,
+    project_root_for_config,
+)
 
 out_path = sys.argv[1]
 overlay = json.loads(os.environ["ABICHECK_OVERLAY_JSON"])
@@ -587,6 +603,49 @@ else:
         if isinstance(loaded, dict):
             base = loaded
         break
+
+    # Codex review, fresh evidence: mirror embed_build_source()'s own
+    # `build_config or discover_build_config(raw_sources)` selection
+    # (abicheck/buildsource/embed.py). That function is what actually reads
+    # build:/compile:/source:/debug: for L3-L5 embedding, and it is a
+    # SEPARATE, narrower lookup than the checkout-root walk just above --
+    # non-recursive, anchored at the --sources tree itself, never walking up
+    # to parents. When no explicit --config is given, a --sources directory
+    # carrying its own .abicheck.yml is used EXCLUSIVELY for those four
+    # blocks; the checkout-root config found above (if any) is never even
+    # consulted for them. Since this Action always ends up passing an
+    # explicit --config once any compile-context input is set, that
+    # discovery would otherwise never run at all (`build_config is not
+    # None`), silently dropping the sources root's own build settings.
+    # Replicate the same outcome here: when --sources names a directory
+    # with its own config file (distinct from whatever was found above),
+    # its own build:/compile:/source:/debug: blocks REPLACE (not merge
+    # into) the checkout-root document's own such blocks -- and become the
+    # project-root anchor for the compile.include_dirs resolution below --
+    # exactly as if no explicit --config had been in the way.
+    sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
+    if sources_root_env:
+        sources_found = discover_build_config(Path(sources_root_env))
+        if sources_found is not None and sources_found != found_path:
+            try:
+                sources_loaded = yaml.safe_load(
+                    sources_found.read_text(encoding="utf-8")
+                )
+            except Exception as exc:
+                print(
+                    f"::error::failed to parse the discovered sources-root "
+                    f"config {sources_found}: {exc}. Refusing to silently "
+                    "proceed as if it were unconfigured.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if isinstance(sources_loaded, dict):
+                for _blk_key in ("build", "compile", "source", "debug"):
+                    if _blk_key in sources_loaded:
+                        base[_blk_key] = sources_loaded[_blk_key]
+                    else:
+                        base.pop(_blk_key, None)
+                found_path = sources_found
 
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip the two executable-authorizing keys before merging (see
