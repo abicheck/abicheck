@@ -11,6 +11,8 @@ disposition.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.policy.disposition_close import (
@@ -184,3 +186,65 @@ class TestOverrideSuppressionAcceptsSyntheticRuleProvenance:
         record = ledger.record_for(c)
         assert record.rule.rule_id == "crosscheck:exported_not_public=off"
         assert record.rule.source_file is None
+
+
+class TestOverrideSuppressionPreservesAnAlreadyResolvedVerdictClass:
+    """Codex review, PR #1172, round 7: ``_verdict_class_of(change)`` reads
+    only what is stamped directly on *change*
+    (``compatibility_decision``/``effective_verdict``) -- but the record
+    being overridden may already carry a class
+    ``DispositionLedger.resolve_verdict_classes`` resolved earlier against
+    the full ``DiffResult`` context a bare ``Change`` does not carry.
+    Unconditionally overwriting with ``_verdict_class_of``'s (typically
+    ``None``) answer would silently erase an already-correct class, hiding
+    a real API/ABI break from ``suppressed_gating_records`` the moment it
+    is suppressed by this path.
+    """
+
+    def test_an_already_resolved_class_survives_the_override(self) -> None:
+        ledger = DispositionLedger()
+        c = _change()
+        ledger.record(c, Disposition.GATING, application_point="p", from_gate=True)
+        # Simulate what `resolve_verdict_classes` would have stamped from
+        # full `DiffResult` context -- `c` itself carries neither
+        # `compatibility_decision` nor `effective_verdict`, so
+        # `_verdict_class_of(c)` alone would answer `None`.
+        index = ledger.index_for(c)
+        ledger._records[index] = replace(  # noqa: SLF001
+            ledger._records[index], verdict_class="abi_breaking"
+        )
+
+        override_suppression(
+            ledger,
+            c,
+            rule=RuleProvenance(rule_id="crosscheck:exported_not_public=off"),
+            application_point="scan_crosscheck_off",
+        )
+
+        record = ledger.record_for(c)
+        assert record.disposition is Disposition.SUPPRESSED
+        assert record.verdict_class == "abi_breaking"
+
+    def test_a_freshly_stamped_class_still_wins(self) -> None:
+        # Negative control: when *change* itself carries a fresh stamp, that
+        # answer must still be used (not frozen to whatever the record had
+        # before, which could itself be stale).
+        from abicheck.checker_policy import Verdict
+
+        ledger = DispositionLedger()
+        c = _change()
+        ledger.record(c, Disposition.GATING, application_point="p", from_gate=True)
+        index = ledger.index_for(c)
+        ledger._records[index] = replace(  # noqa: SLF001
+            ledger._records[index], verdict_class="abi_breaking"
+        )
+        c.effective_verdict = Verdict.COMPATIBLE
+
+        override_suppression(
+            ledger,
+            c,
+            rule=RuleProvenance(rule_id="crosscheck:exported_not_public=off"),
+            application_point="scan_crosscheck_off",
+        )
+
+        assert ledger.record_for(c).verdict_class == Verdict.COMPATIBLE.value

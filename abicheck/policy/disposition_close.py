@@ -719,19 +719,27 @@ def override_suppression(
     *rule* is normally a real :class:`~abicheck.suppression.Suppression`,
     projected through :func:`~abicheck.policy.rule_provenance.rule_provenance`
     like every other disposition. A caller with no such rule object -- a
-    scan-only policy like ``--crosscheck KEY=off``, which is not a
-    suppression-file entry at all -- passes an already-built
+    scan-only policy like ``--crosscheck KEY=off``, not a suppression-file
+    entry at all -- passes an already-built
     :class:`~abicheck.policy.rule_provenance.RuleProvenance` directly instead
-    (Codex review, fourth round: passing bare ``rule=None`` here recorded a
-    correct terminal disposition with no rule/reason a structured ledger
-    consumer could read back, even though ``Change.suppression_rule`` carried
-    the human-readable string).
+    (Codex review, fourth round: bare ``rule=None`` recorded a correct
+    disposition with no rule/reason a structured ledger consumer could read
+    back, even though ``Change.suppression_rule`` carried the string).
 
     A no-op if *change* was never recorded -- nothing to override. Leaves
     every field ``record_suppression`` would not have set
     (``reclassified_by``, ``reason_code``, ``scope_decided``,
-    ``policy_overlay``) untouched; only ``verdict_class`` is recomputed,
-    matching what a fresh ``record_suppression`` call would have stored.
+    ``policy_overlay``) untouched.
+
+    ``verdict_class`` is recomputed from ``_verdict_class_of(change)``, but
+    only *replaces* the existing one when that finds a stamped verdict
+    (Codex review, PR #1172, round 7): it reads only what is stamped
+    directly on *change*, while the record here may already carry a class
+    ``resolve_verdict_classes`` resolved earlier against full ``DiffResult``
+    context bare *change* lacks. Unconditionally overwriting would silently
+    erase an already-correct class for every finding never separately
+    stamped -- the common case -- hiding a real break from
+    ``suppressed_gating_records``'s conserved delta the moment it suppresses.
 
     Lives here, not on ``DispositionLedger`` itself, for the same reason
     ``close_consumer_scope``/``apply_scope`` do: this module owns closing an
@@ -749,12 +757,13 @@ def override_suppression(
     else:
         provenance = rule_provenance(rule, source_file=source_file)
     record = ledger._records[index]  # noqa: SLF001
+    fresh_class = _verdict_class_of(change)
     ledger._records[index] = replace(  # noqa: SLF001
         record,
         disposition=Disposition.SUPPRESSED,
         application_point=application_point,
         rule=provenance,
-        verdict_class=_verdict_class_of(change),
+        verdict_class=fresh_class if fresh_class is not None else record.verdict_class,
         gate_excluded=True,
     )
 

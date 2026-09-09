@@ -299,3 +299,39 @@ class TestAbi3FlagStaysOnLegacyCli:
             }
         )
         assert cmd[1] == "compare"
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestExtraArgsOutputFlagStaysOnLegacyCli:
+    """``-o PATH``/``--output PATH`` via the general ``extra-args``
+    passthrough (Codex review, PR #1172, round 7): both `scan` and
+    `compare` accept it, but the file it writes carries a different JSON
+    contract on each side (`scan_schema_version`/`diff.findings` vs.
+    `report_schema_version`/`changes`) -- exactly the divergence the
+    dedicated `INPUT_OUTPUT_FILE`/`--write` checks already guard against
+    for their own inputs."""
+
+    @pytest.mark.parametrize(
+        "flag", ["-o report.json", "--output report.json", "--output=report.json"]
+    )
+    def test_output_flag_stays_on_legacy_cli(self, flag: str) -> None:
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": flag,
+            }
+        )
+        assert cmd[1] == "scan"
+
+    def test_no_output_flag_still_routes_to_compare(self) -> None:
+        # Negative control: extra-args with no -o/--output at all is the
+        # already-tested compare-translation shape.
+        cmd = _run_cmd(
+            {
+                **_BASE_INPUTS,
+                "INPUT_DEPTH": "headers",
+                "INPUT_EXTRA_ARGS": "--verbose",
+            }
+        )
+        assert cmd[1] == "compare"

@@ -1617,6 +1617,17 @@ _extra_args_has_scan_only_flag() {
     --abi3)
       return 0
       ;;
+    # `-o PATH`/`--output PATH` via the general extra-args passthrough
+    # (Codex review, PR #1172, round 7): both `scan` and `compare` accept
+    # it, but the file it writes carries a different JSON contract on each
+    # side (scan_schema_version/diff.findings vs.
+    # report_schema_version/changes) -- exactly the divergence the
+    # dedicated `INPUT_OUTPUT_FILE`/`--write` checks below already guard
+    # against for their own inputs. A caller reaching the same destination
+    # through `extra-args` instead must not slip past that guard.
+    -o | --output)
+      return 0
+      ;;
     esac
   done <<<"$(_extra_args_options)"
   return 1
