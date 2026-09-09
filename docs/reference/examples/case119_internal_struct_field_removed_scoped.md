@@ -41,7 +41,7 @@ compile:
   frontend: clang
   compiler: clang
 EOF
-abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --show-filtered --config .abicheck.yml
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --view filtered --config .abicheck.yml
 ```
 
 ## Expected abicheck finding

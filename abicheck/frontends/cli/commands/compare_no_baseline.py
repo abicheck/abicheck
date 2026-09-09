@@ -96,13 +96,20 @@ def maybe_dispatch_no_baseline_compare(
     return True
 
 
-#: The four values `--view` resolves into, and each one's "nothing requested"
+#: The values `--view` resolves into, and each one's "nothing requested"
 #: default -- anything else means a real `--view` token was given.
 _VIEW_DEFAULTS: dict[str, object] = {
     "report_mode": "full",
     "show_only": None,
     "demangle": None,
     "explain_patterns": False,
+    # Phase 5 additions (Codex review, PR #1180, fresh evidence): a
+    # no-baseline audit has no scope/disposition ledger and no suppression
+    # audit either -- it reports one hand-built, un-suppressed, always-
+    # in-scope empty change set by construction -- so these two are exactly
+    # as unsupported as the four above, not a silent no-op.
+    "show_filtered": False,
+    "audit_suppressions": False,
 }
 
 

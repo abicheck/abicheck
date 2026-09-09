@@ -505,6 +505,8 @@ class ResolvedCompareConfig:
     dwarf_only: bool = False
     debuginfod: bool = False
     debuginfod_url: str | None = None
+    #: Phase 7: ``--pdb-path`` demoted to ``debug.pdb_path``.
+    pdb_path: str | None = None
     #: Phase 7 (one-comparison-product.md §4.1): ``--lang`` demoted to
     #: ``compile.lang`` with no surviving CLI override. ``None`` when
     #: unset -- the caller (``run_compare``) applies ``LANG_DEFAULT``.
@@ -536,6 +538,8 @@ class ResolvedCompareConfig:
     fail_on_removed_library: bool = False
     release_dso_only: bool = False
     release_include_private_dso: bool = False
+    #: Phase 7: ``release.support_promise`` (``off``/``declared``).
+    release_support_promise: str = "off"
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
 
     @property
@@ -639,6 +643,7 @@ def resolve_compare_config(
     dwarf_only = bool(cfg.debug_dwarf_only) if cfg else False
     debuginfod = bool(cfg.debug_debuginfod) if cfg else False
     debuginfod_url = cfg.debug_debuginfod_url if cfg else None
+    pdb_path_cfg = cfg.debug_pdb_path if cfg else None
     compile_lang = cfg.compile_lang if cfg else None
     show_redundant = bool(cfg.scope_show_redundant) if cfg else False
     bundle_system_providers = tuple(cfg.bundle_system_providers) if cfg else ()
@@ -648,6 +653,7 @@ def resolve_compare_config(
     on_incomplete_scope = (cfg.scope_on_incomplete if cfg else None) or "warn"
     fail_on_removed_library = bool(cfg.gate_fail_on_removed_library) if cfg else False
     release_dso_only = bool(cfg.release_dso_only) if cfg else False
+    release_support_promise = (cfg.release_support_promise if cfg else None) or "off"
     release_include_private_dso = bool(cfg.release_include_private_dso) if cfg else False
     res_limit_nodes = cfg.resource_limits_max_bundle_facts_decode_nodes if cfg else None
 
@@ -664,6 +670,7 @@ def resolve_compare_config(
         dwarf_only=dwarf_only,
         debuginfod=debuginfod,
         debuginfod_url=debuginfod_url if isinstance(debuginfod_url, str) else None,
+        pdb_path=pdb_path_cfg if isinstance(pdb_path_cfg, str) else None,
         compile_lang=compile_lang,
         show_redundant=show_redundant,
         merged_severity_preset=eff_preset,
@@ -676,6 +683,7 @@ def resolve_compare_config(
         on_incomplete_scope=on_incomplete_scope,
         fail_on_removed_library=fail_on_removed_library,
         release_dso_only=release_dso_only,
+        release_support_promise=release_support_promise,
         release_include_private_dso=release_include_private_dso,
         resource_limits_max_bundle_facts_decode_nodes=res_limit_nodes,
     )

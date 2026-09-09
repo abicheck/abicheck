@@ -58,7 +58,6 @@ def _param_from_cli(name: str) -> bool:
 
 
 def _reject_set_input_flags(
-    reconcile_build_context: bool,
     env_matrix_path: Path | None,
     used_by_apps: tuple[Any, ...] = (),
     required_symbols: tuple[str, ...] = (),
@@ -69,6 +68,7 @@ def _reject_set_input_flags(
     include_labels: dict[Path, str] | None = None,
     require_complete_analysis: bool = False,
     budget: str | None = None,
+    pdb_path: Path | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
 
@@ -86,17 +86,34 @@ def _reject_set_input_flags(
     cleanup phase two PR G2 deleted the flag entirely, so there is nothing
     left to reject it against on a release comparison either.
     """
-    if reconcile_build_context:
-        raise click.UsageError(
-            "--reconcile-build-context is not supported for directory/package "
-            "(release) comparisons; it applies to single-file / snapshot "
-            "inputs. Compare the libraries individually to use it."
-        )
+    # ``--reconcile-build-context`` is not one of these any more either
+    # (one-comparison-product.md §4.1's AUTO row): the flag is gone and the
+    # ADR-039 reconciliation runs unconditionally inside the Tier-2
+    # ``compare_snapshots`` chokepoint every per-library fan-out already
+    # routes through, so the release path now *gets* the behavior this
+    # branch used to reject a request for.
     if env_matrix_path is not None:
         raise click.UsageError(
             "--env-matrix is not supported for directory/package (release) "
             "comparisons yet; it applies to single-file / snapshot inputs. "
             "Compare the libraries individually to use it."
+        )
+    if pdb_path is not None:
+        # Codex review, PR #1180, fresh evidence ("Reject PDB config for
+        # release fan-outs"): compare_pdb_config's own PE-liveness check
+        # never fires here -- it sees the raw directory/package path, not
+        # its PE members, so it never rejects. The release dispatch below
+        # has no PDB parameter of its own at all, so a configured
+        # debug.pdb_path would otherwise be silently dropped, every member
+        # falling back to auto-discovery with no PDB.
+        raise click.UsageError(
+            "debug.pdb_path is not supported for directory/package "
+            "(release) comparisons: the per-library fan-out has no "
+            "per-member PDB parameter, so the configured value would be "
+            "silently ignored while every member fell back to auto-"
+            "discovery (an embedded PDB path, or a same-named .pdb next "
+            "to the DLL). Compare the specific library individually to "
+            "use it."
         )
     if used_by_apps:
         raise click.UsageError(
@@ -151,13 +168,16 @@ def _reject_set_input_flags(
     # than a hard rejection -- there is genuinely nothing to audit without a
     # suppression file, so the release fan-out must not reject that same
     # harmless combination just because the operand is a directory/package.
-    # A real conflict remains: ``--suppress`` *with* ``--audit-suppressions``
-    # asks for a genuine per-finding audit result, and the per-library
-    # fan-out still has no single audit result to attach across N libraries
-    # -- that combination is still rejected.
+    # A real conflict remains: ``--suppress`` *with* the audit *rendering*
+    # request asks for a genuine per-finding audit section, and the
+    # per-library fan-out still has no single audit result to attach across
+    # N libraries -- that combination is still rejected. The flag itself is
+    # gone (Phase 5); ``--view suppressions`` is its only spelling now, so
+    # the message names that instead, the same way
+    # ``reject_release_incompatible_view_mode`` already names ``--view``.
     if audit_suppressions and suppress is not None:
         raise click.UsageError(
-            "--audit-suppressions is not supported together with --suppress "
+            "--view suppressions is not supported together with --suppress "
             "for directory/package (release) comparisons yet: the "
             "per-library fan-out has no single suppression-audit result to "
             "attach. Compare the specific library individually to use it."

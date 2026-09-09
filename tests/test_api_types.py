@@ -415,6 +415,33 @@ class TestCompareRequestRuntimeResolvableAnnotations:
         assert "pack_internal_namespaces" in hints
 
 
+class TestCompareRequestRemovedFieldDoesNotShiftPositionalArgs:
+    """Codex review, PR #1180 ("Prevent positional CompareRequest arguments
+    from shifting"): removing ``reconcile_build_context`` from the middle of
+    this dataclass used to silently rebind every field after it for a
+    positional caller (a later ``bool`` landing in ``env_matrix_path``'s
+    slot, a later ``Path`` in ``diagnostic_comparison``'s). A ``KW_ONLY``
+    sentinel now sits exactly where that field used to be, so such a call
+    fails loudly at construction instead.
+    """
+
+    def test_documented_short_positional_shape_still_works(self):
+        old = InputSpec(path=Path("old"))
+        new = InputSpec(path=Path("new"))
+        req = CompareRequest(old, new, "c++", "clang")
+        assert req.lang == "c++"
+        assert req.frontend == "clang"
+
+    def test_reaching_past_the_removed_fields_old_slot_fails_at_construction(self):
+        old = InputSpec(path=Path("old"))
+        new = InputSpec(path=Path("new"))
+        with pytest.raises(TypeError):
+            CompareRequest(
+                old, new, "c++", "clang", False, "strict_abi", None, None,
+                True, None, None, False, False, None, "env-matrix.yaml",
+            )
+
+
 class TestOutputSpec:
     def test_defaults(self):
         out = OutputSpec()

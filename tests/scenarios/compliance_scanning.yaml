@@ -15,11 +15,11 @@ scenarios:
       compliance scanner with public headers and --scope-public-headers, abicheck
       must NOT raise compliance errors for the private break (matching the
       default behaviour of libabigail and abicc). The private change is recorded
-      as filtered (visible under --show-filtered), never as a verdict-affecting
+      as filtered (visible under --view filtered), never as a verdict-affecting
       finding.
     flow:
       - abicheck compare old.json new.json --scope-public-headers
-      - abicheck compare old.json new.json --scope-public-headers --show-filtered
+      - abicheck compare old.json new.json --scope-public-headers --view filtered
     expected:
       exit_code: 0
       verdict: NO_CHANGE   # the only change was to a private type → filtered
@@ -43,7 +43,7 @@ scenarios:
       SC-PUBLIC-SURFACE-SCOPE.
     flow:
       - abicheck compare old.json new.json --scope-public-headers --format json
-      - abicheck compare old.json new.json --scope-public-headers --show-filtered
+      - abicheck compare old.json new.json --scope-public-headers --view filtered
     expected:
       exit_code: 4   # fallback keeps the break, so the gate still fires
       scope_resolved: false

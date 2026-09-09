@@ -52,8 +52,9 @@ than its members: `public_surface_grew`, `public_surface_shrank`, and
 `undocumented_export_ratio_increased` (the fraction of exported symbols
 with no public-header declaration went up — the export table is growing
 faster than the documented contract). They are informational and computed
-unconditionally (ADR-027 Phase 5's later default flip); `--surface-metrics`
-is accepted for compatibility but no longer changes whether they appear:
+unconditionally (ADR-027 Phase 5's later default flip; a later CLI-surface
+cleanup removed the selector flag this section used to name entirely —
+these findings are ordinary `changes[]` entries, no flag needed):
 
 ```bash
 abicheck compare old.json new.so -H include/ --format json

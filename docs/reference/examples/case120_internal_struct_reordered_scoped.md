@@ -42,7 +42,7 @@ compile:
   frontend: clang
   compiler: clang
 EOF
-abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --show-filtered --config .abicheck.yml
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --scope-public-headers --view filtered --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -54,7 +54,7 @@ _No ABI changes detected._
 ```
 
 Unlike case118/case119, this real run produces **no** filtered-ledger entry
-either (`--show-filtered` shows nothing to filter). Two things compound
+either (`--view filtered` shows nothing to filter). Two things compound
 here: `InternalStats` is never instantiated or referenced anywhere in
 `v1.c`/`v2.c`, so it emits no DWARF debug info at all (DWARF only describes
 types the compiler actually used); and the Clang AST frontend used for

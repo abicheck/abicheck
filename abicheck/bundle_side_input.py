@@ -539,9 +539,11 @@ def compare_release_against_bundle_facts(
                 # which an earlier fix cited for forcing it, is only
                 # "Proposed -- not implemented" (Codex review, PR #1154
                 # follow-up: "Obtain ADR approval before forcing verdict
-                # modulation"). surface_metrics=True stays -- pre-existing,
-                # unaffected by this correction.
-                surface_metrics=True,
+                # modulation"). surface_metrics is no longer a parameter of
+                # this Tier-2 verb at all (one-comparison-product.md Phase 5:
+                # `compare_snapshots` forces it on for every caller), so the
+                # explicit `surface_metrics=True` that used to sit here is
+                # gone rather than re-stated.
             )
         except (ProfileMismatchError, ScopeMismatchError) as exc:
             not_comparable[key] = (mismatch_kind(exc), str(exc))

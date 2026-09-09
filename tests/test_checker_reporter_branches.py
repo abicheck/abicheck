@@ -764,10 +764,10 @@ class TestToMarkdownBranches:
 
     def test_to_markdown_with_out_of_surface_note(self):
         # Regression: the default/root-cause markdown render (what `compare`
-        # prints to stdout without --show-filtered) had no indication at all
+        # prints to stdout without --view filtered) had no indication at all
         # that findings were demoted out of the public-surface verdict --
         # unlike JSON/SARIF, which always carry out_of_surface_count/
-        # out_of_surface_changes regardless of --show-filtered. A run that
+        # out_of_surface_changes regardless of --view filtered. A run that
         # demoted 2 real BREAKING findings to "non-public-type" noise could
         # read NO_CHANGE/exit 0 with zero visible trace in the human report.
         excluded = Change(
@@ -784,7 +784,7 @@ class TestToMarkdownBranches:
         )
         out = to_markdown(result)
         assert "2 finding(s) filtered as non-public ABI surface" in out
-        assert "--show-filtered" in out
+        assert "--view filtered" in out
 
     def test_to_markdown_no_out_of_surface_note_when_nothing_filtered(self):
         result = _make_diff(

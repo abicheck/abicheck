@@ -73,7 +73,7 @@ BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     "release": frozenset({"dso_only", "include_private_dso"}),
 }
 STR_SUBKEYS: dict[str, frozenset[str]] = {
-    "build": frozenset({"system", "query", "compile_db"}),
+    "build": frozenset({"system", "query", "compile_db", "compile_db_filter"}),
     "sources": frozenset({"graph"}),
     "severity": frozenset(
         {"preset", "abi_breaking", "potential_breaking", "quality_issues", "addition"}
@@ -84,6 +84,13 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
         {"frontend", "std", "sysroot", "compiler", "frontend_context", "lang"}
     ),
     "debug": frozenset({"format", "debuginfod_url", "pdb_path"}),
+    # one-comparison-product.md Phase 7: the former `compare
+    # --support-promise`, whose own help already called it "a contract-policy
+    # field" (ADR-065 D1/D6) -- i.e. a stable project property, D5 guard 1.
+    # `"off"` must be quoted: bare `off` is a YAML *boolean*, which this type
+    # check rejects outright rather than coercing into a policy name -- the
+    # same trap, and the same answer, as `python.abi3_floor`'s bare `3.9`.
+    "release": frozenset({"support_promise"}),
     # ADR-068 D5: the project's declared abi3 floor, e.g. "3.9" (quoted --
     # a bare 3.9 is a YAML float, which this type check rejects outright
     # rather than coercing it into a version spelling).

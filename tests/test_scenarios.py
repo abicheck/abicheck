@@ -268,7 +268,7 @@ def test_sc_public_surface_scope(tmp_path: Path) -> None:
     assert scoped.exit_code == 0
     assert "`NO_CHANGE`" in scoped.output
     # The private change is recorded as filtered, not dropped.
-    filtered = _compare(tmp_path, old, new, "--scope-public-headers", "--show-filtered")
+    filtered = _compare(tmp_path, old, new, "--scope-public-headers", "--view", "filtered")
     assert "InternalCache" in filtered.output
 
 

@@ -631,22 +631,29 @@ def test_case164_fixtures_reconcile():
     assert ok.reconciled_count == 1
 
 
-def test_service_compare_snapshots_threads_the_flag():
-    """The Tier-2 service verb honours reconcile_build_context (front-ends route
-    through here, never the core directly)."""
+def test_service_compare_snapshots_reconciles_unconditionally():
+    """The Tier-2 service verb reconciles for *every* caller now
+    (one-comparison-product.md §4.1's AUTO row): `reconcile_build_context` is
+    no longer a parameter of it at all, so there is no way for a front end to
+    reach `compare_snapshots` and not get the reconciliation. Asserting the
+    keyword's *absence* is the stronger property -- a re-introduced parameter
+    fails here."""
+    import inspect
+
     from abicheck.service import compare_snapshots
 
+    assert "reconcile_build_context" not in inspect.signature(
+        compare_snapshots
+    ).parameters
     old, new = _fp_pair()
-    assert (
-        compare_snapshots(old, new, reconcile_build_context=True).verdict
-        == Verdict.NO_CHANGE
-    )
-    assert compare_snapshots(old, new).verdict == Verdict.BREAKING
+    assert compare_snapshots(old, new).verdict == Verdict.NO_CHANGE
 
 
-def test_cli_compare_reconcile_flag():
-    """`abicheck compare … --reconcile-build-context` clears the FP end-to-end and
-    discloses the reconciled findings under --show-filtered."""
+def test_cli_compare_reconciles_without_any_flag():
+    """`abicheck compare …` clears the FP end-to-end with no flag at all, and
+    discloses the reconciled findings under `--view filtered`
+    (one-comparison-product.md §4.1's AUTO row: clearing a false positive is
+    never opt-in, and the audit ledger's rendering is a `--view` selector)."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
@@ -660,8 +667,8 @@ def test_cli_compare_reconcile_flag():
             str(case / "v1.abi.json"),
             str(case / "v2.abi.json"),
             "--scope-public-headers",
-            "--reconcile-build-context",
-            "--show-filtered",
+            "--view",
+            "filtered",
         ],
     )
     assert result.exit_code == 0, result.output
@@ -669,9 +676,32 @@ def test_cli_compare_reconcile_flag():
     assert "Reconciled as context-free header-parse artifacts" in combined
 
 
-def test_cli_reconcile_rejected_for_directory_inputs(tmp_path):
-    """The flag is not threaded through the per-library release fan-out, so it is
-    rejected (not silently ignored) for directory/package inputs (Codex #498)."""
+def test_cli_reconcile_flag_is_a_usage_error():
+    """The removed spelling exits 64 with no hidden alias (plan F-27)."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    case = _case164_dir()
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(case / "v1.abi.json"),
+            str(case / "v2.abi.json"),
+            "--reconcile-build-context",
+        ],
+    )
+    assert result.exit_code == 64, result.output
+    assert "No such option" in result.output
+
+
+def test_directory_inputs_now_reconcile_instead_of_rejecting(tmp_path):
+    """The release fan-out used to *reject* `--reconcile-build-context`
+    because it was not threaded through; with the reconciliation
+    unconditional inside the shared Tier-2 chokepoint every per-library
+    comparison already routes through, a directory operand now simply gets
+    it -- and there is no flag left to reject."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
@@ -680,10 +710,16 @@ def test_cli_reconcile_rejected_for_directory_inputs(tmp_path):
     new_dir = tmp_path / "new"
     old_dir.mkdir()
     new_dir.mkdir()
-    runner = CliRunner()
-    result = runner.invoke(
-        main, ["compare", str(old_dir), str(new_dir), "--reconcile-build-context"]
+    case = _case164_dir()
+    (old_dir / "libfoo.abi.json").write_text(
+        (case / "v1.abi.json").read_text(encoding="utf-8"), encoding="utf-8"
     )
-    assert result.exit_code != 0
+    (new_dir / "libfoo.abi.json").write_text(
+        (case / "v2.abi.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--scope-public-headers"]
+    )
     combined = result.output + (result.stderr if result.stderr_bytes else "")
-    assert "--reconcile-build-context is not supported" in combined
+    assert "not supported" not in combined, combined
+    assert result.exit_code == 0, combined

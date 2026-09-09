@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-049 Phase 5 -- ``compare --audit-suppressions``.
+"""ADR-049 Phase 5 -- ``compare``'s suppression audit (``--view suppressions``).
 
 Wires the existing, previously-orphaned ``SuppressionList.audit()``/
 ``SuppressionAudit`` (``suppression.py``) into the ``compare`` CLI: an
@@ -83,16 +83,17 @@ def _write_suppression(tmp_path: Path, yaml_text: str) -> Path:
 
 
 class TestNoOpWithoutSuppress:
-    """ADR-068 D4/Phase 5: `--audit-suppressions` is a rendering-only flag
-    now (matching `--surface-metrics`/`--show-filtered`'s own shape) -- with
-    no `--suppress` file there is genuinely nothing to audit, so the flag is
-    a no-op rather than a usage error."""
+    """ADR-068 D4/Phase 5: the suppression audit is computed on every run
+    that supplies `--suppress`, and `--view suppressions` is a rendering
+    selector over it (the `--audit-suppressions` flag itself is gone) --
+    with no `--suppress` file there is genuinely nothing to audit, so the
+    token is a no-op rather than a usage error."""
 
     def test_no_op_without_suppress(self, tmp_path):
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--audit-suppressions", "--format", "json"],
+            ["compare", str(old_p), str(new_p), "--view", "suppressions", "--format", "json"],
         )
         # A real BREAKING removal in _breaking_pair() -- the flag's absence
         # of a suppression file must not change that outcome.
@@ -106,7 +107,7 @@ class TestNoOpWithoutSuppress:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--audit-suppressions", "--dry-run",
+                "--view", "suppressions", "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -115,7 +116,7 @@ class TestNoOpWithoutSuppress:
 class TestRejectedOnSetInputs:
     def test_rejected_on_directory_inputs_with_a_real_suppress_file(self, tmp_path):
         """CodeRabbit/Codex review, PR #1154: this combination -- a real
-        ``--suppress`` file *and* ``--audit-suppressions`` -- is still
+        ``--suppress`` file *and* the audit render request -- is still
         rejected on a directory/package operand: it asks for a genuine
         per-finding audit result the per-library fan-out has no single
         place to attach. See the no-op test right below for the
@@ -133,23 +134,23 @@ class TestRejectedOnSetInputs:
             main,
             [
                 "compare", str(old_dir), str(new_dir),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
             ],
         )
         assert result.exit_code != 0
         assert "not supported" in result.output
         assert "directory/package" in result.output
-        assert "--audit-suppressions" in result.output
+        assert "--view suppressions" in result.output
 
     def test_accepted_as_a_no_op_on_directory_inputs_without_suppress(
         self, tmp_path
     ) -> None:
-        """CodeRabbit/Codex review on PR #1154: ``--audit-suppressions``
+        """CodeRabbit/Codex review on PR #1154: asking for the audit render
         with no ``--suppress`` is a harmless no-op on the scalar `compare`
         path (nothing to audit) -- it must be equally harmless on a
         directory/package operand instead of the blanket usage error this
-        class used to assert for every ``--audit-suppressions`` regardless
-        of ``--suppress``."""
+        class used to assert for every such request regardless of
+        ``--suppress``."""
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -162,11 +163,11 @@ class TestRejectedOnSetInputs:
             main,
             [
                 "compare", str(old_dir), str(new_dir),
-                "--audit-suppressions", "--format", "json",
+                "--view", "suppressions", "--format", "json",
             ],
         )
         assert result.exit_code == 4, result.output
-        assert "--audit-suppressions" not in result.output
+        assert "not supported" not in result.output
 
 
 class TestJsonReport:
@@ -183,7 +184,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -214,7 +215,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -247,7 +248,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -280,7 +281,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -316,7 +317,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -351,7 +352,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -386,7 +387,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -428,7 +429,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -455,7 +456,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -492,7 +493,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--policy", str(policy), "--format", "json",
             ],
         )
@@ -546,7 +547,7 @@ class TestJsonReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json", "--view", report_mode,
             ],
         )
@@ -571,7 +572,7 @@ class TestMarkdownReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -600,7 +601,7 @@ class TestMarkdownReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -621,7 +622,7 @@ class TestMarkdownReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
             ],
         )
         assert result.exit_code == 0, result.output
@@ -675,7 +676,7 @@ class TestMarkdownReport:
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
             ],
         )
         assert result.exit_code == 4, result.output
@@ -748,7 +749,7 @@ class TestUsedByScopedOnlyChange:
             [
                 "compare", str(old), str(new),
                 "--used-by", str(app),
-                "--suppress", str(suppress), "--audit-suppressions",
+                "--suppress", str(suppress), "--view", "suppressions",
                 "--format", "json",
             ],
         )
@@ -765,7 +766,11 @@ class TestUsedByScopedOnlyChange:
 
 
 class TestHelpAll:
-    def test_help_all_mentions_flag(self):
+    def test_help_all_documents_the_view_token(self):
+        """one-comparison-product.md Phase 5: the flag is gone; the audit is
+        computed unconditionally and `--view suppressions` renders it, so
+        `--help-all` must document the token rather than a dead flag."""
         result = CliRunner().invoke(main, ["compare", "--help-all"])
         assert result.exit_code == 0
-        assert "--audit-suppressions" in result.output
+        assert "--audit-suppressions" not in result.output
+        assert "suppressions" in result.output

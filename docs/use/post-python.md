@@ -75,12 +75,12 @@ abicheck compare libmylib.v1.so libmylib.v2.so --post-manifest manifest.json
   are always kept — a struct passed to a committed export or a changed SONAME
   breaks clients regardless of the export set.
 
-See exactly what was demoted with `--show-filtered` (text) or under the
+See exactly what was demoted with `--view filtered` (text) or under the
 `surface_scope` key (`--format json`):
 
 ```bash
 abicheck compare libmylib.v1.so libmylib.v2.so \
-    --post-manifest manifest.json --show-filtered
+    --post-manifest manifest.json --view filtered
 ```
 
 The manifest surface is authoritative, so this works independently of

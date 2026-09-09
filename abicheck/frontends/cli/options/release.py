@@ -18,7 +18,7 @@ the 2000-line hard cap.
 
 Bundles ``release_options`` (directory/package release-comparison knobs),
 ``debug_resolution_options`` (ADR-021a separate-debug-file resolution),
-``adr027_compare_options``, ``app_usage_scope_options``,
+``app_usage_scope_options``,
 ``build_source_dump_options``, and ``evidence_options`` (the ADR-037 D3
 canonical name for the pre-existing ``build_source_compare_options`` alias,
 kept here too) --
@@ -173,14 +173,16 @@ def release_options(func: F) -> F:
         "'old='/'new=' prefix (e.g. --debug-info old=a-dbg.rpm --debug-info "
         "new=b-dbg.rpm). Directory/package inputs only (ADR-040).",
     )(func)
-    func = click.option(
-        "--support-promise",
-        "support_promise",
-        type=click.Choice(["off", "declared"]),
-        default="off",
-        show_default=True,
-        help="Report a proven change to the release's declared component set as a finding (ADR-065 D1/D6, a contract-policy field): 'off' (the default) emits nothing; 'declared' emits support_promise_component_retired/_introduced for every member whose absence the *other* side's proven-complete inventory establishes -- a package archive unpacked in full, or a stored snapshot whose capture asserted inventory_complete. Never fires on an unmatched member under an unproven inventory, whatever the setting. (directory/package inputs only)",
-    )(func)
+    # one-comparison-product.md Phase 7: ``--support-promise`` is gone from
+    # `compare`'s CLI. ADR-065 D1/D6 (and the flag's own help text) called it
+    # "a contract-policy field" -- a project's declared support promise is
+    # exactly D5 guard 1's stable project property, not a per-run operand, so
+    # ``release.support_promise`` in ``.abicheck.yml`` is its only spelling
+    # now, resolved onto ResolvedCompareConfig alongside the Phase 7d
+    # ``release.dso_only``/``release.include_private_dso`` siblings. The
+    # unregistered release engine (``cli_compare_release.compare_release_cmd``)
+    # keeps its own internal parameter, which this fan-out feeds from the
+    # resolved config.
     return func
 
 
@@ -215,58 +217,16 @@ def debug_resolution_options(func: F) -> F:
     return func
 
 
-def adr027_compare_options(func: F) -> F:
-    """Add the ADR-027 API-surface-intelligence options to ``compare``.
-
-    ``--surface-metrics`` (A1/D1.2 metric drift) is the only flag left
-    here. ``--explain-patterns`` (A4 modulation explanation) moved into
-    ``--view patterns`` (ADR-068 D4/Phase 5 §4.1: it is one of four
-    spellings of "which parts of the canonical result do I want rendered"
-    -- see ``frontends.cli.options.view``).
-
-    ADR-068 D4/Phase 5 (one-comparison-product.md §6): pattern-verdict
-    modulation (``--pattern-verdicts``) is no longer a flag at all -- it is
-    an unconditional, evidence-gated analysis stage of every ``compare`` run
-    now (AUTOMATIC per §3 #7: "on where evidence exists"). It never fires
-    without genuine evidence (an opaque-pointer/PIMPL idiom) and never turns
-    a break into a pass on its own -- it only ever demotes at
-    header-aware-or-better evidence tiers or raises a lost-invariant break --
-    so making it unconditional never manufactures a false negative, only
-    removes an opt-in a user could forget. ``--view patterns`` no longer
-    implies it: it is now pure rendering over whatever modulation the
-    (always-on) stage already recorded on ``result.pattern_modulations`` --
-    it can change what is *shown*, never what was *decided* (the bug this
-    decoupling fixes: asking "why" used to also flip "whether", which could
-    change the verdict and exit code).
-
-    ``--surface-metrics`` computation is unconditional too as of this same
-    phase (ADR-068 D4/Phase 5, §4.1's AUTO classification): every
-    ``compare`` now always computes the ADR-027 metric-drift findings and
-    merges them into ``result.changes`` exactly as ``--surface-metrics``
-    always did -- there is no longer a way to turn the *computation* off.
-    The flag survives, unchanged in name, but its role changes to a
-    rendering-adjacent one matching ``--audit-suppressions``' own precedent:
-    it no longer decides whether the findings exist, only whether client
-    code that reads it as an explicit opt-in still sees the flag it always
-    passed keep working (Click accepts and ignores it -- see
-    ``cli_compare_helpers.run_compare``'s own handling). See the PR that
-    landed this for the measurement that justified merging AUTOMATIC
-    treatment for this flag along with modulation/suppression-audit, where
-    an earlier note here had deferred it.
-    """
-    func = click.option(
-        "--surface-metrics",
-        "surface_metrics",
-        is_flag=True,
-        default=False,
-        help="No longer required: aggregate public-surface metric drift "
-        "(ADR-027: public_surface_grew/shrank, "
-        "undocumented_export_ratio_increased) is now always computed and "
-        "included in every comparison's findings (informational, "
-        "COMPATIBLE) -- ADR-068 D4/Phase 5. This flag is accepted for "
-        "backward compatibility and currently has no effect.",
-    )(func)
-    return func
+# ADR-068 D4 / one-comparison-product.md Phase 5: ``adr027_compare_options``
+# used to live here, carrying ``--explain-patterns`` and then, after that
+# moved into ``--view patterns``, only ``--surface-metrics``. Both are gone
+# now. ADR-027's public-surface metric-drift findings
+# (``public_surface_grew``/``public_surface_shrank``/
+# ``undocumented_export_ratio_increased``) are computed on every comparison
+# and merged into ``result.changes``, so the flag selected neither analysis
+# nor rendering -- §4.1's AUTO classification, carried all the way through
+# to the flag's deletion rather than left as an accepted no-op (D5: an
+# accepted spelling is public surface).
 
 
 def app_usage_scope_options(func: F) -> F:
@@ -412,7 +372,8 @@ def build_source_dump_options(func: F) -> F:
         "or a pre-captured pack. Auto-discovered inside the --sources tree when "
         "omitted. When it resolves to a compile database and -H/--header is "
         "given, that database also parameterizes the header parse with the "
-        "build's exact flags (scope it with --compile-db-filter).",
+        "build's exact flags (scope it with build.compile_db_filter in "
+        ".abicheck.yml).",
     )(func)
     return func
 

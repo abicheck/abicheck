@@ -115,7 +115,7 @@ class TestSuppressionAuditFoldDemangle:
         )
         result = _invoke(
             "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--audit-suppressions",
+            "--suppress", str(suppress), "--view", "suppressions",
         )
         assert "## Suppression Audit" in result.output
         # The label's own selector echo is never demangled.
@@ -137,7 +137,7 @@ class TestSuppressionAuditFoldDemangle:
         )
         result = _invoke(
             "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--audit-suppressions", "--view", "no-demangle",
+            "--suppress", str(suppress), "--view", "suppressions", "--view", "no-demangle",
         )
         assert f"suppressed func_removed: {_MANGLED}" in result.output
         assert f"suppressed func_removed: {_DEMANGLED}" not in result.output
@@ -174,7 +174,7 @@ class TestSuppressionAuditFoldDemangle:
         )
         result = _invoke(
             "compare", str(old_p), str(new_p),
-            "--suppress", str(suppress), "--audit-suppressions",
+            "--suppress", str(suppress), "--view", "suppressions",
         )
         assert f"`intentional removal (symbol={ctor1})`" in result.output
         assert f"`intentional removal (symbol={ctor2})`" in result.output

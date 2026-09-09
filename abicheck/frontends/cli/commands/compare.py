@@ -48,7 +48,6 @@ from ....cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli
 from ....cli_options import (
     LANG_DEFAULT,
     abi3_option,
-    adr027_compare_options,
     app_usage_scope_options,
     bundle_facts_manifest_options,
     changed_path_options,
@@ -81,7 +80,6 @@ from ....frontends.cli.operand_diagnostics import (  # noqa: F401  — re-export
 from ..dump_debug_config import DumpDebugConfig, resolve_stored_bundle_lang
 from ..options.params import (
     SIDED_EXISTING_PATH_PARAM,
-    SIDED_PATH_PARAM,
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
 
@@ -98,13 +96,36 @@ from .dump import dump_cmd
 _RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
 
 
-def reject_release_incompatible_view_mode(report_mode: str) -> None:
-    """Reject a ``--view`` mode a directory/package release fan-out can't
-    honor: ``leaf``/``root-cause`` restructure a single comparison's own
-    root-cause graph, and the release summary is an aggregate report across
-    every library with no single such graph to restructure. ``full`` and
-    ``impact`` (each library already has its own ``DiffResult`` to compute
-    an impact table from) are the only accepted values here.
+def reject_release_incompatible_view_mode(
+    report_mode: str, *, show_filtered: bool = False
+) -> None:
+    """Reject a ``--view`` mode/token a directory/package release fan-out
+    can't honor: ``leaf``/``root-cause`` restructure a single comparison's
+    own root-cause graph, and the release summary is an aggregate report
+    across every library with no single such graph to restructure. ``full``
+    and ``impact`` (each library already has its own ``DiffResult`` to
+    compute an impact table from) are the only accepted report modes here.
+
+    ``filtered`` (Codex review, PR #1180, fresh evidence) is rejected the
+    same way rather than silently accepted-and-ignored: unlike
+    ``report_mode``, ``_dispatch_release_compare`` never threads
+    ``show_filtered`` through to the release engine's own renderer at all
+    (``cli_compare_release.py`` has no such concept), so ``--view
+    filtered`` on a directory/package operand used to produce the
+    identical output an invocation without the token would -- the one
+    thing a rendering selector must never do (ADR-068 D4). Wiring the
+    ledger into the per-library release renderer is a real feature, not a
+    rename fix; a directory/package caller who needs it compares one
+    library pair at a time in the meantime, same as ``leaf``/``root-cause``
+    above.
+
+    ``suppressions``/``audit_suppressions`` is deliberately NOT checked
+    here: ``cli_compare_options._reject_set_input_flags`` already rejects
+    it, but only together with a real ``--suppress`` file -- with no
+    ``--suppress`` at all it is a harmless no-op on a directory/package
+    operand, the same as on a single-pair `compare` (CodeRabbit/Codex
+    review, PR #1154). Checking it unconditionally here would regress that
+    no-op back to a blanket rejection.
 
     Shared by ``_dispatch_release_compare``'s own check below and
     ``cli_compare_helpers.py``'s pre-``--dry-run`` rejection point (Codex
@@ -122,6 +143,13 @@ def reject_release_incompatible_view_mode(report_mode: str) -> None:
             "report across every library with no single such graph to "
             "restructure. Compare one library at a time (a single old/new "
             f".so pair) to use --view {report_mode}."
+        )
+    if show_filtered:
+        raise click.UsageError(
+            "--view filtered is not available when comparing directories or "
+            "packages: the release engine does not yet render this ledger "
+            "per library. Compare one library at a time (a single old/new "
+            ".so pair) to use --view filtered."
         )
 
 
@@ -172,11 +200,26 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     kwargs["show_only"] = kwargs.pop("show_only", None)
     kwargs["demangle"] = kwargs.pop("demangle", None)
     kwargs["explain_patterns"] = kwargs.pop("explain_patterns", False)
+    # `show_filtered`/`audit_suppressions` are popped (not forwarded):
+    # `compare_release_cmd` has no such parameter at all -- the release
+    # engine doesn't render either ledger per library yet (Codex review, PR
+    # #1180). `show_filtered`'s only role here is the unconditional
+    # rejection immediately below; `audit_suppressions` is popped purely so
+    # it never reaches `compare_release_cmd` as an unexpected kwarg --
+    # cli_compare_options._reject_set_input_flags (run ahead of this call,
+    # same as the pre-dry-run block below) already rejects it together with
+    # a real --suppress file, and is a no-op without one, so it is not
+    # rejected a second time (unconditionally) here.
+    view_show_filtered = kwargs.pop("show_filtered", False)
+    kwargs.pop("audit_suppressions", False)
     # Already validated ahead of the --dry-run emit (cli_compare_helpers.py's
     # pre-dry-run block) -- re-checked here too since _dispatch_release_
     # compare has its own direct callers/tests and must reject on its own,
     # not merely rely on an upstream caller having done so.
-    reject_release_incompatible_view_mode(report_mode)
+    reject_release_incompatible_view_mode(
+        report_mode,
+        show_filtered=view_show_filtered,
+    )
     kwargs["show_impact"] = report_mode == "impact"
     if report_mode == "impact":
         report_mode = "full"
@@ -597,23 +640,27 @@ def _embed_inline_source_side(
     metavar="TOKEN",
     help="Repeatable rendering selector (ADR-068 D4): never changes the "
          "verdict, findings, or exit code. Replaces --report-mode/"
-         "--show-only/--demangle/--no-demangle/--explain-patterns. TOKEN: "
+         "--show-only/--demangle/--no-demangle/--explain-patterns/"
+         "--show-filtered/--audit-suppressions. TOKEN: "
          "'full' (default)/'leaf'/'impact'/'root-cause' (report mode); "
          "'show=<tokens>' (severity/element/action filter, same vocabulary "
          "as the old --show-only, repeatable to OR groups together); "
          "'demangle'/'no-demangle' (C++ demangling, default ON for "
          "markdown/review/html); 'patterns' (explain pattern-verdict "
-         "modulation, which always runs where evidence exists). Example: "
+         "modulation, which always runs where evidence exists); 'filtered' "
+         "(echo the scope/disposition ledger of findings excluded from the "
+         "verdict, always computed and always in --format json); "
+         "'suppressions' (echo the --suppress rule audit, likewise always "
+         "computed -- a no-op without --suppress, never an error). Example: "
          "--view leaf --view demangle --view show=breaking,functions.",
 )
 # Policy + suppression family (ADR-037 D3). The strict/justification pair
 # lives only in .abicheck.yml's suppression: block now (ADR-037 D4).
 @policy_options
-@click.option("--pdb-path", "pdb", multiple=True, type=SIDED_PATH_PARAM,
-              help="Explicit PDB file path for Windows PE debug info. Applies to both "
-                   "sides; scope to one with an 'old='/'new=' prefix, repeating the flag "
-                   "per side (e.g. --pdb-path old=a.pdb --pdb-path new=b.pdb). Overrides "
-                   "automatic PDB discovery (ADR-040).")
+# Phase 7 (SS4.1's CONFIG row): --pdb-path is gone from `compare` too --
+# `debug.pdb_path` is its only spelling, `dump`'s own key since Phase 7c
+# (ADR-037 D8.1). A side needing its own PDB names the directory holding it
+# with `--debug-root old=`/`new=`, which the resolver already searches.
 # ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
 @app_usage_scope_options
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
@@ -641,15 +688,15 @@ def _embed_inline_source_side(
               help="Additional directory to search for shared libraries (with --follow-deps).")
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
-@scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
-@click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
-              help="List findings excluded by --scope-public-headers (audit trail).")
+@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
+# ADR-068 D4 / Phase 5: --show-filtered is gone; the ledger it echoed has
+# been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
 @click.option("--post-manifest", "post_manifest_path",
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
               help="Scope the comparison to a POST Python export manifest's committed ABI "
                    "surface. Only changes to the manifest's pp_*/ufunc-loop symbols count; "
                    "private __pp_* kernel churn and other non-committed exports are demoted "
-                   "to the filtered ledger (see --show-filtered).")
+                   "to the filtered ledger (see --view filtered).")
 @click.option("--probe-matrix", "probe_matrix", multiple=True, type=SIDED_EXISTING_PATH_PARAM,
               help="Build-configuration matrix snapshot, "
                    "scoped per side with an 'old='/'new=' prefix (e.g. --probe-matrix "
@@ -665,14 +712,16 @@ def _embed_inline_source_side(
 @evidence_options  # --depth, --sources, --build-info
 @changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
 @abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
-@adr027_compare_options  # ADR-027: --explain-patterns (rendering only, modulation is automatic, ADR-068 D4) / --surface-metrics (still opt-in)
+# ADR-068 D4 / Phase 5: --surface-metrics is gone -- ADR-027's metric-drift
+# findings are computed on every comparison and merged into result.changes,
+# so nothing was left for the flag to select, not even a rendering choice.
 @env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
-@click.option("--reconcile-build-context", is_flag=True, default=False,
-              help="Clear context-free header-parse false positives using the build's "
-                   "active preprocessor defines (ADR-039): a conditional field's phantom "
-                   "add/remove/size change the build proves never happened is moved to an "
-                   "audit bucket instead of the verdict. No-op unless snapshots carry "
-                   "build_context_defines + per-field guards.")
+# §4.1's AUTO row: ADR-039 build-context reconciliation is unconditional now
+# and `--reconcile-build-context` is gone. It is strictly evidence-gated and
+# can only ever move a phantom finding out of the verdict, never manufacture
+# one, so an opt-in switch could only mean "leave a known false positive in
+# because you forgot a flag". Forced on at the Tier-2 chokepoint
+# (workflows/compare_policy.compare_snapshots): CLI, API and Action alike.
 @click.option("--budget", "budget", default=None,
               help="ADR-068 §3 #19: a wall-clock guard on this run's deadline-aware "
                    "stages, so a CI job fails clearly (exit 5) instead of running "
@@ -691,7 +740,7 @@ def _embed_inline_source_side(
                    "reader knows not to trust it the way an ordinary comparable "
                    "diff is trusted. Not needed, and does nothing, on a "
                    "comparable pair.")
-@contract_options  # ADR-049: --contract/--audit-suppressions
+@contract_options  # ADR-049: --contract (--audit-suppressions is gone -- `--view suppressions`)
 @pack_option  # ADR-049 D8: --pack
 @click.option("--use-cases", "use_cases_manifest",
               type=click.Path(exists=True, dir_okay=False, path_type=Path),

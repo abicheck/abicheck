@@ -526,6 +526,118 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        # ADR-068 D4 / one-comparison-product.md Phase 5's closing slice: the
+        # last three "a flag decides whether you get told" rows. All three
+        # pieces of data were already (or are now) computed unconditionally;
+        # the two that have a rendering to select moved into `--view`, and
+        # `--surface-metrics` needed no selector at all because every
+        # projection already renders its findings.
+        "compare --surface-metrics/--show-filtered/--audit-suppressions"
+        " (--view filtered / --view suppressions; the metrics need no"
+        " selector, they are ordinary findings)",
+        ("--surface-metrics", "--show-filtered", "--audit-suppressions"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # Historical-record framing (design review / milestones ledger).
+                "contribute/config-key-review.md",
+                "contribute/goals.md",
+                # Each names the retired flag only in the sentence explaining
+                # its own fold, the same way the --view row above allows.
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/027-api-surface-intelligence.md",
+                "contribute/adr/067-change-intent-acknowledgment-and-disposition-audit.md",
+                "use/api-surface-intelligence.md",
+                "use/output-formats.md",
+                "use/suppression.md",
+                "reference/config-file.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md Phase 7 (§4.1's CONFIG row): compare's
+        # --pdb-path joins dump's, removed in Phase 7c. `debug.pdb_path` is
+        # the only spelling on either command now (ADR-037 D8.1).
+        "compare --pdb-path (debug.pdb_path in .abicheck.yml)",
+        ("--pdb-path",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/cli-cleanup-phase-two.md",
+                "reference/config-file.md",
+                "reference/platforms.md",
+                "use/windows-pe.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md §4.1's AUTO row: ADR-039's build-context
+        # reconciliation is unconditional now (forced on at the Tier-2
+        # `compare_snapshots` chokepoint), so there is no flag to name.
+        "compare --reconcile-build-context (always on where build context is present)",
+        ("--reconcile-build-context",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/039-build-context-reconciliation.md",
+                "learn/build-and-source-data.md",
+                "use/cli-flags.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md Phase 7i: a proven inventory change is a
+        # stable project promise, not a per-invocation operand (ADR-065 D1).
+        "compare --support-promise (release.support_promise in .abicheck.yml)",
+        ("--support-promise",),
+        frozenset(
+            {
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/vision-api-abi-evolution.md",
+                "contribute/adr/065-comparison-scope-selection-and-completeness.md",
+                "contribute/adr/index.md",
+                "reference/exit-codes.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md §4.2 / Phase 7i: the L2 header-parse
+        # scoping glob is a stable project property beside `build.compile_db`,
+        # not a per-invocation flag.
+        "dump --compile-db-filter (build.compile_db_filter in .abicheck.yml)",
+        ("--compile-db-filter",),
+        frozenset(
+            {
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/one-semantic-pipeline.md",
+                "contribute/plans/g41-baseline-consumer-context-and-declarative-assurance.md",
+                "contribute/known-gaps.md",
+                "contribute/adr/020-build-context-capture.md",
+            }
+        ),
+    ),
+    (
+        # one-comparison-product.md §4.2 / Phase 7f: three spellings of
+        # "stamp this snapshot with where it came from" collapse into one
+        # repeatable `dump --provenance KEY=VALUE`.
+        "dump --git-tag/--build-id/--no-git (dump --provenance KEY=VALUE)",
+        ("--git-tag", "--build-id", "--no-git"),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/config-key-review.md",
+                "contribute/plans/one-comparison-product.md",
+                "reference/cli-reference.md",
+                "use/cli-flags.md",
+                "use/baselines.md",
+            }
+        ),
+    ),
 )
 
 

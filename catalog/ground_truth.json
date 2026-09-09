@@ -1532,7 +1532,7 @@
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "A public struct field gains a #ifdef guard while both releases still ship with that macro defined, so the ABI is unchanged. A context-free header parse prunes the guarded field and raises a type_field_removed FALSE POSITIVE (the record size is artifact-accurate, so no size change fires); the binary depth is blind (identical builds) and correct. Only build context (the active -D define set, via --reconcile-build-context / ADR-039) proves the field is effectively present in both builds and clears the phantom. Ships committed guard-annotated snapshot fixtures (no compiler).",
+   "description": "A public struct field gains a #ifdef guard while both releases still ship with that macro defined, so the ABI is unchanged. A context-free header parse prunes the guarded field and raises a type_field_removed FALSE POSITIVE (the record size is artifact-accurate, so no size change fires); the binary depth is blind (identical builds) and correct. Only build context (the active -D define set, reconciled automatically / ADR-039) proves the field is effectively present in both builds and clears the phantom. Ships committed guard-annotated snapshot fixtures (no compiler).",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "type_field_removed"

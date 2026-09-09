@@ -69,6 +69,7 @@ from ....cli_resolve import (
 from ....frontends.cli import help as cli_help
 from ..dump_debug_config import (
     DumpDebugConfig,
+    resolve_dump_build_compile_db_filter,
     resolve_dump_debug_fields,
     resolve_dump_lang_and_env_toggles,
 )
@@ -84,6 +85,7 @@ if TYPE_CHECKING:
 # importing this module from `cli.py`'s registration block is the same
 # side-effect pattern every sibling `cli_*` command module already uses.
 from ....cli import main
+from ..options.provenance import dump_provenance_option, parse_provenance_tokens
 from ..runtime import (
     _resolve_debug_artifact,
     _setup_verbosity,
@@ -184,9 +186,7 @@ def _resolve_and_check_dump_debug_format(
 # The L2 compile database comes from --build-info, whose operand is already
 # "a build dir, a compile_commands.json, or a pre-captured pack" -- the same
 # thing -p/--build-dir and its --compile-db alias took.
-@click.option("--compile-db-filter", "compile_db_filter", default=None,
-              help="Glob pattern to filter compile_commands.json entries by source file "
-                   "(e.g. 'src/libfoo/**'). Useful for large databases.")
+# SS4.2's CONFIG row: --compile-db-filter is gone (build.compile_db_filter).
 # ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
 # --dwarf-only/--debug-format/--debuginfod/--debuginfod-url/--pdb-path: gone
 # (Phase 7c, debug: config only). --debug-root stays (per-run evidence).
@@ -203,12 +203,8 @@ def _resolve_and_check_dump_debug_format(
                    "so far.")
 @verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
-@click.option("--git-tag", "git_tag", default=None,
-              help="Git tag to embed in the snapshot (e.g. v2.0.0).")
-@click.option("--build-id", "build_id", default=None,
-              help="Opaque build identifier (CI run ID, build number, etc.).")
-@click.option("--no-git", "no_git", is_flag=True, default=False,
-              help="Do not auto-detect git commit SHA.")
+# §4.2 / Phase 7f: --git-tag/--build-id/--no-git -> one KEY=VALUE selector.
+@dump_provenance_option
 @build_source_dump_options  # --build-info / --sources (embed inline)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              include_dependencies: bool,
@@ -216,11 +212,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              snapshot_compression: str,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dry_run: bool,
-             compile_db_filter: str | None,
              debug_roots: tuple[Path, ...],
              dump_manifest_path: Path | None,
              verbose: bool,
-             git_tag: str | None, build_id: str | None, no_git: bool,
+             provenance: tuple[str, ...],
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None,
              build_targets: tuple[str, ...] = (),
@@ -259,6 +254,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     from ....cli_dump_request import build_dump_request
     from ....dry_run import emit_dry_run, reject_dry_run_with_output
 
+    # Phase 7f: already validated eagerly by the option's own callback.
+    _prov = parse_provenance_tokens(provenance)
+    git_tag, build_id, no_git = _prov.git_tag, _prov.build_id, _prov.no_git
     reject_dry_run_with_output(dry_run, output)
     if output is None and snapshot_compression not in ("auto", "none"):
         raise click.UsageError(
@@ -275,6 +273,9 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         click.get_current_context(), build_config=build_config, sources=sources,
         lang=lang, lang_default=LANG_DEFAULT, apply_env_toggles=apply_compile_config_env_toggles,
     )
+    # §4.2's CONFIG row: `build.compile_db_filter` replaces
+    # `--compile-db-filter`.
+    compile_db_filter = resolve_dump_build_compile_db_filter(build_config, sources)
     # Phase 7c: debug.* config only
     _debug = resolve_dump_debug_fields(_resolved_debug, build_config=build_config, sources=sources)
     dwarf_only, debug_format_opt, debuginfod, debuginfod_url, pdb_path = (

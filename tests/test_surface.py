@@ -946,7 +946,7 @@ class TestScopedCompareNoFalsePositives:
 
 
 class TestScopeCli:
-    """End-to-end CLI wiring for --scope-public-headers / --show-filtered."""
+    """End-to-end CLI wiring for --scope-public-headers / --view filtered."""
 
     def _write(self, path, snap):
         from abicheck.serialization import snapshot_to_json
@@ -980,7 +980,7 @@ class TestScopeCli:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["compare", str(op), str(np_), "--scope-public-headers", "--show-filtered"],
+            ["compare", str(op), str(np_), "--scope-public-headers", "--view", "filtered"],
         )
         assert result.exit_code == 0, result.output
         # The internal layout change is in the audit ledger on stderr...

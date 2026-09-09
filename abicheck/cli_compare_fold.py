@@ -77,6 +77,7 @@ import click
 
 from .errors import ProfileMismatchError, ScopeMismatchError
 from .frontends.cli.runtime import _write_or_echo
+from .service_render import ONELINE_FORMAT as _ONELINE_FORMAT
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -690,6 +691,13 @@ def _report_run_aborted(
     for every configured target, not just the primary ``fmt``/``output``,
     or a ``--write json=report.json`` consumer silently gets no file at all
     on exit 5 instead of the same structured refusal the primary format got.
+
+    markdown/text/review/html (Codex review, fresh evidence, PR #1180,
+    "Render aborts for every accepted output format") get a small dedicated
+    refusal document too, via :func:`_render_run_aborted_text`/
+    :func:`_render_run_aborted_html` -- an ``-o out.md``/``--write
+    html=out.html`` target must not stay silently absent, or worse keep a
+    stale prior-run document, on an aborted run.
     """
     refusal = (library, old_version, new_version, kind, message)
 
@@ -720,10 +728,66 @@ def _report_run_aborted(
                 library, old_version, new_version, kind, message
             )
             _write_or_echo(target_output, xml)
+        elif target_fmt in ("markdown", "text", "review"):
+            # Codex review, PR #1180, fresh evidence ("Render aborts for
+            # every accepted output format"): a `-o out.md`/`--write
+            # markdown=out.md` target must not stay silently absent (or,
+            # worse, keep a stale prior-run document) on an aborted run --
+            # a scripted consumer that only checks the file's existence/
+            # mtime would otherwise read a stale success report instead of
+            # the abort.
+            _write_or_echo(target_output, _render_run_aborted_text(*refusal))
+        elif target_fmt == "html":
+            _write_or_echo(target_output, _render_run_aborted_html(*refusal))
+        elif target_fmt == _ONELINE_FORMAT:
+            # Codex review, fresh evidence ("Render budget aborts in
+            # oneline format"): --format oneline is a real, separate
+            # primary format (service_render.ONELINE_FORMAT) the branch
+            # above never matched -- same "must not stay silently absent"
+            # reasoning, in oneline's own single-line shape.
+            _write_or_echo(
+                target_output,
+                f"{library}: comparison aborted ({kind}): {message}",
+            )
 
     _render_one(fmt, output)
     for secondary_fmt, secondary_output in secondary_writes:
         _render_one(secondary_fmt, secondary_output)
+
+
+def _render_run_aborted_text(
+    library: str, old_version: str, new_version: str, kind: str, message: str
+) -> str:
+    """A minimal human-readable refusal document for markdown/text/review.
+
+    Deliberately not the full ``ReportDocument`` machinery those formats
+    normally render through -- there is no ``DiffResult`` here to project,
+    the same reason :func:`_report_run_aborted`'s JSON/SARIF/JUnit branches
+    each build a dedicated, schema-conformant refusal document rather than
+    reusing the ordinary renderer.
+    """
+    return (
+        f"# {library}: comparison aborted\n\n"
+        f"old={old_version!r} new={new_version!r}\n\n"
+        f"**{kind}**: {message}\n\n"
+        "No verdict was produced.\n"
+    )
+
+
+def _render_run_aborted_html(
+    library: str, old_version: str, new_version: str, kind: str, message: str
+) -> str:
+    """The ``html`` sibling of :func:`_render_run_aborted_text`."""
+    import html as _html
+
+    return (
+        "<!doctype html><html><body>"
+        f"<h1>{_html.escape(library)}: comparison aborted</h1>"
+        f"<p>old='{_html.escape(old_version)}' new='{_html.escape(new_version)}'</p>"
+        f"<p><strong>{_html.escape(kind)}</strong>: {_html.escape(message)}</p>"
+        "<p>No verdict was produced.</p>"
+        "</body></html>"
+    )
 
 
 def _exit_on_budget_overflow(

@@ -362,6 +362,9 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         fail_on_removed=(
             bool(_early_cfg.gate_fail_on_removed_library) if _early_cfg else False
         ),
+        support_promise=(
+            _early_cfg.release_support_promise if _early_cfg else None
+        ),
         new_is_single_file=_new_is_single_file,
     )
 

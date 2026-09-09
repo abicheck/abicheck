@@ -823,10 +823,10 @@ def _release_summary_effective_config_block(
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
         on_incomplete_scope=on_incomplete_scope,  # ADR-065 D6: warn/block exit differently
-        # ADR-068 D4/Phase 5: modulation/surface-metrics are unconditional
-        # now -- this stand-in must agree, not default to the old "off".
+        # ADR-068 D4/Phase 5 + §4.1's AUTO rows: modulation, surface metrics and ADR-039 reconciliation are unconditional now (forced on at the Tier-2 chokepoint every library here routes through), so this stand-in must agree rather than default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,
+        reconcile_build_context_enabled=True,
     )
     ec_scheme = gate_exit_code_scheme(severity_config is not None)
     ec_fields = effective_config_fields(

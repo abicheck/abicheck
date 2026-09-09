@@ -2804,8 +2804,11 @@ def _run_snapshot_pair_case(
     """Run `abicheck compare` directly on a committed AbiSnapshot pair.
 
     Covers ``mode: snapshot-pair`` (case170, plain old.abi.json/new.abi.json)
-    and ``mode: reconcile`` (case164, v1.abi.json/v2.abi.json, needs
-    --reconcile-build-context to clear the phantom finding, ADR-039).
+    and ``mode: reconcile`` (case164, v1.abi.json/v2.abi.json, ADR-039's
+    build-context reconciliation -- unconditional since
+    one-comparison-product.md Phase 7i removed --reconcile-build-context,
+    so *reconcile* no longer selects a CLI flag; kept as a parameter only
+    to distinguish the two modes for the caller's own accounting).
     """
     if not _HAS_ABICHECK:
         return ToolResult(verdict="SKIP")
@@ -2827,8 +2830,7 @@ def _run_snapshot_pair_case(
         "--format",
         "json",
     ]
-    if reconcile:
-        cmd.append("--reconcile-build-context")
+    del reconcile  # ADR-039 reconciliation is unconditional now; see docstring.
     try:
         r = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, env=_ABICHECK_ENV

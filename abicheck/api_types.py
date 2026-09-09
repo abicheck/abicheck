@@ -56,7 +56,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import KW_ONLY, dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -615,11 +615,27 @@ class CompareRequest:
     # Override debuginfod server URL (only meaningful with enable_debuginfod);
     # None uses the resolver's default server list / DEBUGINFOD_URLS env var.
     debuginfod_url: str | None = None
-    # ADR-039: clear context-free header-parse false positives using the build's
-    # active preprocessor defines (a conditional field's phantom add/remove/size
-    # delta the build proves never changed). Opt-in; a no-op unless the snapshots
-    # carry ``build_context_defines`` + per-field ``guard`` annotations.
-    reconcile_build_context: bool = False
+    # No ``reconcile_build_context`` field: one-comparison-product.md §4.1's
+    # AUTO row made ADR-039's reconciliation unconditional, forced on in the
+    # Tier-2 ``compare_snapshots`` chokepoint, so neither this request nor
+    # the CLI carries a switch for it (still evidence-gated: a no-op without
+    # ``build_context_defines`` + per-field ``guard`` annotations).
+    #
+    # Codex review, PR #1180 ("Prevent positional CompareRequest arguments
+    # from shifting"): removing a field from the *middle* of a positional
+    # dataclass silently rebinds every field after it for a positional
+    # caller instead of failing loudly — the exact PR #582 lesson the
+    # ``lang_explicit``/``pack_policy_overrides`` fields below already
+    # guard against for a *new* field, but nothing protected a *removed*
+    # one until now. A ``KW_ONLY`` sentinel right here, at the boundary
+    # ``reconcile_build_context`` itself used to sit on, makes every field
+    # from this point on keyword-only: a positional caller who used to
+    # reach as far as ``reconcile_build_context`` now gets an immediate
+    # ``TypeError`` at construction instead of a silently shifted value,
+    # while every caller within the documented ``CompareRequest(old, new,
+    # "c++", "clang", ...)`` shape (this file's own example, well short of
+    # this boundary) is unaffected.
+    _: KW_ONLY
     # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML). When
     # its ``runtime_floors`` are set, new symbol-version requirements classify
     # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)

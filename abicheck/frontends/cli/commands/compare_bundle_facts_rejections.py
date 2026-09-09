@@ -80,6 +80,7 @@ def reject_unsupported_options(
     dso_only: bool = False,
     include_private_dso: bool = False,
     fail_on_removed: bool = False,
+    support_promise: str | None = None,
     new_is_single_file: bool = False,
 ) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
@@ -93,9 +94,10 @@ def reject_unsupported_options(
     the bottom of this function, which only make sense when NEW_INPUT is a
     *live* directory/package (the default, ``False``, unchanged).
 
-    *dso_only*/*include_private_dso*/*fail_on_removed* (Phase 7d,
-    one-comparison-product.md §4.1) are the resolved ``release.dso_only``/
-    ``release.include_private_dso``/``gate.fail_on_removed_library``
+    *dso_only*/*include_private_dso*/*fail_on_removed*/*support_promise*
+    (Phase 7d/7i, one-comparison-product.md §4.1) are the resolved
+    ``release.dso_only``/``release.include_private_dso``/
+    ``gate.fail_on_removed_library``/``release.support_promise``
     ``.abicheck.yml`` values -- no longer CLI kwargs at all, so the caller
     resolves them off the loaded project config and passes them in here,
     rather than this (pure, kwargs-only) function loading config itself.
@@ -155,6 +157,21 @@ def reject_unsupported_options(
             "per_library_snapshots keys against the release directory "
             "yourself if you need this accounting."
         )
+    if support_promise and support_promise != "off":
+        # Codex review, PR #1180, fresh evidence: compare_release_against_
+        # bundle_facts() has no support-promise channel at all -- neither a
+        # policy parameter it forwards nor a proven-inventory acquisition
+        # record it builds one from -- so a declared policy here would
+        # silently omit every support_promise_component_retired/_introduced
+        # finding a directory/package `compare` of the same content would
+        # report. Rejected rather than left to appear honored.
+        raise click.UsageError(
+            "release.support_promise is not supported together with "
+            "a stored-bundle-facts OLD_INPUT: this driver builds no proven-"
+            "inventory acquisition record to derive a support-promise "
+            "finding from. Compare the release directory/package itself "
+            "(not a stored bundle-facts document) to use it."
+        )
     if kwargs.get("bundle_facts_out") is not None:
         raise click.UsageError(
             "--bundle-facts-out is not supported together with "
@@ -210,7 +227,6 @@ def reject_unsupported_options(
     from ....cli_compare_options import _reject_set_input_flags
 
     _reject_set_input_flags(
-        bool(kwargs.get("reconcile_build_context", False)),
         kwargs.get("env_matrix_path"),
         # Workstream D-S1: a --used-by-manifest-named consumer is exactly as
         # unsupported here as a bare --used-by one (this dispatch runs before
@@ -314,20 +330,14 @@ def reject_unsupported_options(
         raise click.UsageError(
             "--devel-pkg old=... is not supported together with a stored-bundle-facts OLD_INPUT."
         )
-    if (
-        kwargs.get("pdb_path") is not None
-        or kwargs.get("old_pdb_path") is not None
-        or kwargs.get("new_pdb_path") is not None
-    ):
-        # Codex review: same root cause as --debug-info just above --
-        # compare_release_against_bundle_facts()'s per-library
-        # service.resolve_input() call has no pdb_path parameter to receive
-        # any of these (this driver's own docstring: "no debug-info package
-        # resolution, no PDB"), so a NEW-side PE DLL would always fall back
-        # to binary-only extraction regardless of what was given here.
-        raise click.UsageError(
-            "--pdb-path is not supported together with a stored-bundle-facts OLD_INPUT."
-        )
+    # The `--pdb-path` CLI-flag rejection that used to sit here is gone with
+    # the flag itself (one-comparison-product.md Phase 7, §4.1's CONFIG row):
+    # `debug.pdb_path` is the only spelling left, and this dispatcher already
+    # rejects that config key below (`_unsupported_config_blocks`, "debug:")
+    # for the identical reason -- compare_release_against_bundle_facts()'s
+    # per-library service.resolve_input() call has no pdb_path parameter to
+    # receive it, so a NEW-side PE DLL would fall back to binary-only
+    # extraction regardless. One rejection, at the one surviving source.
     if (
         kwargs.get("follow_deps")
         or kwargs.get("search_paths")

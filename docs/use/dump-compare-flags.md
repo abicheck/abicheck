@@ -153,11 +153,14 @@ target triple, sysroot, and ABI-affecting options like `-fvisibility=hidden`.
 | Flag | Description |
 |------|-------------|
 | `--build-info <path>` | A build directory containing `compile_commands.json`, the database file itself, or a pre-captured pack |
-| `--compile-db-filter <glob>` | Filter entries by source file pattern (e.g., `src/libfoo/**`) |
 
 `--build-info` is the one flag that takes this operand: with `-H`/`--header`
 also given, the database it resolves to parameterizes the header parse with
-the build's exact flags, and it is the L3 build source either way.
+the build's exact flags, and it is the L3 build source either way. To filter
+entries by source file pattern (e.g., `src/libfoo/**`), set `build:
+compile_db_filter: <glob>` in `.abicheck.yml` beside `compile_db:` — a
+project-scoped setting, not a per-invocation flag (one-comparison-product.md
+Phase 7i).
 
 When both `--build-info` and `.abicheck.yml`'s `compile:` block (`options:`,
 `sysroot:`, ...) are given, the config values take precedence.

@@ -14,7 +14,7 @@
 | **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** Build-Context Reconciliation (ADR-039) | **Verdict:** ✅ NO_CHANGE
-(only with `--reconcile-build-context`; a context-free header read
+(build-context reconciliation is automatic; a context-free header read
 misreports BREAKING)
 
 ## Verdict and consumer impact
@@ -50,7 +50,6 @@ abicheck compare v1.abi.json v2.abi.json --scope-public-headers
 
 # With build-context reconciliation (ADR-039) -- the phantom clears:
 abicheck compare v1.abi.json v2.abi.json --scope-public-headers \
-  --reconcile-build-context
 ```
 
 ## Expected abicheck finding
@@ -64,11 +63,11 @@ Verdict: BREAKING (exit 4)
     reads garbage or writes out of bounds.
   Affected symbols: cfg_make
 
-With --reconcile-build-context:
+With build context available (reconciliation is automatic):
 Verdict: NO_CHANGE (exit 0)
 
 _No ABI changes detected._
-(--show-filtered discloses: "Reconciled as context-free header-parse
+(--view filtered discloses: "Reconciled as context-free header-parse
 artifacts (1 finding): type_field_removed: Config [config.h:10]")
 ```
 
@@ -84,14 +83,14 @@ so it is exactly the depth that produces the phantom here.
 
 The default header-AST parse evaluates `#ifdef CONFIG_KEEP_LEGACY` with
 the macro undefined, so `legacy` is absent from the parsed field list even
-though every shipped build has it. `--reconcile-build-context` cross
+though every shipped build has it. The automatic build-context reconciliation cross
 references the case's `conditional_fields` registry (populated from the
 compile database's active `-D` set during a build-aware `dump`) against
 each struct's guarded members: since `CONFIG_KEEP_LEGACY` is in
 `build_context_defines` on both sides, the guarded field is proven
 present in both real builds and the phantom removal is reclassified as a
 context-free parsing artifact rather than a genuine break (ADR-028 D3: a
-reconciled finding is disclosed under `--show-filtered`, never silently
+reconciled finding is disclosed under `--view filtered`, never silently
 dropped, and an *unconditional* removal — or one guarded on an undefined
 macro — is never reconciled away).
 
@@ -101,7 +100,7 @@ This is what a CI job diffing two release header snapshots sees if it
 scopes to public headers before the build system's `-D` flags are known —
 e.g. a header-only ABI-diff step that runs ahead of, or independent from,
 the actual compile. Feeding that same job the project's
-`compile_commands.json` (L3) via `--reconcile-build-context` is what turns
+`compile_commands.json` (L3), reconciled automatically, is what turns
 "the header text changed" into "the shipped struct changed," and here the
 two answers disagree.
 
@@ -113,7 +112,7 @@ field really is conditional, either drop the guard (always ship it) or
 move it behind an opaque accessor so header-only tooling never has to
 resolve preprocessor state to know the real layout. Where a guard must
 stay, publish the active `-D` set (a compile database) alongside the
-headers so ABI-diff tooling — abicheck's `--reconcile-build-context` here —
+headers so ABI-diff tooling — abicheck's automatic build-context reconciliation here —
 has the evidence to resolve it instead of guessing.
 
 ## Cross-tool comparison

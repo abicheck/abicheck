@@ -934,7 +934,6 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context, *,
-    reconcile_build_context: bool,
     env_matrix_path: Path | None,
     used_by_apps: tuple[ConsumerAppInput, ...], required_symbols: tuple[str, ...],
     diagnostic_comparison: bool, audit_suppressions: bool,
@@ -942,7 +941,7 @@ def _reject_flags_unsupported_for_set_inputs(
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
     suppress: Path | None = None,
-    budget: str | None = None,
+    budget: str | None = None, pdb_path: Path | None = None,
 ) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -964,7 +963,7 @@ def _reject_flags_unsupported_for_set_inputs(
     everything else outright).
     """
     _reject_set_input_flags(
-        reconcile_build_context, env_matrix_path,
+        env_matrix_path,
         used_by_apps=used_by_apps, required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
@@ -972,7 +971,7 @@ def _reject_flags_unsupported_for_set_inputs(
         suppress=suppress,
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
-        budget=budget,
+        budget=budget, pdb_path=pdb_path,
     )
     _reject_compile_context_for_set_inputs(ctx)
     return _reject_evidence_flags_for_set_inputs(ctx)
@@ -1180,7 +1179,6 @@ def run_compare(
     *,
     old_input: Path, new_input: Path,
     output_dir: Path | None,
-    support_promise: str = "off",
     select: tuple[str, ...] = (), select_required: tuple[str, ...] = (),
     debug_info1: Path | None, debug_info2: Path | None,
     devel_pkg1: Path | None, devel_pkg2: Path | None,
@@ -1215,7 +1213,6 @@ def run_compare(
     fmt: str, demangle: bool | None, output: Path | None,
     suppress: Path | None,
     policy: str, policy_file_path: Path | None,
-    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
     severity_preset: str | None,
     config: Path | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
@@ -1227,17 +1224,11 @@ def run_compare(
     debug_roots: tuple[Path, ...],
     debug_roots_old: tuple[Path, ...],
     debug_roots_new: tuple[Path, ...],
-    # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
-    # unconditionally now (see compare_snapshots() call site below).
-    # explain_patterns survives, now pure rendering of the always-on ledger
-    # (populated by --view patterns; see frontends.cli.options.view).
-    # surface_metrics is also unconditional now -- the CLI always passes
-    # True to compare_snapshots() below regardless of this parameter's
-    # value, matching pattern_verdicts' own precedent (see
-    # adr027_compare_options' docstring).
+    # ADR-068 D4/Phase 5: --pattern-verdicts/--surface-metrics are gone --
+    # both run unconditionally now (compare_snapshots() passes True for
+    # both below). explain_patterns renders the always-on ledger via
+    # `--view patterns`, same as show_filtered/audit_suppressions below.
     explain_patterns: bool,
-    surface_metrics: bool,
-    reconcile_build_context: bool,
     env_matrix_path: Path | None,
     verbose: bool,
     use_cases_manifest: Path | None = None,
@@ -1357,6 +1348,13 @@ def run_compare(
     dwarf_only = resolved_cfg.dwarf_only
     debuginfod = resolved_cfg.debuginfod
     debuginfod_url = resolved_cfg.debuginfod_url
+    # Phase 7 (§4.1 CONFIG row): --pdb-path is config-only; see compare_pdb_config's docstring.
+    from .frontends.cli.compare_pdb_config import resolve_and_reject_shared_pdb_path
+
+    pdb_path = resolve_and_reject_shared_pdb_path(
+        resolved_cfg.pdb_path, old_input=old_input, new_input=new_input)
+    old_pdb_path: Path | None = None
+    new_pdb_path: Path | None = None
     show_redundant = resolved_cfg.show_redundant
     # Phase 7 (one-comparison-product.md §4.1): `--lang` has no CLI flag
     # left either; `compile.lang` is its only source, defaulting to the
@@ -1413,7 +1411,6 @@ def run_compare(
     if {old_kind, new_kind} & {"directory", "package"}:
         release_depth = _reject_flags_unsupported_for_set_inputs(
             ctx,
-            reconcile_build_context=reconcile_build_context,
             env_matrix_path=env_matrix_path,
             used_by_apps=used_by_apps, required_symbols=required_symbols,
             diagnostic_comparison=diagnostic_comparison,
@@ -1422,7 +1419,7 @@ def run_compare(
             require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
             suppress=suppress,
-            budget=budget,
+            budget=budget, pdb_path=pdb_path,
         )
         # Codex review, fresh evidence ("Validate release-only view
         # restrictions before dry-run exit"): --view leaf/root-cause is
@@ -1438,7 +1435,10 @@ def run_compare(
             reject_release_incompatible_view_mode,
         )
 
-        reject_release_incompatible_view_mode(report_mode)
+        reject_release_incompatible_view_mode(
+            report_mode,
+            show_filtered=show_filtered,
+        )
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
 
@@ -1572,7 +1572,7 @@ def run_compare(
             dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
             fail_on_removed=resolved_cfg.fail_on_removed_library,
             on_incomplete_scope=resolved_cfg.on_incomplete_scope,
-            support_promise=support_promise,
+            support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
             select=select, select_required=select_required,
             debug_info1=debug_info1, debug_info2=debug_info2,
             devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
@@ -1604,6 +1604,8 @@ def run_compare(
             # _dispatch_release_compare resolves and validates them.
             report_mode=report_mode, show_only=show_only,
             demangle=demangle, explain_patterns=explain_patterns,
+            # Forwarded so _dispatch_release_compare can reject (no per-library ledger yet).
+            show_filtered=show_filtered, audit_suppressions=audit_suppressions,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
@@ -1943,10 +1945,8 @@ def run_compare(
             force_public_symbols=force_public,
             extra_changes=extra_changes,
             pattern_verdicts=True,
-            surface_metrics=True,
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=post_manifest_allowlist,
-            reconcile_build_context=reconcile_build_context,
             diagnostic_comparison=diagnostic_comparison,
             contract_evaluation=contract_evaluation,
             contract_mode=resolved_contract_mode,

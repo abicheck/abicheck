@@ -619,11 +619,12 @@ NEW): X` are now two different lines rather than one wording for both. See
 the migration notes in
 [Exit codes](../reference/exit-codes.md#the-completeness-axis-adr-065-d6d7-directorypackage-compare-only).
 
-**Support-promise findings (`--support-promise`).** A proven inventory
-change is a change to what the project *promises to ship*, and ADR-065 D1
-requires it to be emitted under a policy rather than inferred. `off` (the
-default) emits nothing. `--support-promise declared` reports each proven
-removal as `support_promise_component_retired` (BREAKING) and each proven
+**Support-promise findings (`release.support_promise` in `.abicheck.yml`).**
+A proven inventory change is a change to what the project *promises to
+ship*, and ADR-065 D1 requires it to be emitted under a policy rather than
+inferred — a stable project property, not a per-invocation flag, so
+one-comparison-product.md Phase 7i moved it out of the CLI. `off` (the
+default) emits nothing. `release: {support_promise: declared}` reports each proven
 addition as `support_promise_component_introduced` (a compatible addition),
 as ordinary entries in the release report's `libraries` list carrying a
 `support_promise` field, so the release verdict, the severity policy and
