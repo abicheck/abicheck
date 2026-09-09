@@ -884,6 +884,27 @@ def test_scan_files_missing_directory_root_still_counted_under_changed_paths(
     assert res.files_skipped == 1
 
 
+def test_scan_files_accepts_a_one_shot_changed_paths_iterable(
+    tmp_path: Path,
+) -> None:
+    """Codex review, ninth round, fresh evidence: `changed_paths` is typed
+    `Iterable[str] | None`, which permits a one-shot generator. The eighth
+    round's own missing-root accounting consumed it once (building
+    `changed_suffixes`) before passing the SAME object to
+    `iter_source_files`, which then saw an already-exhausted iterable and
+    excluded every real candidate -- even one the generator genuinely
+    named."""
+    real = tmp_path / "real.hpp"
+    real.write_text("struct S { int x; };")
+
+    def _changed_paths():
+        yield "real.hpp"
+
+    res = scan_files([real], changed_paths=_changed_paths())
+    assert res.files_scanned == 1
+    assert res.files_skipped == 0
+
+
 def test_scan_files_empty_changed_paths_reports_no_skips(
     tmp_path: Path,
 ) -> None:

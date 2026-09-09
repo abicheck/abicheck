@@ -950,6 +950,14 @@ def scan_files(
     constrained sandbox never turns a scan into an error.
     """
     roots = list(roots)
+    # Codex review, ninth round, fresh evidence: `changed_paths` is typed as
+    # `Iterable[str] | None`, which permits a one-shot iterable (a
+    # generator). Materialized here, once, so the missing-root accounting
+    # below and the `iter_source_files` call after it both see the SAME
+    # entries -- consuming a generator once (e.g. building `changed_suffixes`
+    # below) would silently exhaust it, leaving `iter_source_files` an empty
+    # set and excluding every real candidate.
+    changed_paths = list(changed_paths) if changed_paths is not None else None
     # Codex review, fourth round, fresh evidence: `iter_source_files` silently
     # drops a root that is neither a file nor a directory (deleted/renamed
     # after being selected) with no accounting at all -- `[existing.hpp,

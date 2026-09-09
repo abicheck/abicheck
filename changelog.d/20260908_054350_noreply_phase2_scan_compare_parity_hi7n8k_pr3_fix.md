@@ -138,4 +138,11 @@
   the same kind of return-shape restructuring the reverted sixth-round fix
   attempted -- disproportionate to an adversarial-only, OS-level failure
   mode a best-effort advisory pre-scan (ADR-035 D2/D3) already degrades
-  gracefully from.
+  gracefully from. Ninth follow-up round (Codex review, PR #1169, ninth
+  round, fresh evidence): `changed_paths` is typed `Iterable[str] | None`,
+  permitting a one-shot generator; the eighth round's own missing-root
+  accounting consumed it once (building `changed_suffixes`) before passing
+  the SAME, now-exhausted object to `iter_source_files`, silently excluding
+  every real candidate even when the generator genuinely named one.
+  `scan_files` now materializes `changed_paths` into a list once, up
+  front, so both consumers see the same entries.
