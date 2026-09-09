@@ -40,3 +40,13 @@
   gate labels and exit code solely because of which route the baseline
   shape happened to select, not because of anything the step itself asked
   for differently.
+- **`scan --against --crosscheck KEY=info`/`=warning` now actually demotes
+  the automatic cross-source-checks stage's own finding, matching the
+  single-snapshot `scan crosscheck` mechanism's existing "info/warning
+  never gate" contract.** Previously the demoted level kept the finding
+  visible (as documented) but had no effect on its contribution to the
+  baseline scan's verdict or exit code — it still scored at its
+  `ChangeKind`'s own default severity under both the legacy verdict scheme
+  and `--severity-preset`/`.abicheck.yml`'s `severity:` scheme, so an
+  explicit `=info`/`=warning` override could still fail a run the same
+  flag on the sibling single-snapshot mechanism would pass.

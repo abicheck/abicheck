@@ -106,6 +106,7 @@ from ..policy.scope_completeness import (
 )
 from ..policy.severity import (
     PRESET_DEFAULT,
+    GateDecision,
     IssueCategory,
     SeverityConfig,
     SeverityLevel,
@@ -121,6 +122,7 @@ from ..policy.severity import (
 __all__ = [
     "ExitDecision",
     "GATE_SEVERITY_CATEGORIES",
+    "GateDecision",
     "GateOptions",
     "INCOMPLETE_SCOPE_POLICIES",
     "IssueCategory",

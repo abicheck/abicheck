@@ -1079,6 +1079,7 @@ def _run_baseline_compare(
     require_complete_analysis: bool = False,
     requested_depth: str | None = None,
     enabled_checks: frozenset[str] | None = None,
+    severities: dict[str, str] | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, preserving scan authority.
 
@@ -1092,6 +1093,18 @@ def _run_baseline_compare(
     single-snapshot `crosscheck` mechanism already respects it (Codex
     review). `enabled_checks=None` means every check stays enabled (`scan`'s
     own default, matching `_parse_crosschecks`'s no-flags case).
+
+    *severities* is `_parse_crosschecks`'s other half: a check explicitly
+    given `--crosscheck KEY=info`/`=warning` (Codex review, PR #1172, round
+    16) stays enabled and its automatic-stage finding stays visible, but
+    must not gate -- `_crosscheck_severity_exit`'s own contract for `scan`'s
+    dedicated single-snapshot mechanism ("`info`/`warning` never gate")
+    applies here too, or the caller's explicit demotion is silently
+    overridden by the finding kind's own default verdict once it reaches
+    the automatic stage. `KEY=error` needs no special-casing here: it only
+    ever *promotes* a check that would otherwise stay advisory, which the
+    dedicated `crosscheck` report's own `_crosscheck_severity_exit` already
+    handles independently of this diff.
 
     *headers*/*includes* are the same scan header inputs used to build the
     candidate, threaded into the baseline parse so a native ``--baseline``
@@ -1312,52 +1325,83 @@ def _run_baseline_compare(
         from .workflows.disposition import RuleProvenance, override_suppressed_change
 
         _disabled = frozenset(ALL_CHECKS) - enabled_checks
-        if _disabled:
-            _dropped = [
-                c
-                for c in diff.changes
-                if getattr(c, "cross_source_evolution", None)
-                and getattr(c.kind, "value", None) in _disabled
-            ]
-            if _dropped:
-                _dropped_ids = {id(c) for c in _dropped}
-                diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
-                _ledger = getattr(diff, "disposition_ledger", None)
-                for c in _dropped:
-                    _rule_id = f"crosscheck:{c.kind.value}=off"
-                    c.suppression_rule = _rule_id
-                    override_suppressed_change(
-                        _ledger,
-                        c,
-                        rule=RuleProvenance(
-                            rule_id=_rule_id,
-                            reason=f"disabled via --crosscheck {c.kind.value}=off",
-                        ),
-                        application_point="scan_crosscheck_off",
-                    )
-                diff.suppressed_changes = [*diff.suppressed_changes, *_dropped]
-                # CodeRabbit review: `suppressed_count` is a distinct scalar
-                # (set to `len(suppressed)` at construction time), not derived
-                # from `len(suppressed_changes)` -- must stay in sync.
-                diff.suppressed_count = len(diff.suppressed_changes)
-                # Codex review (PR #1172, round 12): `verdict_scored_changes`
-                # also excludes a `CrossSourceEvolution.RESOLVED` finding --
-                # it stays visible in `diff.changes` but must not drive this
-                # recompute, the same way `checker.compare()`'s own
-                # `all_unsuppressed` already excludes it (plan F-9); without
-                # that, disabling an unrelated crosscheck here could
-                # resurrect an already-fixed cross-source issue into a
-                # failing verdict.
-                _redundant = getattr(diff, "redundant_changes", None) or []
-                _verdict_population = verdict_scored_changes(
-                    diff.changes, _redundant, _ledger
+        _dropped = [
+            c
+            for c in diff.changes
+            if getattr(c, "cross_source_evolution", None)
+            and getattr(c.kind, "value", None) in _disabled
+        ]
+        if _dropped:
+            _dropped_ids = {id(c) for c in _dropped}
+            diff.changes = [c for c in diff.changes if id(c) not in _dropped_ids]
+            _ledger = getattr(diff, "disposition_ledger", None)
+            for c in _dropped:
+                _rule_id = f"crosscheck:{c.kind.value}=off"
+                c.suppression_rule = _rule_id
+                override_suppressed_change(
+                    _ledger,
+                    c,
+                    rule=RuleProvenance(
+                        rule_id=_rule_id,
+                        reason=f"disabled via --crosscheck {c.kind.value}=off",
+                    ),
+                    application_point="scan_crosscheck_off",
                 )
-                if policy_file is not None:
-                    diff.verdict = policy_file.compute_verdict(_verdict_population)
-                else:
-                    from .checker_policy import compute_verdict
+            diff.suppressed_changes = [*diff.suppressed_changes, *_dropped]
+            # CodeRabbit review: `suppressed_count` is a distinct scalar
+            # (set to `len(suppressed)` at construction time), not derived
+            # from `len(suppressed_changes)` -- must stay in sync.
+            diff.suppressed_count = len(diff.suppressed_changes)
+        # `--crosscheck KEY=info`/`=warning` (Codex review, PR #1172, round
+        # 16): the check stays enabled and its finding stays fully visible
+        # in `diff.changes`/the report -- unlike `_dropped` above, nothing
+        # here is suppressed -- but it must not gate on *any* axis, the same
+        # unconditional "`info`/`warning` never gate" contract
+        # `scan_engine._crosscheck_severity_exit` already enforces for the
+        # dedicated single-snapshot `crosscheck` mechanism. `_non_gating`
+        # (a plain local, not a `diff` mutation) is read again much further
+        # down, in the `exit_code_scheme == "severity"` branch -- that
+        # branch's `gate_decision_for_result`/`compute_gate_decision` always
+        # read `result.changes`/a changes list directly (deliberately, by
+        # that module's own docstring, so a display-only filter can never
+        # change the exit code), so the exclusion has to be applied at each
+        # of those two call sites, not by mutating `diff.changes` itself or
+        # stamping a per-finding `effective_verdict` override (tried first;
+        # rejected because `Verdict.COMPATIBLE` still classifies as
+        # `quality_issues`, which `--severity-preset strict` itself treats
+        # as `error` -- contradicting "never gate").
+        _non_gating = frozenset(
+            k for k, level in (severities or {}).items() if level in ("info", "warning")
+        )
 
-                    diff.verdict = compute_verdict(_verdict_population, policy=policy)
+        def _crosscheck_non_gating(c: Any) -> bool:
+            return bool(
+                getattr(c, "cross_source_evolution", None)
+                and getattr(c.kind, "value", None) in _non_gating
+            )
+
+        if _dropped or _non_gating:
+            # Codex review (PR #1172, round 12): `verdict_scored_changes`
+            # also excludes a `CrossSourceEvolution.RESOLVED` finding --
+            # it stays visible in `diff.changes` but must not drive this
+            # recompute, the same way `checker.compare()`'s own
+            # `all_unsuppressed` already excludes it (plan F-9); without
+            # that, disabling an unrelated crosscheck here could
+            # resurrect an already-fixed cross-source issue into a
+            # failing verdict.
+            _ledger = getattr(diff, "disposition_ledger", None)
+            _redundant = getattr(diff, "redundant_changes", None) or []
+            _verdict_population = [
+                c
+                for c in verdict_scored_changes(diff.changes, _redundant, _ledger)
+                if not _crosscheck_non_gating(c)
+            ]
+            if policy_file is not None:
+                diff.verdict = policy_file.compute_verdict(_verdict_population)
+            else:
+                from .checker_policy import compute_verdict
+
+                diff.verdict = compute_verdict(_verdict_population, policy=policy)
     # Codex review: stamp metadata so the same-binary warning below fires here too (a no-op for JSON/Perl/symvers). Best-effort (mocked resolve_input tests may pass a path with no real file -- all-or-nothing). Hash through the full GNU ld linker-script chain to its final resolved target -- the same binary resolve_input() already followed above -- so a (possibly multi-hop) script vs. its target DSO still reads as byte-identical. Routed through `workflows.extraction`, not `binary_utils` directly -- this module is `frontends` layer under ADR-061, which may not import `extract` (where `binary_utils` lives).
     from .workflows.extraction import resolve_linker_script_chain
 
@@ -1464,7 +1508,11 @@ def _run_baseline_compare(
     )
 
     from .cli_compare_helpers import _verdict_exit_code
-    from .workflows.gate import fold_coverage_exit, gate_decision_for_result
+    from .workflows.gate import (
+        GateDecision,
+        fold_coverage_exit,
+        gate_decision_for_result,
+    )
 
     verdict = diff.verdict.value
     # Mirrors `compare`'s own `_exit_with_severity_or_verdict` (cli.py):
@@ -1485,10 +1533,34 @@ def _run_baseline_compare(
         # `reporter._build_severity_json` via the shared
         # `gate_decision_for_result` chokepoint (ADR-061 D9), so the two
         # commands' gate receipts are comparable field-by-field.
-        computed_gate = gate_decision_for_result(diff, sev_config)
+        #
+        # `_non_gating` (round 16, see its own definition above): scored
+        # over a filtered list, not `diff.changes` directly, when a
+        # `--crosscheck KEY=info`/`=warning` demotion is in effect --
+        # `gate_decision_for_result` deliberately always reads
+        # `result.changes` in full (its own docstring: a *display-only*
+        # filter must never change the exit code), so this scan-specific,
+        # per-run exclusion has to route around it via the same
+        # `compute_gate_decision` primitive it calls internally, called
+        # directly with the filtered list instead.
+        computed_gate: GateDecision | None
+        if _non_gating:
+            from .workflows.gate import compute_gate_decision
+
+            _sev_changes = [c for c in diff.changes if not _crosscheck_non_gating(c)]
+            computed_gate = compute_gate_decision(
+                _sev_changes,
+                sev_config,
+                policy=diff.policy,
+                kind_sets=diff._effective_kind_sets(),
+                policy_file=diff.policy_file,
+            )
+        else:
+            _sev_changes = list(diff.changes)
+            computed_gate = gate_decision_for_result(diff, sev_config)
         assert computed_gate is not None  # sev_config is not None here
         gate = _build_severity_json(
-            list(diff.changes),
+            _sev_changes,
             sev_config,
             gate=computed_gate,
             policy=diff.policy,

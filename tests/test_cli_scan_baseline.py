@@ -736,6 +736,72 @@ class TestCrosscheckOffStaysEffectiveOnAutomaticStageFindings:
         kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
         assert "exported_not_public" in kinds
 
+    @pytest.mark.parametrize("level", ["info", "warning"])
+    def test_info_and_warning_levels_never_gate(
+        self, tmp_path: Path, level: str
+    ) -> None:
+        # Codex review, PR #1172, round 16: `--crosscheck KEY=info`/`=warning`
+        # kept the check enabled (finding stays in `diff.findings`) but had
+        # zero effect on the automatic-stage finding's own gating -- it
+        # still scored at its ChangeKind's default severity. `--severity-
+        # preset strict` (potential_breaking: error) is what actually
+        # proves the fix: `exported_not_public` is a RISK-kind check, so
+        # its default COMPATIBLE_WITH_RISK verdict *would* gate under
+        # strict (exit 2) if the demotion had no effect -- the same way
+        # the reported bug's own repro used an API_BREAK-kind check under
+        # the legacy scheme.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(p),
+                "--against",
+                str(p),
+                "--crosscheck",
+                f"exported_not_public={level}",
+                "--severity-preset",
+                "strict",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        kinds = [f["kind"] for f in (payload.get("diff") or {}).get("findings", [])]
+        assert "exported_not_public" in kinds, "finding stays fully visible"
+
+    def test_no_crosscheck_flag_still_gates_under_strict(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control: without an explicit info/warning demotion, the
+        # same finding under --severity-preset strict genuinely gates --
+        # confirming the parametrized test above isn't passing for some
+        # unrelated reason (e.g. strict not actually applying here).
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        p = self._self_compared_export_case(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(p),
+                "--against",
+                str(p),
+                "--severity-preset",
+                "strict",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+
 
 class TestGatingRedundantChanges:
     """``gating_redundant_changes()`` (CodeRabbit review, PR #1172):
