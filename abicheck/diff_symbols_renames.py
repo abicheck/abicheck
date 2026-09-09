@@ -799,10 +799,28 @@ def _all_constituents_elf_bound(
     -- the same "assume evidence was examined" default
     ``evidence_status_for_result``'s own ``evidence_tiers=()`` fallback uses
     -- so a caller that can't thread the map through gets prior behavior.
+
+    *old_names* are :func:`find_prefix_rename_pairs`'s display-name output
+    (``Function.name``, demangled), not ``old_map``'s own mangled-symbol
+    keys -- a direct ``name in old_map`` test against a mangled-keyed map
+    silently matched nothing for ordinary C++ names, making ``all(...)``
+    over the resulting empty generator vacuously ``True`` regardless of
+    real evidence (Codex review, fresh evidence). Resolved here via a
+    name -> Function reverse index built from *old_map*'s own values; an
+    ambiguous (2+ declarations sharing one demangled spelling) or
+    unresolved name counts as *not* bound, never silently promoted to
+    "confirmed bound".
     """
     if old_map is None:
         return True
-    return all(bool(old_map[name].elf_binding) for name in old_names if name in old_map)
+    by_name: dict[str, list[Function]] = {}
+    for f in old_map.values():
+        by_name.setdefault(f.name, []).append(f)
+    for name in old_names:
+        matches = by_name.get(name)
+        if matches is None or len(matches) != 1 or not matches[0].elf_binding:
+            return False
+    return True
 
 
 def emit_prefix_batch_rename(

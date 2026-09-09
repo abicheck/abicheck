@@ -39,6 +39,7 @@ from .checker import (
 )
 from .checker_policy import (
     HasKind,
+    evidence_status_for_result,
     policy_kind_sets as _policy_kind_sets,
 )
 from .contract_gating import is_evaluated
@@ -1026,7 +1027,8 @@ def compute_root_cause_section(
         order.append(key)
         root_by_key[key] = root_display
         finding_lines_by_key[key] = [
-            _format_change_md(c, evidence_tiers) + _cross_source_evolution_md_suffix(c)
+            _format_change_md(c, evidence_status_for_result(c, evidence_tiers))
+            + _cross_source_evolution_md_suffix(c)
             for c in group_changes
         ]
         count_by_key[key] = len(group_changes)

@@ -29,8 +29,14 @@ are covered below.
 from __future__ import annotations
 
 from abicheck.checker_policy import EvidenceStatus, evidence_status_for_result
-from abicheck.compare.namespace_move import emit_namespace_move_batches
-from abicheck.diff_symbols_renames import emit_prefix_batch_rename
+from abicheck.compare.namespace_move import (
+    emit_namespace_move_batches,
+    find_namespace_move_groups,
+)
+from abicheck.diff_symbols_renames import (
+    emit_prefix_batch_rename,
+    find_prefix_rename_pairs,
+)
 from abicheck.model import Function
 from abicheck.model.elf_facts import SymbolBinding
 
@@ -38,6 +44,20 @@ from abicheck.model.elf_facts import SymbolBinding
 def _fn(mangled: str, bound: bool) -> Function:
     return Function(
         name=mangled,
+        mangled=mangled,
+        return_type="void",
+        elf_binding=SymbolBinding.GLOBAL if bound else None,
+    )
+
+
+def _real_fn(name: str, mangled: str, bound: bool) -> Function:
+    """A constituent whose demangled `name` genuinely differs from its
+    mangled `mangled` spelling -- the shape `_fn` above deliberately
+    collapses, which is exactly what let the mangled-key/demangled-name
+    mismatch bug (Codex review, fresh evidence) go uncaught by every test
+    above."""
+    return Function(
+        name=name,
         mangled=mangled,
         return_type="void",
         elf_binding=SymbolBinding.GLOBAL if bound else None,
@@ -160,5 +180,95 @@ class TestNamespaceMoveBatchEvidenceAggregation:
         change = emit_namespace_move_batches(groups, old_map)[0]
         assert (
             evidence_status_for_result(change, ["header", "elf"])
+            is EvidenceStatus.UNATTRIBUTED
+        )
+
+
+class TestRealisticMangledKeyVsDemangledNameMismatch:
+    """Codex review, fresh evidence: `find_prefix_rename_pairs` emits
+    *demangled* `Function.name` pairs, but `old_map` (from
+    `diff_symbols._public_functions`) is keyed by *mangled* symbol -- every
+    test class above used `_fn(mangled, bound)` with `name=mangled`, which
+    made the two identity spaces coincide by construction and silently
+    hid the real mismatch. These tests use `_real_fn`, where `name` and
+    `mangled` genuinely differ, going through the actual production
+    `find_prefix_rename_pairs` -> `emit_prefix_batch_rename` chain
+    (not hand-built pairs), to prove the fix resolves constituents by
+    their real declaration rather than vacuously matching nothing.
+    """
+
+    def test_weak_constituent_is_detected_through_the_real_matcher(self) -> None:
+        old_map = {
+            "_ZN3Foo3barEv": _real_fn("Foo::bar()", "_ZN3Foo3barEv", bound=True),
+            "_ZN3Foo3bazEv": _real_fn("Foo::baz()", "_ZN3Foo3bazEv", bound=False),
+        }
+        new_map = {
+            "_ZN9mylib_Foo3barEv": _real_fn(
+                "mylib_Foo::bar()", "_ZN9mylib_Foo3barEv", bound=True
+            ),
+            "_ZN9mylib_Foo3bazEv": _real_fn(
+                "mylib_Foo::baz()", "_ZN9mylib_Foo3bazEv", bound=True
+            ),
+        }
+        removed = set(old_map.keys())
+        added = set(new_map.keys())
+        pairs = find_prefix_rename_pairs(removed, added, old_map, new_map)
+        assert len(pairs) == 2  # sanity: the matcher found both constituents
+
+        change = emit_prefix_batch_rename(pairs, old_map)[0]
+        # Before the fix this vacuously read "all constituents bound" --
+        # `Foo::baz()`'s unbound old declaration must actually be found and
+        # correctly downgrade the batch.
+        assert not change.symbol_binding
+        assert (
+            evidence_status_for_result(change, ["header", "elf"])
+            is EvidenceStatus.UNATTRIBUTED
+        )
+
+    def test_fully_bound_batch_is_confirmed_through_the_real_matcher(self) -> None:
+        old_map = {
+            "_ZN3Foo3barEv": _real_fn("Foo::bar()", "_ZN3Foo3barEv", bound=True),
+            "_ZN3Foo3bazEv": _real_fn("Foo::baz()", "_ZN3Foo3bazEv", bound=True),
+        }
+        new_map = {
+            "_ZN9mylib_Foo3barEv": _real_fn(
+                "mylib_Foo::bar()", "_ZN9mylib_Foo3barEv", bound=True
+            ),
+            "_ZN9mylib_Foo3bazEv": _real_fn(
+                "mylib_Foo::baz()", "_ZN9mylib_Foo3bazEv", bound=True
+            ),
+        }
+        removed = set(old_map.keys())
+        added = set(new_map.keys())
+        pairs = find_prefix_rename_pairs(removed, added, old_map, new_map)
+        assert len(pairs) == 2
+
+        change = emit_prefix_batch_rename(pairs, old_map)[0]
+        assert change.symbol_binding
+        assert (
+            evidence_status_for_result(change, ["header", "elf"])
+            is EvidenceStatus.ARTIFACT_PROVEN
+        )
+
+    def test_namespace_move_resolves_the_real_mangled_declaration(self) -> None:
+        # Two constituents genuinely moved from ns::d1 to ns::d2 -- one
+        # bound, one not -- resolved through the real
+        # find_namespace_move_groups -> emit_namespace_move_batches chain.
+        old_map = {
+            "_ZN2ns2d13fooEv": _real_fn("ns::d1::foo()", "_ZN2ns2d13fooEv", bound=True),
+            "_ZN2ns2d13barEv": _real_fn(
+                "ns::d1::bar()", "_ZN2ns2d13barEv", bound=False
+            ),
+        }
+        removed = set(old_map.keys())
+        added = {"_ZN2ns2d23fooEv", "_ZN2ns2d23barEv"}
+        groups = find_namespace_move_groups(removed, added)
+        assert groups  # sanity: a real move was detected
+
+        changes = emit_namespace_move_batches(groups, old_map)
+        assert len(changes) == 1
+        assert not changes[0].symbol_binding
+        assert (
+            evidence_status_for_result(changes[0], ["header", "elf"])
             is EvidenceStatus.UNATTRIBUTED
         )
