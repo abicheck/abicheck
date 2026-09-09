@@ -38,7 +38,7 @@ from abicheck.cli import compare_cmd, dump_cmd, main
 from abicheck.cli_options import compile_context_options, sided_frontend_explicit
 from abicheck.cli_scan import scan_cmd
 from abicheck.model import AbiSnapshot
-from abicheck.service_scan import CompileContext, ScanRequest
+from abicheck.service_scan import CompileContext
 
 #: The dest names the compile-context family contributes (dump↔scan parity).
 #: The ``gcc_*`` dests are deliberately absent: --gcc-options was removed as a
@@ -95,12 +95,20 @@ def test_compile_context_default_is_empty() -> None:
     assert CompileContext(frontend="clang").is_default is False
 
 
-def test_scan_request_carries_compile_context() -> None:
+def test_input_spec_carries_compile_context() -> None:
+    """The typed request's per-side L2 compile context (ADR-055 D1).
+
+    Was ``ScanRequest.compile`` until ADR-068 Phase 4 retired that type;
+    ``InputSpec.compile`` is the same capability on the one surviving request
+    pair, and ``None`` (rather than an inert default instance) is how a side
+    says "no override", so call sites can still skip threading one.
+    """
+    from abicheck.api_types import InputSpec
+
     cc = CompileContext(gcc_options="-DFOO=1", sysroot=Path("/sr"), nostdinc=True)
-    req = ScanRequest(binaries=[Path("x.so")], compile=cc)
-    assert req.compile is cc
-    # Default request has an inert context (call sites can skip threading).
-    assert ScanRequest().compile.is_default is True
+    side = InputSpec.of(Path("x.so"), compile=cc)
+    assert side.compile is cc
+    assert InputSpec.of(Path("x.so")).compile is None
 
 
 def test_dump_elf_threads_compile_context_to_dumper(

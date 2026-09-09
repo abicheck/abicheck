@@ -3259,127 +3259,44 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   # — there is no separate --audit/--mode/--source-method/--estimate flag any
   # more (CLI simplification).
   CMD+=(scan)
-  SCAN_ARTIFACT_SET="${INPUT_NEW_LIBRARY_SET:-}"
-  if [[ -n "$SCAN_ARTIFACT_SET" ]]; then
-    # ADR-056: audit a *set* of libraries with no old side, as one
-    # operation. Mutually exclusive with new-library and against/
-    # abi-baseline — normally caught early by action/validate-inputs.sh,
-    # before any dependency install; re-checked here for anyone invoking
-    # run.sh directly (e.g. tests) without that step.
-    if [[ -n "${INPUT_NEW_LIBRARY:-}" ]]; then
-      echo "::error::mode: scan cannot take both new-library and new-library-set — new-library-set audits a *set* of libraries with no old side (ADR-056), new-library scans exactly one artifact. Set only one."
-      exit 1
-    fi
-    if [[ -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ]]; then
-      # Without this, the later "omit --against for new-library-set" logic
-      # (below) would silently downgrade an explicitly-requested baseline
-      # compare into an audit-only run instead of rejecting it -- a direct
-      # run.sh caller (bypassing validate-inputs.sh's own copy of this
-      # check) would get a successful result for a different operation
-      # than requested (Codex review).
-      echo "::error::mode: scan with new-library-set does not support against/abi-baseline — new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
-      exit 1
-    fi
-    # `new-library-set`'s own input contract stays a directory or a
-    # comma-separated path list (action.yml) -- CLI cleanup phase two, PR 5
-    # changed only the native `scan --artifact-set` *CLI* value syntax to a
-    # repeatable option, and the Action's own input is a separate, already
-    # decoupled front end this plan's front-end-parity rule requires stay
-    # working, not re-broken to match. A bare directory (no comma) is passed
-    # through as the one CLI value unchanged; a comma-separated list is
-    # split into one `--artifact-set` occurrence per member here, so the
-    # Action's callers never see the CLI's syntax change. Blank members
-    # (from a stray leading/trailing/double comma) are skipped, mirroring
-    # the old CLI parser's own `if p.strip()` filter rather than forwarding
-    # them to a per-member CLI empty-string rejection.
-    if [[ "$SCAN_ARTIFACT_SET" == *,* || "$SCAN_ARTIFACT_SET" == *$'\n'* ]]; then
-      # `read -ra ... <<<` reads only the first line, silently dropping every
-      # member after an embedded newline (e.g. a YAML block-scalar
-      # new-library-set value like "a.so,\nb.so") -- a real regression from
-      # the old Python parser, which split the *entire* string on comma with
-      # no such truncation (Codex review). IFS word-splitting on the whole
-      # value has no line-based limit: setting IFS to comma-or-newline makes
-      # unquoted expansion split on either, so a *pure* newline-separated
-      # block scalar (no commas at all -- CodeRabbit review) splits too, not
-      # just the comma case str.split(",") would have handled.
-      # -f (noglob) is required alongside IFS splitting: an unquoted array
-      # assignment word-splits *then* pathname-expands each resulting word,
-      # so a member containing a glob metacharacter (e.g. "*.so,z.so") would
-      # otherwise silently expand "*.so" against the working directory and
-      # scan whatever files happen to match, not the literal requested
-      # member (Codex review, security-relevant for an untrusted Action
-      # input).
-      _old_ifs="$IFS"
-      IFS=$',\n'
-      set -f
-      # shellcheck disable=SC2206  # intentional word-splitting on IFS=$',\n'; -f above suppresses globbing
-      _scan_artifact_set_members=($SCAN_ARTIFACT_SET)
-      set +f
-      IFS="$_old_ifs"
-      for _scan_artifact_set_member in "${_scan_artifact_set_members[@]}"; do
-        # Trim surrounding whitespace (xargs-free, no subshell/echo pitfalls).
-        _scan_artifact_set_member="${_scan_artifact_set_member#"${_scan_artifact_set_member%%[![:space:]]*}"}"
-        _scan_artifact_set_member="${_scan_artifact_set_member%"${_scan_artifact_set_member##*[![:space:]]}"}"
-        [[ -n "$_scan_artifact_set_member" ]] || continue
-        CMD+=(--artifact-set "$_scan_artifact_set_member")
-      done
-    else
-      # A YAML block-scalar directory value commonly carries a trailing
-      # newline even with no comma at all (e.g. "libs/\n") -- trim it the
-      # same way the per-member branch above does, so it isn't forwarded as
-      # a literal, nonexistent path (CodeRabbit review; the old Python
-      # parser stripped every part unconditionally).
-      _scan_artifact_set_dir="${SCAN_ARTIFACT_SET#"${SCAN_ARTIFACT_SET%%[![:space:]]*}"}"
-      _scan_artifact_set_dir="${_scan_artifact_set_dir%"${_scan_artifact_set_dir##*[![:space:]]}"}"
-      if [[ -z "$_scan_artifact_set_dir" ]]; then
-        echo "::error::new-library-set must not be empty." >&2
-        exit 1
-      fi
-      CMD+=(--artifact-set "$_scan_artifact_set_dir")
-    fi
-    # CLI cleanup phase two, PR J: --bundle-system-providers removed from
-    # scan's CLI too -- sourced only from build-config's own .abicheck.yml
-    # `bundle.system_providers:` now (forwarded via --config/--build-config
-    # elsewhere in this script for scan mode).
-  else
-    SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"
-    # scan has no per-library fan-out (unlike compare) — a directory/package
-    # is normally caught early by action/validate-inputs.sh, before any
-    # dependency install; re-checked here for anyone invoking run.sh directly
-    # (e.g. tests) without that step.
-    if _is_release_style_operand "$SCAN_ARTIFACT"; then
-      echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use new-library-set to audit a set with no old side, or mode: compare against a directory/package for a multi-library binary comparison instead."
-      exit 1
-    fi
-    CMD+=("$SCAN_ARTIFACT")
+  # ADR-068's second 2026-09-09 amendment ruling table, applied to this
+  # Action's own input surface (D8: hard removal, no deprecation window).
+  # Each of these named a `scan` CLI flag that no longer exists, so the only
+  # honest outcomes are a clear error naming the blocker/replacement or a
+  # silent downgrade to a different operation than the workflow asked for.
+  if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
+    echo "::error::mode: scan no longer supports new-library-set (ADR-068 (b): scan --artifact-set is retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented -- routing it onto compare --no-baseline today would silently narrow those guarantees. Until that lands, run one scan per library."
+    exit 1
   fi
+  if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
+    echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves deterministically from the mode preset; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
+    exit 1
+  fi
+  if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
+    echo "::error::mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
+    exit 1
+  fi
+  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}"
+  # scan has no per-library fan-out (unlike compare) — a directory/package
+  # is normally caught early by action/validate-inputs.sh, before any
+  # dependency install; re-checked here for anyone invoking run.sh directly
+  # (e.g. tests) without that step.
+  if _is_release_style_operand "$SCAN_ARTIFACT"; then
+    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use mode: compare against a directory/package for a multi-library binary comparison instead."
+    exit 1
+  fi
+  CMD+=("$SCAN_ARTIFACT")
 
-  if [[ -n "$SCAN_ARTIFACT_SET" ]]; then
-    # --artifact-set has no old side, so cli_scan._run_artifact_set rejects
-    # old=/new= scoping outright -- old-header/old-include are meaningless
-    # here (reject loudly rather than let the CLI's own UsageError surface
-    # only after toolchain install) and new-header/new-include map to the
-    # bare flags, not "-H new=..."/"-I new=..." (Codex review).
-    if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
-      echo "::error::mode: scan with new-library-set does not support old-header/old-include -- new-library-set is audit-only (no old side, ADR-056)."
-      exit 1
-    fi
-    add_flag "-H" "${INPUT_HEADER:-}"
-    add_flag "-H" "${INPUT_NEW_HEADER:-}"
-    add_flag "-I" "${INPUT_INCLUDE:-}"
-    add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
-  else
-    # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
-    # the --against side; old-header/old-include and new-header/new-include
-    # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
-    # leak into the baseline side's parse (Codex review).
-    add_flag "-H" "${INPUT_HEADER:-}"
-    add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
-    add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
-    add_flag "-I" "${INPUT_INCLUDE:-}"
-    add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
-    add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
-  fi
+  # -H/-I are side-aware on scan: a bare value applies to both ARTIFACT and
+  # the --against side; old-header/old-include and new-header/new-include
+  # scope to one side only (ADR-040 L1) so a candidate-only header doesn't
+  # leak into the baseline side's parse (Codex review).
+  add_flag "-H" "${INPUT_HEADER:-}"
+  add_sided_flag "-H" "old" "${INPUT_OLD_HEADER:-}"
+  add_sided_flag "-H" "new" "${INPUT_NEW_HEADER:-}"
+  add_flag "-I" "${INPUT_INCLUDE:-}"
+  add_sided_flag "-I" "old" "${INPUT_OLD_INCLUDE:-}"
+  add_sided_flag "-I" "new" "${INPUT_NEW_INCLUDE:-}"
 
   # --public-header-dir is not side-aware on the CLI (unlike -H/-I above),
   # so it's forwarded once regardless of which branch above ran.
@@ -3424,7 +3341,7 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   # (a candidate-only header reachable from the baseline side). Mirrors the
   # exact condition the real `--against` forward below uses, so the two
   # stay in lockstep.
-  if [[ -z "$SCAN_ARTIFACT_SET" && "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
+  if [[ "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
     add_sided_flag "-H" "new" "${INPUT_PUBLIC_HEADER_DIR:-}"
   else
     add_flag "-H" "${INPUT_PUBLIC_HEADER_DIR:-}"
@@ -3451,20 +3368,16 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   # scan's config flag is --config (not --build-config, which does not exist on
   # scan and hard-fails with exit 64). dump uses --config for the same input.
   add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
-  # --build-target (P0.2, lab report follow-up): scan now supports the same
-  # root-target scoping dump does (scan_engine.run_scan_core), so forward it
-  # identically -- an unscoped scan of a multi-package workspace previously
-  # diverged from a --build-target-scoped dump baseline's own L3 evidence.
-  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
+  # No `--build-target` here: ADR-068's second 2026-09-09 amendment rules
+  # `scan --build-target` (b) -- retired -- and this branch rejects the
+  # `build-target` input outright above rather than forwarding a flag the
+  # command no longer has. `dump --build-target` is unchanged.
   # Omitting --against is already a one-build audit-only run; the preferred
   # way to force one for a single step is to simply not set against/
   # abi-baseline there. The deprecated `audit: true` back-compat alias
   # (above) achieves the same by skipping --against outright even when
   # against/abi-baseline resolved to a value elsewhere in the workflow.
-  # --artifact-set is audit-only at the CLI level too (ADR-056) — normally
-  # caught early by validate-inputs.sh; skip forwarding here as well for
-  # anyone invoking run.sh directly.
-  if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" ]]; then
+  if [[ "$FORCE_AUDIT_ONLY" != "true" ]]; then
     add_single_flag "--against" "${INPUT_AGAINST:-}"
   fi
   add_single_flag "--lang" "${INPUT_LANG:-}"
@@ -3486,7 +3399,6 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   add_single_flag "--since" "${INPUT_SINCE:-}"
   add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
   add_single_flag "--budget" "${INPUT_BUDGET:-}"
-  add_single_flag "--risk-rules" "${INPUT_RISK_RULES:-}"
   add_flag "--crosscheck" "${INPUT_CROSSCHECK:-}"
   # `scan --against` takes @policy_options (--policy/--policy-file/
   # --suppress) the same as compare, but this branch never forwarded them —
@@ -3501,7 +3413,7 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   # --policy strict_abi into an always-present explicit flag and break
   # every existing audit-only (no baseline) scan step with a usage error
   # (Codex review, P1).
-  if [[ "$FORCE_AUDIT_ONLY" != "true" && -z "$SCAN_ARTIFACT_SET" && -n "${INPUT_AGAINST:-}" ]]; then
+  if [[ "$FORCE_AUDIT_ONLY" != "true" && -n "${INPUT_AGAINST:-}" ]]; then
     # `--policy` takes both operands now: a built-in profile name, or a
     # policy document (a path, or a packaged built-in like `security`). A
     # policy-file input therefore *is* the policy for this run and outranks
@@ -3577,10 +3489,8 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
     # (Codex review — a naive rerun-on-text-format fallback would double
     # potentially expensive work and describe a second, separately
     # budget-metered run rather than the one whose status actually gated the
-    # step). Only needed when the primary format isn't already JSON, and
-    # --artifact-set has no single-artifact JSON shape to render a second
-    # time (the CLI itself rejects --secondary-* there too). Also skipped
-    # when the user's own `extra-args` already requests `--write`/
+    # step). Only needed when the primary format isn't already JSON. Also
+    # skipped when the user's own `extra-args` already requests `--write`/
     # `--write` (Codex review, follow-up) -- see
     # `_extra_args_has_write_flag`'s own docstring for why injecting
     # ours anyway would be actively wrong, not merely redundant.
@@ -3608,8 +3518,7 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
     # branch at all -- the `elif` above it returns before `OUTPUT_FILE`/`-o`/
     # this injection are considered, so there is no separate dry-run check
     # needed here (Codex review, P2, fresh evidence).
-    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" \
-       && -z "$SCAN_ARTIFACT_SET" ]] && ! _extra_args_has_write_flag; then
+    if [[ "${_EFFECTIVE_FORMAT:-${FORMAT:-}}" != "json" ]] && ! _extra_args_has_write_flag; then
       PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
       CMD+=(--write "json=$PR_JSON")
     fi
@@ -5065,30 +4974,20 @@ elif [[ "$_CLI_MODE" == "scan" ]]; then
         # compatibility verdict to escalate to -- same shape as ERROR in
         # that respect, deliberately not escalated.
         #
-        # `--artifact-set` shares this exact code too, as of 2026-09-04
-        # (`service_scan._aggregate_scan_set_verdict`'s own "Design
-        # decision" note): closing the last `--artifact-set`/`format: text`
-        # signal gap this axis had (the set has no single-artifact stderr
-        # to point at, so its own message below names the JSON report's
-        # per_artifact entries instead).
         VERDICT="EVIDENCE_CONTRACT_ERROR"
-        if [[ -n "${SCAN_ARTIFACT_SET:-}" ]]; then
-          # Generic on the specific cause for the same reason as the
-          # single-artifact message below -- which member and why lives in
-          # the report, not one shared stderr line.
-          echo "::error::abicheck scan aborted: at least one --artifact-set member's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the JSON/text report's per_artifact entries for which member and why (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
-        else
-          # Generic on purpose (Codex review, fresh evidence): scan_engine's
-          # _EvidenceContractError has two independent raise sites -- a
-          # pinned --depth/--source-method with no source evidence, and
-          # --abi3 targeting a binary _run_abi3_audit can't recognise as a
-          # CPython extension module -- and this exit code alone doesn't say
-          # which fired. Naming the depth/evidence cause here would
-          # misdiagnose the abi3 case, which has nothing to do with a pin or
-          # missing evidence; the command's own stderr (printed above) names
-          # the exact cause.
-          echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
-        fi
+        # Generic on purpose (Codex review, fresh evidence): scan_engine's
+        # _EvidenceContractError has two independent raise sites -- a
+        # pinned --depth/--source-method with no source evidence, and
+        # --abi3 targeting a binary _run_abi3_audit can't recognise as a
+        # CPython extension module -- and this exit code alone doesn't say
+        # which fired. Naming the depth/evidence cause here would
+        # misdiagnose the abi3 case, which has nothing to do with a pin or
+        # missing evidence; the command's own stderr (printed above) names
+        # the exact cause. (Through 2026-09-09 an `--artifact-set` run
+        # shared this code and got its own per-member wording; ADR-068's
+        # second amendment retired that mode, so there is one message
+        # again.)
+        echo "::error::abicheck scan aborted: this scan's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected, or --abi3 targeting a binary that isn't a recognisable CPython extension module)."
         ;;
       6)
         # NOT_COMPARABLE (ADR-050 D2: a scope/profile mismatch between the
@@ -5601,15 +5500,6 @@ _maybe_post_pr_comment() {
     compare | scan) ;;
     *) return 0 ;;
   esac
-  # `scan --artifact-set` (ADR-056) has no old side and no single scanned
-  # artifact -- its JSON is a per-library audit list, a different shape
-  # `pr_comment_scan.py`'s `from_scan` doesn't handle (it expects one
-  # `diff`/`findings`/`additions` block for one artifact). Skip rather than
-  # render a misleading or crashing comment.
-  if [[ "$MODE" == "scan" && -n "${SCAN_ARTIFACT_SET:-}" ]]; then
-    echo "abicheck: scan --artifact-set has no single-artifact JSON shape; skipping PR comment."
-    return 0
-  fi
   # A dry run performed no real comparison -- posting a comment would either
   # show nothing (no PR_JSON) or silently trigger a second, real compare just
   # to produce one, defeating the point of --dry-run. Skip entirely.

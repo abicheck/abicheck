@@ -14,24 +14,26 @@
 
 """Coverage-closing unit tests for :mod:`abicheck.service_scan`.
 
-Targets the error/fallback branches and the MCP subprocess harness that the
-existing ``test_scan_estimate.py`` happy-path tests don't reach: header-input
-edge cases, the compile-DB / source-tree / pack TU counters' failure paths, and
-the killable ``run_scan_subprocess`` worker (``_scan_subprocess_worker`` /
-``_kill_process_tree``). Default lane — no compiler; the subprocess tests use a
-serialized ``.abi.json`` snapshot so the spawned child never invokes castxml.
+Targets the error/fallback branches the existing ``test_scan_estimate.py``
+happy-path cases don't reach: header-input edge cases and the compile-DB /
+source-tree / pack TU counters' failure paths. Default lane — no compiler.
+
+ADR-068 Phase 4 retired this module's request/result types along with
+``run_scan``/``run_scan_set`` and their killable subprocess harness, so the
+``_scan_subprocess_worker``/``_kill_process_tree``/``_descendant_pgids`` cases
+that used to live here went with the code they covered; what remains is the
+dry-run cost model's own error handling.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import signal
-import subprocess
 from pathlib import Path
 
 import pytest
 
+from abicheck.api_types import InputSpec
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.errors import ValidationError
 from abicheck.model import (
@@ -43,18 +45,11 @@ from abicheck.model import (
 )
 from abicheck.serialization import snapshot_to_json
 from abicheck.service_scan import (
-    ScanRequest,
     _count_compile_db_tus,
     _count_pack_tus,
     _count_source_tus,
-    _descendant_pgids,
-    _kill_process_tree,
-    _layers_from_coverage,
-    _reject_comparison_only_fields,
-    _scan_subprocess_worker,
     estimate_scan,
     expand_header_inputs,
-    run_scan_subprocess,
 )
 
 # The _kill_process_tree group-termination logic is POSIX-only: it relies on
@@ -179,9 +174,7 @@ def test_estimate_counts_source_tree_without_compile_db(
     tree.mkdir()
     (tree / "x.cpp").write_text("//\n", encoding="utf-8")
     (tree / "y.cpp").write_text("//\n", encoding="utf-8")
-    est = estimate_scan(
-        ScanRequest(binaries=[snap_path], sources=tree, mode="baseline")
-    )
+    est = estimate_scan(InputSpec.of(snap_path, sources=tree), mode="baseline")
     l3 = next(e for e in est if e.layer == "L3_build")
     assert l3.tus == 2
     assert l3.note == "counted source files (no compile DB)"
@@ -224,766 +217,67 @@ def test_count_pack_tus_not_a_pack_returns_none(
 # ── _layers_from_coverage: defensive int coercion (lines 700-710) ─────────────
 
 
-def test_layers_from_coverage_coerces_and_skips_bad_values() -> None:
-    # A forward-compat / hand-edited coverage row can carry non-numeric counters or
-    # a non-numeric `facts`; the mapper coerces what it can and drops the rest
-    # rather than aborting the whole render.
-    rows = [
-        {
-            "method": "s5",
-            "layer": "L4_source_abi",
-            "status": "present",
-            "facts": "not-a-number",  # → coerced to 0
-            "detail": "d",
-            "counters": {"matched_symbols": 3, "bad": "nope", "also": None},
-        }
-    ]
-    out = _layers_from_coverage(rows)
-    assert len(out) == 1
-    layer = out[0]
-    assert layer.layer == "L4_source_abi"
-    assert layer.facts == 0  # non-numeric facts fell back to 0
-    assert layer.counters == {"matched_symbols": 3}  # bad counters dropped
+class TestServiceScanDefinesNoRequestOrResultType:
+    """ADR-068 Phase 4's definition of done, as an executable check.
 
-
-# ── _reject_comparison_only_fields: shared by run_scan / run_scan_set ─────────
-#
-# Ported from a former MCP `abi_scan` end-to-end test (the only place this
-# behaviour used to be exercised) when the MCP server was removed — the rule
-# itself is Tier-2 (`service_scan.py`) and belongs at this layer, not tied to
-# any one front end.
-
-
-class TestRejectComparisonOnlyFields:
-    def _audit_request(self, **overrides: object) -> ScanRequest:
-        return ScanRequest(binaries=[Path("lib.so")], mode="audit", **overrides)
-
-    @pytest.mark.parametrize(
-        ("overrides", "field"),
-        [
-            ({"policy": "sdk_vendor"}, "policy"),
-            ({"contract_evaluation": True}, "contract_evaluation"),
-            ({"policy_file": object()}, "policy_file"),
-            ({"suppression": object()}, "suppression"),
-            ({"max_findings": 5}, "max_findings"),
-        ],
-    )
-    def test_rejects_a_comparison_only_field_without_a_baseline(
-        self, overrides: dict, field: str
-    ) -> None:
-        req = self._audit_request(**overrides)
-        with pytest.raises(ValidationError, match=field):
-            _reject_comparison_only_fields(req)
-
-    def test_plain_audit_request_is_accepted(self) -> None:
-        assert _reject_comparison_only_fields(self._audit_request()) is None
-
-    def test_severities_without_a_baseline_is_accepted(self) -> None:
-        """Codex review, PR #1172, round 16, third review round (fresh
-        evidence): `severities` is *not* comparison-only -- it is also the
-        audit-only, single-snapshot `_crosscheck_severity_exit()`'s own
-        input, exactly the shape a documented `--crosscheck KEY=warning`
-        audit-only `scan`/`scan --artifact-set` request builds. An earlier
-        revision of this fix added `severities` to
-        `_COMPARISON_ONLY_FIELD_PREDICATES` instead, which made this raise
-        `ValidationError` for that legitimate, pre-existing usage.
-        """
-        req = self._audit_request(severities={"exported_not_public": "warning"})
-        assert _reject_comparison_only_fields(req) is None
-
-
-class TestCliApiParity:
-    """Structural regression tests generalizing two gaps a PR #724 review
-    round found in this exact area, on two different fields (first several
-    policy/contract fields via `run_scan_set()`'s missing guard, most
-    recently `max_findings` reaching `run_scan_core` with no override, no
-    validation, and no typed-API field at all): a CLI-only knob threaded
-    through `run_scan_core`/`_run_baseline_compare` silently has no typed-API
-    equivalent, or a `ScanRequest` field meaningful only for a baseline
-    comparison silently has no guard. Both were previously only caught by
-    hand-picked example tests (`test_rejects_a_comparison_only_field_without_
-    a_baseline` above) -- which only proves the *listed* fields are guarded,
-    never that the list itself is complete. These derive the expected set
-    from the real function signatures instead, so a newly-added field that
-    should join one of these lists fails CI on its own, without a human
-    remembering to extend the example list too.
+    `CompareRequest` -> `CompareResult` is the one typed request/result
+    contract. This module's own `ScanRequest`/`ScanResult`/`ScanArtifactResult`/
+    `ScanSetResult`/`Budget`/`LayerResult` are deleted, and so are the entry
+    points that consumed them. Stated structurally -- over every public name
+    the module and the `abicheck.service` facade actually expose -- rather than
+    as a list of the six names that happened to exist, so a *new* scan-shaped
+    request or result type fails here too.
     """
 
-    #: `_run_baseline_compare`/`ScanRequest` share these parameter names, but
-    #: both matter for a plain one-build audit too -- not baseline-only.
-    #: `enabled_checks` joined this set (not `_COMPARISON_ONLY_FIELD_
-    #: PREDICATES`) when `_run_baseline_compare` gained its own
-    #: `enabled_checks` parameter (ADR-068 amendment, PR #1172): the same
-    #: `--crosscheck KEY=off` set already governs `run_crosschecks`' own
-    #: audit-only single-snapshot pass regardless of whether `--against` is
-    #: given, so it is exactly as "always relevant" as `headers`/`includes`.
-    #: `severities` joined the same way, one round later (round 16, Codex
-    #: review, fresh evidence): it was first added to
-    #: `_COMPARISON_ONLY_FIELD_PREDICATES` instead, which made
-    #: `_run_artifact_set()`'s own long-standing, documented
-    #: `--crosscheck KEY=warning` usage (consumed by the audit-only
-    #: `scan_engine._crosscheck_severity_exit`, with no baseline in sight)
-    #: raise `ValidationError`/exit 64 -- the same "shared, not
-    #: baseline-only" mistake `enabled_checks` avoided by living here.
-    _ALWAYS_RELEVANT_FIELDS = frozenset(
-        {
-            "headers",
-            "includes",
-            "public_header_dirs",
-            "lang",
-            "baseline",
-            "enabled_checks",
-            "severities",
+    def _public_names(self, module) -> set[str]:
+        return {n for n in dir(module) if not n.startswith("_")}
+
+    def test_no_request_or_result_dataclass_is_defined(self) -> None:
+        import dataclasses
+        import inspect
+
+        import abicheck.service_scan as service_scan
+
+        offenders = sorted(
+            name
+            for name in self._public_names(service_scan)
+            if inspect.isclass(getattr(service_scan, name))
+            and getattr(service_scan, name).__module__ == service_scan.__name__
+            and dataclasses.is_dataclass(getattr(service_scan, name))
+            and name.endswith(("Request", "Result"))
+        )
+        assert offenders == []
+
+    def test_the_retired_names_do_not_resolve_on_either_surface(self) -> None:
+        import abicheck.service as service
+        import abicheck.service_scan as service_scan
+
+        retired = {
+            "ScanRequest",
+            "ScanResult",
+            "ScanArtifactResult",
+            "ScanSetResult",
+            "Budget",
+            "LayerResult",
+            "run_scan",
+            "run_audit",
+            "run_scan_set",
+            "run_scan_subprocess",
+            "run_scan_set_subprocess",
         }
-    )
+        assert not retired & self._public_names(service_scan)
+        assert not retired & self._public_names(service)
+        assert not retired & set(service.__all__)
 
-    def test_every_baseline_only_field_is_guarded(self) -> None:
+    def test_the_cost_model_is_what_remains(self) -> None:
+        """The module is not merely emptied -- `estimate_scan` still ships,
+        and now takes the canonical `InputSpec` instead of a request."""
         import inspect
-        from dataclasses import fields
 
-        from abicheck.cli_scan_baseline import _run_baseline_compare
-        from abicheck.service_scan import _COMPARISON_ONLY_FIELD_PREDICATES
+        import abicheck.service_scan as service_scan
 
-        baseline_only_params = set(inspect.signature(_run_baseline_compare).parameters)
-        req_field_names = {f.name for f in fields(ScanRequest)}
-        candidates = (
-            baseline_only_params & req_field_names
-        ) - self._ALWAYS_RELEVANT_FIELDS
-        missing = candidates - set(_COMPARISON_ONLY_FIELD_PREDICATES)
-        assert not missing, (
-            f"ScanRequest field(s) {sorted(missing)} share a name with a "
-            "_run_baseline_compare parameter but aren't in "
-            "_COMPARISON_ONLY_FIELD_PREDICATES -- a caller can set them "
-            "without --against and get a silent no-op instead of a "
-            "ValidationError."
-        )
+        params = inspect.signature(service_scan.estimate_scan).parameters
+        first = next(iter(params.values()))
+        assert first.annotation == "InputSpec"
+        assert first.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
 
-    def test_severities_is_not_falsely_treated_as_baseline_only(self) -> None:
-        """Codex review, PR #1172, round 16, third review round (fresh
-        evidence): `severities` was briefly added to
-        `_COMPARISON_ONLY_FIELD_PREDICATES` (the previous round's own fix),
-        which made it comparison-only -- but `severities` is *also* the
-        audit-only, single-snapshot `_crosscheck_severity_exit()`'s own
-        input (`run_scan_core`'s `severities` parameter, threaded from a
-        one-sided `scan`/`scan --artifact-set` request with no baseline at
-        all). That made a `ScanRequest(severities=..., baseline=None)` --
-        exactly what a documented `--crosscheck KEY=warning` audit-only
-        scan builds -- raise `ValidationError`/exit 64 instead of running.
-        `severities` belongs in `_ALWAYS_RELEVANT_FIELDS` instead, the same
-        home `enabled_checks` already has for the identical reason.
-        """
-        from abicheck.service_scan import _COMPARISON_ONLY_FIELD_PREDICATES
-
-        assert "severities" not in _COMPARISON_ONLY_FIELD_PREDICATES
-        assert "severities" in self._ALWAYS_RELEVANT_FIELDS
-
-    def test_every_run_scan_core_kwarg_matching_a_scan_request_field_is_forwarded(
-        self,
-    ) -> None:
-        import ast
-        import inspect
-        import textwrap
-        from dataclasses import fields
-
-        from abicheck.scan_engine import run_scan_core
-        from abicheck.service_scan import run_scan
-
-        core_params = set(inspect.signature(run_scan_core).parameters)
-        req_field_names = {f.name for f in fields(ScanRequest)}
-        candidates = core_params & req_field_names
-
-        tree = ast.parse(textwrap.dedent(inspect.getsource(run_scan)))
-        forwarded: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and getattr(node.func, "id", None) == (
-                "run_scan_core"
-            ):
-                forwarded = {kw.arg for kw in node.keywords if kw.arg}
-
-        missing = candidates - forwarded
-        assert not missing, (
-            f"ScanRequest field(s) {sorted(missing)} share a name with a "
-            "run_scan_core parameter but aren't passed by run_scan()'s call "
-            "to it -- the field exists on ScanRequest but silently does "
-            "nothing (the exact shape of the ScanRequest.max_findings gap a "
-            "Codex review found on PR #724)."
-        )
-
-
-# ── _scan_subprocess_worker: run-in-child entry (lines 874-883) ───────────────
-
-
-class _FakeQueue:
-    def __init__(self) -> None:
-        self.items: list[tuple[str, object]] = []
-
-    def put(self, item: tuple[str, object]) -> None:
-        self.items.append(item)
-
-
-def test_scan_subprocess_worker_conveys_ok(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # Neutralize the process-group detach so the test's own session is untouched,
-    # then run the worker in-process and confirm it ships an ("ok", dict) payload.
-    monkeypatch.setattr(os, "setsid", lambda: None, raising=False)
-    q = _FakeQueue()
-    _scan_subprocess_worker(ScanRequest(binaries=[snap_path], mode="audit"), q)
-    assert len(q.items) == 1
-    status, payload = q.items[0]
-    assert status == "ok"
-    assert isinstance(payload, dict)
-    assert "verdict" in payload and "layers" in payload
-
-
-def test_scan_subprocess_worker_conveys_error(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # run_scan raises for != 1 binary; the worker must convert the exception into a
-    # sanitized ("err", "Type: message") pair rather than crash.
-    monkeypatch.setattr(os, "setsid", lambda: None, raising=False)
-    q = _FakeQueue()
-    _scan_subprocess_worker(
-        ScanRequest(binaries=[snap_path, snap_path], mode="audit"), q
-    )
-    assert len(q.items) == 1
-    status, payload = q.items[0]
-    assert status == "err"
-    assert isinstance(payload, str)
-    assert payload.startswith("ValueError:")
-
-
-def test_scan_subprocess_worker_ignores_setsid_failure(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # A non-POSIX / already-leader setsid raises; the worker swallows it and still
-    # produces a result.
-    def _raise() -> None:
-        raise OSError("no setsid")
-
-    monkeypatch.setattr(os, "setsid", _raise, raising=False)
-    q = _FakeQueue()
-    _scan_subprocess_worker(ScanRequest(binaries=[snap_path], mode="audit"), q)
-    assert q.items and q.items[0][0] == "ok"
-
-
-def test_scan_subprocess_worker_installs_sigterm_cleanup(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # Codex review (PR #591), round 9: _kill_process_tree's _descendant_pgids()
-    # walk is a point-in-time snapshot taken before proc.terminate() fires; a
-    # clang/castxml child this worker spawns via deadline.run_bounded() in the
-    # gap between that snapshot and the terminate() call is invisible to it.
-    # Without its own SIGTERM handler installed, proc.terminate() (default
-    # disposition, since this is a fresh spawn-context process with nothing
-    # inherited) would kill the worker immediately, orphaning that child. The
-    # worker must install its own cleanup handler so its own _active_pgroups
-    # registry gets a chance to sweep whatever it has registered, independent
-    # of what the outer snapshot did or didn't see.
-    from abicheck import deadline
-
-    monkeypatch.setattr(os, "setsid", lambda: None, raising=False)
-    calls: list[bool] = []
-    monkeypatch.setattr(deadline, "install_sigterm_cleanup", lambda: calls.append(True))
-    q = _FakeQueue()
-    _scan_subprocess_worker(ScanRequest(binaries=[snap_path], mode="audit"), q)
-    assert calls == [True]
-
-
-# ── _kill_process_tree: the terminate/killpg branches (lines 886-912) ─────────
-
-
-class _FakeProc:
-    def __init__(self, alive: bool = True, pid: int = 4321) -> None:
-        self._alive = alive
-        self.pid = pid
-        self.terminated = 0
-        self.joins: list[float | None] = []
-
-    def is_alive(self) -> bool:
-        return self._alive
-
-    def terminate(self) -> None:
-        self.terminated += 1
-
-    def join(self, timeout: float | None = None) -> None:
-        self.joins.append(timeout)
-
-
-def test_kill_process_tree_noop_when_dead() -> None:
-    proc = _FakeProc(alive=False)
-    _kill_process_tree(proc)
-    assert proc.terminated == 0 and proc.joins == []
-
-
-@_posix_process_groups
-def test_kill_process_tree_kills_own_group_via_terminate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # When the child never detached (its pgid still equals the parent's group),
-    # killpg would nuke the parent — so terminate() the single process instead.
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 777)
-    monkeypatch.setattr(os, "getpgrp", lambda: 777)
-    proc = _FakeProc()
-    _kill_process_tree(proc)
-    assert proc.terminated == 1
-    assert 5 in proc.joins  # the trailing reap join
-
-
-@_posix_process_groups
-def test_kill_process_tree_kills_detached_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A detached child (own process group) is killed group-wide: SIGTERM, and —
-    # because our fake stays alive — an escalation SIGKILL.
-    signals: list[tuple[int, int]] = []
-    monkeypatch.setattr(os, "getpgid", lambda _pid: 999)
-    monkeypatch.setattr(os, "getpgrp", lambda: 111)
-    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
-    proc = _FakeProc()  # stays alive → triggers the SIGKILL escalation
-    _kill_process_tree(proc)
-    import signal
-
-    assert (999, signal.SIGTERM) in signals
-    assert (999, signal.SIGKILL) in signals
-    assert 3 in proc.joins and 5 in proc.joins
-
-
-@_posix_process_groups
-def test_kill_process_tree_kills_detached_descendant_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Codex review (PR #591): a clang/castxml child spawned via
-    deadline.run_bounded's start_new_session=True detaches into its OWN
-    session/pgid, distinct from the worker's own group — killing only
-    proc.pid's own group used to leave that child running as an orphan once
-    the worker's group-kill fired. _descendant_pgids must find it by walking
-    the live PPID tree, and _kill_process_tree must killpg it too."""
-    signals: list[tuple[int, int]] = []
-    # Worker pid 4321 is a detached group leader (pgid 4321, distinct from
-    # this test's own group 111); its child 5555 (standing in for a clang/
-    # castxml invocation) further detached into ITS OWN group (pgid 5555) —
-    # exactly what deadline.run_bounded's start_new_session=True produces.
-    monkeypatch.setattr(
-        os, "getpgid", lambda pid: {4321: 4321, 5555: 5555}.get(pid, pid)
-    )
-    monkeypatch.setattr(os, "getpgrp", lambda: 111)
-    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
-
-    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert cmd[0] == "ps"
-        return subprocess.CompletedProcess(
-            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
-        )
-
-    monkeypatch.setattr(subprocess, "run", _fake_ps)
-    proc = _FakeProc(pid=4321)  # stays alive → triggers the SIGKILL escalation
-    _kill_process_tree(proc)
-    import signal
-
-    assert (4321, signal.SIGTERM) in signals
-    assert (5555, signal.SIGTERM) in signals
-    assert (4321, signal.SIGKILL) in signals
-    assert (5555, signal.SIGKILL) in signals
-
-
-@_posix_process_groups
-def test_kill_process_tree_terminates_worker_even_with_detached_descendants(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """CodeRabbit review (PR #591): when the worker itself never detached
-    (its pgid still equals the parent's group, so it's excluded from the
-    pgid set to avoid killpg-ing the MCP server) but it spawned a detached
-    clang/castxml descendant (pgids stays non-empty), proc.terminate() must
-    still run -- it used to be skipped whenever pgids was non-empty,
-    leaving the direct worker process running forever."""
-    monkeypatch.setattr(
-        os, "getpgid", lambda pid: {4321: 111, 5555: 5555}.get(pid, pid)
-    )
-    monkeypatch.setattr(os, "getpgrp", lambda: 111)  # worker never detached
-    monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
-
-    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        assert cmd[0] == "ps"
-        return subprocess.CompletedProcess(
-            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
-        )
-
-    monkeypatch.setattr(subprocess, "run", _fake_ps)
-    proc = _FakeProc(pid=4321)  # stays alive → also exercises the killpg sweep
-    _kill_process_tree(proc)
-
-    assert proc.terminated == 1
-
-
-@_posix_process_groups
-def test_kill_process_tree_falls_back_on_oserror(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # If getpgid/killpg raise (race: pid already gone), fall back to terminate().
-    def _boom(_pid: int) -> int:
-        raise ProcessLookupError("gone")
-
-    monkeypatch.setattr(os, "getpgid", _boom)
-    proc = _FakeProc()
-    _kill_process_tree(proc)
-    assert proc.terminated == 1
-    assert 5 in proc.joins
-
-
-@_posix_process_groups
-def test_kill_process_tree_swallows_terminate_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The doubly-defensive path: getpgid raises, so we fall back to terminate() —
-    # and terminate() *also* raises. The inner guard swallows it, and the trailing
-    # reap join still runs, so the helper never propagates.
-    monkeypatch.setattr(
-        os, "getpgid", lambda _pid: (_ for _ in ()).throw(OSError("gone"))
-    )
-
-    class _StubbornProc(_FakeProc):
-        def terminate(self) -> None:
-            super().terminate()
-            raise OSError("terminate failed")
-
-    proc = _StubbornProc()
-    _kill_process_tree(proc)  # must not raise
-    assert proc.terminated == 1
-    assert 5 in proc.joins
-
-
-@_posix_process_groups
-def test_kill_process_tree_getpgrp_failure_falls_back_to_terminate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # os.getpgrp() itself can raise on a platform without process groups
-    # (AttributeError, the same guard the rest of this helper uses) — fall
-    # back to a plain terminate() before ever touching getpgid/killpg.
-    monkeypatch.setattr(
-        os, "getpgrp", lambda: (_ for _ in ()).throw(AttributeError("no getpgrp"))
-    )
-    proc = _FakeProc()
-    _kill_process_tree(proc)  # must not raise
-    assert proc.terminated == 1
-    assert 5 in proc.joins
-
-
-@_posix_process_groups
-def test_kill_process_tree_getpgrp_and_terminate_both_fail(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The doubly-defensive path for the getpgrp-failure fallback itself:
-    # os.getpgrp() raises, and the subsequent terminate() *also* raises. Both
-    # must be swallowed — the trailing reap join still runs, never propagates.
-    monkeypatch.setattr(
-        os, "getpgrp", lambda: (_ for _ in ()).throw(AttributeError("no getpgrp"))
-    )
-
-    class _StubbornProc(_FakeProc):
-        def terminate(self) -> None:
-            super().terminate()
-            raise OSError("terminate failed")
-
-    proc = _StubbornProc()
-    _kill_process_tree(proc)  # must not raise
-    assert proc.terminated == 1
-    assert 5 in proc.joins
-
-
-@_posix_process_groups
-def test_kill_process_tree_sigterm_failure_on_one_pgid_still_signals_others(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Multiple detached groups (the worker's own + a descendant's): one
-    # killpg(SIGTERM) call raising must not abort the sweep over the rest.
-    monkeypatch.setattr(
-        os, "getpgid", lambda pid: {4321: 4321, 5555: 5555}.get(pid, pid)
-    )
-    monkeypatch.setattr(os, "getpgrp", lambda: 111)
-    signals: list[tuple[int, int]] = []
-
-    def _killpg(pgid: int, sig: int) -> None:
-        if pgid == 4321 and sig == signal.SIGTERM:
-            raise PermissionError("no permission for this group")
-        signals.append((pgid, sig))
-
-    monkeypatch.setattr(os, "killpg", _killpg)
-
-    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            cmd, 0, stdout="4321 100\n5555 4321\n", stderr=""
-        )
-
-    monkeypatch.setattr(subprocess, "run", _fake_ps)
-    proc = _FakeProc(pid=4321)
-    _kill_process_tree(proc)  # must not raise despite the first killpg failing
-    assert (5555, signal.SIGTERM) in signals
-    assert (4321, signal.SIGKILL) in signals
-    assert (5555, signal.SIGKILL) in signals
-
-
-# ── _descendant_pgids: ps-output parsing edge cases (best-effort, never raises) ──
-
-
-@_posix_process_groups
-def test_descendant_pgids_empty_on_ps_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object, **_k: object) -> None:
-        raise OSError("ps not found")
-
-    monkeypatch.setattr(subprocess, "run", _boom)
-    assert _descendant_pgids(4321) == set()
-
-
-@_posix_process_groups
-def test_descendant_pgids_skips_malformed_and_non_integer_lines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A malformed `ps` line (wrong field count) or a non-integer pid/ppid must
-    # be skipped rather than raising, while well-formed lines still parse.
-    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        stdout = "not-a-valid-line\n4321 abc\nabc 4321\n5555 4321\n"
-        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
-
-    monkeypatch.setattr(subprocess, "run", _fake_ps)
-    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
-    assert _descendant_pgids(4321) == {4321, 5555}
-
-
-@_posix_process_groups
-def test_descendant_pgids_does_not_loop_on_a_cycle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A pid appearing as its own (indirect) child — via a race in the ps
-    # snapshot, or a re-parented pid reused mid-walk — must not spin forever;
-    # the `seen` set stops the walk from revisiting it.
-    def _fake_ps(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        stdout = "5555 4321\n4321 5555\n"  # 4321 <-> 5555, a two-node cycle
-        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
-
-    monkeypatch.setattr(subprocess, "run", _fake_ps)
-    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
-    assert _descendant_pgids(4321) == {4321, 5555}
-
-
-# ── run_scan_subprocess: the killable MCP harness (lines 915-943) ─────────────
-
-
-def test_run_scan_subprocess_returns_result_dict(snap_path: Path) -> None:
-    # End-to-end: the child runs the scan under spawn and ships back the
-    # ScanResult.to_dict() payload; the parent returns it unchanged.
-    payload = run_scan_subprocess(
-        ScanRequest(binaries=[snap_path], mode="audit"), timeout=120.0
-    )
-    assert isinstance(payload, dict)
-    assert "verdict" in payload
-    assert isinstance(payload["layers"], list)
-
-
-def test_run_scan_subprocess_joins_already_exited_worker(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # When the worker has already finished by the time the parent checks
-    # (the common case — q.get() already returned the payload), cleanup is a
-    # plain join(), not the process-tree kill (that path is only for a
-    # still-running worker after a timeout).
-    import multiprocessing
-    import queue as _queue_mod
-
-    class _FakeProcess:
-        def __init__(self, target, args, daemon) -> None:
-            self._target = target
-            self._args = args
-            self.joined: list[float | None] = []
-
-        def start(self) -> None:
-            self._target(*self._args)
-
-        def is_alive(self) -> bool:
-            return False
-
-        def join(self, timeout: float | None = None) -> None:
-            self.joined.append(timeout)
-
-    class _FakeCtx:
-        def Queue(self):  # noqa: N802 - matches multiprocessing.Queue's name
-            return _queue_mod.Queue()
-
-        def Process(self, target, args, daemon):  # noqa: N802
-            return _FakeProcess(target, args, daemon)
-
-    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeCtx())
-    payload = run_scan_subprocess(
-        ScanRequest(binaries=[snap_path], mode="audit"), timeout=5.0
-    )
-    assert isinstance(payload, dict)
-    assert "verdict" in payload
-
-
-def test_run_scan_subprocess_propagates_worker_error(snap_path: Path) -> None:
-    # A worker-side failure (two binaries → ValueError) is re-raised as a
-    # RuntimeError carrying the sanitized message.
-    with pytest.raises(RuntimeError, match="ValueError"):
-        run_scan_subprocess(
-            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
-            timeout=120.0,
-        )
-
-
-def test_run_scan_subprocess_times_out(snap_path: Path) -> None:
-    # A timeout shorter than even the spawn/import startup forces the queue.get to
-    # raise Empty → TimeoutError, and the still-starting child is killed.
-    with pytest.raises(TimeoutError, match="exceeded"):
-        run_scan_subprocess(
-            ScanRequest(binaries=[snap_path], mode="audit"), timeout=0.001
-        )
-
-
-# ── run_scan_set_subprocess: the artifact-set killable MCP harness (G35) ──────
-#
-# Reuses test_run_scan_subprocess_joins_already_exited_worker's in-process
-# _FakeCtx/_FakeProcess trick: the "child" runs synchronously in this same
-# process, so monkeypatching service_scan.run_scan_set (the module-global the
-# worker calls) drives the real _scan_set_subprocess_worker/
-# run_scan_set_subprocess boundary logic without paying for a real spawn or
-# needing real ELF fixtures.
-
-
-class _FakeSetCtx:
-    def __init__(self) -> None:
-        import queue as _queue_mod
-
-        self.queue = _queue_mod.Queue()
-
-    def Queue(self):  # noqa: N802 - matches multiprocessing.Queue's name
-        return self.queue
-
-    def Process(self, target, args, daemon):  # noqa: N802
-        class _FakeProcess:
-            def start(self) -> None:
-                target(*args)
-
-            def is_alive(self) -> bool:
-                return False
-
-            def join(self, timeout: float | None = None) -> None:
-                pass
-
-        return _FakeProcess()
-
-
-def test_run_scan_set_subprocess_propagates_artifact_set_error(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # P2 regression (Codex review): an ArtifactSetError (ValueError subclass)
-    # raised inside run_scan_set must cross the subprocess boundary as a real
-    # ValueError, carrying its own actionable message -- not collapse into a
-    # generic RuntimeError an MCP tool's _sanitize_error would then report as
-    # a bare "unexpected error".
-    import multiprocessing
-
-    import abicheck.service_scan as service_scan_mod
-    from abicheck.bundle import ArtifactSetError
-
-    def _fake_run_scan_set(req):
-        raise ArtifactSetError(
-            "--artifact-set has ambiguous duplicate SONAME provider(s): x"
-        )
-
-    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeSetCtx())
-    monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
-    with pytest.raises(ValueError, match="ambiguous duplicate SONAME"):
-        service_scan_mod.run_scan_set_subprocess(
-            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
-            timeout=120.0,
-        )
-
-
-def test_run_scan_set_subprocess_propagates_plain_value_error(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # The cardinality/baseline ValueErrors run_scan_set raises itself (not
-    # via ArtifactSetError) get the same real-ValueError treatment.
-    import multiprocessing
-
-    import abicheck.service_scan as service_scan_mod
-
-    def _fake_run_scan_set(req):
-        raise ValueError("run_scan_set requires 2 or more distinct binaries")
-
-    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeSetCtx())
-    monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
-    with pytest.raises(ValueError, match="2 or more distinct binaries"):
-        service_scan_mod.run_scan_set_subprocess(
-            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
-            timeout=120.0,
-        )
-
-
-def test_run_scan_set_subprocess_propagates_unexpected_error_as_runtime_error(
-    monkeypatch: pytest.MonkeyPatch, snap_path: Path
-) -> None:
-    # Anything other than a ValueError still becomes the generic RuntimeError
-    # (unchanged behavior) -- this fix is additive, not a blanket pass-through.
-    import multiprocessing
-
-    import abicheck.service_scan as service_scan_mod
-
-    def _fake_run_scan_set(req):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(multiprocessing, "get_context", lambda _name: _FakeSetCtx())
-    monkeypatch.setattr(service_scan_mod, "run_scan_set", _fake_run_scan_set)
-    with pytest.raises(RuntimeError, match="boom"):
-        service_scan_mod.run_scan_set_subprocess(
-            ScanRequest(binaries=[snap_path, snap_path], mode="audit"),
-            timeout=120.0,
-        )
-
-
-class TestResolveMemberScanLevel:
-    """``_resolve_member_scan_level`` is the one resolution
-    ``_run_scan_one_member`` and ``estimate_artifact_set`` (``scan
-    --artifact-set --dry-run``) both consume (Codex review, ``workflows/
-    AGENTS.md``'s "dry-run and execution must consume the same resolved
-    plan" rule) -- test it directly rather than only through those two
-    callers.
-    """
-
-    def test_raises_on_malformed_risk_rules(self, tmp_path: Path) -> None:
-        import abicheck.service_scan as service_scan_mod
-
-        bad = tmp_path / "bad.yml"
-        bad.write_text("risk_rules: [1, 2\n  - broken")
-        req = ScanRequest(
-            binaries=[], mode="audit", source_method="auto",
-            changed_paths=["src/foo.c"], seeded=True, risk_rules_path=bad,
-        )
-        with pytest.raises(ValueError, match="cannot read --risk-rules"):
-            service_scan_mod._resolve_member_scan_level(req)
-
-    def test_pinned_depth_ignores_risk_rules_default_and_still_resolves(self) -> None:
-        import abicheck.service_scan as service_scan_mod
-
-        req = ScanRequest(binaries=[], mode="audit", depth="build")
-        sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = (
-            service_scan_mod._resolve_member_scan_level(req)
-        )
-        assert sm is None
-        assert eff_depth.value == "build"
-        assert changed == []
-        assert seeded is False
-
-    def test_seeded_auto_uses_risk_recommended_method(self) -> None:
-        import abicheck.service_scan as service_scan_mod
-
-        req = ScanRequest(
-            binaries=[], mode="audit", source_method="auto",
-            changed_paths=["include/public.h"], seeded=True,
-        )
-        _sm, _dp, changed, seeded, risk, resolved, _eff_depth, _collect_mode = (
-            service_scan_mod._resolve_member_scan_level(req)
-        )
-        assert changed == ["include/public.h"]
-        assert seeded is True
-        assert resolved.value == risk.recommended_method

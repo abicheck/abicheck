@@ -653,21 +653,6 @@ def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible
     assert "--dry-run cannot be combined with --write" in res.output
 
 
-def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--artifact-set",
-            str(tmp_path),
-            "--write",
-            f"json={tmp_path / 'x.json'}",
-        ],
-    )
-    assert res.exit_code != 0
-    assert "not supported with --artifact-set" in res.output
-
-
 def test_audit_mode_runs_without_baseline(runner, tmp_path):
     # An exported symbol with no public declaration → exported_not_public (RISK).
     # Absence of --against already means a one-build audit (no separate flag).
@@ -1795,26 +1780,6 @@ def test_promoted_risk_verdict_matches_exit_code(runner, tmp_path, baseline_snap
     assert payload["verdict"] == "API_BREAK"
 
 
-def test_malformed_risk_rules_yaml_is_click_error(
-    runner, tmp_path, new_snap_compatible
-):
-    bad = tmp_path / "rules.yml"
-    # Invalid YAML (unbalanced brackets) → yaml.YAMLError, must be a clean CLI error.
-    bad.write_text("risk_rules: { unclosed: [1, 2", encoding="utf-8")
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--risk-rules",
-            str(bad),
-        ],
-    )
-    assert res.exit_code != 0
-    assert res.exception is None or isinstance(res.exception, SystemExit)
-    assert "cannot read --risk-rules" in res.output
-
-
 # NOTE: test_source_method_s2_runs_preprocessor_tier (--source-method s2) is
 # deleted — --source-method is gone and no --depth rung maps to S2
 # (_DEPTH_TO_METHOD has no S2 entry, nor does any --mode preset or the auto
@@ -1823,26 +1788,41 @@ def test_malformed_risk_rules_yaml_is_click_error(
 # tests/test_preprocessor_scan.py and tests/test_evidence_depth_levels.py.
 
 
-def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):
-    # A *successful* empty diff (no-op PR) is a valid seed → auto picks s0/off,
-    # distinct from a missing/failed seed which falls back to the preset (Codex).
-    # `HEAD...HEAD` is an empty diff in this repo's git.
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--since",
-            "HEAD",
-            "--format",
-            "json",
-        ],
-    )
-    if res.exit_code != 0 or "seed failed" in res.output:
-        pytest.skip("git unavailable / not a repo in this environment")
-    payload = _payload(res)
-    assert payload["level"]["source_method"] == "s0"
-    assert payload["level"]["collect_mode"] == "off"
+def test_auto_seeded_empty_diff_uses_the_preset_not_a_risk_score(
+    runner, new_snap_compatible
+):
+    """A seed no longer changes which level `auto` resolves to.
+
+    ADR-068's second 2026-09-09 amendment rules risk-driven `auto` depth
+    selection (b) -- dropped. A successful empty diff used to score 0 and
+    resolve to `s0`/off while an unseeded run fell back to the mode preset;
+    both now resolve to the preset, which was never *narrower* than the
+    risk-scored choice. Asserted against the *unseeded* run's own resolved
+    level rather than a literal, so this stays a statement about
+    seed-independence even if the preset itself is ever retuned.
+    """
+    def _level(*extra: str):
+        res = runner.invoke(
+            main, ["scan", str(new_snap_compatible), "--format", "json", *extra]
+        )
+        if res.exit_code != 0 or "seed failed" in res.output:
+            pytest.skip("git unavailable / not a repo in this environment")
+        return _payload(res)["level"]
+
+    unseeded = _level()
+    seeded_empty = _level("--since", "HEAD")
+    # The resolved (method, depth) level is what the risk score used to move;
+    # it is now seed-independent.
+    assert seeded_empty["source_method"] == unseeded["source_method"]
+    assert seeded_empty["depth"] == unseeded["depth"]
+    # And it is the preset, not the retired `s0`/off risk floor.
+    assert seeded_empty["source_method"] != "s0"
+    assert seeded_empty["collect_mode"] != "off"
+    # The replay *scope* still follows the seed (ADR-043 D3, a separate axis
+    # from the level this ruling touched): a real seed scopes to the changed
+    # paths, an unseeded run to the current library target.
+    assert seeded_empty["collect_mode"] == "source-changed"
+    assert unseeded["collect_mode"] == "source-target"
 
 
 def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible):

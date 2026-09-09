@@ -24,12 +24,10 @@ new cost model -- and adds only the compare-specific glue: resolving
 compare's own ``--depth``/``.abicheck.yml`` ``source.method``/
 ``--sources``/``--build-info`` precedence into the
 ``(SourceMethod, EvidenceDepth)`` pair ``estimate_scan``'s ``resolved_level``
-takes, building one :class:`~abicheck.service_scan.ScanRequest` per side, and
+takes, building one :class:`~abicheck.api_types.InputSpec` per side, and
 summing both sides' rows layer-by-layer (:func:`_merge_layer_estimates`) --
 a real ``compare`` run with live source/build evidence extracts *both*
-operands, so the preview sums each side's own projection, the same
-per-operand aggregation :func:`~abicheck.service_scan.estimate_artifact_set`
-already applies across a scan set's members.
+operands, so the preview sums each side's own projection.
 
 A new, dedicated leaf module rather than an addition to
 :mod:`abicheck.cli_compare_helpers` or :mod:`abicheck.service_scan`: both
@@ -68,7 +66,7 @@ def _resolve_compare_estimate_level(
     :func:`~abicheck.service_scan.estimate_scan`'s ``resolved_level`` takes,
     mirroring how ``cli_scan.py`` pre-resolves its own ``(resolved,
     eff_depth_enum)`` before calling it rather than letting the callee
-    re-derive a level from ``ScanRequest.mode``'s own preset default, which
+    re-derive a level from ``estimate_scan``'s own mode-preset default, which
     has no notion of compare's --sources/--build-info inference rule (or of
     compare having no PR change seed for ``auto`` to escalate against)."""
     from ..model.evidence_depth_levels import (
@@ -103,9 +101,8 @@ def _merge_layer_estimates(
     layer -- a real ``compare`` run with live source/build evidence extracts
     *both* operands, so the projected cost is each side's own row summed,
     the same per-operand aggregation
-    :func:`~abicheck.service_scan.estimate_artifact_set` already applies
-    across a scan set's members, applied here across a compare's two
-    operands instead. Introduces no separate cost model -- every row still
+    :func:`~abicheck.service_scan.estimate_scan` already produces per
+    operand, applied here across a compare's two operands instead. Introduces no separate cost model -- every row still
     comes straight out of :func:`~abicheck.service_scan.estimate_scan`."""
     from ..service_scan import CostEstimate
 
@@ -150,31 +147,30 @@ def estimate_compare_dry_run_cost(
     probe itself raised -- mirroring ``cli_scan.py``'s own best-effort
     ``estimate_scan`` call, which the dry run must never let a probe failure
     turn into a hard crash."""
-    from ..service_scan import ScanRequest, estimate_scan
+    from ..api_types import InputSpec
+    from ..service_scan import estimate_scan
 
     try:
         resolved_level = _resolve_compare_estimate_level(
             depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
         )
         common_headers = list(headers) + list(includes)
-        old_req = ScanRequest(
-            binaries=[old_input],
+        old_side = InputSpec.of(
+            old_input,
             headers=common_headers + list(old_headers_only),
             includes=list(includes),
             sources=old_sources,
             build_info=old_build_info,
-            mode="pr",
         )
-        new_req = ScanRequest(
-            binaries=[new_input],
+        new_side = InputSpec.of(
+            new_input,
             headers=common_headers + list(new_headers_only),
             includes=list(includes),
             sources=new_sources,
             build_info=new_build_info,
-            mode="pr",
         )
-        old_estimates = estimate_scan(old_req, resolved_level=resolved_level)
-        new_estimates = estimate_scan(new_req, resolved_level=resolved_level)
+        old_estimates = estimate_scan(old_side, resolved_level=resolved_level)
+        new_estimates = estimate_scan(new_side, resolved_level=resolved_level)
         return _merge_layer_estimates((old_estimates, new_estimates)), None
     except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
         return None, str(exc)

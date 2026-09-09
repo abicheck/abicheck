@@ -33,9 +33,16 @@ what was skipped.
 **`mode: scan` remains the one to reach for** when this step also needs: a
 single-release audit with no baseline at all (see [Single-release
 audit](#single-release-audit-no-baseline) below — `mode: compare` has no
-no-baseline input yet), `crosscheck`'s `KEY=error` promotion syntax,
-`build-target` scoping, or `new-library-set` (multi-library audit) — none of
-those has a `compare` equivalent at all. A `budget` wall-clock guard is
+no-baseline input yet) or `crosscheck`'s `KEY=error` promotion syntax —
+neither has a `compare` equivalent at all. Three inputs that used to be on
+this list are **retired** rather than translated (ADR-068's second
+2026-09-09 amendment, ruling (b)): `new-library-set` (the multi-library
+audit mode — blocked on ADR-065 S3's component inventories; run one `scan`
+per library meanwhile), `risk-rules` (and with it the risk-driven `auto`
+depth escalation — pin `depth:` explicitly instead) and `build-target` (use
+`mode: dump` to narrow a multi-target workspace). Setting any of them on a
+`mode: scan` step is now an explicit `::error::`, not a silent downgrade. A
+`budget` wall-clock guard is
 different: `compare` itself now has `--budget`, but the Action's `mode:
 compare` input still doesn't read it (a translation gap, not a missing CLI
 capability — see the table below).
@@ -61,10 +68,9 @@ is tracked in
 | Your step sets… | Why it still runs legacy `scan` |
 |---|---|
 | no `against`/`abi-baseline` (audit-only) | `compare --no-baseline` does not reproduce the audit's findings yet |
-| `new-library-set` | no `compare` equivalent for the multi-library audit mode |
 | `budget` | `compare` has its own `--budget` flag now (exit `5` on overflow applies to both commands) — this is an Action-translation gap (`action/run.sh` still forces `INPUT_BUDGET` onto the legacy route), not a missing CLI capability, and closes once that translation is updated |
-| `risk-rules`, `crosscheck`, `build-target` | no `compare` flag equivalent |
-| no `depth` at all | `scan`'s risk-driven `auto` selection has no `compare` equivalent; `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers` — either way, never the risk-scored choice `auto` makes |
+| `crosscheck` | no `compare` flag equivalent; `policy.overrides.<CHANGE_KIND>` in `.abicheck.yml` is the replacement spelling for the `KEY=error` half, and the engine axis behind it is ADR-064 surface a later slice retires |
+| no `depth` at all | `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers`; `scan`'s own `auto` now resolves deterministically from its mode preset (the risk-driven escalation is retired, ADR-068 (b)), so the two still differ |
 | `depth: build` or `depth: source` | `compare` now has its own evidence-contract floor (exit `7`), but it's narrower than `scan`'s: `scan`'s floor is unconditional, while `compare`'s is exempted whenever both operands are already-serialized snapshots (see [Evidence Depth](evidence-depth.md)'s "pinned depth is a contract" warning) — routing onto it could silently narrow the guarantee this Action's users rely on, so it stays on the legacy CLI |
 | a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |
 | an `against:` ending `.json`/`.json.gz`/`.json.zst`, or any file content-detected as a JSON snapshot | `compare` and `scan` disagree on snapshot-baseline handling |

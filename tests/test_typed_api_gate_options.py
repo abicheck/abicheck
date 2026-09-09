@@ -631,124 +631,6 @@ class TestRunCompareForwardsGateOptions:
         assert shim_result.exit_decision.code == typed_result.exit_decision.code == 0
 
 
-class TestScanRequestGateOptions:
-    """`ScanRequest.severity_preset` -> `run_scan`'s `sev_config` forwards
-    into `run_scan_core` (only meaningful with `baseline` set, matching
-    `cli_scan.py`'s own `_COMPARISON_ONLY_FLAGS` rule for the identical CLI
-    flag). Its sibling `exit_code_scheme` field/flag, deleted in CLI cleanup
-    phase two PR G2, used to be covered here too -- there is no longer a
-    second field to forward, reject, or validate."""
-
-    def _pair(self, tmp_path: Path) -> tuple[Path, Path]:
-        return _write(tmp_path, *_breaking_pair())
-
-    def test_default_reproduces_the_legacy_exit_code(self, tmp_path: Path) -> None:
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        old, new = self._pair(tmp_path)
-        result = run_scan(ScanRequest(binaries=[new], baseline=old))
-        assert result.exit_code == 4
-
-    def test_severity_scheme_actually_changes_the_exit_code(
-        self, tmp_path: Path
-    ) -> None:
-        """Regression assertion #1: not a no-op field."""
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        old, new = self._pair(tmp_path)
-        legacy = run_scan(ScanRequest(binaries=[new], baseline=old))
-        demoted = run_scan(
-            ScanRequest(
-                binaries=[new],
-                baseline=old,
-                severity_preset="info-only",
-            )
-        )
-        assert legacy.exit_code == 4
-        assert demoted.exit_code == 0
-
-    def test_agrees_with_the_cli_for_equivalent_input(self, tmp_path: Path) -> None:
-        """Regression assertion #2: parity against the real `scan --against`
-        CLI invocation, not the implementation's own helper."""
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        old, new = self._pair(tmp_path)
-        api_result = run_scan(
-            ScanRequest(
-                binaries=[new],
-                baseline=old,
-                severity_preset="info-only",
-            )
-        )
-        cli_result = CliRunner().invoke(
-            main,
-            [
-                "scan",
-                str(new),
-                "--against",
-                str(old),
-                "--severity-preset",
-                "info-only",
-            ],
-        )
-        assert cli_result.exit_code == 0, cli_result.output
-        assert api_result.exit_code == cli_result.exit_code == 0
-
-    def test_rejected_without_a_baseline_like_the_cli_flags(
-        self, tmp_path: Path
-    ) -> None:
-        """Mirrors `cli_scan._COMPARISON_ONLY_FLAGS`'s identical rejection
-        of `--severity-preset` with no `--against`."""
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        _, new = self._pair(tmp_path)
-        with pytest.raises(ValidationError, match="severity_preset"):
-            run_scan(ScanRequest(binaries=[new], severity_preset="strict"))
-
-    def test_invalid_gate_fields_raise_validation_error(self, tmp_path: Path) -> None:
-        """CodeRabbit review, fresh evidence, PR #1032: `run_scan` called
-        `resolve_scan_gate_options` -> `resolve_release_gate_options` with
-        no exception translation at all -- an invalid `severity_preset`
-        raised `PolicyError` (a `ValueError` subclass, from
-        `resolve_severity_config`), not `ValidationError`, the type every
-        other malformed-`ScanRequest` field raises. A Tier-2 caller guarding
-        `run_scan` with `except ValidationError` -- the documented contract
-        -- would miss it and see the raw exception instead. Fixed by
-        translating it at the `resolve_scan_gate_options` call site,
-        mirroring the existing `_resolve_scan_contract_config` ->
-        `resolve_scan_config` translation just above it in
-        `service_scan.py`. (Its sibling assertion for an invalid
-        `exit_code_scheme` was removed along with the field itself, CLI
-        cleanup phase two PR G2.)"""
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        old, new = self._pair(tmp_path)
-        with pytest.raises(ValidationError):
-            run_scan(
-                ScanRequest(
-                    binaries=[new], baseline=old, severity_preset="not-a-preset"
-                )
-            )
-
-    def test_default_severity_fields_leave_the_pre_existing_behaviour_unchanged(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        old, new = self._pair(tmp_path)
-        explicit_none = run_scan(
-            ScanRequest(
-                binaries=[new],
-                baseline=old,
-                severity_preset=None,
-            )
-        )
-        omitted = run_scan(ScanRequest(binaries=[new], baseline=old))
-        assert explicit_none.exit_code == omitted.exit_code == 4
-
-
 class TestInvalidExitCodeScheme:
     """Historically: `exit_code_scheme` reached `resolve_release_gate_
     options` unchecked from a typed `CompareRequest`/`ScanRequest` -- unlike
@@ -805,12 +687,6 @@ class TestInvalidExitCodeScheme:
                 new=InputSpec(path=Path("new.abi.json")),
                 exit_code_scheme="legacy",
             )
-
-    def test_scan_request_no_longer_has_an_exit_code_scheme_field(self) -> None:
-        from abicheck.service_scan import ScanRequest
-
-        with pytest.raises(TypeError, match="exit_code_scheme"):
-            ScanRequest(binaries=[Path("new.so")], exit_code_scheme="legacy")  # type: ignore[call-arg]
 
     def test_compare_request_rejects_bad_preset_before_extraction_runs(self) -> None:
         """CodeRabbit review, fresh evidence: a misspelled preset (e.g.

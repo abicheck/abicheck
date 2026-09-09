@@ -88,14 +88,6 @@ def _run_scan_summary(env_extra: dict[str, str], tmp_path: Path) -> str:
 
 
 class TestScanJobSummaryArtifactSet:
-    def test_artifact_set_renders_in_summary(self, tmp_path: Path) -> None:
-        summary = _run_scan_summary(
-            {"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, tmp_path
-        )
-        assert "Artifact set" in summary
-        assert "a.so,b.so" in summary
-        # The old always-Binary row must not render an empty target.
-        assert "| Binary | `` |" not in summary
 
     def test_bare_new_library_still_renders_binary(self, tmp_path: Path) -> None:
         artifact = tmp_path / "new.json"

@@ -56,7 +56,7 @@ back to a different, unrequested behavior.
 | `format: json` | yes | n/a (always JSON) | yes | yes |
 | `format: markdown` / `text` | yes | n/a (always JSON) | `text` only | `markdown` only |
 | `upload-sarif: true` | yes (needs `format: sarif`) | **error** | **error** | **error** |
-| `pr-comment` | yes | no-op | yes (single artifact only — no-op with `new-library-set`) | no-op |
+| `pr-comment` | yes | no-op | yes | no-op |
 
 For a multi-library release directory (several `.so`/`.dll`/`.dylib` files),
 use `mode: compare` with a directory/package operand — it fans out to a
@@ -196,7 +196,7 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
 | `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
-| `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
+| `risk-rules` | — | **Retired** (ADR-068 (b)): `scan --risk-rules` and the risk-driven `auto` depth escalation it fed are gone. Pin `depth:` explicitly instead; setting this input is an error. |
 
 !!! note "format in scan mode"
     `scan` supports `format: text` (default) or `json`; any other value is a
@@ -253,7 +253,7 @@ suppression:
 | `severity-addition` | — | Severity for additions: `error`, `warning`, or `info` (compare mode only) |
 | `extra-args` | `''` | Additional CLI arguments passed to abicheck |
 | `add-job-summary` | `true` | Write summary to Job Summary panel (ignored for dump mode) |
-| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons; scan mode for a single artifact — not `new-library-set`). No-op outside `pull_request` events. |
+| `pr-comment` | `true` | Post a sticky ABI report comment on the PR (compare mode, including directory/package comparisons; scan mode for a single artifact). No-op outside `pull_request` events. |
 | `pr-comment-mode` | `update` | `update` keeps one comment and edits it in place; `new` posts a fresh comment each run |
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |
@@ -284,7 +284,7 @@ extraction cleanup is unconditional now, with no config replacement.
 | Output | Description |
 |--------|-------------|
 | `verdict` | **compare** (single pair or directory/package operands, including `--used-by`/`--required-symbol`-scoped runs): `COMPATIBLE`, `COMPATIBLE_WITH_RISK` (a real, exit-0 tier for a compatible-but-risky change), `SEVERITY_ERROR`, `COVERAGE_INCOMPLETE`, `SCOPE_INCOMPLETE` (directory/package operands only, ADR-065: an unchecked selected member under `.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed at all — fails the step unconditionally), `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY` (directory/package operands with `fail-on-removed-library` set, which since ADR-065 requires a proven-complete NEW inventory), or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `COVERAGE_INCOMPLETE`, `API_BREAK`, `BREAKING`, `BUDGET_OVERFLOW`, `EVIDENCE_CONTRACT_ERROR` (ADR-037 D5 — the scan's evidence contract couldn't be satisfied; not a CLI usage error and not an ABI/API break), or `ERROR`. **deps-compare:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps-tree:** `PASS`, `FAIL`, or `ERROR`. |
-| `exit-code` | **compare:** `0` (compatible), `1` (severity error, incomplete contract coverage, incomplete analysis assurance, or — directory/package operands, ADR-065 — an incompletely checked comparison scope under `.abicheck.yml`'s `scope.on_incomplete: block` or no comparison completed at all; the four share the code and are told apart by the report's pre-fold `severity.exit_code`, `contract_coverage_exit_contribution`, `analysis_assurance.status`, and the `exit` block's scope contributions), `2` (API break), `4` (ABI break), `8` (library proven removed, with `fail-on-removed-library` and a proven-complete NEW inventory). **scan:** `0` (compatible/advisory), `1` (incomplete contract coverage), `2` (API break), `4` (ABI break), `5` (budget overflow), `7` (evidence-contract error — a single-artifact `scan --against` and every `--artifact-set` member share this same dedicated code as of 2026-09-04). **deps-compare:** `0` (pass), `1` (warn), `4` (fail). **deps-tree:** `0` (ok), `1` (missing). |
+| `exit-code` | **compare:** `0` (compatible), `1` (severity error, incomplete contract coverage, incomplete analysis assurance, or — directory/package operands, ADR-065 — an incompletely checked comparison scope under `.abicheck.yml`'s `scope.on_incomplete: block` or no comparison completed at all; the four share the code and are told apart by the report's pre-fold `severity.exit_code`, `contract_coverage_exit_contribution`, `analysis_assurance.status`, and the `exit` block's scope contributions), `2` (API break), `4` (ABI break), `8` (library proven removed, with `fail-on-removed-library` and a proven-complete NEW inventory). **scan:** `0` (compatible/advisory), `1` (incomplete contract coverage), `2` (API break), `4` (ABI break), `5` (budget overflow), `7` (evidence-contract error, dedicated code as of 2026-09-03). **deps-compare:** `0` (pass), `1` (warn), `4` (fail). **deps-tree:** `0` (ok), `1` (missing). |
 | `report-path` | Path to the generated report file (empty when no output file was produced) |
 
 ## Usage examples

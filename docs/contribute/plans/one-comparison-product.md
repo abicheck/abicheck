@@ -230,7 +230,7 @@ identity; **DELETE** — leaves the product.
 | 28 | Evidence-contract abort (exit `7`) | `scan_engine._check_scan_evidence_contract` | `compare` `ExitDecision` axis | COMPARE-STAGE | **Landed** (2026-09-09, Phase 4 commit 2): new `policy/depth_evidence_contract.py`, wired into both the native CLI and the typed pipeline — closes a real, previously-undocumented gap (`compare --depth build` with no evidence silently exited 0) |
 | 29 | Coverage/depth reporting lines | `cli_scan_helpers.render_*` | `report/` compute/render pair | INTERNAL | ADR-061 `report/` pair rule |
 | 30 | `scan` report schema (`SCAN_SCHEMA_VERSION`) | `service_scan`, `workflows/scan_abort_result.py` | one `ReportDocument` | DELETE | Every consumer migrated (Phase 4) |
-| 31 | `ScanRequest` / `ScanResult` typed API | `service_scan.py` | `CompareRequest` / `CompareResult` | DELETE (fields absorbed) | ADR-055 registry update |
+| 31 | `ScanRequest` / `ScanResult` typed API | `service_scan.py` | `CompareRequest` / `CompareResult` | DELETE (fields absorbed) | **Done** (2026-09-09, Phase 4's typed-API slice): both types deleted, with `ScanArtifactResult`/`ScanSetResult`/`Budget`/`LayerResult` and `run_scan`/`run_audit`/`run_scan_set`. One field absorbed (`allow_build_query`); the rest were already covered or ruled (b) and dropped. ADR-055's amendment carries the ledger; `SCAN_SCHEMA_VERSION` bumped to 1.31 and stays in the D3 registry while the command ships. See Phase 4's own status section |
 | 32 | Action `mode: scan` | `action/run.sh` (~40 branches) | `mode: compare` (+ `baseline-channel: none`) | DELETE after absorption | Phase 4; Action input lifecycle (ADR-047) |
 | 33 | `pr-comment` scan projection | `pr_comment_scan.py`, `pr_comment_scan_abort.py` | one PR-comment projection over `ReportDocument` | INTERNAL (merged) | Phase 4 |
 | 34 | Depth vocabulary/resolution | `model/evidence_depth_levels.py` (was `buildsource/scan_levels.py`) | keep as engine primitive, renamed off `scan` | INTERNAL | **Done** — Phase 6's rename step landed ahead of the command's own deletion; see Phase 6's own section for the full rename list and the `poi.py`/`risk.py` correction |
@@ -671,14 +671,54 @@ section's *actual* state, not the target it originally described:
   that must close before every `mode: scan` request — audit-only included —
   can safely route to `compare` unconditionally. See the known-gaps entry
   for the exact remaining mechanical steps once that closes.
-- **Typed API — not started.** `ScanRequest`/`ScanResult` still define every
-  field they did before this commit (`service_scan.py`); only
-  `collapse_versioned_symbols` has been absorbed into `CompareRequest`
-  (`b94fccd6d`). Absorbing the rest and updating ADR-055's schema registry
-  is real, substantial work against `abicheck/api_types.py` — out of this
-  commit's file ownership (concurrent CLI-flag-consolidation work also
-  touches that file) and deferred to its own PR rather than attempted
-  piecemeal here.
+- **Typed API — landed (2026-09-09, its own PR).** `abicheck/service_scan.py`
+  defines no request or result type any more. `ScanRequest`, `ScanResult`,
+  `ScanArtifactResult`, `ScanSetResult`, `Budget` and `LayerResult` are
+  deleted, along with `run_scan`/`run_audit`/`run_scan_set` and their
+  subprocess harnesses (`workflows/scan_subprocess.py` went with them — its
+  only callers were those two harnesses). What remains in that module is the
+  ADR-035 D10 dry-run cost model: `estimate_scan` now projects one
+  `InputSpec` plus the run-scoped level scalars, because a cost preview is a
+  projection over an *input*, not over a request. `CompareRequest` ->
+  `CompareResult` is the one typed contract, which is also what kept
+  `cross_front_end_differences()` honest — with no second API namespace left,
+  `workflows/scan_config.SCAN_REQUEST_SPELLINGS` (the per-request-type
+  selector-spelling remap two namespaces forced) is deleted too, as is
+  `workflows/scan_gate_options.py` (`ScanRequest`'s own gate resolution).
+  `SCAN_SCHEMA_VERSION` is bumped to `1.31` and **stays** in ADR-055's D3
+  registry: the `scan` command still ships, so its `--format json` envelope
+  still has a live version to publish; what left is the typed half, since the
+  marker no longer stamps any Python result object. ADR-055's own amendment
+  carries the field-by-field ledger.
+
+  Field fates follow ADR-068's second 2026-09-09 ruling table, not a fresh
+  judgement. One field was genuinely absorbed — `allow_build_query` becomes
+  `CompareRequest.allow_build_query`, forwarded (with the already-present
+  `InputSpec.build_config`, which nothing on that path read) into
+  `resolve_side_snapshot`, which has accepted the pass-through since PR 3A;
+  `False` keeps the standing "never execute a build system as a side effect
+  of resolving an input" default, so every pre-existing request is unchanged.
+  Everything else was already covered by `compare` or is ruled (b) and
+  **deleted rather than carried forward**: `--risk-rules` and the risk-driven
+  `auto` depth escalation it fed, `scan --build-target`, and
+  `--artifact-set`/`new-library-set` (the mode — §3 #16's capability is
+  preserved and returns as `compare --no-baseline DIR` once ADR-065 S3's
+  component inventories land; `bundle.py`'s audit primitives stay put). The
+  Action absorbs all three per the ADR's own "Consequence for
+  `action/run.sh`" paragraph: each is rejected with an explicit `::error::`
+  naming the blocker or replacement, never silently downgraded.
+
+  **One (b) item deliberately not completed here.** The ruling table also
+  retires the `--crosscheck KEY=error` promotion *syntax*. `ScanRequest.
+  severities` — the part this slice owns — is gone with the request type, but
+  the `scan` CLI flag and its engine half are left standing: that half is
+  ADR-064's `crosscheck_promotion_contribution`, a published `ExitDecision`
+  axis with its own `exit`-block key, precedence rule
+  (`policy/exit_decision_precedence.py`), abort-envelope participant and
+  `REPORT_SCHEMA_VERSION` 2.42 entry. Removing a published exit axis is an
+  ADR-064 amendment that changes `compare`'s report schema too, not a
+  typed-API slice. Tracked in
+  [known gaps](../known-gaps.md).
 - **Docs — landed.** `docs/use/scan-levels.md` is renamed
   `docs/use/evidence-depth.md` (still the evidence trio's third role, no
   fourth page added) and reworked to lead with `compare`/`dump`, naming each
