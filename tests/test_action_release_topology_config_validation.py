@@ -51,7 +51,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from test_action_release_topology_config import _harness, _run_bash_script
+from test_action_release_topology_config import (
+    _harness,
+    _read_config_overlay,
+    _run_bash_script,
+)
 
 
 class TestReleaseTopologyOverlayCleansUpOnMergeSubprocessFailure:
@@ -101,3 +105,69 @@ class TestReleaseTopologyOverlayValidatesTheBaseConfigBeforeMerging:
         assert result.returncode != 0
         assert "unknown .abicheck.yml key 'not_a_real_key'" in result.stderr
         assert "--config" not in result.stdout
+
+
+class TestReleaseTopologyOverlayHonorsExplicitFalseInputs:
+    """Codex review, PR #1159 (P1, fresh evidence): ``dso-only``/
+    ``include-private-dso``/``fail-on-removed-library`` used to collapse
+    "omitted" and "explicit false" onto the identical value
+    (``${INPUT_DSO_ONLY:-false}``, plus a matching declared ``default:
+    'false'`` in ``action.yml``), so a workflow that explicitly wrote
+    ``dso-only: false`` to override a discovered/explicit ``.abicheck.yml``'s
+    own ``release.dso_only: true`` had that override silently ignored --
+    the early-return guard fired (every input read as the literal string
+    "false") and the discovered ``true`` value remained in effect
+    untouched. ``action.yml`` now declares no default for any of the three
+    inputs, so an omitted one resolves to an empty string, distinguishable
+    from an explicit ``"true"``/``"false"``; the guard and the overlay
+    generator key off that emptiness, not truthiness."""
+
+    def test_explicit_false_overrides_a_discovered_true(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "release:\n  dso_only: true\n", encoding="utf-8"
+        )
+        result = _run_bash_script(_harness(), {"INPUT_DSO_ONLY": "false"}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["release"]["dso_only"] is False
+
+    def test_explicit_false_fail_on_removed_library_overrides_discovered_true(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "gate:\n  fail_on_removed_library: true\n", encoding="utf-8"
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_FAIL_ON_REMOVED_LIBRARY": "false"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["gate"]["fail_on_removed_library"] is False
+
+    def test_omitted_input_leaves_a_discovered_true_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """The companion case: when dso-only is never mentioned at all (as
+        opposed to explicitly set to false), the discovered config's own
+        true value must survive -- proving the fix distinguishes the two
+        rather than always forcing a value through. Triggers
+        add_release_topology_config_flags via a different, explicitly-set
+        input (fail-on-removed-library) so the function still runs."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "release:\n  dso_only: true\n", encoding="utf-8"
+        )
+        result = _run_bash_script(
+            _harness(), {"INPUT_FAIL_ON_REMOVED_LIBRARY": "true"}, cwd=tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        doc = _read_config_overlay(result.stdout.splitlines())
+        assert doc["release"]["dso_only"] is True
+        assert doc["gate"]["fail_on_removed_library"] is True
+
+    def test_all_inputs_omitted_is_still_a_no_op(self, tmp_path: Path) -> None:
+        """Every input empty (never given) must still take the early-return
+        path -- the fix must not turn this function into a no-longer-
+        skippable no-op that always synthesizes an overlay."""
+        result = _run_bash_script(_harness(), {}, cwd=tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines() == ["compare"]

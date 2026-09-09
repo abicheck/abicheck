@@ -73,21 +73,18 @@ inputs:
     description: 'Development package with headers for new side. compare mode, directory/package operands only.'
     required: false
   dso-only:
-    description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only.'
+    description: 'Only compare shared objects, skip executables. compare mode, directory/package operands only. Deliberately no declared default (Codex review, fresh evidence): the synthesized release:/gate: config overlay needs to tell "omitted" apart from an explicit "false" (which must override a discovered/explicit .abicheck.yml''s own release.dso_only: true) -- a declared default would make every omitted invocation indistinguishable from an explicit false, silently losing that override.'
     required: false
-    default: 'false'
   include-private-dso:
-    description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only.'
+    description: 'Include private (non-public) shared objects from non-standard paths. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
-    default: 'false'
   keep-extracted:
     description: 'Keep extracted temporary files for debugging. compare mode, directory/package operands only.'
     required: false
     default: 'false'
   fail-on-removed-library:
-    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full (ADR-065 D2/S3); a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only.'
+    description: 'Exit 8 when a library present in old is proven removed in new -- NEW must have a proven-complete declared inventory: either a stored ProjectSnapshot package whose capture asserted inventory_complete, or a package archive (e.g. .rpm/.deb) whose own readable member table this run extracted and could enumerate in full (ADR-065 D2/S3); a live directory, or an archive whose member table could not be read in full, is an unproven inventory and an unmatched library there is an incomplete scope instead, governed by the scope.on_incomplete key in .abicheck.yml. compare mode, directory/package operands only. Deliberately no declared default -- see dso-only''s own description for why.'
     required: false
-    default: 'false'
 
   # ── Header inputs ───────────────────────────────────────────────────────────
   header:

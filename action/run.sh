@@ -1080,9 +1080,20 @@ PYEOF
 # caller bug, not a user input to accommodate -- that case still fails
 # loud rather than silently producing a two---config command line.
 add_release_topology_config_flags() {
-  if [[ "${INPUT_DSO_ONLY:-false}" != "true" \
-        && "${INPUT_INCLUDE_PRIVATE_DSO:-false}" != "true" \
-        && "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" != "true" ]]; then
+  # dso-only/include-private-dso/fail-on-removed-library deliberately carry
+  # no declared default in action.yml (Codex review, fresh evidence): an
+  # explicit `false` from the workflow must be able to override a
+  # discovered/explicit .abicheck.yml's own release.dso_only/
+  # release.include_private_dso/gate.fail_on_removed_library: true --
+  # collapsing "omitted" and "explicit false" onto the same value (the old
+  # `${INPUT_DSO_ONLY:-false}` shape, which also made this early return fire
+  # whenever all three read as "false") would make that override silently
+  # unreachable. So this guard -- and the overlay-generation below -- keys
+  # off whether each input was actually GIVEN (non-empty string) at all,
+  # never off its truthiness.
+  if [[ -z "${INPUT_DSO_ONLY:-}" \
+        && -z "${INPUT_INCLUDE_PRIVATE_DSO:-}" \
+        && -z "${INPUT_FAIL_ON_REMOVED_LIBRARY:-}" ]]; then
     return 0
   fi
   local _config_idx=-1 _i
@@ -1120,9 +1131,9 @@ add_release_topology_config_flags() {
   fi
   local _release_overlay_json
   _release_overlay_json=$(cd "$_PY_SAFE_DIR" \
-  && ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-false}" \
-  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-false}" \
-  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}" \
+  && ABICHECK_RELEASE_DSO_ONLY="${INPUT_DSO_ONLY:-}" \
+  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="${INPUT_INCLUDE_PRIVATE_DSO:-}" \
+  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}" \
   PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
@@ -1137,16 +1148,27 @@ import json
 import os
 import sys
 
+# Each of these three env vars is "" (not "false") when the corresponding
+# Action input was never given at all -- action.yml deliberately declares
+# no default for any of them (Codex review, fresh evidence) so that an
+# explicit `false` from the workflow can still override a discovered/
+# explicit .abicheck.yml's own true value, instead of being silently
+# indistinguishable from "not set". Only an explicitly-given value (either
+# spelling) is written into the overlay; omitted means "let whatever the
+# base config already says stand", not "force false".
 doc: dict[str, object] = {}
 release_blk: dict[str, object] = {}
-if os.environ.get("ABICHECK_RELEASE_DSO_ONLY") == "true":
-    release_blk["dso_only"] = True
-if os.environ.get("ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO") == "true":
-    release_blk["include_private_dso"] = True
+_dso_only = os.environ.get("ABICHECK_RELEASE_DSO_ONLY", "")
+if _dso_only:
+    release_blk["dso_only"] = _dso_only == "true"
+_include_private_dso = os.environ.get("ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO", "")
+if _include_private_dso:
+    release_blk["include_private_dso"] = _include_private_dso == "true"
 if release_blk:
     doc["release"] = release_blk
-if os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY") == "true":
-    doc["gate"] = {"fail_on_removed_library": True}
+_fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
+if _fail_on_removed:
+    doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
 json.dump(doc, sys.stdout)
 PYEOF
   )

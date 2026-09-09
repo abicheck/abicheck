@@ -35,3 +35,15 @@
   where the existing shared-library discovery already excludes
   executables regardless of this setting), so these settings previously
   had no effect and no diagnostic. Now rejected with a `click.UsageError`.
+- **Action `dso-only`/`include-private-dso`/`fail-on-removed-library` can
+  now explicitly override a discovered `.abicheck.yml`'s own `true`
+  setting** — these three inputs previously declared a `default: 'false'`
+  in `action.yml`, making an omitted input and an explicit `dso-only:
+  false` indistinguishable; a workflow that explicitly set one of them to
+  `false` to override a discovered/explicit project config's own `true`
+  had that override silently ignored (the synthesizing function's
+  early-return guard treated "all false" as "nothing to do" and left the
+  discovered config untouched). The three inputs now declare no default,
+  so an omitted one resolves to an empty string distinguishable from an
+  explicit `"true"`/`"false"`, and only an explicitly-given value is
+  written into the synthesized overlay.
