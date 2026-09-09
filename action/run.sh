@@ -4712,7 +4712,19 @@ else
   # NOT_COMPARABLE verdict without also adding this check silently
   # regressed a real `mode: compare` scope mismatch to a passing step.
   if [[ "$VERDICT" == "NOT_COMPARABLE" ]]; then
-    echo "::error::abicheck reported NOT_COMPARABLE: the two sides were not extracted under a comparable profile/scope contract. See the JSON report's diff.reason for what mismatched."
+    # Unlike scan's own NOT_COMPARABLE message above, this cannot point at
+    # "the JSON report's diff.reason" (Codex review, fresh evidence):
+    # compare's own comparability-gate refusal (`_report_not_comparable()`)
+    # raises before any DiffResult exists, so there is no `diff` key at all
+    # -- its `--format json` document carries the mismatch detail at root
+    # `reason` (schema 2.17), not nested under `diff`. And for every
+    # human-facing format (markdown/html/review, the Action's own default),
+    # that function writes no JSON document whatsoever -- not even into a
+    # secondary `--write` this run injected -- so pointing at "the JSON
+    # report" is doubly wrong for the common case: there usually isn't one.
+    # The one place the mismatch detail is guaranteed to be is this
+    # command's own stderr, already in the job log above this line.
+    echo "::error::abicheck reported NOT_COMPARABLE: the two sides were not extracted under a comparable profile/scope contract. See the command's own error output above for what mismatched (or, with format: json, the JSON report's root reason field)."
     FINAL_EXIT=1
   fi
 
