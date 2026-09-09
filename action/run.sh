@@ -3574,12 +3574,13 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
     # exactly the one flag `compare` itself has no such option for -- its
     # own pattern-verdict modulation has been unconditional since ADR-068
     # D4, so the flag exists purely to *gate the routing decision*, not to
-    # be forwarded. Appending it verbatim (the plain `CMD+=($INPUT_EXTRA_
-    # ARGS)` the `else` branch below still uses) would fail the translated
-    # `compare` invocation with a real "no such option" usage error on the
-    # one request shape this predicate was supposed to let through safely
-    # -- the only case reaching this branch at all. Filtered here rather
-    # than from `_extra_args_has_scan_only_flag`'s own always-legacy list
+    # be forwarded. Appending it verbatim (the plain
+    # `CMD+=($INPUT_EXTRA_ARGS)` the `else` branch below still uses) would
+    # fail the translated `compare` invocation with a real "no such option"
+    # usage error on the one request shape this predicate was supposed to
+    # let through safely -- the only case reaching this branch at all.
+    # Filtered here rather than from `_extra_args_has_scan_only_flag`'s
+    # own always-legacy list
     # (that list forces legacy; this flag's whole point is the opposite)
     # and only in the scan->compare translation branch, so a native `mode:
     # compare` request passing this flag directly still gets the real,
