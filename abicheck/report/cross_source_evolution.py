@@ -86,3 +86,38 @@ def change_cross_source_evolution_field(c: Change) -> str | None:
     """The per-``Change`` JSON field value for ``cross_source_evolution``, or ``None``."""
     cse = getattr(c, "cross_source_evolution", None)
     return cse.value if cse is not None else None
+
+
+#: Human-readable tag for each ``Change.cross_source_evolution`` state,
+#: rendered inline next to a hygiene finding in Markdown output so it isn't
+#: mistaken for newly-introduced drift on a re-diff of an otherwise-
+#: unchanged pair of releases. Also consulted from the JSON-safe row shape
+#: ``report/render_markdown_document.py`` builds for the default full-mode
+#: report (keyed by the same ``.value`` string this module's own
+#: :func:`change_cross_source_evolution_field` already produces).
+CROSS_SOURCE_EVOLUTION_MD_TAGS: dict[str, str] = {
+    "introduced": "🆕 introduced",
+    "resolved": "✅ resolved",
+    "persistent": "♻️ persistent (pre-existing, not new)",
+    "not_evaluated": "❔ not evaluated on one side",
+}
+
+
+def cross_source_evolution_md_suffix(c: object) -> str:
+    """``"\\n  > Cross-source hygiene: ..."`` tag for a stamped *c*, or ``""``.
+
+    ADR-068 finding A: :func:`compute_cross_source_evolution` (``workflows.
+    cross_source_evolution``) stamps every cross-source hygiene finding with
+    its OLD->NEW evolution state, but before this fix no Markdown renderer
+    ever read it -- a byte-identical rebuild's *entirely pre-existing*
+    hygiene debt rendered indistinguishably from newly introduced drift. The
+    JSON report has always carried this via
+    :func:`change_cross_source_evolution_field`; this mirrors it into every
+    Markdown call site instead of only JSON's.
+    """
+    cse = getattr(c, "cross_source_evolution", None)
+    if cse is None:
+        return ""
+    label = cse.value if hasattr(cse, "value") else str(cse)
+    tag = CROSS_SOURCE_EVOLUTION_MD_TAGS.get(label, label)
+    return f"\n  > Cross-source hygiene: {tag}"

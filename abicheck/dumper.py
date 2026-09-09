@@ -634,19 +634,22 @@ def _header_ast_parser(
         )
         _target_known = not _forwards_response_file(gcc_options, gcc_option_tokens)
         _bare_reprobe_args = _forwarded_driver_mode_token(gcc_options, gcc_option_tokens)
-        _bare_reprobe = (
-            _configured_target_triple(None, _bare_reprobe_args, clang_bin) if _target_known else None
-        )
+
+        def _bare_reprobe() -> str | None:
+            # Deferred (Codex review, fresh evidence): eagerly evaluating this would
+            # start a second compiler subprocess (its own 10s timeout) on every call.
+            return _configured_target_triple(None, _bare_reprobe_args, clang_bin) if _target_known else None
+
         _guess_ok = (
             _target_known
             and _is_default_clang_bin(clang_bin, compiler)
             and not _clang_bin_is_explicitly_configured(gcc_path, gcc_prefix)
         )
         target_triple = _configured_target_triple(gcc_options, gcc_option_tokens, clang_bin) or (
-            (_explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True) or _bare_reprobe)
+            (_explicit_target_triple(gcc_options, gcc_option_tokens, cl_style=True) or _bare_reprobe())
             if is_cl_mode
             else _explicit_target_triple(gcc_options, gcc_option_tokens)
-            or _bare_reprobe
+            or _bare_reprobe()
             or (sys.platform if _guess_ok else None)
         )
         parser = _ClangAstParser(

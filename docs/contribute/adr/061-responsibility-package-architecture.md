@@ -1457,13 +1457,28 @@ orchestration conflation of the shape Phase 5 already solved for
 - `bundle_facts.py` and its serialization/store siblings are classified
   `workflows`, conflating the `BundleFacts` value, its persistence, and
   capture/comparison orchestration. **Not yet started.**
-- `probe_harness.py` (`compare`) needs `snapshot_to_dict`/
+- `probe_harness.py` (`compare`) needed `snapshot_to_dict`/
   `snapshot_from_dict` to serialize its own probe matrix. Comparison logic
   must not become the owner of persistence because a probe workflow needs
   serialized inputs; `compare`'s `may_import: [model]` offers no facade
-  route, so this needs its own answer. Re-measure its scope with the slice —
-  the counts in `architecture/debt.yaml`'s entry predate later splits.
-  **Not yet started** — unaffected by slice 1 above.
+  route. **Closed (closure package 5, slice 2):** the conversion functions
+  (`ProbeResult.to_dict`/`MatrixSnapshot.to_json`/`.from_dict`, and the
+  module-level `write_matrix_snapshot`/`load_matrix_snapshot`) moved out of
+  `probe_harness.py` entirely into `abicheck/workflows/findings.py` —
+  already this ADR's own documented `workflows` re-export surface for "the
+  probe matrix" — which legally imports both `compare` (for the
+  `ProbeResult`/`MatrixSnapshot` dataclasses) and `abicheck.serialization`
+  (the `public_root_surfaces` facade). `ProbeResult`/`MatrixSnapshot` are
+  now pure value objects with no `storage` import; `probe_harness.py`
+  itself still owns `load_probe_spec`/`run_probe_matrix` (YAML parsing and
+  compile orchestration), unchanged. `probe_harness.py` *is* documented
+  Python API (`docs/use/probe-harness.md`) — the compatibility question was
+  never whether the module is public, only whether the removed
+  *serialization* helpers specifically needed a shim at their old path;
+  they didn't, since the documented workflow's supported path is that doc
+  page, which now imports the moved names from `workflows.findings`
+  instead (verified round-tripping) — every internal caller (CLI, tests)
+  was switched to the new home in the same slice.
 
 The owners to establish are: `model` for snapshot/bundle value types and
 their invariants; `storage` for codecs, schemas, persistence, and schema

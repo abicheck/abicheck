@@ -30,7 +30,7 @@
 **Status:** Accepted — implemented. Tracked as G22 in
 `docs/contribute/usecase-registry.yaml` (entry `UC-WF-cli-contract`, now
 `complete`); phased work in
-[plans/g22-cli-consolidation.md](../plans/g22-cli-consolidation.md). All seven
+plans/g22-cli-consolidation.md. All seven
 phases landed (D1–D12), enforced by the `cli-contract` AI-readiness gate and
 `tests/test_cli_contract.py`. The residual this line used to record — the
 `--ast-frontend android` value staying exposed on `collect`'s

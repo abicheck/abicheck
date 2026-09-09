@@ -808,6 +808,54 @@ def test_probe_failure_under_a_cl_style_driver_recovers_via_bare_reprobe(
     assert parser._target_triple == "aarch64-apple-darwin"
 
 
+def test_successful_probe_skips_the_bare_reprobe_entirely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex review, fresh evidence: the bare re-probe is a second real
+    compiler subprocess invocation (its own 10-second timeout) -- it must
+    be deferred until the primary, option-bearing probe has actually
+    failed, not evaluated unconditionally on every call. A successful
+    primary probe must short-circuit it away entirely."""
+    ast = _tu({"kind": "TranslationUnitDecl", "inner": []})
+    monkeypatch.setattr(
+        dumper, "_clang_header_dump", lambda *a, **k: (ast, None, False)
+    )
+    calls: list[tuple[str | None, tuple[str, ...]]] = []
+
+    def _fake_configured_target_triple(
+        gcc_options: str | None, gcc_option_tokens: tuple[str, ...], clang_bin: str
+    ) -> str | None:
+        calls.append((gcc_options, gcc_option_tokens))
+        return "x86_64-pc-linux-gnu"
+
+    monkeypatch.setattr(
+        dumper, "_configured_target_triple", _fake_configured_target_triple
+    )
+    monkeypatch.setattr(dumper, "_resolve_clang_bin", lambda *a, **k: "clang")
+
+    parser = _header_ast_parser(
+        [],
+        [],
+        backend="clang",
+        compiler="c",
+        gcc_path=None,
+        gcc_prefix=None,
+        gcc_options="-O2",
+        sysroot=None,
+        nostdinc=False,
+        lang=None,
+        exported_dynamic=set(),
+        exported_static=set(),
+        public_header_paths=[],
+        public_dir_paths=[],
+    )
+
+    assert isinstance(parser, _ClangAstParser)
+    assert parser._target_triple == "x86_64-pc-linux-gnu"
+    # Only the ONE primary probe call -- no bare (option-free) re-probe.
+    assert calls == [("-O2", ())]
+
+
 def test_successful_probe_still_honored_for_a_cl_style_driver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

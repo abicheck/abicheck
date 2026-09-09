@@ -317,12 +317,10 @@ class TestEvidenceStatusInJson:
         d = json.loads(to_json(r))
         assert d["changes"][0]["evidence_status"] == "unattributed"
 
-    def test_breaking_change_with_binary_evidence_stays_artifact_proven(self):
-        c = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "Public function removed: foo")
-        r = _result(Verdict.BREAKING, changes=[c])
-        r.evidence_tiers = ["header", "elf"]
-        d = json.loads(to_json(r))
-        assert d["changes"][0]["evidence_status"] == "artifact_proven"
+    # test_breaking_change_with_binary_evidence_stays_artifact_proven and its
+    # ADR-068 finding C sibling (elf tier present, symbol_binding absent ->
+    # unattributed) moved to tests/unit/report/test_evidence_status_json.py
+    # (this file sits at its architecture debt-no-growth baseline).
 
     def test_report_schema_version_matches_constant(self):
         from abicheck.schemas import REPORT_SCHEMA_VERSION

@@ -44,6 +44,9 @@ from .checker_policy import (
 from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
 from .report import contract_conflicts_markdown as _ccm, render_markdown as _rmd
+from .report.cross_source_evolution import (
+    cross_source_evolution_md_suffix as _cross_source_evolution_md_suffix,
+)
 from .report.disposition_audit import (
     DispositionAudit,
     compute_disposition_audit,
@@ -1012,7 +1015,10 @@ def compute_root_cause_section(
     for key, root_display, group_changes in groups:
         order.append(key)
         root_by_key[key] = root_display
-        finding_lines_by_key[key] = [_format_change_md(c) for c in group_changes]
+        finding_lines_by_key[key] = [
+            _format_change_md(c) + _cross_source_evolution_md_suffix(c)
+            for c in group_changes
+        ]
         count_by_key[key] = len(group_changes)
 
     if missing_labels:
@@ -1153,8 +1159,32 @@ def _append_suppression_note(lines: list[str], result: DiffResult) -> None:
 _BREAKING_ICON = "❌"  # ❌
 _SOURCE_BREAK_ICON = "⚠️"  # ⚠️
 _RISK_ICON = "⚠️"  # ⚠️
+_HYGIENE_ICON = "\U0001f9f9"  # 🧹
 _QUALITY_ICON = "\U0001f50d"  # 🔍
 _ADDITION_ICON = "✅"  # ✅
+
+
+def _hygiene_evolution_counts_line(hygiene: list[Change]) -> str:
+    """``"introduced: 2 · resolved: 1 · persistent: 40016 · not evaluated: 0"``
+    for a list of cross-source-evolution-stamped findings -- the Markdown
+    counterpart of ``report.cross_source_evolution.
+    CrossSourceEvolutionSummary`` (JSON's own per-state counts), so a
+    reader can see the split without counting bullet points (ADR-068
+    finding A)."""
+    from .checker_policy import CrossSourceEvolution
+
+    counts = dict.fromkeys(CrossSourceEvolution, 0)
+    for c in hygiene:
+        cse = getattr(c, "cross_source_evolution", None)
+        if cse is not None:
+            counts[cse] += 1
+    return (
+        f"Introduced: {counts[CrossSourceEvolution.INTRODUCED]} · "
+        f"Resolved: {counts[CrossSourceEvolution.RESOLVED]} · "
+        f"Persistent: {counts[CrossSourceEvolution.PERSISTENT]} · "
+        f"Not evaluated: {counts[CrossSourceEvolution.NOT_EVALUATED]}"
+    )
+
 
 _SEVERITY_EMOJI = {
     "error": "❌",  # ❌
@@ -1375,19 +1405,52 @@ def compute_severity_sections(
         )
 
     if risk:
+        # ADR-068 finding A: RISK_KINDS mixes two different stories --
+        # ordinary deployment-compatibility risk (a new GLIBC version
+        # requirement, etc.) and the cross-source hygiene checks
+        # (workflows.cross_source_evolution) `compare()` runs automatically
+        # on every invocation. The latter are stamped with an OLD->NEW
+        # evolution state (introduced/resolved/persistent/not_evaluated) --
+        # a `persistent` finding is pre-existing hygiene debt, not new
+        # drift, and lumping it under "Deployment Risk Changes" with that
+        # section's GLIBC-oriented blurb both mislabels it and drowns any
+        # genuine deployment-risk finding in the same section. Split them
+        # into their own section instead.
+        hygiene = [
+            c for c in risk if getattr(c, "cross_source_evolution", None) is not None
+        ]
+        deployment_risk = [
+            c for c in risk if getattr(c, "cross_source_evolution", None) is None
+        ]
         sev_label = _section_severity_label(severity_config, "potential_breaking")
-        groups.append(
-            _rmd.ChangeGroup(
-                heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
-                changes=tuple(risk),
-                oneline=True,
-                note_lines=(
-                    "> These changes are **binary-compatible** but may cause the library to fail",
-                    "> loading on older systems (e.g. a new GLIBC version requirement). Verify",
-                    "> your target environment before deploying.",
-                ),
+        if deployment_risk:
+            groups.append(
+                _rmd.ChangeGroup(
+                    heading=f"## {_RISK_ICON} Deployment Risk Changes{sev_label}",
+                    changes=tuple(deployment_risk),
+                    oneline=True,
+                    note_lines=(
+                        "> These changes are **binary-compatible** but may cause the library to fail",
+                        "> loading on older systems (e.g. a new GLIBC version requirement). Verify",
+                        "> your target environment before deploying.",
+                    ),
+                )
             )
-        )
+        if hygiene:
+            groups.append(
+                _rmd.ChangeGroup(
+                    heading=f"## {_HYGIENE_ICON} Cross-Source Hygiene Findings{sev_label}",
+                    changes=tuple(hygiene),
+                    oneline=True,
+                    note_lines=(
+                        "> These findings compare each snapshot's own evidence sources against each",
+                        "> other (e.g. an exported symbol missing from public headers) -- they are",
+                        "> **not** OLD vs. NEW drift. Each carries its own evolution state relative to",
+                        "> the OLD snapshot: `persistent` findings already existed before this change",
+                        f"> and are not new; only `introduced` ones are new. {_hygiene_evolution_counts_line(hygiene)}",
+                    ),
+                )
+            )
 
     if compatible:
         from .checker_policy import ADDITION_KINDS as _ADDITION_KINDS

@@ -9,9 +9,9 @@ lifecycle: active
 **Type:** Architectural assessment plus a phased convergence plan. Not a
 gap-closure plan against a `usecase-registry.yaml` entry — this is a
 cross-cutting initiative plan, alongside
-[CLI cleanup, phase two](cli-cleanup-phase-two.md),
+CLI cleanup, phase two,
 [G33 (typed API convergence)](g33-typed-api-and-mcp-convergence.md), and
-[G32 (comparability contract)](g32-comparability-contract-and-multi-tu-manifest.md),
+G32 (comparability contract),
 all three of which this plan builds directly on and names throughout.
 **Related:** [ADR-037](../adr/037-cli-interface-contract.md) (CLI interface
 contract), [ADR-049](../adr/049-contract-relevance-and-compatibility-configuration.md)
@@ -2566,7 +2566,7 @@ advisory CI signal, but it should be understood as catching a different
 This plan does not compete with the existing initiative plans — it names
 where they converge and what remains once each is fully landed:
 
-- **[CLI cleanup, phase two](cli-cleanup-phase-two.md)** already names three
+- **CLI cleanup, phase two** already names three
   of the same prerequisites this plan generalizes (one typed `dump`
   resolution path — its "PR C"; one effective pack/gate configuration —
   its "PR B"; one canonical exit decision — its "PR G1", already merged).
@@ -2577,7 +2577,7 @@ where they converge and what remains once each is fully landed:
   extend to `dump` and the artifact-resolution surface generally; its own
   "Phase 6" note (a standing sequencing constraint on ADR-049's rollout)
   applies unchanged to this plan's Phase 2.
-- **[G32](g32-comparability-contract-and-multi-tu-manifest.md)**'s
+- **G32**'s
   comparability contract (`ExtractionContract`, `scope_fingerprint`) is
   exactly the fingerprint machinery Phase 1's acceptance tests reuse — this
   plan does not propose a second comparability mechanism.

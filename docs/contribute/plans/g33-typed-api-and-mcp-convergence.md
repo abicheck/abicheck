@@ -36,7 +36,7 @@ below for the historical record of what this migration needed first.
 **Related:** ADR-037 (G22, CLI consolidation — done), ADR-049 (contract relevance,
 see [public-contract-default.md](public-contract-default.md) for its own
 rollout), ADR-043 (`used_by`/`required_symbols` app scoping), ADR-050
-(comparability contract / `frontend_context`, see [G32](g32-comparability-contract-and-multi-tu-manifest.md)),
+(comparability contract / `frontend_context`, see G32),
 [G30](g30-github-actions-integration-model.md) (Actions tiers — this plan
 defers to it rather than duplicating)
 **Scope:** `abicheck/service.py`, `abicheck/api_types.py`,

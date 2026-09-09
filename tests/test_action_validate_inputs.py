@@ -92,10 +92,18 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_BUILD_INFO",
     "INPUT_COMPILE_DB",
     "INPUT_BUILD_TARGET",
+    "INPUT_JOBS",
+    "INPUT_BUNDLE_SYSTEM_PROVIDERS",
 )
 
 
-def _run_validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _run_validate(
+    env_extra: dict[str, str], bash_options: list[str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the real validator. ``bash_options`` are passed to the interpreter
+    itself (e.g. ``["-O", "xpg_echo"]``), so a test can exercise the script
+    under a shell configured the way a real runner's might be -- see
+    ``test_action_validate_inputs_injection.py``."""
     # Strip any of validate-inputs.sh's own INPUT_* vars the *test process*
     # inherited (e.g. if pytest itself ran inside a composite-action step)
     # before layering env_extra back on top -- otherwise a test that
@@ -106,7 +114,7 @@ def _run_validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]
         env.pop(name, None)
     env.update(env_extra)
     return subprocess.run(
-        [_bash_executable(), str(VALIDATE_SH)],
+        [_bash_executable(), *(bash_options or []), str(VALIDATE_SH)],
         capture_output=True,
         text=True,
         env=env,
@@ -352,11 +360,16 @@ class TestScanNewLibrarySet:
         assert "::warning::" in result.stdout
         assert "new-library-set" in result.stdout
 
-    def test_bundle_system_providers_input_no_longer_validated(self) -> None:
-        # PR J: bundle-system-providers is no longer an Action input at all
-        # (topology moved to .abicheck.yml's `bundle:` block) -- setting the
-        # stray env var validate-inputs.sh once special-cased is now a no-op,
-        # never a warning, on every mode this class used to check.
+    def test_bundle_system_providers_is_a_hard_error(self) -> None:
+        """A removed input that used to configure *analysis semantics* must
+        fail loudly rather than be dropped.
+
+        Deleting an input from ``action.yml`` does not do this: GitHub drops
+        the undeclared key before the composite action runs, so the caller
+        gets no annotation and the setting silently stops applying. Both
+        removed inputs are therefore re-declared as tombstones and rejected
+        here instead.
+        """
         for mode_env in (
             {"INPUT_MODE": "compare"},
             {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"},
@@ -366,9 +379,49 @@ class TestScanNewLibrarySet:
             result = _run_validate(
                 {**mode_env, "INPUT_BUNDLE_SYSTEM_PROVIDERS": "libvendor.so.1"}
             )
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert "::error::" in result.stdout
+            assert "bundle-system-providers" in result.stdout
+            # The migration target must be named, not just the removal.
+            assert "bundle.system_providers" in result.stdout
+
+    def test_jobs_warns_on_every_mode(self) -> None:
+        """``jobs`` was a tuning knob (worker count), so its removal warns
+        rather than breaking a version bump -- but it must not be silent.
+        Reported by a real downstream integration whose ``jobs: 1`` cap went
+        inert with nothing failing (~2.8x wall time, ~3.2x peak RSS)."""
+        for mode_env in (
+            {"INPUT_MODE": "compare"},
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"},
+            {"INPUT_MODE": "dump"},
+        ):
+            result = _run_validate({**mode_env, "INPUT_JOBS": "1"})
             assert result.returncode == 0, result.stdout + result.stderr
-            assert "::warning::" not in result.stdout
-            assert "bundle-system-providers" not in result.stdout
+            assert "::warning::" in result.stdout
+            assert "jobs" in result.stdout
+
+    def test_removed_inputs_are_silent_when_unset(self) -> None:
+        """The tombstones fire on the *set* value only -- an ordinary run
+        that never mentions them stays clean."""
+        result = _run_validate({"INPUT_MODE": "compare"})
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "jobs" not in result.stdout
+        assert "bundle-system-providers" not in result.stdout
+
+    @pytest.mark.parametrize("name", ["jobs", "bundle-system-providers"])
+    def test_removed_inputs_stay_declared_in_action_yml(self, name: str) -> None:
+        """The rejection above is only reachable if the input is still
+        *declared*: an undeclared key never reaches the composite action at
+        all. Pin that, so a later "tidy up dead inputs" pass cannot silently
+        restore the drop-on-the-floor behavior this whole block exists to
+        prevent."""
+        import yaml
+
+        action_yml = VALIDATE_SH.parent.parent / "action.yml"
+        inputs = yaml.safe_load(action_yml.read_text())["inputs"]
+        assert name in inputs
+        description = inputs[name]["description"].lower()
+        assert "removed" in description
 
 
 @pytest.mark.skipif(
@@ -735,9 +788,7 @@ class TestCompareRejectsRequireCompleteAnalysisForDirectoryOrPackage:
         )
         assert result.returncode == 0, result.stdout + result.stderr
 
-    def test_directory_compare_with_the_flag_unset_passes(
-        self, tmp_path: Path
-    ) -> None:
+    def test_directory_compare_with_the_flag_unset_passes(self, tmp_path: Path) -> None:
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
         result = _run_validate(
