@@ -564,6 +564,22 @@ def _suppress_lockstep_soname_findings(
         result.changes = [
             c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
+        # Codex review, fresh evidence ("Preserve lockstep findings in the
+        # suppression trail"): removing `unnecessary` from `result.changes`
+        # alone drops it from the finding-level audit trail entirely --
+        # `to_json()`'s own `suppression` block reads `result.suppressed_
+        # changes`/`suppressed_count` (the same fields every other
+        # suppression path in this codebase populates,
+        # `checker._filter_suppressed_changes`), not the disposition
+        # ledger this function already updates below. Without this, the
+        # rewritten per-library `--output-dir` JSON reported
+        # `suppression.suppressed_count: 0` and an empty
+        # `suppressed_changes` array while its own `disposition_audit`
+        # (recomputed a few lines down) said one finding was suppressed --
+        # two supposedly-agreeing views of the same report disagreeing on
+        # whether a suppression happened at all.
+        result.suppressed_changes = [*result.suppressed_changes, *unnecessary]
+        result.suppressed_count += len(unnecessary)
         suppressed += len(unnecessary)
         # Codex review, fresh evidence ("Record lockstep SONAME suppression
         # before folding audits"): this library's own `disposition_audit`

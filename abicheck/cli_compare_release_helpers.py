@@ -1288,6 +1288,80 @@ def _format_release_junit(
     )
 
 
+def _list_len(value: object) -> int:
+    """``len(value)`` when *value* is a list, else 0 -- a small type-safe
+    helper for reading the length of an ``object``-typed dict value (e.g.
+    ``dict[str, object]["some_key"]``) without a bare ``len(object)`` mypy
+    error."""
+    return len(value) if isinstance(value, list) else 0
+
+
+def _release_filtered_summary_counts(
+    library_results: list[dict[str, object]],
+    bundle_result: BundleDiffResult | None,
+    matrix_result: DiffResult | None,
+    *,
+    displayed_bundle_count: int,
+    displayed_matrix_count: int,
+) -> dict[str, int]:
+    """Aggregate ``{"displayed", "total"}`` finding counts across every
+    release-level projection a ``--view show=...`` selection was applied
+    to, for both ``_format_release_json`` and ``_format_release_markdown``
+    to record under their own ``release_filtered_summary`` field (Codex
+    review, fresh evidence, both formats: "Record the active filter in
+    release JSON" / "Disclose active filters in release Markdown") --
+    deliberately a separately-named, separately-shaped structure from
+    scalar ``compare`` JSON's own ``filtered_summary`` (Codex review, fresh
+    evidence, second round: "Preserve the scalar filtered_summary schema"),
+    since scalar's shape (``breaking``/``source_breaks``/``risk_changes``/
+    ``total_changes``, one ``DiffResult``'s own severity buckets) has no
+    release-level equivalent to compute from an aggregate across many
+    libraries plus the bundle/matrix sections -- reusing that name for an
+    incompatible shape would silently break a consumer reading
+    ``filtered_summary.breaking`` off a release document the same way it
+    does off a scalar one.
+
+    ``total``/``displayed`` are summed from each library's own real
+    (uncapped) finding count, plus the bundle/matrix findings when either
+    ran. Reading ``findings_total_count``/``findings_total_count_view``
+    (stashed per-library by ``_strip_diff_results_and_adjust_verdict``,
+    before its own ``_MAX_RELEASE_FINDINGS_PER_LIBRARY`` display cap is
+    applied to ``entry["findings"]``) rather than ``len(lib["findings"])``
+    is deliberate too (Codex review, fresh evidence, third round: "Count
+    uncapped findings in release filter totals") -- summing the
+    already-capped display list under-reports a library with more than the
+    per-library findings cap (e.g. 25 real findings reads as 10), the exact
+    "trace of what a filter hid" this field exists to preserve.
+
+    *displayed_bundle_count*/*displayed_matrix_count* are passed in rather
+    than recomputed here, since each caller already has its own
+    already-filtered bundle/matrix projection in a different shape (JSON's
+    own list-of-dicts vs. Markdown's list of live objects) -- counting is
+    the only thing both need from it.
+    """
+
+    def _as_count(value: object) -> int:
+        return value if isinstance(value, int) else 0
+
+    total_findings = sum(
+        _as_count(lib.get("findings_total_count"))
+        for lib in library_results
+        if isinstance(lib, dict)
+    )
+    displayed_findings = sum(
+        _as_count(lib.get("findings_total_count_view"))
+        for lib in library_results
+        if isinstance(lib, dict)
+    )
+    if bundle_result is not None:
+        total_findings += len(bundle_result.bundle_findings)
+        displayed_findings += displayed_bundle_count
+    if matrix_result is not None:
+        total_findings += len(matrix_result.changes)
+        displayed_findings += displayed_matrix_count
+    return {"displayed": displayed_findings, "total": total_findings}
+
+
 def _format_release_json(
     worst_verdict: str,
     old_dir: Path,
@@ -1496,61 +1570,18 @@ def _format_release_json(
         # was indistinguishable from missing/truncated detail, unlike
         # scalar `compare` JSON, which has always carried
         # `show_only_filter`/`filtered_summary` for exactly this reason
-        # (`reporter._add_show_only_filter`). `show_only_filter` mirrors
-        # that field verbatim (same name, same string type -- no schema
-        # conflict). The pre/post-filter counts are deliberately a
-        # *separately named* structure, not a same-named `filtered_summary`
-        # (Codex review, fresh evidence, second round: "Preserve the scalar
-        # filtered_summary schema") -- the scalar field's shape
-        # (`breaking`/`source_breaks`/`risk_changes`/`total_changes`, one
-        # `DiffResult`'s own severity buckets) has no release-level
-        # equivalent to compute from an aggregate across many libraries
-        # plus the bundle/matrix sections, so reusing that name for a
-        # differently-shaped `{displayed, total}` dict would silently break
-        # a consumer reading `filtered_summary.breaking` off a release
-        # document the same way it does off a scalar one.
-        #
-        # `total`/`displayed` are aggregated across every release-level
-        # projection this same `show_only` was just applied to above: each
-        # library's own real (uncapped) finding count, plus the bundle/
-        # matrix findings when either ran. Reading `findings_total_count`/
-        # `findings_total_count_view` (stashed per-library by
-        # `_strip_diff_results_and_adjust_verdict`, before its own
-        # `_MAX_RELEASE_FINDINGS_PER_LIBRARY` display cap is applied to
-        # `entry["findings"]`) rather than `len(lib["findings"])` is
-        # deliberate too (Codex review, fresh evidence, third round: "Count
-        # uncapped findings in release filter totals") -- summing the
-        # already-capped display list under-reports a library with more
-        # than the per-library findings cap (e.g. 25 real findings reads as
-        # 10), the exact "trace of what a filter hid" this field exists to
-        # preserve.
-        def _as_count(value: object) -> int:
-            return value if isinstance(value, int) else 0
-
-        def _list_len(value: object) -> int:
-            return len(value) if isinstance(value, list) else 0
-
-        total_findings = sum(
-            _as_count(lib.get("findings_total_count"))
-            for lib in library_results
-            if isinstance(lib, dict)
-        )
-        displayed_findings = sum(
-            _as_count(lib.get("findings_total_count_view"))
-            for lib in library_results
-            if isinstance(lib, dict)
-        )
-        if bundle_result is not None:
-            total_findings += len(bundle_result.bundle_findings)
-            displayed_findings += _list_len(summary.get("bundle_findings"))
-        if matrix_result is not None:
-            total_findings += len(matrix_result.changes)
-            displayed_findings += _list_len(summary.get("matrix_findings"))
+        # (`reporter._add_show_only_filter`). See
+        # :func:`_release_filtered_summary_counts` for why the counts live
+        # under a separately-named `release_filtered_summary` field rather
+        # than a same-shaped `filtered_summary`.
         summary["show_only_filter"] = show_only
-        summary["release_filtered_summary"] = {
-            "displayed": displayed_findings,
-            "total": total_findings,
-        }
+        summary["release_filtered_summary"] = _release_filtered_summary_counts(
+            library_results,
+            bundle_result,
+            matrix_result,
+            displayed_bundle_count=_list_len(summary.get("bundle_findings")),
+            displayed_matrix_count=_list_len(summary.get("matrix_findings")),
+        )
     # CLI cleanup phase two, PR B (Codex review, PR #803): the release-level
     # *summary* JSON is a separate computation from the optional per-library
     # `to_json` sidecar files, which reach `add_contract_context` on their
@@ -1644,6 +1675,15 @@ def _format_release_markdown(
     renderer itself from calling either filter function. *library_results*
     itself is never mutated, so this function's caller can also render an
     unfiltered (``show_only=None``) secondary ``--write`` from the same data.
+
+    When *show_only* is active, the document also gets a ``> Filtered by:
+    ...`` note (Codex review, fresh evidence: "Disclose active filters in
+    release Markdown") -- the identical rendering and aggregate counts
+    JSON's ``release_filtered_summary`` field carries, via the shared
+    :func:`_release_filtered_summary_counts`, mirroring scalar ``compare``
+    Markdown's own long-standing ``> Filtered by: ...`` note for the same
+    reason: without it, a filtered-to-empty findings section next to
+    ``verdict: BREAKING`` was indistinguishable from missing detail.
     """
     from .cli_compare_receipt import (
         _release_md_library_findings,
@@ -1707,6 +1747,31 @@ def _format_release_markdown(
             f"| **Bundle** | {bundle_em} `{bundle_result.bundle_verdict.value}` "
             f"({bundle_count} cross-library finding{'s' if bundle_count != 1 else ''}) |",
         )
+    if show_only:
+        # Codex review, fresh evidence ("Disclose active filters in release
+        # Markdown"): the release Markdown substituted the filtered per-
+        # library/bundle/matrix projections above with no trace of *why* --
+        # mirrors scalar `compare` Markdown's own `> Filtered by: ...` note
+        # (`report/render_markdown_document.py`), reusing the identical
+        # `render_show_only_cli_hint` rendering and the same aggregate
+        # counts JSON's `release_filtered_summary` field now carries (see
+        # `_release_filtered_summary_counts`'s own docstring).
+        from .reporter_markdown import render_show_only_cli_hint
+
+        counts = _release_filtered_summary_counts(
+            library_results,
+            bundle_result,
+            matrix_result,
+            displayed_bundle_count=len(display_bundle_findings),
+            displayed_matrix_count=len(display_matrix_changes),
+        )
+        cli_hint = render_show_only_cli_hint(show_only)
+        lines.append("")
+        lines.append(
+            f"> Filtered by: `{cli_hint}` "
+            f"({counts['displayed']} of {counts['total']} findings shown)"
+        )
+        lines.append("")
     if scope_section is not None:
         lines += render_comparison_scope_markdown(scope_section)
     lines += _release_md_libraries_table(display_library_results, _VERDICT_EMOJI)

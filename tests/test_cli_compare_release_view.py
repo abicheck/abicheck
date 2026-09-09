@@ -405,6 +405,37 @@ class TestReleaseViewShowOnly:
         }
         assert not leaked, lib_keys
 
+    def test_release_markdown_discloses_the_active_filter_and_counts(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, fresh evidence ("Disclose active filters in
+        release Markdown"): the release Markdown used to substitute the
+        filtered per-library projection with no trace of the selector or
+        the displayed-versus-total count, leaving readers unable to tell
+        "filtered to nothing" apart from "no detail available" -- unlike
+        scalar `compare` Markdown, which has always emitted a `> Filtered
+        by: ...` note for this."""
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir), "--view", "show=variables",
+        )
+        assert result.exit_code == 4, result.output
+        assert "api_b" not in result.output
+        assert (
+            "> Filtered by: `--view show=variables` (0 of 2 findings shown)"
+            in result.output
+        )
+
+    def test_release_markdown_omits_the_filter_note_without_view_show(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+
+        result = _invoke("compare", str(old_dir), str(new_dir))
+        assert result.exit_code == 4, result.output
+        assert "Filtered by" not in result.output
+
 
 class TestReleaseViewDemangle:
     """``--view demangle``/``--view no-demangle`` on a directory/package input."""

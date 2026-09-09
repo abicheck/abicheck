@@ -63,3 +63,15 @@ Uncomment the section that is right (remove the HTML comment wrapper).
 - The pattern-aware modulation ledger's own text (`compare --view
   patterns`) referenced the retired `--pattern-verdicts` flag; it now
   names the flag's actual replacement.
+- `compare --view show=...` on a directory/package release now also
+  discloses the active filter and displayed/total counts in the
+  Markdown report (a `> Filtered by: ...` note), matching the JSON
+  document's `release_filtered_summary` and scalar `compare` Markdown's
+  own long-standing note for the same reason.
+- The lockstep-SONAME-bump suppression on a directory/package `compare`
+  now also records the suppressed finding in the affected library's
+  `DiffResult.suppressed_changes`/`suppressed_count` — the fields
+  `to_json()`'s own `suppression` block reads — not just on the
+  disposition ledger; a rewritten `--output-dir` per-library JSON
+  previously reported `suppressed_count: 0` despite its own
+  `disposition_audit` recording a suppression.
