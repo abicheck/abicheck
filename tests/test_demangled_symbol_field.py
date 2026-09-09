@@ -219,3 +219,116 @@ class TestSchema:
 
         report = json.loads(to_json(result))
         jsonschema.validate(instance=report, schema=schema)
+
+
+class TestDemanglePrewarmScoping:
+    """Codex review, fresh evidence: the first cut of the batch-demangle
+    prewarm (``diff_symbols._prewarm_elf_only_demangling``) warmed every
+    ELF_ONLY-visibility OLD-side name regardless of whether the new side
+    still exported it -- so an *unchanged* large ELF-only C++ library
+    demangled its entire export table on every comparison, even though
+    ``demangled_symbol`` is only ever read for a removal finding. Assert the
+    prewarm batch excludes a name that survives unchanged and includes one
+    that is genuinely removed.
+    """
+
+    def test_function_prewarm_excludes_unchanged_symbols(self, monkeypatch) -> None:
+        import abicheck.compare.elf_only_demangle as elf_only_demangle_mod
+
+        real_demangle_batch = elf_only_demangle_mod.demangle_batch
+        calls: list[list[str]] = []
+
+        def spy(names, **kwargs):
+            names = list(names)
+            calls.append(names)
+            return real_demangle_batch(names, **kwargs)
+
+        monkeypatch.setattr(elf_only_demangle_mod, "demangle_batch", spy)
+
+        stable = "_ZN3Foo6stableEv"
+        removed = "_ZN3Foo7removedEv"
+        old = _snapshot(
+            [
+                Function(
+                    name=stable,
+                    mangled=stable,
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                ),
+                Function(
+                    name=removed,
+                    mangled=removed,
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                ),
+            ]
+        )
+        new = _snapshot(
+            [
+                Function(
+                    name=stable,
+                    mangled=stable,
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                ),
+            ]
+        )
+        compare(old, new)
+
+        assert calls, "demangle_batch was never called"
+        prewarmed = calls[0]
+        assert removed in prewarmed
+        assert stable not in prewarmed
+
+    def test_variable_prewarm_excludes_unchanged_symbols(self, monkeypatch) -> None:
+        import abicheck.compare.elf_only_demangle as elf_only_demangle_mod
+
+        real_demangle_batch = elf_only_demangle_mod.demangle_batch
+        calls: list[list[str]] = []
+
+        def spy(names, **kwargs):
+            names = list(names)
+            calls.append(names)
+            return real_demangle_batch(names, **kwargs)
+
+        monkeypatch.setattr(elf_only_demangle_mod, "demangle_batch", spy)
+
+        stable = "_ZN3Foo6stableE"
+        removed = "_ZN3Foo7removedE"
+        old = AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            variables=[
+                Variable(
+                    name=stable,
+                    mangled=stable,
+                    type="int",
+                    visibility=Visibility.ELF_ONLY,
+                ),
+                Variable(
+                    name=removed,
+                    mangled=removed,
+                    type="int",
+                    visibility=Visibility.ELF_ONLY,
+                ),
+            ],
+            elf_only_mode=True,
+        )
+        new = AbiSnapshot(
+            library="libx.so",
+            version="1.0",
+            variables=[
+                Variable(
+                    name=stable,
+                    mangled=stable,
+                    type="int",
+                    visibility=Visibility.ELF_ONLY,
+                ),
+            ],
+        )
+        compare(old, new)
+
+        # Two calls: one from _diff_functions (empty), one from _diff_variables.
+        prewarmed = [n for call in calls for n in call]
+        assert removed in prewarmed
+        assert stable not in prewarmed

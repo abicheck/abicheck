@@ -24,7 +24,10 @@ from typing import Any
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.constants import constant_index_pair, diff_constants
-from .demangle import demangle, demangle_batch
+from .compare.elf_only_demangle import (
+    elf_only_demangled_name,
+    prewarm_elf_only_demangling,
+)
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -288,48 +291,8 @@ def _format_params(params: list[Param]) -> str:
     return ", ".join(parts) if parts else "(none)"
 
 
-def _elf_only_demangled_name(mangled: str, visibility: Visibility) -> str | None:
-    """:data:`Change.demangled_symbol` for an export-table-only declaration.
-
-    ``itanium_export_function``/``itanium_export_variable``
-    (``extract/export_symbol_identity.py``) set ``Function.name``/
-    ``Variable.name`` to the raw mangled spelling for a ``Visibility.
-    ELF_ONLY`` entity -- there is no header AST to source a pretty name
-    from, unlike every other visibility. So ``description``/``old_value``
-    on a finding about one of these embeds the raw mangled name, not a
-    human-readable one (Codex review, item 8). Returns ``None`` for every
-    other visibility (already demangled at parse time) and whenever
-    :func:`demangle.demangle` itself returns ``None``/the unchanged input
-    (not a valid mangled name, or no demangler available).
-    """
-    if visibility != Visibility.ELF_ONLY:
-        return None
-    demangled = demangle(mangled)
-    return demangled if demangled and demangled != mangled else None
-
-
-def _prewarm_elf_only_demangling(
-    old_map: dict[str, Function] | dict[str, Variable],
-) -> None:
-    """Batch-demangle every ``ELF_ONLY``-visibility OLD-side mangled name in
-    one ``c++filt``/``cxxfilt`` call before the per-symbol removal loop below
-    runs :func:`_elf_only_demangled_name` one entity at a time.
-
-    Without this, a library with many distinct ELF-only C++ removals forked
-    one ``c++filt`` subprocess *per removed symbol* whenever ``cxxfilt`` isn't
-    installed -- seconds to minutes of pure process-launch overhead, entirely
-    wasted whenever the selected report format never reads
-    ``demangled_symbol`` at all (Codex review, fresh evidence). ``demangle()``
-    already checks :func:`demangle.demangle_batch`'s own module-level cache
-    before doing any work of its own (see its docstring's "field-eval P11"
-    note; :func:`diff_symbols_renames`'s rename gate relies on the identical
-    warm-then-reuse pattern), so this call turns every later
-    ``demangle(mangled)`` in this pass into a cache hit rather than a fresh
-    subprocess, without changing what any single lookup returns.
-    """
-    demangle_batch(
-        [m for m, decl in old_map.items() if decl.visibility == Visibility.ELF_ONLY]
-    )
+_elf_only_demangled_name = elf_only_demangled_name
+_prewarm_elf_only_demangling = prewarm_elf_only_demangling
 
 
 def _check_removed_function(
@@ -971,7 +934,6 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
     old_map = _public_functions(old)
-    _prewarm_elf_only_demangling(old_map)
     # ADR-049 Phase 2: the new side's matching index. A ``Mapping`` over the
     # same keys ``_public_functions`` returns -- so every loop below is
     # unchanged and each function is still visited once -- plus the
@@ -979,6 +941,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # joins on. One shared primitive instead of a second hand-rolled multimap,
     # the same way ``build_type_map`` already backs flat *type* matching.
     new_map = SymbolIdentityIndex.for_functions(_public_functions(new))
+    _prewarm_elf_only_demangling(old_map, new_map)
 
     # Lookups for the virtual-method-addition check below: type records
     # (via ambiguity-safe TypeMap, not a naive bare-name dict — PR #608), the
@@ -1300,10 +1263,11 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     cv_facts_reliable = old.header_cv_facts_reliable and new.header_cv_facts_reliable
     old_vars = _public_variables(old)
-    _prewarm_elf_only_demangling(old_vars)
+    new_vars_index = SymbolIdentityIndex.for_variables(_public_variables(new))
+    _prewarm_elf_only_demangling(old_vars, new_vars_index)
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
-        SymbolIdentityIndex.for_variables(_public_variables(new)),
+        new_vars_index,
         on_removed=_var_removed,
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(

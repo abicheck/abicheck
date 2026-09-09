@@ -101,4 +101,21 @@
   installed — a library with many distinct ELF-only C++ removals could
   previously add seconds to minutes of pure process-launch overhead even
   when the selected report format never reads `demangled_symbol` at all
-  (Codex review).
+  (Codex review). Scoped to names that can actually end up
+  `FUNC_REMOVED_ELF_ONLY`/`VAR_REMOVED` (excluding any OLD-side mangled key
+  the NEW side still exports), not every ELF-only name in the OLD snapshot
+  — the first cut of this prewarm demangled an *unchanged* large ELF-only
+  C++ library's entire export table on every comparison (Codex review,
+  fresh evidence). Both the resolver and the prewarm moved into a new leaf
+  module, `compare/elf_only_demangle.py`, for the same no-growth-monolith
+  reason as the batch-rename evidence move above.
+- The root-cause Markdown view (`--report-mode root-cause`) now preserves a
+  `scoped_only_changes` (`--used-by`/`--required-symbol`) entry's
+  `EvidenceStatus.CONSUMER_PROVEN` override instead of re-deriving its
+  evidence status from `DiffResult.evidence_tiers` like an ordinary
+  comparison finding — JSON and SARIF already stamp a scoped_only finding
+  this way (proven by the supplied consumer's own import table,
+  independent of what the library-to-library comparison itself examined),
+  so the un-fixed root-cause path could describe empirical consumer
+  evidence and then call its own consequence merely plausible (Codex
+  review).

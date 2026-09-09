@@ -38,6 +38,7 @@ from .checker import (
     Verdict,
 )
 from .checker_policy import (
+    EvidenceStatus,
     HasKind,
     evidence_status_for_result,
     policy_kind_sets as _policy_kind_sets,
@@ -1014,10 +1015,23 @@ def compute_root_cause_section(
     ``_format_change_md`` qualify an ``UNATTRIBUTED`` finding's impact text
     here too (Codex review, fresh evidence: this root-cause path kept the
     unconditional text even after the full/leaf Markdown views were fixed).
+
+    A *scoped_only* member keeps its ``EvidenceStatus.CONSUMER_PROVEN``
+    override rather than being re-scored from *evidence_tiers* like an
+    ordinary comparison finding -- JSON (``reporter.to_json``'s
+    ``_scoped_only_change_dict``) and SARIF already stamp scoped_only
+    findings this way (they are proven by the supplied consumer's own
+    import table, independent of what evidence the library-to-library
+    comparison itself carries), so recomputing via
+    ``evidence_status_for_result`` here would contradict those two formats
+    and could demote a consumer-proven finding to "plausible, not
+    confirmed" (Codex review, fresh evidence).
     """
     groups = _group_changes_by_root_cause(changes + scoped_only)
     if not groups and not missing_labels:
         return None
+
+    scoped_only_ids = {_finding_id(c) for c in scoped_only}
 
     order: list[str] = []
     root_by_key: dict[str, str] = {}
@@ -1027,7 +1041,12 @@ def compute_root_cause_section(
         order.append(key)
         root_by_key[key] = root_display
         finding_lines_by_key[key] = [
-            _format_change_md(c, evidence_status_for_result(c, evidence_tiers))
+            _format_change_md(
+                c,
+                EvidenceStatus.CONSUMER_PROVEN
+                if _finding_id(c) in scoped_only_ids
+                else evidence_status_for_result(c, evidence_tiers),
+            )
             + _cross_source_evolution_md_suffix(c)
             for c in group_changes
         ]
