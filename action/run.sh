@@ -1312,6 +1312,54 @@ _config_sets_debug_options() {
   grep -Eq "(^|[[:space:]{,])[\"']?(dwarf_only|format|debuginfod|debuginfod_url)[\"']?[[:space:]]*:[[:space:]]*[^[:space:]#]" "$_cfg" 2>/dev/null
 }
 
+# Sixteenth Codex review round, P1, fresh evidence: `cli_scan._discover_
+# scan_project_config`'s own `require_parseable` split -- an EXPLICIT
+# `--build-config` that fails to parse is a hard usage error on `scan` too
+# (identical to `compare`'s own `cli_compare_helpers.run_compare` behavior,
+# which raises `click.UsageError` unconditionally on any parse failure, with
+# no auto-discovered/explicit distinction of its own) -- but an
+# AUTO-discovered config (`--sources`' own tree, or the cwd-upward walk)
+# that fails to parse is deliberately best-effort on `scan`: a warning,
+# `cfg_path` cleared, and the run continues on CLI settings alone
+# ("a config the user never explicitly bound to shouldn't fail a run it
+# wasn't asked to affect", the function's own docstring). Verified directly:
+# `.abicheck.yml` containing `scope: [` (malformed YAML), `scan --against`
+# completes the comparison, migrated `compare` exits 64 -- an existing,
+# previously-passing scan silently becoming a hard `ERROR`.
+#
+# Scoped to the auto-discovered case only (an explicit `build-config` is
+# skipped outright -- both commands already agree on hard-erroring there,
+# so forcing legacy CLI would just delay an error the user should see
+# either way). Runs a real `yaml.safe_load()` from the isolated
+# `$_PY_SAFE_DIR`, the only way to know "this specific file fails to parse"
+# short of re-implementing YAML parsing in bash -- a textual heuristic
+# (unlike `_config_sets_source_method`/`_config_sets_abi3_floor`/
+# `_config_sets_debug_options` above, which only ever need to detect a
+# *key*, not judge the whole document's syntactic validity) has no safe
+# over-inclusive direction here: guessing wrong either way is a real
+# behavior difference, not a conservative fallback.
+_auto_discovered_config_is_malformed() {
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    return 1
+  fi
+  if [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    return 1
+  fi
+  local _cfg
+  _cfg="$(_resolve_scan_effective_config_path)" || return 1
+  [[ -n "$_cfg" && -f "$_cfg" ]] || return 1
+  ! (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+import yaml
+try:
+    with open(sys.argv[1], "rb") as f:
+        yaml.safe_load(f)
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+' "$_cfg" 2>/dev/null)
+}
+
 # ---------------------------------------------------------------------------
 # Build the abicheck command
 # ---------------------------------------------------------------------------
@@ -2547,6 +2595,7 @@ elif [[ "$MODE" == "scan" ]]; then
      || _config_sets_abi3_floor \
      || _config_sets_debug_options \
      || _migrated_compare_against_native_baseline_has_build_evidence \
+     || _auto_discovered_config_is_malformed \
      || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
   fi

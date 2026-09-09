@@ -331,3 +331,30 @@ it should read in CHANGELOG.md. Delete the other sections.
   provenance rule to match `scan`'s -- a real product change to `compare`
   itself, previously and deliberately declined, out of scope for an
   Action-migration PR.
+  A sixteenth review round closed one more gap: `cli_scan._discover_scan_
+  project_config`'s own `require_parseable` split leaves an AUTO-discovered
+  config (no explicit `build-config`) that fails to parse as best-effort on
+  `scan` (a warning, the config cleared, the run continues on CLI settings
+  alone), but `compare` (`cli_compare_helpers.run_compare`) raises
+  `click.UsageError` unconditionally on any parse failure, with no
+  auto-discovered/explicit distinction of its own. Verified directly:
+  `.abicheck.yml` containing `scope: [` (malformed YAML), `scan --against`
+  completes the comparison, migrated `compare` exits 64 -- an existing,
+  previously-passing scan silently becoming a hard `ERROR`. Fixed with a
+  new `_auto_discovered_config_is_malformed` gate condition, scoped to the
+  auto-discovered case only (an explicit `build-config` already hard-errors
+  identically on both commands, so forcing legacy CLI there would just
+  delay an error the user should see either way) -- runs a real
+  `yaml.safe_load()` from the isolated `$_PY_SAFE_DIR`, since a textual
+  heuristic has no safe over-inclusive direction for "does this whole
+  document parse at all" the way a keyword match does for "does this key
+  exist".
+  `tests/test_action_run_sh_scan_compare_migration.py` was split once it
+  grew past the architecture gate's 1200-line test-file cap: every
+  project-config-driven gate condition (`source.method`, `abi3_floor`,
+  `debug.*`, the sources-tree `--config` forwarding, and this round's
+  malformed-config check) now lives in a new sibling module,
+  `tests/test_action_run_sh_scan_compare_migration_config_gates.py`, with
+  its own copy of the shared harness (matching the existing convention
+  every scan-mode Action test module already follows independently, rather
+  than cross-importing between test files).
