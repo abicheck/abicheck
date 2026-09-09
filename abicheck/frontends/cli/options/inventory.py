@@ -15,6 +15,10 @@
 
 """ADR-037 D10 CLI-contract metadata: the ``cli-contract`` gate's tables.
 
+The per-option ADR-068 D5 rulings that used to live here as
+``COMPARE_FLAG_BUDGET_BASE``/``_RAISES`` now live in the sibling
+``rulings.py``; see its docstring for why the shape changed.
+
 Split out of ``cli_options.py`` when that module reached the 2000-line hard
 cap (CLAUDE.md "Files that are large — edit carefully"). This is pure
 data (family → flags, family → decorator, the flag-count budget ledger)
@@ -27,6 +31,15 @@ table.
 """
 
 from __future__ import annotations
+
+from .rulings import (
+    COMPARE_FLAG_BUDGET as COMPARE_FLAG_BUDGET,
+    COMPARE_OPTION_RULINGS as COMPARE_OPTION_RULINGS,
+    DUMP_FLAG_BUDGET as DUMP_FLAG_BUDGET,
+    DUMP_OPTION_RULINGS as DUMP_OPTION_RULINGS,
+    RULINGS_BY_COMMAND as RULINGS_BY_COMMAND,
+    OptionRuling as OptionRuling,
+)
 
 # ── ADR-037 D10: contract metadata (single source of truth for the gate) ──────
 #
@@ -113,227 +126,30 @@ VERDICT_EMITTING_COMMANDS: dict[str, str] = {
 #: Empty today — every verdict-emitting command carries the full required set.
 INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 
-#: ADR-037 D10.5 — soft per-command flag-count budget for ``compare`` (a WARN
-#: nudge, enforced by ``tests/test_config_rebalance.py::TestFlagBudget``).
-#: Counts only the *visible* options: the families demoted to ``.abicheck.yml``
-#: in Phase 5 (per-category severity, scope FP-tuning, suppression hygiene) are
-#: hidden and config-bound (D4), so they don't count against the budget. The
-#: ADR's end-state target is ~20; this interim ceiling keeps new visible flags
-#: from creeping back in while the deprecation window runs.
+#: ADR-037 D10.5's per-command visible-option ceiling. **Superseded shape**
+#: (plan Phase 7k): this was ``COMPARE_FLAG_BUDGET_BASE + len(
+#: COMPARE_FLAG_BUDGET_RAISES)``, an opaque base count plus a partial ledger,
+#: and the test asserted ``visible <= budget``. Every flag removed from the
+#: base surface without lowering ``BASE`` turned into permanent slack a later
+#: flag could occupy silently -- measured at replacement time: ``visible=48``,
+#: ``BASE=41``, ``len(RAISES)=16``, budget ``57``, i.e. **nine flags of
+#: slack**, with ``--budget`` already landed as a visible option carrying no
+#: ledger entry at all. ``BASE`` naming no flags is also why "which flags are
+#: ruled?" had no answer.
 #:
-#: The budget is **derived** from the ledger below, not a hand-set number:
-#: ``BASE`` is the visible count that settled after the ADR-037 D7
-#: ``compare-release`` fold-in, and every visible flag added since must appear in
-#: ``COMPARE_FLAG_BUDGET_RAISES`` with a one-line rationale (why it is a per-run
-#: analysis input, not a project setting demotable to config). Because the budget
-#: equals ``BASE + len(RAISES)`` and the test asserts ``visible <= budget``, a new
-#: visible flag *cannot* be slipped in by silently consuming slack — the only way
-#: to raise the ceiling is to add a documented ledger entry (a regression that
-#: previously let ``--post-manifest`` land undocumented; see the ledger test).
+#: The ceiling is now exactly the number of options carrying a written
+#: ADR-068 D5 ruling in ``rulings.py``, and ``tests/test_config_rebalance.py``
+#: asserts an *exact bijection* in both directions, for ``dump`` as well as
+#: ``compare`` (``dump`` previously had no ledger at all). A new flag cannot
+#: be added without stating in writing which guard lets it in.
 #:
-#: History that folded into ``BASE`` (no per-flag ledger — these predate the
-#: ledger and moved the count in bulk): 60→66 when ``@compile_context_options``
-#: (--gcc-*/--sysroot/--nostdinc, ADR-037 D3) unified onto ``compare`` for
-#: dump/scan L2 parity; 66→76 visible when ``compare-release`` was removed and its
-#: release-only knobs (package extraction, DSO selection, removed-library gate,
-#: ADR-023 bundle/manifest) folded onto ``compare``'s directory/package path
-#: (ADR-037 D7) — genuine release surface, inert on single files.
-#: Lowered 76→70 by ADR-040 Lever 1 Phase B: the per-side ``--old/new-header``,
-#: ``--old/new-include``, ``--old/new-sources`` and ``--old/new-build-info``
-#: triples collapsed into the four side-aware flags ``--header`` / ``--include``
-#: / ``--sources`` / ``--build-info`` (``old=``/``new=`` value prefix), a net −6.
-#: Lowered 70→65 by ADR-040 Lever 1 Phase C (slice 1): ``--pdb-path`` and
-#: ``--debug-root`` collapsed their per-side triples (−2 each) and
-#: ``--probe-matrix-old/new`` folded into one side-aware ``--probe-matrix`` (−1).
-#: Lowered 65→63 by Phase C (slice 2): ``--debug-info1/2`` and ``--devel-pkg1/2``
-#: folded into side-aware ``--debug-info`` / ``--devel-pkg`` (−1 each). The
-#: unregistered release engine keeps its per-side ``--debug-info1/2`` etc.
-#: Lowered 63→62 by Phase C (slice 3): ``--old-version``/``--new-version``
-#: folded into one side-aware ``--version`` (``old=``/``new=`` prefix; per-side
-#: defaults ``old``/``new``). The unregistered release engine keeps its per-side
-#: ``--old-version``/``--new-version``.
-#: Lowered 62→57 by ADR-040 Lever 2 (Phase D, constraint-aware subset): the
-#: debug-resolution knobs ``--debug-format``/``--debuginfod``/``--debuginfod-url``/
-#: ``--dwarf-only`` demoted to the ``debug:`` config block and ``--show-redundant``
-#: to ``scope.show_redundant`` — all now ``hidden`` (they still override config,
-#: like the severity family), so they leave the visible surface (−5). The coarse
-#: ``--debug-root`` stays visible; the toolchain family and ``--scope-public-headers``
-#: are documented carve-outs (shared with dump/scan / everyday on-off switch).
-#: Lowered 57→55 by CLI cleanup phase two, PR J: ``--bundle-system-providers``/
-#: ``--bundle-cohort`` demoted to ``.abicheck.yml``'s ``bundle:`` block, with
-#: no CLI override at all (like ``--show-redundant`` above) — a stable,
-#: reviewed-in-a-PR release-topology property, not a per-run input, per this
-#: plan's own "belongs somewhere else" test.
-#: Lowered 55→48 by Phase 7 (one-comparison-product.md §4.1, ADR-037 D8.1):
-#: ``--ast-frontend``/``--compiler``/``--compiler-prefix``/
-#: ``--compiler-option``/``--sysroot``/``--nostdinc`` (the original
-#: ``@compile_context_options`` bulk fold this ledger's own "60→66" note
-#: above describes) and ``--lang`` (part of the base surface since before
-#: this ledger existed) are all gone from ``compare``'s CLI entirely — no
-#: escape hatch, ``.abicheck.yml``'s ``compile:`` block is their only
-#: source now (−7). The three surviving per-flag ``COMPARE_FLAG_BUDGET_
-#: RAISES`` entries for this same family (``--allow-ast-frontend-fallback``/
-#: ``--allow-unsupported-castxml``/``--frontend-context``) are removed in
-#: the same change, not folded into ``BASE``.
-#: Lowered 48→44 by Phase 7d (one-comparison-product.md §4.1): ``--dso-only``
-#: (``release.dso_only``), ``--fail-on-removed-library``/``--no-fail-on-
-#: removed-library`` (one Click param -- ``gate.fail_on_removed_library``,
-#: prerequisite vision A-S2/S4 landed 2026-09-06 as ADR-065 S4),
-#: ``--include-private-dso`` (``release.include_private_dso``), and
-#: ``--on-incomplete-scope`` (``scope.on_incomplete``) are all gone from
-#: ``compare``'s CLI entirely -- no escape hatch, same shape as this
-#: ledger's own "Lowered 57→55" bundle-topology note above (−4).
-#: ``--instantiation-manifest``/``--bundle-facts-out``/
-#: ``--bundle-facts-library-manifest`` stay CLI flags this phase (a real
-#: ADR-049-coordinated config home, an equivalent ``dump`` capability, and
-#: the G42 named-environments prerequisite respectively have not landed --
-#: see each option's own docstring in ``frontends/cli/options/release.py``/
-#: ``bundle_facts.py``).
-#: Lowered 44→41 by one-comparison-product.md Phase 5's closing slice and
-#: Phase 7's ``--pdb-path`` row (§4.1). Three base-surface flags are gone
-#: from ``compare``'s CLI entirely, no escape hatch:
-#: ``--surface-metrics`` and ``--show-filtered`` (§4.1's AUTO rows -- the
-#: ADR-027 metric-drift findings and the ADR-067 S1 disposition ledger are
-#: both computed on every run, so neither flag gated analysis; the ledger's
-#: *rendering* moved to ``--view filtered``, and the metrics need no
-#: selector at all since every projection already renders them), and
-#: ``--pdb-path`` (§4.1's CONFIG row -- ``debug.pdb_path``, the key ``dump``
-#: has read since Phase 7c). Two ``COMPARE_FLAG_BUDGET_RAISES`` entries go
-#: with the same change rather than folding into ``BASE``:
-#: ``--audit-suppressions`` (AUTO -- the audit is computed on every run
-#: given ``--suppress``; ``--view suppressions`` renders it) and
-#: ``--reconcile-build-context`` (AUTO -- ADR-039's reconciliation is
-#: unconditional now, forced on at the Tier-2 ``compare_snapshots``
-#: chokepoint, since an evidence-gated step that can only ever *clear* a
-#: false positive has no legitimate off position).
-COMPARE_FLAG_BUDGET_BASE = 41
-
-#: Per-flag ledger of every visible ``compare`` flag added since the D7 fold-in.
-#: flag spelling → rationale (why it is a per-run analysis input, not a stable
-#: project setting demotable to ``.abicheck.yml``). Keep in sync with reality:
-#: ``tests/test_config_rebalance.py`` asserts each key is a currently-visible
-#: ``compare`` option, so demoting one to hidden/config means removing its entry
-#: (and lowering ``BASE`` if it belonged to the base surface).
-COMPARE_FLAG_BUDGET_RAISES: dict[str, str] = {
-    "--post-manifest": (
-        "G23 / #492: scopes the comparison to a POST Python export manifest's "
-        "committed ABI surface. A per-run scoping input (which manifest to hold "
-        "the release to), not a stable project setting — like --instantiation-manifest."
-    ),
-    "--env-matrix": (
-        "ADR-020b runtime_floors: declared deployment constraints that turn "
-        "version-requirement RISK findings into decidable COMPATIBLE/BREAKING "
-        "verdicts. The matrix varies per deployment target checked, so it is a "
-        "per-run input, not a stable project setting."
-    ),
-    "--write": (
-        "Emits a second output format from the same comparison run to its own "
-        "file (e.g. --write json=abi.json alongside a --format markdown "
-        "report), so a CI caller (the GitHub Action's PR-comment JSON) no "
-        "longer has to re-invoke abicheck a second time. One FORMAT=PATH "
-        "operand rather than the --secondary-format/--secondary-output pair it "
-        "replaces, which was a usage error unless both were given. A per-run "
-        "rendering choice, not a stable project setting."
-    ),
-    "--dry-run": (
-        "ADR-043: resolve and validate the invocation without running the diff. "
-        "A per-run preview toggle, not a stable project setting."
-    ),
-    "--used-by": (
-        "ADR-043: folds the removed `appcompat` command into compare -- scopes "
-        "the comparison to one or more applications' actual imports. Which "
-        "application(s) to check against varies per run, not a project setting."
-    ),
-    "--used-by-manifest": (
-        "Workstream D-S1: a JSON document naming one or more consumer "
-        "binaries with optional digest/platform/profile/provider-baseline "
-        "provenance and an advisory/required distinction, merged into the "
-        "same --used-by pipeline. Which manifest(s) to check against varies "
-        "per run, exactly like --used-by itself, not a project setting."
-    ),
-    "--required-symbol": (
-        "ADR-043: folds the removed `plugin-check` command into compare -- an "
-        "explicit required-entrypoint contract for a plugin-host pairing. Varies "
-        "per run (which symbols a given host resolves), not a project setting."
-    ),
-    "--diagnostic-comparison": (
-        "ADR-050 D2: downgrades a comparability-gate hard failure (mismatched "
-        "profile/scope ExtractionContract fingerprints) into a tentative diff "
-        "for this one invocation. Whether a given OLD/NEW pair happens to be "
-        "incomparable varies per run, not a stable project setting."
-    ),
-    "--dump-manifest": (
-        "ADR-050 D3: a real multi-translation-unit dump for one side, in "
-        "place of a single -H/--header list. Which side(s) need a manifest "
-        "(and which manifest) varies per comparison, not a stable project "
-        "setting."
-    ),
-    "--include-system-declarations": (
-        "Shared with dump (cli_options.include_dependencies_option): whether "
-        "to include toolchain/system-header declarations in a live-binary "
-        "side's dependency scope for this comparison. Which mode a given "
-        "invocation needs varies per run (matching whatever a baseline was "
-        "dumped with), not a stable project setting."
-    ),
-    "--contract": (
-        "ADR-049: opts one invocation into the contract evaluator and picks "
-        "which evidence domain it judges each finding against (public/"
-        "exports/all). What a given run is asking varies with it -- 'what "
-        "does my declared header surface promise' vs. 'what does this binary "
-        "actually export' -- so it is a per-invocation choice, not a stable "
-        "project default."
-    ),
-    "--pack": (
-        "ADR-049 D8: selects a reusable configuration pack (policy/contract/"
-        "gate) for this comparison. Which packs apply varies per run -- the "
-        "same library is checked against a vendor SDK contract in one "
-        "invocation and an internal CI gate in another -- so it is a per-run "
-        "selection, like --policy-file. Revisit this entry if a project-config "
-        "`packs:` key lands: D7 already reserves the `project_config` tier "
-        "below packs, so a permanent project-wide selection would belong "
-        "there and this flag would become the per-run override of it."
-    ),
-    "--require-complete-analysis": (
-        "P0.4: opts one invocation into gating its exit code on "
-        "analysis_assurance.status being 'complete', orthogonal to the "
-        "compatibility verdict. Whether a given run needs that extra "
-        "assurance floor varies per invocation (e.g. a release gate vs. an "
-        "exploratory local diff), not a stable project default -- like "
-        "--contract/--audit-suppressions above."
-    ),
-    "--since": (
-        "ADR-068 Phase 2c (one-comparison-product.md SS3 #12): the git ref "
-        "this run's changed-path scope is computed against. A PR's own diff "
-        "is the archetypal per-run operand -- it differs on every single "
-        "invocation and is never a property of the project, so ADR-068 D5 "
-        "keeps it on the CLI (it is also the spelling `scan` has always "
-        "had). Scoping input only: it narrows which translation units the "
-        "L4/L5 replay examines and produces no finding of its own."
-    ),
-    "--changed-path": (
-        "ADR-068 Phase 2c: the explicit form of --since above, for a caller "
-        "that already knows the changed files (a CI job that computed the "
-        "diff itself, or a non-git checkout). Same per-run rationale, same "
-        "scoping-only effect; one of the two is redundant only if abicheck "
-        "assumes every consumer has a git working tree, which it does not."
-    ),
-    "--abi3": (
-        "ADR-068 Phase 2d (SS3 #15): activates the candidate-side stable-ABI "
-        "audit for this run and, when given, overrides the project's own "
-        "declared floor. The *floor* is the stable half and lives in "
-        "`.abicheck.yml`'s `python.abi3_floor` (ADR-068 D5) -- what stays "
-        "per-run is whether to audit at all and against which experimental "
-        'floor ("what would raising us to 3.12 cost?"). Deliberately '
-        "visible rather than hidden: ADR-068 D5 counts a hidden-but-accepted "
-        "option as public surface anyway, so hiding it would understate the "
-        "surface instead of documenting it here."
-    ),
-}
-
-#: Derived ceiling — never hand-edit; add a ``COMPARE_FLAG_BUDGET_RAISES`` entry.
-COMPARE_FLAG_BUDGET = COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
-
-
+#: History that used to fold into ``BASE`` -- the per-family bulk moves from
+#: ADR-037 D3/D7, ADR-040 Levers 1/2, and plan Phases 7a-7j -- is recorded in
+#: this file's git history and in ``docs/contribute/plans/
+#: one-comparison-product.md``'s own §6 Phase 7 narrative, which is where a
+#: reader looking for "why did this number move" is actually served. It is
+#: not restated here, because a per-flag ruling table replaces the need for a
+#: running total to be self-explaining.
 #: Navigational meta-options excluded from the flag-count budget: they are
 #: not a per-run analysis input the ADR-037 D10.5 budget is bounding, just a
 #: help-screen escape hatch (G21.8 collapse M2's curated/full `compare --help`
