@@ -298,8 +298,21 @@ class TestCliApiParity:
 
     #: `_run_baseline_compare`/`ScanRequest` share these parameter names, but
     #: both matter for a plain one-build audit too -- not baseline-only.
+    #: `enabled_checks` joined this set (not `_COMPARISON_ONLY_FIELD_
+    #: PREDICATES`) when `_run_baseline_compare` gained its own
+    #: `enabled_checks` parameter (ADR-068 amendment, PR #1172): the same
+    #: `--crosscheck KEY=off` set already governs `run_crosschecks`' own
+    #: audit-only single-snapshot pass regardless of whether `--against` is
+    #: given, so it is exactly as "always relevant" as `headers`/`includes`.
     _ALWAYS_RELEVANT_FIELDS = frozenset(
-        {"headers", "includes", "public_header_dirs", "lang", "baseline"}
+        {
+            "headers",
+            "includes",
+            "public_header_dirs",
+            "lang",
+            "baseline",
+            "enabled_checks",
+        }
     )
 
     def test_every_baseline_only_field_is_guarded(self) -> None:
