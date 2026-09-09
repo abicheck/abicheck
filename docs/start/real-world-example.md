@@ -13,7 +13,7 @@ commands are the same for any C/C++ shared library.
 
 You always need the **two builds**. Adding the **public headers** makes the
 result reliable (see [§3](#3-the-reliable-baseline-header-aware-l2)); adding your
-sources + build command enables the **recommended** deeper [source scan](#5-going-deeper-the-source-scan-recommended).
+sources + build command enables the **recommended** deeper [source-level replay](#5-going-deeper-source-level-replay-recommended).
 
 | Input | Need it for | What it is |
 |-------|-------------|-----------|
@@ -21,7 +21,7 @@ sources + build command enables the **recommended** deeper [source scan](#5-goin
 | **Public headers** | a reliable verdict | the headers a consumer `#include`s — your **API surface**; abicheck parses them to tell public API from internal churn and to see types |
 | **Include root(s)** | parsing those headers | the `-I` directories the headers' *own* `#include`s resolve against — not analysed, they just let the parse succeed |
 | **C/C++ std + `-D` macros** | correct parsing | the dialect / feature macros the library was built with (set once in a [config file](#4-configure-once-abicheckyml)) |
-| **Sources + build command** | the recommended source scan | your source tree plus the command that builds it — lets abicheck replay changed code ([§5](#5-going-deeper-the-source-scan-recommended)) |
+| **Sources + build command** | the recommended source-level replay | your source tree plus the command that builds it — lets abicheck replay changed code ([§5](#5-going-deeper-source-level-replay-recommended)) |
 | Debug info (DWARF/PDB) | optional | cross-checks types when headers are absent |
 
 !!! tip "Public headers vs. include roots"
@@ -54,7 +54,7 @@ and is always available, but it must treat *every* exported symbol as ABI — it
 can't tell your public API from internal churn. Give abicheck the public headers
 and it scopes internal/leaked symbols out, sees type/enum/signature changes a
 binary can't show, and reports at **HIGH** confidence. (It isn't the deepest
-analysis — the [source scan](#5-going-deeper-the-source-scan-recommended) goes
+analysis — the [source-level replay](#5-going-deeper-source-level-replay-recommended) goes
 further — it's the floor for results you can trust.)
 
 ```bash
