@@ -64,8 +64,12 @@ for v in ("v1", "v2"):
     pack_io.write(dataclasses.replace(pack, root=Path(f"{v}.evidence")))
 PYEOF
 
-abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence --ast-frontend clang -o v1.abi.json
-abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence --ast-frontend clang -o v2.abi.json
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence -o v1.abi.json --config .abicheck.yml
+abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence -o v2.abi.json --config .abicheck.yml
 
 abicheck compare v1.abi.json v2.abi.json --no-scope-public-headers
 ```

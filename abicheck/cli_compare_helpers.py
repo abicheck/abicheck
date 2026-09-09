@@ -323,115 +323,6 @@ def _classify_and_reject_operands(
     return old_kind, new_kind
 
 
-def _render_compare_dry_run(
-    *,
-    old_input: Path, new_input: Path,
-    old_kind: str, new_kind: str,
-    depth: str | None,
-    source_method: str | None = None,
-    headers: tuple[Path, ...], includes: tuple[Path, ...],
-    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
-    old_sources: Path | None, new_sources: Path | None,
-    old_build_info: Path | None, new_build_info: Path | None,
-    cfg_path: Path | None,
-    fmt: str,
-    exit_code_scheme: str | None,
-    header_backend: str,
-    used_by_apps: tuple[ConsumerAppInput, ...] = (),
-    required_symbols: tuple[str, ...] = (),
-    select: tuple[str, ...] = (),
-    select_required: tuple[str, ...] = (),
-) -> Any:
-    """Build the ``compare --dry-run`` report (ADR-043 D4): resolve, never diff."""
-    from .dry_run import DryRunResult, tool_status
-
-    result = DryRunResult(command="compare")
-    result.add(
-        "Inputs",
-        f"old: {old_input} ({old_kind})",
-        f"new: {new_input} ({new_kind})",
-    )
-    # Effective depth (P1 fix): a dry run must report what the real run will
-    # actually do, not just echo the raw --depth string back — the same
-    # inference _normalize_compare_options applies (--depth > source.method >
-    # inferred from --sources/--build-info > off) drives this.
-    collect_mode, effective_depth_label = _resolve_compare_collect_mode(
-        depth, source_method, old_sources, new_sources, old_build_info, new_build_info,
-    )
-    result.add(
-        "Resolved depth and source scope",
-        f"requested depth: {depth or '(not given)'}",
-        f"effective depth: {effective_depth_label}",
-        f"effective collect mode: {collect_mode}",
-        "source scope: target on each side (compare has no PR change seed)"
-        if collect_mode in ("source-target", "source-changed", "graph-full")
-        else None,
-    )
-    from .frontends.cli.compare_dry_run import add_compare_cost_preview_section
-    from .workflows.compare_cost_preview import estimate_compare_dry_run_cost
-
-    add_compare_cost_preview_section(
-        result,
-        *estimate_compare_dry_run_cost(
-            old_input=old_input, new_input=new_input,
-            depth=depth, source_method=source_method,
-            headers=headers, includes=includes,
-            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
-            old_sources=old_sources, new_sources=new_sources,
-            old_build_info=old_build_info, new_build_info=new_build_info,
-        ),
-    )
-    all_headers = list(headers) + list(old_headers_only) + list(new_headers_only)
-    result.add(
-        "Headers and compile context",
-        f"ast-frontend: {header_backend}",
-        f"headers: {', '.join(str(h) for h in all_headers)}" if all_headers else None,
-    )
-    result.add(
-        "Build/source inputs",
-        f"old sources/build-info: {old_sources or old_build_info or '(embedded)'}",
-        f"new sources/build-info: {new_sources or new_build_info or '(embedded)'}",
-    )
-    result.add("Tools and frontends", *tool_status("castxml", "clang", "gcc", "g++"))
-    result.add(
-        "Configuration and value origins",
-        f".abicheck.yml: {cfg_path if cfg_path else '(none found)'}",
-    )
-    result.add(
-        "Output and exit-code behavior",
-        f"format: {fmt}",
-        f"exit-code scheme: {exit_code_scheme or 'legacy (0/2/4)'}; contract coverage adds an orthogonal 1 under --contract",
-    )
-    if {old_kind, new_kind} & {"directory", "package"}:
-        result.add("Consumer/contract scoping", "dispatch: per-library release fan-out")
-        from .frontends.cli.release_dry_run import add_comparison_plan_section
-
-        add_comparison_plan_section(
-            result, old_input, new_input, old_kind, new_kind, select, select_required
-        )
-    if used_by_apps:
-        from .appcompat import parse_app_requirements
-        from .model.consumer_spec import as_consumer_spec
-
-        for app in used_by_apps:
-            app_label = as_consumer_spec(app).path
-            try:
-                reqs = parse_app_requirements(app, old_input.stem)
-                result.add(
-                    "Consumer/contract scoping",
-                    f"--used-by {app_label}: {len(reqs.undefined_symbols)} required "
-                    f"symbol(s), {len(reqs.required_versions)} required version(s)",
-                )
-            except Exception as exc:  # noqa: BLE001 - best-effort dry-run probe
-                result.warn(f"--used-by {app_label}: could not parse requirements: {exc}")
-    if required_symbols:
-        result.add(
-            "Consumer/contract scoping",
-            f"--required-symbol(s): {len(required_symbols)} entrypoint(s) required",
-        )
-    return result
-
-
 def _report_not_comparable(
     exc: ProfileMismatchError | ScopeMismatchError,
     old: AbiSnapshot,
@@ -531,6 +422,9 @@ def _preflight_manifests_and_audit(
     *,
     old_dump_manifest: Path | None,
     new_dump_manifest: Path | None,
+    # ADR-068 D4/Phase 5: no longer read here -- `--audit-suppressions`
+    # without `--suppress` is a no-op now, not a rejection (see below).
+    # Kept on the signature so the caller's kwargs-forwarding stays uniform.
     audit_suppressions: bool,
     suppress: Path | None,
     pack_paths: Any,
@@ -562,15 +456,16 @@ def _preflight_manifests_and_audit(
         except ManifestValidationError as exc:
             raise click.UsageError(str(exc)) from exc
 
-    if audit_suppressions and suppress is None:
-        # Validated ahead of the --dry-run emit below, same reasoning as the
-        # directory/package rejection above (Codex review, fresh evidence):
-        # a dry run must not report "ok" for `--audit-suppressions` without
-        # `--suppress` when the identical non-dry-run invocation is rejected
-        # by the later (post-suppression-loading) guard in this function.
-        raise click.UsageError(
-            "--audit-suppressions requires --suppress (nothing to audit)."
-        )
+    # ADR-068 D4/Phase 5: `--audit-suppressions` with no `--suppress` used to
+    # be a hard UsageError here ("nothing to audit"). It is now a no-op --
+    # there is genuinely nothing to audit without a suppression file, and a
+    # rendering-only flag (this one now matches --show-filtered/
+    # --surface-metrics' own shape: it only ever gates whether an
+    # already-computed, possibly-absent section is shown) should never
+    # reject an otherwise-valid invocation just because it has nothing to
+    # display. `_attach_suppression_audit` below is unconditionally guarded
+    # on `suppress is not None` already, so `result.suppression_audit` stays
+    # `None` exactly as it would without the flag.
 
     # Manifest validity, ahead of the --dry-run emit for the same reason as
     # the two guards above -- see the helper for what deliberately does *not*
@@ -1055,6 +950,7 @@ def _reject_flags_unsupported_for_set_inputs(
     include_labels: dict[Path, str] | None,
     require_complete_analysis: bool = False,
     use_cases_manifest: Path | None = None,
+    suppress: Path | None = None,
 ) -> str | None:
     """Reject the single-pair-only flags on a directory/package compare.
 
@@ -1081,6 +977,7 @@ def _reject_flags_unsupported_for_set_inputs(
         use_cases_manifest=use_cases_manifest,
         diagnostic_comparison=diagnostic_comparison,
         audit_suppressions=audit_suppressions,
+        suppress=suppress,
         include_labels=include_labels,
         require_complete_analysis=require_complete_analysis,
     )
@@ -1340,9 +1237,12 @@ def run_compare(
     debug_roots_new: tuple[Path, ...],
     # ADR-068 D4/Phase 5: --pattern-verdicts is gone -- it runs
     # unconditionally now (see compare_snapshots() call site below).
-    # explain_patterns survives, now pure rendering of the always-on ledger.
-    # --surface-metrics stays an opt-in flag (see adr027_compare_options'
-    # own docstring for why it wasn't folded into AUTO this phase).
+    # explain_patterns survives, now pure rendering of the always-on ledger
+    # (populated by --view patterns; see frontends.cli.options.view).
+    # surface_metrics is also unconditional now -- the CLI always passes
+    # True to compare_snapshots() below regardless of this parameter's
+    # value, matching pattern_verdicts' own precedent (see
+    # adr027_compare_options' docstring).
     explain_patterns: bool,
     surface_metrics: bool,
     reconcile_build_context: bool,
@@ -1526,7 +1426,23 @@ def run_compare(
             include_labels=include_labels,
             require_complete_analysis=require_complete_analysis,
             use_cases_manifest=use_cases_manifest,
+            suppress=suppress,
         )
+        # Codex review, fresh evidence ("Validate release-only view
+        # restrictions before dry-run exit"): --view leaf/root-cause is
+        # rejected for a directory/package operand inside
+        # _dispatch_release_compare, but that check never ran for
+        # --dry-run (emit_dry_run raises SystemExit before dispatch is ever
+        # reached) -- so a dry run reported "ok" (exit 0) for exactly the
+        # combination the identical non-dry-run invocation rejects (exit
+        # 64). Validated here too, ahead of the --dry-run emit below, the
+        # same way every other release-only flag conflict in this block
+        # already is.
+        from .frontends.cli.commands.compare import (
+            reject_release_incompatible_view_mode,
+        )
+
+        reject_release_incompatible_view_mode(report_mode)
         if pack_paths:
             from .cli_compare_receipt import resolve_release_pack_application_from_ctx
 
@@ -1591,11 +1507,25 @@ def run_compare(
 
     if dry_run:
         from .dry_run import emit_dry_run
+        from .frontends.cli.compare_dry_run import build_compare_dry_run_result
 
-        emit_dry_run(_render_compare_dry_run(
+        # ADR-043 D4's dry-run report must reflect the *effective* depth, not
+        # just echo `--depth` back -- the same resolution `_render_compare_
+        # dry_run` used to compute internally before it moved to
+        # `frontends/cli/compare_dry_run.py` (see that module's own
+        # docstring for why it now takes the resolved pair as parameters
+        # instead of resolving them itself).
+        collect_mode_dr, effective_depth_label_dr = _resolve_compare_collect_mode(
+            depth, resolved_cfg.source_method,
+            old_sources, new_sources, old_build_info, new_build_info,
+        )
+        emit_dry_run(build_compare_dry_run_result(
             old_input=old_input, new_input=new_input,
             old_kind=old_kind, new_kind=new_kind,
-            depth=depth, source_method=resolved_cfg.source_method,
+            depth=depth,
+            collect_mode=collect_mode_dr,
+            effective_depth_label=effective_depth_label_dr,
+            source_method=resolved_cfg.source_method,
             headers=headers, includes=includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_sources=old_sources, new_sources=new_sources,
@@ -1617,6 +1547,14 @@ def run_compare(
             build_config=cfg_path, frontend_context=frontend_context,
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
+            # `cfg_path` above is `config` (explicit --config) OR the
+            # cwd-upward auto-discovered .abicheck.yml -- NOT necessarily
+            # the raw explicit CLI value merge_compile_config's own
+            # `build_config is not None` inference expects. Without this,
+            # an auto-discovered config's `compile.compiler` would bypass
+            # the untrusted-executable-selection gate entirely (Codex
+            # review, fresh evidence -- real finding on PR #1154).
+            config_explicit=(config is not None),
         )
         # Dirs the config appended past the CLI -I roots (mirrors the single-pair
         # `config_includes` split below): must survive a per-library-pair
@@ -1661,7 +1599,15 @@ def run_compare(
             secondary_writes=secondary_writes,
             compile_context=directory_compile_context,
             config_includes=directory_config_includes,
-            depth=release_depth, public_header_dirs=project_config_public_header_dirs(project_cfg), collapse_versioned_symbols=collapse_versioned_symbols,
+            depth=release_depth,
+            public_header_dirs=project_config_public_header_dirs(project_cfg),
+            collapse_versioned_symbols=collapse_versioned_symbols,
+            # Codex review (PR #1154 follow-up): --view's derived values were
+            # silently dropped from this dispatch -- forwarded raw
+            # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
+            # _dispatch_release_compare resolves and validates them.
+            report_mode=report_mode, show_only=show_only,
+            demangle=demangle, explain_patterns=explain_patterns,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
@@ -1711,6 +1657,11 @@ def run_compare(
         frontend_context=frontend_context,
         compiler_path=compiler_path, compiler_prefix=compiler_prefix,
         compiler_option_tokens=compiler_option_tokens,
+        # `cfg_path` is `config` (explicit --config) OR the cwd-upward
+        # auto-discovered .abicheck.yml -- see the identical note on the
+        # directory/package `resolve_directory_compile_context` call above
+        # (Codex review, fresh evidence -- real finding on PR #1154).
+        config_explicit=(config is not None),
     )
     # The dirs the config appended past the CLI -I roots. These are documented as
     # applying to *both* sides, so they must survive a per-side --old/new-include
@@ -1935,9 +1886,14 @@ def run_compare(
     # modulation is unconditional now, not a flag (removed; see
     # adr027_compare_options). It is independently evidence-gated
     # (idiom-only demotion), so this never manufactures a false negative --
-    # it only fixes the bug where asking *why* (--explain-patterns) used to
+    # it only fixes the bug where asking *why* (--view patterns) used to
     # also decide *whether* modulation happened, which could change the
-    # verdict and exit code. --surface-metrics stays a real opt-in flag.
+    # verdict and exit code.
+    # ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
+    # too now (§4.1's AUTO classification) -- always True regardless of
+    # what the (now vestigial, accepted-for-compatibility) flag says, the
+    # same "the flag is a no-op, the analysis always runs" treatment
+    # pattern_verdicts=True above already gets.
     # Reporting reads the severity config only under the severity exit scheme;
     # resolved once here rather than re-spelled at each of the five consumers.
     report_severity = sev_config if resolved_cfg.exit_code_scheme == "severity" else None
@@ -1962,7 +1918,7 @@ def run_compare(
             force_public_symbols=force_public,
             extra_changes=extra_changes,
             pattern_verdicts=True,
-            surface_metrics=surface_metrics,
+            surface_metrics=True,
             collapse_versioned_symbols=collapse_versioned_symbols,
             public_surface_allowlist=post_manifest_allowlist,
             reconcile_build_context=reconcile_build_context,

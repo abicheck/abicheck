@@ -26,8 +26,11 @@ heap) is broken without recompilation.
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libfoo_v1.so
 g++ -shared -fPIC -g v2.cpp -o libfoo_v2.so
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=v1.h --header new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -74,7 +77,7 @@ signal for this case rather than relying on that overlay alone.
 `descriptor_base`'s fully-namespace-qualified spelling
 (`mylib::detail::descriptor_base`) and confirm it's reached by value from
 the public `knn_descriptor`; castxml is the documented default AST
-backend for this evidence layer, and clang (`--ast-frontend clang`) is a
+backend for this evidence layer, and clang (`compile.frontend: clang` (via `.abicheck.yml`)) is a
 supported alternative frontend that recovers the same qualified-name and
 layout information used above.
 

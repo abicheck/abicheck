@@ -252,7 +252,7 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --format markdown)
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --show-only added --format markdown)
+CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --view show=added --format markdown)
 """
         _run(
             harness,

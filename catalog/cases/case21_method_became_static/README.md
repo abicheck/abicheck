@@ -49,7 +49,7 @@ itself (32 → 8 bits, the minimum size of an empty class), which
 isn't quite the same fact as "method became static" — DWARF's own
 `is_static` concept (`DW_AT_external`) describes file-scope linkage, not
 instance-vs-static class methods, so plain DWARF can't directly see the
-qualifier change. Adding headers (L2, `--ast-frontend clang` here since this
+qualifier change. Adding headers (L2, `compile.frontend: clang` (via `.abicheck.yml`) here since this
 sandbox has no castxml) additionally surfaces the more semantically precise
 `func_static_changed: Static qualifier changed: bar (False -> True)` for the
 same break — see below.
@@ -64,8 +64,11 @@ At L2, the header AST additionally carries each method's `static`
 specifier, so abicheck can name the actual qualifier change:
 
 ```bash
-abicheck compare libfoo_v1.so libfoo_v2.so \
-  --header old=old/lib.h --header new=new/lib.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libfoo_v1.so libfoo_v2.so --header old=old/lib.h --header new=new/lib.h --config .abicheck.yml
 ```
 
 ```text

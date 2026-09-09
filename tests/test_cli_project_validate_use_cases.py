@@ -305,7 +305,11 @@ class TestUseCaseImpactOnCompare:
         block = doc["use_case_impact"]
         assert block["manifest"] == str(manifest)
         assert block["use_case_count"] == 1
-        assert block["unattributed_changes"] == 0
+        # ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
+        # now -- removing the only public function also shrinks the public
+        # surface; that aggregate `<surface>` finding is not reachable from
+        # any use case's own entrypoints, so it counts as unattributed.
+        assert block["unattributed_changes"] == 1
         (row,) = block["by_use_case"]["training workflow"]
         assert (row["symbol"], row["kind"]) == ("train", "func_removed")
         # finding_id is what lets a consumer join this row back to the
@@ -336,7 +340,11 @@ class TestUseCaseImpactOnCompare:
         assert res.exit_code == 4, res.output
         block = _json_report(res)["use_case_impact"]
         assert block["by_use_case"] == {}
-        assert block["unattributed_changes"] == block["total_changes"] == 1
+        # ADR-068 D4/Phase 5: --surface-metrics computation is unconditional
+        # now -- the removal also shrinks the public surface, so a second,
+        # equally-unattributed `<surface>` finding joins the one this test
+        # is actually about.
+        assert block["unattributed_changes"] == block["total_changes"] == 2
 
     def test_added_function_attributed_via_the_new_side_graph(
         self, tmp_path: Path
@@ -378,7 +386,7 @@ class TestUseCaseImpactOnCompare:
         # an addition), so the block must attribute none either.
         scoped = _json_report(
             _compare(
-                manifest, old, new, "--format", "json", "--show-only", "removed"
+                manifest, old, new, "--format", "json", "--view", "show=removed"
             )
         )
         block = scoped["use_case_impact"]
@@ -403,7 +411,7 @@ class TestUseCaseImpactOnCompare:
         assert "training workflow: 1 change(s)" in full.output, full.output
 
         scoped = _compare(
-            manifest, old, new, "--format", "markdown", "--show-only", "removed"
+            manifest, old, new, "--format", "markdown", "--view", "show=removed"
         )
         # The only change is an addition, so `--show-only removed` displays
         # nothing -- and the section must attribute nothing to match. The use

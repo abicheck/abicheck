@@ -69,7 +69,7 @@ case needs.
 old constructor's mangled name (encoding `attach_mode_t` as a parameter
 type) is present in v1's `.dynsym`/DWARF and absent from v2's, so
 `func_removed_elf_only` fires without any header/AST evidence. Passing
-public headers (`-H` + `--ast-frontend clang`) sharpens this further —
+public headers (`-H` + `compile.frontend: clang` (via `.abicheck.yml`)) sharpens this further —
 the header-scoped run additionally reports `type_removed: attach_mode_t`
 and a cleaner `func_removed: task_arena` — but that extra precision isn't
 required to reach the BREAKING verdict.

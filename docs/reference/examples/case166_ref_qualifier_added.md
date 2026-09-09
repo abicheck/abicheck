@@ -38,7 +38,11 @@ recompilation is mandatory even though no call site's *source* changed.
 ```bash
 g++ -shared -fPIC -g v1.cpp -o libv1.so
 g++ -shared -fPIC -g v2.cpp -o libv2.so
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+cat > .abicheck.yml <<'EOF'
+compile:
+  frontend: clang
+EOF
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -68,7 +72,7 @@ unexplained removed+added pair unlinked.
 attribute on the AST node, so abicheck needs the public header AST plus the
 Itanium mangling (`_ZNR…`/`_ZNO…`) to recover the qualifier; DWARF alone
 does not carry it. castxml is the documented default backend for this
-evidence layer; clang (`--ast-frontend clang`, used above) is a supported
+evidence layer; clang (`compile.frontend: clang` (via `.abicheck.yml`), used above) is a supported
 alternative AST frontend for hosts without castxml installed.
 
 ## Why abicheck catches it

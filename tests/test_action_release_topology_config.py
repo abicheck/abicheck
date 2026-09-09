@@ -504,7 +504,7 @@ _PY_BIN="{sys.executable}"
 {merge_fn_source}
 {fn_source}
 add_release_topology_config_flags
-_overlay_path="${{CMD[-1]}}"
+_overlay_path="${{CMD[${{#CMD[@]}}-1]}}"
 STDERR_FILE=$(mktemp)
 {_main_exit_trap_source()}
 printf '%s\\n' "$_overlay_path"

@@ -408,6 +408,13 @@ also_copy = [
     "pixi.lock",
     "scripts",
     "skills-src",
+    # Scanned by scripts/retired_surfaces.py's tools/ sweep
+    # (test_docs_contract_retired_surfaces.py::test_the_real_tools_readmes_
+    # are_in_the_target_set reads the real repository tree directly) --
+    # without this, the mutants/ sandbox copy has no tools/ directory at
+    # all, so the test's real-vs-expected comparison sees an empty set
+    # (Codex review, fresh evidence: mutmut PR lane failure).
+    "tools",
     # The three committed publication trees `scripts/gen_agent_skills.py`
     # generates from `skills-src/`. `test_gen_agent_skills.py` compares them
     # against it, so copying only the source reports every generated file as

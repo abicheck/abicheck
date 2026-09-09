@@ -122,14 +122,14 @@ A new detector should:
   (`reporter_markdown.root_cause_lookup_for_changes`) resolves them and
   passes the value into `assess_change`, not the detector. A new detector
   should participate by setting the existing `caused_by_type` field where
-  it applies (the same signal `--report-mode root-cause` groups on) rather
+  it applies (the same signal `--view root-cause` groups on) rather
   than inventing a parallel correlation mechanism; the full
   `RootCauseCorrelator` correlating findings with no `caused_by_type` link
   at all is still
   [Phase 6](plans/g29-impact-analysis-layer.md#phase-6-new-detectors-examples-fp-gates).
 - **A new report format restructuring.** Every new field this contract asks
   for is additive to the existing JSON/SARIF/JUnit shapes (mirrors how
-  [`--report-mode root-cause` reached JUnit](../learn/impact-analysis.md)
+  [`--view root-cause` reached JUnit](../learn/impact-analysis.md)
   without restructuring its per-symbol `<testcase>` tree) — don't propose a
   breaking schema change to accommodate a new detector's output.
 

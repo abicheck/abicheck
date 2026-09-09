@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from .bundle_models import BundleDiffResult
     from .severity import KindSets, SeverityConfig
 
 from .checker import (
@@ -428,6 +429,91 @@ class ShowOnlyFilter:
         return self._check_action(change.kind.value, self.actions)
 
 
+#: Separator between OR'd ``ShowOnlyFilter`` groups in a single ``show_only``
+#: string (CodeRabbit/Codex review, PR #1154). ``--view show=...`` is
+#: repeatable; each occurrence is one AND-across-dimensions/OR-within-
+#: dimension group (``ShowOnlyFilter``'s own pre-existing single-string
+#: grammar, unchanged), and repeat occurrences must OR *those groups*
+#: together -- joining them with "," instead (the bug this fixes) collapsed
+#: two different-dimension groups into one AND-group instead, and two
+#: same-dimension groups into a wider OR *within* that one dimension, either
+#: way losing the promised "match either group" semantics. ";" was never a
+#: legal character in a single group's own token grammar (severity/element/
+#: action words only), so splitting on it first is a strict, backward-
+#: compatible generalization: a string with no ";" is exactly one group,
+#: identical to every pre-existing single-string caller/test.
+SHOW_ONLY_GROUP_SEP = ";"
+
+
+def parse_show_only_groups(show_only: str) -> tuple[ShowOnlyFilter, ...]:
+    """Parse a ``show_only`` string into its OR'd ``ShowOnlyFilter`` groups.
+
+    See ``SHOW_ONLY_GROUP_SEP``'s own comment for the grammar. Each group is parsed
+    with the existing, unchanged ``ShowOnlyFilter.parse`` -- a bad token
+    inside any group raises the identical ``ValueError`` it always did.
+    """
+    return tuple(
+        ShowOnlyFilter.parse(part) for part in show_only.split(SHOW_ONLY_GROUP_SEP)
+    )
+
+
+def render_show_only_cli_hint(show_only: str) -> str:
+    """Render *show_only* back as a literally re-runnable ``--view show=...``
+    invocation.
+
+    Codex review (PR #1154 second follow-up: "Render repeated show groups
+    as repeated view options"): the raw *show_only* string stores repeated
+    ``--view show=...`` occurrences joined by :data:`SHOW_ONLY_GROUP_SEP`
+    (``";"``), an internal transport separator -- ``ShowOnlyFilter.parse``
+    rejects it as a single value, and an unquoted shell treats a bare ``;``
+    as a command separator. Every "how to reproduce this filter" hint
+    (Markdown/HTML "Filtered by" notes) must render one ``--view show=...``
+    token per group instead of echoing the internal separator verbatim.
+    A *show_only* with no ``;`` (the common case, and every pre-existing
+    single-group caller) round-trips to exactly one ``--view show=...``
+    token, unchanged from before this function existed.
+    """
+    groups = show_only.split(SHOW_ONLY_GROUP_SEP)
+    return " ".join(f"--view show={group}" for group in groups)
+
+
+def show_only_matches(
+    show_only: str,
+    change: Change,
+    policy: str = "strict_abi",
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> bool:
+    """Return True if *change* matches ANY OR'd group of *show_only*."""
+    return any(
+        group.matches(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
+        )
+        for group in parse_show_only_groups(show_only)
+    )
+
+
+def show_only_matches_severity_label(show_only: str | None, label: str) -> bool:
+    """Return True if *label* passes any OR'd group's severity dimension.
+
+    For a finding with no backing ``Change`` (a missing-contract label) --
+    ``apply_show_only``'s element/action dimensions don't apply to "a symbol
+    is simply absent", so only the severity dimension is checked, the same
+    narrowing every one of this function's call sites already documented
+    for the single-group case. A group with no severity tokens at all
+    matches every label (mirrors ``ShowOnlyFilter._check_severity``'s own
+    "unconstrained dimension passes" rule) -- so this generalizes the
+    pre-existing ``not show_only_severities or label in show_only_severities``
+    check at each call site to OR across every group instead of just one.
+    """
+    if not show_only:
+        return True
+    return any(
+        not group.severities or label in group.severities
+        for group in parse_show_only_groups(show_only)
+    )
+
+
 def apply_show_only(
     changes: Sequence[Change],
     show_only: str,
@@ -443,13 +529,112 @@ def apply_show_only(
     the rest of the report — including kind-level ``PolicyFile.overrides``
     and per-finding ``effective_verdict`` — so the filter never disagrees
     with the JSON severity field for the same change.
+
+    *show_only* may hold several ``SHOW_ONLY_GROUP_SEP``-joined OR'd groups (see
+    :func:`parse_show_only_groups`) -- a change is kept if it matches ANY
+    one of them.
     """
-    filt = ShowOnlyFilter.parse(show_only)
     return [
         c
         for c in changes
-        if filt.matches(c, policy=policy, kind_sets=kind_sets, policy_file=policy_file)
+        if show_only_matches(
+            show_only, c, policy=policy, kind_sets=kind_sets, policy_file=policy_file
+        )
     ]
+
+
+def filter_release_bundle_findings(
+    findings: Sequence[Any],
+    show_only: str,
+    policy: str = "strict_abi",
+    policy_file: object | None = None,
+) -> list[Any]:
+    """Filter ``compare-release`` bundle (cross-library) findings via --show-only.
+
+    Codex review, PR #1154 second follow-up ("Apply release show filters
+    inside each renderer"): bundle findings are release-global, not tied to
+    one library's own ``DiffResult``, so :func:`apply_show_only` (which
+    expects a real :class:`Change`) cannot be called on them directly.
+    Each finding is lowered through its own ``to_change()`` projection --
+    the identical lowering
+    ``cli_compare_release_helpers._fold_release_global_severity`` already
+    uses to resolve a bundle finding's severity for the release's exit
+    code -- so this display filter can never disagree with what that exit
+    code already computed for the same finding. *kind_sets* is deliberately
+    not accepted: bundle findings carry canonical, already-partitioned
+    ``ChangeKind``s, matching that same existing severity fold's own
+    omission of it.
+
+    *findings* is typed ``Sequence[Any]`` rather than
+    ``Sequence[BundleFinding]`` to avoid this leaf module importing
+    :mod:`abicheck.bundle_models` at runtime for a type-only reference; any
+    object exposing ``to_change() -> Change`` (every real
+    :class:`~abicheck.bundle_models.BundleFinding` does) satisfies it.
+    """
+    return [
+        f
+        for f in findings
+        if show_only_matches(
+            show_only, f.to_change(), policy=policy, policy_file=policy_file
+        )
+    ]
+
+
+def release_bundle_findings_for_view(
+    bundle_result: BundleDiffResult, show_only: str | None
+) -> list[Any]:
+    """Return *bundle_result*'s findings, ``--view show=``-filtered when active.
+
+    Codex review, PR #1154 second follow-up ("Apply release show filters
+    inside each renderer"): shared by the release fan-out's JSON
+    (``cli_compare_release_helpers._format_release_json``) and Markdown
+    (``cli_compare_release_helpers._format_release_markdown``) bundle
+    sections so the two formats can never disagree about which bundle
+    findings a given ``show_only`` selection keeps. Both call sites live in
+    ``cli_compare_release_helpers.py`` (a ``frontends`` module, which may
+    import both this module and ``report``) as of Codex review, fresh
+    evidence, PR #1154 follow-up ("Move release filtering out of the
+    Markdown renderer") -- ``report/render_release_markdown.py``'s own
+    Markdown section renderer used to call this function directly, which
+    `report/AGENTS.md`'s renderer contract forbids (a renderer may only
+    format an already-computed projection, never filter one itself); it now
+    takes the pre-filtered result as a parameter instead. A no-op (returns
+    every finding) when *show_only* is falsy.
+    """
+    if not show_only:
+        return list(bundle_result.bundle_findings)
+    return filter_release_bundle_findings(
+        bundle_result.bundle_findings,
+        show_only,
+        policy=bundle_result.policy,
+        policy_file=bundle_result.policy_file,
+    )
+
+
+def release_matrix_changes_for_view(
+    matrix_result: DiffResult, show_only: str | None
+) -> list[Change]:
+    """Return *matrix_result*'s changes, ``--view show=``-filtered when active.
+
+    Shared by the release fan-out's JSON and Markdown release-global matrix
+    (build-configuration) sections, both called from
+    ``cli_compare_release_helpers.py`` for the identical reason as
+    :func:`release_bundle_findings_for_view` -- see that function's own
+    docstring. Unlike a bundle finding, a matrix result is a real
+    :class:`DiffResult`, so it is filtered the identical way a per-library
+    one is (``kind_sets``/``policy_file`` included, so the severity
+    dimension resolves consistently). A no-op (returns every change) when
+    *show_only* is falsy.
+    """
+    if not show_only:
+        return list(matrix_result.changes)
+    return apply_show_only(
+        matrix_result.changes,
+        show_only,
+        policy=matrix_result.policy or "strict_abi",
+        kind_sets=matrix_result._effective_kind_sets(),
+        policy_file=matrix_result.policy_file,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -795,12 +980,9 @@ def _resolve_scoped_gate_findings(
     # sarif.to_sarif fix). Element/action tokens don't cleanly apply to "a
     # symbol is simply absent", so only the severity dimension is checked.
     missing_severity_label = "breaking" if blocks else "compatible"
-    show_only_severities = (
-        ShowOnlyFilter.parse(show_only).severities if show_only else frozenset()
-    )
     missing_labels = list(
         getattr(result, "scoped_missing_labels", ()) or ()
-        if not show_only_severities or missing_severity_label in show_only_severities
+        if show_only_matches_severity_label(show_only, missing_severity_label)
         else ()
     )
     return scoped_only, missing_labels, blocks, missing_kind

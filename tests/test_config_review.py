@@ -140,7 +140,8 @@ class TestDemangleTriState:
                 str(new_p),
                 "--format",
                 "markdown",
-                "--no-demangle",
+                "--view",
+                "no-demangle",
             ],
         )
         # --no-demangle suppresses demangling even on markdown -> stub not run.
@@ -152,7 +153,7 @@ class TestDemangleTriState:
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--format", "json", "--demangle"],
+            ["compare", str(old_p), str(new_p), "--format", "json", "--view", "demangle"],
         )
         assert "_Z3foov" in result.output
         assert "foo()" not in result.output
@@ -296,16 +297,18 @@ class TestDebugFormatSelector:
 
 class TestReportModeImpact:
     def test_impact_in_choices(self):
-        # --report-mode is in compare's advanced tier (G21.8 collapse M2),
-        # folded behind --help-all; plain --help only shows the common subset.
-        out = CliRunner().invoke(main, ["compare", "--help-all"]).output
+        # ADR-068 D4/Phase 5: --report-mode is gone -- its values are now
+        # --view tokens, and --view is a *common* option (unlike the old
+        # --report-mode's advanced-tier placement), so its help text (which
+        # names "impact") shows on plain --help already.
+        out = CliRunner().invoke(main, ["compare", "--help"]).output
         assert "impact" in out
 
     def test_impact_mode_runs(self, tmp_path):
         old_p, new_p = _write_removed_cpp_symbol(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--report-mode", "impact"],
+            ["compare", str(old_p), str(new_p), "--view", "impact"],
         )
         # Exit code unchanged: a removed symbol is still a 4 (BREAKING).
         assert result.exit_code == 4

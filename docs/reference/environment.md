@@ -87,7 +87,7 @@ therefore configured entirely by environment. See
 
 | Variable | Values | Default | Effect | Module |
 |----------|--------|---------|--------|--------|
-| `DEBUGINFOD_URLS` | space-separated server URLs | `""` (no servers) | The standard debuginfod server list. abicheck consults it **only** when network resolution is enabled with `--debuginfod` and `--debuginfod-url` is not given. `--debuginfod-url` overrides `DEBUGINFOD_URLS`. Only `http`/`https` URLs are used. | `debug_resolver.py` (`DebuginfodResolver._default_urls`) |
+| `DEBUGINFOD_URLS` | space-separated server URLs | `""` (no servers) | The standard debuginfod server list. abicheck consults it **only** when network resolution is enabled with `.abicheck.yml`'s `debug.debuginfod: true` and `debug.debuginfod_url` is not given. `debug.debuginfod_url` overrides `DEBUGINFOD_URLS`. Only `http`/`https` URLs are used. | `debug_resolver.py` (`DebuginfodResolver._default_urls`) |
 
 ---
 

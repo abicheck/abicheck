@@ -25,7 +25,7 @@ stop rather than proceed on an unvalidated surface.
 abicheck compare OLD NEW \
   --depth headers \
   --scope-public-headers \
-  --report-mode root-cause \
+  --view root-cause \
   --format json \
   -o compare.json
 ```
@@ -56,7 +56,7 @@ abicheck compare OLD NEW \
   --used-by path/to/consumer-binary \
   --header old=../old-side/include/foo.h --header new=include/foo.h \
   --include old=../old-side/include/ --include new=include/ \
-  --depth headers --report-mode root-cause --format json \
+  --depth headers --view root-cause --format json \
   -o consumer.json
 ```
 
@@ -73,7 +73,7 @@ abicheck compare OLD NEW \
   --required-symbol plugin_init --required-symbol plugin_shutdown \
   --header old=../old-side/include/plugin_api.h \
   --header new=include/plugin_api.h \
-  --depth headers --report-mode root-cause --format json
+  --depth headers --view root-cause --format json
 ```
 
 or, from a maintained list:
@@ -82,7 +82,7 @@ or, from a maintained list:
 abicheck compare OLD NEW --required-symbol @host-contract.txt \
   --header old=../old-side/include/plugin_api.h \
   --header new=include/plugin_api.h \
-  --depth headers --report-mode root-cause --format json
+  --depth headers --view root-cause --format json
 ```
 
 Supply the entrypoint's headers on both branches, and require

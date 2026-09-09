@@ -420,7 +420,7 @@ class TestTheGateContributionIsAlwaysTheAppliedNumber:
                 "_Z4keepv",
                 "--contract",
                 "all",
-                "--report-mode",
+                "--view",
                 "root-cause",
                 "--format",
                 "json",
@@ -532,13 +532,18 @@ class TestScanKeepsWhatItDoesNotScore:
         report = self._scan(tmp_path, "--contract", "exports")
         diff = report["diff"]
         assert diff["breaking"] == 0
-        assert diff["not_evaluated"] == 1
+        # `public_surface_shrank` (ADR-027 Phase 5's surface-metric roll-up,
+        # unconditional at the shared `compare_snapshots` Tier-2 chokepoint
+        # regardless of `scan`'s own flags) now joins `func_removed` here --
+        # both are informational-or-excluded facts the removal pair's export
+        # scope proves out of contract.
+        assert diff["not_evaluated"] == 2
         entries = [f for f in diff["findings"] if f["bucket"] == "not_evaluated"]
-        assert [f["kind"] for f in entries] == ["func_removed"]
+        assert {f["kind"] for f in entries} == {"func_removed", "public_surface_shrank"}
         # ...with the reason it did not gate, which is what makes the row
         # actionable rather than merely present.
-        assert entries[0]["contract_relevance"] == "UNKNOWN_UNRESOLVED"
-        assert entries[0]["contract_reason_code"]
+        assert all(f["contract_relevance"] == "UNKNOWN_UNRESOLVED" for f in entries)
+        assert all(f["contract_reason_code"] for f in entries)
 
     def test_a_scan_row_carries_the_canonical_decision_pair(
         self, tmp_path: Path
@@ -569,6 +574,57 @@ class TestScanKeepsWhatItDoesNotScore:
         diff = self._scan(tmp_path)["diff"]
         assert diff["breaking"] == 1
         assert "not_evaluated" not in diff
+
+
+class TestReleaseFanoutKeepsWhatItDoesNotScore:
+    """The directory/package release fan-out's own counterpart to
+    :class:`TestScanKeepsWhatItDoesNotScore` above (Codex review, PR #1154
+    follow-up: "Preserve not-evaluated findings in release summaries").
+
+    Without a severity configuration in effect, `cli_compare_release_
+    matrix._release_display_buckets`'s legacy branch walked ``diff.
+    breaking``/``diff.source_breaks``/``diff.risk``/``diff.compatible`` --
+    all four route through ``DiffResult._evaluated_changes()``, which under
+    ``--contract`` excludes a finding contract evaluation left
+    ``NOT_EVALUATED``. A directory/package operand's own ``findings`` list
+    silently lost such a finding entirely, unlike the equivalent scalar
+    ``compare`` report (serializes ``diff.changes`` directly) or ``scan
+    --against`` (already surfaces its own ``"not_evaluated"`` bucket, see
+    above).
+    """
+
+    def test_a_directory_operand_still_surfaces_the_excluded_finding(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old, new = _removal_pair()
+        (old_dir / "libfoo.json").write_text(
+            snapshot_to_json(old), encoding="utf-8"
+        )
+        (new_dir / "libfoo.json").write_text(
+            snapshot_to_json(new), encoding="utf-8"
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--format",
+                "json",
+                "--contract",
+                "exports",
+            ],
+        )
+        assert isinstance(result.exception, SystemExit | None), result.output
+        payload = json.loads(result.output)
+        lib = payload["libraries"][0]
+        entries = [f for f in lib["findings"] if f["bucket"] == "not_evaluated"]
+        by_kind = {f["kind"]: f for f in entries}
+        assert by_kind["func_removed"]["symbol"] == "_Z5pub_bv"
 
 
 class TestExplicitScopeReachesTheGateBeforeItComputes:

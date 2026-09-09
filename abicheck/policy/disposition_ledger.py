@@ -323,6 +323,64 @@ class DispositionLedger:
         ]
         return gated
 
+    def with_suppressed(
+        self,
+        changes: Iterable[object],
+        *,
+        application_point: str,
+        rule: RuleProvenance | None = None,
+    ) -> DispositionLedger:
+        """A copy with each of *changes* now labelled ``SUPPRESSED``.
+
+        For a release-level policy decision applied strictly *after* the
+        per-comparison ledger closed -- a cross-member decision an individual
+        comparison cannot make on its own, since it depends on every
+        sibling's own outcome (e.g. ``cli_compare_release_pairwise.
+        _suppress_lockstep_soname_findings``'s lockstep-SONAME-bump
+        downgrade, which only fires once the *release's* worst verdict is
+        known, long after this library's own ledger finalized). Without
+        this, mutating ``result.changes`` alone leaves the finding's
+        original (``non_gating``, typically) disposition standing --
+        Codex review, fresh evidence: the final report hid the finding
+        while the audit still classified it as ``non_gating``, with no
+        suppression rule or reason recorded at all. *rule* is this
+        synthetic policy decision's own :class:`RuleProvenance` (there is no
+        real ``Suppression`` from a ``--suppress`` document behind it) --
+        without one, the audit's own ``rules()`` tally silently omits the
+        row entirely (it skips any record with ``rule is None``), which
+        would answer "suppressed" with no way to say by what.
+
+        ``record()``'s "no-op when already recorded" rule protects against a
+        second, *independent* observer racing to relabel the same finding;
+        this is deliberately the opposite case -- the one, single,
+        later-stage authority intentionally overriding its own earlier
+        record, not a second producer disagreeing with the first. A copy,
+        not an in-place relabel, for the identical reason :meth:`with_gate`
+        is a copy: a report projection must not mutate the ledger it
+        renders. *changes* not found in this ledger are silently ignored
+        (the same "duck-typed stand-in" tolerance every other lookup here
+        already has).
+        """
+        targets = {id(c) for c in changes}
+        superseded = DispositionLedger()
+        superseded._anchors = list(self._anchors)
+        superseded._aliases = list(self._aliases)
+        superseded._seen_ids = dict(self._seen_ids)
+        superseded._seen_keys = dict(self._seen_keys)
+        superseded._records = [
+            replace(
+                record,
+                disposition=Disposition.SUPPRESSED,
+                application_point=application_point,
+                rule=rule,
+                gate_excluded=True,
+            )
+            if id(change) in targets
+            else record
+            for record, change in zip(self._records, self._anchors)
+        ]
+        return superseded
+
     @staticmethod
     def _regated(
         record: DispositionRecord,

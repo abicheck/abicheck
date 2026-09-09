@@ -271,14 +271,18 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
        impact="The aggregate count of public declarations (functions, variables, "
               "types, enums) increased between versions. Informational only — the "
               "individual additions are reported separately; this is the net "
-              "signal for CI dashboards and release notes. Emitted only with "
-              "--surface-metrics.",
+              "signal for CI dashboards and release notes. Computed "
+              "unconditionally as of ADR-027 Phase 5's later default flip; "
+              "--surface-metrics is accepted for compatibility but no longer "
+              "changes whether this finding is emitted.",
        description_template="public surface grew: {old} → {new} declarations (+{detail})"),
     _E("public_surface_shrank", _C,
        impact="The aggregate count of public declarations decreased between "
               "versions. Informational roll-up only — individual removals are "
-              "reported (and may be breaking) on their own. Emitted only with "
-              "--surface-metrics.",
+              "reported (and may be breaking) on their own. Computed "
+              "unconditionally as of ADR-027 Phase 5's later default flip; "
+              "--surface-metrics is accepted for compatibility but no longer "
+              "changes whether this finding is emitted.",
        description_template="public surface shrank: {old} → {new} declarations ({detail})"),
     _E("public_to_internal_dependency", _R,
        impact="A public/exported declaration reaches an internal (non-public-header) "
@@ -404,7 +408,10 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
        impact="The fraction of exported symbols with no public-header declaration "
               "(EXPORT_ONLY origin) rose between versions — a packaging-hygiene "
               "regression: a symbol was exported without a corresponding public "
-              "header. Informational; emitted only with --surface-metrics.",
+              "header. Informational; computed unconditionally as of ADR-027 "
+              "Phase 5's later default flip -- --surface-metrics is accepted "
+              "for compatibility but no longer changes whether this finding "
+              "is emitted.",
        description_template="undocumented-export ratio rose: {old} → {new} (symbols exported without a public header)"),
     _E("uninstantiated_template_removed", _A,
        impact="A public template that was never instantiated into a binary symbol "

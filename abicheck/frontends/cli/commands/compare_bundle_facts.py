@@ -166,6 +166,10 @@ def resolve_dispatch_compile_context(ctx: click.Context, kwargs: dict[str, Any],
         compiler_path=kwargs.get("compiler_path"),
         compiler_prefix=kwargs.get("compiler_prefix"),
         compiler_option_tokens=tuple(kwargs.get("compiler_option_tokens") or ()),
+        # kwargs["config"] may be the cwd-upward auto-discovered path above
+        # -- use the real `_config_explicit` so the compile.compiler trust
+        # gate isn't fooled (PR #1154).
+        config_explicit=_config_explicit,
     )
     apply_env_toggles_for_stored_pair(ctx, kwargs["config"], apply_compile_config_env_toggles)
     # Forward the *merged* include list (Codex review), not the raw kwargs

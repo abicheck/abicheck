@@ -243,8 +243,10 @@ binary to derive a side from; the clang frontend is the one that records
 the uninstantiated patterns:
 
 ```bash
-abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --ast-frontend clang
+abicheck compare libv1.so libv2.so --header old=v1.h --header new=v2.h --config .abicheck.yml
 ```
+
+(with `.abicheck.yml`'s `compile:` block declaring `frontend: clang`)
 
 [case191](../reference/examples/case191_header_only_graph_field_type.md) is
 the header-graph break that comparison reports — a public struct gaining a
