@@ -168,3 +168,46 @@ it should read in CHANGELOG.md. Delete the other sections.
   PR preset's risk-resolved collect mode and scan-specific per-layer
   candidate cost, which `compare --dry-run`'s own preview does not
   reproduce.
+  A ninth review round closed two more gaps, both rooted in the same
+  discovery-precedence miss: `scan`'s own effective-config resolution has
+  three tiers (an explicit `build-config`, else `discover_build_config` at
+  `--sources`' own tree root, else an upward walk from the checkout root),
+  but this migration previously only ever covered the first and third,
+  entirely missing the middle one -- so a `source.method`/`python.
+  abi3_floor`/severity/scope/suppression/gate setting living in a config
+  discovered from `--sources`' own tree went unseen. Fixed generally: a new
+  `_resolve_scan_effective_config_path` helper reproduces all three tiers
+  via the real python discovery functions, used both to widen the existing
+  `source.method` detection and to explicitly forward `--config` to the
+  migrated `compare` invocation whenever `--sources` has its own config
+  compare's default resolution wouldn't otherwise see. A new, dedicated
+  `python.abi3_floor` config-key detection (the same discovery precedence)
+  closes the other reported gap: `scan` enables its stable-ABI audit only
+  from an explicit `--abi3` CLI value, never from project config, but
+  `compare` also enables it from this key -- a migrated invocation with no
+  `--abi3` given at all could still run the audit under `compare` and fail
+  its own precondition (a non-CPython-extension pair) with exit 7, where
+  `scan` would simply never have looked at that key. Also fixed a
+  self-inflicted bug in the new resolver's own first draft: its inline
+  python subprocess runs from an isolated temp directory (this file's
+  established untrusted-checkout-avoidance pattern), so the discovery
+  function's own `Path.cwd()` default silently resolved against THAT
+  directory instead of the real checkout root -- caught by this round's
+  own regression tests regressing the pre-existing cwd-discovery case,
+  fixed by threading the real working directory through explicitly.
+  Separately, a CI-only failure that reproduced deterministically across
+  every unit-test lane (`['compare', 'scan', 'scan']` instead of
+  `['compare', 'scan']`) was traced to a genuine, PRE-EXISTING interaction
+  between two independent reuse-or-rerun mechanisms rather than a new
+  regression: `_maybe_post_pr_comment`'s own JSON-acquisition rerun
+  (gated on the real ambient `GITHUB_EVENT_NAME=pull_request` this test
+  suite's own CI job runs under, never set in a local/sandboxed run) also
+  needs a readable report and, given the same unreadable `/dev/null`
+  destination the cross-source fallback tests already use, independently
+  reruns a third time. The published verdict/exit-code were never affected
+  (both come from the second invocation either way); fixed by scoping the
+  two affected tests to `INPUT_PR_COMMENT: false`, isolating them from a
+  mechanism outside what they actually test. A diagnostic `argv_log.txt`
+  (timestamp/pid/ppid/full argv per stub invocation, harmless and left in
+  place) is what surfaced the real third command line and made this
+  traceable at all.

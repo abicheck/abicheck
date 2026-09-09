@@ -759,17 +759,22 @@ _effective_format() {
 # CLI, never a wrong answer.
 _config_sets_source_method() {
   local _cfg=""
-  # `build-config`/`--config FILE` selects a TRUSTED project config
-  # explicitly (`scan --help-all`) -- cwd auto-discovery only applies when
-  # it's omitted (second Codex review pass on this function, fresh
-  # evidence: the earlier "fixed" reply still only opened
-  # `$PWD/.abicheck.yml`/`.abicheck.yaml`, so an Action step passing
-  # `build-config: some/other/path.yml` with an explicit `source.method`
-  # in THAT file went undetected, since it never lives at the checkout
-  # root at all). Checked first, and exclusively when set: an explicit
-  # `--config` means abicheck never falls back to auto-discovery, so a
-  # `.abicheck.yml` that happens to also sit at `$PWD` is irrelevant here.
-  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+  # Prefers the real, full scan-equivalent resolution (explicit
+  # build-config, else `--sources`' own tree, else an upward walk from
+  # `$PWD` -- `_resolve_scan_effective_config_path`, defined above; ninth
+  # Codex review round, fresh evidence: the previous bash-only version
+  # below covered only the first and third tiers, entirely missing a
+  # `source.method` living in a config discovered from `--sources`' own
+  # tree). Falls back to that narrower, dependency-free bash-only check
+  # (an explicit `--build-config`, else a root-level `$PWD/.abicheck.yml`/
+  # `.yaml`) only when Python isn't usable at all, rather than failing
+  # closed unconditionally -- the common case (an ordinary root-level
+  # config, no `--sources`) stays detectable with no Python dependency.
+  if _cfg="$(_resolve_scan_effective_config_path)"; then
+    if [[ -z "$_cfg" || ! -f "$_cfg" ]]; then
+      return 1
+    fi
+  elif [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
     _cfg="${INPUT_BUILD_CONFIG}"
     if ! _is_path_already_qualified "$_cfg"; then
       _cfg="$PWD/$_cfg"
@@ -1007,6 +1012,100 @@ except Exception:
     print("1")
 ' "$_baseline" 2>/dev/null)
   [[ "$_result" == "1" ]]
+}
+
+# Ninth Codex review round, P1, fresh evidence (two related findings):
+# `cli_scan.py`'s own `_discover_scan_project_config` resolves the
+# effective project config through THREE tiers -- an explicit
+# `--build-config`, else `discover_build_config(sources)` (a real, own-root-
+# only lookup at the `--sources` tree, checking the same recognized
+# locations `find_config_in_dir` does: the root spelling and both
+# `.github/`-nested ones), else (since `against` is always set on this
+# migrated path) `discover_project_config()` (an upward walk from `$PWD`).
+# The dedicated-input gate condition (`_config_sets_source_method`, below)
+# and `_build_migrated_compare_cmd`'s own `--config` forwarding previously
+# only ever covered the first and third tiers -- entirely missing the
+# middle one, so a `source.method`/`python.abi3_floor` (or any other
+# setting: severity, scope, suppression, gate) living in a config
+# discovered from `--sources`' own tree went unseen by both.
+#
+# Shells out to the real python discovery functions rather than
+# reimplementing `find_config_in_dir`'s multi-location/upward-walk logic a
+# second time in bash, same rationale as this file's other `_migrated_
+# compare_*` helpers. Echoes the resolved path (possibly empty, meaning
+# "no config" -- a real, legitimate answer) and returns 0 on success;
+# returns 1 with nothing echoed only when this could not be determined at
+# all (no usable Python), so a caller needing a fail-closed safety property
+# can tell "no config" from "couldn't check" instead of conflating them.
+_resolve_scan_effective_config_path() {
+  if [[ "$_PY_BIN_HAS_ABICHECK" != "true" ]]; then
+    return 1
+  fi
+  local _explicit="${INPUT_BUILD_CONFIG:-}"
+  local _sources="${INPUT_SOURCES:-}"
+  local _real_pwd="$PWD"
+  if [[ -n "$_explicit" ]] && ! _is_path_already_qualified "$_explicit"; then
+    _explicit="$PWD/$_explicit"
+  fi
+  if [[ -n "$_sources" ]] && ! _is_path_already_qualified "$_sources"; then
+    _sources="$PWD/$_sources"
+  fi
+  # `$PWD` passed explicitly as `argv[3]` and threaded through as `discover_
+  # project_config`'s own `start=` -- this subprocess runs from `$_PY_SAFE_
+  # DIR` (the isolated, untrusted-checkout-free directory every inline
+  # python invocation in this file uses), so `discover_project_config()`'s
+  # own default (`Path.cwd()`) would otherwise silently resolve against
+  # THAT directory instead of the real checkout root, missing every
+  # ordinary root-level `.abicheck.yml` entirely (Codex review, ninth
+  # round, fresh evidence: caught by this file's own new regression tests
+  # regressing the pre-existing cwd-discovery case, not by the reported
+  # finding itself).
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+explicit = sys.argv[1] or None
+sources = sys.argv[2] or None
+real_pwd = sys.argv[3]
+try:
+    if explicit:
+        cfg = Path(explicit)
+    else:
+        cfg = None
+        if sources:
+            from abicheck.workflows.extraction import discover_build_config
+            cfg = discover_build_config(Path(sources))
+        if cfg is None:
+            from abicheck.cli_helpers_compare import discover_project_config
+            cfg = discover_project_config(Path(real_pwd))
+    print(str(cfg) if cfg else "")
+except Exception:
+    print("")
+' "$_explicit" "$_sources" "$_real_pwd" 2>/dev/null)
+}
+
+# Whether the effective project config (see `_resolve_scan_effective_
+# config_path` above) sets `python: {abi3_floor: ...}`. `scan` enables its
+# stable-ABI audit ONLY from an explicit `--abi3` CLI value (`cli_scan.py`'s
+# own `_parse_abi3_floor(abi3)`, the CLI parameter -- never from project
+# config), but `compare` ALSO enables it from this config key
+# (`cli_compare_helpers.py`'s enrichment) -- so a migrated invocation with
+# no `--abi3` given at all could still run this audit under `compare` and
+# fail its own precondition (a non-CPython-extension pair) with exit 7,
+# where `scan` itself would simply never have looked at that key and
+# exited 0. No `python_stable_abi_violation` finding is even produced in
+# that failure (the audit never got that far), so the cross-source/
+# pattern-verdict fallback's own after-the-fact detection can't catch it
+# either -- this needs its own dedicated gate condition.
+#
+# A narrow textual check (not a real YAML parse), matching `_config_sets_
+# source_method`'s own established principle: an over-match (a config that
+# happens to contain this text outside a real `python:` mapping) only ever
+# costs staying on the already-correct legacy CLI.
+_config_sets_abi3_floor() {
+  local _cfg
+  _cfg="$(_resolve_scan_effective_config_path)" || return 0
+  [[ -n "$_cfg" && -f "$_cfg" ]] || return 1
+  grep -Eq "(^|[[:space:]{,])[\"']?abi3_floor[\"']?[[:space:]]*:[[:space:]]*[^[:space:]#]" "$_cfg" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -2146,6 +2245,21 @@ elif [[ "$MODE" == "scan" ]]; then
   #     and `build-info`-without-`sources` conditions above already guard,
   #     just for the dry-run preview's own content rather than a real run's
   #     findings.
+  #   - the effective project config (see `_resolve_scan_effective_
+  #     config_path`'s own docstring for the full scan-equivalent
+  #     resolution: explicit `build-config`, else `--sources`' own tree,
+  #     else an upward walk from `$PWD`) sets `python: {abi3_floor: ...}`
+  #     (`_config_sets_abi3_floor`, ninth Codex review round, P1, fresh
+  #     evidence): `scan` enables its stable-ABI audit ONLY from an
+  #     explicit `--abi3` CLI value, never from project config, but
+  #     `compare` ALSO enables it from this key -- a migrated invocation
+  #     with no `--abi3` given at all could still run this audit under
+  #     `compare` and fail its own precondition (a non-CPython-extension
+  #     pair) with exit 7, where `scan` itself would simply never have
+  #     looked at that key and exited 0. No `python_stable_abi_violation`
+  #     finding is even produced in that failure (the audit never got that
+  #     far), so the cross-source/pattern-verdict fallback's own
+  #     after-the-fact detection can't catch it either.
   #   - `extra-args` itself carries a scan-only flag or a non-`json`
   #     `--format` override (`_extra_args_forces_legacy_scan_cli`, defined
   #     above): every condition in this list so far only inspects a
@@ -2226,6 +2340,7 @@ elif [[ "$MODE" == "scan" ]]; then
      || [[ "${INPUT_DRY_RUN:-false}" == "true" ]] \
      || _extra_args_has_dry_run_flag \
      || _migrated_compare_against_declares_full_dependency_scope "${INPUT_AGAINST}" \
+     || _config_sets_abi3_floor \
      || _extra_args_forces_legacy_scan_cli; then
     _SCAN_USES_LEGACY_CLI=true
   fi
@@ -2701,7 +2816,28 @@ elif [[ "$MODE" == "scan" ]]; then
   # apply "to the current ARTIFACT").
   add_sided_flag "--sources" "new" "${INPUT_SOURCES:-}"
   add_sided_flag "--build-info" "new" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  if [[ -n "${INPUT_BUILD_CONFIG:-}" ]]; then
+    add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  elif [[ -n "${INPUT_SOURCES:-}" ]]; then
+    # Ninth Codex review round, P1, fresh evidence: `scan` resolves its
+    # own project config via `discover_build_config(sources)` when
+    # `--sources` is given and no `--build-config` was, checking the
+    # `--sources` tree's OWN root -- but `compare`'s default `--config`
+    # resolution only ever walks upward from `$PWD`, never looking inside
+    # `--sources` at all. Without this, a `sources` tree with its own
+    # `.abicheck.yml` (severity/scope/suppression/gate settings included)
+    # silently lost all of it under a migrated invocation. Resolved via
+    # the real python discovery function (`_resolve_scan_effective_
+    # config_path`, defined above) rather than reimplementing `find_
+    # config_in_dir`'s multi-location lookup a second time in bash; a
+    # non-empty result here is, by construction, exactly what `discover_
+    # build_config(sources)` would have returned (build-config is empty
+    # in this branch, so that tier is skipped and the cwd-walk fallback
+    # only fires when the sources-tree lookup itself found nothing --
+    # matching `scan`'s own precedence exactly, not just approximating it).
+    _sources_cfg="$(_resolve_scan_effective_config_path)"
+    add_single_flag "--config" "${_sources_cfg:-}"
+  fi
   # `auto` is never forwarded: it's scan's own no-op spelling of "let the
   # mode preset/risk-scoring decide" (see `_SCAN_USES_LEGACY_CLI`'s own
   # pinned-depth gate above), but `compare --depth` has no `auto` choice at

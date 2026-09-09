@@ -692,6 +692,157 @@ class TestScanStaysOnLegacyCliForSourceMethodConfig:
         )
         assert cmd[1] == "compare", cmd
 
+    def test_sources_tree_config_stays_on_scan(self, tmp_path: Path) -> None:
+        # Ninth Codex review round, P1, fresh evidence: `scan` resolves its
+        # own project config via `discover_build_config(sources)` when
+        # `--sources` is given and no `--build-config` was -- checking the
+        # `--sources` tree's OWN root, never `$PWD`. The previous version of
+        # this check covered only an explicit `build-config` and `$PWD`
+        # auto-discovery, entirely missing a `source.method` living in a
+        # config discovered from `--sources`' own tree instead.
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            "source:\n  method: auto\n", encoding="utf-8"
+        )
+        cmd = self._run_cmd_in(
+            tmp_path, _base_env(INPUT_SOURCES=str(sources_dir))
+        )
+        assert cmd[1] == "scan", cmd
+
+    def test_sources_tree_without_config_still_migrates(self, tmp_path: Path) -> None:
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        cmd = self._run_cmd_in(
+            tmp_path, _base_env(INPUT_SOURCES=str(sources_dir))
+        )
+        assert cmd[1] == "compare", cmd
+
+    def test_build_config_wins_over_sources_tree_config(
+        self, tmp_path: Path
+    ) -> None:
+        # An explicit build-config outranks --sources' own tree, exactly as
+        # it outranks $PWD auto-discovery -- matching cli_scan.py's own
+        # `_discover_scan_project_config` precedence (explicit config wins
+        # outright over `discover_build_config(sources)`).
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            "source:\n  method: auto\n", encoding="utf-8"
+        )
+        explicit_config = tmp_path / "explicit-config.yml"
+        explicit_config.write_text("scope:\n  public: true\n", encoding="utf-8")
+        cmd = self._run_cmd_in(
+            tmp_path,
+            _base_env(
+                INPUT_SOURCES=str(sources_dir),
+                INPUT_BUILD_CONFIG=str(explicit_config),
+            ),
+        )
+        assert cmd[1] == "compare", cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestMigratedCompareForwardsSourcesTreeConfig:
+    """Ninth Codex review round, P1, fresh evidence: the migrated ``compare``
+    invocation now explicitly forwards ``--config`` when ``--sources`` has
+    its own discovered project config -- otherwise ALL of its settings
+    (severity, scope, suppression, gate) silently disappeared under a
+    migrated run, not just ``source.method`` (covered separately above).
+    Reproduced directly: an old library exporting ``existing``, a new
+    library exporting ``existing``+``added``, ``severity.addition: error``
+    in the sources tree's own config -- ``scan`` exits 1 for the addition,
+    the un-fixed migrated ``compare`` request exited 0 since its own
+    default config resolution never looked inside ``--sources`` at all.
+    """
+
+    def test_config_forwarded_when_sources_has_its_own(
+        self, tmp_path: Path
+    ) -> None:
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        config_file = sources_dir / ".abicheck.yml"
+        config_file.write_text("scope:\n  public: true\n", encoding="utf-8")
+        cmd = _run_cmd(_base_env(INPUT_SOURCES=str(sources_dir)))
+        assert cmd[1] == "compare", cmd
+        assert "--config" in cmd, cmd
+        assert str(config_file) in cmd, cmd
+
+    def test_no_config_forwarded_when_sources_has_none(
+        self, tmp_path: Path
+    ) -> None:
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        cmd = _run_cmd(_base_env(INPUT_SOURCES=str(sources_dir)))
+        assert cmd[1] == "compare", cmd
+        assert "--config" not in cmd, cmd
+
+    def test_dedicated_build_config_input_still_wins(self, tmp_path: Path) -> None:
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            "scope:\n  public: true\n", encoding="utf-8"
+        )
+        explicit_config = tmp_path / "explicit-config.yml"
+        explicit_config.write_text("scope:\n  public: true\n", encoding="utf-8")
+        cmd = _run_cmd(
+            _base_env(
+                INPUT_SOURCES=str(sources_dir),
+                INPUT_BUILD_CONFIG=str(explicit_config),
+            )
+        )
+        assert cmd[1] == "compare", cmd
+        assert "--config" in cmd, cmd
+        assert str(explicit_config) in cmd, cmd
+        assert str(sources_dir / ".abicheck.yml") not in cmd, cmd
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestScanStaysOnLegacyCliForAbi3FloorConfig:
+    """Ninth Codex review round, P1, fresh evidence: ``scan`` enables its
+    stable-ABI audit ONLY from an explicit ``--abi3`` CLI value, never from
+    project config, but ``compare`` ALSO enables it from a project config's
+    ``python: {abi3_floor: ...}`` block -- a migrated invocation with no
+    ``--abi3`` given at all could still run this audit under ``compare``
+    and fail its own precondition (a non-CPython-extension pair) with exit
+    7, where ``scan`` itself would simply never have looked at that key and
+    exited 0. No ``python_stable_abi_violation`` finding is even produced
+    in that failure, so the cross-source/pattern-verdict fallback's own
+    after-the-fact detection can't catch it either -- this needs its own
+    dedicated gate condition.
+    """
+
+    def test_cwd_config_with_abi3_floor_stays_on_scan(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            'python:\n  abi3_floor: "3.8"\n', encoding="utf-8"
+        )
+        cmd = _run_cmd(_base_env(), cwd=tmp_path)
+        assert cmd[1] == "scan", cmd
+
+    def test_sources_tree_config_with_abi3_floor_stays_on_scan(
+        self, tmp_path: Path
+    ) -> None:
+        sources_dir = tmp_path / "vendored-src"
+        sources_dir.mkdir()
+        (sources_dir / ".abicheck.yml").write_text(
+            'python:\n  abi3_floor: "3.8"\n', encoding="utf-8"
+        )
+        cmd = _run_cmd(
+            _base_env(INPUT_SOURCES=str(sources_dir)), cwd=tmp_path
+        )
+        assert cmd[1] == "scan", cmd
+
+    def test_config_without_abi3_floor_still_migrates(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "scope:\n  public: true\n", encoding="utf-8"
+        )
+        cmd = _run_cmd(_base_env(), cwd=tmp_path)
+        assert cmd[1] == "compare", cmd
+
+    def test_no_config_still_migrates(self, tmp_path: Path) -> None:
+        cmd = _run_cmd(_base_env(), cwd=tmp_path)
+        assert cmd[1] == "compare", cmd
+
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestScanStaysOnLegacyCliForFullDependencyScopeBaseline:

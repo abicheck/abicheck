@@ -295,8 +295,6 @@ class TestCrossSourceFindingTriggersLegacyScanFallback:
         argv_log = tmp_path / "argv_log.txt"
         assert calls == ["compare", "scan"], (
             calls,
-            outputs["_stdout"],
-            outputs["_stderr"],
             argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
         )
 
@@ -583,6 +581,26 @@ class TestUnreadableReportDestinationTriggersFallback:
     via the same effective-dry-run test the PR-comment/annotation code
     already uses, so a dry run's own legitimately-absent report never
     triggers a real second invocation.
+
+    Both tests below set `INPUT_PR_COMMENT: "false"`, isolating them from a
+    real, PRE-EXISTING, and entirely separate mechanism this repo's own CI
+    investigation traced a real failure to (PR #1158, ninth-round
+    follow-up): `_maybe_post_pr_comment`'s own reuse-or-rerun fallback
+    (`action/run.sh`) independently needs a readable JSON report to build
+    the sticky PR comment from, gated on `${GITHUB_EVENT_NAME:-}` being
+    `pull_request`/`pull_request_target` -- unset in an ordinary local/
+    sandboxed test run (so this mechanism never activates there), but a
+    REAL ambient value on the actual GitHub Actions runner this test suite
+    itself executes on for a `pull_request`-triggered CI job (`_run_action`
+    deliberately inherits the surrounding environment). With the effective
+    destination unreadable at `/dev/null` for BOTH the cross-source
+    fallback above AND this unrelated mechanism, each one independently
+    reruns once to get its own fresh, readable copy -- three total
+    invocations in that specific environment, not two, even though the
+    published verdict/exit-code (this test's own actual subject) are
+    unaffected either way, since both come entirely from the SECOND
+    invocation. `INPUT_PR_COMMENT: "false"` keeps these two tests scoped to
+    the one mechanism they actually test.
     """
 
     def test_unreadable_output_destination_falls_back_to_scan(
@@ -613,6 +631,7 @@ class TestUnreadableReportDestinationTriggersFallback:
         )
         env = _scan_env(tmp_path)
         env["INPUT_OUTPUT_FILE"] = "/dev/null"
+        env["INPUT_PR_COMMENT"] = "false"
         outputs = _run_action(tmp_path, env, bindir)
         # The fallback's own re-run reuses the identical (still-/dev/null)
         # output destination, so its rich JSON verdict (`COMPATIBLE_WITH_
@@ -659,6 +678,7 @@ class TestUnreadableReportDestinationTriggersFallback:
         env = _scan_env(tmp_path)
         del env["INPUT_OUTPUT_FILE"]
         env["INPUT_EXTRA_ARGS"] = "-o /dev/null"
+        env["INPUT_PR_COMMENT"] = "false"
         outputs = _run_action(tmp_path, env, bindir)
         # The fallback's own re-run reuses the identical (still-/dev/null)
         # output destination, so its rich JSON verdict (`COMPATIBLE_WITH_
@@ -789,8 +809,6 @@ class TestAbi3FindingTriggersLegacyScanFallback:
         argv_log = tmp_path / "argv_log.txt"
         assert calls == ["compare", "scan"], (
             calls,
-            outputs["_stdout"],
-            outputs["_stderr"],
             argv_log.read_text(encoding="utf-8") if argv_log.is_file() else "<no argv_log>",
         )
 
