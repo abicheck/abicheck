@@ -143,6 +143,63 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="ci.shared_budget_over_heterogeneous_matrix",
+        invariant=(
+            "A resource budget a CI job declares once -- `timeout-minutes` "
+            "above all -- must resolve per matrix leg whenever the legs' "
+            "real costs differ by more than the budget's own headroom. One "
+            "shared number over a heterogeneous matrix has no correct "
+            "value: sized for the slowest leg it discards the gate on every "
+            "faster one, and sized for the faster ones it cancels the "
+            "slowest leg's healthy runs. The failure is silent in the worst "
+            "way -- a job-level timeout reports `cancelled`, which reads as "
+            "a superseded run or a reclaimed runner rather than as a "
+            "failure, so it can recur for days on `main` without being "
+            "diagnosed. Raising the shared number is not a fix but a "
+            "deferral: the budget's headroom decays as the suite grows, so "
+            "the same cancellation returns once the slowest leg catches up "
+            "again."
+        ),
+        fixed_by=(1188,),
+        seed_tests=("tests/test_verify_profiles.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant's *quantitative* half is not executable "
+                    "here. Whether a leg's budget still clears its real "
+                    "cost can only be answered by wall-clock measurements "
+                    "from completed CI runs, which this repository does not "
+                    "ingest -- so the seed test pins the three figures read "
+                    "off `main` by hand (40.4/41.3/45.2 minutes) as a "
+                    "literal oracle. That catches a budget lowered below "
+                    "what was already observed, but nothing detects the "
+                    "decay this class names as the recurring shape: when "
+                    "the Windows leg reaches 75 minutes the test will still "
+                    "pass against its stale 45.2. Closing it needs the "
+                    "per-leg durations published as a queryable artifact "
+                    "(the canonical lane already emits `test-durations.json` "
+                    "for individual tests, but no lane records its own total "
+                    "against its budget) -- a real follow-up, not something "
+                    "a structural YAML scan can reach."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1188",
+            ),
+            KnownGap(
+                description=(
+                    "Scoped to `unit-tests`, the one job observed "
+                    "cancelling. No audit was run over this repository's "
+                    "other matrix jobs (`integration-tests`, the PE/Mach-O "
+                    "and packaging lanes, `check-project.yml`'s own "
+                    "`plan`/`check`/`aggregate`) to find which of them also "
+                    "share one budget across legs of materially different "
+                    "cost -- the same defect, unlooked-for, in every job "
+                    "this fix did not touch."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1188",
+            ),
+        ),
+    ),
+    BugClass(
         id="tooling.platform_dependent_path_key",
         invariant=(
             "A repo-relative path computed to serve as a lookup/comparison "
