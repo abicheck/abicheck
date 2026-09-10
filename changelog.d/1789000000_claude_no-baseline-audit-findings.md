@@ -25,16 +25,17 @@
 - **`--dry-run` validates `--suppress`/`--policy-file` before previewing.** A
   malformed document exits `64` on the real run, so a preview that exited `0`
   approved a run that could not start.
-- **The pinned-depth floor now applies to every operand this run parses**,
-  not only to a recognized binary. `Module.symvers`, a bare BTF/CTF blob and
-  an ABICC Perl dump each become a fresh snapshot that structurally cannot
-  carry L3-L5 evidence, yet all three read as "already stored" and were
-  exempted: `compare --no-baseline Module.symvers --depth source` reported a
-  clean audit with no evidence tiers at all. The two-sided
-  `compare a.symvers b.symvers --depth source` did the same, so the rule now
-  has one owner (`workflows/input_resolution.side_is_live`) both forms call.
-  Only a genuinely serialized snapshot is exempt — in either of its shapes,
-  a `.abi.json` file or a directory-backed `ProjectSnapshot` package.
+- **The pinned-depth floor now applies to every operand this run derives a
+  description from**, not only to a recognized binary. A `Module.symvers`
+  manifest and a bare BTF/CTF blob each become a fresh snapshot that
+  structurally cannot carry L3-L5 evidence, yet both read as "already
+  stored" and were exempted: `compare --no-baseline Module.symvers --depth
+  source` reported a clean audit with no evidence tiers at all. The
+  two-sided `compare a.symvers b.symvers --depth source` did the same, so
+  the rule now has one owner (`workflows/input_resolution.side_is_live`)
+  both forms call. Exempt is an already-serialized ABI *description*, in any
+  of its shapes — a `.abi.json` file, a directory-backed `ProjectSnapshot`
+  package, or a saved ABICC Perl dump.
 - **`compare --no-baseline` accepts a `ProjectSnapshot` package directory.**
   It is a single artifact — `resolve_input` decodes one into exactly one
   snapshot, and a two-sided `compare` already accepted it — but a blanket
@@ -116,7 +117,7 @@
   `--old-variant`/`--new-variant`, `--bundle-facts-*`,
   `--since`/`--changed-path`, `--select`/`--select-required`,
   `--output-dir`, `--abi3`, `--budget`, `--severity-preset`, `--pack`,
-  `--config`, `--instantiation-manifest`, `--follow-deps`, `--search-path`,
+  `--instantiation-manifest`, `--follow-deps`, `--search-path`,
   `--ld-library-path`, `--debug-info` and `--devel-pkg`.
 
 - **A suppressed finding no longer disappears from a `--no-baseline`

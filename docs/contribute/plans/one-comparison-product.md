@@ -796,10 +796,13 @@ section's *actual* state, not the target it originally described:
     `report.no_baseline.NO_BASELINE_UNSUPPORTED_FORMATS`.
 
   **§3 row 2 is closed.** `tests/parity/test_no_baseline_audit_corpus_parity.py`
-  is the gate: `compare --no-baseline` and `scan` agree *exactly* on all
-  eleven G20 audit fixtures (twelve runs — `case151` contributes its
-  `thin.abi.json` variant), asserting no capability loss and nothing
-  manufactured as two separate statements. `tests/test_no_baseline_d3_properties.py`
+  is the gate over all eleven G20 audit fixtures (twelve runs — `case151`
+  contributes its `thin.abi.json` variant). The statement it makes is
+  *directional*, not "the two outputs are equal": `compare --no-baseline`
+  reports **at least** every kind `scan` reports (no capability loss), and
+  every finding it adds beyond that is a real candidate-side enrichment in a
+  permitted ADR-068 D3 state (nothing manufactured). Those are asserted as
+  two separate statements, per fixture and once corpus-wide. `tests/test_no_baseline_d3_properties.py`
   states D3 as a property over generated candidates rather than eleven fixed
   cases, per `AGENTS.md`'s bug-class rule. The nine G20 case READMEs and
   `examples/workflows/audit-release` are re-driven onto
@@ -1600,7 +1603,7 @@ under Phase 0's parity harness while both commands exist.
 | F-2 | Binary + public headers | Full L2 declaration result; header-origin scoping applied |
 | F-3 | Build + source evidence (`--depth source`) | L3–L5 findings identical to `scan --depth source` on the same inputs |
 | F-4 | Source-only/API change invisible in the binary | Detected through the available evidence, classed `API_BREAK`, not `BREAKING` (authority rule) |
-| F-5 | Private header leak | `private_header_leak` reported by `compare` (today: `scan` only) |
+| F-5 | Private header leak | `private_header_leak` reported by `compare` |
 | F-6 | Public declaration not exported | `public_not_exported` reported by `compare` |
 | F-7 | Exported symbol not publicly declared | `exported_not_public` reported by `compare` |
 | F-8 | **Pre-existing** leak, baseline lacking headers | `not_evaluated` on OLD — reported as a candidate-side finding with baseline evidence absent, **never** as `introduced` |
