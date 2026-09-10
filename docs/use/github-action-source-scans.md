@@ -146,21 +146,23 @@ selection either way: `compare` infers `source`/`build` from whichever of
 `sources`/`build-info` is supplied, and bottoms out at `headers` when neither
 is given; `scan` always resolves to `headers`.
 
-**`compare`'s pinned depth is not a contract the way `scan`'s is.** `scan
---depth source` with no `--sources`/`--build-info` given hard-fails before
-comparing (exit 7, "pinned depth 'source' ... needs source evidence, but no
---sources/--build-info was given") — a pinned depth without the evidence to
-back it is an error, not a silent downgrade. `compare --depth source` has no
-such floor: with the same missing evidence it degrades silently to a
-binary-only comparison and can still exit 0 (verified live — see the gap
-table in [`docs/use/evidence-depth.md`](evidence-depth.md)). A copied
-`mode: compare` workflow that stops supplying `sources:`/`build-info:` (or
-never had it) will keep reporting green without ever running the L3-L5
-analysis it asked for, where the equivalent `mode: scan` workflow would fail
-loudly instead. Until `compare` gains its own evidence-floor enforcement,
-treat `sources:`/`build-info:` as load-bearing for any pinned `depth: build`
-or `depth: source` under `mode: compare` — nothing checks that they were
-actually supplied.
+**A pinned depth is a contract on `compare` too.** `scan --depth source`
+with no `--sources`/`--build-info` given hard-fails before comparing (exit 7,
+"pinned depth 'source' ... needs source evidence, but no --sources/--build-info
+was given") — a pinned depth without the evidence to back it is an error, not
+a silent downgrade. `compare --depth build|source` now enforces the same floor
+and reports it through the same axis: an operand this run extracts live that
+cannot reach the pinned rung records `evidence_contract_error` and exits `7`
+(`policy/depth_evidence_contract.py`; the full per-command account is in
+[`docs/use/evidence-depth.md`](evidence-depth.md)).
+
+The one carve-out is a side that is *already* a serialized snapshot
+(`old-library: abi-baseline.json`): that operand was not extracted by this run
+at all, so there is no "reached a shallower rung than requested" failure to
+report for it, and such a pair still exits `0`/`2`/`4` on its own contents.
+So `sources:`/`build-info:` stay load-bearing under `mode: compare` in exactly
+that case — a stored-snapshot operand pinned to `depth: build`/`source` is not
+checked against the pin, while a live one is.
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
@@ -178,7 +180,7 @@ actually supplied.
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
 | Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
-| Risk-driven depth selection (`auto`) | `mode: scan` only — omit `depth` there + set `since:` |
+| Risk-driven depth selection (`auto`) | *Retired* (ADR-068's second 2026-09-09 amendment, ruling (b)). An omitted `depth` resolves to `headers` in every mode — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
 | A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: scan` only — `mode: compare` reads no `budget` input yet |
 
 !!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"
