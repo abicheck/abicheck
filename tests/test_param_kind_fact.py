@@ -67,6 +67,7 @@ from abicheck.model import (
     ParamKind,
     Visibility,
 )
+from abicheck.storage.fact_codec import decode_param_facts
 
 
 def _func(mangled: str, params: list[Param]) -> Function:
@@ -276,6 +277,13 @@ class TestUnwrapCvTypedef:
     def test_none_input_returns_none(self) -> None:
         assert unwrap_cv_typedef(None, CU=None) is None
 
+    def test_depth_exceeded_returns_the_die_unwrapped(self) -> None:
+        """The ``depth > 10`` half of the guard -- independent of the
+        ``type_die is None`` half above, so the recursion cap itself is
+        exercised, not just the "no die at all" case."""
+        typedef_die = self._FakeDie("DW_TAG_typedef")
+        assert unwrap_cv_typedef(typedef_die, CU=None, depth=11) is typedef_die
+
 
 def _castxml_ctx(elements: dict[str, ET.Element]) -> CastxmlParserContext:
     ctx = CastxmlParserContext(ET.Element("GCC_XML"), set(), set())
@@ -327,3 +335,49 @@ class TestCastxmlTopLevelParamKind:
     def test_unknown_tag_defaults_to_value(self) -> None:
         ctx = _castxml_ctx({"f1": ET.Element("FundamentalType", {"id": "f1"})})
         assert top_level_param_kind(ctx, "f1") is ParamKind.VALUE
+
+
+class TestDecodeParamFactsKind:
+    """``fact_codec.decode_param_facts``'s ``kind_fact`` reconstruction,
+    called directly rather than only through a full snapshot round-trip --
+    both halves of its ``kind_fact is not None and kind_fact.value is not
+    None`` guard, independently."""
+
+    def test_modern_document_with_real_kind_fact(self) -> None:
+        decoded = decode_param_facts(
+            {"kind": "pointer", "kind_fact": {"status": "present", "value": "pointer"}},
+            schema_version=45,
+        )
+        assert decoded["kind_fact"] is not None
+        assert decoded["kind_fact"].value is ParamKind.POINTER
+
+    def test_modern_document_missing_the_sibling_key_reads_not_collected(self) -> None:
+        """Schema >= 45 but no ``kind_fact`` key: a malformed/truncated
+        document, not "predates conversion" -- ``decode_fact`` reads it as
+        ``Fact.not_collected()`` (value ``None``) rather than inventing
+        evidence, so the ``ParamKind(...)`` rebuild is correctly skipped."""
+        decoded = decode_param_facts({"kind": "pointer"}, schema_version=45)
+        assert decoded["kind_fact"] is not None
+        assert decoded["kind_fact"].status is FactStatus.NOT_COLLECTED
+        assert decoded["kind_fact"].value is None
+
+    def test_legacy_pre_v45_document_with_no_kind_fact_key_decodes_to_none(
+        self,
+    ) -> None:
+        """Pre-v45, ``kind_fact`` absent: ``decode_fact`` alone (schema below
+        its own min) returns ``None`` -- letting ``Param.__post_init__``'s
+        own legacy bridge (not this function) derive the real ``Fact`` from
+        the *legacy* ``kind`` value instead of a pre-decoded ``None``-value
+        stand-in the ``ParamKind(...)`` rebuild would otherwise choke on."""
+        decoded = decode_param_facts({"kind": "pointer"}, schema_version=44)
+        assert decoded["kind_fact"] is None
+
+    def test_legacy_pre_v45_document_with_no_legacy_key_either(self) -> None:
+        """Pre-v45 AND no legacy ``kind`` key at all: the *other* half of
+        ``decode_fact_with_legacy_presence``'s own special case -- genuinely
+        no evidence either way, so it returns ``Fact.not_collected()``
+        directly rather than delegating to ``decode_fact``."""
+        decoded = decode_param_facts({}, schema_version=44)
+        assert decoded["kind_fact"] is not None
+        assert decoded["kind_fact"].status is FactStatus.NOT_COLLECTED
+        assert decoded["kind_fact"].value is None

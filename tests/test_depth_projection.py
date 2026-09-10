@@ -122,6 +122,7 @@ from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.depth_projection import (
+    _allow_dwarf_name,
     project_build_source_pack_to_depth,
     project_pair_to_depth,
     project_snapshot_to_depth,
@@ -1021,3 +1022,75 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
             c.kind == ChangeKind.STRUCT_SIZE_CHANGED and c.symbol == "S"
             for c in result.changes
         )
+
+    def test_neither_side_carries_a_dwarf_block_at_all(self) -> None:
+        """``snap.dwarf is None`` (never populated at all, not merely
+        empty) must not raise when the joint floor tries to pre-scope it --
+        the ``if snap.dwarf is not None:`` guard's own False branch."""
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            dwarf=None,
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            from_headers=True,
+            dwarf=None,
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+        )
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert old_p.dwarf is None
+        assert new_p.dwarf is None
+
+    def test_empty_public_scope_skips_the_filter_entirely(self) -> None:
+        """Neither side names any struct/enum at all -- ``_public_dwarf_
+        scope`` returns empty frozensets, so ``if dwarf_struct_scope:``/
+        ``if dwarf_enum_scope:`` both take their False branch and the raw
+        DWARF pool (whatever it holds) is left untouched, not emptied."""
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={"Internal": StructLayout(name="Internal", byte_size=8)},
+                enums={"IE": EnumInfo(name="IE", underlying_byte_size=4)},
+            ),
+            types=[],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            from_headers=False,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={"Internal": StructLayout(name="Internal", byte_size=16)},
+                enums={"IE": EnumInfo(name="IE", underlying_byte_size=4)},
+            ),
+        )
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert set(old_p.dwarf.structs) == {"Internal"}
+        assert set(new_p.dwarf.structs) == {"Internal"}
+        assert set(old_p.dwarf.enums) == {"IE"}
+        assert set(new_p.dwarf.enums) == {"IE"}
+
+
+class TestAllowDwarfName:
+    """``_allow_dwarf_name`` -- the full-name-or-unqualified-suffix matcher
+    ``project_pair_to_depth`` uses to pre-scope the raw DWARF pool, and
+    ``diff_platform._diff_dwarf``'s own identically-behaved ``_allow_name``
+    mirrors. Exercised directly since every fixture above only ever uses
+    flat (unqualified) names, which never reaches the ``::``-split fallback
+    on its own."""
+
+    def test_full_name_match(self) -> None:
+        assert _allow_dwarf_name("ns::S", frozenset({"ns::S"})) is True
+
+    def test_unqualified_suffix_match(self) -> None:
+        assert _allow_dwarf_name("ns::S", frozenset({"S"})) is True
+
+    def test_no_match(self) -> None:
+        assert _allow_dwarf_name("ns::S", frozenset({"Other"})) is False
