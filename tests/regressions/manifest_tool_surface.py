@@ -262,7 +262,7 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "pinned constant and not the same table the implementation "
             "consults."
         ),
-        fixed_by=(1193,),
+        fixed_by=(1195,),
         seed_tests=(
             "tests/test_cli_compare_release_depth.py",
             "tests/test_cli_compare_release_header_graph.py",
