@@ -105,26 +105,45 @@ def compatibility_metrics(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    effective_verdicts: Sequence[object] | None = None,
 ) -> CompatibilityMetrics:
     """Compute canonical ABICC-style binary compatibility counters/percentages.
 
-    Without *policy*/*kind_sets*/*policy_file*, ``breaking_count`` counts raw
-    ``ChangeKind`` membership in the canonical ``_BREAKING_KINDS`` set —
-    which disagrees with a policy-demoted finding's *effective* verdict. A
-    removal a policy file demotes to ``COMPATIBLE`` still carries its raw
-    ``FUNC_REMOVED`` kind, so the canonical-kind count would report it as
-    breaking (e.g. "0.0% binary compatibility") on the same page whose
-    verdict banner reads ``COMPATIBLE`` (computed from the *effective*
-    verdict) — a direct, visible contradiction. Passing *kind_sets* (from
-    ``DiffResult._effective_kind_sets()``) and/or *policy_file* makes this
-    metric agree with the verdict by counting each change's effective
-    verdict instead of its raw kind. A named *policy* alone (e.g.
-    ``plugin_abi``, with no ``kind_sets``/``policy_file``) must also take
-    this path — ``effective_verdict_for_change`` resolves its own kind sets
-    from *policy* when *kind_sets* is ``None`` (Codex review on #549) — or a
+    Without *policy*/*kind_sets*/*policy_file*/*effective_verdicts*,
+    ``breaking_count`` counts raw ``ChangeKind`` membership in the canonical
+    ``_BREAKING_KINDS`` set — which disagrees with a policy-demoted
+    finding's *effective* verdict. A removal a policy file demotes to
+    ``COMPATIBLE`` still carries its raw ``FUNC_REMOVED`` kind, so the
+    canonical-kind count would report it as breaking (e.g. "0.0% binary
+    compatibility") on the same page whose verdict banner reads
+    ``COMPATIBLE`` (computed from the *effective* verdict) — a direct,
+    visible contradiction. Passing *kind_sets* (from ``DiffResult.
+    _effective_kind_sets()``) and/or *policy_file* makes this metric agree
+    with the verdict by counting each change's effective verdict instead of
+    its raw kind. A named *policy* alone (e.g. ``plugin_abi``, with no
+    ``kind_sets``/``policy_file``) must also take this path --
+    ``effective_verdict_for_change`` resolves its own kind sets from
+    *policy* when *kind_sets* is ``None`` (Codex review on #549) — or a
     policy-downgraded kind would still be counted as breaking here.
+
+    *effective_verdicts*, when given, is a pre-resolved verdict per entry
+    in *changes* (same order, same length) -- this metric then counts
+    breaking membership from those instead of calling
+    ``effective_verdict_for_change`` itself, and *policy*/*kind_sets*/
+    *policy_file* are ignored. An ADR-061 gap C caller with an already-
+    completed ``ReportEnvelope`` passes ``[f.verdict for f in envelope.
+    findings_for(changes)]`` here: a dated ``PolicyFile.reclassify`` rule's
+    expiry is resolved against *today*, so recomputing from raw policy
+    inputs every render (rather than reading the envelope's own,
+    already-resolved verdict) could change this page's percentage after
+    the rule expires even though the envelope's shared document was frozen
+    before that (Codex review, fresh evidence).
     """
-    if policy is not None or kind_sets is not None or policy_file is not None:
+    if effective_verdicts is not None:
+        from .checker_policy import Verdict as _Verdict
+
+        breaking_count = sum(1 for v in effective_verdicts if v == _Verdict.BREAKING)
+    elif policy is not None or kind_sets is not None or policy_file is not None:
         from .checker_policy import Verdict as _Verdict
         from .severity import effective_verdict_for_change
 

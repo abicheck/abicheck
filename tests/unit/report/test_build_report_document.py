@@ -669,6 +669,43 @@ class TestRendererOrderIndependence:
 
         assert snapshot.impact_proof_path[0]["label"] == "original"
 
+    def test_mutating_a_shared_structured_list_field_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``_snapshot_diff_result``'s
+        list-copy branch decoupled the *outer* container but shared each
+        non-``Change`` *element* unchanged. ``DiffResult.contract_conflicts``
+        is exactly such a field (``list[dict]``, read directly by
+        Markdown's own contract-conflicts section) -- mutating
+        ``contract_conflicts[0]["entity"]`` after construction must not
+        reach it.
+        """
+        conflict = {"conflict_kind": "type_mismatch", "entity": "Foo", "sources": []}
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            policy="strict_abi",
+            contract_conflicts=[conflict],
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.contract_conflicts[0] is not conflict, (
+            "the envelope shared the caller's own contract_conflicts entry"
+        )
+
+        markdown_before = render_envelope("markdown", envelope)
+        conflict["entity"] = "Mutated"
+        markdown_after = render_envelope("markdown", envelope)
+
+        assert markdown_before == markdown_after, (
+            "Markdown's contract-conflicts section moved when a "
+            "contract_conflicts entry mutated after the envelope was "
+            "already built"
+        )
+
     def test_mutating_a_shared_dict_attribute_after_construction_cannot_reach_the_envelope(
         self,
     ) -> None:

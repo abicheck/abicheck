@@ -317,22 +317,40 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     snapshot = copy.copy(result)
     identity_map: dict[int, Change] = {}
 
-    def _snapshot_maybe_change(value: object) -> object:
+    def _snapshot_element(value: object) -> object:
+        """One list/tuple/dict *element*'s own independent copy.
+
+        A ``Change`` gets the identity-tracked treatment every other Change
+        in this snapshot gets; anything else gets the same best-effort deep
+        copy the top-level catch-all below applies to a whole field --
+        a structured element (e.g. ``contract_conflicts``' own
+        ``dict``-shaped entries) is exactly as reachable through a
+        container this loop already opens as a bare field is (Codex
+        review, fresh evidence: the outer list container was
+        decoupled, but its own dict *elements* were still shared).
+        """
         if isinstance(value, Change):
             new_value = _snapshot_change(value)
             identity_map[id(value)] = new_value
             return new_value
-        return value
+        try:
+            return copy.deepcopy(value)
+        except TypeError:
+            return value
 
     for name, value in vars(result).items():
         if name == "disposition_ledger":
             continue
         if isinstance(value, list):
-            setattr(snapshot, name, [_snapshot_maybe_change(v) for v in value])
+            setattr(snapshot, name, [_snapshot_element(v) for v in value])
         elif isinstance(value, tuple) and any(isinstance(v, Change) for v in value):
-            setattr(snapshot, name, tuple(_snapshot_maybe_change(v) for v in value))
+            setattr(snapshot, name, tuple(_snapshot_element(v) for v in value))
         elif isinstance(value, dict):
-            setattr(snapshot, name, dict(value))
+            setattr(
+                snapshot,
+                name,
+                {k: _snapshot_element(v) for k, v in value.items()},
+            )
         elif value is not None and not isinstance(
             value, (str, int, float, bool, bytes, Enum)
         ):

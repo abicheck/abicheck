@@ -718,12 +718,24 @@ def build_html_document(
     # guards against. Filtered via the shared predicate rather than
     # `result._evaluated_changes()` since a stub result need not expose it.
     _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
+    _metrics_changes = [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)]
+    # ADR-061 gap C: an envelope has already resolved every change's verdict
+    # once, at construction -- reading it here instead of calling
+    # effective_verdict_for_change again keeps this percentage from moving
+    # if a dated PolicyFile.reclassify rule expires between construction and
+    # render (Codex review, fresh evidence: `policy`/`kind_sets`/
+    # `policy_file` alone re-resolve against *today* on every call).
     metrics = compatibility_metrics(
-        [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)],
+        _metrics_changes,
         old_symbol_count,
         policy=getattr(result, "policy", None),
         kind_sets=_eff_kind_sets_fn() if callable(_eff_kind_sets_fn) else None,
         policy_file=getattr(result, "policy_file", None),
+        effective_verdicts=(
+            [f.verdict for f in envelope.findings_for(_metrics_changes)]  # type: ignore[arg-type]
+            if envelope is not None
+            else None
+        ),
     )
     breaking_count = metrics.breaking_count
     bc_pct = metrics.binary_compatibility_pct

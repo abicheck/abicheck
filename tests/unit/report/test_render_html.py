@@ -751,6 +751,44 @@ def test_html_envelope_show_only_dropping_a_correlated_target_does_not_crash() -
     assert "_ZN3foo6removeEv" in html_out
 
 
+def test_html_compatibility_metrics_reuse_the_envelope_s_findings() -> None:
+    """Codex review, fresh evidence: ``compatibility_metrics`` recomputed
+    ``effective_verdict_for_change`` fresh on every render, even when an
+    envelope had already resolved it -- a dated ``PolicyFile.reclassify``
+    rule's expiry is checked against *today*, so the rendered
+    binary-compatibility percentage could move after the rule expires even
+    though the envelope's own document/findings stayed at their
+    construction-time value. HTML now passes the envelope's already-
+    resolved verdicts through instead of recomputing.
+    """
+    from unittest.mock import patch
+
+    removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+    policy_file = PolicyFile(
+        reclassify=[
+            ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov"),
+        ],
+    )
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo.so",
+        changes=[removed],
+        policy="strict_abi",
+        policy_file=policy_file,
+    )
+    old = AbiSnapshot(library="libfoo.so", version="1.0")
+    new = AbiSnapshot(library="libfoo.so", version="2.0")
+    envelope = build_report_envelope(result, old, new)
+    assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+    with patch("abicheck.severity.effective_verdict_for_change") as spy:
+        html_out = generate_html_report(result, envelope=envelope)
+
+    spy.assert_not_called()
+    assert "100.0%" in html_out or "Binary Compatibility" in html_out
+
+
 def test_html_compat_changes_table_empty_and_populated() -> None:
     """``render_compat_changes_table`` -- the ABICC-style table renderer --
     has no caller left in ``html_report.py`` after the ReportDocument
