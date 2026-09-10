@@ -577,7 +577,7 @@ def test_a_coverage_gated_audit_publishes_the_ledger_that_gated_it() -> None:
         doc = compute_no_baseline_document(result)
 
     assert doc.contract_selected, "the contract path must actually have run"
-    payload, exit_code = render_no_baseline(result, "json")
+    payload, _exit_code = render_no_baseline(result, "json")
     body = json.loads(payload)
     assert "contract_coverage_failures" in body, (
         "the ledger is emitted whenever a contract domain was selected — `[]` "
@@ -765,8 +765,8 @@ def test_every_suppressed_finding_keeps_its_full_rule_provenance(
     rows = body["suppressed_findings"]
     assert len(rows) == len(doc.suppressed)
 
-    for row, finding in zip(rows, doc.suppressed, strict=True):
-        recorded = ledger.rule_for(finding.change)
+    for row, entry in zip(rows, doc.suppressed, strict=True):
+        recorded = ledger.rule_for(entry.finding.change)
         assert recorded is not None, (
             "the run recorded no ledger entry, so this test would pass "
             "vacuously against a projection that emits nothing"
@@ -804,9 +804,7 @@ def test_the_markdown_suppression_table_shows_reason_and_source() -> None:
     assert "waivers.yaml" in text, "and the file is where they would edit it"
 
 
-def test_a_diffresult_without_a_ledger_reports_no_provenance_rather_than_faking_one(
-    tmp_path: Path,
-) -> None:
+def test_a_run_without_a_ledger_reports_no_provenance_rather_than_faking_one() -> None:
     """The complement: absent provenance is `null`, never invented.
 
     A `DiffResult` rebuilt from JSON carries no disposition ledger. Emitting
@@ -821,7 +819,7 @@ def test_a_diffresult_without_a_ledger_reports_no_provenance_rather_than_faking_
     doc = compute_no_baseline_document(result)
 
     assert doc.suppressed
-    assert all(p is None for p in doc.suppression_provenance)
+    assert all(entry.provenance is None for entry in doc.suppressed)
     body = json.loads(render_no_baseline(result, "json")[0])
     assert all(
         row["suppression_provenance"] is None for row in body["suppressed_findings"]

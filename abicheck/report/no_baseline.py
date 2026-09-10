@@ -71,6 +71,11 @@ from .no_baseline_document import (
     NO_BASELINE_SUPPORTED_FORMATS as NO_BASELINE_SUPPORTED_FORMATS,
     NO_BASELINE_UNSUPPORTED_FORMATS as NO_BASELINE_UNSUPPORTED_FORMATS,
     NoBaselineDocument as NoBaselineDocument,
+    # Deliberately not re-exported (`X as X`) like the names above: those are
+    # this module's published surface, while this one is an internal detail
+    # of how `suppressed` is shaped. A consumer wanting the type imports it
+    # from `no_baseline_document`, which owns it.
+    SuppressedFinding,
 )
 
 if TYPE_CHECKING:
@@ -239,10 +244,7 @@ def compute_no_baseline_document(
         old_acquisition_state=result.acquisition.members[0].state.value,
         evidence_tiers=tuple(diff.evidence_tiers),
         findings=resolve(result.findings),
-        suppressed=resolve(result.suppressed_findings),
-        suppression_provenance=_suppression_provenance(
-            diff, result.suppressed_findings
-        ),
+        suppressed=_suppressed_entries(diff, resolve(result.suppressed_findings)),
         evolution=compute_cross_source_evolution_summary(result.findings),
         pattern_preprocessor_scan=_candidate_side_scan(
             compute_pattern_preprocessor_scan_json(diff)
@@ -259,10 +261,10 @@ def compute_no_baseline_document(
     )
 
 
-def _suppression_provenance(
-    diff: Any, suppressed: Sequence[Any]
-) -> tuple[Mapping[str, Any] | None, ...]:
-    """ADR-067 D3's full rule provenance, one entry per suppressed finding.
+def _suppressed_entries(
+    diff: Any, findings: Sequence[ReportFinding]
+) -> tuple[SuppressedFinding, ...]:
+    """Pair each suppressed finding with ADR-067 D3's full rule provenance.
 
     Joined off the run's own ``disposition_ledger`` by object identity
     (``DispositionLedger.rule_for``) -- the same lookup ``reporter.py``'s
@@ -279,12 +281,18 @@ def _suppression_provenance(
     reporting none.
     """
     ledger = getattr(diff, "disposition_ledger", None)
-    if ledger is None:
-        return tuple(None for _ in suppressed)
-    return tuple(_provenance_row(ledger, change) for change in suppressed)
+    return tuple(
+        SuppressedFinding(
+            finding=finding,
+            provenance=_provenance_row(ledger, finding.change),
+        )
+        for finding in findings
+    )
 
 
 def _provenance_row(ledger: Any, change: Any) -> Mapping[str, Any] | None:
+    if ledger is None:
+        return None
     rule = ledger.rule_for(change)
     return None if rule is None else rule.to_dict()
 
@@ -358,9 +366,7 @@ def _finding_json(finding: ReportFinding) -> dict[str, Any]:
     return row
 
 
-def _suppressed_json(
-    finding: ReportFinding, provenance: Mapping[str, Any] | None
-) -> dict[str, Any]:
+def _suppressed_json(entry: SuppressedFinding) -> dict[str, Any]:
     """One suppressed finding's JSON row: the finding, plus what hid it.
 
     Two fields, because they answer different questions and one cannot stand
@@ -377,10 +383,10 @@ def _suppressed_json(
       disposition audit exists to preserve (Codex review, P1). ``null``
       when the run kept no ledger entry for this finding.
     """
-    row = _finding_json(finding)
+    row = _finding_json(entry.finding)
     row["disposition"] = "suppressed"
-    row["suppression_rule"] = getattr(finding.change, "suppression_rule", None)
-    row["suppression_provenance"] = dict(provenance) if provenance else None
+    row["suppression_rule"] = getattr(entry.finding.change, "suppression_rule", None)
+    row["suppression_provenance"] = dict(entry.provenance) if entry.provenance else None
     return row
 
 
@@ -407,10 +413,7 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         # suppressed" must not look the same to a consumer checking whether
         # policy hid anything (the same convention `contract_coverage_
         # failures` follows -- `[]` rather than omitted).
-        "suppressed_findings": [
-            _suppressed_json(f, p)
-            for f, p in zip(doc.suppressed, doc.suppression_provenance, strict=True)
-        ],
+        "suppressed_findings": [_suppressed_json(entry) for entry in doc.suppressed],
         "suppressed_count": len(doc.suppressed),
         "cross_source_evolution": render_cross_source_evolution_json(doc.evolution),
         "pattern_preprocessor_scan": doc.pattern_preprocessor_scan,
@@ -523,9 +526,8 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             "| Finding | Symbol | Severity | Suppressed by | Reason | Source | Expires |",
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
-        for finding, prov in zip(
-            doc.suppressed, doc.suppression_provenance, strict=True
-        ):
+        for entry in doc.suppressed:
+            finding = entry.finding
             change = finding.change
             # The label alone answers "which rule"; a reader deciding whether
             # the waiver still applies needs the reason it was written for,
@@ -533,7 +535,7 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             # collapses label and reason into one string, so a rule stating
             # both showed only its label here (Codex review, P1).
             rule = getattr(change, "suppression_rule", None) or "(rule gave no label)"
-            prov = prov or {}
+            prov = entry.provenance or {}
             reason = prov.get("reason") or "(none stated)"
             source = prov.get("source_file") or "(not recorded)"
             expires = prov.get("expires") or "(never)"

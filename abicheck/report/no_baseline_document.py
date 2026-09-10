@@ -173,6 +173,31 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
 
 
 @dataclass(frozen=True)
+class SuppressedFinding:
+    """One suppressed finding and the rule that actually hid it.
+
+    *provenance* is the already-serialized
+    :class:`~abicheck.policy.disposition_ledger.RuleProvenance` -- ADR-067
+    D3's full record (rule id, source file, reason, label, expiry), not a
+    display label. The audit carried ``Change.suppression_rule`` instead,
+    which is ``SuppressionOutcome.rule_label()``'s deliberate ``label or
+    reason`` collapse, so a rule stating both lost its reason and its source
+    file in every projection (Codex review, P1).
+
+    Resolved through the run's own disposition ledger by object identity --
+    the same ``rule_for`` join ``reporter.py``'s two-sided suppression block
+    uses -- never by re-evaluating the rule set, which could name a
+    different rule than the one that fired. ``None`` when the run kept no
+    ledger entry for this finding (a ``DiffResult`` rebuilt from JSON keeps
+    none); inventing a row from the display label would look like a real
+    ADR-067 record while carrying strictly less.
+    """
+
+    finding: ReportFinding
+    provenance: Mapping[str, Any] | None
+
+
+@dataclass(frozen=True)
 class NoBaselineDocument:
     """The one frozen audit document every format projects.
 
@@ -203,23 +228,12 @@ class NoBaselineDocument:
     #: alongside rather than dropped: ``vision.md``'s "Record before
     #: disposing" rule requires "detected, then suppressed by rule X" to
     #: stay visible on a passing run, never to read as "nothing found".
-    suppressed: tuple[ReportFinding, ...]
-    #: One entry per :attr:`suppressed` finding, positionally aligned: the
-    #: already-serialized :class:`~abicheck.policy.disposition_ledger.
-    #: RuleProvenance` of the rule that actually fired (``None`` only when
-    #: the run recorded no ledger entry for it).
     #:
-    #: ADR-067 D3's full provenance -- rule id, source file, reason, label,
-    #: expiry -- not a display label. This carried
-    #: ``Change.suppression_rule`` instead, which is
-    #: ``SuppressionOutcome.rule_label()``'s deliberate ``label or reason``
-    #: collapse, so a rule stating both lost its reason and its source file
-    #: in every audit projection (Codex review, P1). Resolved through the
-    #: run's own ledger by object identity -- the same ``rule_for`` join
-    #: ``reporter.py``'s two-sided suppression block uses -- rather than by
-    #: re-evaluating the rule set, which could name a different rule than
-    #: the one that hid the finding.
-    suppression_provenance: tuple[Mapping[str, Any] | None, ...]
+    #: Each carries its own rule provenance rather than the document holding
+    #: a second, positionally-aligned tuple: a pairing invariant a renderer
+    #: has to honor is one a renderer can break, and the finding and the
+    #: rule that hid it are one fact.
+    suppressed: tuple[SuppressedFinding, ...]
     evolution: CrossSourceEvolutionSummary | None
     pattern_preprocessor_scan: dict[str, Any] | None
     run_outcome: dict[str, Any]
