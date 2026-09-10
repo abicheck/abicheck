@@ -500,6 +500,45 @@ class TestRendererOrderIndependence:
                 f"envelope ({after[target] - build_calls[target]} extra call(s))"
             )
 
+    def test_suppressed_changes_are_resolved_by_the_envelope_not_on_every_render(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: SARIF's own ``suppressions`` array
+        renders every ``result.suppressed_changes`` entry too, and
+        ``findings_for`` had no index entry for any of them (only
+        ``result.changes``/``scoped_only_changes`` were pre-resolved) --
+        every suppressed finding fell through to the per-change fallback,
+        re-running ``build_report_findings`` inside a renderer on every
+        single render. ``envelope.suppressed_findings`` closes that: SARIF's
+        lookup is now a pure index hit, resolved once at construction.
+        """
+        suppressed = Change(ChangeKind.VAR_REMOVED, "_Z3barv", "suppressed")
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            suppressed_changes=[suppressed],
+            policy="strict_abi",
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        with self._decision_spies() as spies:
+            envelope = build_report_envelope(result, old, new)
+            build_calls = {t: s.call_count for t, s in spies.items()}
+            assert envelope.suppressed_findings, (
+                "suppressed_changes were not pre-resolved at construction"
+            )
+            for formats in (self._FORMATS, tuple(reversed(self._FORMATS))):
+                self._render_all_from(formats, envelope)
+            after = {t: s.call_count for t, s in spies.items()}
+
+        for target in self._DECISION_SITES:
+            assert after[target] == build_calls[target], (
+                f"{target} ran again while projecting an already-completed "
+                f"envelope ({after[target] - build_calls[target]} extra call(s))"
+            )
+
     def test_mutating_the_caller_s_result_after_construction_cannot_reach_the_envelope(
         self,
     ) -> None:

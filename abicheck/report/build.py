@@ -377,6 +377,38 @@ def _remap_disposition_ledger(ledger: object, mapping: dict[int, Change]) -> obj
     return remapped
 
 
+def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
+    """A shallow, container-decoupled copy of one operand ``AbiSnapshot``.
+
+    Mirrors :func:`_snapshot_diff_result`'s own reasoning (a caller
+    reassigning ``old.version`` or appending to ``old.functions`` after the
+    envelope was built must not reach HTML's/JUnit's own direct reads of
+    ``envelope.old``/``envelope.new``) but *not* its depth: a real
+    ``AbiSnapshot`` carries every ``Function``/``RecordType``/``EnumType``
+    the extractor found -- tens of thousands for a large library -- and
+    ``copy.deepcopy``ing the whole object graph on every render measurably
+    dominates render time on such a library (Codex review, fresh evidence:
+    ~6s for a pair of 10k-function snapshots). A shallow copy of the
+    top-level object plus a fresh container for each list/dict field
+    closes the two concrete cases actually reported (reassignment,
+    list-level mutation) at the cost this module already accepts
+    elsewhere for the same tradeoff -- a *field* mutated in place inside
+    one retained ``Function``/``RecordType`` (as opposed to the field
+    ``old.version`` or the container ``old.functions`` itself) is not
+    covered, the same boundary ``_snapshot_change`` does NOT extend to
+    ``old``/``new`` themselves.
+    """
+    import copy
+
+    result = copy.copy(snapshot)
+    for name, value in vars(snapshot).items():
+        if isinstance(value, list):
+            setattr(result, name, list(value))
+        elif isinstance(value, dict):
+            setattr(result, name, dict(value))
+    return result
+
+
 def build_report_envelope(
     result: DiffResult,
     old: AbiSnapshot,
@@ -398,22 +430,21 @@ def build_report_envelope(
     a caller does to the object it passed in after this call returns can
     ever reach the envelope -- every decision below, and every projection
     that reads ``envelope.result`` directly, is computed from that one
-    frozen-in-effect copy. *old*/*new* get the identical treatment: they are
-    the public multi-format workflow's own retained operands, read directly
-    by more than one projection (HTML's/JSON's version and dependency-info
-    fields, JUnit's unchanged-testcase set) that ``build_report_document``
-    itself never touches -- reassigning ``old.version`` or mutating
+    frozen-in-effect copy. *old*/*new* get the analogous (shallower --
+    see :func:`_snapshot_abi_snapshot`) treatment: they are the public
+    multi-format workflow's own retained operands, read directly by more
+    than one projection (HTML's/JSON's version and dependency-info fields,
+    JUnit's unchanged-testcase set) that ``build_report_document`` itself
+    never touches -- reassigning ``old.version`` or mutating
     ``old.functions`` after this call returned would otherwise desynchronize
     exactly those projections from one another (Codex review, fresh
     evidence).
     """
-    import copy
-
     from ..policy.gate_decision import gate_decision_for_result
 
     result = _snapshot_diff_result(result)
-    old = copy.deepcopy(old)
-    new = copy.deepcopy(new) if new is not None else None
+    old = _snapshot_abi_snapshot(old)
+    new = _snapshot_abi_snapshot(new) if new is not None else None
     opts = options if options is not None else RenderOptions()
     gate = gate_decision_for_result(result, severity_config)
     document = build_report_document(
@@ -443,6 +474,16 @@ def build_report_envelope(
         if scoped_only
         else ()
     )
+    suppressed_findings = (
+        build_report_findings(
+            list(result.suppressed_changes),
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
+        )
+        if result.suppressed_changes
+        else ()
+    )
     return ReportEnvelope(
         result=result,
         old=old,
@@ -453,4 +494,5 @@ def build_report_envelope(
         findings=findings,
         gate=gate,
         scoped_only_findings=scoped_only_findings,
+        suppressed_findings=suppressed_findings,
     )

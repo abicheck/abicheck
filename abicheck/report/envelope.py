@@ -132,8 +132,15 @@ class ReportEnvelope:
     #: ``--required-symbol`` pass synthesized outside ``result.changes``
     #: (JUnit folds these into its own testcase tree; no other format does).
     scoped_only_findings: tuple[ReportFinding, ...] = ()
-    #: Cached ``id(change) -> finding`` index over both tuples above, built
-    #: on first use within one render. Valid only while those exact
+    #: Findings for ``result.suppressed_changes`` -- SARIF's own
+    #: ``suppressions`` array registers every one of them, which otherwise
+    #: made a suppressed-finding render fall through ``findings_for``'s
+    #: per-change fallback on every single suppressed change, in a renderer
+    #: an envelope is supposed to make read-only (Codex review, fresh
+    #: evidence).
+    suppressed_findings: tuple[ReportFinding, ...] = ()
+    #: Cached ``id(change) -> finding`` index over all three tuples above,
+    #: built on first use within one render. Valid only while those exact
     #: ``Change`` objects are alive -- see ``report/finding.py``'s module
     #: docstring on why a ``Change``-keyed cache is not an option.
     _index: dict[int, ReportFinding] = field(
@@ -149,7 +156,11 @@ class ReportEnvelope:
         returns a fresh dict) rather than hold a reference to this one.
         """
         if not self._index:
-            for finding in (*self.findings, *self.scoped_only_findings):
+            for finding in (
+                *self.findings,
+                *self.scoped_only_findings,
+                *self.suppressed_findings,
+            ):
                 self._index[id(finding.change)] = finding
         return self._index
 
