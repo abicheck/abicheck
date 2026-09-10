@@ -62,18 +62,17 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
 # ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
-# routings -- the legacy `scan` CLI branch (gated on `_SCAN_NEEDS_LEGACY_CLI`,
-# unchanged code, unconditionally forwarding these six flags exactly as
-# before) and a `compare`-translated branch (which only forwards them once a
-# baseline is present -- an audit-only request using any of them routes to
-# the legacy branch instead, see that branch's own `_SCAN_NEEDS_LEGACY_CLI`
-# computation). This file's parity assertions are about the legacy branch's
-# unconditional forwarding, so the marker is anchored there specifically
-# rather than to the (now ambiguous) bare `'elif [[ "$MODE" == "scan"
-# ]]; then'`, which the new translated branch's header also matches.
-_SCAN_MODE_MARKER = (
-    'elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then'
-)
+# routings -- the legacy `scan` CLI branch (gated on
+# `_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`, unchanged code, unconditionally
+# forwarding these six flags exactly as before) and a `compare`-translated
+# branch (which only forwards them once a baseline is present). Since
+# ADR-068's second 2026-09-09 amendment collapsed the routing predicate to
+# one condition, the legacy branch is reached *only* for an audit-only
+# request (no baseline) now. This file's parity assertions are about the
+# legacy branch's unconditional forwarding, so the marker is anchored there
+# specifically rather than to the (now ambiguous) bare `'elif [[ "$MODE" ==
+# "scan" ]]; then'`, which the new translated branch's header also matches.
+_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" && "$_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI" == "true" ]]; then'
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 # scan has no release fan-out, so its region ends at the nostdinc if-block;
@@ -207,7 +206,7 @@ def _py_bin_has_abicheck_source() -> str:
 _EXTRA_ARGS_FAMILY_START = "_extra_args_is_value_option() {"
 _EXTRA_ARGS_FAMILY_END = (
     '    [[ "$_name" == "--config" ]] && return 0\n'
-    "  done <<<\"$(_extra_args_options)\"\n"
+    '  done <<<"$(_extra_args_options)"\n'
     "  return 1\n}\n"
 )
 
@@ -620,7 +619,7 @@ class TestCompileContextForwardingParity:
         fake_bin.mkdir()
         fake_python3 = fake_bin / "python3"
         fake_python3.write_text(
-            '#!/bin/bash\n'
+            "#!/bin/bash\n"
             '[[ "$1" == "-c" && "$2" == "import abicheck" ]] && exit 0\n'
             "exit 1\n"
         )

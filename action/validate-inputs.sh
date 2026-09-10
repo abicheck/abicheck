@@ -145,6 +145,9 @@ case "$MODE" in
     if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
       _fail "mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
     fi
+    if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
+      _fail "mode: scan no longer supports crosscheck (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity; only the KEY=LEVEL syntax itself doesn't survive."
+    fi
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, or use mode: compare against a directory/package for a multi-library binary comparison."
     fi
@@ -379,6 +382,15 @@ fi
 # there rather than failing a workflow the input never affected.
 if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
   _warn "new-library-set is set but has no effect: it applied only to mode: scan, where it is now retired (ADR-068 (b): scan --artifact-set is gone, pending ADR-065 S3). Remove it."
+fi
+
+# crosscheck: same shape as new-library-set directly above -- retired
+# (ADR-068 (b)), the scan-mode arm above rejects it outright, and on any
+# other mode it was always inert (crosscheck has never been a `compare`/
+# `dump`/`deps-tree`/`deps-compare` input), so it stays a warning there
+# rather than failing a workflow the input never affected.
+if [[ -n "${INPUT_CROSSCHECK:-}" && "$MODE" != "scan" ]]; then
+  _warn "crosscheck is set but has no effect: it applied only to mode: scan, where it is now retired (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- use --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error instead). Remove it."
 fi
 
 # Removed inputs, kept registered in action.yml as tombstones and rejected

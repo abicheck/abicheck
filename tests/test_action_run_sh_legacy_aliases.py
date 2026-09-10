@@ -30,6 +30,7 @@ These tests extract the relevant fragments verbatim from run.sh (the same
 "parse the real file, don't hand-copy it" discipline as
 ``test_action_run_sh_helpers.py``) rather than re-implementing the logic.
 """
+
 from __future__ import annotations
 
 import os
@@ -41,13 +42,14 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _ALIAS_START_MARKER = 'MODE="${INPUT_MODE:-compare}"'
 _ALIAS_END_MARKER = 'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"'
 # ADR-068 D2 / plan Phase 4 commit 1: `mode: scan` now has two internal CLI
-# routings -- the legacy `scan` CLI branch (gated on `_SCAN_NEEDS_LEGACY_CLI`,
-# unchanged code) and a `compare`-translated branch. The --against/
-# FORCE_AUDIT_ONLY gating this file exercises is the legacy branch's own,
-# unchanged logic, so the marker is anchored there specifically rather than
-# to the (now ambiguous) bare `'elif [[ "$MODE" == "scan" ]]; then'`, which
-# the new translated branch's header also matches.
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then'
+# routings -- the legacy `scan` CLI branch (gated on
+# `_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`, unchanged code) and a
+# `compare`-translated branch. The --against/FORCE_AUDIT_ONLY gating this
+# file exercises is the legacy branch's own, unchanged logic, so the marker
+# is anchored there specifically rather than to the (now ambiguous) bare
+# `'elif [[ "$MODE" == "scan" ]]; then'`, which the new translated branch's
+# header also matches.
+_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" && "$_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI" == "true" ]]; then'
 _AGAINST_START_MARKER = 'add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"'
 _AGAINST_END_MARKER = 'add_single_flag "--lang" "${INPUT_LANG:-}"'
 
@@ -110,7 +112,10 @@ def _run_bash_script(
     try:
         return subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, env=env, check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
         )
     finally:
         os.unlink(script_path)
@@ -118,7 +123,7 @@ def _run_bash_script(
 
 class TestEstimateAliasesDryRun:
     def _run(self, env_extra: dict[str, str]) -> str:
-        script = _alias_region() + "\necho \"DRY_RUN=$INPUT_DRY_RUN\"\n"
+        script = _alias_region() + '\necho "DRY_RUN=$INPUT_DRY_RUN"\n'
         env = {**os.environ, **env_extra}
         out = _run_bash_script(script, env)
         return out.stdout
@@ -152,11 +157,8 @@ class TestAuditAliasSkipsAgainst:
         # add_single_flag is defined earlier in run.sh (line ~60); redefine a
         # minimal equivalent here since we only extract the alias region, not
         # the whole file, to keep the harness self-contained and fast.
-        harness = (
-            'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\n'
-            "CMD=()\n"
-        )
-        script = harness + _against_region() + '\nprintf \'%s\\n\' "${CMD[@]}"\n'
+        harness = 'add_single_flag() { [[ -n "$2" ]] && CMD+=("$1" "$2"); }\nCMD=()\n'
+        script = harness + _against_region() + "\nprintf '%s\\n' \"${CMD[@]}\"\n"
         env = {**os.environ, **env_extra}
         out = _run_bash_script(script, env)
         return out.stdout.splitlines()

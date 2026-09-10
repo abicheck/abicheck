@@ -300,15 +300,19 @@ def test_every_validate_inputs_var_is_set_by_its_own_step() -> None:
 class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
     """A retired input is rejected on every route, not just the legacy one.
 
-    ADR-068's second 2026-09-09 amendment retires three `mode: scan` inputs
-    (ruling (b)). `run.sh` first rejects them, then decides whether the run
-    dispatches to the legacy `scan` CLI or the translated `compare` one.
+    ADR-068's second 2026-09-09 amendment retires four `mode: scan` inputs:
+    three under ruling (b) hard removal (`new-library-set`/`risk-rules`/
+    `build-target`), plus `crosscheck` (also ruling (b), but dropped as
+    superseded -- `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error`
+    is its replacement, not a missing capability). `run.sh` first rejects
+    all four, then decides whether the run dispatches to the legacy `scan`
+    CLI or the translated `compare` one.
 
     The order is the contract. The rejections originally sat *inside* the
-    `_SCAN_NEEDS_LEGACY_CLI` branch, so a scan that qualified for the compare
-    route skipped all three and silently ignored the retired input instead of
-    erroring (CodeRabbit review, PR #1186). The retirement is a property of
-    the input, not of which CLI the run happens to route onto.
+    routing predicate's own branch, so a scan that qualified for the compare
+    route skipped all of them and silently ignored the retired input instead
+    of erroring (CodeRabbit review, PR #1186). The retirement is a property
+    of the input, not of which CLI the run happens to route onto.
 
     Stated positionally rather than by executing both routes: the defect was
     a *placement* one, and a fragment-level behavioural test would have to
@@ -318,11 +322,16 @@ class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
     preflight copy.
     """
 
-    _RETIRED = ("INPUT_NEW_LIBRARY_SET", "INPUT_RISK_RULES", "INPUT_BUILD_TARGET")
+    _RETIRED = (
+        "INPUT_NEW_LIBRARY_SET",
+        "INPUT_RISK_RULES",
+        "INPUT_BUILD_TARGET",
+        "INPUT_CROSSCHECK",
+    )
 
     def test_each_rejection_precedes_the_route_decision(self) -> None:
         text = RUN_SH.read_text(encoding="utf-8")
-        route = text.index("_SCAN_NEEDS_LEGACY_CLI=true")
+        route = text.index("_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI=true")
         for name in self._RETIRED:
             guard = text.find(f'if [[ -n "${{{name}:-}}" ]]; then\n  echo "::error::')
             assert guard != -1, f"{name} has no ::error:: rejection in run.sh at all"
@@ -340,4 +349,4 @@ class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
         the real one, so pin that it appears exactly once.
         """
         text = RUN_SH.read_text(encoding="utf-8")
-        assert text.count("_SCAN_NEEDS_LEGACY_CLI=true") == 1
+        assert text.count("_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI=true") == 1
