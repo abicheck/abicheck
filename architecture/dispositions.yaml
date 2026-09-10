@@ -4,10 +4,9 @@
     {
       "path": "abicheck/api_types.py",
       "disposition": "retain",
-      "supported_reason": "ADR-061 D2's own end-state physical layout names this exact file at root ('api_types.py compatibility exports during migration'); it is also declared in modules.yaml's public_root_surfaces. It holds the typed request/response dataclasses for the Tier-2 service layer (ADR-037 D2) -- a cross-layer typed contract, not one layer's business logic -- which is why a trial classification into `model` (its only import-compatible option) still produced 13 new model -> policy violations from its own body: it names ChangeKind-derived vocabulary that only policy owns. It is not itself a candidate for a single owning layer under D1's dependency contract.",
+      "supported_reason": "ADR-061 gap B closed the implementation-vs-facade split this record's own `notes` field once flagged as still open: the typed request/response dataclasses for the Tier-2 service layer (ADR-037 D2) physically moved to `workflows.request_inputs`/`workflows.contracts` (`InputSpec` and `OutputSpec`/`CompareRequest`/`DumpRequest`/`CompareResult` respectively, split purely to stay under the 800-line new-file ceiling), plus `model.header_ast_frontends` for the one constant an `extract`-layer caller also needs. This file is now a pure re-export facade (69 lines) preserving every existing `from abicheck.api_types import ...` path; every canonical internal caller now imports the owning module directly. It stays a retained exemption because it is also declared in modules.yaml's public_root_surfaces and ADR-061 D2's own end-state physical layout still names this exact file at root -- not because it holds unmoved business logic anymore.",
       "owner": "abicheck maintainers",
-      "review_by": "2027-03-01",
-      "notes": "The implementation-vs-facade split this file's own fields will eventually need (which of its fields are pure model value vs. policy-derived vocabulary) is gap B's question, not resolved by this record."
+      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/build_context.py",
@@ -20,12 +19,10 @@
     },
     {
       "path": "abicheck/checker_policy.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/classification.py for the derived kind-set/impact/verdict algorithms (BREAKING_KINDS-style frozensets, impact_for, apply_policy_file_overrides); ChangeKind identity itself already lives in model/change_catalog and this module only re-exports it.",
-      "rationale": "This is gap B's own worked example, verbatim: model-classified code (checker_types.py and others) and compare-classified code (buildsource/build_diff.py and 45+ other call sites) import this module directly today, so a naive reclassification into `policy` measured 139 new dependency-direction violations (model -> policy is forbidden, compare -> policy is forbidden) in a trial run. Note this module is technically import-safe if classified as `model` instead (0 new findings), but that would misrepresent its actual content -- it holds real classification/verdict algorithms, which D1 explicitly reserves for `policy` -- so that option is deliberately not taken here: a check passing is necessary but not sufficient evidence of correct ownership.",
+      "disposition": "retain",
+      "supported_reason": "ADR-061 gap B executed this record's own trial migration for real: the derived kind-set/impact/verdict algorithms (BREAKING_KINDS-style frozensets, impact_for, apply_policy_file_overrides) moved to `policy/classification.py`, and the per-finding evidence-status/cross-source-evolution predicates (EvidenceTier.rank, is_cross_source_resolved, has_binary_evidence) moved to `policy/evidence_status.py` -- ChangeKind identity itself already lived in model/change_catalog and this module only re-exported it. What remains is a 132-line pure re-export facade preserving every existing `from abicheck.checker_policy import ...` path. It stays unclassified rather than moving into `model` or `policy`, though, because the underlying direction conflict this record's trial run measured is unchanged: `model`-classified `checker_types.py` and `compare`-classified call sites still import the facade module directly, and `model -> policy`/`compare -> policy` are still forbidden edges -- classifying the *facade* into either layer would reproduce the same violation the real implementation's move was meant to resolve. It is also declared in modules.yaml's public_root_surfaces.",
       "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
+      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/comparability.py",
@@ -47,12 +44,10 @@
     },
     {
       "path": "abicheck/contract_coverage_ledger.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/contract_coverage_ledger.py -- ADR-049 Phase 5's unsuppressible coverage ledger belongs alongside its sibling policy-classified contract_coverage_exit.py.",
-      "rationale": "frontends (cli_compare_release_pairwise.py, cli_scan_baseline.py) import this module directly today. Trial classification into `policy` measured 4 new frontends -> policy violations. Needs those two call sites routed through workflows first.",
+      "disposition": "retain",
+      "supported_reason": "ADR-061 gap B routed the two frontends call sites this record's trial run flagged (cli_compare_release_pairwise.py, cli_scan_baseline.py) through the real owner directly, and moved ADR-049 Phase 5's unsuppressible coverage ledger to policy/coverage_ledger.py, alongside its sibling policy-classified contract_coverage_exit.py. What remains is a 45-line pure re-export facade preserving every existing `from abicheck.contract_coverage_ledger import ...` path -- fully classified as far as the real implementation goes, but the facade itself is retained rather than deleted since gap B's own compatibility contract requires the flat import path to keep resolving.",
       "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
+      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/contract_evidence.py",
@@ -65,12 +60,10 @@
     },
     {
       "path": "abicheck/contract_gating.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/gating.py -- ADR-049 D1's shared verdict/gate leaf predicate that checker._compute_verdict_for and severity.compute_exit_code/compute_gate_decision both share.",
-      "rationale": "model-classified checker_types.py imports this module directly (model -> policy is forbidden -- model.may_import is empty), and frontends' cli_scan_baseline.py also imports it directly. Trial classification into `policy` measured 9 new violations from both. Needs the model-side reader moved off a direct import (a value/protocol split, mirroring model/policy_file_protocol.py's own precedent for a similar checker_policy-adjacent conflict) before this file can move.",
+      "disposition": "retain",
+      "supported_reason": "ADR-061 gap B moved the real implementation this record's trial run targeted: ADR-049 D1's shared verdict/gate leaf predicate (the same one checker._compute_verdict_for and severity.compute_exit_code/compute_gate_decision share) now lives in policy/contract_finding_relevance.py. What remains is a 45-line pure re-export facade preserving every existing `from abicheck.contract_gating import ...` path. It stays unclassified rather than moving into `model` or `policy` because the direction conflict this record's trial run measured is unchanged: `model`-classified checker_types.py and frontends' cli_scan_baseline.py both still import the facade module directly, and model -> policy is still forbidden (model.may_import is empty) -- classifying the facade itself into either layer would reproduce the violation the real implementation's move was meant to resolve.",
       "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
+      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/deadline.py",
@@ -144,12 +137,10 @@
     },
     {
       "path": "abicheck/reclassify.py",
-      "disposition": "migrate",
-      "target_layer": "policy",
-      "slice": "policy/reclassify.py -- 'the third policy-file primitive', alongside its sibling policy-classified policy_file.py/suppression.py.",
-      "rationale": "model-classified checker_types.py imports this module directly (model -> policy is forbidden). Trial classification into `policy` also produced an observed compare -> model -> policy -> compare responsibility cycle, not just a flat violation count (5 new findings total) -- the same checker_policy/DiffResult coupling gap B already names as its own worked example. Blocked on checker_policy.py's own disposition closing first.",
+      "disposition": "retain",
+      "supported_reason": "ADR-061 gap B moved the real implementation this record's trial run targeted: 'the third policy-file primitive', alongside its sibling policy-classified policy_file.py/suppression.py, now lives in policy/reclassify.py. What remains is a 53-line pure re-export facade preserving every existing `from abicheck.reclassify import ...` path. It stays unclassified rather than moving into `model` or `policy` because the direction conflict this record's trial run measured is unchanged -- model-classified checker_types.py still imports the facade module directly, and model -> policy is still forbidden -- and checker_policy.py, the sibling record this one was blocked on, closed the same way (its own real implementation moved, its facade stayed unclassified for the identical reason), not by both facades' classification changing.",
       "owner": "abicheck maintainers",
-      "review_by": "2026-12-15"
+      "review_by": "2027-03-01"
     },
     {
       "path": "abicheck/scan_engine.py",
