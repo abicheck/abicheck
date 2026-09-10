@@ -112,11 +112,44 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "Every per-finding entry-builder for a shared `Change` "
             "(`compare`'s `changes[]`, `scan --against`'s baseline dicts, "
-            "the release fan-out's capped `findings`) must resolve an "
-            "audit field (e.g. `reclassified_by`) via one canonical helper "
-            "-- never a sibling silently omitting a field another computes."
+            "the release fan-out's capped `findings`, `compare "
+            "--no-baseline`'s audit rows) must resolve an audit field (e.g. "
+            "`reclassified_by`, a suppression's rule provenance) via one "
+            "canonical helper -- never a sibling silently omitting a field "
+            "another computes. The same rule holds *between formats* of one "
+            "report: a fact one projection publishes and its siblings drop "
+            "leaves a consumer of the quiet format unable to act on the run "
+            "it was handed."
         ),
-        fixed_by=(1176,),
-        seed_tests=("tests/test_disposition_reclassification.py",),
+        # #1185-era follow-up, two instances of the same shape. The audit's
+        # suppressed rows read `Change.suppression_rule` -- the `label or
+        # reason` display collapse -- while `reporter.py`'s sibling already
+        # resolved the full ADR-067 record through
+        # `DispositionLedger.rule_for`, so a waiver stating both lost its
+        # reason and source file. And the JUnit projection published only
+        # the total exit code where JSON/Markdown/oneline/SARIF all named
+        # the orthogonal axis that fired.
+        fixed_by=(1176, 1185),
+        seed_tests=(
+            "tests/test_disposition_reclassification.py",
+            "tests/test_no_baseline_report_formats.py",
+        ),
+        axes={
+            # Only what a seed test really drives.
+            "renderer": ("json", "markdown", "junit"),
+            "record": ("suppression-provenance", "exit-axis"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The between-formats half is asserted for the audit "
+                    "document's suppression provenance and exit axes only. "
+                    "No gate enumerates a report's semantic fields and "
+                    "checks every projection carries each one, so a new "
+                    "field added to one renderer alone is still possible."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
     ),
 )
