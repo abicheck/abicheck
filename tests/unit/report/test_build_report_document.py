@@ -30,7 +30,7 @@ from unittest import mock
 
 import pytest
 
-from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot
 from abicheck.policy.disposition_close import finalize_ledger
@@ -807,6 +807,42 @@ class TestRendererOrderIndependence:
         assert html_before == html_after, (
             "HTML's binary-compatibility percentage moved when a PolicyFile "
             "mutated after the envelope was already built"
+        )
+
+    def test_mutating_a_shared_library_metadata_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``old_metadata``/``new_metadata``
+        (``LibraryMetadata``) are custom mutable objects too, read directly
+        by SARIF's own artifact-hash block and HTML's file-metadata section
+        -- reassigning ``old_metadata.path`` after construction must not
+        reach either.
+        """
+        old_metadata = LibraryMetadata(
+            path="/old/libfoo.so", sha256="a" * 64, size_bytes=100
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            policy="strict_abi",
+            old_metadata=old_metadata,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.old_metadata is not old_metadata, (
+            "the envelope shared the caller's own LibraryMetadata object"
+        )
+
+        sarif_before = render_envelope("sarif", envelope)
+        old_metadata.path = "/mutated/path.so"
+        sarif_after = render_envelope("sarif", envelope)
+
+        assert sarif_before == sarif_after, (
+            "SARIF's artifact path moved when LibraryMetadata mutated after "
+            "the envelope was already built"
         )
 
     def test_mutating_the_caller_s_snapshots_after_construction_cannot_reach_the_envelope(

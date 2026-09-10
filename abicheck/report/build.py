@@ -283,17 +283,36 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     gating record as outside its gate's ``severity_input``, since none of
     the ledger's recorded identities match these new objects).
 
-    ``policy_file`` gets the same deep copy: it is a custom, mutable
-    object (not a list/tuple/dict this loop otherwise catches), and more
-    than one format calls ``effective_verdict_for_change``/
-    ``classify_effective_change`` straight against ``envelope.result.
-    policy_file`` for its own classification -- HTML's own
-    ``compatibility_metrics`` call among them (Codex review, fresh
-    evidence: a `PolicyFile.overrides`` mutation after construction moved
-    HTML's binary-compatibility percentage while ``document``/``findings``
-    stayed at their frozen values).
+    Every other non-primitive attribute (``policy_file``, ``old_metadata``/
+    ``new_metadata``, and the many ``object | None``-typed fields --
+    ``suppression_audit``, ``contract_context``, ``analysis_assurance``,
+    ``acknowledgments``, ... -- ``DiffResult`` accumulates) gets the same
+    treatment via the catch-all branch below, rather than one field named
+    at a time as each was independently reported: a custom mutable object
+    hanging off ``DiffResult`` is exactly the same class of bug as a list
+    or a ``Change``, whichever field it happens to be (Codex review, fresh
+    evidence, three rounds: ``comparability_assurance`` -> ``policy_file``
+    -> ``old_metadata``/``new_metadata`` -- HTML's own
+    ``compatibility_metrics`` call classifies straight against
+    ``envelope.result.policy_file``; more than one format reads
+    ``old_metadata``/``new_metadata`` directly). ``disposition_ledger`` is
+    the one exception -- it needs identity-preserving remap
+    (:func:`_remap_disposition_ledger`), not a plain deep copy, so it is
+    excluded from the catch-all and handled on its own below. An ``Enum``
+    member is immutable by construction and never needs a copy of its own.
+
+    The catch-all deep copy is best-effort: some ``object | None`` fields
+    (e.g. a frozen dataclass built over a ``types.MappingProxyType``) are
+    not themselves deep-copyable at all (``TypeError: cannot pickle
+    'mappingproxy' object``) -- and don't need to be, since a value the
+    stdlib itself refuses to copy already can't be handed a *new*, mutable
+    container to leak through; sharing the original is exactly as safe as
+    copying it would have been. Falling back to sharing on that specific
+    failure, rather than letting it propagate, is what keeps this general
+    fix from being narrower than the one-field-at-a-time fixes it replaces.
     """
     import copy
+    from enum import Enum
 
     snapshot = copy.copy(result)
     identity_map: dict[int, Change] = {}
@@ -306,14 +325,21 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
         return value
 
     for name, value in vars(result).items():
+        if name == "disposition_ledger":
+            continue
         if isinstance(value, list):
             setattr(snapshot, name, [_snapshot_maybe_change(v) for v in value])
         elif isinstance(value, tuple) and any(isinstance(v, Change) for v in value):
             setattr(snapshot, name, tuple(_snapshot_maybe_change(v) for v in value))
         elif isinstance(value, dict):
             setattr(snapshot, name, dict(value))
-    if snapshot.policy_file is not None:
-        snapshot.policy_file = copy.deepcopy(snapshot.policy_file)
+        elif value is not None and not isinstance(
+            value, (str, int, float, bool, bytes, Enum)
+        ):
+            try:
+                setattr(snapshot, name, copy.deepcopy(value))
+            except TypeError:
+                pass
     ledger = getattr(snapshot, "disposition_ledger", None)
     if ledger is not None:
         snapshot.disposition_ledger = _remap_disposition_ledger(ledger, identity_map)
