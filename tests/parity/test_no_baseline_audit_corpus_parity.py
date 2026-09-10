@@ -248,9 +248,7 @@ def test_audit_gate_axis_requires_opt_in() -> None:
     """
     for case_name in _AUDIT_GATE_SHOULD_FIRE:
         path = _fixture_path(case_name, "snapshot.abi.json")
-        result = invoke_cli(
-            "compare", "--no-baseline", str(path), "--format", "json"
-        )
+        result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
         assert result.exit_code == 0, (
             f"{case_name}: audit-gate axis fired without --severity-preset "
             f"(exit {result.exit_code}); it must be opt-in:\n{result.output}"
@@ -297,6 +295,60 @@ def test_scan_baseline_exit_codes_documented_for_the_gated_fixtures() -> None:
     assert result.exit_code == 0, (
         "case143: expected legacy `scan` to stay exit 0 (RISK-classified "
         f"finding), got {result.exit_code}:\n{result.output}"
+    )
+
+
+def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> None:
+    """Regression for a Codex security review finding (P1) on this axis's
+    first revision: it read a finding's *raw* ``ChangeKind`` category
+    (``BREAKING_KINDS``/``API_BREAK_KINDS`` membership) instead of its
+    *effective*, policy-resolved verdict, so an explicitly-selected,
+    trusted ``--policy`` document promoting a normally-RISK finding to
+    BREAKING was silently invisible to the gate -- an untrusted candidate
+    artifact could pass a CI job that had explicitly asked to gate on
+    exactly that promotion. ``case143``'s ``exported_not_public`` finding is
+    RISK-classified by default (does not gate, per
+    ``_AUDIT_GATE_SHOULD_FIRE`` above); this pins that an ``overrides:``
+    policy promoting it to ``break`` (``Verdict.BREAKING``) flips the axis
+    to fire, exit 3, even though the raw finding kind never changed.
+    """
+    policy_path = tmp_path / "promote_exported_not_public.yml"
+    policy_path.write_text("overrides:\n  exported_not_public: break\n")
+    path = _fixture_path("case143_audit_accidental_export", "snapshot.abi.json")
+
+    # Baseline: case143 does not gate under the built-in default policy.
+    baseline = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(path),
+        "--format",
+        "json",
+        "--severity-preset",
+        "default",
+    )
+    assert baseline.exit_code == 0, baseline.output
+    assert json.loads(baseline.stdout)["exit_axes"]["audit_gate"] == 0
+
+    # With the override in effect, the same fixture's same finding must gate.
+    promoted = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(path),
+        "--format",
+        "json",
+        "--severity-preset",
+        "default",
+        "--policy",
+        str(policy_path),
+    )
+    report = json.loads(promoted.stdout)
+    assert promoted.exit_code == 3, (
+        f"a --policy override promoting case143's finding to BREAKING must "
+        f"gate the audit (exit 3), got {promoted.exit_code}:\n{promoted.output}"
+    )
+    assert report["exit_axes"]["audit_gate"] == 3
+    assert {f["kind"] for f in report["findings"]} == {"exported_not_public"}, (
+        "the override must not change which finding is reported, only whether it gates"
     )
 
 

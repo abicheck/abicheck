@@ -16,7 +16,6 @@ from dataclasses import dataclass
 
 import pytest
 
-from abicheck.checker_policy import ChangeKind
 from abicheck.policy.audit_gate_exit import (
     AUDIT_GATE_EXIT_CODE,
     SEVERITY_PRESET_DISABLES_AUDIT_GATE,
@@ -24,38 +23,23 @@ from abicheck.policy.audit_gate_exit import (
     audit_gate_exit_contribution,
     fold_audit_gate_exit,
 )
-from abicheck.policy.classification import (
-    API_BREAK_KINDS,
-    BREAKING_KINDS,
-    COMPATIBLE_KINDS,
-    RISK_KINDS,
-)
-
-
-@dataclass
-class _FakeChange:
-    kind: ChangeKind
+from abicheck.policy.classification import Verdict
 
 
 @dataclass
 class _FakeFinding:
-    change: _FakeChange
+    """Stands in for a :class:`~abicheck.report.finding.ReportFinding` --
+    only the ``.verdict`` attribute the axis actually reads."""
+
+    verdict: Verdict
 
 
-def _breaking_kind() -> ChangeKind:
-    return next(iter(BREAKING_KINDS))
+@dataclass
+class _FakeChangeWithNoVerdict:
+    """A raw, unresolved object (e.g. ``Change``) that carries no
+    ``.verdict`` at all -- must never be mistaken for a gating finding."""
 
-
-def _api_break_kind() -> ChangeKind:
-    return next(iter(API_BREAK_KINDS))
-
-
-def _risk_kind() -> ChangeKind:
-    return next(iter(RISK_KINDS))
-
-
-def _compatible_kind() -> ChangeKind:
-    return next(iter(COMPATIBLE_KINDS))
+    kind: object = None
 
 
 class TestAuditGateExitCode:
@@ -75,9 +59,7 @@ class TestAuditGateEnabledForSeverityPreset:
 
     def test_info_only_is_disabled(self) -> None:
         assert (
-            audit_gate_enabled_for_severity_preset(
-                SEVERITY_PRESET_DISABLES_AUDIT_GATE
-            )
+            audit_gate_enabled_for_severity_preset(SEVERITY_PRESET_DISABLES_AUDIT_GATE)
             is False
         )
         assert SEVERITY_PRESET_DISABLES_AUDIT_GATE == "info-only"
@@ -89,60 +71,71 @@ class TestAuditGateEnabledForSeverityPreset:
 
 class TestAuditGateExitContribution:
     def test_disabled_is_always_zero(self) -> None:
-        """Even a BREAKING-classified finding contributes 0 when the axis
+        """Even a BREAKING-verdict finding contributes 0 when the axis
         was never opted into -- the opt-in gate is checked before anything
         about the findings themselves."""
-        findings = [_FakeFinding(_FakeChange(_breaking_kind()))]
+        findings = [_FakeFinding(Verdict.BREAKING)]
         assert audit_gate_exit_contribution(findings, enabled=False) == 0
 
     def test_empty_findings_is_zero(self) -> None:
         assert audit_gate_exit_contribution([], enabled=True) == 0
 
-    def test_breaking_kind_gates(self) -> None:
-        findings = [_FakeFinding(_FakeChange(_breaking_kind()))]
+    def test_breaking_verdict_gates(self) -> None:
+        findings = [_FakeFinding(Verdict.BREAKING)]
         assert (
-            audit_gate_exit_contribution(findings, enabled=True)
-            == AUDIT_GATE_EXIT_CODE
+            audit_gate_exit_contribution(findings, enabled=True) == AUDIT_GATE_EXIT_CODE
         )
 
-    def test_api_break_kind_gates(self) -> None:
+    def test_api_break_verdict_gates(self) -> None:
         """case148/case149's own classification -- the exact reproduction
         this axis exists for."""
-        findings = [_FakeFinding(_FakeChange(_api_break_kind()))]
+        findings = [_FakeFinding(Verdict.API_BREAK)]
         assert (
-            audit_gate_exit_contribution(findings, enabled=True)
-            == AUDIT_GATE_EXIT_CODE
+            audit_gate_exit_contribution(findings, enabled=True) == AUDIT_GATE_EXIT_CODE
         )
 
-    def test_risk_kind_does_not_gate(self) -> None:
+    def test_risk_verdict_does_not_gate(self) -> None:
         """case143's own classification -- the exact regression this axis
         must not reintroduce."""
-        findings = [_FakeFinding(_FakeChange(_risk_kind()))]
+        findings = [_FakeFinding(Verdict.COMPATIBLE_WITH_RISK)]
         assert audit_gate_exit_contribution(findings, enabled=True) == 0
 
-    def test_compatible_kind_does_not_gate(self) -> None:
-        findings = [_FakeFinding(_FakeChange(_compatible_kind()))]
+    def test_compatible_verdict_does_not_gate(self) -> None:
+        findings = [_FakeFinding(Verdict.COMPATIBLE)]
         assert audit_gate_exit_contribution(findings, enabled=True) == 0
 
     def test_one_gating_finding_among_many_non_gating_ones_still_gates(self) -> None:
         findings = [
-            _FakeFinding(_FakeChange(_risk_kind())),
-            _FakeFinding(_FakeChange(_compatible_kind())),
-            _FakeFinding(_FakeChange(_api_break_kind())),
+            _FakeFinding(Verdict.COMPATIBLE_WITH_RISK),
+            _FakeFinding(Verdict.COMPATIBLE),
+            _FakeFinding(Verdict.API_BREAK),
         ]
         assert (
-            audit_gate_exit_contribution(findings, enabled=True)
-            == AUDIT_GATE_EXIT_CODE
+            audit_gate_exit_contribution(findings, enabled=True) == AUDIT_GATE_EXIT_CODE
         )
 
-    def test_accepts_bare_change_objects_too(self) -> None:
-        """A caller may pass bare ``Change``-shaped objects (``.kind``
-        directly), not only ``ReportFinding``-shaped ones (``.change.kind``)
-        -- both shapes appear across this codebase's call sites."""
+    def test_a_policy_promoted_verdict_gates(self) -> None:
+        """The regression this contract change closes (Codex security
+        review, P1): a ``--policy`` ``overrides:``/``reclassify:`` rule
+        that promotes a finding's *effective* verdict to BREAKING/API_BREAK
+        must gate here even though nothing about its raw ``ChangeKind``
+        changed -- this axis never re-derives a category from the raw kind,
+        it only ever reads the already-resolved ``.verdict``."""
+        findings = [_FakeFinding(Verdict.BREAKING)]
         assert (
-            audit_gate_exit_contribution([_FakeChange(_breaking_kind())], enabled=True)
-            == AUDIT_GATE_EXIT_CODE
+            audit_gate_exit_contribution(findings, enabled=True) == AUDIT_GATE_EXIT_CODE
         )
+
+    def test_an_object_with_no_verdict_attribute_is_never_mistaken_for_gating(
+        self,
+    ) -> None:
+        """A raw, unresolved object (e.g. an unwrapped ``Change``) carries
+        no ``.verdict`` at all and must be skipped, not misread as
+        non-gating *or* gating -- a caller that forgot to resolve findings
+        through ``build_report_findings`` first must never silently gate
+        (or silently fail to), it should simply find nothing to read."""
+        findings = [_FakeChangeWithNoVerdict()]
+        assert audit_gate_exit_contribution(findings, enabled=True) == 0
 
 
 class TestFoldAuditGateExit:

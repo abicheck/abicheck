@@ -612,6 +612,47 @@ axis alongside the other `max`-folded axes) cover the module directly.
 **Status.** Implemented. `docs/contribute/known-gaps.md`'s matching entry
 is updated to record this as closed.
 
+### Correction (2026-09-10, same day): the gating rule reads the effective verdict, not the raw kind
+
+A Codex security review on the PR implementing this amendment (P1) found a
+real gap in the paragraph above titled "Why the axis does not route through
+`severity.py`'s category model": reading `BREAKING_KINDS`/`API_BREAK_KINDS`
+membership off a finding's *raw* `change.kind` is correct only on the
+un-policied G20 corpus. The moment a run supplies `--policy` (a document
+this repository's `SECURITY.md` treats as trusted, unlike the analyzed
+binary itself), an `overrides:`/`reclassify:` rule can promote a normally
+`RISK`-classified finding (e.g. `case143`'s `exported_not_public`) to
+`Verdict.BREAKING` — every other consumer of a finding's classification in
+this codebase (the JSON/Markdown/SARIF/JUnit renderers, the two-sided gate)
+reads that *effective*, policy-resolved verdict via `policy.severity.
+effective_verdict_for_change`, but this axis's first revision did not, so
+the promotion was silently invisible to it: an untrusted candidate artifact
+could still exit `0` under an explicitly-selected policy that had named its
+finding breaking.
+
+Fixed the same day, before merge, by changing `audit_gate_exit_contribution`
+to read each finding's already-resolved `.verdict` (a
+`report.finding.ReportFinding`, produced by `build_report_findings` /
+`effective_verdict_for_change`) and compare it against `Verdict.BREAKING`/
+`Verdict.API_BREAK` directly, instead of importing the raw `BREAKING_KINDS`/
+`API_BREAK_KINDS` sets. This is "read, don't re-derive" applied to this
+axis, matching how every other renderer already reads classification — it
+does not change the decision stated above (the axis still does not route
+through `severity.py`'s coarser `IssueCategory`/`potential_breaking`
+bucket, which stays merged with `RISK_KINDS` for the reason already given),
+it corrects which representation of "does this finding's classification
+gate" the axis reads. `policy/audit_gate_exit.py` stays a leaf module with
+no new upward dependency: it reads a duck-typed `.verdict` attribute rather
+than importing `report.finding.ReportFinding` itself, preserving the
+`policy -> report` dependency direction this repository's architecture
+gate enforces. Regression coverage: `tests/test_audit_gate_exit.py::
+TestAuditGateExitContribution::test_a_policy_promoted_verdict_gates` (unit
+level) and `tests/parity/test_no_baseline_audit_corpus_parity.py::
+test_audit_gate_axis_honors_a_policy_promoted_verdict` (live, an
+`overrides:` policy document promoting `case143`'s finding, verified to
+flip its exit code from `0` to `3` with no change to which finding is
+reported).
+
 ## Alternatives considered
 
 **Keep `scan`, make `compare` call into it.** Rejected: it preserves two

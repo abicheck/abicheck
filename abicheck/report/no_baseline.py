@@ -178,8 +178,16 @@ def _no_baseline_exit_axes(
         # Ordered first so it reads alongside the other content axes rather
         # than after the evidence/scope ones below, which is purely a
         # presentation choice -- `max` does not care about dict order.
+        #
+        # Resolved through `_finding_resolver` (the same policy-effective
+        # verdict every renderer reads), never the raw `result.findings`
+        # `Change` tuple -- gating on a finding's raw `ChangeKind` category
+        # would silently miss a `--policy` override/`reclassify:` rule that
+        # promotes it to breaking (Codex security review, P1; see
+        # `policy.audit_gate_exit`'s own module docstring).
         "audit_gate": audit_gate_exit_contribution(
-            result.findings, enabled=audit_gate_enabled
+            _finding_resolver(result.diff)(result.findings),
+            enabled=audit_gate_enabled,
         ),
         "contract_coverage": coverage_exit_floor(result.diff),
         "analysis_assurance": analysis_assurance_exit_contribution(
