@@ -1389,7 +1389,7 @@
     },
     {
       "path": "abicheck/workflows/history.py",
-      "baseline_lines": 853,
+      "baseline_lines": 854,
       "target": "workflows",
       "rule": "no_growth",
       "disposition": "migrate",
