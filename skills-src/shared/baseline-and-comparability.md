@@ -40,8 +40,9 @@ Ways to obtain a baseline side:
 - no baseline at all yet — an audit of the candidate build alone (never an
   addition/removal/verdict). `compare --no-baseline libfoo.so` (ADR-068 D2)
   is the declared spelling: it reports the audit's cross-source hygiene
-  findings under `findings[]`, with `changes[]`/`verdict` staying empty, and
-  by default a hygiene finding never gates CI (exit `0`). To reproduce a
+  findings under its own `findings` array, with `changes[]`/`verdict`
+  staying empty, and by default a hygiene finding never gates CI (exit
+  `0`). To reproduce a
   `scan`-based gating job, add `--severity-preset default` (or `strict`) —
   that opts into the orthogonal audit-gate axis and exits `3` (never `2`/`4`)
   on a `BREAKING`/`API_BREAK`-classified finding; a non-gating job needs no
