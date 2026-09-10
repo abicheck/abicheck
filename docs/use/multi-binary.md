@@ -529,6 +529,48 @@ Each finding has:
 - `affected_libraries` — list of every library affected by this finding;
   enables fan-out filtering downstream.
 
+## Per-library finding cap and truncation (`--max-findings-per-library`)
+
+Each `libraries[i]` entry's `findings`/`findings_view` list (kind/symbol/
+description/location per finding) is capped at 10 entries by default so a
+large directory/package fan-out can't blow up the always-on release summary
+— mirrors `scan --against`'s own `--max-findings` cap, documented in
+[Output Formats](output-formats.md). Raise or lower the cap per run with
+`compare --max-findings-per-library N`
+(directory/package inputs only) or globally via the
+`ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY` environment variable when
+neither passes an explicit value; either configures the same cap, and it
+only changes how much of each library's diff the aggregate summary
+itemizes — never the verdict or exit code. `--output-dir` remains the way
+to see every library's full, unfiltered single-pair `compare` report
+unconditionally, regardless of this cap.
+
+When a library's list is actually truncated, the entry sets
+`findings_truncated`/`findings_view_truncated` (the latter only when
+`--view show=...` is active) alongside the exact, untruncated
+`findings_total_count`/`findings_total_count_view`, and also
+`findings_truncated_kinds`/`findings_view_truncated_kinds` — a
+`ChangeKind -> count` map of what was cut from that library's list, the
+same shape `scan --against`'s identical ledger uses — so the shape of a
+truncated library's diff is visible without rerunning at a higher cap.
+Both kind maps are absent when nothing was truncated for that library.
+
+```json
+{
+  "libraries": [
+    {
+      "library": "libfoo.so",
+      "verdict": "BREAKING",
+      "breaking": 25,
+      "findings": ["... 10 entries ..."],
+      "findings_truncated": true,
+      "findings_truncated_kinds": {"func_removed": 24, "public_surface_shrank": 1},
+      "findings_total_count": 25
+    }
+  ]
+}
+```
+
 ## Exit codes
 
 Same as before, but a bundle finding can promote the verdict:

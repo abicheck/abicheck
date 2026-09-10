@@ -235,7 +235,7 @@ def test_every_finding_dict_builder_agrees_on_reclassified_by(
     # one builder that regressed.
     from abicheck.cli_compare_release_matrix import _release_finding_dicts
 
-    release_dicts = _release_finding_dicts(diff, None, None)
+    release_dicts, _cut_kinds = _release_finding_dicts(diff, None, None)
     assert release_dicts[0]["reclassified_by"] == expected
 
     # 4. The release fan-out's Markdown rendering of that same dict (Codex

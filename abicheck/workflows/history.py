@@ -89,10 +89,12 @@ from pathlib import Path
 from typing import Literal
 
 from ..checker import compare
-from ..checker_policy import ChangeKind, Confidence
+from ..checker_policy import ChangeKind, Confidence, FindingEvolution
 from ..checker_types import Change, DiffResult
+from ..finding_identity import report_finding_id
 from ..model.identity import EntityId
 from ..model.snapshot import AbiSnapshot
+from ..policy.finding_evolution import apply_finding_evolution
 from ..policy.versioning_policy import VersioningPolicy
 from ..serialization import load_snapshot
 
@@ -216,13 +218,27 @@ class CoverageGap:
 class PairwiseSummary:
     """A thin, transparent record of the underlying ``compare()`` call for
     one adjacent pair — never re-derived from the events; kept so a caller
-    can audit exactly which comparison backs a given lifecycle event."""
+    can audit exactly which comparison backs a given lifecycle event.
+
+    ``evolution_counts``/``resolved`` (ADR-068 Phase 1 item 2's
+    ``FindingEvolution`` primitive, ``policy.finding_evolution.
+    apply_finding_evolution``) are this pair's own findings classified
+    against the *previous* pair's own comparison in this same chain -- the
+    first N>1-comparison caller that primitive was built for (see its
+    module docstring: "a future N>1-comparison consumer computes evolution
+    once"). The very first pair in a chain has no earlier comparison to
+    compare against, so its own ``evolution_counts`` reads
+    ``not_evaluated: <total>``/``resolved: []`` (the primitive's own
+    ``previous=None`` convention), never a guessed ``introduced``.
+    """
 
     from_version: str
     to_version: str
     verdict: str
     change_count: int
     confidence: str
+    evolution_counts: tuple[tuple[str, int], ...] = ()
+    resolved: tuple[Change, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -231,6 +247,8 @@ class PairwiseSummary:
             "verdict": self.verdict,
             "change_count": self.change_count,
             "confidence": self.confidence,
+            "evolution_counts": dict(self.evolution_counts),
+            "resolved": [_resolved_finding_dict(c) for c in self.resolved],
         }
 
 
@@ -298,6 +316,46 @@ def _correspondence_key(entity_kind: str, change: Change) -> str:
 
 def _display_name(change: Change) -> str:
     return change.old_value or change.new_value or change.symbol
+
+
+def _resolved_finding_dict(change: Change) -> dict[str, object]:
+    """JSON-safe projection of one ``FindingEvolution.RESOLVED`` finding.
+
+    Deliberately not the full ``reporter._change_to_dict`` shape (severity,
+    gate contribution, ...) -- a resolved finding is a historical fact about
+    the *previous* pair's own comparison, not one this pair's own policy
+    classified -- mirrors ``report.finding_evolution.ResolvedFindingEntry``
+    field-for-field without importing it: ``workflows/`` may not import
+    ``report/`` (ADR-061's dependency direction is the other way around), so
+    this stays a small, self-contained projection rather than a new
+    cross-layer edge.
+    """
+    return {
+        "finding_id": report_finding_id(change),
+        "kind": change.kind.value,
+        "symbol": change.symbol,
+        "description": change.description,
+        "old_value": change.old_value,
+        "new_value": change.new_value,
+        "source_location": change.source_location,
+    }
+
+
+def _evolution_counts(result: DiffResult) -> tuple[tuple[str, int], ...]:
+    """Per-``FindingEvolution``-state counts over *result*'s own findings,
+    after :func:`~abicheck.policy.finding_evolution.apply_finding_evolution`
+    has stamped it. Mirrors ``report.finding_evolution.
+    compute_finding_evolution_summary``'s counting rule field-for-field
+    (zero-inclusive, ``RESOLVED`` counted from ``resolved_findings`` rather
+    than ``changes`` -- see that function's own comment for why) without
+    importing it, for the same cross-layer reason
+    :func:`_resolved_finding_dict` gives.
+    """
+    counts: dict[str, int] = {e.value: 0 for e in FindingEvolution}
+    for change in result.changes:
+        counts[change.evolution.value] = counts.get(change.evolution.value, 0) + 1
+    counts[FindingEvolution.RESOLVED.value] = len(result.resolved_findings)
+    return tuple((e.value, counts[e.value]) for e in FindingEvolution)
 
 
 # ---------------------------------------------------------------------------
@@ -531,10 +589,18 @@ def build_longitudinal_history(
         )
     )
 
+    # ADR-068 Phase 1 item 2: the dedicated N>1-comparison caller
+    # `FindingEvolution`'s own module docstring names as follow-up work.
+    # `previous_result` is the prior pair's own `compare()` result in this
+    # same chain -- `None` for the first pair (there is no earlier real
+    # comparison to classify against yet, so its own findings correctly
+    # read `not_evaluated`, never a guessed `introduced`).
+    previous_result: DiffResult | None = None
     for prev, curr in zip(entries, entries[1:]):
         result = compare(
             prev.snapshot, curr.snapshot, policy=policy, scope_to_public_surface=True
         )
+        apply_finding_evolution(result, previous_result)
         pairwise.append(
             PairwiseSummary(
                 from_version=prev.version,
@@ -542,8 +608,11 @@ def build_longitudinal_history(
                 verdict=result.verdict.value,
                 change_count=len(result.changes),
                 confidence=result.confidence.value,
+                evolution_counts=_evolution_counts(result),
+                resolved=tuple(result.resolved_findings),
             )
         )
+        previous_result = result
         events.extend(
             _events_from_pair(
                 prev,

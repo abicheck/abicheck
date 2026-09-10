@@ -644,6 +644,66 @@ class TestDirVsDir:
         assert lib["breaking"] == 15
         assert len(lib["findings"]) == 10
         assert lib["findings_truncated"] is True
+        # Codex review ("a presentation default masquerading as a
+        # contract"): the cut kinds must be visible without rerunning at a
+        # higher cap, same as `scan --against`'s own `findings_truncated_kinds`.
+        # 15 `func_removed` fill the cap's first 10 slots (5 cut); the
+        # library's own `public_surface_shrank` quality finding never gets a
+        # slot at all (the cap is already spent), so it's cut too.
+        assert lib["findings_truncated_kinds"] == {
+            "func_removed": 5,
+            "public_surface_shrank": 1,
+        }
+
+    def test_max_findings_per_library_overrides_the_default_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``compare --max-findings-per-library`` (Codex review: the release
+        cap was a hardcoded 10 with no override, unlike `scan --max-findings`)
+        raises the per-library findings cap; the env var does the same when no
+        explicit flag is given."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_funcs = [
+            Function(
+                name=f"foo{i}",
+                mangled=f"_Z4foo{i}v",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+            for i in range(15)
+        ]
+        old = _snap("1.0", old_funcs, library="libfoo.so")
+        new = _snap("2.0", [], library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        # 16 real findings total: 15 `func_removed` plus the library's own
+        # `public_surface_shrank` quality finding -- a cap of 16 is the
+        # smallest one that leaves nothing truncated.
+
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "json",
+            "--max-findings-per-library",
+            "16",
+        )
+        assert code == 4
+        lib = json.loads(out)["libraries"][0]
+        assert len(lib["findings"]) == 16
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
+
+        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "16")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        lib = json.loads(out)["libraries"][0]
+        assert len(lib["findings"]) == 16
+        assert "findings_truncated" not in lib
 
     def test_json_findings_include_severity_gated_addition(
         self, tmp_path: Path

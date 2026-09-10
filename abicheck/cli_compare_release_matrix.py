@@ -427,7 +427,90 @@ def _validate_suppression_early(
         )
 
 
+#: Default cap on findings embedded in each library's ``findings``/
+#: ``findings_view`` lists in the release summary so a large fan-out cannot
+#: blow up the always-on release output; ``--output-dir`` (see
+#: ``cli_compare_release_pairwise.py``'s per-library ``<lib>.json`` sidecar)
+#: remains the way to see every library's full, unfiltered report
+#: unconditionally. Overridable per run via ``compare-release
+#: --max-findings-per-library``, or globally via the
+#: ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY`` env var when neither passes
+#: an explicit value -- mirrors ``cli_scan_baseline``'s identical
+#: ``_MAX_BASELINE_FINDINGS``/``_resolve_max_baseline_findings`` pair (see
+#: :func:`_resolve_max_release_findings_per_library`), which this cap used
+#: to lack entirely (Codex review: "a presentation default masquerading as
+#: a contract").
 _MAX_RELEASE_FINDINGS_PER_LIBRARY = 10
+
+#: Env var read by :func:`_resolve_max_release_findings_per_library` when a
+#: caller does not pass an explicit ``max_findings``. Kept distinct from a
+#: CLI/API default of ``None`` so "not specified" is distinguishable from
+#: "explicitly 10".
+_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR = "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY"
+
+
+def _resolve_max_release_findings_per_library(max_findings: int | None) -> int:
+    """Resolve the effective per-library findings cap: explicit override,
+    else env, else default. Mirrors
+    ``cli_scan_baseline._resolve_max_baseline_findings`` exactly (same
+    precedence, same "malformed override degrades to the safe default
+    rather than failing the run" behavior).
+
+    *max_findings* is the per-call override (``compare-release
+    --max-findings-per-library``); it wins when given. Otherwise
+    ``ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY`` lets a CI job raise (or
+    lower) the cap globally without a code change.
+    """
+    if max_findings is not None:
+        if max_findings < 1:
+            raise ValueError(
+                f"max_findings_per_library must be a positive integer, got {max_findings}"
+            )
+        return max_findings
+    import os
+
+    env_value = os.environ.get(_MAX_RELEASE_FINDINGS_PER_LIBRARY_ENV_VAR)
+    if env_value:
+        try:
+            parsed = int(env_value)
+        except ValueError:
+            return _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        if parsed >= 1:
+            return parsed
+    return _MAX_RELEASE_FINDINGS_PER_LIBRARY
+
+
+def _release_change_kind_str(c: Any) -> str:
+    """The same tolerant ``kind`` read ``release_finding_entry`` uses, standalone.
+
+    Mirrors ``cli_scan_baseline._change_kind_str`` -- kept local rather than
+    imported since the two ``cli_*`` command families are independently
+    owned and this is a five-line, dependency-free primitive. Shared so the
+    per-kind truncation ledger below counts a raw ``Change`` the identical
+    way the finding dicts spell its ``kind`` -- a mismatch here would make
+    the ledger's keys disagree with the ``kind`` values in
+    ``entry["findings"]`` itself.
+    """
+    kind = getattr(c, "kind", None)
+    return str(getattr(kind, "value", str(kind)))
+
+
+def _accumulate_release_kind_counts(
+    entry: dict[str, object], field: str, kinds: Any
+) -> None:
+    """Add *kinds* (an iterable of kind strings) onto ``entry[field]``.
+
+    Mirrors ``cli_scan_baseline._accumulate_kind_counts``: a running dict
+    (not overwritten), sorted by kind name so the JSON is deterministic and
+    diff-friendly across runs of the same input.
+    """
+    from collections import Counter
+
+    existing = entry.get(field) or {}
+    counter: Counter[str] = Counter(existing if isinstance(existing, dict) else {})
+    counter.update(kinds)
+    if counter:
+        entry[field] = dict(sorted(counter.items()))
 
 
 def _release_gating_buckets(
@@ -562,7 +645,8 @@ def _release_finding_dicts(
     diff: DiffResult,
     severity_config: SeverityConfig | None = None,
     show_only: str | None = None,
-) -> list[dict[str, object]]:
+    max_findings: int | None = None,
+) -> tuple[list[dict[str, object]], list[str]]:
     """Project a library's gating findings into small, capped dicts.
 
     Same shape as ``cli_scan_baseline._baseline_finding_dicts`` /
@@ -582,19 +666,31 @@ def _release_finding_dicts(
     own effective kind sets/policy file so it never disagrees with the
     per-finding severity a single-pair report for the same library would
     show) -- applied before the cap, so a filtered-out finding never
-    occupies one of the ``_MAX_RELEASE_FINDINGS_PER_LIBRARY`` slots a
-    displayed one needed.
+    occupies one of the cap's slots a displayed one needed.
+
+    *max_findings* (``compare-release --max-findings-per-library``) is
+    resolved via :func:`_resolve_max_release_findings_per_library` --
+    ``None`` falls back to the env var, then the built-in default, exactly
+    like ``cli_scan_baseline``'s identical knob.
 
     Each dict also carries ``reclassified_by`` (schema 2.31) when a
     ``reclassify:`` rule decided the change's effective verdict, via
     :func:`abicheck.reporter.release_finding_entry` -- the identical
     resolution `compare`'s ``changes[]``/``scan --against`` use, so the
     three can't drift on which rule fired for a shared finding.
+
+    Returns ``(dicts, cut_kinds)`` -- ``cut_kinds`` is every kind string cut
+    from *any* bucket (not just the one that first hit the cap), so a
+    caller can accumulate an exact kind -> count truncation ledger the same
+    way ``cli_scan_baseline._baseline_summary`` does, instead of a bare
+    ``findings_truncated`` boolean that hides the shape of what was cut.
     """
     from .reporter import release_finding_entry
     from .reporter_markdown import apply_show_only
 
+    cap = _resolve_max_release_findings_per_library(max_findings)
     findings: list[dict[str, object]] = []
+    cut_kinds: list[str] = []
     for bucket_name, bucket_changes in _release_display_buckets(diff, severity_config):
         if show_only:
             bucket_changes = apply_show_only(
@@ -604,12 +700,15 @@ def _release_finding_dicts(
                 kind_sets=diff._effective_kind_sets(),
                 policy_file=diff.policy_file,
             )
-        remaining = _MAX_RELEASE_FINDINGS_PER_LIBRARY - len(findings)
-        if remaining <= 0:
-            break
-        for c in bucket_changes[:remaining]:
+        remaining = max(0, cap - len(findings))
+        included, excluded = bucket_changes[:remaining], bucket_changes[remaining:]
+        for c in included:
             findings.append(release_finding_entry(c, bucket_name, diff.policy_file))
-    return findings
+        # Keep tallying excluded kinds across every remaining bucket (not
+        # just the one that first hit the cap) -- see this function's own
+        # "Returns" note above.
+        cut_kinds.extend(_release_change_kind_str(c) for c in excluded)
+    return findings, cut_kinds
 
 
 def _strip_diff_results_and_adjust_verdict(
@@ -621,6 +720,7 @@ def _strip_diff_results_and_adjust_verdict(
     needs_annotations: bool = True,
     show_only: str | None = None,
     show_impact: bool = False,
+    max_findings: int | None = None,
 ) -> str:
     """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
 
@@ -682,8 +782,17 @@ def _strip_diff_results_and_adjust_verdict(
     :func:`abicheck.cli_compare_release_helpers._release_findings_for_render`
     for whichever renderer is primary, never for a secondary ``--write``.
 
+    *max_findings* (``compare-release --max-findings-per-library`` /
+    ``$ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY``) overrides the default
+    per-library cap -- see :func:`_resolve_max_release_findings_per_library`.
+    Whenever a library's ``findings``/``findings_view`` is truncated, the
+    kinds cut are also accumulated into ``findings_truncated_kinds``/
+    ``findings_view_truncated_kinds`` (kind -> count cut), mirroring
+    ``cli_scan_baseline``'s identical ``findings_truncated_kinds`` ledger.
+
     Returns the (possibly updated) *worst_verdict* string.
     """
+    cap = _resolve_max_release_findings_per_library(max_findings)
     for entry in library_results:
         if not isinstance(entry, dict):
             continue
@@ -691,17 +800,22 @@ def _strip_diff_results_and_adjust_verdict(
         if isinstance(diff, DiffResult):
             display_buckets = _release_display_buckets(diff, severity_config)
             total_gating = sum(len(cat_changes) for _, cat_changes in display_buckets)
-            findings = _release_finding_dicts(diff, severity_config, None)
+            findings, cut_kinds = _release_finding_dicts(
+                diff, severity_config, None, max_findings
+            )
             if findings:
                 entry["findings"] = findings
-                if total_gating > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
+                if total_gating > cap:
                     entry["findings_truncated"] = True
+                    _accumulate_release_kind_counts(
+                        entry, "findings_truncated_kinds", cut_kinds
+                    )
             # Codex review, fresh evidence ("Count uncapped findings in
             # release filter totals"): the uncapped pool size behind
             # `findings` above -- `len(entry["findings"])` alone
-            # under-reports once a library crosses
-            # `_MAX_RELEASE_FINDINGS_PER_LIBRARY` (e.g. 25 findings reports
-            # as 10). This is the one place the real, uncapped
+            # under-reports once a library crosses the resolved cap (e.g. 25
+            # findings reports as 10 under the default). This is the one
+            # place the real, uncapped
             # `total_gating` is still available before `diff` is discarded
             # below; a private, `findings_view`-shaped key (popped by
             # `_release_findings_for_render`, never rendered) so
@@ -726,10 +840,15 @@ def _strip_diff_results_and_adjust_verdict(
                     )
                     for _, cat_changes in display_buckets
                 )
-                findings_view = _release_finding_dicts(diff, severity_config, show_only)
+                findings_view, cut_kinds_view = _release_finding_dicts(
+                    diff, severity_config, show_only, max_findings
+                )
                 entry["findings_view"] = findings_view
-                if total_gating_view > _MAX_RELEASE_FINDINGS_PER_LIBRARY:
+                if total_gating_view > cap:
                     entry["findings_view_truncated"] = True
+                    _accumulate_release_kind_counts(
+                        entry, "findings_view_truncated_kinds", cut_kinds_view
+                    )
                 # The filtered counterpart of `findings_total_count` above --
                 # same rationale, same private/popped contract.
                 entry["findings_total_count_view"] = total_gating_view

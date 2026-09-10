@@ -1234,7 +1234,7 @@ def run_compare(
     since: str | None = None,  # ADR-068 Phase 2c: changed-path localization
     changed_paths_opt: tuple[str, ...] = (),
     abi3: str | None = None,  # ADR-068 Phase 2d: candidate-side abi3 audit
-    budget: str | None = None,  # ADR-068 §3 #19: absorbed from scan, exit 5
+    budget: str | None = None, max_findings_per_library: int | None = None,  # release fan-out only
 ) -> None:
     """Run the single-pair (or set fan-out) ``compare`` flow and exit accordingly."""
     from .dry_run import reject_dry_run_with_output
@@ -1589,7 +1589,7 @@ def run_compare(
             report_mode=report_mode, show_only=show_only,
             demangle=demangle, explain_patterns=explain_patterns,
             # Forwarded so _dispatch_release_compare can reject (no per-library ledger yet).
-            show_filtered=show_filtered, audit_suppressions=audit_suppressions,
+            show_filtered=show_filtered, audit_suppressions=audit_suppressions, max_findings_per_library=max_findings_per_library,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
