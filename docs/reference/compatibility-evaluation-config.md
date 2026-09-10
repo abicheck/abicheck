@@ -354,20 +354,26 @@ deliberately normalizes option spellings away and so is blind to it:
 ```python
 from abicheck.compatibility_evaluation_frontend import unstatable_selectors
 
-unstatable_selectors(api_config)                            # no CLI flag at an API tier
-unstatable_selectors(api_config, request_type=ScanRequest)  # ...and every name is a real field
+unstatable_selectors(api_config)                               # no CLI flag at an API tier
+unstatable_selectors(api_config, request_type=CompareRequest)  # ...and every name is a real field
 ```
 
 Without `request_type` it reports any `api_request` hop labelled with a CLI
 flag — a candidate built with a hard-coded `"--flag"` instead of going
 through the resolver's front-end-aware spelling. That check alone is not
 enough, because "not a flag" passes for any plausible-looking identifier:
-**"the API" is not one namespace.** The default API spelling is
-`CompareRequest`'s, and `ScanRequest` names three of the same inputs
-differently (`scope_to_public_surface`, `policy_file`, `suppression`), so a
-front end resolving at `FrontEnd.API` can still record fields its own request
-type does not have. Pass `api_spellings=` to remap them per request type, and
-`request_type=` to have the check verify it.
+**"the API" need not be one namespace.** A front end resolving at
+`FrontEnd.API` can record fields its own request type does not have, so
+`request_type=` has the check verify each name is real, and `api_spellings=`
+remaps the default (`CompareRequest`'s) spellings for a front end whose
+request type names the same input differently.
+
+Today there is only one such type. `ScanRequest` used to name three of these
+inputs differently (`scope_to_public_surface`, `policy_file`, `suppression`)
+— the defect that motivated both parameters — and it was removed in ADR-068
+Phase 4 along with its `SCAN_REQUEST_SPELLINGS` remap. The parameters stay
+because the *rule* they enforce is what makes a receipt replayable, and a
+second typed front end would reintroduce the hazard immediately.
 
 The field check covers the `api_request` **and** `legacy_alias` tiers, since
 `--policy`/`scope_public` are D7 aliases and a hop for one sits at the latter.

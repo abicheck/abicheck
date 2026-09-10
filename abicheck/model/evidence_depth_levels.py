@@ -329,6 +329,40 @@ def resolve_source_method(
     return mode_preset(mode)[0]
 
 
+#: The depth an *omitted* ``--depth`` resolves to (ADR-068's second 2026-09-09
+#: amendment, ruling (b)).
+#:
+#: ``auto`` used to mean "score the risk of the changed paths and pick a rung",
+#: falling back to the ``--mode`` preset when no diff seed was produced. Both
+#: halves of that are retired: the risk scorer no longer selects an evidence
+#: level, and the *preset* is not the replacement -- ``_MODE_PRESET`` maps both
+#: ``PR`` and ``AUDIT`` to ``(S5, SOURCE)``, so falling back to it would run a
+#: full source replay on every unpinned scan, which is both far more expensive
+#: than the risk-scored choice it replaced (a low-risk seeded PR resolved to
+#: ``s0``/off) and not the contract the amendment accepted. That contract is
+#: "the same fixed ``headers`` default ``compare`` always used"; a job wanting
+#: source-level assurance pins ``--depth source`` explicitly.
+#:
+#: Deliberately a named constant shared by every unpinned-depth resolution
+#: (the ``scan`` CLI and :func:`~abicheck.service_scan.estimate_scan`'s own
+#: dry-run projection) rather than a literal at each, so the cost preview can
+#: never price a different rung than the run executes.
+UNPINNED_DEPTH: EvidenceDepth = EvidenceDepth.HEADERS
+
+
+def resolve_unpinned_level(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
+    """The ``(method, depth)`` level an omitted ``--depth`` resolves to.
+
+    Exactly ``resolve_level(mode=mode, depth=UNPINNED_DEPTH)`` -- i.e. the
+    resolution an explicit ``--depth headers`` would get, so the two spellings
+    cannot drift. *mode* is accepted (and, today, unused) because the caller
+    always has one and the preset is the thing this deliberately does *not*
+    consult: passing it keeps that visible at the call site instead of leaving
+    a future reader to wonder whether the mode was forgotten.
+    """
+    return resolve_level(mode=mode, source_method=None, depth=UNPINNED_DEPTH)
+
+
 def resolve_level(
     *,
     mode: ScanMode,

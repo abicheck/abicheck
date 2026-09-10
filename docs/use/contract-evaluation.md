@@ -142,9 +142,9 @@ summary usually wants to say which one fired.
 ## Common mistakes
 
 - **Expecting the Python API to infer evaluation from the mode.** The CLI
-  does — naming a domain is the whole request — but `CompareRequest`/
-  `ScanRequest` still require `contract_evaluation=True` *alongside*
-  `contract_mode`, and reject a mode given without it. They also have no
+  does — naming a domain is the whole request — but `CompareRequest` still
+  requires `contract_evaluation=True` *alongside* `contract_mode`, and
+  rejects a mode given without it. They also have no
   `auto`: pass `contract_mode=None` to leave the domain unstated.
 - **Passing `--contract` to `scan` without `--against`.** There is no
   comparison to evaluate, so it is a usage error (exit `64`) rather than a

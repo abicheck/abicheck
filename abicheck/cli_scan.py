@@ -121,6 +121,7 @@ from .model.evidence_depth_levels import (
     SourceScope,
     level_to_collect_mode,
     resolve_level,
+    resolve_unpinned_level,
 )
 
 # The scan *engine* (classify → always-on tier → level → compare) lives in
@@ -1338,19 +1339,18 @@ def scan_cmd(
     # preprocessor pass when a compile DB + `clang -E` are available (else the
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
-    # The unset dial still means 'auto' (ADR-037 D5) -- but `auto` now resolves
-    # deterministically from the mode preset alone. ADR-068's second
-    # 2026-09-09 amendment rules the risk-driven escalation (b): omitting
-    # --depth was never *narrower* than the preset, so dropping the
-    # sometimes-deeper escalation removes a convenience, not a floor. A CI job
-    # that wants source-level assurance pins `--depth source`.
-    sm = SourceMethod.AUTO if dp is None else None
-    is_auto = sm is SourceMethod.AUTO
-    resolved, eff_depth_enum = resolve_level(
-        mode=scan_mode,
-        source_method=sm,
-        depth=dp,
-        auto_method=None,
+    # The unset dial still means 'auto' (ADR-037 D5), but ADR-068's second
+    # 2026-09-09 amendment retired what `auto` used to *do*: risk-driven
+    # escalation is ruled (b), and the replacement is the fixed `headers`
+    # default `compare` always used -- NOT the `--mode` preset, which maps both
+    # PR and AUDIT to (S5, SOURCE) and would run a full source replay on every
+    # unpinned scan. See `resolve_unpinned_level`'s own docstring; a job that
+    # wants source-level assurance pins `--depth source`.
+    is_auto = dp is None
+    resolved, eff_depth_enum = (
+        resolve_unpinned_level(scan_mode)
+        if dp is None
+        else resolve_level(mode=scan_mode, source_method=None, depth=dp)
     )
     # collect_mode and reported depth come from the resolved (method, depth)
     # level. The S5 (source) replay scope is command-aware (ADR-043 D3): a valid

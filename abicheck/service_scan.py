@@ -460,10 +460,16 @@ def _resolve_estimate_level(
     else:
         sm = SourceMethod(source_method) if source_method else None
         dp = parse_user_depth(depth)  # honors the symbols->binary alias (Codex)
-        # ADR-068's second 2026-09-09 amendment rules risk-driven ``auto`` depth
-        # selection (b) -- dropped, not carried forward: an omitted depth now
-        # resolves deterministically from the mode preset alone, never from a
-        # risk score over the changed paths.
+        # ADR-068's second 2026-09-09 amendment rules risk-driven ``auto``
+        # depth selection (b) -- dropped, so no risk score is consulted here
+        # any more. What an *unpinned command* resolves to instead
+        # (``resolve_unpinned_level``'s fixed ``headers`` rung) is deliberately
+        # NOT applied here: this function's own *mode* argument is a caller's
+        # explicit "price this preset" request, not an omitted ``--depth``.
+        # The ``scan`` CLI never relies on this branch for a real run's
+        # preview -- it pre-resolves its own level and passes it as
+        # *resolved_level* above -- so the two cannot disagree about what the
+        # run will execute.
         resolved, eff_depth = resolve_level(
             mode=ScanMode(mode), source_method=sm, depth=dp, auto_method=None
         )

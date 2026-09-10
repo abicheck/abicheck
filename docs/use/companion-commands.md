@@ -71,10 +71,10 @@ them is a plain "no such option" usage error (exit 64), same as any other
 unrecognized flag. There is no warn-and-map compatibility shim: this table is
 here only for anyone migrating an old command line, not as a live alias list.
 The internal `s0`…`s6` / `ScanMode` vocabulary still exists inside the engine
-(`model/evidence_depth_levels.py`) — the internal Python service API
-(`ScanRequest`, used by other programmatic callers) still accepts it —
-but it must never leak into the public CLI, `--help`, reports, the config
-schema, or GitHub Action inputs. Prefer `--depth`.
+(`model/evidence_depth_levels.py`), but it has no public entry point at all
+any more — the typed `ScanRequest` that used to accept it was removed in
+ADR-068 Phase 4 — and it must never leak into the public CLI, `--help`,
+reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 
 **`--source-method s0…s6`** (the old "how it gathers evidence" axis):
 

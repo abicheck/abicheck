@@ -3269,7 +3269,7 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
     exit 1
   fi
   if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
-    echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves deterministically from the mode preset; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
+    echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
     exit 1
   fi
   if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then

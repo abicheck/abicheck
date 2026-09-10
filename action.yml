@@ -525,13 +525,12 @@ inputs:
     description: >
       RETIRED (ADR-068's second 2026-09-09 amendment, ruling (b)). `scan
       --risk-rules` is gone, together with the risk-driven `auto` depth
-      escalation it fed: an omitted `depth` now resolves deterministically
-      from the mode preset, which was never *narrower* than what a
-      non-risk-driven run already used, so this removes a sometimes-deeper
-      convenience rather than a floor. Set `depth: source` (or `build`)
-      explicitly to pin the level a risk profile used to escalate to. Still
-      declared so a workflow that sets it gets an explicit `::error::`
-      saying so.
+      escalation it fed: an omitted `depth` now resolves to the fixed
+      `headers` rung — the same default `compare` has always used — instead
+      of being scored from the changed paths. Set `depth: source` (or
+      `build`) explicitly to pin the level a risk profile used to escalate
+      to. Still declared so a workflow that sets it gets an explicit
+      `::error::` saying so.
     required: false
   # ── Baseline auto-fetch (compare / scan modes) ───────────────────────────────
   abi-baseline:

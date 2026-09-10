@@ -22,11 +22,14 @@
   now fails the step with an explicit error naming that prerequisite rather
   than silently auditing less.
 - **`scan --risk-rules` and risk-driven `auto` depth selection are retired**
-  (same ruling). Omitting `--depth` now resolves deterministically from the
-  mode preset, which was never *narrower* than what a non-risk-driven run
-  already used — so this removes a sometimes-deeper convenience, not a floor.
-  A job that wants source-level assurance on every run must pin
-  `--depth source` explicitly. The risk score itself is still computed and
+  (same ruling). **Omitting `--depth` on `scan` now resolves to the fixed
+  `headers` rung** — the same default `compare` has always used — instead of
+  being scored from the changed paths. This is a behaviour change in both
+  directions and worth checking if you run `scan` without `--depth`: a
+  low-risk seeded run used to resolve to `s0`/off, and an *unseeded* run used
+  to fall back to the `--mode` preset's `(s5, source)`, i.e. a full source
+  replay. Pin `--depth source` (or `build`) explicitly to ask for source
+  evidence on every run. The risk score itself is still computed and
   reported; it just no longer selects an evidence level.
 - **`scan --build-target` is retired** (same ruling); `dump --build-target` is
   unchanged. It narrowed which build target's evidence collection used when a

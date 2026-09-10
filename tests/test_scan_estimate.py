@@ -251,53 +251,52 @@ def test_estimate_counts_collect_pack_tus(snap_path: Path, tmp_path: Path) -> No
     assert l3.tus == 4
 
 
-@pytest.mark.parametrize(
-    ("changed_paths", "seeded"),
-    [
-        ([], True),               # seeded but empty (a no-op PR)
-        ([], False),              # unseeded
-        (["src/a.cpp"], True),    # a source TU changed
-        (["include/a.h"], True),  # a header changed (the widest fan-out)
-        (["docs/readme.md"], True),  # a change no risk rule would score at all
-    ],
-)
-def test_estimate_auto_depth_is_seed_independent(
-    snap_path: Path, tmp_path: Path, changed_paths: list[str], seeded: bool
+def test_the_unpinned_level_the_dry_run_prices_is_the_one_the_run_executes(
+    snap_path: Path, tmp_path: Path
 ) -> None:
-    """``auto`` prices the mode preset, whatever the changed-path seed says.
+    """`scan --dry-run` and `scan` resolve an omitted `--depth` identically.
 
-    ADR-068's second 2026-09-09 amendment rules risk-driven ``auto`` depth
-    selection (b) -- dropped -- so the *level* an unpinned run resolves to is
-    now a pure function of the mode preset. Parametrized across the whole
-    seed-shape space the retired risk scorer discriminated on (empty-but-
-    seeded, unseeded, a source TU, a header, an unscored path): every one must
-    now produce the identical layer set, against a literal oracle -- every
-    layer the ``pr`` preset's own level collects -- rather than against
-    ``resolve_level``'s answer for the same inputs. Before this ruling, the
-    third and fourth rows below scored high enough to escalate and the first
-    two scored to the ``s0``/off floor, so this set genuinely varied by seed.
+    ADR-068's second 2026-09-09 amendment rules risk-driven `auto` depth
+    selection (b) and names the fixed `headers` rung as the replacement --
+    *not* the `--mode` preset, which is `(S5, SOURCE)` and would price (and
+    run) a full source replay on every unpinned scan.
+
+    `estimate_scan`'s own `mode` argument is a caller's explicit "price this
+    preset" request, so the rule deliberately does not live there; the CLI
+    pre-resolves its level and hands it over as `resolved_level`. That makes
+    `resolve_unpinned_level` the single point the two share, which is what
+    this pins: the projection taken at that level touches only the intrinsic
+    L0-L2 layers, matching what `level_to_collect_mode` gives the real run.
+
+    The seed-independence half is asserted end-to-end on the CLI, in
+    `tests/test_cli_scan.py::test_unpinned_depth_resolves_to_headers_whatever_the_seed`.
     """
+    from abicheck.model.evidence_depth_levels import (
+        ScanMode,
+        SourceScope,
+        level_to_collect_mode,
+        resolve_unpinned_level,
+    )
+
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(
         json.dumps([{"file": "a.cpp", "command": "c++", "directory": "."}]),
         encoding="utf-8",
     )
-    req = EstimateOperand(
-        binaries=[snap_path],
-        compile_db=cdb,
-        source_method="auto",
-        changed_paths=changed_paths,
-        seeded=seeded,
-    )
-    layers = {e.layer for e in estimate(req)}
-    assert layers == {
-        "L0_binary",
-        "L1_debug",
-        "L2_header",
-        "L3_build",
-        "L4_source_abi",
-        "L5_source_graph",
-    }
+    for mode in (ScanMode.PR, ScanMode.AUDIT):
+        method, depth = resolve_unpinned_level(mode)
+        # What the real run would collect at that level: nothing beyond L2.
+        for scope in (SourceScope.CHANGED, SourceScope.TARGET):
+            assert level_to_collect_mode(method, depth, source_scope=scope) == "off"
+        # ... and what the dry run prices for it, through the same pair.
+        priced = {
+            e.layer
+            for e in estimate(
+                EstimateOperand(binaries=[snap_path], compile_db=cdb, mode=mode.value),
+                resolved_level=(method, depth),
+            )
+        }
+        assert priced == {"L0_binary", "L1_debug", "L2_header"}
 
 
 def test_estimate_inline_header_change_fans_out(
@@ -390,11 +389,23 @@ def test_cli_dry_run_scans_nothing(
 ) -> None:
     # --estimate was folded into the general --dry-run report (CLI
     # simplification); it still reuses service.estimate_scan under the hood, so
-    # the per-layer TU/cost projection (e.g. L4_source_abi) is still printed.
+    # the per-layer TU/cost projection is still printed. An *unpinned* run
+    # prices only the intrinsic L0-L2 rows now (ADR-068's second 2026-09-09
+    # amendment: an omitted --depth resolves to the fixed `headers` rung, not
+    # the `--mode` preset) -- pinning `--depth source` is what asks for the L4
+    # replay row, and is asserted below so this still proves the dry run
+    # projects real source cost when the run would incur it.
     res = runner.invoke(main, ["scan", str(snap_path), "-H", str(header), "--dry-run"])
     assert res.exit_code == 0, res.output
     assert "Dry run only" in res.output
-    assert "L4_source_abi" in res.output
+    assert "L2_header" in res.output
+    assert "L4_source_abi" not in res.output
+    deep = runner.invoke(
+        main,
+        ["scan", str(snap_path), "-H", str(header), "--depth", "source", "--dry-run"],
+    )
+    assert deep.exit_code == 0, deep.output
+    assert "L4_source_abi" in deep.output
 
 
 def test_cli_dry_run_reports_projected_cost(runner: CliRunner, snap_path: Path) -> None:

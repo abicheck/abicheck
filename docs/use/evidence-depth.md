@@ -55,10 +55,10 @@ warning below for the one remaining difference between the three commands
 `--budget` wall-clock guard (ADR-068 §3 #19) — exit `5` on overflow applies
 to both commands now. Neither does risk-driven `auto` depth, which was
 **retired** rather than mirrored (ADR-068's second 2026-09-09 amendment,
-ruling (b)): omitting `--depth` on `scan` now resolves deterministically
-from its mode preset, exactly as omitting it on `compare`/`dump` always
-did. `scan --build-target` is retired the same way (`dump --build-target`
-is unchanged). `--crosscheck KEY=error` promotion syntax is the one item
+ruling (b)): omitting `--depth` on `scan` now resolves to the fixed
+`headers` rung, exactly the default omitting it on `compare` always gave.
+`scan --build-target` is retired the same way (`dump --build-target` is
+unchanged). `--crosscheck KEY=error` promotion syntax is the one item
 left with no `compare` equivalent.
 
 `abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
@@ -94,8 +94,8 @@ have to close, not just one of the two.
   the supplied evidence reaches. Pin `--depth` explicitly whenever you want a
   specific rung regardless of what other inputs are present, rather than
   relying on this inference. (Legacy `scan`'s own unpinned default resolves
-  from its mode preset; it used to score the risk of the changed paths and
-  sometimes escalate, which ADR-068's second amendment retired.)
+  to the fixed `headers` rung; it used to score the risk of the changed
+  paths and sometimes escalate, which ADR-068's second amendment retired.)
 - **When `--depth source` actually replays source, it always analyses
   *something* real, never a zero-TU no-op** (ADR-043 D3): with a
   `--since`/`--changed-path` seed it replays the *changed* TUs; without one

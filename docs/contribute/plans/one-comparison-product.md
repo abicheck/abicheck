@@ -700,7 +700,12 @@ section's *actual* state, not the target it originally described:
   of resolving an input" default, so every pre-existing request is unchanged.
   Everything else was already covered by `compare` or is ruled (b) and
   **deleted rather than carried forward**: `--risk-rules` and the risk-driven
-  `auto` depth escalation it fed, `scan --build-target`, and
+  `auto` depth escalation it fed (an omitted `--depth` resolves to the fixed
+  `headers` rung the amendment names — `model.evidence_depth_levels.
+  resolve_unpinned_level` — deliberately *not* the `--mode` preset, which is
+  `(S5, SOURCE)` and would run a full source replay on every unpinned scan;
+  Codex review, PR #1186, caught the first attempt doing exactly that),
+  `scan --build-target`, and
   `--artifact-set`/`new-library-set` (the mode — §3 #16's capability is
   preserved and returns as `compare --no-baseline DIR` once ADR-065 S3's
   component inventories land; `bundle.py`'s audit primitives stay put). The
