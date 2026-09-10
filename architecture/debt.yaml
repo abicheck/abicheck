@@ -1463,12 +1463,12 @@
     },
     {
       "path": "tests/test_bugfix_test_contract.py",
-      "baseline_lines": 1208,
+      "baseline_lines": 1209,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "category": "legacy_oversized_test_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1206 -> 1208 (ADR-061 gap B follow-up, Codex review, fresh evidence): TestConditionalRequirements::test_touching_the_surface_asks_its_question gained two parametrize cases (abicheck/policy/classification.py, abicheck/policy/contract_finding_relevance.py) proving the verdict-gate-exit trigger fires on checker_policy.py's/contract_gating.py's real owners, not only their now-logic-free re-export facades -- the same gap check_bugfix_test_contract.py's own trigger tuple just closed. Two lines, one parametrize case each; no smaller diff proves the new trigger strings actually fire.",
+      "rationale": "Existing test module predates ADR-061 and will split by behavior or contract axis with its production migration. Raised 1206 -> 1208 (ADR-061 gap B follow-up, Codex review, fresh evidence): TestConditionalRequirements::test_touching_the_surface_asks_its_question gained two parametrize cases (abicheck/policy/classification.py, abicheck/policy/contract_finding_relevance.py) proving the verdict-gate-exit trigger fires on checker_policy.py's/contract_gating.py's real owners, not only their now-logic-free re-export facades -- the same gap check_bugfix_test_contract.py's own trigger tuple just closed. Two lines, one parametrize case each; no smaller diff proves the new trigger strings actually fire. Raised 1208 -> 1209 (same follow-up sweep, Codex review, fresh evidence): one more parametrize case (abicheck/policy/evidence_status.py) proving checker_policy.py's *second* gap-B owner (has_binary_evidence/is_cross_source_resolved, which feed policy.classification's/severity.py's gate decisions) also triggers verdict-gate-exit -- the trigger tuple addition it proves was itself a one-line fix, and this is the one line proving it fires.",
       "review_by": "2026-11-30"
     },
     {

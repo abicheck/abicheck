@@ -84,6 +84,7 @@ topics:
     fact_sources:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
+      - abicheck/policy/classification.py
       - abicheck/severity.py
       - abicheck/cli_scan.py
       - abicheck/cli_scan_baseline.py
@@ -152,6 +153,7 @@ topics:
     fact_sources:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
+      - abicheck/policy/classification.py
     reference_page: reference/detector-spec.md
     allowed_summaries:
       - skills-src/shared/remediation-catalog.md
@@ -265,6 +267,9 @@ topics:
     fact_sources:
       - abicheck/service.py
       - abicheck/api_types.py
+      - abicheck/workflows/contracts.py
+      - abicheck/workflows/request_inputs.py
+      - abicheck/model/header_ast_frontends.py
       - abicheck/service_dump_pipeline.py
       - abicheck/service_compare_pipeline.py
       - abicheck/service_scan.py
@@ -310,7 +315,9 @@ topics:
     fact_sources:
       - abicheck/policy_file.py
       - abicheck/checker_policy.py
+      - abicheck/policy/classification.py
       - abicheck/reclassify.py
+      - abicheck/policy/reclassify.py
     allowed_summaries:
       - skills-src/shared/policies-and-suppressions.md
       - learn/rollout-and-governance.md
@@ -347,6 +354,7 @@ topics:
       - abicheck/export_surface.py
       - abicheck/contract_pipeline.py
       - abicheck/contract_coverage_ledger.py
+      - abicheck/policy/coverage_ledger.py
       - abicheck/contract_coverage_exit.py
     reference_page: reference/compatibility-evaluation-config.md
     task_pages:

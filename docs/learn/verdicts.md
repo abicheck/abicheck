@@ -9,6 +9,7 @@ canonical_for:
 depends_on:
   - abicheck/change_registry.py
   - abicheck/checker_policy.py
+  - abicheck/policy/classification.py
 lifecycle: active
 generated: false
 ---
