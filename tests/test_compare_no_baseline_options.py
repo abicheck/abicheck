@@ -43,9 +43,14 @@ from abicheck.frontends.cli.commands.compare_no_baseline import (
     _was_given,
 )
 
-_MODULE = (
-    Path(__file__).resolve().parent.parent
-    / "abicheck/frontends/cli/commands/compare_no_baseline.py"
+#: The dispatch *pair*: the module that translates one invocation, and the
+#: sibling that owns which invocations it refuses. Both are scanned, because
+#: the exhaustiveness contract is about the path as a whole -- an option read
+#: in either one is wired, and scanning only the first would have started
+#: reporting false gaps the moment the rulings moved out of it.
+_MODULES = tuple(
+    Path(__file__).resolve().parent.parent / f"abicheck/frontends/cli/commands/{name}"
+    for name in ("compare_no_baseline.py", "no_baseline_rulings.py")
 )
 
 #: Every destination ``cli_options.normalize_sided_options`` *generates*,
@@ -94,6 +99,16 @@ _DISPATCH_OWNED = frozenset({"old_input", "new_input", "no_baseline"})
 #: logging, not analysis, and is a no-op that misleads nobody.
 _PRESENTATION_ONLY = frozenset({"verbose"})
 
+#: Options declared with ``expose_value=False`` whose value is stashed on the
+#: Click context by their own callback, so it never reaches ``kwargs`` and the
+#: AST read-scan below cannot see it. They are guarded by
+#: ``_reject_context_stashed_options``, and
+#: :func:`test_every_context_stashed_option_is_really_rejected` drives the real
+#: CLI to prove each one is -- without that, this bucket would be an escape
+#: hatch that silently re-permits exactly the dropped-flag defect the module's
+#: other tables exist to catch.
+_CONTEXT_STASHED = frozenset({"variant"})
+
 
 def _compare_params() -> set[str]:
     return {p.name for p in main.commands["compare"].params if p.name}
@@ -107,9 +122,13 @@ def _dests_read_by_module() -> set[str]:
     miscounted as a real read — the exact mistake that would make this test
     pass while the option stayed dropped.
     """
-    tree = ast.parse(_MODULE.read_text(encoding="utf-8"))
     dests: set[str] = set()
-    for node in ast.walk(tree):
+    nodes = [
+        node
+        for module in _MODULES
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8")))
+    ]
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
@@ -137,6 +156,7 @@ def test_every_compare_option_is_wired_or_declared() -> None:
         | _CLICK_LEVEL
         | _DISPATCH_OWNED
         | _PRESENTATION_ONLY
+        | _CONTEXT_STASHED
         | set(_INERT_DESTS)
     )
     unaccounted = sorted(_compare_params() - accounted)
@@ -259,7 +279,7 @@ def test_module_documents_why_the_table_exists() -> None:
     realistic way this class reopens, so the reason is pinned as content,
     not left to review.
     """
-    source = _MODULE.read_text(encoding="utf-8")
+    source = _MODULES[0].read_text(encoding="utf-8")
     assert "_UNSUPPORTED_OPTIONS" in source
     assert re.search(r"accepted but never read|silently", source), (
         "the table must explain that it exists to prevent silently-dropped options"
@@ -298,3 +318,35 @@ def test_every_generated_destination_is_wired_or_declared() -> None:
         "each one, or declare it in _UNSUPPORTED_OPTIONS so passing the option "
         "that produces it is a usage error."
     )
+
+
+@pytest.mark.parametrize("dest", sorted(_CONTEXT_STASHED))
+def test_every_context_stashed_option_is_really_rejected(
+    dest: str, tmp_path: Path
+) -> None:
+    """A context-stashed option must be rejected, not merely bucketed.
+
+    Driven through the real CLI rather than by inspecting a table: the value
+    never reaches ``kwargs``, so every name-based check in this module is
+    blind to it, and declaring it accounted-for is precisely how a silently
+    dropped flag would slip past the exhaustiveness test above. ``--variant``
+    did slip past — it arrived on `main` while this branch was open, was
+    accepted on the audit path, and ran a normal comparison at exit 0.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    snapshot = tmp_path / "cand.abi.json"
+    save_snapshot(AbiSnapshot(library="libx.so", version="1.0"), snapshot)
+
+    spelling = "--" + dest.replace("_", "-")
+    result = CliRunner().invoke(
+        main, ["compare", "--no-baseline", str(snapshot), spelling, "v1"]
+    )
+    assert result.exit_code == 64, (
+        f"{spelling} reached the audit and was silently accepted "
+        f"(exit {result.exit_code}); it must be wired or be a usage error"
+    )
+    assert spelling in result.output

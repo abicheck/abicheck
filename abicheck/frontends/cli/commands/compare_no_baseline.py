@@ -50,6 +50,18 @@ from ....workflows.no_baseline_compare import (
 from ..options.contract import resolve_contract_domain, resolve_contract_evaluation
 from ..options.params import _load_suppression_and_policy
 from ..runtime import _safe_write_output, _write_or_echo
+from .no_baseline_rulings import (
+    _INERT_DESTS as _INERT_DESTS,  # noqa: F401  — re-exported: the options test asserts against these tables
+    _OLD_ONLY_DESTS as _OLD_ONLY_DESTS,  # noqa: F401
+    _SIDED_SINGLE_DESTS as _SIDED_SINGLE_DESTS,  # noqa: F401
+    _UNSUPPORTED_OPTIONS as _UNSUPPORTED_OPTIONS,  # noqa: F401
+    _VIEW_DEFAULTS as _VIEW_DEFAULTS,  # noqa: F401
+    _reject_context_stashed_options,
+    _reject_old_sided_inputs,
+    _reject_unsupported_options,
+    _reject_view_tokens_for_no_baseline,
+    _was_given as _was_given,  # noqa: F401
+)
 
 __all__ = ["maybe_dispatch_no_baseline_compare"]
 
@@ -59,361 +71,6 @@ __all__ = ["maybe_dispatch_no_baseline_compare"]
 #: can project; this module only translates that into a Click error.
 _SUPPORTED_FORMATS = NO_BASELINE_SUPPORTED_FORMATS
 
-
-def maybe_dispatch_no_baseline_compare(
-    ctx: click.Context, kwargs: dict[str, Any]
-) -> bool:
-    """Validate and run a ``--no-baseline`` invocation if *kwargs* asked for
-    one; returns ``True`` when it did (the caller must stop -- the whole
-    two-sided pipeline below is skipped), ``False`` for an ordinary
-    two-operand ``compare OLD NEW``.
-
-    ADR-068 D2: ``--no-baseline`` is an explicit declaration, never inferred
-    from arity -- ``compare NEW`` (one operand, no flag) and
-    ``compare --no-baseline OLD NEW`` (the flag plus two operands) are both
-    usage errors (exit 64), raised here rather than left to Click's own
-    argument arity (which cannot express "required unless a flag is set").
-    """
-    no_baseline = kwargs.pop("no_baseline", False)
-    if not no_baseline:
-        if kwargs.get("new_input") is None:
-            raise click.UsageError("Missing argument 'NEW_INPUT'.")
-        return False
-    if kwargs.get("new_input") is not None:
-        raise click.UsageError(
-            "--no-baseline takes exactly one operand (the candidate build); "
-            "OLD is declared absent, so a second path is not accepted. Run "
-            "`abicheck compare OLD NEW` (without --no-baseline) to compare "
-            "against a real baseline."
-        )
-    candidate = kwargs.pop("old_input")
-    kwargs.pop("new_input", None)
-    if candidate.is_dir():
-        raise click.UsageError(
-            "--no-baseline does not support a directory/package operand yet "
-            "-- pass a single artifact (a binary or a stored snapshot)."
-        )
-    _reject_view_tokens_for_no_baseline(kwargs)
-    _run_no_baseline_compare_cmd(ctx, candidate, **kwargs)
-    return True
-
-
-#: The values `--view` resolves into, and each one's "nothing requested"
-#: default -- anything else means a real `--view` token was given.
-_VIEW_DEFAULTS: dict[str, object] = {
-    "report_mode": "full",
-    "show_only": None,
-    "demangle": None,
-    "explain_patterns": False,
-    # Phase 5 additions (Codex review, PR #1180, fresh evidence): a
-    # no-baseline audit has no scope/disposition ledger and no suppression
-    # audit either -- it reports one hand-built, un-suppressed, always-
-    # in-scope empty change set by construction -- so these two are exactly
-    # as unsupported as the four above, not a silent no-op.
-    "show_filtered": False,
-    "audit_suppressions": False,
-}
-
-
-def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
-    """Reject any non-default ``--view`` token for a ``--no-baseline`` audit.
-
-    Codex review, fresh evidence ("Reject unsupported views for no-baseline
-    audits"): a `--no-baseline` report is a self-diff audit against nothing
-    (an empty change set, by construction -- see `report/no_baseline.py`'s
-    own module docstring) -- it has no root-cause graph for `leaf`/
-    `root-cause` to restructure, no per-library `DiffResult` for `impact`
-    to summarize, no findings list for `show=...` to filter, no symbol
-    table for `demangle` to affect, and no pattern-modulation ledger for
-    `patterns` to echo. Silently accepting any of them (`parse_view_tokens`
-    resolved them, but this dispatch never reads the result) reads as "your
-    selector was honored" when nothing changed at all -- the same class of
-    gap `_dispatch_release_compare` already guards against for its own
-    unsupported view modes.
-    """
-    for name, default in _VIEW_DEFAULTS.items():
-        value = kwargs.get(name, default)
-        if value != default:
-            raise click.UsageError(
-                "--view is not available together with --no-baseline: a "
-                "no-baseline audit has no root-cause graph, findings list, "
-                "or pattern-modulation ledger for --view to act on (it "
-                "reports an empty change set by construction). Drop --view "
-                "for this operand."
-            )
-
-
-#: Evidence dests that only ever hold an explicitly ``old=``-prefixed value
-#: (``cli_options.normalize_sided_options`` routes a bare/``both=``
-#: ``--header``/``--include`` to its own separate ``headers``/``includes``
-#: dest), mapped to the CLI spelling that produced them so a usage error
-#: names what the user typed. Any truthy value here is OLD-scoped.
-_OLD_ONLY_DESTS: dict[str, str] = {
-    "old_headers_only": "--header old=",
-    "old_includes_only": "--include old=",
-    "debug_roots_old": "--debug-root old=",
-    "debug_info1": "--debug-info old=",
-    "devel_pkg1": "--devel-pkg old=",
-}
-
-#: Destinations that are inert here *by construction*, with the reason.
-#:
-#: ``old_version`` is a display **label**, not evidence, and
-#: ``cli_options._split_sided_version`` always populates it -- with the
-#: literal placeholder ``"old"`` when the user says nothing. So an explicit
-#: ``--version old=`` is indistinguishable from the default by the time this
-#: dispatch runs, and guarding on it would reject *every* invocation (it did,
-#: briefly). An audit has no OLD side to label, so the value is dropped; the
-#: candidate's own label comes from ``new_version``, which is wired.
-#: Recorded here rather than left out of the accounting entirely, so the
-#: exhaustiveness test still sees a decision rather than an omission.
-_INERT_DESTS: dict[str, str] = {
-    "old_version": (
-        "a label for a side that does not exist; Click always populates it, so "
-        "an explicit value cannot be told from the default"
-    ),
-}
-
-#: Evidence dests whose bare/``both=`` value lands on *both* sides
-#: (``cli_options._split_sided_single``: a bare path sets ``old`` and ``new``
-#: to the same value, an ``old=`` prefix sets only ``old``). So "the user
-#: scoped this to OLD" is not "the old dest is set" -- it is "the old dest is
-#: set to something the new dest did not also get". Getting this wrong the
-#: other way rejects an ordinary bare ``--sources tree/``, which is the
-#: single most useful spelling on this path.
-_SIDED_SINGLE_DESTS: dict[str, tuple[str, str]] = {
-    "old_sources": ("new_sources", "--sources old="),
-    "old_build_info": ("new_build_info", "--build-info old="),
-    "old_dump_manifest": ("new_dump_manifest", "--dump-manifest old="),
-}
-
-
-def _reject_old_sided_inputs(kwargs: dict[str, Any]) -> None:
-    """Reject any explicitly OLD-scoped evidence input for a one-sided audit.
-
-    A ``--no-baseline`` run has no OLD side, so an ``old=``-scoped input asks
-    it to feed a side it was told does not exist. Silently ignoring the value
-    reads as "honored" when it was dropped -- the same class of guard as
-    :func:`_reject_view_tokens_for_no_baseline` above. A bare or ``both=``
-    value is *not* rejected: it applies to the candidate, which is the whole
-    point of passing it.
-    """
-    for dest, spelling in _OLD_ONLY_DESTS.items():
-        # `_was_given`, not truthiness: several of these default to Click's
-        # `UNSET` sentinel, which is truthy -- guarding on truthiness rejected
-        # every invocation, including ones passing nothing at all.
-        if _was_given(kwargs.get(dest)):
-            raise click.UsageError(_old_sided_message(spelling))
-    for dest, (new_dest, spelling) in _SIDED_SINGLE_DESTS.items():
-        old_value = kwargs.get(dest)
-        if old_value is not None and old_value != kwargs.get(new_dest):
-            raise click.UsageError(_old_sided_message(spelling))
-
-
-def _old_sided_message(spelling: str) -> str:
-    return (
-        f"{spelling} is not available together with --no-baseline: the OLD side "
-        "is declared absent, so there is no baseline for this evidence to "
-        "describe. Drop the 'old=' prefix to apply it to the candidate build "
-        "instead."
-    )
-
-
-#: Every ``compare`` option this audit path does **not** implement, mapped
-#: to its CLI spelling and the reason. Passing one is a usage error rather
-#: than a silent no-op.
-#:
-#: This table exists because "accepted but never read" is the single defect
-#: this whole module has now produced four separate times -- ``--contract``,
-#: ``--sources``/``--build-info``/``--depth``/``--dry-run``, ``--write``,
-#: and ``--include-system-declarations`` (see ``docs/contribute/known-gaps.md``).
-#: Each was found by reading the code, never by a failing test, because a
-#: dropped option produces no output at all. Fixing them one at a time
-#: leaves the *class* open: the next option added to ``compare`` inherits
-#: the same silence. So the rule is inverted here -- an option this path
-#: does not implement must be listed, and
-#: ``tests/test_compare_no_baseline_options.py`` fails if any ``compare``
-#: parameter is neither read by this module nor named below. A new
-#: ``compare`` flag therefore cannot reach ``--no-baseline`` silently; it is
-#: either wired or declared.
-#:
-#: Three reason families, so the message tells the user which it is:
-#:
-#: * *no baseline to speak of* -- the option describes a comparison
-#:   (consumer scoping, variant selection, a stored bundle-facts pair).
-#: * *not a single artifact* -- the option is for the directory/package
-#:   release fan-out, which ``--no-baseline`` does not accept anyway.
-#: * *not implemented yet* -- genuinely applicable to a one-sided audit and
-#:   simply not wired. These are the ones worth closing next; they are
-#:   listed rather than silently accepted so that is a visible decision.
-_UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
-    # -- describes a comparison this run never performs -------------------
-    "used_by_apps": (
-        "--used-by",
-        "consumer scoping answers 'does this change break a consumer', which "
-        "needs two versions to compare",
-    ),
-    "required_symbols_opt": (
-        "--required-symbol",
-        "an entrypoint contract is checked against what a comparison removed; "
-        "with no baseline nothing can have been removed",
-    ),
-    "used_by_manifests": (
-        "--used-by-manifest",
-        "a consumer manifest merges into the --used-by pipeline, which needs "
-        "two versions to compare",
-    ),
-    "use_cases_manifest": (
-        "--use-cases",
-        "use-case attribution maps a comparison's findings to declared use "
-        "cases; an audit's findings are not changes",
-    ),
-    "post_manifest_path": (
-        "--post-manifest",
-        "a post-manifest overlays contract scope across two sides",
-    ),
-    "env_matrix_path": (
-        "--env-matrix",
-        "an environment matrix compares runtime floors across two builds",
-    ),
-    "diagnostic_comparison": (
-        "--diagnostic-comparison",
-        "ADR-050's escape hatch downgrades an incomparable-pair failure; a "
-        "self-compare is trivially comparable",
-    ),
-    "old_variant": ("--old-variant", "there is no OLD side to select a variant of"),
-    "new_variant": (
-        "--new-variant",
-        "variant selection picks matching builds from two sides",
-    ),
-    "bundle_facts_out": (
-        "--bundle-facts-out",
-        "bundle facts record a two-sided release comparison",
-    ),
-    "bundle_facts_library_manifest": (
-        "--bundle-facts-library-manifest",
-        "bundle facts record a two-sided release comparison",
-    ),
-    "since": (
-        "--since",
-        "changed-path localization narrows a comparison to what a revision "
-        "range touched",
-    ),
-    "changed_paths_opt": (
-        "--changed-path",
-        "changed-path localization narrows a comparison to what a revision "
-        "range touched",
-    ),
-    # -- for the directory/package release fan-out ------------------------
-    "select": ("--select", "member selection applies to a directory/package operand"),
-    "select_required": (
-        "--select-required",
-        "member selection applies to a directory/package operand",
-    ),
-    "output_dir": (
-        "--output-dir",
-        "per-library output applies to the release fan-out; use -o/--output "
-        "or --write for a single artifact",
-    ),
-    # -- applicable, simply not wired yet ---------------------------------
-    "abi3": (
-        "--abi3",
-        "the stable-ABI audit is candidate-side and belongs here, but is not "
-        "wired to this path yet",
-    ),
-    "budget": (
-        "--budget",
-        "the wall-clock guard is not wired to this path yet",
-    ),
-    "severity_preset": (
-        "--severity-preset",
-        "an audit's findings are advisory and never gate, so a severity "
-        "preset has nothing to act on yet",
-    ),
-    "pack_paths": (
-        "--pack",
-        "pack application is not wired to this path yet",
-    ),
-    "config": (
-        "--config",
-        "project-config resolution is not wired to this path yet",
-    ),
-    "manifest_path": (
-        "--instantiation-manifest",
-        "template-instantiation evidence is not wired to this path yet",
-    ),
-    "follow_deps": (
-        "--follow-deps",
-        "the DT_NEEDED dependency walk is not wired to this path yet",
-    ),
-    "search_paths": (
-        "--search-path",
-        "dependency search paths only matter with --follow-deps",
-    ),
-    "ld_library_path": (
-        "--ld-library-path",
-        "dependency search paths only matter with --follow-deps",
-    ),
-    # Keyed on the destinations `normalize_sided_options` *generates*, not on
-    # the raw option names: `compare_cmd` normalizes before dispatching, so a
-    # guard keyed on `debug_info`/`devel_pkg`/`dump_manifest` would check a
-    # key that never exists and never fire (Codex review, P1 -- the same hole
-    # that let a bare `--dump-manifest` through as a silent no-op).
-    "debug_info2": (
-        "--debug-info",
-        "separate debug-info resolution is not wired to this path yet",
-    ),
-    "devel_pkg2": (
-        "--devel-pkg",
-        "development-package header discovery is not wired to this path yet",
-    ),
-    "new_dump_manifest": (
-        "--dump-manifest",
-        "a dump manifest selects a multi-TU header surface and carries its own "
-        "comparability contract, neither of which this path resolves yet -- it "
-        "was silently ignored before, so even an invalid manifest exited 0 "
-        "while the audit analysed a different surface than requested",
-    ),
-    "probe_matrix_old": (
-        "--probe-matrix",
-        "a build-configuration matrix is folded across two sides",
-    ),
-    "probe_matrix_new": (
-        "--probe-matrix",
-        "a build-configuration matrix is folded across two sides",
-    ),
-}
-
-#: Dests whose "nothing was passed" value is not ``None``/falsey, so a
-#: presence test needs the sentinel rather than truthiness.
-_UNSET_SENTINELS: tuple[object, ...] = (None, (), "", False)
-
-
-def _was_given(value: object) -> bool:
-    """Whether a Click parameter value represents something the user typed.
-
-    ``compare`` uses a mix of ``None``, ``()``, ``""``, ``False`` and an
-    ``UNSET`` sentinel for "not given" (the sentinel exists so a config
-    layer can tell an explicit value from a default). Treated uniformly
-    here: anything outside :data:`_UNSET_SENTINELS`, and not the sentinel
-    itself, was stated.
-    """
-    if value is None:
-        return False
-    if type(value).__name__ == "Sentinel" or repr(value).startswith("Sentinel."):
-        return False
-    return value not in _UNSET_SENTINELS
-
-
-def _reject_unsupported_options(kwargs: dict[str, Any]) -> None:
-    """Reject any option :data:`_UNSUPPORTED_OPTIONS` names, if it was given."""
-    for dest, (spelling, reason) in _UNSUPPORTED_OPTIONS.items():
-        if _was_given(kwargs.get(dest)):
-            raise click.UsageError(
-                f"{spelling} is not available with --no-baseline: {reason} "
-                "(ADR-068 D2). It is rejected rather than silently ignored so "
-                "a CI job never believes it took effect."
-            )
 
 
 @dataclass(frozen=True)
@@ -495,7 +152,49 @@ class _ResolvedInvocation:
     contract: _ContractChoices
 
 
-def _validate_no_baseline_invocation(kwargs: dict[str, Any]) -> None:
+def maybe_dispatch_no_baseline_compare(
+    ctx: click.Context, kwargs: dict[str, Any]
+) -> bool:
+    """Validate and run a ``--no-baseline`` invocation if *kwargs* asked for
+    one; returns ``True`` when it did (the caller must stop -- the whole
+    two-sided pipeline below is skipped), ``False`` for an ordinary
+    two-operand ``compare OLD NEW``.
+
+    ADR-068 D2: ``--no-baseline`` is an explicit declaration, never inferred
+    from arity -- ``compare NEW`` (one operand, no flag) and
+    ``compare --no-baseline OLD NEW`` (the flag plus two operands) are both
+    usage errors (exit 64), raised here rather than left to Click's own
+    argument arity (which cannot express "required unless a flag is set").
+    """
+    no_baseline = kwargs.pop("no_baseline", False)
+    if not no_baseline:
+        if kwargs.get("new_input") is None:
+            raise click.UsageError("Missing argument 'NEW_INPUT'.")
+        return False
+    if kwargs.get("new_input") is not None:
+        raise click.UsageError(
+            "--no-baseline takes exactly one operand (the candidate build); "
+            "OLD is declared absent, so a second path is not accepted. Run "
+            "`abicheck compare OLD NEW` (without --no-baseline) to compare "
+            "against a real baseline."
+        )
+    candidate = kwargs.pop("old_input")
+    kwargs.pop("new_input", None)
+    if candidate.is_dir():
+        raise click.UsageError(
+            "--no-baseline does not support a directory/package operand yet "
+            "-- pass a single artifact (a binary or a stored snapshot)."
+        )
+    _reject_view_tokens_for_no_baseline(kwargs)
+    _run_no_baseline_compare_cmd(ctx, candidate, **kwargs)
+    return True
+
+
+#: The values `--view` resolves into, and each one's "nothing requested"
+#: default -- anything else means a real `--view` token was given.
+def _validate_no_baseline_invocation(
+    ctx: click.Context, kwargs: dict[str, Any]
+) -> None:
     """Refuse every invocation this path cannot honour, before any work.
 
     Ordered so the cheapest, most specific message wins: an unsupported
@@ -533,6 +232,7 @@ def _validate_no_baseline_invocation(kwargs: dict[str, Any]) -> None:
             )
     _reject_old_sided_inputs(kwargs)
     _reject_unsupported_options(kwargs)
+    _reject_context_stashed_options(ctx)
 
 
 def _resolve_no_baseline_invocation(
@@ -687,7 +387,7 @@ def _run_no_baseline_compare_cmd(
     Four phases, one each: refuse what this path cannot honour, resolve what
     it can, run the audit, report it.
     """
-    _validate_no_baseline_invocation(kwargs)
+    _validate_no_baseline_invocation(ctx, kwargs)
     inv = _resolve_no_baseline_invocation(ctx, kwargs)
 
     if inv.output.dry_run:

@@ -34,7 +34,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .errors import SnapshotError
+from .errors import AmbiguousVariantSelectionError, SnapshotError
 from .project_snapshot_store import (
     DirectoryObjectStore,
     read_artifact_ref,
@@ -387,10 +387,20 @@ def materialize_release_variant_artifacts(
     summary = read_manifest_summary(root_path)
     if variant_id is None:
         if len(summary.variant_ids) != 1:
-            raise ValueError(
+            known = sorted(summary.variant_ids)
+            # No CLI flag named here, deliberately: which *side* of a
+            # comparison this package is -- and so whether the remediation
+            # is `--variant old=` or `--variant new=` -- is knowable only
+            # at the front end that resolved both operands. The engine
+            # states the fact and carries the ids; `cli_compare_release_
+            # matrix._resolve_release_package_side` appends the
+            # side-correct example (Codex review, PR #1184, second round:
+            # an earlier fix hard-coded `old=` and misdirected a caller
+            # whose NEW operand was the ambiguous one).
+            raise AmbiguousVariantSelectionError(
                 f"{root_path} declares {len(summary.variant_ids)} variant(s) "
-                f"({sorted(summary.variant_ids)}) -- pass an explicit "
-                "variant id (--old-variant/--new-variant) to select one"
+                f"({known}) -- pass an explicit variant id to select one",
+                tuple(known),
             )
         variant_id = summary.variant_ids[0]
     elif variant_id not in summary.variant_ids:

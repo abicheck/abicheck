@@ -27,7 +27,8 @@ debug-resolution + `--show-redundant` demoted to config, toolchain and
 
 ADR-037 (D10.5) gave `compare` a visible-flag budget with an explicit
 end-state target of **~20** flags and an interim ceiling that only ratchets
-up with a documented rationale (see `COMPARE_FLAG_BUDGET_RAISES`). As of
+up with a documented rationale (see `options/rulings.py`, which superseded
+`COMPARE_FLAG_BUDGET_RAISES` — second amendment below). As of
 0.4.x `compare` sits at **79 visible flags** — ~4× the target and 1.5× the
 next-largest command (`compat check` at 53). The budget mechanism has held
 the *rate* of growth but has not moved the count *down*: the deprecation
@@ -109,6 +110,20 @@ useful.
 > source of truth going forward; run `abicheck compare --help` or
 > `tests/test_config_rebalance.py::TestFlagBudget` for the current number
 > instead of trusting a number in this prose.
+>
+> **Second amendment (ADR-068 D5 / one-comparison-product.md Phase 7k,
+> 2026-09-09):** the `BASE`/`_RAISES` shape this note describes has been
+> replaced. `BASE` was an opaque count, so it named none of the flags it
+> covered, and the assertion was `visible <= BASE + len(RAISES)` — every
+> flag removed without lowering `BASE` became permanent slack a later flag
+> could occupy unruled (measured at replacement: nine flags of slack, with
+> `--budget` already landed with no entry). The scoreboard survives under
+> the same `COMPARE_FLAG_BUDGET` name but is now exactly
+> `len(COMPARE_OPTION_RULINGS)` in
+> `abicheck/frontends/cli/options/rulings.py`, where **every** visible
+> `compare` *and* `dump` option carries a written D5 ruling, asserted as an
+> exact bijection in both directions. `TestFlagBudget` remains the place to
+> read the current number.
 
 As implemented (the constraint-aware subset chosen for this PR), demotion follows
 the established **hide-then-config** cadence used by the severity/suppression
@@ -178,10 +193,12 @@ the side-aware single flags and `--profile`.
   as hidden overrides). The toolchain family is retained. A migration table ships
   in `docs/use/companion-commands.md` and the CHANGELOG. This matches the
   ADR-037 precedent (hard removal of `--header-backend`).
-* The `COMPARE_FLAG_BUDGET` ledger (`cli_options.py`) is the machine-checked
-  scoreboard: each collapsed concept lowers `COMPARE_FLAG_BUDGET_BASE`, and
-  the ceiling can only rise via a documented `COMPARE_FLAG_BUDGET_RAISES`
-  entry (ADR-040 does not add any — it only removes).
+* The `COMPARE_FLAG_BUDGET` ledger is the machine-checked scoreboard: each
+  collapsed concept lowers it (ADR-040 does not raise it — it only removes).
+  *Superseded shape, see the second amendment above:* what was
+  `COMPARE_FLAG_BUDGET_BASE` plus a documented `COMPARE_FLAG_BUDGET_RAISES`
+  entry is now one per-option ruling table in
+  `abicheck/frontends/cli/options/rulings.py`.
 * MCP parity (ADR-037 D10.3): the `abi_compare` param↔flag name map collapses
   each per-side pair to the single concept key; the map already keys by
   concept, so the change is a net simplification.
@@ -226,9 +243,11 @@ half-migrated with red tests.
   default public-surface scoping (moving it to config-only would make a
   one-token operation require editing a file).
 
-Each phase updates `COMPARE_FLAG_BUDGET_BASE` downward and the
-`_OPTION_SET_SNAPSHOT`; the `TestFlagBudget` ledger tests keep the count and
-its rationale in lockstep.
+Each phase updates the budget downward and the `_OPTION_SET_SNAPSHOT`; the
+`TestFlagBudget` tests keep the count and its rationale in lockstep. (Since
+Phase 7k that means removing the retired option's entry from
+`options/rulings.py`, which lowers the ceiling by construction — there is no
+separate `BASE` to remember to adjust.)
 
 * **Post-rollout rename (CLI audit finding).** The `release` profile was
   renamed to `release-cut`: `compare`'s directory/package fan-out mode is

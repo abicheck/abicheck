@@ -572,9 +572,7 @@ class TestVariantSelection:
         _write_package(old_pkg, old_libs, variant_id="gcc13")
         _write_package(new_pkg, new_libs, variant_id="gcc13")
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         assert ec == 4
         outcomes = _sorted_outcomes(out)
         assert any(o[0] == "BREAKING" and o[1] == 1 for o in outcomes)
@@ -630,9 +628,7 @@ class TestVariantSelection:
         self._multi_variant_package(old_pkg)
         _write_package(new_pkg, new_libs)
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         assert ec == 64
         assert "variant" in out.lower()
 
@@ -647,8 +643,8 @@ class TestVariantSelection:
             "compare",
             str(old_pkg),
             str(new_pkg),
-            "--old-variant",
-            "gcc13",
+            "--variant",
+            "old=gcc13",
             "--format",
             "json",
         )
@@ -666,7 +662,7 @@ class TestMultiVariantSingleArtifactClassification:
     single-artifact reader (`project_snapshot_legacy.
     read_legacy_snapshot_document`) has no variant-selection logic at all
     -- it always reads the package's sole artifact unconditionally -- so an
-    explicit `--old-variant v2` was silently ignored rather than honored:
+    explicit `--variant old=v2` was silently ignored rather than honored:
     the comparison ran against `v1`'s real content regardless of which
     variant was actually requested."""
 
@@ -703,7 +699,7 @@ class TestMultiVariantSingleArtifactClassification:
     def test_old_variant_selecting_the_empty_variant_is_honored(
         self, tmp_path: Path
     ) -> None:
-        """Before the fix, `--old-variant v2` against this package silently
+        """Before the fix, `--variant old=v2` against this package silently
         compared `v1`'s real `liba.so` (function `foo` removed -- a real
         BREAKING finding, exit 4) since the flag was never consulted at
         all. After the fix, the release fan-out actually resolves `v2` --
@@ -721,8 +717,8 @@ class TestMultiVariantSingleArtifactClassification:
             "compare",
             str(old_pkg),
             str(new_pkg),
-            "--old-variant",
-            "v2",
+            "--variant",
+            "old=v2",
             "--format",
             "json",
         )
