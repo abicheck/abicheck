@@ -44,6 +44,35 @@ def invoke_cli(*args: str):
     return CliRunner().invoke(abicheck_main, list(args))
 
 
+def _native_library_with_exports() -> Path | None:
+    """A real, already-built native binary that exports symbols.
+
+    ``compare``'s live-artifact path requires an export table (a "DLL", in
+    its own error wording) -- a plain executable copied in under a ``.so``
+    name reads its file *content*, not its name, so it fails that check
+    regardless of extension. ``shutil.which("true")`` used to stand in for
+    "any native binary" on every platform, which holds on Linux/macOS
+    (a dynamically-linked ELF/Mach-O executable there still carries a real
+    dynamic symbol table) but not on Windows: Git for Windows' ``true.exe``
+    is a plain PE executable with no export directory at all, so the copy
+    fails abicheck's own "has no exports ... Verify the file is a valid
+    DLL" check every time -- reproduced on windows-latest CI (previously
+    masked by an unrelated job timeout that cancelled the run before this
+    test's turn in the suite). A real system DLL is the Windows-correct
+    stand-in; every supported Windows image ships one at this path.
+    """
+    import shutil
+
+    if sys.platform == "win32":
+        import os
+
+        system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        dll = system_root / "System32" / "kernel32.dll"
+        return dll if dll.is_file() else None
+    which = shutil.which("true")
+    return Path(which) if which is not None else None
+
+
 @pytest.fixture
 def candidate() -> Path:
     """A committed G20 audit fixture that reports exactly one finding."""
@@ -457,13 +486,11 @@ def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) 
     recorded version on both the one- and two-sided paths -- asserting on the
     snapshot would pass whether or not the option was wired.
     """
-    import shutil
-
-    src = shutil.which("true")
-    if src is None:  # pragma: no cover - every supported CI image has it
-        pytest.skip("no native binary available to label")
+    src = _native_library_with_exports()
+    if src is None:  # pragma: no cover - every supported CI image has one
+        pytest.skip("no native library with exports available to label")
     binary = tmp_path / "libfoo.so"
-    binary.write_bytes(Path(src).read_bytes())
+    binary.write_bytes(src.read_bytes())
     result = invoke_cli(
         "compare",
         "--no-baseline",
