@@ -48,6 +48,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ..checker_types import Change
 from .document import ReportDocument
 from .envelope import RenderOptions, ReportEnvelope
 from .finding import build_report_findings
@@ -204,8 +205,33 @@ def build_report_document(
     )
 
 
+def _snapshot_change(change: Change) -> Change:
+    """One shallow, list-decoupled copy of a single finding.
+
+    ``Change`` is an ordinary mutable dataclass, not a value type -- pattern
+    modulation legitimately sets ``effective_verdict`` on one *during*
+    ``compare()``, for one concrete example. A shared ``Change`` instance
+    reassigned after this envelope was built (its ``effective_verdict``, or
+    any other field) would still be classified from its pre-mutation value
+    by ``document``/``findings`` (frozen at that value) while a projection
+    that classifies straight from ``envelope.result`` would read the new
+    one -- the same class of disagreement :func:`_snapshot_diff_result`
+    closes for the containing lists, one level down. Copying the object
+    itself decouples every scalar/reference field from a later reassignment;
+    copying its own list-valued fields (e.g. ``affected_symbols``) decouples
+    those from a later in-place mutation too.
+    """
+    import copy
+
+    snapshot = copy.copy(change)
+    for name, value in vars(change).items():
+        if isinstance(value, list):
+            setattr(snapshot, name, list(value))
+    return snapshot
+
+
 def _snapshot_diff_result(result: DiffResult) -> DiffResult:
-    """Return a copy of *result* with every list-valued attribute replaced.
+    """Return a copy of *result* with every list/tuple-of-``Change`` replaced.
 
     :class:`ReportEnvelope` exists so a decision made once cannot drift by
     the time a later projection reads it -- but ``DiffResult`` itself is an
@@ -218,26 +244,44 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     original list) from any projection that reads ``envelope.result``
     directly for presentation (HTML's/JUnit's bucketing, SARIF's rule
     catalog) -- the exact case ``report/AGENTS.md``'s immutability
-    contract for this envelope forbids.
+    contract for this envelope forbids. Every ``Change`` element is itself
+    snapshotted too (:func:`_snapshot_change`) -- copying only the
+    containers and leaving the mutable ``Change`` objects inside shared by
+    reference closes the container-level version of this bug but not the
+    element-level one (a caller reassigning ``change.effective_verdict``
+    after construction, reported as a follow-up finding on this same fix).
 
     ``copy.copy`` (not ``dataclasses.replace``) on purpose: some scoping
     passes (``cli_helpers_compare.py``'s ``result.scoped_only_changes =
     ...``) attach attributes that are not declared ``DiffResult`` fields at
     all; ``dataclasses.replace`` reconstructs the object through
     ``__init__`` and would silently drop them, while ``copy.copy`` carries
-    every attribute in ``__dict__``, declared or not. Only *list*-valued
-    attributes get a fresh list -- the ``Change``/other elements inside are
-    still shared by reference (their identity is how ``findings_for``
-    indexes them), only the containers are independent, and a tuple-valued
-    attribute (e.g. ``scoped_only_changes``) is already immune to in-place
-    mutation and needs no copy.
+    every attribute in ``__dict__``, declared or not. A list-valued
+    attribute gets a fresh list (with every ``Change`` element replaced by
+    its own snapshot; a non-``Change`` element is shared as before -- e.g.
+    ``coverage_warnings``' plain strings need no copy of their own). A
+    tuple-valued attribute (e.g. ``scoped_only_changes``) is already immune
+    to in-place *container* mutation, but still needs its own ``Change``
+    elements replaced the same way.
     """
     import copy
 
     snapshot = copy.copy(result)
     for name, value in vars(result).items():
         if isinstance(value, list):
-            setattr(snapshot, name, list(value))
+            setattr(
+                snapshot,
+                name,
+                [_snapshot_change(v) if isinstance(v, Change) else v for v in value],
+            )
+        elif isinstance(value, tuple) and any(isinstance(v, Change) for v in value):
+            setattr(
+                snapshot,
+                name,
+                tuple(
+                    _snapshot_change(v) if isinstance(v, Change) else v for v in value
+                ),
+            )
     return snapshot
 
 

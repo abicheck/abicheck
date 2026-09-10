@@ -30,7 +30,7 @@ from unittest import mock
 
 import pytest
 
-from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot
 from abicheck.report.build import build_report_document, build_report_envelope
@@ -530,6 +530,63 @@ class TestRendererOrderIndependence:
             assert "_Z3foov" not in rendered[fmt], (
                 f"{fmt!r} rendered a change appended to the caller's DiffResult "
                 "after the envelope was already built"
+            )
+
+    def test_mutating_a_shared_change_s_verdict_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """The element-level sibling of the container-mutation test above.
+
+        Snapshotting the containing lists is not enough on its own: ``Change``
+        is itself an ordinary mutable dataclass (pattern-verdict modulation
+        legitimately reassigns ``effective_verdict`` on one *during*
+        ``compare()``), so the envelope must not share the caller's own
+        ``Change`` objects either -- reported as a follow-up finding on the
+        fix above, since copying only the list containers still left the
+        mutable ``Change`` elements inside them shared by reference. This
+        reproduces the exact scenario reported: escalate a ``COMPATIBLE``
+        addition to ``BREAKING`` by reassigning ``effective_verdict`` after
+        the envelope was already built, then confirm every projection still
+        reports the pre-mutation, additive verdict.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result([addition])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.changes[0] is not addition, (
+            "the envelope shared the caller's own Change object by reference"
+        )
+
+        addition.effective_verdict = Verdict.BREAKING
+
+        assert envelope.result.changes[0].effective_verdict is None, (
+            "the envelope's own Change mutated when the caller's did"
+        )
+        assert envelope.findings[0].verdict != Verdict.BREAKING, (
+            "findings disagreed with the envelope's own (unmutated) Change"
+        )
+
+        sarif = to_sarif(envelope.result, envelope=envelope)
+        levels = {r["level"] for r in sarif["runs"][0]["results"]}
+        assert "error" not in levels, (
+            "SARIF escalated a change mutated on the caller's object after "
+            "the envelope was already built"
+        )
+
+        # Markdown's own static verdict legend always mentions "BREAKING" (a
+        # key explaining the marker, not a per-finding classification), so a
+        # bare substring check would false-positive on it; check the line
+        # naming the mutated symbol specifically instead.
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            symbol_lines = [
+                line for line in rendered[fmt].splitlines() if "_Z3newv" in line
+            ]
+            assert symbol_lines, f"{fmt!r} lost the mutated change entirely"
+            assert not any("BREAKING" in line for line in symbol_lines), (
+                f"{fmt!r} reported a change mutated on the caller's own "
+                "Change object after the envelope was already built"
             )
 
 
