@@ -1271,6 +1271,31 @@ class TestRendererOrderIndependence:
         assert md_before == md_after, "dependency section moved on mutation"
         assert "1 resolved DSOs" in md_before
 
+    def test_mutating_a_shared_dependency_info_node_entry_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the ``dependency_info`` fix above
+        gave ``nodes`` a fresh outer *list*, but a bare ``list(value)``
+        still shared each ``dict`` entry -- mutating
+        ``old.dependency_info.nodes[0]["soname"]`` after construction must
+        not change a later render.
+        """
+        node = {"soname": "libfoo.so.1"}
+        dep = DependencyInfo(nodes=[node])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", dependency_info=dep)
+        new = _snapshot("2.0")
+        envelope = self._envelope(_result([]), old, new, follow_deps=True)
+
+        assert envelope.old.dependency_info.nodes[0] is not node
+
+        md_before = render_envelope("markdown", envelope)
+        node["soname"] = "libmutated.so.1"
+        md_after = render_envelope("markdown", envelope)
+
+        assert md_before == md_after, "dependency entry moved on mutation"
+        assert "libfoo.so.1" in md_before
+        assert "libmutated.so.1" not in md_after
+
 
 class TestSarifAndJunitDecisionBoundary:
     """ADR-061 Phase 2 gap C acceptance test: a guard for SARIF's and

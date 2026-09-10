@@ -427,13 +427,17 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
     list/dict, so it got neither treatment above and stayed fully shared
     with the caller (CodeRabbit review, fresh evidence: mutating
     ``old.dependency_info.nodes`` after this call changed a later render).
-    It gets the identical one-level-deeper shallow treatment this function
-    already gives the snapshot itself: a shallow ``copy.copy`` of the
-    object, plus a fresh container for each of its own list/dict fields --
-    deliberately not a recursive deep copy, for the same reason the rest of
-    this function isn't one, and deliberately scoped to this one known
-    field rather than every optional metadata attribute (``dwarf``/``elf``/
-    ...), several of which can be far larger than a dependency graph.
+    It gets a shallow ``copy.copy`` of the object, a fresh container for
+    each of its own list/dict fields, and (Codex review, fresh evidence:
+    a bare ``list(value)`` still shared each ``dict`` entry, so mutating
+    ``old.dependency_info.nodes[0]["soname"]`` after construction could
+    still desync one projection from another already reading the same
+    envelope) one ``copy.deepcopy`` per list element -- each entry is one
+    small, JSON-shaped dict, not a large object graph, so this stays
+    nowhere near the cost the rest of this function avoids. Deliberately
+    scoped to this one known field rather than every optional metadata
+    attribute (``dwarf``/``elf``/...), several of which can be far larger
+    than a dependency graph.
     """
     import copy
 
@@ -447,7 +451,7 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
         dep = copy.copy(result.dependency_info)
         for name, value in vars(dep).items():
             if isinstance(value, list):
-                setattr(dep, name, list(value))
+                setattr(dep, name, [copy.deepcopy(v) for v in value])
             elif isinstance(value, dict):
                 setattr(dep, name, dict(value))
         result.dependency_info = dep
