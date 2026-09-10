@@ -6363,7 +6363,9 @@ looked like the obvious fix and wasn't.
   package handling; PR #1016 only extended `--depth binary`'s
   *acceptance* to a second operand shape that inherits a limitation the
   single-pair path has always had. `cli_compare_options.
-  _reject_depth_for_set_inputs`'s docstring now cross-references this
+  _resolve_depth_for_set_inputs` (named `_reject_depth_for_set_inputs`
+  until its per-rung allow-list was deleted -- see "A depth shortfall is a
+  hard per-member `ERROR` ..." below) cross-references this
   entry so the directory/package path states the same acknowledged
   limitation explicitly rather than silently inheriting an undocumented
   one.
@@ -7540,3 +7542,95 @@ deciding what `compare --depth binary` should do, which is a separate
 change with its own blast radius. Registered as a `KnownGap` on the
 `evidence.tier_shortcut_without_substitute` entry in
 `tests/regressions/manifest.py`.
+
+## A depth shortfall is a hard per-member `ERROR` on a directory `compare` but a soft assurance signal on a single-pair one
+
+Found while removing the per-rung `--depth` allow-list that used to reject
+every rung but `binary` for a directory/package operand (see
+`abicheck/cli_compare_options.py`'s `_resolve_depth_for_set_inputs` for the
+full account of why that guard was wrong). Removing it made a pre-existing
+asymmetry reachable, so it is recorded here rather than papered over.
+
+The two `compare` shapes enforce `--depth` through different mechanisms:
+
+* **Single-pair, native CLI** (`cli_compare_helpers.run_compare`) calls
+  `compare_snapshots()` directly. It applies the *ceiling*
+  (`project_pair_to_depth`) and records the shortfall as an assurance fact —
+  `analysis_assurance.status = "failed"`, `depth_satisfied = false`,
+  `requested_depth`/`effective_depth` — which only reaches the exit code
+  under the orthogonal `--require-complete-analysis` axis. So
+  `compare old.so new.so --depth headers` with no headers exits **0**.
+* **Every member of a directory/package fan-out** routes through
+  `service.run_compare` -> `service_compare_pipeline.resolve_compare_request`,
+  which additionally calls `workflows.artifact.execute.enforce_requested_depth`
+  — a hard `ValidationError`. So the same shortfall becomes that member's
+  `ERROR` result (`operational: extraction_error`, `scope: incomplete`) and
+  exit **4**.
+
+Neither behaviour is obviously wrong: the hard fail matches ADR-037 D5's
+"pinned depth with no evidence is an evidence-contract error" (`scan`'s exit
+7), and the soft signal matches ADR-068 §3 #28's design for `compare`. What
+is wrong is that *which one you get depends on the operand's cardinality*,
+which AGENTS.md's "One model, any cardinality" rule says it must not.
+
+Not closed here, deliberately, and not by narrowing the fix that exposed it:
+
+* Making the fan-out soft would need a per-member `analysis_assurance` the
+  release path does not aggregate — that is the same missing aggregation
+  behind `--require-complete-analysis`'s own set-input rejection
+  ("the per-library fan-out has no single analysis_assurance result to gate
+  on"), tracked as P0.6 run-plan-aware aggregation.
+* Making the single-pair native CLI hard-fail is a behaviour change from
+  exit 0 to a failure on a heavily-used path, and it would also make the
+  native CLI diverge from nothing else — the typed API already hard-fails —
+  so it needs its own decision record, not a side effect of this one.
+
+Whichever direction is chosen, the invariant to encode is the one the
+directory/single-pair split already has an executable home for:
+`tests/test_cli_compare_release_depth.py`'s ladder matrix, extended with the
+single-pair path as a parity oracle.
+
+## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to
+
+Reproduced while verifying the `--depth`/header-graph behaviour above, on a
+two-member fixture (`libfoo.so` built from `foo.h`, `libbar.so` from nothing
+but its own source):
+
+```
+abicheck compare old/ new/ --header old=inc/foo.h --header new=inc_new/foo.h
+libbar.so BREAKING  type_size_changed:Widget, type_alignment_changed:Widget,
+                    type_field_type_changed:Widget, type_field_offset_changed:Widget,
+                    exported_not_public:bar_fn, public_not_exported:widget_area, ...
+libfoo.so BREAKING  type_size_changed:Widget, ... (the same four)
+```
+
+`Widget` lives in `foo.h` and is nothing to do with `libbar.so`, yet the
+whole `Widget` change set is reported once per member, and `libbar.so`
+additionally earns `exported_not_public`/`public_not_exported` findings for
+the mismatch between its own exports and a header set describing a different
+library. A release's finding count therefore scales with member count rather
+than with what changed, and `--output-dir`'s per-library reports carry the
+duplicates too.
+
+The cause is structural, not a detector bug: `cli_compare_release.py` resolves
+one `old_h`/`new_h`/`old_inc`/`new_inc` set for the whole release and passes
+it unchanged to every `_compare_one_library` call, because there is no
+member-to-header attribution model. Fixing it means deciding what that model
+is, and every candidate is a real design choice with its own failure modes:
+
+* per-member header *directories* by naming convention (`libfoo.so` ->
+  `foo.h`) — guesswork, and wrong for the common one-umbrella-header library;
+* attribution by symbol overlap (a header belongs to the member whose export
+  table its declarations resolve against) — principled, but it is the
+  `export_surface.py`/`type_reachability.py` machinery run per member, and it
+  must fail *closed* (an unattributable header stays global) or it will hide
+  real findings, which is strictly worse than today's over-reporting;
+* an explicit per-member mapping in `.abicheck.yml` — no guessing, but new
+  public configuration surface, so an ADR.
+
+Deliberately not attempted as part of the `--depth` fix: it is a separate
+change, in a different layer, with a much larger blast radius, and AGENTS.md
+is explicit that recording the gap beats shipping a narrow guess as if it
+were the general fix. Note that over-reporting is the safe direction — no
+finding is *lost* today — which is why this is a gap rather than a blocker
+on the fix that surfaced it.

@@ -13,43 +13,75 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""D1/D3: ``compare --depth`` against a directory/package (release) operand.
+"""``compare --depth`` against a directory/package (release) operand.
 
-Before this fix, ``--depth`` was rejected wholesale for a directory/package
-compare (alongside ``--sources``/``--build-info``/``--dump-manifest``) with a
-message whose own reasoning ("the per-library fan-out does not collect
-inline build/source evidence") only actually applies to ``build``/``source``:
+**The bug class this file exists for** (registry:
+``cli_surface.capability_guard_diverged_from_pipeline``): a front-end guard
+that hard-codes *which* rungs a downstream pipeline can reach, instead of
+letting that pipeline answer from the evidence actually resolved. Such a
+guard is a snapshot of a belief, and it goes stale silently — nothing fails
+when the pipeline gains the capability the guard still denies.
 
-* ``--depth binary`` requests *less* evidence than the fan-out already
-  collects by default -- there is nothing about it the fan-out can't
-  provide, so it must be accepted and forwarded to every pair (this closes
-  D3 too: a baseline dumped with an explicit ``--depth binary`` and a
-  release-fan-out PR side that could not pin the same floor could silently
-  diverge in evidence richness with no warning).
-* ``--depth headers`` is still rejected -- the fan-out has no per-library
-  evidence-*floor* enforcement -- but must get its own, distinct message
-  rather than being lumped in with build/source's "no inline evidence"
-  reasoning, which doesn't apply to it (the fan-out already resolves
-  per-pair header evidence via ``-H``/``--include-dir``).
-* ``--depth build``/``--depth source`` keep being rejected for the original
-  reason.
+That is exactly what happened here. ``--depth`` was first rejected wholesale
+for a set input, then narrowed (D1) to a per-rung allow-list: ``binary``
+accepted, ``headers`` rejected for "the per-library fan-out does not enforce
+a per-library evidence floor", ``build``/``source`` rejected for needing
+inline ``--sources``/``--build-info``. Both surviving rejections were false
+by the time they were written down:
+
+* the fan-out routes every member pair through ``service.run_compare``, and
+  ``service_compare_pipeline.resolve_compare_request`` calls
+  ``workflows.artifact.execute.enforce_requested_depth`` for every pair it
+  resolves — the floor enforcement the ``headers`` message said had no home;
+* a member may itself be a pre-dumped snapshot carrying embedded L3/L4/L5
+  evidence, which satisfies ``build``/``source`` with no inline collection
+  at all.
+
+So the tests below deliberately do **not** assert "``--depth headers`` is
+now accepted" (the one reported input). They enumerate the *whole* public
+ladder against members of *every* evidence level and state the invariant the
+guard violated: **no rung is rejected up front; each member's own resolved
+evidence decides its own outcome.** The oracle is a hand-written ladder in
+this module, compared against fixtures whose evidence level is known by
+construction — never ``evidence_depth.DEPTH_RANK``, which is the same table
+the implementation consults.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
+from abicheck.buildsource.build_evidence import BuildEvidence, Target, TargetKind
+from abicheck.buildsource.model import BuildSourceManifest
+from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
-# ── helpers (mirrors test_compare_release_annotations.py's own) ────────────
+#: The public ``--depth`` ladder, weakest first — restated here by hand on
+#: purpose. Importing ``abicheck.evidence_depth.DEPTH_RANK`` would make the
+#: oracle the very table the code under test ranks with, so a reordering bug
+#: would agree with itself and pass (AGENTS.md: "a stated oracle that is not
+#: the same formula/helper the implementation itself uses").
+LADDER = ("binary", "headers", "build", "source")
+
+#: Fixture evidence levels, by construction rather than by measurement:
+#: what each ``_snap`` shape below genuinely carries.
+EVIDENCE_LEVELS = ("binary", "headers", "build")
 
 
-def _snap(version: str, library: str = "libfoo.so") -> AbiSnapshot:
-    return AbiSnapshot(
+# ── fixtures ───────────────────────────────────────────────────────────────
+
+
+def _snap(
+    evidence: str, version: str = "1.0", library: str = "libfoo.so"
+) -> AbiSnapshot:
+    """A snapshot carrying exactly *evidence*'s level and nothing above it."""
+    snap = AbiSnapshot(
         library=library,
         version=version,
         functions=[
@@ -60,22 +92,27 @@ def _snap(version: str, library: str = "libfoo.so") -> AbiSnapshot:
                 visibility=Visibility.PUBLIC,
             )
         ],
-        from_headers=True,
+        from_headers=evidence in ("headers", "build"),
     )
+    if evidence == "build":
+        snap.build_source = BuildSourcePack(
+            root=Path("."),
+            manifest=BuildSourceManifest(),
+            build_evidence=BuildEvidence(
+                targets=[Target(id="t1", name="foo", kind=TargetKind.SHARED_LIBRARY)]
+            ),
+        )
+    return snap
 
 
-def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
-    path.write_text(snapshot_to_json(snap), encoding="utf-8")
-    return path
-
-
-def _make_release_dirs(tmp_path: Path) -> tuple[Path, Path]:
-    old_dir = tmp_path / "old"
-    new_dir = tmp_path / "new"
-    old_dir.mkdir()
-    new_dir.mkdir()
-    _write_snap(old_dir / "libfoo.json", _snap("1.0"))
-    _write_snap(new_dir / "libfoo.json", _snap("1.0"))
+def _release_dirs(tmp_path: Path, evidence: str) -> tuple[Path, Path]:
+    old_dir = tmp_path / f"old-{evidence}"
+    new_dir = tmp_path / f"new-{evidence}"
+    for side in (old_dir, new_dir):
+        side.mkdir()
+        (side / "libfoo.json").write_text(
+            snapshot_to_json(_snap(evidence)), encoding="utf-8"
+        )
     return old_dir, new_dir
 
 
@@ -86,155 +123,166 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-class TestDepthBinaryAcceptedForReleaseCompare:
-    """D1: ``--depth binary`` is an explicit assertion the release fan-out
-    can always honour -- it must not be rejected, and must actually reach
-    each per-library comparison (D3: so a release PR side can pin the same
-    evidence floor a baseline was dumped under)."""
+def _release_json(out: str) -> dict:
+    match = re.search(r"^\{", out, re.M)
+    assert match is not None, f"no JSON document in output: {out[:400]}"
+    return json.loads(out[match.start() :])
 
-    def test_depth_binary_does_not_raise_usage_error(self, tmp_path: Path) -> None:
-        old_dir, new_dir = _make_release_dirs(tmp_path)
+
+# ── the invariant ──────────────────────────────────────────────────────────
+
+
+class TestEveryDepthRungReachesTheFanOut:
+    """The whole ladder × every member evidence level (12 cases).
+
+    This is the generalized statement of the class, not a reproducer for the
+    ``--depth headers`` report: it fails for *any* rung a future front-end
+    guard starts pre-judging, in either direction.
+    """
+
+    @pytest.mark.parametrize("requested", LADDER)
+    @pytest.mark.parametrize("evidence", EVIDENCE_LEVELS)
+    def test_no_rung_is_ever_rejected_up_front(
+        self, tmp_path: Path, requested: str, evidence: str
+    ) -> None:
+        """No ``--depth`` value is a *usage* error on a set input (exit 64).
+
+        Whether the evidence is there is a question about the members, and
+        the members are not read until dispatch — so a pre-dispatch usage
+        error can only ever be a guess.
+        """
+        old_dir, new_dir = _release_dirs(tmp_path, evidence)
         code, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--depth",
-            "binary",
+            requested,
             "--format",
             "json",
         )
-        assert code == 0, out
+        assert code != 64, out
         assert "not supported for directory/package" not in out
 
-    def test_depth_binary_is_forwarded_to_every_library_pair(
-        self, tmp_path: Path, monkeypatch
+    @pytest.mark.parametrize("requested", LADDER)
+    @pytest.mark.parametrize("evidence", EVIDENCE_LEVELS)
+    def test_member_outcome_follows_that_member_s_own_evidence(
+        self, tmp_path: Path, requested: str, evidence: str
     ) -> None:
-        """Proves the value actually reaches ``service.run_compare`` for
-        each pair, not just that the CLI stopped rejecting it (mirrors
-        ``test_cli_compare_bundle_facts_rejections.py``'s identical
-        ``test_depth_binary_clears_headers`` pattern for the sibling
-        --old-bundle-facts dispatcher)."""
+        """A member fails iff *it* falls short of the requested rung.
+
+        The oracle is ``LADDER``'s hand-written order against the fixture's
+        constructed evidence level — not the rank table the implementation
+        uses, and not the front end's own allow-list.
+        """
+        old_dir, new_dir = _release_dirs(tmp_path, evidence)
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            requested,
+            "--format",
+            "json",
+        )
+        data = _release_json(out)
+        [lib] = data["libraries"]
+        short = LADDER.index(evidence) < LADDER.index(requested)
+        if short:
+            assert lib["verdict"] == "ERROR", lib
+            assert "evidence depth" in str(lib["error"])
+            assert data["run_outcome"]["operational"] == "extraction_error"
+        else:
+            assert lib["verdict"] == "NO_CHANGE", lib
+            assert code == 0, out
+
+    @pytest.mark.parametrize("requested", LADDER)
+    def test_every_rung_is_forwarded_verbatim_to_every_pair(
+        self, tmp_path: Path, requested: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Proves the value reaches ``service.run_compare``, not merely that
+        the CLI stopped rejecting it — a guard could equally have been
+        "fixed" by accepting the flag and dropping it on the floor, which is
+        the silent-no-op failure the sibling ``--sources`` guard exists to
+        prevent."""
         import abicheck.service as service
 
-        old_dir, new_dir = _make_release_dirs(tmp_path)
+        old_dir, new_dir = _release_dirs(tmp_path, "build")
         captured: list[object] = []
         real_run_compare = service.run_compare
 
-        def _capturing_run_compare(*args: object, **kwargs: object) -> object:
+        def _capturing(*args: object, **kwargs: object) -> object:
             captured.append(kwargs.get("depth"))
             return real_run_compare(*args, **kwargs)
 
-        monkeypatch.setattr(service, "run_compare", _capturing_run_compare)
-
-        code, out = _invoke(
+        monkeypatch.setattr(service, "run_compare", _capturing)
+        _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--depth",
-            "binary",
+            requested,
             "--format",
             "json",
         )
-        assert code == 0, out
-        assert captured == ["binary"]
+        assert captured == [requested]
 
-    def test_depth_binary_reported_per_library(self, tmp_path: Path) -> None:
-        old_dir, new_dir = _make_release_dirs(tmp_path)
-        code, out = _invoke(
+
+class TestDepthShortfallGuidanceSurvivesTheGuardRemoval:
+    """The removed usage errors carried advice the floor message cannot.
+
+    ``enforce_requested_depth`` tells the user to supply ``--sources``; on a
+    set input that flag is itself rejected. Dropping a guard must not drop
+    the guidance it carried, so the release-shaped alternatives are appended
+    to the per-member failure.
+    """
+
+    @pytest.mark.parametrize("requested", ("build", "source"))
+    def test_release_shaped_alternatives_are_named(
+        self, tmp_path: Path, requested: str
+    ) -> None:
+        old_dir, new_dir = _release_dirs(tmp_path, "headers")
+        _, out = _invoke(
             "compare",
             str(old_dir),
             str(new_dir),
             "--depth",
-            "binary",
+            requested,
             "--format",
             "json",
         )
+        error = str(_release_json(out)["libraries"][0]["error"])
+        assert "dump --sources/--build-info" in error
+        assert "compare this library individually" in error
+
+    def test_hint_is_scoped_to_depth_pins(self, tmp_path: Path) -> None:
+        """A run with no ``--depth`` must not acquire the depth hint — the
+        handler that appends it also catches unrelated ``ValidationError``s.
+        """
+        old_dir, new_dir = _release_dirs(tmp_path, "binary")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0, out
-        data = json.loads(out)
-        [lib] = data["libraries"]
-        assert lib["verdict"] == "NO_CHANGE"
+        assert "dump --sources/--build-info" not in out
 
 
-class TestDepthHeadersRejectedDistinctlyForReleaseCompare:
-    """D1: ``--depth headers`` is still rejected on this path, but its
-    message must not claim the "no inline build/source evidence" reasoning
-    that only applies to build/source -- the fan-out already resolves
-    per-pair header evidence; what's missing is floor enforcement."""
+class TestSetInputEvidenceFlagsStillRejected:
+    """Regression guard for the *other* direction: the flags that genuinely
+    have no per-library home must keep being rejected. Removing the rung
+    allow-list must not weaken the input guard next to it."""
 
-    def test_depth_headers_is_rejected(self, tmp_path: Path) -> None:
-        old_dir, new_dir = _make_release_dirs(tmp_path)
-        code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--depth",
-            "headers",
-        )
-        assert code == 64
-        assert "--depth headers" in out
-
-    def test_depth_headers_message_is_distinct_from_build_source(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("flag", "value"),
+        (("--sources", "new={src}"), ("--build-info", "new={src}")),
+    )
+    def test_inline_evidence_flags_are_still_usage_errors(
+        self, tmp_path: Path, flag: str, value: str
     ) -> None:
-        old_dir, new_dir = _make_release_dirs(tmp_path)
-        code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--depth",
-            "headers",
-        )
-        assert code == 64
-        assert "does not collect inline build/source evidence" not in out
-        assert "evidence floor" in out
-
-
-class TestDepthBuildSourceStillRejectedForReleaseCompare:
-    """Unchanged behaviour (regression coverage for the refactor): build and
-    source both keep the original "no inline evidence" message."""
-
-    def test_depth_build_is_rejected(self, tmp_path: Path) -> None:
-        old_dir, new_dir = _make_release_dirs(tmp_path)
-        code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--depth",
-            "build",
-        )
-        assert code == 64
-        assert "--depth build" in out
-        assert "does not collect inline build/source evidence" in out
-
-    def test_depth_source_is_rejected(self, tmp_path: Path) -> None:
-        old_dir, new_dir = _make_release_dirs(tmp_path)
-        code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--depth",
-            "source",
-        )
-        assert code == 64
-        assert "--depth source" in out
-        assert "does not collect inline build/source evidence" in out
-
-    def test_sources_still_rejected_alongside_depth_refactor(
-        self, tmp_path: Path
-    ) -> None:
-        """Regression guard: splitting --depth out of
-        _EVIDENCE_SET_INPUT_FLAGS must not accidentally stop rejecting the
-        flags that stayed in it."""
-        old_dir, new_dir = _make_release_dirs(tmp_path)
+        old_dir, new_dir = _release_dirs(tmp_path, "headers")
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         code, out = _invoke(
-            "compare",
-            str(old_dir),
-            str(new_dir),
-            "--sources",
-            f"new={src_dir}",
+            "compare", str(old_dir), str(new_dir), flag, value.format(src=src_dir)
         )
         assert code == 64
-        assert "--sources" in out
+        assert flag in out
         assert "does not collect inline build/source evidence" in out

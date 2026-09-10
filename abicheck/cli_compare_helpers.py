@@ -933,9 +933,12 @@ def _reject_flags_unsupported_for_set_inputs(
     compare``'s own rejection of a second one), so it is simply forwarded.
 
     Returns the ``--depth`` value the caller should forward to the fan-out
-    (D1: currently always ``"binary"`` or ``None`` --
-    :func:`~abicheck.cli_resolve._reject_depth_for_set_inputs` rejects
-    everything else outright).
+    -- any rung of the public ladder, or ``None`` when none was typed.
+    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs` used
+    to reject every rung but ``"binary"``; it no longer rejects any, because
+    the floor those rejections stood in for is enforced per member by the
+    same ``enforce_requested_depth`` a single-pair compare runs (see that
+    function's docstring).
     """
     _reject_set_input_flags(
         env_matrix_path,

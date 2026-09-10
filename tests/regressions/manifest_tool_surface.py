@@ -245,4 +245,70 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="cli_surface.capability_guard_diverged_from_pipeline",
+        invariant=(
+            "A front-end guard may reject an input the pipeline behind it "
+            "would silently drop, but never a *capability* the pipeline can "
+            "answer for itself from real evidence. Where the pipeline "
+            "already decides per operand -- an evidence rung it floor-checks "
+            "and projects, a derivation it performs whenever its inputs are "
+            "present -- the front end forwards and lets it decide, so the "
+            "same request means the same thing at every operand cardinality "
+            "(AGENTS.md's 'One model, any cardinality'). Corollary, and the "
+            "half that actually bites: a capability claim recorded only in a "
+            "comment or plan document is unfalsifiable, so every such claim "
+            "needs an executed test whose oracle is the other surface, not a "
+            "pinned constant and not the same table the implementation "
+            "consults."
+        ),
+        fixed_by=(1193,),
+        seed_tests=(
+            "tests/test_cli_compare_release_depth.py",
+            "tests/test_cli_compare_release_header_graph.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "guard": ("depth-rung-allow-list", "header-graph-attach-claim"),
+            "depth_rung": ("binary", "headers", "build", "source"),
+            "member_evidence": ("binary", "headers", "build"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Two instances of this class were found in one place "
+                    "(`compare`'s set-input guards) and both are now "
+                    "executed. No sweep was run for the rest: the pattern "
+                    "is 'a `_reject_*_for_set_inputs` guard whose message "
+                    "asserts what the fan-out cannot do', and "
+                    "`cli_compare_options.py`/`cli_resolve.py` carry "
+                    "several more of exactly that shape "
+                    "(`--require-complete-analysis`, `--budget`, "
+                    "`--env-matrix`, `--use-cases`, the sided "
+                    "`--ast-frontend`). Each needs reading against what its "
+                    "pipeline does *today*, one at a time -- the two closed "
+                    "here were both stale, so the base rate is not "
+                    "reassuring, but a mechanical gate cannot tell a stale "
+                    "claim from a live one."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "Closing the depth guard exposed a real "
+                    "cardinality-dependent divergence it had been hiding: a "
+                    "depth shortfall hard-fails a fan-out member "
+                    "(`enforce_requested_depth`) but is only a soft "
+                    "`analysis_assurance` fact on the native single-pair "
+                    "CLI path, which calls `compare_snapshots()` directly. "
+                    "The ladder matrix therefore states the invariant "
+                    "per member rather than as single-pair parity; adding "
+                    "the single-pair path as an oracle is what closes it, "
+                    "once it is decided which of the two behaviours is the "
+                    "contract."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

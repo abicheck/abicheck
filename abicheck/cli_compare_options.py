@@ -210,86 +210,118 @@ def _reject_set_input_flags(
         )
 
 
-def _reject_depth_for_set_inputs(ctx: click.Context) -> str | None:
-    """Resolve (or reject) an explicit ``--depth`` for a directory/package compare.
+def _resolve_depth_for_set_inputs(ctx: click.Context) -> str | None:
+    """Resolve an explicit ``--depth`` for a directory/package compare.
 
-    D1: ``--depth`` used to be rejected wholesale by
-    ``cli_resolve._reject_evidence_flags_for_set_inputs``, lumped in with
-    ``--sources``/``--build-info``/``--dump-manifest`` under one message
-    whose own reasoning ("the per-library fan-out does not collect inline
-    build/source evidence") never applied to every rung of the dial:
+    Returns the requested depth verbatim (``None`` when the user did not
+    type one) for the caller to forward to the release fan-out. It rejects
+    nothing: every rung of the public ladder is forwarded, exactly as a
+    single-pair ``compare`` forwards it.
 
-    * ``binary`` requests *less* evidence than the fan-out already collects
-      by default (each pair is compared from its own binary plus whatever
-      header/compile-context evidence the release's own
-      ``-H``/``--include-dir`` already resolves) — there is nothing about an
-      explicit ``--depth binary`` assertion the fan-out can't provide, so it
-      is accepted here and forwarded to every pair (mirrors a single-pair
-      ``compare --depth binary``, which just clears header/build/source
-      evidence rather than requiring anything new). This used to only clear
-      *separately supplied* header/include inputs, inheriting the
-      single-pair path's own "floor, not a ceiling" gap for a
-      directory/package member that is itself an already-dumped JSON
-      snapshot carrying richer embedded evidence — see
-      ``docs/contribute/known-gaps.md``'s "``--depth`` is a floor for live
-      extraction, not a ceiling for a pre-built snapshot" entry for the
-      full history. That gap is now closed for both shapes at once: each
-      pair here is forwarded through ``service.run_compare`` the same way a
-      plain single-pair ``compare`` is, so ``classify_compare_pair``'s
-      ``abicheck.policy.depth_projection.project_snapshot_to_depth``
-      projection (applied uniformly, not specific to directory/package
-      operands) already caps what each pair's classification sees down to
-      the requested rung, regardless of whether the richer evidence came
-      from a fresh extraction or a pre-built snapshot on disk.
-    * ``headers`` is still rejected, but for a narrower, distinct reason than
-      build/source: the fan-out *does* resolve per-pair header evidence
-      (the same ``-H``/compile-context plumbing a plain directory `compare`
-      already threads through), so it isn't blocked by "no inline
-      build/source evidence". What's actually missing is depth's *floor*
-      enforcement (``workflows.artifact.execute.enforce_requested_depth`` —
-      failing the run when a pair didn't actually reach the requested rung)
-      — that has no home in the per-library fan-out today. Lumping it into
-      build/source's message would misstate why it's rejected, so it gets
-      its own message instead (D1).
-    * ``build``/``source`` are rejected for the original reason: they need
-      inline build/source evidence the release fan-out has no per-library
-      way to collect (the flags that would feed it — ``--sources``/
-      ``--build-info`` — are exactly what the caller's own
-      ``_EVIDENCE_SET_INPUT_FLAGS`` rejects).
+    **Why this used to reject three of the four rungs, and why it no longer
+    does.** This guard began as one wholesale "``--depth`` is not supported
+    for directory/package comparisons" usage error, later split (D1) into a
+    per-rung allow-list: ``binary`` accepted, ``headers`` rejected for
+    lacking per-library *floor* enforcement, ``build``/``source`` rejected
+    for needing inline ``--sources``/``--build-info`` the fan-out cannot
+    collect. Both surviving rejections rested on beliefs about the fan-out
+    that stopped being true once every member pair started routing through
+    :func:`abicheck.service.run_compare` like any other comparison:
 
-    Returns the accepted depth value (currently always ``"binary"`` or
-    ``None``) for the caller to forward to the fan-out; raises
-    ``click.UsageError`` for anything else explicitly requested. Lives here
-    (not next to its caller in ``cli_resolve.py``) purely because that
-    module has no line-count budget left (`architecture/debt.yaml`'s
-    ``no_growth`` baseline) — this module's own ``click``-only, no-abicheck-
-    import leaf contract (see the module docstring) fits it exactly as
-    well.
+    * **Floor enforcement does have a home.**
+      ``service_compare_pipeline.resolve_compare_request`` calls
+      ``workflows.artifact.execute.enforce_requested_depth`` for *every*
+      pair it resolves, the fan-out's members included, and
+      ``classify_compare_pair`` applies the matching ceiling
+      (``policy.depth_projection.project_pair_to_depth``). A member that
+      falls short of the requested rung therefore already fails -- as that
+      member's own ``ERROR`` result on the release's acquisition record
+      (``operational: extraction_error``, ``scope: incomplete``), which is
+      the *release-shaped* answer, strictly more informative than one
+      whole-run usage error that names no member at all.
+    * **Reachability is a property of the members, not of the operand's
+      cardinality.** A directory member may itself be a pre-dumped JSON
+      snapshot carrying embedded L3/L4/L5 evidence (``dump --sources``/
+      ``--build-info``), which satisfies ``build``/``source`` with no inline
+      collection at all -- so rejecting those rungs for every set input
+      denied a genuinely reachable configuration. Conversely a bare ``.so``
+      member cannot reach them, and now says so per member rather than
+      being pre-judged for its neighbours.
+
+    So the whole rung allow-list was a static restatement of a check that
+    already runs downstream over real evidence, wrong in one direction and
+    redundant in the other. Deleting it is what makes
+    ``compare OLD_DIR NEW_DIR --depth X`` mean, per member, exactly what
+    ``compare old.so new.so --depth X`` means -- AGENTS.md's "One model, any
+    cardinality" product rule.
+
+    Unchanged by any of that, and still worth reading before touching this
+    path: ``--depth`` is a *floor* for live extraction and, for a member
+    that is already a pre-built snapshot, the ceiling is applied by
+    ``policy.depth_projection`` rather than by refusing the operand -- see
+    ``docs/contribute/known-gaps.md``'s "``--depth`` is a floor for live
+    extraction, not a ceiling for a pre-built snapshot" entry, which this
+    function has cross-referenced since it accepted its first rung.
+
+    The *flags* that genuinely have no per-library home on this path
+    (``--sources``/``--build-info``/``--dump-manifest``) are still rejected,
+    by this function's caller
+    (``cli_resolve._reject_evidence_flags_for_set_inputs``) -- that guard is
+    about an input the fan-out would silently drop, not about a rung. The
+    guidance the removed rung errors used to carry (compare libraries
+    individually, or pre-dump snapshots with ``dump --sources``) is now
+    appended to the per-member depth-floor failure by
+    ``cli_compare_release_pairwise._compare_one_library``, so it reaches the
+    user at the point it actually applies.
+
+    Lives here (not next to its caller in ``cli_resolve.py``) purely because
+    that module has no line-count budget left (``architecture/debt.yaml``'s
+    ``no_growth`` baseline) -- this module's own ``click``-only,
+    no-abicheck-import leaf contract (see the module docstring) fits it
+    exactly as well.
     """
     if ctx.get_parameter_source("depth") != click.core.ParameterSource.COMMANDLINE:
         return None
     depth: str | None = ctx.params.get("depth")
+    return depth.lower() if depth is not None else None
+
+
+def set_input_depth_shortfall_message(error: str, depth: str | None) -> str:
+    """*error* plus the guidance the removed rung allow-list used to carry.
+
+    ``workflows.artifact.execute.enforce_requested_depth``'s message tells
+    the user to supply the evidence the rung needs, naming ``--sources``
+    among the ways to do it. On a directory/package operand that flag is
+    itself rejected (``cli_resolve._reject_evidence_flags_for_set_inputs``:
+    the per-library fan-out has no way to collect inline build/source
+    evidence), so on this one path the advice is unfollowable as written.
+
+    That is precisely what the rung allow-list deleted from
+    :func:`_resolve_depth_for_set_inputs` used to say, before the run
+    started, for every member at once. Deleting a wrong guard must not
+    delete the true thing it happened to be saying -- so the release-shaped
+    alternatives are appended here, to the failure of the member they
+    actually apply to.
+
+    Returns *error* unchanged when *depth* is ``None``: the caller catches
+    every ``ValidationError``, and one raised for an unrelated reason has
+    nothing to do with rungs.
+
+    Lives beside the resolver whose guidance this is, in the same
+    ``click``-only leaf, rather than in the release engine that renders it
+    -- ``cli_compare_release_pairwise.py`` sits at its
+    ``architecture/debt.yaml`` ``no_growth`` baseline, and message text is
+    not that module's responsibility anyway.
+    """
     if depth is None:
-        return None
-    value = depth.lower()
-    if value == "binary":
-        return value
-    if value == "headers":
-        raise click.UsageError(
-            "--depth headers is not supported for directory/package (release) "
-            "comparisons: the per-library fan-out does not enforce a "
-            "per-library evidence floor (it already resolves per-pair header "
-            "evidence via -H/--include-dir, it just can't yet fail the run "
-            "when a pair falls short of the requested rung). Compare the "
-            "libraries individually (where --depth headers is honoured) to "
-            "require header-level evidence."
-        )
-    raise click.UsageError(
-        f"--depth {depth} is not supported for directory/package (release) "
-        "comparisons: the per-library fan-out does not collect inline "
-        "build/source evidence. Compare the libraries individually (or "
-        "pre-dump snapshots with `dump --sources/--build-info`) to collect "
-        "L3-L5 evidence."
+        return error
+    return error + (
+        " On a directory/package (release) compare, inline "
+        "--sources/--build-info are not accepted (the per-library fan-out "
+        "cannot collect them), so this member can only reach a build/source "
+        "rung from evidence it already carries: pre-dump each member with "
+        "`dump --sources/--build-info` and compare the snapshot "
+        "directories, or compare this library individually."
     )
 
 
