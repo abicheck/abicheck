@@ -585,3 +585,133 @@ def test_a_stored_operand_with_raw_evidence_gates_like_the_two_sided_run(
         f"one-sided exited {audit.exit_code}, two-sided {two_sided.exit_code} "
         "on the same operand and the same unsatisfiable pinned depth"
     )
+
+
+def _project_snapshot_package(tmp_path: Path, case: str) -> Path:
+    """A real directory-backed storage-v2 ``ProjectSnapshot`` package holding
+    the same single artifact *case*'s committed ``.abi.json`` file holds."""
+    from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
+    from abicheck.serialization import load_snapshot, snapshot_to_dict
+
+    document = snapshot_to_dict(
+        load_snapshot(example_catalog.case_dir(case) / "snapshot.abi.json")
+    )
+    package = tmp_path / "package"
+    write_legacy_snapshot_package(
+        document,
+        package,
+        artifact_id="libdemo.so",
+        max_known_schema_version=document.get("schema_version", 1),
+    )
+    return package
+
+
+@pytest.mark.parametrize(
+    "operand",
+    ["symvers", "perl_dump", "unknown_text"],
+)
+def test_an_operand_this_run_parses_is_held_to_the_pinned_depth(
+    tmp_path: Path, operand: str
+) -> None:
+    """Only an already-*serialized snapshot* is exempt from the depth floor.
+
+    The carve-out asked ``detect_binary_format(path) is not None`` — "is this
+    a native binary?" — which is a narrower question with a different answer
+    for every operand that is neither a binary nor a snapshot. Each of those
+    is parsed into a brand-new snapshot that structurally cannot carry L3-L5
+    evidence, so a pinned ``--depth source`` was silently unsatisfiable:
+    ``Module.symvers --depth source`` reported no evidence tiers at all and
+    exit 0 (Codex review, P1).
+
+    Parametrized over the *class* rather than the reported input: the shared
+    property of all three is "not a binary, not a snapshot", and a fix keyed
+    to symvers alone would leave the siblings exempt. The oracle is the
+    predicate's own contract — anything not stored is live — checked here
+    against operands chosen to be exactly the ones that used to slip through.
+    """
+    from abicheck.workflows.no_baseline_compare import candidate_is_live_artifact
+
+    bodies = {
+        "symvers": "0x00000000\tvfs_read\tvmlinux\tEXPORT_SYMBOL\n",
+        "perl_dump": "$VAR1 = {\n  'ABI' => {}\n};\n",
+        "unknown_text": "not a snapshot, not a binary\n",
+    }
+    path = tmp_path / operand
+    path.write_text(bodies[operand])
+    assert candidate_is_live_artifact(path) is True, (
+        f"a {operand} operand is parsed into a fresh snapshot by this run, so "
+        "a pinned --depth build/source is something it can fall short of"
+    )
+
+
+def test_a_serialized_snapshot_stays_exempt_in_both_of_its_shapes(
+    tmp_path: Path,
+) -> None:
+    """The complement, so the fix above cannot be 'gate everything'.
+
+    Both shapes `resolve_input` accepts as a stored snapshot are exempt — a
+    single ``.abi.json`` file and a directory-backed `ProjectSnapshot`
+    package — because only a serialized snapshot can already *carry* the
+    pinned evidence. A plain directory of libraries is neither, and must not
+    be swept into the exemption.
+    """
+    from abicheck.workflows.no_baseline_compare import candidate_is_live_artifact
+
+    stored = (
+        example_catalog.case_dir("case143_audit_accidental_export")
+        / "snapshot.abi.json"
+    )
+    package = _project_snapshot_package(tmp_path, "case143_audit_accidental_export")
+    plain = tmp_path / "release"
+    plain.mkdir()
+    (plain / "libfoo.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + bytes(56))
+
+    assert candidate_is_live_artifact(stored) is False
+    assert candidate_is_live_artifact(package) is False, (
+        "a ProjectSnapshot package is the repository's own storage-v2 form of "
+        "the same stored snapshot, so it carries the same exemption"
+    )
+    assert candidate_is_live_artifact(plain) is True, (
+        "a plain directory of libraries is not a stored snapshot; exempting "
+        "one would be the same silent-clean-result bug in reverse"
+    )
+
+
+def test_the_audit_accepts_a_project_snapshot_package_directory(
+    tmp_path: Path,
+) -> None:
+    """A single artifact is a single artifact, whichever shape it is stored in.
+
+    The dispatch rejected every directory outright, so the same snapshot was
+    accepted as a `.abi.json` file and refused in the repository's own
+    package form — which a two-sided `compare` accepts (Codex review, P2).
+    Asserted as *agreement between the two shapes*' finding sets rather than
+    a fixed exit code, so they cannot drift apart again.
+    """
+    case = "case143_audit_accidental_export"
+    package = _project_snapshot_package(tmp_path, case)
+    stored = example_catalog.case_dir(case) / "snapshot.abi.json"
+
+    from_package = invoke_cli(
+        "compare", "--no-baseline", str(package), "--format", "json"
+    )
+    from_file = invoke_cli("compare", "--no-baseline", str(stored), "--format", "json")
+    assert from_package.exit_code == from_file.exit_code == 0, from_package.output
+
+    kinds_of = lambda out: sorted(f["kind"] for f in json.loads(out)["findings"])  # noqa: E731
+    assert kinds_of(from_package.output) == kinds_of(from_file.output)
+
+
+def test_a_release_directory_is_still_a_usage_error(tmp_path: Path) -> None:
+    """The narrowing must not become 'accept any directory'.
+
+    A directory of several libraries needs the per-library fan-out this path
+    does not have yet, so it stays a usage error naming that reason.
+    """
+    plain = tmp_path / "release"
+    plain.mkdir()
+    (plain / "libfoo.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + bytes(56))
+
+    result = invoke_cli("compare", "--no-baseline", str(plain))
+    assert result.exit_code == 64, result.output
+    assert "directory of libraries" in result.output

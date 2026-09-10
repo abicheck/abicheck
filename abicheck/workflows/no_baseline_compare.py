@@ -99,6 +99,7 @@ __all__ = [
     "NO_BASELINE_SELECTION",
     "NoBaselineCompareResult",
     "candidate_is_live_artifact",
+    "candidate_is_stored_snapshot",
     "declared_absent_acquisition_record",
     "public_header_sets_for_candidate",
     "resolve_no_baseline_candidate",
@@ -258,6 +259,24 @@ def public_header_sets_for_candidate(
     )
 
 
+def candidate_is_stored_snapshot(path: Path) -> bool:
+    """Whether *path* is an already-serialized snapshot, in either shape.
+
+    The ``workflows``-layer spelling of
+    ``input_resolution.is_stored_snapshot_operand`` for a ``frontends``
+    caller, which may not import ``extract``/``storage`` internals directly
+    (ADR-061's dependency direction) and would otherwise re-derive the
+    package test from the filesystem. The CLI needs the same answer the
+    depth-floor carve-out needs, for a different reason: to tell a
+    directory-backed ``ProjectSnapshot`` *package* -- one artifact, which
+    this path audits fine -- from a release *directory* of several
+    libraries, which needs a fan-out it does not have yet.
+    """
+    from .input_resolution import is_stored_snapshot_operand
+
+    return is_stored_snapshot_operand(path)
+
+
 def candidate_is_live_artifact(
     path: Path,
     *,
@@ -284,36 +303,16 @@ def candidate_is_live_artifact(
     specific error about it moments later, and claiming "stored" would
     silently *suppress* the exit-7 axis.
     """
-    from ..binary_utils import detect_binary_format, resolve_linker_script_chain
     from ..buildsource.raw_evidence import any_raw_evidence_input
+    from .input_resolution import side_is_live
 
-    # Raw `--sources`/`--build-info` makes the run live even when the
-    # *artifact* operand is a stored snapshot: the run collects L3-L5
-    # evidence itself, so a pinned depth is something it can genuinely fall
-    # short of. Testing the operand's path alone exempted exactly that case
-    # -- `compare --no-baseline case143.abi.json --sources <empty dir>
-    # --depth source` exited 0 with `elf, header` evidence where the
-    # equivalent two-sided invocation exited 7 (Codex review, P1). The
-    # two-sided path already encoded this as `old_fmt is not None or
-    # old_had_raw_evidence`; `buildsource.raw_evidence` is now the one owner
-    # of the predicate's other half, so the two sides share the rule rather
-    # than each carrying a copy of it.
-    if any_raw_evidence_input(sources, build_info):
-        return True
-
-    try:
-        # Follow a GNU ld INPUT()/GROUP() script to its target first: the
-        # script itself is text, so `detect_binary_format` answers `None` for
-        # it -- but the resolver *does* follow it and extracts the DSO it
-        # names, so treating the operand as stored exempted a genuinely live
-        # extraction from the depth floor. `compare --no-baseline alias.so
-        # --depth build` exited 0 where the very same library, named
-        # directly, exited 7 (Codex review, P1). Chain-resolving matches what
-        # `resolve_input` does with the same operand, so the two agree by
-        # construction rather than by coincidence.
-        return detect_binary_format(resolve_linker_script_chain(path)) is not None
-    except OSError:
-        return True
+    # `side_is_live` owns this rule for both `compare` forms -- see its
+    # docstring for the two ways a run is live, and for the narrower question
+    # ("is this a native binary?") both paths used to ask instead, which
+    # silently exempted every operand that is neither a binary nor a snapshot.
+    return side_is_live(
+        path, had_raw_evidence=any_raw_evidence_input(sources, build_info)
+    )
 
 
 #: The one selection value a ``--no-baseline`` run's

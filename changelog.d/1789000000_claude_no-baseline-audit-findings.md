@@ -1,5 +1,21 @@
 ### Fixed
 
+- **The pinned-depth floor now applies to every operand this run parses**,
+  not only to a recognized binary. `Module.symvers`, a bare BTF/CTF blob and
+  an ABICC Perl dump each become a fresh snapshot that structurally cannot
+  carry L3-L5 evidence, yet all three read as "already stored" and were
+  exempted: `compare --no-baseline Module.symvers --depth source` reported a
+  clean audit with no evidence tiers at all. The two-sided
+  `compare a.symvers b.symvers --depth source` did the same, so the rule now
+  has one owner (`workflows/input_resolution.side_is_live`) both forms call.
+  Only a genuinely serialized snapshot is exempt — in either of its shapes,
+  a `.abi.json` file or a directory-backed `ProjectSnapshot` package.
+- **`compare --no-baseline` accepts a `ProjectSnapshot` package directory.**
+  It is a single artifact — `resolve_input` decodes one into exactly one
+  snapshot, and a two-sided `compare` already accepted it — but a blanket
+  directory check refused it, so the same stored snapshot was usable as a
+  file and rejected in the repository's own storage-v2 form. A release
+  *directory of libraries* stays a usage error, naming the fan-out it needs.
 - **`compare --no-baseline` now applies the pinned-depth floor when raw
   `--sources`/`--build-info` is given**, even though the artifact operand is
   a stored snapshot. Liveness is a property of the run, not only of the

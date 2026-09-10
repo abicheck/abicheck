@@ -144,6 +144,73 @@ def sniff_text_format(path: Path) -> str:
     return "unknown"
 
 
+def is_stored_snapshot_operand(path: Path) -> bool:
+    """Is *path* an already-serialized ``AbiSnapshot``, rather than something
+    this run extracts or parses into a fresh one?
+
+    The one question the ``--depth build``/``--depth source`` evidence-contract
+    floor's carve-out should be asking (``policy.depth_evidence_contract``'s
+    "Live extraction only" note). Both `compare` paths asked
+    ``detect_binary_format(path) is not None`` instead -- "is this a native
+    binary?" -- which is a *narrower* question with a different answer for
+    every operand that is neither: a ``Module.symvers`` manifest, a bare
+    BTF/CTF blob, an ABICC Perl dump. `resolve_input` parses each of those
+    into a brand-new snapshot that structurally cannot carry L3-L5 build or
+    source evidence, yet all three read as "stored" and were exempted, so
+    ``compare --no-baseline Module.symvers --depth source`` reported a clean
+    audit with *no evidence tiers at all* and exit 0 (Codex review, P1 --
+    and the two-sided ``compare a.symvers b.symvers --depth source`` did the
+    same, so this is the shared cause, not one path's copy of it).
+
+    Only a real serialized snapshot is exempt, because only a real serialized
+    snapshot can *already carry* the pinned evidence -- and when it does not,
+    that is the separately-recorded ceiling question ("``--depth`` is a floor
+    for live extraction, not a ceiling for a pre-built snapshot"), not a
+    floor failure. Covers both shapes `resolve_input` accepts: a single
+    ``.abi.json`` file (including the gzip/zstd-compressed spellings, via
+    :func:`sniff_text_format`'s bounded decoded prefix) and a directory-backed
+    storage-v2 ``ProjectSnapshot`` package.
+
+    Errs toward "not stored" on an unreadable path, matching the callers'
+    own fail-loud direction: resolution raises a real, specific error moments
+    later, and claiming "stored" would silently *suppress* the exit-7 axis.
+    """
+    from ..project_snapshot_legacy import is_project_snapshot_package_dir
+
+    try:
+        if path.is_dir():
+            # Not every directory: a plain directory-of-libraries release
+            # operand is not a stored snapshot at all, and exempting one
+            # would be the same silent-clean-result bug in the other
+            # direction. `is_project_snapshot_package_dir` validates the
+            # package's own `manifest.json` content rather than its
+            # filename, which a `BuildSourcePack` shares.
+            return is_project_snapshot_package_dir(path)
+        return sniff_text_format(path) == "json"
+    except OSError:
+        return False
+
+
+def side_is_live(path: Path, *, had_raw_evidence: bool = False) -> bool:
+    """Whether this run *extracts* the operand at *path*, for the
+    ``--depth build``/``--depth source`` evidence-contract floor.
+
+    The one owner of the rule both `compare` forms apply, so the two-sided
+    comparison and the one-sided audit cannot answer it differently -- which
+    they did, in the same direction, for every operand that is neither a
+    native binary nor a serialized snapshot (see
+    :func:`is_stored_snapshot_operand`).
+
+    Two ways to be live, and either suffices: the operand itself is parsed
+    into a fresh snapshot, or *had_raw_evidence* says the run was given a raw
+    ``--sources`` checkout / ``--build-info`` build dir it collects L3-L5
+    facts from. The second matters even when the operand is stored -- and
+    matters *especially* then, since the inline-embed rewrites the operand
+    path to a temporary snapshot before this is asked.
+    """
+    return had_raw_evidence or not is_stored_snapshot_operand(path)
+
+
 def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
     """*path* as a directory-backed ADR-062/ADR-063 storage-v2
     `ProjectSnapshot` package (`project_snapshot_legacy

@@ -1966,13 +1966,13 @@ def run_compare(
             fmt=fmt, output=output, secondary_writes=secondary_writes,
         )
     _enrichment.report_abi3_evidence_contract_error(result, _abi3_failure)  # ADR-068 exit-7 axis
-    # ADR-068 §3 #28: closes the native CLI's own `enforce_requested_depth`
-    # gap. "Live" = a recognized binary format OR inline --sources/
-    # --build-info embedding above; a plain snapshot operand is exempt.
+    # ADR-068 §3 #28's floor; `side_is_live` owns "did this run extract it?"
+    # for both `compare` forms -- its docstring has the whole account.
+    from .workflows.input_resolution import side_is_live
     _enrichment.report_depth_evidence_contract_error(
         result, depth, old, new,
-        old_is_live=old_fmt is not None or old_had_raw_evidence,
-        new_is_live=new_fmt is not None or new_had_raw_evidence,
+        old_is_live=side_is_live(old_input, had_raw_evidence=old_had_raw_evidence),
+        new_is_live=side_is_live(new_input, had_raw_evidence=new_had_raw_evidence),
     )
     _report_compare_result(
         ctx, result, old, new,

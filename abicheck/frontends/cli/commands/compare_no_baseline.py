@@ -43,6 +43,7 @@ from ....report.no_baseline import (
 from ....workflows.no_baseline_compare import (
     NoBaselineCompareResult,
     candidate_is_live_artifact,
+    candidate_is_stored_snapshot,
     public_header_sets_for_candidate,
     resolve_no_baseline_candidate,
     run_no_baseline_compare,
@@ -70,7 +71,6 @@ __all__ = ["maybe_dispatch_no_baseline_compare"]
 #: :mod:`abicheck.report.no_baseline` -- the report layer decides what it
 #: can project; this module only translates that into a Click error.
 _SUPPORTED_FORMATS = NO_BASELINE_SUPPORTED_FORMATS
-
 
 
 @dataclass(frozen=True)
@@ -180,10 +180,19 @@ def maybe_dispatch_no_baseline_compare(
         )
     candidate = kwargs.pop("old_input")
     kwargs.pop("new_input", None)
-    if candidate.is_dir():
+    if candidate.is_dir() and not candidate_is_stored_snapshot(candidate):
+        # Narrowed from a blanket `is_dir()` check: a directory-backed
+        # storage-v2 `ProjectSnapshot` package *is* a single artifact --
+        # `resolve_input` decodes one into exactly one `AbiSnapshot`, and a
+        # two-sided `compare` accepts it -- so rejecting it made the same
+        # stored snapshot acceptable as a `.abi.json` file and refused in the
+        # repository's own package form (Codex review, P2). What stays
+        # rejected is a *release* directory of several libraries, which needs
+        # the per-library fan-out this path does not have yet (plan row F-23).
         raise click.UsageError(
-            "--no-baseline does not support a directory/package operand yet "
-            "-- pass a single artifact (a binary or a stored snapshot)."
+            "--no-baseline does not support a directory of libraries yet "
+            "-- pass a single artifact (a binary, a stored snapshot, or a "
+            "ProjectSnapshot package directory)."
         )
     _reject_view_tokens_for_no_baseline(kwargs)
     _run_no_baseline_compare_cmd(ctx, candidate, **kwargs)
