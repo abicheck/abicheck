@@ -33,7 +33,12 @@ import pytest
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot
-from abicheck.report.build import build_report_document, build_report_envelope
+from abicheck.policy_file import PolicyFile
+from abicheck.report.build import (
+    _snapshot_change,
+    build_report_document,
+    build_report_envelope,
+)
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.report.document import ReportDocument
 from abicheck.report.envelope import RenderOptions, ReportEnvelope
@@ -598,6 +603,31 @@ class TestRendererOrderIndependence:
                 "Change object after the envelope was already built"
             )
 
+    def test_snapshot_change_decouples_a_nested_mutable_field(self) -> None:
+        """Codex review, fresh evidence: a shallow per-field list copy still
+        shares the *elements* of a nested container. ``impact_proof_path``
+        is ``list[dict[str, object]]`` -- copying the outer list decouples
+        appends/reassignment of the whole field, but mutating
+        ``impact_proof_path[0]["label"]`` in place would still reach both
+        the original and the "snapshot" through the same shared dict.
+        ``_snapshot_change`` is a primitive with its own contract
+        (independent of any one caller), so it gets its own direct test
+        rather than only an envelope-level one.
+        """
+        original = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "removed",
+            impact_proof_path=[{"label": "original"}],
+        )
+        snapshot = _snapshot_change(original)
+        assert snapshot.impact_proof_path is not None
+        assert snapshot.impact_proof_path[0] is not original.impact_proof_path[0]
+
+        original.impact_proof_path[0]["label"] = "mutated"
+
+        assert snapshot.impact_proof_path[0]["label"] == "original"
+
     def test_mutating_a_shared_dict_attribute_after_construction_cannot_reach_the_envelope(
         self,
     ) -> None:
@@ -672,6 +702,73 @@ class TestRendererOrderIndependence:
 
         compute_exit_code_spy.assert_not_called()
         assert "blocked by severity policy" in digest
+
+    def test_sarif_level_reuses_the_envelope_s_finding_not_a_live_policy_file(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: SARIF's own ``_severity`` read
+        ``result.policy_file``/``result.policy`` directly for every result --
+        live, shared state a caller could still mutate after the envelope
+        was already built, even though ``build.py``'s snapshot decouples
+        every list/tuple/dict attribute and every ``Change`` object.
+        Mutating ``PolicyFile.overrides`` after construction (escalating a
+        ``FUNC_ADDED`` to ``BREAKING``) must not change SARIF's ``level``
+        for a finding the envelope already resolved as ``COMPATIBLE``.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        policy_file = PolicyFile()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[addition],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        policy_file.overrides[ChangeKind.FUNC_ADDED] = Verdict.BREAKING
+
+        sarif = to_sarif(envelope.result, envelope=envelope)
+        levels = {r["level"] for r in sarif["runs"][0]["results"]}
+        assert "error" not in levels, (
+            "SARIF re-derived a finding's level from a PolicyFile mutated "
+            "after the envelope was already built"
+        )
+
+    def test_mutating_the_caller_s_snapshots_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``envelope.old``/``envelope.new``
+        were the caller's own, still-live ``AbiSnapshot`` operands.
+        ``build_report_document`` never reads them (JSON's version strings
+        come from ``result.old_version``/``new_version``, already immune),
+        but HTML's own version fields are read straight from ``envelope.
+        old``/``envelope.new`` -- reassigning ``old.version`` after
+        construction must not reach it.
+        """
+        result = _result([])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.old is not old and envelope.new is not new, (
+            "the envelope shared the caller's own AbiSnapshot objects"
+        )
+
+        old.version = "9.9.9-mutated"
+        new.version = "9.9.9-mutated"
+
+        assert envelope.old.version == "1.0"
+        assert envelope.new is not None and envelope.new.version == "2.0"
+
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            assert "9.9.9-mutated" not in rendered[fmt], (
+                f"{fmt!r} reported a version mutated on the caller's own "
+                "AbiSnapshot after the envelope was already built"
+            )
 
 
 class TestSarifAndJunitDecisionBoundary:

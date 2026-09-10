@@ -69,6 +69,7 @@ from abicheck.reporter_markdown import (
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
+    from abicheck.report.finding import ReportFinding
     from abicheck.severity import GateDecision, SeverityConfig
 
 # ---------------------------------------------------------------------------
@@ -101,6 +102,8 @@ def _severity(
     change: Change,
     result: DiffResult,
     severity_config: SeverityConfig | None = None,
+    *,
+    finding: ReportFinding | None = None,
 ) -> str:
     """Return the SARIF ``level`` for *change*.
 
@@ -126,21 +129,36 @@ def _severity(
     the coarser per-kind default severity from the policy registry, which is
     intentionally finer-grained than the 4-way verdict table (e.g.
     distinguishing "warning" additions from "note"-worthy ones).
+
+    *finding* (ADR-061 gap C), when given, is this change's already-resolved
+    :class:`~abicheck.report.finding.ReportFinding`: its ``category``/
+    ``verdict`` are used directly instead of re-deriving them from live,
+    mutable ``result`` state a caller could change between two projections
+    of one envelope (Codex review: a ``PolicyFile.overrides`` mutation
+    disagreed with the envelope's own frozen finding). A direct caller with
+    no envelope keeps the prior recompute.
     """
     if severity_config is not None:
-        from abicheck.severity import classify_effective_change
+        if finding is not None:
+            category = finding.category
+        else:
+            from abicheck.severity import classify_effective_change
 
-        category = classify_effective_change(
-            change,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+            category = classify_effective_change(
+                change,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+            )
         level = severity_config.level_for(category)
         return _SEVERITY_LEVEL_TO_SARIF.get(level.value, "warning")
 
     entry = policy_for(change.kind)
-    verdict = result._effective_verdict_for_change(change)
+    verdict = (
+        finding.verdict
+        if finding is not None
+        else result._effective_verdict_for_change(change)
+    )
     if verdict != entry.default_verdict:
         return _VERDICT_TO_SARIF_LEVEL.get(verdict, entry.severity)
     return entry.severity
@@ -350,8 +368,12 @@ def _result_for(
     root_cause: tuple[str, str] | None = None,
     impact_root_cause: tuple[str, str] | None = None,
     impact_root_cause_evidence: dict[str, object] | None = None,
+    finding: ReportFinding | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
+
+    *finding* (ADR-061 gap C), when given, is forwarded to :func:`_severity`
+    unchanged -- see that function's own docstring for what it drives.
 
     *root_cause*, when given (``--report-mode root-cause``, G29 Phase 3
     slice 5, ADR-052), is this finding's ``(root_cause_id, root_display)``
@@ -470,7 +492,7 @@ def _result_for(
     relevance = contract_relevance_of(change)
     properties.update(_contract_properties(change, relevance, result, severity_config))
 
-    level = _severity(change, result, severity_config)
+    level = _severity(change, result, severity_config, finding=finding)
     # ADR-049 D1/D9: compatibility policy did not score this finding, so it
     # contributed nothing to the verdict or the exit code -- emitting
     # `level: "error"` for it published a SARIF run whose annotations say
@@ -834,6 +856,20 @@ def to_sarif(
     # library verdict (CLI-audit P1 fix); None means no scoping is active, so
     # _result_for's existing full-library severity computation is unchanged.
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
+    # ADR-061 gap C: resolve every finding this loop (and the two below) needs
+    # through the completed envelope, keyed by id(change) -- `_severity`'s
+    # `finding=` reads `.category`/`.verdict` from here rather than
+    # re-deriving them from `result`'s live, mutable `policy_file`/`policy`
+    # (Codex review). `findings_for` resolves an unindexed change (e.g. a
+    # suppressed one) the same way its per-change fallback always has.
+    finding_by_id: dict[int, ReportFinding] = {}
+    if envelope is not None:
+        finding_by_id = {
+            id(f.change): f
+            for f in envelope.findings_for(
+                [*changes, *result.suppressed_changes, *scoped_only_changes]
+            )
+        }
     for change in changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
@@ -852,6 +888,7 @@ def to_sarif(
                 ),
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
+                finding=finding_by_id.get(id(change)),
             )
         )
 
@@ -877,7 +914,9 @@ def to_sarif(
         rule_id = change.kind.value
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
-        suppressed_result = _result_for(change, result, severity_config)
+        suppressed_result = _result_for(
+            change, result, severity_config, finding=finding_by_id.get(id(change))
+        )
         suppressed_result["suppressions"] = [
             {
                 "kind": "external",
@@ -913,6 +952,7 @@ def to_sarif(
                 ),
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
+                finding=finding_by_id.get(id(change)),
             )
         )
 

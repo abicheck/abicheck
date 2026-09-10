@@ -206,7 +206,7 @@ def build_report_document(
 
 
 def _snapshot_change(change: Change) -> Change:
-    """One shallow, list-decoupled copy of a single finding.
+    """A fully independent copy of a single finding.
 
     ``Change`` is an ordinary mutable dataclass, not a value type -- pattern
     modulation legitimately sets ``effective_verdict`` on one *during*
@@ -216,18 +216,25 @@ def _snapshot_change(change: Change) -> Change:
     by ``document``/``findings`` (frozen at that value) while a projection
     that classifies straight from ``envelope.result`` would read the new
     one -- the same class of disagreement :func:`_snapshot_diff_result`
-    closes for the containing lists, one level down. Copying the object
-    itself decouples every scalar/reference field from a later reassignment;
-    copying its own list-valued fields (e.g. ``affected_symbols``) decouples
-    those from a later in-place mutation too.
+    closes for the containing lists, one level down.
+
+    A full ``copy.deepcopy`` rather than a shallow copy of just the
+    top-level list fields: several fields nest a mutable container inside
+    another (``impact_proof_path: list[dict[str, object]]``,
+    ``impact_alternative_paths: list[list[dict[str, object]]]``) -- a
+    shallow per-field list copy decouples the outer list but still shares
+    the dicts inside it, so mutating ``impact_proof_path[0]["label"]`` after
+    construction would reach the envelope exactly as reassigning
+    ``effective_verdict`` did before this fix (Codex review, fresh
+    evidence). Every field ``Change`` actually carries is plain,
+    self-contained data (strings, enums, nested frozen dataclasses like
+    ``ImpactAssessment``, dicts/lists of the same) -- nothing here holds a
+    reference to another large shared object (an ``AbiSnapshot``, a
+    ``PolicyFile``) that a deep copy would wastefully duplicate.
     """
     import copy
 
-    snapshot = copy.copy(change)
-    for name, value in vars(change).items():
-        if isinstance(value, list):
-            setattr(snapshot, name, list(value))
-    return snapshot
+    return copy.deepcopy(change)
 
 
 def _snapshot_diff_result(result: DiffResult) -> DiffResult:
@@ -311,11 +318,22 @@ def build_report_envelope(
     a caller does to the object it passed in after this call returns can
     ever reach the envelope -- every decision below, and every projection
     that reads ``envelope.result`` directly, is computed from that one
-    frozen-in-effect copy.
+    frozen-in-effect copy. *old*/*new* get the identical treatment: they are
+    the public multi-format workflow's own retained operands, read directly
+    by more than one projection (HTML's/JSON's version and dependency-info
+    fields, JUnit's unchanged-testcase set) that ``build_report_document``
+    itself never touches -- reassigning ``old.version`` or mutating
+    ``old.functions`` after this call returned would otherwise desynchronize
+    exactly those projections from one another (Codex review, fresh
+    evidence).
     """
+    import copy
+
     from ..policy.gate_decision import gate_decision_for_result
 
     result = _snapshot_diff_result(result)
+    old = copy.deepcopy(old)
+    new = copy.deepcopy(new) if new is not None else None
     opts = options if options is not None else RenderOptions()
     gate = gate_decision_for_result(result, severity_config)
     document = build_report_document(
