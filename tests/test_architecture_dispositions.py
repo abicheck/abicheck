@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 from scripts.check_architecture import check_repository
-from tests.test_architecture_check import _rules, _tree, _write
+from tests.test_architecture_check import _add_package, _rules, _tree, _write
 
 
 def test_debt_entry_missing_disposition_fails_schema(tmp_path: Path) -> None:
@@ -229,6 +229,81 @@ def test_disposition_unknown_target_layer_fails_schema(tmp_path: Path) -> None:
                 "target_layer": "nonexistent",
                 "slice": "model/orphan.py",
                 "rationale": "exercise an unknown target layer",
+                "owner": "test",
+                "review_by": "2099-01-01",
+            }
+        ],
+    }
+    _write(root / "architecture/dispositions.yaml", json.dumps(dispositions))
+
+    assert "schema" in _rules(root)
+
+
+def test_disposition_nested_path_fails_schema(tmp_path: Path) -> None:
+    """CodeRabbit/Codex review (PR #1189): a disposition path must name a
+    direct ``abicheck/*.py`` root module, not a nested package path -- the
+    coverage loop only ever scans root files, so a nested path would pass
+    schema validation while covering nothing real."""
+    root = _tree(tmp_path)
+    _add_package(root, "model")
+    _write(root / "abicheck/model/value.py", "VALUE = 1\n")
+    dispositions = {
+        "schema_version": 1,
+        "modules": [
+            {
+                "path": "abicheck/model/value.py",
+                "disposition": "accept",
+                "reason": "exercise a nested path",
+                "owner": "test",
+                "review_by": "2099-01-01",
+            }
+        ],
+    }
+    _write(root / "architecture/dispositions.yaml", json.dumps(dispositions))
+
+    assert "schema" in _rules(root)
+
+
+def test_disposition_nonexistent_path_fails_schema(tmp_path: Path) -> None:
+    """CodeRabbit/Codex review (PR #1189): a disposition entry for a module
+    that doesn't exist must fail schema validation, not silently satisfy the
+    completion check -- a deleted/renamed module's stale entry must be
+    caught, not read as still-valid coverage."""
+    root = _tree(tmp_path)
+    dispositions = {
+        "schema_version": 1,
+        "modules": [
+            {
+                "path": "abicheck/typo.py",
+                "disposition": "accept",
+                "reason": "exercise a nonexistent path",
+                "owner": "test",
+                "review_by": "2099-01-01",
+            }
+        ],
+    }
+    _write(root / "architecture/dispositions.yaml", json.dumps(dispositions))
+
+    assert "schema" in _rules(root)
+
+
+def test_disposition_non_string_target_layer_fails_schema_without_crashing(
+    tmp_path: Path,
+) -> None:
+    """Codex review (PR #1189): a non-string ``target_layer`` (e.g. a JSON
+    list) must not crash the checker with an unhashable-type error -- it
+    must report a schema finding like any other malformed value."""
+    root = _tree(tmp_path)
+    _write(root / "abicheck/orphan.py", "VALUE = 1\n")
+    dispositions = {
+        "schema_version": 1,
+        "modules": [
+            {
+                "path": "abicheck/orphan.py",
+                "disposition": "migrate",
+                "target_layer": ["model"],
+                "slice": "model/orphan.py",
+                "rationale": "exercise a non-string target layer",
                 "owner": "test",
                 "review_by": "2099-01-01",
             }

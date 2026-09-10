@@ -451,6 +451,7 @@ def _validate_dispositions(
     config: dict[str, Any],
     layers: Mapping[str, dict[str, Any]],
     findings: list[Finding],
+    root: Path,
 ) -> set[str]:
     """Validate ``architecture/dispositions.yaml`` (ADR-061 gap F).
 
@@ -486,9 +487,20 @@ def _validate_dispositions(
         path = _safe_relative_path(raw.get("path"), f"{where}.path", findings)
         if path is None:
             ok = False
-        elif not path.startswith("abicheck/") or not path.endswith(".py"):
+        elif PurePosixPath(path).parent != PurePosixPath(
+            "abicheck"
+        ) or not path.endswith(".py"):
             findings.append(
-                Finding("schema", f"{where}.path: must name an abicheck Python module")
+                Finding(
+                    "schema",
+                    f"{where}.path: must name a direct abicheck/*.py root module "
+                    "(not a nested package path)",
+                )
+            )
+            ok = False
+        elif not (root / path).is_file():
+            findings.append(
+                Finding("schema", f"{where}.path: module {path!r} does not exist")
             )
             ok = False
         elif path in seen:
@@ -525,11 +537,14 @@ def _validate_dispositions(
                     Finding("schema", f"{where}.{field}: must be non-empty")
                 )
                 ok = False
-        if disposition == "migrate" and raw.get("target_layer") not in layers:
+        target_layer = raw.get("target_layer")
+        if disposition == "migrate" and (
+            not isinstance(target_layer, str) or target_layer not in layers
+        ):
             findings.append(
                 Finding(
                     "schema",
-                    f"{where}.target_layer: unknown layer {raw.get('target_layer')!r}",
+                    f"{where}.target_layer: unknown layer {target_layer!r}",
                 )
             )
             ok = False
@@ -991,7 +1006,9 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
         root / "architecture/dispositions.yaml", findings
     )
     layers = _validate_modules(modules, findings)
-    disposition_paths = _validate_dispositions(dispositions_config, layers, findings)
+    disposition_paths = _validate_dispositions(
+        dispositions_config, layers, findings, root
+    )
     _check_selector_leaf_purity(root, findings)
     limits = modules.get("limits", {})
     production_limit = (
