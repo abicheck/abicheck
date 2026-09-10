@@ -253,7 +253,8 @@ class TestRejectUnsupportedAgainstOperand:
             reject_unsupported_against_operand,
         )
 
-        reject_unsupported_against_operand(None)  # must not raise
+        result = reject_unsupported_against_operand(None)  # must not raise
+        assert result is None
 
     def test_a_project_snapshot_package_is_accepted(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.scan_against import (
@@ -262,7 +263,8 @@ class TestRejectUnsupportedAgainstOperand:
 
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         root = _write_package(tmp_path, snap)
-        reject_unsupported_against_operand(root)  # must not raise
+        result = reject_unsupported_against_operand(root)  # must not raise
+        assert result is None
 
     def test_a_plain_directory_is_rejected(self, tmp_path: Path) -> None:
         from abicheck.frontends.cli.scan_against import (
@@ -281,7 +283,8 @@ class TestRejectUnsupportedAgainstOperand:
 
         f = tmp_path / "snap.json"
         f.write_text("{}", encoding="utf-8")
-        reject_unsupported_against_operand(f)  # must not raise
+        result = reject_unsupported_against_operand(f)  # must not raise
+        assert result is None
 
 
 class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
@@ -294,7 +297,8 @@ class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
 
     def test_a_fresh_nonexistent_root_is_accepted(self, tmp_path: Path) -> None:
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
-        _write_package(tmp_path, snap)  # must not raise
+        root = _write_package(tmp_path, snap)  # must not raise
+        assert root.exists()
 
     def test_an_existing_empty_root_is_accepted(self, tmp_path: Path) -> None:
         from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
@@ -308,6 +312,7 @@ class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
             artifact_id=snap.library,
             max_known_schema_version=SCHEMA_VERSION,
         )  # must not raise
+        assert any(root.iterdir())
 
     def test_republishing_into_an_existing_package_is_refused(
         self, tmp_path: Path

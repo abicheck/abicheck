@@ -3119,7 +3119,7 @@ class TestRejectOversizedDeclaredContent:
             def __iter__(self):  # type: ignore[no-untyped-def]
                 return iter(self.getmembers())
 
-        _reject_oversized_declared_content(_FakeTarFile())  # type: ignore[arg-type]
+        assert _reject_oversized_declared_content(_FakeTarFile()) is None  # type: ignore[arg-type]
 
     def test_rejects_when_member_count_exceeds_the_limit(
         self, monkeypatch: pytest.MonkeyPatch
