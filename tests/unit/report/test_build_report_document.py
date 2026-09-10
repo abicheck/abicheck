@@ -484,6 +484,54 @@ class TestRendererOrderIndependence:
                 f"envelope ({after[target] - build_calls[target]} extra call(s))"
             )
 
+    def test_mutating_the_caller_s_result_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """A live handle on the ``DiffResult`` passed in must not leak.
+
+        Every projection above reads ``envelope.result`` directly for its own
+        presentation (HTML's/JUnit's bucketing, SARIF's rule catalog), not
+        only through ``document``/``findings``/``gate``. If the envelope held
+        the caller's own, still-mutable ``DiffResult`` object, a later
+        mutation of it -- appending a change, as a caller/sibling pass in
+        this codebase legitimately does elsewhere (``post_manifest.py``), or
+        reassigning ``.changes`` wholesale (``cli_scan_baseline.py``) --
+        would desynchronize those direct readers from the document/findings/
+        gate the envelope already froze, defeating the whole point of
+        building one envelope and projecting it into several formats
+        (reported by an external review of this refactor). This test
+        reproduces exactly that scenario: mutate the original object *after*
+        the envelope was built, then confirm every projection still reports
+        the pre-mutation state.
+        """
+        result = _result([])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        # Mutate the caller's own object after envelope construction: append
+        # a breaking change (the concrete scenario reported), and separately
+        # reassign `.changes` outright to prove reassignment can't leak in
+        # either.
+        result.changes.append(_BREAKING)
+        result.changes = [_BREAKING, _ADDITION]
+
+        assert envelope.result.changes == [], (
+            "the envelope's own result mutated when the caller's did"
+        )
+        assert envelope.document.to_mapping()["changes"] == [], (
+            "the frozen document disagreed with the envelope's own result"
+        )
+        assert envelope.findings == (), (
+            "findings disagreed with the envelope's own (unmutated) result"
+        )
+
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            assert "_Z3foov" not in rendered[fmt], (
+                f"{fmt!r} rendered a change appended to the caller's DiffResult "
+                "after the envelope was already built"
+            )
+
 
 class TestSarifAndJunitDecisionBoundary:
     """ADR-061 Phase 2 gap C acceptance test: a guard for SARIF's and

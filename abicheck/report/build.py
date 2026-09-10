@@ -204,6 +204,43 @@ def build_report_document(
     )
 
 
+def _snapshot_diff_result(result: DiffResult) -> DiffResult:
+    """Return a copy of *result* with every list-valued attribute replaced.
+
+    :class:`ReportEnvelope` exists so a decision made once cannot drift by
+    the time a later projection reads it -- but ``DiffResult`` itself is an
+    ordinary mutable dataclass (``contract_pipeline``/``post_manifest``
+    legitimately append to ``.changes`` *during* ``compare()``, and
+    ``cli_scan_baseline`` reassigns it afterward for its own filtering
+    pass). A caller handing this same, still-live object to a later,
+    unrelated mutation after the envelope was built would otherwise
+    desynchronize ``document``/``findings``/``gate`` (built from the
+    original list) from any projection that reads ``envelope.result``
+    directly for presentation (HTML's/JUnit's bucketing, SARIF's rule
+    catalog) -- the exact case ``report/AGENTS.md``'s immutability
+    contract for this envelope forbids.
+
+    ``copy.copy`` (not ``dataclasses.replace``) on purpose: some scoping
+    passes (``cli_helpers_compare.py``'s ``result.scoped_only_changes =
+    ...``) attach attributes that are not declared ``DiffResult`` fields at
+    all; ``dataclasses.replace`` reconstructs the object through
+    ``__init__`` and would silently drop them, while ``copy.copy`` carries
+    every attribute in ``__dict__``, declared or not. Only *list*-valued
+    attributes get a fresh list -- the ``Change``/other elements inside are
+    still shared by reference (their identity is how ``findings_for``
+    indexes them), only the containers are independent, and a tuple-valued
+    attribute (e.g. ``scoped_only_changes``) is already immune to in-place
+    mutation and needs no copy.
+    """
+    import copy
+
+    snapshot = copy.copy(result)
+    for name, value in vars(result).items():
+        if isinstance(value, list):
+            setattr(snapshot, name, list(value))
+    return snapshot
+
+
 def build_report_envelope(
     result: DiffResult,
     old: AbiSnapshot,
@@ -220,9 +257,16 @@ def build_report_envelope(
     and handed to the document build, so the document's own ``severity``
     block and the decision object SARIF's and HTML's gate blocks read are
     literally the same object rather than two calls that agree.
+
+    *result* is snapshotted first (:func:`_snapshot_diff_result`) so nothing
+    a caller does to the object it passed in after this call returns can
+    ever reach the envelope -- every decision below, and every projection
+    that reads ``envelope.result`` directly, is computed from that one
+    frozen-in-effect copy.
     """
     from ..policy.gate_decision import gate_decision_for_result
 
+    result = _snapshot_diff_result(result)
     opts = options if options is not None else RenderOptions()
     gate = gate_decision_for_result(result, severity_config)
     document = build_report_document(
