@@ -445,6 +445,12 @@ only_mutate = [
     # is now a re-export facade with no logic of its own, so mutating it
     # would exercise nothing.
     "abicheck/policy/classification.py",
+    # per-finding epistemic status / cross-comparison evolution -- moved from
+    # abicheck/checker_policy.py to abicheck/policy/evidence_status.py by the
+    # same ADR-061 gap B split (EvidenceTier.rank, is_cross_source_resolved,
+    # has_binary_evidence: reporting/gate-contribution logic, not covered by
+    # policy/classification.py above).
+    "abicheck/policy/evidence_status.py",
     "abicheck/idioms.py",  # ADR-027 idiom & anti-pattern recognisers
     "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
     "abicheck/surface_graph.py",  # ADR-027 declaration-graph substrate

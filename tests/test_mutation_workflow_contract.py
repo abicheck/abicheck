@@ -503,6 +503,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_action_collect_facts.py": frozenset(
         {
             "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
@@ -511,6 +512,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_action_check_target.py": frozenset(
         {
             "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.finding_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
@@ -524,6 +526,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_action_run_sh_annotate_renderer.py": frozenset(
         {
             "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
@@ -542,6 +545,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_action_run_sh_compare_pr_json_write.py": frozenset(
         {
             "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
@@ -562,6 +566,7 @@ _ACCEPTED_KILL_LOSS = {
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
             "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
