@@ -65,6 +65,10 @@ def _tree(tmp_path: Path) -> Path:
         tmp_path / "architecture/debt.yaml",
         json.dumps({"schema_version": 1, "files": []}),
     )
+    _write(
+        tmp_path / "architecture/dispositions.yaml",
+        json.dumps({"schema_version": 1, "modules": []}),
+    )
     _write(tmp_path / "abicheck/__init__.py")
     return tmp_path
 
@@ -151,6 +155,7 @@ def test_debt_baseline_cannot_grow(tmp_path: Path) -> None:
                 "baseline_lines": 9,
                 "target": "model",
                 "rule": "no_growth",
+                "disposition": "migrate",
                 "category": "legacy_monolith",
                 "owner": "maintainers",
                 "rationale": "Move it as a tested vertical slice.",
@@ -179,6 +184,7 @@ def test_concurrent_growth_already_on_pr_base_is_not_attributed_to_branch(
                 "baseline_lines": 9,
                 "target": "model",
                 "rule": "no_growth",
+                "disposition": "migrate",
                 "category": "legacy_monolith",
                 "owner": "maintainers",
                 "rationale": "Move it as a tested vertical slice.",
@@ -208,6 +214,7 @@ def test_branch_growth_beyond_pr_base_still_fails(tmp_path: Path, monkeypatch) -
                 "baseline_lines": 9,
                 "target": "model",
                 "rule": "no_growth",
+                "disposition": "migrate",
                 "category": "legacy_monolith",
                 "owner": "maintainers",
                 "rationale": "Move it as a tested vertical slice.",
@@ -239,6 +246,7 @@ def test_initial_adoption_accepts_concurrent_pre_contract_growth(
                 "baseline_lines": 9,
                 "target": "model",
                 "rule": "no_growth",
+                "disposition": "migrate",
                 "category": "legacy_monolith",
                 "owner": "maintainers",
                 "rationale": "Move it as a tested vertical slice.",
@@ -283,6 +291,7 @@ def test_new_ordinary_file_cannot_claim_adoption_debt(
                 "baseline_lines": 10,
                 "target": "model",
                 "rule": "no_growth",
+                "disposition": "migrate",
                 "category": "legacy_monolith",
                 "owner": "maintainers",
                 "rationale": "Not actually adoption-era debt.",
@@ -549,6 +558,7 @@ def test_invalid_debt_path_and_review_date_fail_schema(tmp_path: Path) -> None:
                 "baseline_lines": 8,
                 "target": "model",
                 "rule": "no_growth",
+                "disposition": "migrate",
                 "category": "legacy",
                 "owner": "maintainers",
                 "rationale": "legacy",
