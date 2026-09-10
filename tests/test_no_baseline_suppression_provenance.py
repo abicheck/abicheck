@@ -20,7 +20,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # noqa: S405  # nosec B405 (trusted test data)
 from pathlib import Path
 
 import pytest
