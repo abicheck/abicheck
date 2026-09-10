@@ -5666,16 +5666,53 @@ looked like the obvious fix and wasn't.
   `TestStdAllocatorSyntheticKeyNotFalselyDemoted` for the exact
   counterexample from review, reproduced and fixed.
 
-  Two related residuals from the same report, deliberately not addressed
-  here: the *type-level* churn among these same symbols (the compatible
-  `func_added`/risk `declaration_renamed` findings the same 5 removals
-  pair with, and 7 further `declaration_renamed` findings elsewhere in the
-  same report) is pure noise from the lambda's identity embedding its
+  Two related residuals from the same report. The compatible `func_added`
+  churn is ordinary add/remove pairing (not itself a bug), left as-is.
+
+  ~~The risk `declaration_renamed` findings elsewhere in the same report (7
+  further ones) is pure noise from the lambda's identity embedding its
   source `line:col` rather than an ordinal position — closing that needs
   changing how a closure is *identified*, a materially larger change to
-  `name_classification`/the castxml and clang backends' own closure
-  naming than this fix's binary-evidence check, and is not attempted
-  here. And a public-surface filter gap (ELF-only, mangled-only symbols
+  `name_classification`/the castxml and clang backends' own closure naming
+  than this fix's binary-evidence check, and is not attempted here.~~
+  **Update: fixed, narrower than the originally-scoped "change how a
+  closure is identified" (fresh report, real oneTBB 2021.12.0 -> 2023.0.0,
+  139 `declaration_renamed` L5 findings against oneDNN's 3 for a comparable
+  corpus size).** Tracing a representative sample confirmed the same
+  mechanism this entry already names: `buildsource.graph_reconcile`'s
+  structural-context tier correctly PAIRS an unrelated-edit-shifted
+  closure with its own unchanged predecessor (that matching evidence never
+  reads the coordinate text at all), but `_classify_outcome` then compared
+  the two nodes' *literal* qualified-name spelling — which embeds the
+  closure's own `:line:col` — to decide "renamed", so every closure an
+  unrelated header edit merely shifted read as a rename. Rather than the
+  originally-scoped identity-naming rewrite (which risks the exact
+  same-header-collision trade-off `strip_anonymous_type_location`'s own
+  docstring documents for *matching*), the actual fix is narrower and
+  provably safe: `model.graph_identity.closure_location_free_identity`
+  drops a closure/anonymous-tag marker's basename+coordinates entirely (not
+  merely the checkout-root prefix `_normalize_graph_identity` already
+  strips) for the *outcome-classification* comparison only, never for
+  matching/merging — the pair was already established by tier evidence that
+  never consults this text, so no new merge rides on it, and a genuine
+  cross-file move is still caught by the separate, coordinate-text-blind
+  `old_file`/`new_file` check right below it (reclassifying it
+  `declaration_moved` instead of the misleading `declaration_renamed`,
+  never hiding the file change). See
+  `tests/test_graph_reconcile_closure_rename.py` — both the oneTBB-shaped
+  regression cases and a standalone property-test class for the new
+  primitive (idempotence, location/basename invariance, parenthesized/bare
+  spelling agreement, marker-kind non-collapse, never-raises on arbitrary
+  text) per this file's own "Primitive-level property tests" guidance,
+  since this is a reusable identity-comparison helper, not a one-off
+  patch. The separate, still-open gap about the L5 graph's own node *ids*
+  not sharing the flat snapshot's ordinal renumbering (this file's own
+  "The L5 source graph's own node identities are never renumbered..."
+  entry, elsewhere in this file) is unaffected by this fix — it is about
+  node-id/flat-field spelling agreement, not the rename-vs-not-renamed
+  classification this fix corrects.
+
+  And a public-surface filter gap (ELF-only, mangled-only symbols
   such as `std::once_flag::_Prepare_execution<lambda>`'s internal guard
   thunks, which `surface.py` cannot scope-classify because it never
   demangles) is a separate detector, not this one, and is likewise not

@@ -104,6 +104,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ..model.graph_identity import closure_location_free_identity
 from .entity_identity import (
     IDENTITY_TIER_CANONICAL,
     CanonicalIdentity,
@@ -408,7 +409,24 @@ def _classify_outcome(
         _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
         or new_declaring_file
     )
-    renamed = bool(old_qn) and bool(new_qn) and old_qn != new_qn
+    # A closure/anonymous-tag's qualified-name spelling embeds its own
+    # source coordinates (`(lambda:foo.h:4:37)`) -- an unrelated edit
+    # elsewhere in the same header shifts an otherwise-unchanged closure to
+    # a new line, which literal `old_qn != new_qn` alone reads as a genuine
+    # rename. Comparing the coordinate-free form instead asks the actual
+    # question this outcome cares about: did anything *other* than the
+    # closure's incidental position change? A real declaring-file move is
+    # still caught below via `old_file`/`new_file`, which never derives from
+    # this marker text -- see `closure_location_free_identity`'s own
+    # docstring for why dropping the discriminator here is safe (this pair
+    # was already matched by canonical-id/alias/structural-context evidence
+    # that never consults this comparison; no new merge rides on it).
+    renamed = (
+        bool(old_qn)
+        and bool(new_qn)
+        and closure_location_free_identity(old_qn)
+        != closure_location_free_identity(new_qn)
+    )
     moved = bool(old_file) and bool(new_file) and old_file != new_file
     if renamed and not moved:
         return OUTCOME_RENAMED
