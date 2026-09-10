@@ -103,7 +103,7 @@ class TestBundleFactsArchiveResourceLimits:
         identical aggregate cap now too (see the sibling write-side test
         below), so writing under the already-lowered cap would raise here
         instead of at load."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
 
         metadata = {
             f"lib{i}.so": _meta(soname=f"lib{i}.so", exports=[f"sym{i}"])
@@ -129,7 +129,7 @@ class TestBundleFactsArchiveResourceLimits:
         review, fresh evidence: ~150MB RSS from a 6MB payload of ~2M empty
         objects). A small monkeypatched budget makes this fast to exercise
         without actually allocating at that scale."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
@@ -162,7 +162,7 @@ class TestBundleFactsArchiveResourceLimits:
         `storage.json_budget` pre-scan counts both container shapes into
         one combined budget, so this must raise the identical way the
         object-node test above does."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         monkeypatch.setattr(bundle_facts_module, "DEFAULT_MAX_JSON_OBJECT_NODES", 100)
@@ -322,7 +322,7 @@ class TestBundleFactsArchiveResourceLimits:
         exercises the reader's *independent* enforcement of the same cap
         -- e.g. against a manifest hand-crafted or written by an older,
         less-strict writer."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
         from abicheck.storage.bundle_archive import (
             BundleArchiveReader,
             BundleArchiveWriter,
@@ -425,7 +425,7 @@ class TestBundleFactsArchiveResourceLimits:
         would let it through -- must fail on write, before producing an
         archive its own paired reader would refuse to reopen (Codex
         review, fresh evidence)."""
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
 
         monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3)
         shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
@@ -447,8 +447,8 @@ class TestBundleFactsArchiveResourceLimits:
         serialize that same payload once per name (possibly terabytes of
         work) before ever getting a chance to reject the write (Codex
         review, fresh evidence)."""
-        import abicheck.bundle_facts as bundle_facts_module_local
         import abicheck.serialization as serialization_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
 
         monkeypatch.setattr(bundle_facts_module_local, "DEFAULT_MAX_LIBRARY_COUNT", 3)
         serialize_calls = 0
@@ -483,7 +483,7 @@ class TestBundleFactsArchiveResourceLimits:
         aggregate limit in live Python objects alone. Each duplicate's own
         copy must be charged against the same budget too (Codex review,
         fresh evidence)."""
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
 
         shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
         facts = BundleFacts(
@@ -510,7 +510,7 @@ class TestBundleFactsArchiveResourceLimits:
         counted the way the reader counts it on load, publishing an
         archive its own paired reader would then refuse to reopen (Codex
         review, fresh evidence)."""
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
 
         shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
         facts = BundleFacts(
@@ -541,7 +541,7 @@ class TestBundleFactsArchiveResourceLimits:
         evidence). Confirmed here by counting `snapshot_to_dict` calls: a
         cap that rejects after the 2nd of 3 distinct snapshots must never
         let the 3rd be serialized at all."""
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
         from abicheck.serialization import snapshot_to_dict
 
         metadata = {
@@ -583,7 +583,7 @@ class TestBundleFactsArchiveResourceLimits:
         one large snapshot could perform ~2 TiB of redundant
         serialization work before the aggregate check ever runs). Now
         cached per object identity."""
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
         from abicheck.serialization import snapshot_to_dict
 
         shared_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
@@ -627,7 +627,7 @@ class TestBundleFactsArchiveResourceLimits:
         review, fresh evidence)."""
         import copy
 
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
         from abicheck.serialization import snapshot_to_dict
 
         base_snap = _per_library_snapshots(_old_metadata())["libcore.so"]
@@ -669,7 +669,7 @@ class TestBundleFactsArchiveResourceLimits:
         no (or small) library snapshots but an oversized manifest would
         therefore pass this check and then be rejected on load (Codex
         review, fresh evidence)."""
-        import abicheck.bundle_facts as bundle_facts_module_local
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module_local
 
         monkeypatch.setattr(
             bundle_facts_module_local, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100
@@ -710,7 +710,7 @@ class TestBundleFactsArchiveResourceLimits:
         payload regardless of dedup; this is verified by having every
         payload be genuinely distinct (soname differs per entry, so none of
         them share a blob)."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
 
         monkeypatch.setattr(
             bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 100
@@ -766,7 +766,7 @@ class TestBundleFactsArchiveResourceLimits:
         single library snapshot whose own serialization alone exceeds the
         cap (via one oversized string field, not many small ones summing
         past it) must still be rejected with the correct error."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
 
         monkeypatch.setattr(
             bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000
@@ -821,7 +821,7 @@ class TestBundleFactsArchiveResourceLimits:
         """Functional correctness companion: an `InstantiationManifest`
         whose own serialization alone exceeds the cap must still be
         rejected with the correct error, not exhaust memory first."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
 
         monkeypatch.setattr(
             bundle_facts_module, "DEFAULT_MAX_BUNDLE_DECODED_BYTES", 1000
@@ -940,7 +940,7 @@ class TestBundleFactsArchiveResourceLimits:
         aggregate check (previously applied only after the read
         returned) ever gets a chance to reject it, letting peak decoded
         memory substantially exceed the promised whole-load limit."""
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
         from abicheck.storage.bundle_archive import BundleArchiveReader
 
         # Generous enough for both real per-library JSON blobs (~3.2 KiB
@@ -989,7 +989,7 @@ class TestBundleFactsArchiveResourceLimits:
         bypassing the aggregate decoded-byte budget."""
         import json as json_module
 
-        import abicheck.bundle_facts as bundle_facts_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
         from abicheck.storage.bundle_archive import BundleArchiveWriter
 
         # A payload that parses successfully as *both* an AbiSnapshot (via
@@ -1078,8 +1078,8 @@ class TestBundleFactsArchiveResourceLimits:
         of whether any real content happens to collide."""
         import json as json_module
 
-        import abicheck.bundle_facts as bundle_facts_module
         import abicheck.storage.bundle_archive as bundle_archive_module
+        import abicheck.storage.bundle_facts_archive as bundle_facts_module
 
         monkeypatch.setattr(
             bundle_archive_module, "content_hash", lambda payload: "deadbeef" * 8

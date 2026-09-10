@@ -41,7 +41,7 @@ before this module existed.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -350,26 +350,6 @@ def require_degraded_marker_version(
             f"schema_version {DEGRADED_MARKER_SCHEMA_VERSION} (ADR-065 D8); "
             f"this document declares schema_version {schema_version}, which a "
             "reader that cannot honor the marker would still accept"
-        )
-
-
-def require_degraded_members_known(
-    degraded_members: Mapping[str, str],
-    members: Iterable[str],
-    *,
-    what: str = "bundle facts",
-) -> None:
-    """Reject a ``degraded_members`` key naming no stored member: a marker
-    on a misspelled or absent library would be re-keyed away by a later
-    comparison and silently vanish, leaving the real members compared as
-    complete evidence despite a persisted capture-failure signal (Codex
-    review). Applied at every construction/import choke point."""
-    unknown = sorted(set(degraded_members) - set(members))
-    if unknown:
-        raise ValueError(
-            f"{what}: 'degraded_members' names {len(unknown)} library(ies) absent "
-            f"from 'per_library_snapshots' ({', '.join(unknown)}) -- a capture-"
-            "failure marker must name a stored member (ADR-065 D8)"
         )
 
 

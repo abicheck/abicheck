@@ -31,15 +31,13 @@ extraction, comparison, policy, workflow, report, or frontend modules — a
 storage module that needs to know a verdict, a `ChangeKind`, or a CLI flag
 is in the wrong layer. `scripts/check_architecture.py` enforces this.
 
-In practice today the package imports even less than that allows. The
-bundle-archive modules import only `abicheck.errors` and no `model`/`compare`
-type at all — the `BundleFacts`-aware glue that would need one stays in
-`bundle_facts.py`/`serialization.py` (still flat-root), which cannot yet join
-`model` cleanly; see `bundle_archive.py`'s own docstring for the cycle that
-blocks it. The ADR-062 primitives import nothing from `abicheck` at all,
-which lets them ship ahead of the `model` package the flat `model.py` has not
-yet migrated into. A future module needing a `model`-owned type imports it
-directly once that type has joined `model` — not via `serialization.py`.
+`bundle_archive.py` (the pure zip-container primitive) imports only
+`abicheck.errors`. `bundle_facts_codec.py`/`bundle_facts_archive.py` (the
+`BundleFacts`-aware JSON/G40-archive glue, ADR-061 gap E) import
+`model.bundle_facts.BundleFacts` directly — see `bundle_facts_codec.py`'s own
+docstring for the one remaining dynamic bridge to `serialization.py` (a real
+two-file cycle, not a layering problem). The ADR-062 primitives import
+nothing from `abicheck` at all, ahead of `model.py`'s own migration.
 
 ## Canonical entry points
 
@@ -52,7 +50,9 @@ content-hash-addressed blobs, nothing more. `bundle_archive_cd_guard.py`'s
 from `BundleArchiveReader.__init__` before `zipfile.ZipFile` parses anything.
 Callers wanting a real `BundleFacts` in one of these archives go through
 `serialization.py`'s `save_bundle_facts`/`load_bundle_facts`
-(`format="archive"`), which delegates the glue to `bundle_facts.py`.
+(`format="archive"`), which delegate to `bundle_facts_codec.py` then
+`bundle_facts_archive.py` (ADR-061 gap E, see `../bundle_facts.py`'s facade).
+`bundle_facts_package.py` is the third surface: a multi-artifact `ProjectSnapshot` package (ADR-062 A1.4/A1.5).
 
 ### ADR-062 Phase 0 primitives, plus Phase 1's object model, DTO layer, and import adapter
 

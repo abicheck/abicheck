@@ -424,7 +424,10 @@
   "facades": [
     "abicheck.aggregate",
     "abicheck.aggregate_findings",
-    "abicheck.aggregate_manifest"
+    "abicheck.aggregate_manifest",
+    "abicheck.bundle_facts",
+    "abicheck.bundle_facts_serialization",
+    "abicheck.bundle_facts_store"
   ],
   "frozen_root_families": {
     "cli_": [

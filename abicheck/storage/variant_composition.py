@@ -32,8 +32,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..model.bundle_facts import require_degraded_members_known
 from .bundle_facts_validation import (
-    require_degraded_members_known,
     validated_degraded_members,
     validated_inventory_complete,
 )
