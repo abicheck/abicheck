@@ -33,6 +33,8 @@ import pytest
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot
+from abicheck.policy.disposition_close import finalize_ledger
+from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.policy_file import PolicyFile
 from abicheck.report.build import (
     _snapshot_change,
@@ -737,6 +739,37 @@ class TestRendererOrderIndependence:
             "SARIF re-derived a finding's level from a PolicyFile mutated "
             "after the envelope was already built"
         )
+
+    def test_snapshotting_changes_does_not_break_the_disposition_ledger(self) -> None:
+        """Codex review, fresh evidence, P1: ``DispositionLedger`` keys every
+        lookup on ``id(change)`` against the objects ``checker.compare()``
+        recorded it with. Replacing every ``Change`` with an independent
+        copy (this envelope's whole point) would otherwise desynchronize
+        ``with_gate``'s own ``id(change)`` membership test from the
+        snapshot's new objects, reading a real, blocking, gating finding as
+        ``effective_total: 0`` -- exactly the D3 conservation invariant
+        (``counts()`` sums to ``detected_total``) this ledger exists to
+        guarantee.
+        """
+        breaking = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result([breaking])
+        ledger = finalize_ledger(DispositionLedger(), result)
+        result.disposition_ledger = ledger  # type: ignore[attr-defined]
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        severity_config = SeverityConfig()
+
+        pre_audit = compute_disposition_audit(result, severity_config)
+        assert pre_audit.effective_total == 1
+
+        envelope = build_report_envelope(
+            result, old, new, severity_config=severity_config
+        )
+
+        assert envelope.result.disposition_ledger is not ledger
+        post_audit = compute_disposition_audit(envelope.result, severity_config)
+        assert post_audit.effective_total == pre_audit.effective_total == 1
+        assert dict(post_audit.counts)["gating"] == 1
+        assert sum(dict(post_audit.counts).values()) == post_audit.detected_total
 
     def test_mutating_the_caller_s_snapshots_after_construction_cannot_reach_the_envelope(
         self,

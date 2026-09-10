@@ -273,28 +273,70 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     ``comparability_assurance``, read straight off ``envelope.result`` by
     HTML's/Markdown's comparability section -- CodeRabbit review) gets a
     fresh dict for the same reason a list does.
+
+    Every ``Change`` this replaces is tracked in an ``id(original) ->
+    replacement`` map, then used to remap ``result.disposition_ledger``
+    (:func:`_remap_disposition_ledger`) -- that ledger's every consumer
+    keys strictly on ``id(change)`` (Codex review, fresh evidence:
+    ``report/disposition_audit.py``'s own ``ledger_for(result,
+    severity_config)`` call, on this same snapshot, otherwise reads every
+    gating record as outside its gate's ``severity_input``, since none of
+    the ledger's recorded identities match these new objects).
     """
     import copy
 
     snapshot = copy.copy(result)
+    identity_map: dict[int, Change] = {}
+
+    def _snapshot_maybe_change(value: object) -> object:
+        if isinstance(value, Change):
+            new_value = _snapshot_change(value)
+            identity_map[id(value)] = new_value
+            return new_value
+        return value
+
     for name, value in vars(result).items():
         if isinstance(value, list):
-            setattr(
-                snapshot,
-                name,
-                [_snapshot_change(v) if isinstance(v, Change) else v for v in value],
-            )
+            setattr(snapshot, name, [_snapshot_maybe_change(v) for v in value])
         elif isinstance(value, tuple) and any(isinstance(v, Change) for v in value):
-            setattr(
-                snapshot,
-                name,
-                tuple(
-                    _snapshot_change(v) if isinstance(v, Change) else v for v in value
-                ),
-            )
+            setattr(snapshot, name, tuple(_snapshot_maybe_change(v) for v in value))
         elif isinstance(value, dict):
             setattr(snapshot, name, dict(value))
+    ledger = getattr(snapshot, "disposition_ledger", None)
+    if ledger is not None:
+        snapshot.disposition_ledger = _remap_disposition_ledger(ledger, identity_map)
     return snapshot
+
+
+def _remap_disposition_ledger(ledger: object, mapping: dict[int, Change]) -> object:
+    """A copy of *ledger* with every ``id(change)``-keyed identity remapped.
+
+    ``policy.disposition_ledger.DispositionLedger`` keys every one of its
+    lookups (``with_gate``'s ``severity_input`` test, ``index_for``/
+    ``record_for``/``rule_for``) on ``id(change)`` against the objects it
+    was recorded with -- see that class's own docstrings. This module
+    replaces every recorded ``Change`` with an independent copy
+    (:func:`_snapshot_change`/:func:`_snapshot_diff_result`), which
+    otherwise desynchronizes those lookups from this ledger's *own*
+    ``_anchors``/``_seen_ids``, silently answering every one of them
+    "unrecorded". Reaches into the ledger's own private state (rather than
+    adding a public method there) because that module carries an
+    ``architecture/debt.yaml`` ``no_growth`` baseline this PR does not own
+    and is already at, with no headroom for a new method; every attribute
+    name here is the one that class's own docstrings already document.
+    """
+    import copy as _copy
+
+    remapped = _copy.copy(ledger)
+    remapped._records = list(ledger._records)  # type: ignore[attr-defined]
+    remapped._seen_keys = dict(ledger._seen_keys)  # type: ignore[attr-defined]
+    remapped._anchors = [mapping.get(id(a), a) for a in ledger._anchors]  # type: ignore[attr-defined]
+    remapped._aliases = [mapping.get(id(a), a) for a in ledger._aliases]  # type: ignore[attr-defined]
+    remapped._seen_ids = {  # type: ignore[attr-defined]
+        (id(mapping[old_id]) if old_id in mapping else old_id): idx
+        for old_id, idx in ledger._seen_ids.items()  # type: ignore[attr-defined]
+    }
+    return remapped
 
 
 def build_report_envelope(
