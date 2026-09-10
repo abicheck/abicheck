@@ -667,12 +667,12 @@ def _release_lib_row(
     # Codex review, findings-fixes round 10/11: compatible_additions is now
     # the additions-only count (report schema 4.0's compatible_additions
     # correction, matching the scalar `compare` report's own
-    # `ReportSummary.compatible_additions` -- see report_summary.py), no
-    # longer the total compatible count minus quality_issues. A release JSON
-    # written by a pre-4.0 build has no field to distinguish this from the
-    # old semantics; there is no reliable way to detect that case from the
-    # payload alone, so this reader assumes the current writer's semantics,
-    # matching `cli_compare_release_pairwise.py`'s own emitted values.
+    # `ReportSummary.compatible_additions`), no longer the total compatible
+    # count minus quality_issues. A present `release_schema_version` key
+    # (round 11) confirms this document was written after the correction;
+    # its absence is ambiguous (see `RELEASE_SCHEMA_VERSION`'s own
+    # docstring), so this reader assumes the current writer's semantics
+    # either way, matching `cli_compare_release_pairwise.py`'s own values.
     quality = _as_int(lib.get("quality_issues"))
     additions = _as_int(lib.get("compatible_additions"))
     pot_err = levels.get("potential_breaking") == "error"
