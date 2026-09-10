@@ -1312,7 +1312,9 @@ the off-by-default case, a real end-to-end JSON report with actual stamped
 `--help-all` text, and the directory/package rejection — plus the frozen
 `compare` option-set snapshot in `tests/test_cli_contract.py` and the
 generated `docs/reference/cli-reference.md` were updated accordingly. Also
-added a `COMPARE_FLAG_BUDGET_RAISES` ledger entry
+added a `COMPARE_FLAG_BUDGET_RAISES` ledger entry (that ledger was
+superseded by `options/rulings.py` in one-comparison-product.md Phase 7k;
+the entry lives there now)
 (`cli_options.py`) for the new visible flag, since `--contract-evaluation`
 pushed `compare`'s visible-option count one past the existing budget.
 
@@ -3182,7 +3184,8 @@ secondary call site" findings earlier in this same PR. Rejected on
 directory/package (release) comparisons, same reasoning and message shape
 as `--contract-evaluation`'s identical restriction (the per-library fan-out
 has no single result to attach one audit to). `--audit-suppressions` added
-to `cli_options.COMPARE_FLAG_BUDGET_RAISES` (a genuine per-run analysis
+to `cli_options.COMPARE_FLAG_BUDGET_RAISES` -- now
+`frontends/cli/options/rulings.py` (a genuine per-run analysis
 input, not a stable project setting -- like `--contract-evaluation`
 itself). New tests: `tests/test_cli_compare_audit_suppressions.py` (usage
 guard, directory/package rejection, JSON stale/high-risk-match rendering,

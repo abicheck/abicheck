@@ -6881,3 +6881,87 @@ equal was previously skipped, not marked passing under a false default) — at
 that point drop the skip and go back to an unconditional comparison so a
 *future* regression on this field is caught structurally rather than by an
 absent key silently reading as "no divergence".
+
+## Retired CLI spellings still named in runtime messages
+
+**Status:** one instance fixed (PR #1184), the repo-wide sweep deliberately
+not attempted. Bug class:
+`cli_surface.retired_spelling_in_remediation` in
+`tests/regressions/manifest.py` —
+check there first before restating the invariant.
+
+Codex review on PR #1184 caught
+`project_snapshot_legacy.materialize_release_variant_artifacts`'s
+multi-variant ambiguity error still telling the caller to "pass an explicit
+variant id (`--old-variant`/`--new-variant`)" after plan Phase 7j retired
+both spellings with no alias. A user who followed the tool's own advice
+landed straight in an exit-64 usage error — the CLI actively misdirecting
+them. Fixed — twice. The first fix named the live `--variant` flag but
+hard-coded the side to `old=`, so a caller whose *NEW* operand was the
+ambiguous one was told to run something that fails just as hard (Codex
+review, second round). The flag-existence oracle passed on that bug,
+which is the lesson: **a live flag aimed at the wrong operand is still
+broken advice.** The invariant is now the stronger one — *run the
+advice*: the seed test takes the message's own `(e.g. --variant new=v1)`
+example, re-invokes `compare` with it, and asserts the ambiguity is
+actually resolved, parametrized over which side is ambiguous. A bare
+`--variant ID` is not a safe fallback either, since it applies to both
+sides and the unambiguous side does not declare that id — which is why
+the side must reach the message at all.
+
+The layering fix that makes it possible: the engine
+(`AmbiguousVariantSelectionError`) states the fact and carries the
+declared ids but names **no CLI flag**, because only the front end that
+resolved both operands knows which side this package is;
+`cli_compare_release_matrix._resolve_release_package_side` appends the
+side-correct example. That is the same engine-error/CLI-wrapper split
+`AmbiguousLibraryMatchError` already uses.
+
+**What is not closed.** An AST sweep of non-docstring string literals under
+`abicheck/` against every spelling in `scripts/retired_surfaces.py`'s
+`RETIRED_SURFACES` reports **44 hits across 25 modules**, and several read
+like the same defect already sitting in the tree:
+
+- `pdb_utils.py:129` — `"locate_pdb: skipping network path %s (use
+  --pdb-path to override)"` (`--pdb-path` left `compare` in Phase 7i and
+  `dump` in Phase 7c)
+- `reporter_markdown.py:297` — `"Unknown --show-only token: "`
+  (`--show-only` folded into `--view` in Phase 5)
+- `dumper.py:1527`, `dumper_elf_fallback.py:145` — `--dwarf-only`
+- `cli_dump_helpers.py:133`, `frontends/cli/commands/dump.py` —
+  `--debug-format`
+- `cli_audit.py:77` — `--reconcile-build-context` (removed in Phase 7i)
+
+**Why this is not a mechanical sweep, and why it was not attempted in the
+same PR.** The hits are not decidable without reading each site against the
+command that emits it:
+
+1. A flag retired from `compare`/`dump` can still be **live on `scan`**,
+   which kept the whole L2 compile-context and debug-resolution families
+   (7a/7b/7c explicitly left `scan` untouched). A shared engine module's
+   message naming `--dwarf-only` may be correct for the caller that
+   actually reaches it.
+2. `cli_compare_release.py`'s **unregistered** release engine legitimately
+   still *defines* `--old-variant`/`--new-variant`/`--dso-only`/
+   `--support-promise`/`--include-private-dso` as its own options — those
+   are live option definitions, not stale advice, and account for 9 of the
+   44 hits on their own.
+3. Historical mentions in `model/change_catalog/` descriptions,
+   `contract_relevance_types.py`, and `options/rulings.py`'s own ruling
+   rationales are deliberate records of what a thing *used to* be called.
+
+So a sweep-turned-gate would need roughly 25 hand-judged allowlist entries —
+the shape AGENTS.md's own `IMPORT_CYCLE_ALLOWLIST` guidance warns is itself
+a smell, and precisely the "large unreviewed allowlist shipped as if it
+closed the class" outcome the bug-class discipline exists to prevent. It is
+also a separate change from PR #1184's CLI option audit.
+
+**Tractable when picked up:** go site by site, resolving each message
+against the command(s) that can actually emit it — the fix for a genuinely
+stale one is either naming the live spelling (as PR #1184 did) or scoping
+the message per front end. Only once the real hits are down to the
+legitimate three categories above is a gate in
+`scripts/check_docs_contract.py` worth adding, extending the existing
+`RETIRED_SURFACES` docs sweep to first-party Python with a *small*,
+reasoned allowlist. Doing the gate first would invert that order and bake
+today's 25 unexamined sites into an allowlist nobody revisits.
