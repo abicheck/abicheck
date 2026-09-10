@@ -192,6 +192,79 @@ def test_a_run_without_a_ledger_reports_no_provenance_rather_than_faking_one() -
         row["suppression_provenance"] is None for row in body["suppressed_findings"]
     )
 
+    # Every projection is *rendered*, not just the document inspected. The
+    # first version of this test asserted the document and the JSON row and
+    # stopped there, so the renderers' own no-provenance fallbacks were
+    # never executed — this test claimed the fallback was right while never
+    # running it (found via the patch-coverage report, which flagged exactly
+    # those lines).
+    #
+    # With no ledger the label falls back to the collapsed display field,
+    # which for this rule holds its label; what must NOT appear is a
+    # fabricated structured record.
+    markdown = render_no_baseline(result, "markdown")[0]
+    assert "audit-waiver-17" in markdown, (
+        "with no ledger the collapsed display field is all that is knowable, "
+        "and it is still shown"
+    )
+    assert "waivers.yaml" not in markdown, (
+        "the source file was never recorded for this run, so inventing it "
+        "would be a fabricated ADR-067 record"
+    )
+
+    sarif = json.loads(render_no_baseline(result, "sarif")[0])
+    suppressions = [
+        r["suppressions"][0]
+        for r in sarif["runs"][0]["results"]
+        if r.get("suppressions")
+    ]
+    assert suppressions, "a suppressed finding must still carry a suppression"
+    for suppression in suppressions:
+        assert "properties" not in suppression, (
+            "no ledger entry means no structured record to publish"
+        )
+        assert suppression["justification"] == "audit-waiver-17"
+
+    junit = ET.fromstring(render_no_baseline(result, "junit")[0])
+    skipped = list(junit.iter("skipped"))
+    assert skipped, "a suppressed finding must still be a skipped JUnit case"
+    for element in skipped:
+        assert element.attrib["message"] == "suppressed: audit-waiver-17"
+        assert "suppression rule:" not in (element.text or ""), (
+            "the structured block belongs only to a run that recorded one"
+        )
+
+
+def test_a_rule_stating_neither_label_nor_reason_still_reads_as_suppressed() -> None:
+    """The last fallback: a rule with nothing to say about itself.
+
+    `--suppress` does not require a label or a reason (only
+    `suppression.require_justification` does), so a bare selector-only rule
+    is legal input. Every projection must still say the finding was
+    suppressed rather than rendering an empty or missing attribution.
+    """
+    result = _result(
+        "case143_audit_accidental_export",
+        suppression=SuppressionList([Suppression(symbol_pattern=".*")]),
+    )
+    doc = compute_no_baseline_document(result)
+    assert doc.suppressed
+
+    sarif = json.loads(render_no_baseline(result, "sarif")[0])
+    justifications = [
+        r["suppressions"][0]["justification"]
+        for r in sarif["runs"][0]["results"]
+        if r.get("suppressions")
+    ]
+    assert justifications == ["suppressed by an abicheck --suppress rule"] * len(
+        justifications
+    )
+    assert justifications
+
+    markdown = render_no_baseline(result, "markdown")[0]
+    assert "(rule gave no label)" in markdown
+    assert "(none stated)" in markdown
+
 
 @pytest.mark.parametrize(
     ("label", "reason", "expected"),
@@ -283,3 +356,45 @@ def test_a_suppression_justification_never_repeats_one_field_as_two(
             "JUnit and SARIF share one justification helper and must not "
             "phrase it differently"
         )
+
+
+def test_a_non_coverage_gate_names_its_axis_without_a_coverage_block() -> None:
+    """A gate on an axis that names no provider omits the provider block.
+
+    The JUnit failure text has two parts: the contributing axes, and the
+    contract-coverage ledger's per-provider rows. Only the coverage axis can
+    name a provider, so a run gated purely on (say) analysis assurance must
+    state its axis and print no coverage section at all — an empty
+    "contract coverage failures:" heading would imply a ledger that closed
+    with nothing missing, which is a different fact from having no ledger.
+
+    Asserted by projecting a document built for that state rather than by
+    hunting a fixture that happens to gate that way: `render_no_baseline_junit`
+    is a pure function of the document, so the document *is* the input under
+    test, and constructing it directly is what lets the combination be
+    exercised at all.
+    """
+    import dataclasses
+
+    from abicheck.report.no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
+    from abicheck.report.no_baseline_render import render_no_baseline_junit
+
+    base = compute_no_baseline_document(_result("case143_audit_accidental_export"))
+    doc = dataclasses.replace(
+        base,
+        exit_code=1,
+        exit_axes={"analysis_assurance": 1, "contract_coverage": 0},
+        coverage_failures=(),
+    )
+
+    failure = ET.fromstring(render_no_baseline_junit(doc)).find(".//failure")
+    assert failure is not None and failure.text
+
+    assert NO_BASELINE_EXIT_AXIS_LABELS["analysis_assurance"] in failure.text
+    assert NO_BASELINE_EXIT_AXIS_LABELS["contract_coverage"] not in failure.text, (
+        "an axis that contributed 0 must not be named as a cause"
+    )
+    assert "contract coverage failures:" not in failure.text, (
+        "no ledger rows means no section; an empty heading would imply a "
+        "domain that closed cleanly, which is a different fact"
+    )
