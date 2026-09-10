@@ -269,10 +269,10 @@ def _resolve_depth_for_set_inputs(ctx: click.Context) -> str | None:
     (``cli_resolve._reject_evidence_flags_for_set_inputs``) -- that guard is
     about an input the fan-out would silently drop, not about a rung. The
     guidance the removed rung errors used to carry (compare libraries
-    individually, or pre-dump snapshots with ``dump --sources``) is now
-    appended to the per-member depth-floor failure by
-    ``cli_compare_release_pairwise._compare_one_library``, so it reaches the
-    user at the point it actually applies.
+    individually, or pre-dump snapshots with ``dump --sources``) is carried
+    by the release's own evidence-contract notice
+    (``cli_compare_release_matrix``), which is where a run that pinned a
+    rung its members could not reach now reports it.
 
     Lives here (not next to its caller in ``cli_resolve.py``) purely because
     that module has no line-count budget left (``architecture/debt.yaml``'s
@@ -284,45 +284,6 @@ def _resolve_depth_for_set_inputs(ctx: click.Context) -> str | None:
         return None
     depth: str | None = ctx.params.get("depth")
     return depth.lower() if depth is not None else None
-
-
-def set_input_depth_shortfall_message(error: str, depth: str | None) -> str:
-    """*error* plus the guidance the removed rung allow-list used to carry.
-
-    ``workflows.artifact.execute.enforce_requested_depth``'s message tells
-    the user to supply the evidence the rung needs, naming ``--sources``
-    among the ways to do it. On a directory/package operand that flag is
-    itself rejected (``cli_resolve._reject_evidence_flags_for_set_inputs``:
-    the per-library fan-out has no way to collect inline build/source
-    evidence), so on this one path the advice is unfollowable as written.
-
-    That is precisely what the rung allow-list deleted from
-    :func:`_resolve_depth_for_set_inputs` used to say, before the run
-    started, for every member at once. Deleting a wrong guard must not
-    delete the true thing it happened to be saying -- so the release-shaped
-    alternatives are appended here, to the failure of the member they
-    actually apply to.
-
-    Returns *error* unchanged when *depth* is ``None``: the caller catches
-    every ``ValidationError``, and one raised for an unrelated reason has
-    nothing to do with rungs.
-
-    Lives beside the resolver whose guidance this is, in the same
-    ``click``-only leaf, rather than in the release engine that renders it
-    -- ``cli_compare_release_pairwise.py`` sits at its
-    ``architecture/debt.yaml`` ``no_growth`` baseline, and message text is
-    not that module's responsibility anyway.
-    """
-    if depth is None:
-        return error
-    return error + (
-        " On a directory/package (release) compare, inline "
-        "--sources/--build-info are not accepted (the per-library fan-out "
-        "cannot collect them), so this member can only reach a build/source "
-        "rung from evidence it already carries: pre-dump each member with "
-        "`dump --sources/--build-info` and compare the snapshot "
-        "directories, or compare this library individually."
-    )
 
 
 #: ADR-068 Phase 2c/2d flags that only a *single-pair* compare implements

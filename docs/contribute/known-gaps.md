@@ -7543,52 +7543,53 @@ change with its own blast radius. Registered as a `KnownGap` on the
 `evidence.tier_shortcut_without_substitute` entry in
 `tests/regressions/manifest.py`.
 
-## A depth shortfall is a hard per-member `ERROR` on a directory `compare` but a soft assurance signal on a single-pair one
+## ~~A depth shortfall is a hard per-member `ERROR` on a directory `compare` but a soft assurance signal on a single-pair one~~ — CLOSED
 
-Found while removing the per-rung `--depth` allow-list that used to reject
-every rung but `binary` for a directory/package operand (see
-`abicheck/cli_compare_options.py`'s `_resolve_depth_for_set_inputs` for the
-full account of why that guard was wrong). Removing it made a pre-existing
-asymmetry reachable, so it is recorded here rather than papered over.
+**Closed in PR #1195**, in the same PR that surfaced it, after a Codex
+review round showed the divergence was wider than this entry first
+described. Kept here because the shape of the mistake is the reusable part.
 
-The two `compare` shapes enforce `--depth` through different mechanisms:
+Measured, the two paths disagreed on *every* row, not just hard-vs-soft:
 
-* **Single-pair, native CLI** (`cli_compare_helpers.run_compare`) calls
-  `compare_snapshots()` directly. It applies the *ceiling*
-  (`project_pair_to_depth`) and records the shortfall as an assurance fact —
-  `analysis_assurance.status = "failed"`, `depth_satisfied = false`,
-  `requested_depth`/`effective_depth` — which only reaches the exit code
-  under the orthogonal `--require-complete-analysis` axis. So
-  `compare old.so new.so --depth headers` with no headers exits **0**.
-* **Every member of a directory/package fan-out** routes through
-  `service.run_compare` -> `service_compare_pipeline.resolve_compare_request`,
-  which additionally calls `workflows.artifact.execute.enforce_requested_depth`
-  — a hard `ValidationError`. So the same shortfall becomes that member's
-  `ERROR` result (`operational: extraction_error`, `scope: incomplete`) and
-  exit **4**.
+| shortfall | scalar `compare` | directory `compare` |
+|---|---|---|
+| live, `--depth headers` | 0 | 4 (`ERROR`) |
+| live, `--depth build` | 7 | 4 |
+| live, `--depth source` | 7 | 4 |
+| stored snapshot, `--depth source` | 0 (live-only carve-out) | 4 |
 
-Neither behaviour is obviously wrong: the hard fail matches ADR-037 D5's
-"pinned depth with no evidence is an evidence-contract error" (`scan`'s exit
-7), and the soft signal matches ADR-068 §3 #28's design for `compare`. What
-is wrong is that *which one you get depends on the operand's cardinality*,
-which AGENTS.md's "One model, any cardinality" rule says it must not.
+Two mechanisms existed and the fan-out reached the wrong one first.
+`policy/depth_evidence_contract.py` is the one this repo documents as
+closing the gap "for every `compare` caller from one place" — exit-7 axis,
+recorded not raised, `build`/`source` only, live-extraction only — and
+`service_compare_pipeline.classify_compare_pair` already called it with the
+right `old_is_live`/`new_is_live` flags. But `resolve_compare_request`
+called `enforce_requested_depth` unconditionally ~170 lines earlier, which
+raised first and pre-empted that recording in exactly the cases it was
+written for. The native scalar CLI escaped only because it does not route
+through `resolve_compare_request` at all.
 
-Not closed here, deliberately, and not by narrowing the fix that exposed it:
+The fix: `resolve_compare_request` no longer calls `enforce_requested_depth`,
+so the exit-7 axis governs every `compare` surface; the release fan-out
+aggregates each member's `evidence_contract_error_contribution` with `max()`
+the way it already aggregates the contract-coverage floor, and emits its own
+stderr notice (the per-member `DiffResult` is discarded before the note a
+single-pair run renders). All eight rows of the matrix now agree, and a run
+without `--depth` is unchanged.
 
-* Making the fan-out soft would need a per-member `analysis_assurance` the
-  release path does not aggregate — that is the same missing aggregation
-  behind `--require-complete-analysis`'s own set-input rejection
-  ("the per-library fan-out has no single analysis_assurance result to gate
-  on"), tracked as P0.6 run-plan-aware aggregation.
-* Making the single-pair native CLI hard-fail is a behaviour change from
-  exit 0 to a failure on a heavily-used path, and it would also make the
-  native CLI diverge from nothing else — the typed API already hard-fails —
-  so it needs its own decision record, not a side effect of this one.
+`dump`'s own floors and `workflows.bundle_stored_pair_compare`'s separate
+`enforce_requested_depth` call were deliberately **not** touched — each is a
+different command with its own tested contract, and
+`test_cli_compare_bundle_facts_stored_pair.py` pins the bundle one
+explicitly (a stored pair *does* hard-fail there on the `headers` rung).
+That is a third behaviour for the same question, still open, and worth
+reading before anyone unifies further.
 
-Whichever direction is chosen, the invariant to encode is the one the
-directory/single-pair split already has an executable home for:
-`tests/test_cli_compare_release_depth.py`'s ladder matrix, extended with the
-single-pair path as a parity oracle.
+The reusable lesson is the one the bug class
+`cli_surface.capability_guard_diverged_from_pipeline` now records: when two
+mechanisms implement the same rule and one is documented as "the one place",
+the other one silently winning on a subset of surfaces is not a redundancy,
+it is a divergence waiting for a front-end change to expose it.
 
 ## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to
 

@@ -3103,14 +3103,23 @@ class TestCompareRequestAdr055Evidence:
 
 
 class TestCompareRequestDepthSatisfaction:
-    """Codex review, P1: an explicitly requested `depth` (e.g. "source")
-    that a raw input actually failed to reach (no usable compile database/
-    extractor/linkable declarations) previously diffed whatever weaker
-    evidence embed_build_source produced with no signal that the requested
-    depth wasn't met -- mirrors dump's own check_requested_depth_satisfied
-    hard-fail, monkeypatching `_gated_source_label` (the shared "what depth
-    did this snapshot actually reach" recompute) to simulate reached vs.
-    not-reached without needing a real compile database/source tree."""
+    """`compare`'s depth-shortfall contract at the typed-API boundary.
+
+    Originally (Codex review, P1) this pinned a hard `ValidationError` from
+    `run_compare_request`, mirroring `dump`'s own
+    `check_requested_depth_satisfied`. **PR #1195 changed that contract**:
+    a `compare` shortfall is ADR-064's exit-7 axis, *recorded* on the result
+    (`policy.depth_evidence_contract`), never raised -- because the raise
+    lived on only one of `compare`'s resolution paths and made the same
+    comparison exit differently depending on which front end reached it.
+
+    A pre-serialized snapshot side is carved out entirely (this run never
+    extracted it), and only `build`/`source` can be outrun at all -- the
+    liveness half is pinned across every side/liveness combination by
+    `tests/test_depth_evidence_contract_liveness.py`. Still monkeypatches
+    `gated_source_label` to simulate reached vs. not-reached without a real
+    compile database or source tree.
+    """
 
     def _make_snap_file(self, tmp_path, name, version):
         from abicheck.model import AbiSnapshot
@@ -3120,7 +3129,13 @@ class TestCompareRequestDepthSatisfaction:
         save_snapshot(AbiSnapshot(library=name, version=version), path)
         return path
 
-    def test_depth_not_reached_rejected(self, tmp_path, monkeypatch):
+    def test_depth_not_reached_is_recorded_not_raised(self, tmp_path, monkeypatch):
+        """The behaviour change itself: no `ValidationError` any more.
+
+        Both operands here are stored snapshots, so this also pins the
+        live-only carve-out -- the axis is not merely unraised, it is
+        correctly *not set*, because neither side was extracted by this run.
+        """
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         monkeypatch.setattr(
@@ -3131,8 +3146,9 @@ class TestCompareRequestDepthSatisfaction:
         request = CompareRequest(
             old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
         )
-        with pytest.raises(ValidationError, match="only reached 'build'"):
-            run_compare_request(request)
+        result, _, _ = run_compare_request(request).as_tuple()
+        assert isinstance(result, DiffResult)
+        assert result.evidence_contract_error is False, result
 
     def test_depth_reached_passes(self, tmp_path, monkeypatch):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
@@ -3147,25 +3163,6 @@ class TestCompareRequestDepthSatisfaction:
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert isinstance(result, DiffResult)
-
-    def test_reports_the_failing_side(self, tmp_path, monkeypatch):
-        old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
-        new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
-
-        def _by_version(build_source, snap):
-            # The old side's snapshot loads with version "1.0" -- distinguish
-            # by that so only the new side fails the gate.
-            return "source" if snap.version == "1.0" else "binary"
-
-        monkeypatch.setattr(
-            "abicheck.evidence_depth.gated_source_label", _by_version
-        )
-
-        request = CompareRequest(
-            old=InputSpec.of(old_p), new=InputSpec.of(new_p), depth="source"
-        )
-        with pytest.raises(ValidationError, match="new side"):
-            run_compare_request(request)
 
     def test_depth_binary_always_satisfied(self, tmp_path, monkeypatch):
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")

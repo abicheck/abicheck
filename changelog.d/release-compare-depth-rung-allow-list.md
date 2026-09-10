@@ -10,19 +10,29 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   rung with exit `64`, on the stated grounds that it "does not enforce a
   per-library evidence floor" and "does not collect inline build/source
   evidence". Both grounds had stopped being true: every member pair is
-  resolved through `service.run_compare`, which floor-checks it with the
-  same `enforce_requested_depth` a single-pair compare runs and projects it
-  with the same `project_pair_to_depth` — and a member may itself be a
+  resolved through `service.run_compare`, and a member may itself be a
   pre-dumped snapshot already carrying embedded L3/L4/L5 evidence, which
   satisfies `build`/`source` with no inline collection at all. Every rung is
-  now forwarded verbatim to every member, and a member that falls short of
-  the requested rung fails as *that member's* `ERROR` result
-  (`operational: extraction_error`, `scope: incomplete`) naming the side and
-  the depth it actually reached, instead of one whole-run usage error that
-  named no member. The removed errors' guidance is not lost: the
-  release-shaped alternatives (pre-dump members with `dump --sources`/
-  `--build-info`, or compare the library on its own) are appended to that
-  per-member failure, where they apply.
+  now forwarded verbatim to every member.
+
+- **A pinned `--depth` that the evidence does not reach now means the same
+  thing however the operands are packaged.** `compare` had two depth-floor
+  mechanisms and which one you got depended on the surface: the native
+  single-pair CLI recorded ADR-064's evidence-contract axis (exit `7`, for
+  `build`/`source` only, with a stored-snapshot side carved out), while
+  `service_compare_pipeline.resolve_compare_request` raised a hard
+  `ValidationError` for *every* rung including `headers` and for stored
+  snapshots too — pre-empting the recording in exactly the cases it was
+  written for. A directory `compare` routes through the second and a
+  single-pair one through the first, so the identical comparison exited `7`
+  or `4` depending only on whether the two binaries sat in a directory.
+  `resolve_compare_request` no longer calls `enforce_requested_depth`, so
+  the exit-7 axis governs every `compare` surface; the release fan-out
+  aggregates each member's contribution with `max()` alongside the
+  contract-coverage floor it already folds, and explains it on stderr rather
+  than exiting `7` silently. A run without an explicit `--depth` is
+  unaffected, as are `dump`'s own floors and the stored-bundle-facts pair
+  comparison, which keep their separate, separately-tested contracts.
 
 ### Documentation
 

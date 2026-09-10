@@ -352,6 +352,21 @@ def _finalize_release_output(
                 err=True,
             )
 
+    # ADR-064's evidence-contract axis (exit 7): aggregated from the members
+    # and reported/exited by its own owner, ahead of the verdict-based exit
+    # below -- see that module for why it is not another floor folded into
+    # `_exit_compare_release`.
+    from .frontends.cli.release_evidence_contract import (
+        release_evidence_contract_contribution,
+        report_and_exit_on_evidence_contract,
+    )
+
+    report_and_exit_on_evidence_contract(
+        library_results,
+        release_evidence_contract_contribution(library_results),
+        worst_verdict=worst_verdict,
+    )
+
     _exit_compare_release(
         worst_verdict,
         fail_on_removed,

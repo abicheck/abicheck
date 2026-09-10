@@ -71,10 +71,7 @@ from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
 )
-from .workflows.artifact.execute import (
-    _resolve_side_snapshot_impl,
-    enforce_requested_depth,
-)
+from .workflows.artifact.execute import _resolve_side_snapshot_impl
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -441,7 +438,10 @@ def resolve_compare_request(
     # resolve, not inside `_resolve_side`: it reads the on-disk ELF, so it
     # gains nothing from the extraction threads.
     populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
-    enforce_requested_depth(request.depth, (("old", old), ("new", new)))
+    # No `enforce_requested_depth` here (PR #1195): a `compare` depth
+    # shortfall is ADR-064's exit-7 axis, recorded by `classify_compare_pair`
+    # below, which this call used to pre-empt. Why:
+    # `policy/depth_evidence_contract.py`'s docstring.
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
     compile_contexts = resolved_pair_compile_contexts(
@@ -501,11 +501,11 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
-    # request`'s own `enforce_requested_depth` call already confirmed both
-    # sides' *resolved* evidence meets `request.depth` as a floor -- this is
-    # the ceiling half, filtering what this classification is allowed to see
-    # down to that same rung. Deliberately a *view*, not a mutation of
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: this is the *ceiling*
+    # half, filtering what this classification is allowed to see down to the
+    # requested rung; the floor half is the exit-7 axis recorded below, and
+    # the ceiling applies whether or not it was met.
+    # Deliberately a *view*, not a mutation of
     # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
     # `pair` may still be read elsewhere for its unprojected snapshots.
     old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
@@ -603,8 +603,8 @@ def classify_compare_pair(
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
-    # ADR-068 §3 #28: defense-in-depth alongside `resolve_compare_request`'s
-    # own hard `enforce_requested_depth` fail. `pair.old_fmt`/`.new_fmt`
+    # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195
+    # (see `resolve_compare_request`'s note). `pair.old_fmt`/`.new_fmt`
     # (CodeRabbit review) come straight from the request's own operand
     # path, so a stored-snapshot request correctly reads as non-live too.
     from .policy.depth_evidence_contract import record_depth_evidence_contract_error

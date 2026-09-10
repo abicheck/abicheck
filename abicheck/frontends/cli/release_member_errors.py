@@ -28,11 +28,9 @@ Extracted from :func:`abicheck.cli_compare_release_pairwise._compare_one_library
 whose ``try`` body is the comparison and whose ``except`` cascade was this.
 The seam is a real responsibility boundary, not a line-count trick: nothing
 here needs the comparison's ~30 parameters, and the cascade's ordering
-constraints (``UnsupportedArtifactError`` before its ``ValidationError``
-base, both before the generic catch) are a property of the exception
-taxonomy, which is what this module is about. It also gives the
-depth-shortfall guidance one place to be attached rather than a branch
-inside a 200-line function.
+constraints (``UnsupportedArtifactError`` before the generic catch) are a
+property of the exception taxonomy, which is what this module is about,
+not of the comparison's own arguments.
 """
 
 from __future__ import annotations
@@ -47,7 +45,6 @@ from ...errors import (
     ProfileMismatchError,
     ScopeMismatchError,
     UnsupportedArtifactError,
-    ValidationError,
 )
 
 __all__ = ["member_error_entry"]
@@ -91,7 +88,6 @@ def member_error_entry(
     old_version: str,
     new_version: str,
     output_dir: Path | None,
-    depth: str | None,
 ) -> dict[str, object]:
     """Classify *exc* into this member's release result entry.
 
@@ -130,19 +126,5 @@ def member_error_entry(
             "library": old_path.name,
             "verdict": "ERROR",
             "error": exc.format_message(),
-        }
-    if isinstance(exc, ValidationError):
-        # After `UnsupportedArtifactError` above, which subclasses this. A
-        # per-member `--depth` floor failure lands here
-        # (`enforce_requested_depth`, run for this pair by
-        # `resolve_compare_request` exactly as for a single-pair compare),
-        # and it is the one failure that can carry guidance the generic case
-        # cannot -- see `cli_compare_options.set_input_depth_shortfall_message`.
-        from ...cli_compare_options import set_input_depth_shortfall_message
-
-        return {
-            "library": old_path.name,
-            "verdict": "ERROR",
-            "error": set_input_depth_shortfall_message(str(exc), depth),
         }
     return {"library": old_path.name, "verdict": "ERROR", "error": str(exc)}

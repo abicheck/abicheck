@@ -296,16 +296,19 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "Closing the depth guard exposed a real "
-                    "cardinality-dependent divergence it had been hiding: a "
-                    "depth shortfall hard-fails a fan-out member "
-                    "(`enforce_requested_depth`) but is only a soft "
-                    "`analysis_assurance` fact on the native single-pair "
-                    "CLI path, which calls `compare_snapshots()` directly. "
-                    "The ladder matrix therefore states the invariant "
-                    "per member rather than as single-pair parity; adding "
-                    "the single-pair path as an oracle is what closes it, "
-                    "once it is decided which of the two behaviours is the "
-                    "contract."
+                    "cardinality-dependent divergence it had been hiding "
+                    "(all four measured rows differed, not just hard-vs-"
+                    "soft). Closed in the same PR: `resolve_compare_request` "
+                    "no longer calls `enforce_requested_depth`, so ADR-064's "
+                    "exit-7 axis governs every `compare` surface, and the "
+                    "seed test's matrix now uses the single-pair path as its "
+                    "oracle. **Residual:** `workflows.bundle_stored_pair_"
+                    "compare` keeps its own `enforce_requested_depth` call, "
+                    "so a stored bundle-facts pair still hard-fails on the "
+                    "`headers` rung -- a third answer to the same question, "
+                    "pinned by `test_cli_compare_bundle_facts_stored_pair.py` "
+                    "as a deliberate contract from PR #1060 and therefore "
+                    "left alone rather than unified on this review round."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

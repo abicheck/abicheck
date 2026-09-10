@@ -412,6 +412,23 @@ def _compare_one_library(
                 entry["_new_bundle_evidence"] = BundleSignatureEvidence.from_snapshot(
                     compare_result.new_snapshot
                 )
+        # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s
+        # depth-shortfall contract is this axis -- recorded by
+        # `service_compare_pipeline.classify_compare_pair`, never raised --
+        # so the release has to fold each member's own contribution the way
+        # it already folds the contract-coverage floor below, or a pinned
+        # `--depth build`/`source` the members did not reach would exit 7
+        # from a single-pair `compare` and 0 from a directory one (PR #1195,
+        # Codex review). `0` unless this member actually recorded it, which
+        # needs an explicit `--depth` pin, a `build`/`source` rung, and a
+        # live side that fell short -- so every unpinned run is unchanged.
+        # Through `workflows.gate`, which re-exports it: ADR-061 forbids a
+        # `frontends -> policy` import, and this module is a frontend.
+        from .workflows.gate import EXIT_EVIDENCE_CONTRACT_ERROR
+
+        entry["evidence_contract_error_contribution"] = (
+            EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
+        )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -469,7 +486,6 @@ def _compare_one_library(
             old_version=old_version,
             new_version=new_version,
             output_dir=output_dir,
-            depth=depth,
         )
 
 

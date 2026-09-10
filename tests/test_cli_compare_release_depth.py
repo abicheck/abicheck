@@ -29,28 +29,42 @@ a per-library evidence floor", ``build``/``source`` rejected for needing
 inline ``--sources``/``--build-info``. Both surviving rejections were false
 by the time they were written down:
 
-* the fan-out routes every member pair through ``service.run_compare``, and
-  ``service_compare_pipeline.resolve_compare_request`` calls
-  ``workflows.artifact.execute.enforce_requested_depth`` for every pair it
-  resolves — the floor enforcement the ``headers`` message said had no home;
+* the fan-out routes every member pair through ``service.run_compare``, so
+  the depth contract is enforced per member there — the enforcement the
+  ``headers`` message said had no home;
 * a member may itself be a pre-dumped snapshot carrying embedded L3/L4/L5
   evidence, which satisfies ``build``/``source`` with no inline collection
   at all.
 
 So the tests below deliberately do **not** assert "``--depth headers`` is
 now accepted" (the one reported input). They enumerate the *whole* public
-ladder against members of *every* evidence level and state the invariant the
-guard violated: **no rung is rejected up front; each member's own resolved
-evidence decides its own outcome.** The oracle is a hand-written ladder in
-this module, compared against fixtures whose evidence level is known by
-construction — never ``evidence_depth.DEPTH_RANK``, which is the same table
-the implementation consults.
+ladder against members of *every* evidence level.
+
+**The invariant, and why it is stated as parity.** A first version of this
+file asserted each member's outcome against a hand-written ladder, and
+passed — while the fan-out was flattening a three-way contract (exit 0 for
+a satisfied or ``headers`` rung, 7 for an unmet ``build``/``source`` one, 0
+again for a stored-snapshot side the pin cannot apply to) onto a single
+``ERROR``/4 for every case. A Codex review round caught that; a per-member
+oracle could not, because it never looked at what the *other* surface
+answers. So the primary invariant here is now **packaging an operand does
+not change the answer**: a one-member directory exits exactly what a
+single-pair ``compare`` of that same member exits, at every rung. Its
+oracle is the other public surface, which is what makes it survive the
+contract itself being re-decided.
+
+The hand-written ladder is kept for the complementary half only — that a
+rung a member *does* reach still produces a real comparison — since parity
+alone would also be satisfied by both paths failing identically. It is
+deliberately not ``evidence_depth.DEPTH_RANK``, the table the
+implementation ranks with.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -166,14 +180,55 @@ class TestEveryDepthRungReachesTheFanOut:
 
     @pytest.mark.parametrize("requested", LADDER)
     @pytest.mark.parametrize("evidence", EVIDENCE_LEVELS)
-    def test_member_outcome_follows_that_member_s_own_evidence(
+    def test_exit_code_equals_the_single_pair_compare_of_the_same_member(
         self, tmp_path: Path, requested: str, evidence: str
     ) -> None:
-        """A member fails iff *it* falls short of the requested rung.
+        """**The invariant this file exists for.** Packaging an operand must
+        not change the answer: a one-member directory must exit exactly what
+        a single-pair ``compare`` of that same member exits, at every rung.
 
+        The oracle is the other public surface, not a table of expected
+        codes -- so this keeps holding if the depth contract itself is ever
+        re-decided, and fails the moment the two paths disagree in either
+        direction. It is the check that would have caught the flattening
+        Codex's P1 review found: at the point that review landed, this same
+        matrix read scalar 0/7/7/0 against fan-out 4/4/4/4.
+        """
+        old_dir, new_dir = _release_dirs(tmp_path, evidence)
+        member = "libfoo.json"
+        scalar_code, _ = _invoke(
+            "compare",
+            str(old_dir / member),
+            str(new_dir / member),
+            "--depth",
+            requested,
+            "--format",
+            "json",
+        )
+        release_code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            requested,
+            "--format",
+            "json",
+        )
+        assert release_code == scalar_code, out
+
+    @pytest.mark.parametrize("requested", LADDER)
+    @pytest.mark.parametrize("evidence", EVIDENCE_LEVELS)
+    def test_a_reachable_rung_still_compares_the_member(
+        self, tmp_path: Path, requested: str, evidence: str
+    ) -> None:
+        """Parity alone would be satisfied by both paths failing identically.
+
+        So state the other half too: a rung the member's own evidence *does*
+        reach must produce a real comparison, not a skipped or errored one.
         The oracle is ``LADDER``'s hand-written order against the fixture's
-        constructed evidence level — not the rank table the implementation
-        uses, and not the front end's own allow-list.
+        constructed evidence level -- deliberately not
+        ``evidence_depth.DEPTH_RANK``, the table the implementation ranks
+        with.
         """
         old_dir, new_dir = _release_dirs(tmp_path, evidence)
         code, out = _invoke(
@@ -185,14 +240,9 @@ class TestEveryDepthRungReachesTheFanOut:
             "--format",
             "json",
         )
-        data = _release_json(out)
-        [lib] = data["libraries"]
-        short = LADDER.index(evidence) < LADDER.index(requested)
-        if short:
-            assert lib["verdict"] == "ERROR", lib
-            assert "evidence depth" in str(lib["error"])
-            assert data["run_outcome"]["operational"] == "extraction_error"
-        else:
+        if LADDER.index(evidence) >= LADDER.index(requested):
+            data = _release_json(out)
+            [lib] = data["libraries"]
             assert lib["verdict"] == "NO_CHANGE", lib
             assert code == 0, out
 
@@ -228,20 +278,109 @@ class TestEveryDepthRungReachesTheFanOut:
         assert captured == [requested]
 
 
-class TestDepthShortfallGuidanceSurvivesTheGuardRemoval:
-    """The removed usage errors carried advice the floor message cannot.
+@pytest.fixture
+def live_release_dirs(tmp_path: Path) -> tuple[Path, Path]:
+    """One real ``.so`` member per side, built with no headers supplied.
 
-    ``enforce_requested_depth`` tells the user to supply ``--sources``; on a
-    set input that flag is itself rejected. Dropping a guard must not drop
-    the guidance it carried, so the release-shaped alternatives are appended
-    to the per-member failure.
+    The stored-snapshot fixtures above cannot reach the exit-7 axis at all:
+    ``policy.depth_evidence_contract`` carves out a side this run never
+    extracted, so a shortfall on a pre-dumped member is correctly a no-op.
+    The rows where the two paths actually disagreed before this fix were the
+    *live* ones, so they need a real artifact.
+    """
+    from shutil import which
+
+    if which("gcc") is None:
+        pytest.skip("gcc is required to build the live release fixture")
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 1;}\n", encoding="utf-8")
+    old_dir, new_dir = tmp_path / "live-old", tmp_path / "live-new"
+    for side in (old_dir, new_dir):
+        side.mkdir()
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(side / "libfoo.so"), str(src)],
+            check=True,
+            capture_output=True,
+        )
+    return old_dir, new_dir
+
+
+@pytest.mark.integration
+class TestLiveMemberShortfallMatchesTheScalarPath:
+    """The rows the flattening actually broke, on a real artifact.
+
+    With no headers supplied a live member reaches only ``binary`` evidence,
+    so ``headers`` is satisfied (symbol extraction alone backs that rung)
+    while ``build``/``source`` are not. Before this fix a single-pair
+    ``compare`` answered 0/7/7 here and the identical directory answered
+    4/4/4.
+    """
+
+    @pytest.mark.parametrize("requested", LADDER)
+    def test_exit_code_equals_the_single_pair_compare_of_the_same_member(
+        self, live_release_dirs: tuple[Path, Path], requested: str
+    ) -> None:
+        old_dir, new_dir = live_release_dirs
+        scalar_code, _ = _invoke(
+            "compare",
+            str(old_dir / "libfoo.so"),
+            str(new_dir / "libfoo.so"),
+            "--depth",
+            requested,
+            "--format",
+            "json",
+        )
+        release_code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            requested,
+            "--format",
+            "json",
+        )
+        assert release_code == scalar_code, out
+
+
+@pytest.mark.integration
+class TestDepthShortfallIsExplainedNotSilent:
+    """A release that exits 7 must say why, and say something followable.
+
+    The per-member ``DiffResult`` is discarded before the note a single-pair
+    ``compare`` renders from ``record_depth_evidence_contract_error`` would
+    be produced, so the fan-out has to emit its own -- otherwise the exit
+    code is correct and completely unexplained. The scalar note also points
+    at ``--build-info old=/new=`` on ``compare``, which a directory operand
+    rejects outright, so the release note names the alternatives that do
+    work here.
     """
 
     @pytest.mark.parametrize("requested", ("build", "source"))
-    def test_release_shaped_alternatives_are_named(
-        self, tmp_path: Path, requested: str
+    def test_the_release_names_the_short_member_and_the_contribution(
+        self, live_release_dirs: tuple[Path, Path], requested: str
     ) -> None:
-        old_dir, new_dir = _release_dirs(tmp_path, "headers")
+        old_dir, new_dir = live_release_dirs
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            requested,
+            "--format",
+            "json",
+        )
+        assert code == 7, out
+        assert "Requested --depth evidence was not reached in: libfoo.so" in out
+        assert "Contributes 7" in out
+
+    @pytest.mark.parametrize("requested", ("build", "source"))
+    def test_it_names_only_remediation_that_works_on_this_operand(
+        self, live_release_dirs: tuple[Path, Path], requested: str
+    ) -> None:
+        """``cli_surface.retired_spelling_in_remediation``'s rule applied to
+        this notice: advice a user follows must not itself be a usage error
+        on the command being advised."""
+        old_dir, new_dir = live_release_dirs
         _, out = _invoke(
             "compare",
             str(old_dir),
@@ -251,18 +390,11 @@ class TestDepthShortfallGuidanceSurvivesTheGuardRemoval:
             "--format",
             "json",
         )
-        error = str(_release_json(out)["libraries"][0]["error"])
-        assert "dump --sources/--build-info" in error
-        assert "compare this library individually" in error
-
-    def test_hint_is_scoped_to_depth_pins(self, tmp_path: Path) -> None:
-        """A run with no ``--depth`` must not acquire the depth hint — the
-        handler that appends it also catches unrelated ``ValidationError``s.
-        """
-        old_dir, new_dir = _release_dirs(tmp_path, "binary")
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
-        assert code == 0, out
-        assert "dump --sources/--build-info" not in out
+        assert "dump --sources" in out
+        assert "compare the library individually" in out
+        # The flags the scalar note would have suggested are rejected here,
+        # so the notice must not offer them as a `compare` option.
+        assert "pass --build-info old=" not in out
 
 
 class TestSetInputEvidenceFlagsStillRejected:
