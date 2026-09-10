@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AUDIT_REPORT_SCHEMA_VERSION",
+    "NO_BASELINE_EXIT_AXIS_LABELS",
+    "NO_BASELINE_EXIT_AXIS_NOTICES",
     "NO_BASELINE_REPORT_SCHEMA_VERSION",
     "NO_BASELINE_SUPPORTED_FORMATS",
     "NO_BASELINE_UNSUPPORTED_FORMATS",
@@ -127,6 +129,47 @@ NO_BASELINE_SUPPORTED_FORMATS = frozenset(
 #: follow-up) and ``docs/contribute/known-gaps.md``. Not a silent omission:
 #: the CLI's usage error names this ruling.
 NO_BASELINE_UNSUPPORTED_FORMATS = frozenset({"html", "review"})
+
+
+#: The same axes, as short phrases for the one-line view. Kept beside the
+#: long notices above and keyed identically, so an axis cannot be explained
+#: in one projection and silently dropped by the other -- which is exactly
+#: what happened: the Markdown fix left `oneline` still printing a bare
+#: `[exit 7]` with no word about the missed evidence contract (Codex review,
+#: P2). :func:`render_no_baseline_oneline` asserts the two tables agree.
+NO_BASELINE_EXIT_AXIS_LABELS: dict[str, str] = {
+    "contract_coverage": "contract coverage incomplete",
+    "analysis_assurance": "analysis assurance incomplete",
+    "evidence_contract": "evidence contract not met",
+    "incomplete_scope": "comparison scope incomplete",
+    "no_comparison_completed": "no audit completed",
+}
+
+NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
+    "contract_coverage": (
+        "**Contract coverage incomplete** -- the selected `--contract` domain's "
+        "required evidence was not fully available on this candidate "
+        "(ADR-049 Phase 7)."
+    ),
+    "analysis_assurance": (
+        "**Analysis assurance incomplete** -- the evidence behind this audit was "
+        "not complete enough to be relied on, and `--require-complete-analysis` "
+        "makes that a failure rather than a note."
+    ),
+    "evidence_contract": (
+        "**Evidence contract not met** -- a pinned `--depth build`/`--depth "
+        "source` requested evidence this run did not reach; it did not silently "
+        "degrade to shallower evidence (ADR-064)."
+    ),
+    "incomplete_scope": (
+        "**Comparison scope incomplete** -- a selected, expected member never "
+        "reached a completed audit (ADR-065 D6/D7)."
+    ),
+    "no_comparison_completed": (
+        "**No audit completed** -- this run examined nothing, which never reads "
+        "as a clean pass (ADR-065)."
+    ),
+}
 
 
 @dataclass(frozen=True)

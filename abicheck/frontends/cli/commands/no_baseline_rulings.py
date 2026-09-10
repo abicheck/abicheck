@@ -302,10 +302,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "--pack",
         "pack application is not wired to this path yet",
     ),
-    "config": (
-        "--config",
-        "project-config resolution is not wired to this path yet",
-    ),
     "manifest_path": (
         "--instantiation-manifest",
         "template-instantiation evidence is not wired to this path yet",

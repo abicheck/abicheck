@@ -45,7 +45,6 @@ from .cli_compare_fold import (
     _report_not_comparable,
 )
 from .cli_compare_options import (
-    _cli_flag,
     _NormalizedCompareOptions,
     _param_from_cli,
     _reject_bundle_facts_out_for_single_pair,
@@ -128,44 +127,20 @@ def _resolve_compare_config(
     severity_preset: str | None,
     scope_public_headers: bool,
 ) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
-    """Load the project config and merge CLI flags over it (CLI > config > default).
+    """This module's long-standing name for `frontends.cli.project_config.
+    resolve_project_compare_config`.
 
-    ADR-037 D4: resolved *before* dispatch so both the single-file and the
-    directory/package fan-out paths share one resolution. Auto-discovered from the
-    current directory upward, overridable with ``--config``.
-
-    The fourth element is the digest of the bytes the config was parsed from
-    (``None`` when there is no config), captured by the same read so an
-    ADR-049 receipt can prove *which revision* of the file supplied a value
-    rather than only naming its path (Codex review, fresh evidence).
-
-    ADR-068 D5 / Phase 7a: ``compare`` no longer has ``--debug-format``/
-    ``--debuginfod``/``--debuginfod-url``/``--dwarf-only`` CLI flags (they
-    were hidden, already fully config-backed duplicates of ``debug.format``/
-    ``debug.debuginfod``/``debug.debuginfod_url``/``debug.dwarf_only``), so
-    ``resolve_compare_config`` below is called with no ``cli_debug_format``/
-    ``cli_dwarf_only``/``cli_debuginfod``/``cli_debuginfod_url`` override --
-    its defaults (``None``/``None``/``None``/``None``) mean the config value
-    (or the built-in default) always wins.
+    The implementation moved so the ``--no-baseline`` audit -- which
+    dispatches before this module runs -- can reach the same resolution
+    without closing an import cycle back through it. Call sites unchanged.
     """
-    from .cli_helpers_compare import discover_project_config, resolve_compare_config
-    from .workflows.extraction import load_build_config_with_digest
+    from .frontends.cli.project_config import resolve_project_compare_config
 
-    cfg_path = config if config is not None else discover_project_config()
-    cfg_sha: str | None = None
-    try:
-        project_cfg = None
-        if cfg_path is not None:
-            project_cfg, cfg_sha = load_build_config_with_digest(cfg_path)
-    except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
-
-    resolved_cfg = resolve_compare_config(
-        project_cfg,
-        cli_severity_preset=severity_preset,
-        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+    return resolve_project_compare_config(
+        config=config,
+        severity_preset=severity_preset,
+        scope_public_headers=scope_public_headers,
     )
-    return cfg_path, project_cfg, resolved_cfg, cfg_sha
 
 
 def _resolve_compare_collect_mode(

@@ -36,6 +36,7 @@ import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from .cross_source_evolution import change_cross_source_evolution_field
+from .no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
 
 if TYPE_CHECKING:
     from .finding import ReportFinding
@@ -99,6 +100,59 @@ def _sarif_result(
     return entry
 
 
+def _sarif_invocation(doc: NoBaselineDocument) -> dict[str, Any]:
+    """The SARIF ``invocation`` for an audit, including *why* it exited.
+
+    ``executionSuccessful`` is the SARIF spec's "did the tool run to
+    completion", not "did it find anything" -- an audit that completed is
+    successful however many hygiene findings it reports.
+
+    The exit *description* is where a consumer learns why a nonzero code
+    happened, and this published only a generic sentence: a coverage-gated
+    audit said `exitCode: 1` and nothing about which provider fell short,
+    even after the ledger reached the document (Codex review, P2). Each
+    contributing axis is now named, and a coverage failure additionally
+    becomes a ``toolExecutionNotification`` -- the shape SARIF has for "the
+    run itself was limited", which is what an incomplete evidence domain is,
+    as opposed to a `result` about the code.
+    """
+    contributing = [
+        NO_BASELINE_EXIT_AXIS_LABELS[key]
+        for key in NO_BASELINE_EXIT_AXIS_LABELS
+        if doc.exit_axes.get(key)
+    ]
+    description = (
+        "single-build audit (--no-baseline): no compatibility verdict is reported"
+    )
+    if contributing:
+        description += "; " + ", ".join(contributing)
+    invocation: dict[str, Any] = {
+        "executionSuccessful": True,
+        "exitCode": doc.exit_code,
+        "exitCodeDescription": description,
+    }
+    notifications = [
+        {
+            "level": "error",
+            "message": {
+                "text": (
+                    f"contract coverage incomplete: provider "
+                    f"{failure.get('provider', '(unknown)')} on side "
+                    f"{failure.get('side', '(unknown)')} -- "
+                    f"{failure.get('reason', '(no reason recorded)')} "
+                    f"(status {failure.get('status', '(unknown)')}, "
+                    f"completeness {failure.get('completeness', '(unknown)')})"
+                )
+            },
+            "descriptor": {"id": "abicheck.contract-coverage-failure"},
+        }
+        for failure in doc.coverage_failures
+    ]
+    if notifications:
+        invocation["toolExecutionNotifications"] = notifications
+    return invocation
+
+
 def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     """SARIF 2.1.0 projection of *doc*.
 
@@ -142,20 +196,7 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
                         "rules": list(rules.values()),
                     }
                 },
-                "invocations": [
-                    {
-                        # Per the SARIF spec this reports whether the tool ran
-                        # to completion, not whether it found anything -- an
-                        # audit that completed is successful regardless of how
-                        # many hygiene findings it reports.
-                        "executionSuccessful": True,
-                        "exitCode": doc.exit_code,
-                        "exitCodeDescription": (
-                            "single-build audit (--no-baseline): no compatibility "
-                            "verdict is reported"
-                        ),
-                    }
-                ],
+                "invocations": [_sarif_invocation(doc)],
                 "results": results,
                 "properties": {
                     "noBaseline": True,
@@ -164,6 +205,19 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
                     "oldAcquisitionState": doc.old_acquisition_state,
                     "evidenceTiers": list(doc.evidence_tiers),
                     "contractCoverageExitContribution": doc.coverage_exit_contribution,
+                    # The ledger itself, not just its contribution -- a
+                    # code-scanning consumer reading properties gets the same
+                    # actionable rows the JSON report carries.
+                    **(
+                        {
+                            "contractCoverageFailures": [
+                                dict(f) for f in doc.coverage_failures
+                            ]
+                        }
+                        if doc.contract_selected
+                        else {}
+                    ),
+                    "exitAxes": dict(doc.exit_axes),
                 },
             }
         ],

@@ -715,3 +715,119 @@ def test_a_release_directory_is_still_a_usage_error(tmp_path: Path) -> None:
     result = invoke_cli("compare", "--no-baseline", str(plain))
     assert result.exit_code == 64, result.output
     assert "directory of libraries" in result.output
+
+
+def _in_dir(tmp_path: Path, config_text: str | None):
+    """A working directory with (or without) an auto-discovered project config."""
+    work = tmp_path / "project"
+    work.mkdir(exist_ok=True)
+    snapshot = work / "snapshot.abi.json"
+    if not snapshot.exists():
+        snapshot.write_text(
+            (
+                example_catalog.case_dir("case143_audit_accidental_export")
+                / "snapshot.abi.json"
+            ).read_text()
+        )
+    cfg = work / ".abicheck.yml"
+    if config_text is None:
+        cfg.unlink(missing_ok=True)
+    else:
+        cfg.write_text(config_text)
+    return work, snapshot
+
+
+def test_a_malformed_discovered_config_fails_the_audit_as_it_fails_compare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An auto-discovered `.abicheck.yml` is not invisible to the audit.
+
+    The audit dispatches before the two-sided config resolution and never
+    reached it, so a malformed discovered config exited 0 here while ordinary
+    `compare` exits 64 (Codex review, P1). The oracle is the two-sided
+    command's own exit code on the same directory — not a hard-coded 64 — so
+    the two cannot drift apart again.
+    """
+    work, snapshot = _in_dir(tmp_path, "this is: [not valid yaml\n")
+    monkeypatch.chdir(work)
+
+    audit = invoke_cli("compare", "--no-baseline", str(snapshot))
+    two_sided = invoke_cli("compare", str(snapshot), str(snapshot))
+    assert audit.exit_code == two_sided.exit_code, (
+        f"audit exited {audit.exit_code}, two-sided {two_sided.exit_code} "
+        "on the same malformed auto-discovered config"
+    )
+    assert audit.exit_code != 0
+
+
+@pytest.mark.parametrize("public", [True, False])
+def test_a_discovered_configs_scope_reaches_the_audit_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public: bool
+) -> None:
+    """A valid config's `scope.public` must actually change what is audited.
+
+    Asserted at the runner boundary rather than through a finding count:
+    the value has to *arrive*, and a fixture whose findings happen not to be
+    scope-sensitive would let a silently-dropped setting pass. Both values
+    are exercised, since honoring only the default would satisfy one row.
+    """
+    import abicheck.frontends.cli.commands.compare_no_baseline as cmd
+
+    work, snapshot = _in_dir(tmp_path, f"scope:\n  public: {str(public).lower()}\n")
+    monkeypatch.chdir(work)
+
+    seen: dict[str, object] = {}
+    original = cmd.run_no_baseline_compare
+
+    def spy(candidate, **kwargs):
+        seen["scope"] = kwargs.get("scope_to_public_surface")
+        return original(candidate, **kwargs)
+
+    monkeypatch.setattr(cmd, "run_no_baseline_compare", spy)
+    result = invoke_cli("compare", "--no-baseline", str(snapshot), "--format", "json")
+    assert result.exit_code == 0, result.output
+    assert seen["scope"] is public, (
+        "the discovered config's scope.public must reach the audit runner; "
+        "dropping it audits a different surface than the same directory's "
+        "`compare` would"
+    )
+
+
+def test_the_audit_sarif_names_why_it_exited(tmp_path: Path) -> None:
+    """SARIF must carry the coverage ledger, not just `exitCode: 1`.
+
+    A code-scanning consumer reading only the exit code cannot tell which
+    provider fell short (Codex review, P2). The failures become
+    `toolExecutionNotifications` — SARIF's shape for "the run itself was
+    limited", which is what an incomplete evidence domain is, rather than a
+    `result` about the code.
+    """
+    from abicheck.report.no_baseline import render_no_baseline
+    from abicheck.workflows.no_baseline_compare import (
+        resolve_no_baseline_candidate,
+        run_no_baseline_compare,
+    )
+
+    snapshot = (
+        example_catalog.case_dir("case143_audit_accidental_export")
+        / "snapshot.abi.json"
+    )
+    result = run_no_baseline_compare(
+        resolve_no_baseline_candidate(snapshot),
+        contract_evaluation=True,
+        contract_mode="public",
+    )
+    payload, exit_code = render_no_baseline(result, "sarif")
+    run = json.loads(payload)["runs"][0]
+    invocation = run["invocations"][0]
+
+    if exit_code:
+        assert "contract coverage incomplete" in invocation["exitCodeDescription"]
+        notifications = invocation.get("toolExecutionNotifications") or []
+        assert notifications, "a gated audit must say which provider fell short"
+        assert any("provider" in n["message"]["text"] for n in notifications)
+        assert run["properties"]["contractCoverageFailures"]
+    assert invocation["executionSuccessful"] is True, (
+        "SARIF's executionSuccessful means the tool ran to completion, not "
+        "that it found nothing"
+    )

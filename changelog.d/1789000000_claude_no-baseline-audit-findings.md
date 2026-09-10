@@ -1,5 +1,17 @@
 ### Fixed
 
+- **The audit resolves the project config `compare` discovers.** It
+  dispatched before that resolution and never reached it, so an
+  auto-discovered `.abicheck.yml` was invisible: a malformed one exited `0`
+  where ordinary `compare` exits `64`, and a valid `scope.public: false` was
+  dropped — auditing a *different surface* than the same directory's
+  `compare` would. Resolved through the same function at the same
+  CLI > config > default precedence, and `--config` is accepted rather than
+  rejected, since the discovered file is now honored.
+- **SARIF says why a gated audit exited.** The coverage ledger reaches the
+  `toolExecutionNotifications` array (SARIF's shape for "the run itself was
+  limited") and the run's properties, and the exit-code description names
+  every contributing axis, instead of publishing a bare `exitCode: 1`.
 - **A coverage-gated audit now publishes the ledger that gated it.** Under
   `--contract`, the report kept only the numeric contribution, so even
   `--format json` exited 1 with no way to see which provider, on which side,

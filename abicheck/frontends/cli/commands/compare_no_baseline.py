@@ -130,6 +130,23 @@ class _ContractChoices:
 
 
 @dataclass(frozen=True)
+class _ScopeChoices:
+    """What the audit scopes and folds, after `.abicheck.yml` is merged in.
+
+    Resolved through the *same* ``_resolve_compare_config`` a two-sided
+    ``compare`` uses, at the same precedence (CLI > config > built-in
+    default). This path used to run before that resolution and never reach
+    it, so an auto-discovered project config was invisible here: a malformed
+    one exited 0 where ordinary ``compare`` exits 64, and a valid
+    ``scope.public: false`` was silently dropped -- auditing a *different
+    surface* than the same directory's ``compare`` would (Codex review, P1).
+    """
+
+    scope_to_public_surface: bool
+    collapse_versioned_symbols: bool
+
+
+@dataclass(frozen=True)
 class _ResolvedInvocation:
     """One ``--no-baseline`` invocation, already validated and resolved.
 
@@ -151,6 +168,7 @@ class _ResolvedInvocation:
     evidence: _EvidenceInputs
     compile: _CompileChoices
     contract: _ContractChoices
+    scope: _ScopeChoices
 
 
 def maybe_dispatch_no_baseline_compare(
@@ -268,6 +286,36 @@ def _resolve_no_baseline_invocation(
     )
     lang_src = ctx.get_parameter_source("lang") if ctx is not None else None
 
+    # The project config, resolved exactly as a two-sided `compare` resolves
+    # it -- same function, same auto-discovery, same CLI > config > default
+    # precedence. Running before this resolution (and never reaching it) is
+    # what let a malformed auto-discovered `.abicheck.yml` exit 0 here while
+    # ordinary `compare` exits 64, and a valid `scope.public: false` be
+    # dropped, auditing a different surface than the same directory's
+    # `compare` (Codex review, P1). `_resolve_compare_config` raises
+    # `click.UsageError` on a malformed document, so the loud half needs no
+    # code of its own here.
+    from ..project_config import resolve_project_compare_config
+
+    _cfg_path, _project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
+        config=kwargs.get("config"),
+        severity_preset=None,
+        # The flag's own value, not a coalesced default: `_cli_flag`
+        # inside consults Click's parameter *source* to tell "typed" from
+        # "defaulted", which is what lets the config win when it was not
+        # typed. Passing None here would read as "typed nothing".
+        scope_public_headers=bool(kwargs.get("scope_public_headers", True)),
+    )
+    scope = _ScopeChoices(
+        scope_to_public_surface=bool(resolved_cfg.scope_public),
+        # CLI wins when the flag was typed; otherwise the config's own value,
+        # which `resolve_compare_config` has already folded in.
+        collapse_versioned_symbols=bool(
+            kwargs.get("collapse_versioned_symbols")
+            or resolved_cfg.collapse_versioned_symbols
+        ),
+    )
+
     # ADR-049: `--contract VALUE` is what activates the evaluator on the CLI,
     # and `auto` maps back to "no explicit domain stated" so D7's lower tiers
     # decide -- resolved through the same two helpers
@@ -313,6 +361,7 @@ def _resolve_no_baseline_invocation(
             + list(kwargs.get("debug_roots_new") or ()),
             include_labels=kwargs.get("include_labels") or None,
         ),
+        scope=scope,
         contract=_ContractChoices(
             mode=resolve_contract_domain(contract_mode_raw, ctx),
             evaluation=resolve_contract_evaluation(contract_mode_raw),
@@ -452,14 +501,12 @@ def _run_no_baseline_compare_cmd(
         suppression=suppression,
         policy=kwargs.get("policy") or "strict_abi",
         policy_file=policy_file_obj,
-        scope_to_public_surface=bool(kwargs.get("scope_public_headers", True)),
+        scope_to_public_surface=inv.scope.scope_to_public_surface,
         # ADR-068 D4/Phase 5: pattern-verdict modulation is unconditional on
         # every `compare` path now (no `--pattern-verdicts` flag exists any
         # more) -- this audit-only path gets the identical treatment.
         pattern_verdicts=True,
-        collapse_versioned_symbols=bool(
-            kwargs.get("collapse_versioned_symbols", False)
-        ),
+        collapse_versioned_symbols=inv.scope.collapse_versioned_symbols,
         contract_evaluation=inv.contract.evaluation,
         contract_mode=inv.contract.mode,
         # ADR-064's exit-7 axis: a pinned --depth build/source that this
