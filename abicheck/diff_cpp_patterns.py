@@ -48,7 +48,6 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .diff_helpers import make_change
 
@@ -72,11 +71,13 @@ from .diff_templates import (  # noqa: F401
 )
 from .model import AccessLevel, resolved_fact_value
 from .model.binary_naming import strip_vendor_hash
+from .model.change_catalog.kinds import ChangeKind
 from .model.export_index import (
     all_export_names,
     build_raw_export_index,
     pe_export_ids_with_ordinal_placeholder as _pe_export_ids,
 )
+from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType

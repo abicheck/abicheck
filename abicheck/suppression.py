@@ -38,14 +38,10 @@ from pathlib import Path
 
 import yaml
 
-from .checker_policy import (
-    API_BREAK_KINDS,
-    BREAKING_KINDS,
-    ChangeKind,
-    ReachabilityState,
-    Verdict,
-)
 from .checker_types import Change
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import API_BREAK_KINDS, BREAKING_KINDS, Verdict
+from .policy.evidence_status import ReachabilityState
 from .policy.rule_identity import rule_identity
 from .policy.selectors import _TYPE_CHANGE_KINDS, SelectorSet
 from .suppression_yaml import parse_finding_id, raw_finding_ids_by_index

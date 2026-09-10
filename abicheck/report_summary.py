@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
-from .checker_policy import HasKind
+from .model.change_catalog.kinds import HasKind
 
 if TYPE_CHECKING:
     from .severity import KindSets
@@ -125,7 +125,7 @@ def compatibility_metrics(
     policy-downgraded kind would still be counted as breaking here.
     """
     if policy is not None or kind_sets is not None or policy_file is not None:
-        from .checker_policy import Verdict as _Verdict
+        from .policy.classification import Verdict as _Verdict
         from .severity import effective_verdict_for_change
 
         breaking_count = sum(
@@ -192,7 +192,7 @@ def build_summary(result: DiffResult) -> ReportSummary:
     # here already satisfied that exact check to land in `compatible`,
     # avoiding a second `effective_verdict_for_change` resolution per
     # finding (`classify_effective_change`'s own optimization parameter).
-    from .checker_policy import Verdict
+    from .policy.classification import Verdict
     from .severity import IssueCategory, classify_effective_change
 
     quality_issues = sum(

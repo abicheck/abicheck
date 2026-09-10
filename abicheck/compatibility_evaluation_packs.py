@@ -73,9 +73,9 @@ from typing import Any
 import yaml
 
 from .change_registry_types import Verdict
-from .checker_policy import ChangeKind
 from .compatibility_evaluation_config import ImmutableIdentity
 from .errors import PackManifestError
+from .model.change_catalog.kinds import ChangeKind
 from .policy_file import parse_severity_value
 
 

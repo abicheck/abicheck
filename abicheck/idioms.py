@@ -36,8 +36,9 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .checker_policy import ChangeKind, Confidence
 from .model import ParamKind, RecordType, ScopeOrigin, Visibility, resolved_fact_value
+from .model.change_catalog.kinds import ChangeKind
+from .policy.evidence_status import Confidence
 from .surface_graph import SurfaceGraph
 
 # Provenance origins that are NOT part of the public ABI surface — a type defined

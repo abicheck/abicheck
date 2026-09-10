@@ -3,13 +3,13 @@
   "files": [
     {
       "path": "abicheck/analysis_assurance.py",
-      "baseline_lines": 1550,
+      "baseline_lines": 1551,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Bumped by 11 lines for E-S1 (vision-api-abi-evolution.md section E / cli-cleanup-phase-two.md Block 5): the layout_unverified_detectors dataclass field, its to_dict()/compute_analysis_assurance() wiring, and the one import -- the field itself cannot live outside this dataclass, and the detector-name/predicate logic it wires to was already moved out to the new analysis_assurance_layout.py leaf module rather than added here.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Bumped by 11 lines for E-S1 (vision-api-abi-evolution.md section E / cli-cleanup-phase-two.md Block 5): the layout_unverified_detectors dataclass field, its to_dict()/compute_analysis_assurance() wiring, and the one import -- the field itself cannot live outside this dataclass, and the detector-name/predicate logic it wires to was already moved out to the new analysis_assurance_layout.py leaf module rather than added here. Raised 1550 -> 1551 (P1, Codex review, ADR-061 gap B follow-up): the `from .checker_policy import ChangeKind, EvidenceTier` facade import was pointed at its two real owners (`model.change_catalog.kinds`, `policy.evidence_status`) -- one line where one stood before, since the two names genuinely live in different-layer owner modules. No smaller diff.",
       "review_by": "2026-11-30"
     },
     {
@@ -387,6 +387,17 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/bundle_detectors.py",
+      "baseline_lines": 801,
+      "target": "workflows",
+      "rule": "no_growth",
+      "disposition": "accept",
+      "category": "adr061_gap_b_internal_caller_redirect",
+      "owner": "abicheck maintainers",
+      "rationale": "New entry, first crossing the 800-line production cap (P1, Codex review, ADR-061 gap B follow-up): the module-level `from .checker_policy import ChangeKind, Verdict, policy_kind_sets` facade import was pointed at its two real owners (`model.change_catalog.kinds` for `ChangeKind`, `policy.classification` for `Verdict`/`policy_kind_sets`) so this canonical internal caller no longer routes through the compatibility facade. Unavoidably two `from` lines where one stood before -- `ChangeKind` and the two policy-owned names genuinely live in different-layer owner modules, and both names are used at 23+ call sites throughout this file, so a qualified-module-import alternative would mean rewriting every call site (real risk of a silent miscompile across that many sites) instead of the one-line import-block cost. No smaller diff.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "abicheck/checker.py",
       "baseline_lines": 1446,
       "target": "compare",
@@ -652,13 +663,13 @@
     },
     {
       "path": "abicheck/contract_evaluation.py",
-      "baseline_lines": 1733,
+      "baseline_lines": 1734,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1733 -> 1734 (P1, Codex review, ADR-061 gap B follow-up): the `from .checker_policy import ADDITION_KINDS, ChangeKind` facade import was pointed at its two real owners (`model.change_catalog.kinds`, `policy.classification`) -- one line where one stood before, since the two names genuinely live in different-layer owner modules. No smaller diff.",
       "review_by": "2026-11-30"
     },
     {
@@ -685,13 +696,13 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1382,
+      "baseline_lines": 1383,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_compare_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1382 -> 1383 (P1, Codex review, ADR-061 gap B follow-up): the `from .checker_policy import ChangeKind, ReachabilityState` facade import was pointed at its two real owners (`model.change_catalog.kinds`, `policy.evidence_status`) -- one line where one stood before, since the two names genuinely live in different-layer owner modules. No smaller diff.",
       "review_by": "2026-11-30"
     },
     {
@@ -1048,13 +1059,13 @@
     },
     {
       "path": "abicheck/internal_leak.py",
-      "baseline_lines": 1651,
+      "baseline_lines": 1652,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_oversized_module",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. +1 line (2026-08-31): Phase 5 item 2's internal-caller facade migration (PR #965) split a single two-name `from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary` into two real-owner imports (`model/graph_facts.py`, `model/source_graph.py`), which D8 requires for an internal caller and which this frozen baseline had no equal-size reduction available to offset.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. +1 line (2026-08-31): Phase 5 item 2's internal-caller facade migration (PR #965) split a single two-name `from .buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary` into two real-owner imports (`model/graph_facts.py`, `model/source_graph.py`), which D8 requires for an internal caller and which this frozen baseline had no equal-size reduction available to offset. Raised 1651 -> 1652 (P1, Codex review, ADR-061 gap B follow-up): the identical shape one more time -- `from .checker_policy import ChangeKind, ReachabilityState` split into its two real owners (`model.change_catalog.kinds`, `policy.evidence_status`). No smaller diff.",
       "review_by": "2026-11-30"
     },
     {

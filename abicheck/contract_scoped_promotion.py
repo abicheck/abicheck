@@ -43,13 +43,13 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from .checker_policy import Verdict
 from .contract_evaluation import _NOT_APPLICABLE_KIND_SLUGS
 from .contract_relevance_types import (
     EXPLICIT_SCOPE_REASON_CODE,
     ContractAssurance,
     ContractRelevance,
 )
+from .policy.classification import Verdict
 
 # ADR-049 section 4.3 item 1's strongest public-evidence tier: "explicit
 # required symbol, exact contract/ABI manifest, package symbols metadata,
@@ -189,8 +189,8 @@ def recompute_verdict_after_promotion(
     promoted onto the axis, and for every run that never opted into contract
     evaluation.
     """
-    from .checker_policy import compute_verdict
     from .contract_gating import is_evaluated
+    from .policy.classification import compute_verdict
     from .policy.reclassify import _VERDICT_ORDER
 
     changes = getattr(result, "changes", None)

@@ -61,7 +61,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .checker_policy import ADDITION_KINDS, ChangeKind
 from .checker_types import Change
 from .contract_relevance_types import (
     CONTRACT_REASON_CODES,
@@ -74,6 +73,8 @@ from .contract_relevance_types import (
 from .export_surface import ExportSurface
 from .finding_identity import IDENTITY_TIER_REDUCED, resolve_change_identity
 from .model import ScopeOrigin
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import ADDITION_KINDS
 from .post_processing import _PUBLIC_SOURCE_ABI_KINDS, _change_matches_symbols
 from .surface import (
     _HIDDEN_FRIEND_KIND_NAMES,

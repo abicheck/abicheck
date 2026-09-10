@@ -241,12 +241,12 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.vtable_evidence import vtable_transition_is_evidenced
 from .diff_cxx_rules import owner_class_of, vtable_slot_is_override_reuse
 from .diff_helpers import make_change
 from .model import Function, RecordType, resolved_fact_value
+from .model.change_catalog.kinds import ChangeKind
 from .type_reachability_spelling import _namespace_suffix_spellings
 
 

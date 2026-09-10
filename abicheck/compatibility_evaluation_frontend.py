@@ -79,7 +79,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .change_registry_types import Verdict
-from .checker_policy import VALID_BASE_POLICIES, policy_kind_sets
 from .compatibility_evaluation_config import (
     AssuranceConfig,
     CompatibilityEvaluationConfig,
@@ -114,6 +113,8 @@ from .compatibility_evaluation_wiring import (
     resolve_selected_packs,
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
+from .model.change_catalog.registry import VALID_BASE_POLICIES
+from .policy.classification import policy_kind_sets
 from .policy.gate_pack_fold import gate_exit_code_scheme
 from .policy.versioning_policy import (
     VersioningPolicy,

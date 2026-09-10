@@ -22,8 +22,8 @@ these kinds explain and localize it.
 """
 from __future__ import annotations
 
-from ..checker_policy import ChangeKind
 from ..checker_types import Change
+from ..model.change_catalog.kinds import ChangeKind
 from .build_evidence import BuildEvidence
 
 #: Canonical option keys whose drift specifically indicates a toolchain change

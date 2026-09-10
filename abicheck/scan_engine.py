@@ -62,7 +62,6 @@ from .buildsource.poi import (
 )
 from .buildsource.preprocessor_facts import collect_preprocessor_facts
 from .buildsource.risk import RiskScore
-from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
 from .cli_scan_helpers import (
@@ -82,6 +81,7 @@ from .model.evidence_depth_levels import (
     SourceMethod,
     public_depth_value,
 )
+from .policy.classification import API_BREAK_KINDS, BREAKING_KINDS
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext

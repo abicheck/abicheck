@@ -50,7 +50,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
@@ -64,6 +63,7 @@ from .model import (
     resolved_fact_value,
     stdlib_namespaces_excluded,
 )
+from .model.change_catalog.kinds import ChangeKind
 
 
 def _type_map(snap: AbiSnapshot) -> dict[str, RecordType]:

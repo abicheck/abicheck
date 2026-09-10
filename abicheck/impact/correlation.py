@@ -91,8 +91,8 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from ..checker_policy import ChangeKind
 from ..checker_types import Change
+from ..model.change_catalog.kinds import ChangeKind
 
 #: Evidence tier label per correlated finding kind, weakest to strongest
 #: proof that a real consumer is actually affected — an export-table removal

@@ -50,9 +50,10 @@ from .buildsource.call_graph import (
 )
 from .buildsource.entity_identity import candidate_lookup_keys
 from .buildsource.graph_facts import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN
-from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
 from .impact.engine import assess_change
+from .model.change_catalog.kinds import ChangeKind
+from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
@@ -1554,7 +1555,7 @@ def detect_call_graph_leaks(
     Requires an embedded L5 graph on at least one snapshot (see
     :func:`compute_call_graph_leak_paths`); returns ``[]`` otherwise.
     """
-    from .checker_policy import BREAKING_KINDS
+    from .policy.classification import BREAKING_KINDS
 
     internal_set = tuple(internal_namespaces)
     triggering_kinds = BREAKING_KINDS

@@ -101,8 +101,8 @@ def require_evidence_findings(
     """
     if policy_file is None or not policy_file.require_evidence:
         return []
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     for key, label, attr in _REQUIRE_EVIDENCE_LAYERS:
@@ -175,7 +175,7 @@ def finding_bucket_counts(
     artifact-backed is everything not externally injected; build-context-drift /
     source-only come from each finding's ``evidence_category`` tag.
     """
-    from ..checker_policy import ChangeKind
+    from ..model.change_catalog.kinds import ChangeKind
     injected_ids = {id(c) for c in injected_changes}
     out = {"artifact_backed": 0, "build_context_drift": 0,
            "source_only": 0, "evidence_required_missing": 0}

@@ -45,10 +45,11 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .junit_coverage_warnings import append_coverage_warnings_suite
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import Verdict
 from .report.junit_scope import append_scope_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display

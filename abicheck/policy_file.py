@@ -73,18 +73,14 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .checker_policy import (
-    VALID_BASE_POLICIES,
-    ChangeKind,
-    Verdict,
-    compute_verdict,
-    policy_kind_sets,
-)
 from .errors import PolicyError
+from .model.change_catalog.kinds import ChangeKind
+from .model.change_catalog.registry import VALID_BASE_POLICIES
 from .policy.acknowledgment_policy import (
     AcknowledgmentPolicy,
     built_in_default_acknowledgment_policy,
 )
+from .policy.classification import Verdict, compute_verdict, policy_kind_sets
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,

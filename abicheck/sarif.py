@@ -33,14 +33,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
-from abicheck.checker_policy import (
-    EvidenceStatus,
-    ReachabilityState,
-    evidence_status_for_result,
-    impact_caveat_for,
-    impact_for,
-    policy_for,
-)
 from abicheck.contract_gating import (
     contract_relevance_of,
     evaluation_status_of,
@@ -49,6 +41,13 @@ from abicheck.contract_gating import (
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
+from abicheck.policy.classification import (
+    evidence_status_for_result,
+    impact_caveat_for,
+    impact_for,
+    policy_for,
+)
+from abicheck.policy.evidence_status import EvidenceStatus, ReachabilityState
 from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.document import ReportDocument

@@ -34,13 +34,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .checker_policy import (
-    EvidenceStatus,
-    HasKind,
-    evidence_status_for_result,
-    impact_for,
-)
-
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_CSS`` is re-exported via
 # redundant alias (it was previously defined in this module) so any code that
@@ -49,6 +42,9 @@ from .checker_policy import (
 # directly -- those moved into ``report/render_html.py`` alongside the rest
 # of this module's formatting responsibility (ADR-061 Phase 2 item 1).
 from .html_template import _CSS as _CSS
+from .model.change_catalog.kinds import HasKind
+from .policy.classification import evidence_status_for_result, impact_for
+from .policy.evidence_status import EvidenceStatus
 from .policy.gate_decision import gate_decision_for_result
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.

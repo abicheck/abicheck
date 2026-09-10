@@ -39,7 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .checker_policy import Verdict
+from .policy.classification import Verdict
 from .report_summary import ReportSummary, build_summary
 
 if TYPE_CHECKING:
