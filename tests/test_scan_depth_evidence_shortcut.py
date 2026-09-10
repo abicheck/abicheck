@@ -105,22 +105,22 @@ class TestDebugShortcutProperties:
 class TestRunWideHeaderEvidence:
     """Both sides of a scan must be built at the same evidence tier."""
 
-    _SLOTS = ("headers", "public_headers", "public_header_dirs", "baseline_headers")
+    _SLOTS = ("headers", "baseline_headers")
 
     @pytest.mark.parametrize("slot", _SLOTS)
-    def test_any_single_header_input_keeps_the_shortcut_available(
+    def test_a_header_input_on_either_side_keeps_the_shortcut_available(
         self, slot: str
     ) -> None:
-        """Header input in *any* one slot answers the question for both sides.
+        """One side's ``-H`` answers the question for both.
 
-        Enumerated over every slot rather than the one the reported case used,
-        so a slot added later cannot be silently left out of the disjunction.
+        Enumerated over every side rather than the one the reported case used,
+        so a side added later cannot be silently left out of the disjunction.
         """
         kwargs: dict[str, object] = dict.fromkeys(self._SLOTS, ())
         kwargs[slot] = (Path("inc/foo.h"),)
         assert scan_debug_presence_only(EvidenceDepth.HEADERS, **kwargs) is True
 
-    def test_no_header_input_anywhere_withdraws_the_shortcut(self) -> None:
+    def test_no_header_input_on_either_side_withdraws_the_shortcut(self) -> None:
         empty: dict[str, object] = dict.fromkeys(self._SLOTS, ())
         assert scan_debug_presence_only(EvidenceDepth.HEADERS, **empty) is False
 
@@ -132,6 +132,21 @@ class TestRunWideHeaderEvidence:
         """
         seeded: dict[str, object] = dict.fromkeys(self._SLOTS, (Path("inc/foo.h"),))
         assert scan_debug_presence_only(EvidenceDepth.SOURCE, **seeded) is False
+
+    def test_the_predicate_takes_only_inputs_the_ast_parse_reads(self) -> None:
+        """Provenance-only options must not be reachable as "header evidence".
+
+        Stated structurally, over the signature itself, rather than by passing
+        a provenance value and asserting it is ignored: the narrowing is that
+        such a value has no parameter to arrive through at all. This is what
+        makes reintroducing one a visible signature change instead of a silent
+        widening of the disjunction (Codex review, PR #1186 --- counting
+        ``--public-header-dir`` reopened the very hole this module closes).
+        """
+        import inspect
+
+        params = set(inspect.signature(scan_debug_presence_only).parameters)
+        assert params == {"depth", *TestRunWideHeaderEvidence._SLOTS}
 
 
 #: Independently-chosen ABI changes, each detectable only from type evidence
@@ -203,16 +218,26 @@ class TestHeaderlessScanMatchesCompare:
 
     @pytest.mark.parametrize("case", sorted(_CASES))
     @pytest.mark.parametrize("depth", [None, "headers"])
+    @pytest.mark.parametrize("provenance", [False, True])
     def test_a_headerless_scan_sees_what_compare_sees(
-        self, tmp_path: Path, case: str, depth: str | None
+        self, tmp_path: Path, case: str, depth: str | None, provenance: bool
     ) -> None:
         runner = CliRunner()
         old, new = self._libs(tmp_path, case)
         pin = ["--depth", depth] if depth is not None else []
+        # `--public-header-dir` names headers but feeds none to the AST parse
+        # -- it is a provenance boundary only. A run carrying it is still a
+        # header-less run for this contract, and counting it as evidence is a
+        # real regression this axis pins (Codex review, PR #1186).
+        scoped = tmp_path / "provenance-only"
+        if provenance:
+            scoped.mkdir(exist_ok=True)
+            (scoped / "unrelated.h").write_text("struct Unrelated { int z; };\n")
+            pin = [*pin, "--public-header-dir", str(scoped)]
 
         compare_code, compare_json = self._run(
             runner,
-            ["compare", str(old), str(new), *pin],
+            ["compare", str(old), str(new), *(["--depth", depth] if depth else [])],
             tmp_path / "compare.json",
         )
         scan_code, scan_json = self._run(
@@ -221,11 +246,10 @@ class TestHeaderlessScanMatchesCompare:
             tmp_path / "scan.json",
         )
 
+        where = f"{case} at depth={depth} provenance={provenance}"
         assert _verdict(scan_json) == _verdict(compare_json), (
-            f"{case} at depth={depth}: scan={_verdict(scan_json)} "
-            f"compare={_verdict(compare_json)}"
+            f"{where}: scan={_verdict(scan_json)} compare={_verdict(compare_json)}"
         )
         assert scan_code == compare_code, (
-            f"{case} at depth={depth}: scan exit={scan_code} "
-            f"compare exit={compare_code}"
+            f"{where}: scan exit={scan_code} compare exit={compare_code}"
         )

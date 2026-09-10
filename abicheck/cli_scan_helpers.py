@@ -203,23 +203,36 @@ def _uses_debug_presence_only(
 def scan_debug_presence_only(
     depth: EvidenceDepth,
     headers: Any,
-    public_headers: Any,
-    public_header_dirs: Any,
     baseline_headers: Any,
 ) -> bool:
     """:func:`_uses_debug_presence_only` answered from a scan's own operands.
 
-    The header-evidence question is asked run-wide, not per side: a candidate
-    built with headers and a baseline built without would be two snapshots at
-    different evidence tiers, which manufactures findings rather than losing
-    them. So any header input on either side keeps the shortcut available for
-    both, and none anywhere withdraws it from both.
+    Only the ``-H/--header`` inputs count, on either side. They are the ones
+    the header-AST parse actually reads, and the shortcut defers to that parse
+    --- so a flag that names headers without feeding them to it is not
+    evidence for this question.
+
+    ``--public-header-dir`` is the case that makes the distinction load-bearing
+    rather than pedantic. It is a *provenance* boundary
+    (``workflows.scan_config.public_provenance_set``): it classifies origins as
+    public/internal so the leakage/RTTI cross-checks run, and it adds nothing
+    to the AST extraction set. Counting it here reopened exactly the hole this
+    predicate exists to close --- verified live, a
+    ``scan --against ... --public-header-dir DIR`` run reports
+    ``L2_header: skipped ("no public-header AST")`` and yet had DWARF
+    downgraded, losing the ``type_size_changed`` that ``compare`` reports on
+    the identical pair (Codex review, PR #1186). ``public_headers`` is dropped
+    for the same reason and one more: it is derived from ``headers``, so it can
+    never be the *only* evidence anyway.
+
+    The question is asked run-wide, not per side: a candidate built with
+    headers and a baseline built without would be two snapshots at different
+    evidence tiers, which manufactures findings rather than losing them. So a
+    ``-H`` on either side keeps the shortcut available for both, and none on
+    either withdraws it from both.
     """
     return _uses_debug_presence_only(
-        depth,
-        has_header_evidence=bool(
-            headers or public_headers or public_header_dirs or baseline_headers
-        ),
+        depth, has_header_evidence=bool(headers or baseline_headers)
     )
 
 

@@ -96,7 +96,7 @@ file:
 ```bash
 abicheck scan snapshot.abi.json --depth headers   # exit 0, same finding
 abicheck scan snapshot.abi.json --depth binary    # exit 0, same finding
-abicheck scan snapshot.abi.json                   # exit 0, same finding (auto -> depth=source)
+abicheck scan snapshot.abi.json                   # exit 0, same finding (auto -> depth=headers)
 abicheck scan snapshot.abi.json --depth source    # errors: needs --sources/--build-info
 ```
 
