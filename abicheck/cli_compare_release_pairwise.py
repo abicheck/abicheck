@@ -39,7 +39,6 @@ should import from here directly.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -51,12 +50,7 @@ from .checker import DiffResult
 from .cli import _normalize_binary_input, _safe_write_output
 from .cli_compare_receipt import record_release_resolved_config
 from .cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
-from .errors import (
-    IncompatibleSnapshotSchemaError,
-    ProfileMismatchError,
-    ScopeMismatchError,
-    UnsupportedArtifactError,
-)
+from .frontends.cli.release_member_errors import member_error_entry
 from .model import AbiSnapshot
 from .reporter import to_json
 from .workflows.contracts import CompareResult
@@ -197,10 +191,13 @@ def _run_compare_pair(
     known-gap entry). ``None`` (the default) is a true no-op, matching every
     pre-existing caller.
 
-    *depth* (D1) is the one ``--depth`` value the release fan-out can
-    actually honour end to end -- ``"binary"`` -- forwarded unchanged to
-    ``service.run_compare`` so this pair clears header/build/source evidence
-    the same way a single-pair ``compare --depth binary`` would.
+    *depth* is the run's ``--depth`` pin -- any rung of the public ladder,
+    forwarded unchanged to ``service.run_compare`` so this pair is resolved,
+    floor-checked (``enforce_requested_depth``) and depth-projected
+    (``project_pair_to_depth``) exactly as a single-pair ``compare --depth
+    X`` would be. It read ``"binary"``-only while a CLI allow-list rejected
+    the other three rungs; nothing here was ever ``binary``-specific. See
+    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`.
 
     *public_header_dirs* (CodeRabbit review, PR #1138): a project's
     ``.abicheck.yml`` ``scope.public_header_dirs``, resolved once for the
@@ -417,6 +414,23 @@ def _compare_one_library(
                 entry["_new_bundle_evidence"] = BundleSignatureEvidence.from_snapshot(
                     compare_result.new_snapshot
                 )
+        # ADR-064's evidence-contract axis (exit 7), per member. `compare`'s
+        # depth-shortfall contract is this axis -- recorded by
+        # `service_compare_pipeline.classify_compare_pair`, never raised --
+        # so the release has to fold each member's own contribution the way
+        # it already folds the contract-coverage floor below, or a pinned
+        # `--depth build`/`source` the members did not reach would exit 7
+        # from a single-pair `compare` and 0 from a directory one (PR #1195,
+        # Codex review). `0` unless this member actually recorded it, which
+        # needs an explicit `--depth` pin, a `build`/`source` rung, and a
+        # live side that fell short -- so every unpinned run is unchanged.
+        # Through `workflows.gate`, which re-exports it: ADR-061 forbids a
+        # `frontends -> policy` import, and this module is a frontend.
+        from .workflows.gate import EXIT_EVIDENCE_CONTRACT_ERROR
+
+        entry["evidence_contract_error_contribution"] = (
+            EXIT_EVIDENCE_CONTRACT_ERROR if result.evidence_contract_error else 0
+        )
         if contract_evaluation:
             # ADR-049 Phase 7's orthogonal contract-coverage floor (0/1),
             # read off this library's own persisted contract context --
@@ -464,55 +478,17 @@ def _compare_one_library(
                 to_json(result, severity_config=severity_config),
             )
         return entry
-    except (ProfileMismatchError, ScopeMismatchError) as exc:
-        # ADR-050 D2 — ordered before the generic except Exception below.
-        # This library's old/new DSOs were not extracted under a comparable
-        # profile/scope contract: a distinct, expected outcome (not an
-        # abicheck bug), so it gets its own "not_comparable" verdict string
-        # instead of falling into the same "ERROR"/exit-4 bucket a genuine
-        # crash uses — see _RELEASE_VERDICT_ORDER's dedicated rank for it.
-        kind = (
-            "profile_mismatch"
-            if isinstance(exc, ProfileMismatchError)
-            else "scope_mismatch"
-        )
-        if output_dir:
-            from .report.not_comparable import (
-                OperationalStatus,
-                not_comparable_document,
-            )
-            from .schemas import REPORT_SCHEMA_VERSION
-
-            lib_report_path = output_dir / f"{old_path.stem}.json"
-            doc = not_comparable_document(
-                old_path.name,
-                old_version,
-                new_version,
-                kind,
-                str(exc),
-                report_schema_version=REPORT_SCHEMA_VERSION,
-                operational=OperationalStatus.NOT_COMPARABLE,
-            ).to_mapping()
-            _safe_write_output(lib_report_path, json.dumps(doc, indent=2))
-        return {
-            "library": old_path.name,
-            "verdict": "not_comparable",
-            "reason": str(exc),
-        }
-    except (IncompatibleSnapshotSchemaError, UnsupportedArtifactError) as exc:
-        # ADR-065 D6: an artifact this build cannot analyze at all (a stored
-        # snapshot newer than this reader, a container format with no
-        # backend) is `unsupported` -- an incompleteness signal on the
-        # scope axis, not an operational `ERROR` crash floored to exit 4.
-        return {"library": old_path.name, "verdict": "unsupported", "reason": str(exc)}
-    except (click.ClickException, click.UsageError) as exc:
-        return {
-            "library": old_path.name,
-            "verdict": "ERROR",
-            "error": exc.format_message(),
-        }
     except Exception as exc:
-        return {"library": old_path.name, "verdict": "ERROR", "error": str(exc)}
+        # One classification, four outcomes, ordering constraints of its own
+        # -- owned by `cli_compare_release_member_errors`, not by this
+        # function's argument list.
+        return member_error_entry(
+            exc,
+            old_path=old_path,
+            old_version=old_version,
+            new_version=new_version,
+            output_dir=output_dir,
+        )
 
 
 def _suppress_lockstep_soname_findings(

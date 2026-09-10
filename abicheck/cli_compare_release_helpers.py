@@ -37,7 +37,6 @@ working.
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,12 +48,14 @@ from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .errors import SnapshotError
 from .frontends.cli.options.params import DEFAULT_POLICY_PROFILE
+from .frontends.cli.release_exit import _exit_compare_release as _exit_compare_release
 from .model import AbiSnapshot
 from .report.comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from .report.render_release_markdown import (  # re-exported, moved (ADR-065 S2)
     _release_md_bundle_findings as _release_md_bundle_findings,
     _release_md_changed_libraries as _release_md_changed_libraries,
     _release_md_coverage_warnings as _release_md_coverage_warnings,
+    _release_md_evidence_contract as _release_md_evidence_contract,
     _release_md_libraries_table as _release_md_libraries_table,
     _release_md_matrix_findings as _release_md_matrix_findings,
 )
@@ -948,99 +949,6 @@ def _fold_release_global_severity(
     return worst
 
 
-def _exit_compare_release(
-    worst_verdict: str,
-    fail_on_removed: bool,
-    removed_keys: list[str],
-    severity_exit_code: int | None = None,
-    *,
-    contract_coverage_exit_contribution: int = 0,
-    incomplete_scope_exit_contribution: int = 0,
-    no_comparison_completed_exit_contribution: int = 0,
-) -> None:
-    """Exit compare-release with ABI-compatible status code mapping.
-
-    *incomplete_scope_exit_contribution*/*no_comparison_completed_exit_
-    contribution* (ADR-065 D6/D7) are two more ``0``/``1`` orthogonal
-    floors with exactly the coverage axis's rank in both schemes, so they
-    are folded into one floor with it below and then treated identically.
-    *removed_keys* is the **proven** removal set since S2 (D2), never the
-    raw ``unmatched_old`` set difference.
-
-    When *severity_exit_code* is not None, the severity-aware scheme is in
-    effect: that code replaces the verdict-based 2/4 mapping, except that
-    (a) a removed library still exits 8 in preference to the severity code, and
-    (b) an operational ERROR verdict (a library failed to dump/extract/compare)
-    still floors the exit at 4 — such failures produce no ``DiffResult.changes``
-    so the severity aggregation cannot see them, and must never be downgraded.
-    When None, the legacy verdict-based mapping is unchanged.
-
-    ``worst_verdict == "not_comparable"`` (ADR-050 D2) is checked first, in
-    both schemes, ahead of even ``--fail-on-removed-library``'s exit 8: a
-    not_comparable result means the comparison couldn't establish what
-    changed at all, so an apparent "library removed" reading from an
-    incomparable pair is an unproven inference, not a real removal finding
-    entitled to its own exit code. Exits 16 — identical to native
-    ``compare``'s own not_comparable code, since it fires before severity
-    classification or the removed-library check ever run.
-
-    *contract_coverage_exit_contribution* is ADR-049 Phase 7's orthogonal
-    axis (release/package parity, CLI-audit P1), already aggregated with
-    max() across every library by the caller. Folded in with max() at every
-    exit point below (mirroring ``contract_coverage_exit.fold_coverage_exit``
-    for a single-pair ``compare``) except ``not_comparable``, which fires
-    before any library was even scored: it can raise a clean 0 to 1, never
-    lower a real 2/4/8, and is `0` (a no-op fold) for every run that never
-    passed ``--contract``.
-    """
-    contract_coverage_exit_contribution = max(
-        contract_coverage_exit_contribution,
-        incomplete_scope_exit_contribution,
-        no_comparison_completed_exit_contribution,
-    )
-    if worst_verdict == "not_comparable":
-        sys.exit(16)
-    if severity_exit_code is not None:
-        # Severity-aware scheme: removed-library 8 takes precedence over the
-        # severity code, otherwise emit the aggregated severity exit code.
-        if fail_on_removed and removed_keys:
-            sys.exit(8)
-        code = severity_exit_code
-        if worst_verdict == "ERROR":
-            code = max(code, 4)
-        code = max(code, contract_coverage_exit_contribution)
-        if code != 0:
-            sys.exit(code)
-        return
-    # ERROR is a compare-release-specific operational-failure sentinel (not a
-    # Verdict); it floors at 4. Otherwise the verdict→code mapping is the shared
-    # canonical one, so compare and compare-release never disagree (C7).
-    if worst_verdict == "ERROR":
-        sys.exit(max(4, contract_coverage_exit_contribution))
-    from .checker_policy import Verdict
-    from .workflows.gate import legacy_exit_code
-
-    code = (
-        legacy_exit_code(Verdict[worst_verdict])
-        if worst_verdict in Verdict.__members__
-        else 0
-    )
-    if code != 0:
-        # A real verdict-based break always wins outright; folding coverage
-        # in here is a no-op in practice (its own floor is 0/1, never above
-        # a real 2/4) but keeps the "never lowers a real code" invariant
-        # explicit rather than implicit in max()'s commutativity.
-        sys.exit(max(code, contract_coverage_exit_contribution))
-    if fail_on_removed and removed_keys:
-        # A removed library stays its own, separately-aggregated signal
-        # (AGENTS.md: "не смешивая его с entity contract relevance") --
-        # it is checked ahead of the coverage-only fallback below, mirroring
-        # the severity-scheme branch above.
-        sys.exit(8)
-    if contract_coverage_exit_contribution != 0:
-        sys.exit(contract_coverage_exit_contribution)
-
-
 def _release_findings_for_render(
     library_results: list[dict[str, object]], show_only: str | None
 ) -> list[dict[str, object]]:
@@ -1292,6 +1200,19 @@ def _format_release_junit(
         else entry
         for entry in library_results
         if entry.get("verdict") in ("ERROR", "not_comparable")
+    ]
+    # A member short of the pinned `--depth` rung is an error suite too: the
+    # XML is rendered before the exit is taken, so without this a release
+    # exiting 7 produced `failures="0" errors="0"` (Codex review).
+    from .frontends.cli.release_evidence_contract import (
+        evidence_contract_error_entries,
+    )
+
+    _already = {entry.get("library") for entry in error_libs}
+    error_libs += [
+        entry
+        for entry in evidence_contract_error_entries(library_results)
+        if entry["library"] not in _already
     ]
     return to_junit_xml_multi(
         pairs,
@@ -1790,6 +1711,7 @@ def _format_release_markdown(
         lines += render_comparison_scope_markdown(scope_section)
     lines += _release_md_libraries_table(display_library_results, _VERDICT_EMOJI)
     lines += _release_md_coverage_warnings(library_results)
+    lines += _release_md_evidence_contract(library_results)
     lines += _release_md_changed_libraries(removed_keys, added_keys, old_map, new_map)
     lines += _release_md_library_findings(display_library_results)
     lines += _release_md_bundle_findings(bundle_result, display_bundle_findings)

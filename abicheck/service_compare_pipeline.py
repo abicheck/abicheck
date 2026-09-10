@@ -70,10 +70,7 @@ from .workflows.artifact.compile_context_gate import (
     SideCompileInput,
     resolved_pair_compile_contexts,
 )
-from .workflows.artifact.execute import (
-    _resolve_side_snapshot_impl,
-    enforce_requested_depth,
-)
+from .workflows.artifact.execute import _resolve_side_snapshot_impl
 from .workflows.contracts import CompareRequest, CompareResult
 from .workflows.request_inputs import InputSpec, required_path
 
@@ -306,9 +303,10 @@ def resolve_compare_request(
     implementation.
 
     Raises:
-        ValidationError: If the request fails :meth:`CompareRequest.validate`,
-            names a frontend with no extractor for its evidence, or requests a
-            ``depth`` the resolved snapshots did not reach.
+        ValidationError: If the request fails :meth:`CompareRequest.validate`
+            or names a frontend with no extractor for its evidence. **Not**
+            for an unreached ``depth`` since PR #1195 (ADR-064's exit-7 axis,
+            on ``DiffResult.evidence_contract_error``).
         PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
             finds a requested evidence input no resolved collector/backend
             combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
@@ -441,7 +439,9 @@ def resolve_compare_request(
     # resolve, not inside `_resolve_side`: it reads the on-disk ELF, so it
     # gains nothing from the extraction threads.
     populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
-    enforce_requested_depth(request.depth, (("old", old), ("new", new)))
+    # No `enforce_requested_depth` here (PR #1195): a depth shortfall is
+    # ADR-064's exit-7 axis, recorded by `classify_compare_pair` below, which
+    # this call pre-empted. Why: `policy/depth_evidence_contract.py`.
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
     compile_contexts = resolved_pair_compile_contexts(
@@ -501,11 +501,10 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
-    # request`'s own `enforce_requested_depth` call already confirmed both
-    # sides' *resolved* evidence meets `request.depth` as a floor -- this is
-    # the ceiling half, filtering what this classification is allowed to see
-    # down to that same rung. Deliberately a *view*, not a mutation of
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
+    # narrowing what this classification may see to the requested rung. The
+    # floor is the exit-7 axis below; the ceiling applies either way.
+    # Deliberately a *view*, not a mutation of
     # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
     # `pair` may still be read elsewhere for its unprojected snapshots.
     old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
@@ -610,16 +609,11 @@ def classify_compare_pair(
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
-    # ADR-068 §3 #28: defense-in-depth alongside `resolve_compare_request`'s
-    # own hard `enforce_requested_depth` fail. `pair.old_fmt`/`.new_fmt`
-    # (CodeRabbit review) come straight from the request's own operand
-    # path, so a stored-snapshot request correctly reads as non-live too.
-    from .policy.depth_evidence_contract import record_depth_evidence_contract_error
+    # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195.
+    # The liveness rule it needs lives with the axis, not here.
+    from .workflows import depth_evidence_contract
 
-    record_depth_evidence_contract_error(
-        result, request.depth, old, new,
-        old_is_live=pair.old_fmt is not None, new_is_live=pair.new_fmt is not None,
-    )
+    depth_evidence_contract.record_for_compare_request(result, request, old, new)
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -703,7 +697,9 @@ def classify_compare_pair(
     # workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(result, request, gate, pf_before_project_fold, suppression)
+    install_resolved_gate_receipt(
+        result, request, gate, pf_before_project_fold, suppression
+    )
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
@@ -924,7 +920,9 @@ def run_compare(
         ),
         pack_internal_namespaces=pack_internal_namespaces,
         project_policy_overrides=(
-            tuple(project_policy_overrides.items()) if project_policy_overrides else None
+            tuple(project_policy_overrides.items())
+            if project_policy_overrides
+            else None
         ),
         depth=depth,
         severity_preset=severity_preset,

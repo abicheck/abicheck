@@ -705,7 +705,7 @@ def _resolve_compare_snapshots(
 
 #: Build/source evidence *input* flags (param dest → flag): the four
 #: per-side --sources/--build-info. ``--depth`` deliberately isn't here
-#: (D1): see :func:`~abicheck.cli_compare_options._reject_depth_for_set_inputs`.
+#: (D1): see :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`.
 #: ADR-040 L1: keyed on the *side-aware* CLI param dests (``sources`` /
 #: ``build_info``) — the rejection runs on the raw Click params (before the
 #: sided values are normalised into per-side kwargs), so it must check the
@@ -725,16 +725,15 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
     accepted and silently dropped (no L3-L5 collected). Fail loudly so the
     user knows to compare libraries individually to collect deep evidence
     (Codex review). ``--depth`` is handled separately (D1, moved to
-    :mod:`abicheck.cli_compare_options`); its return is returned here too.
-
-    G29 Phase A: the L2 header-only semantic graph is structurally skipped
-    for directory/package (set-input) compares instead of rejected here,
-    since the fan-out never calls a graph-attaching single-pair path
-    (unchanged); see ``docs/contribute/plans/g31-header-graph-default-on-followup.md``.
+    :mod:`abicheck.cli_compare_options`); no rung is rejected, so its return
+    is the rung the user typed. **Correction:** this docstring's G29/G31
+    Phase A claim that the L2 header-only graph is "structurally skipped"
+    here is false since the fan-out moved onto ``service.run_compare`` --
+    executed in ``tests/test_cli_compare_release_header_graph.py``.
     """
     from .cli_compare_options import (
-        _reject_depth_for_set_inputs,
         _reject_single_pair_flags_for_set_inputs,
+        _resolve_depth_for_set_inputs,
     )
 
     _reject_single_pair_flags_for_set_inputs(ctx)  # ADR-068 Phase 2c/2d
@@ -754,7 +753,7 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> str | None:
             "Compare the libraries individually (or pre-dump snapshots with "
             "`dump --sources/--build-info`) to collect L3-L5 evidence."
         )
-    return _reject_depth_for_set_inputs(ctx)
+    return _resolve_depth_for_set_inputs(ctx)
 
 
 def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:

@@ -1162,35 +1162,37 @@ class TestCompareDispatch:
         assert "exit_code_scheme" in (out + err)
 
     @pytest.mark.parametrize(
-        "flag, value, is_path",
+        "flag, value",
         [
-            ("--depth", "source", False),
-            ("--sources", "old=src", True),
-            ("--build-info", "new=build", True),
+            ("--sources", "old=src"),
+            ("--build-info", "new=build"),
         ],
     )
     def test_evidence_flags_rejected_on_set_inputs(
-        self, tmp_path: Path, flag: str, value: str | None, is_path: bool
+        self, tmp_path: Path, flag: str, value: str
     ) -> None:
-        # Inline build/source evidence flags can't be threaded through the
+        # Inline build/source evidence *inputs* can't be threaded through the
         # release fan-out, so they are rejected rather than silently dropped
         # (Codex review).
+        #
+        # ``--depth source`` used to be a third row here. It is not an input
+        # the fan-out would drop -- it is a *rung*, and which rungs a member
+        # can reach is answered per member by the same
+        # ``enforce_requested_depth`` a single-pair compare runs, not by a
+        # front-end allow-list. The whole ladder is covered by
+        # ``tests/test_cli_compare_release_depth.py``.
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        if value is None:
-            extra = [flag]
-        elif is_path:
-            # sided value like "old=src" — the path follows the side prefix
-            side, _, name = value.partition("=")
-            (tmp_path / name).mkdir(exist_ok=True)  # --sources/--build-info need a real path
-            extra = [flag, f"{side}={tmp_path / name}"]
-        else:
-            extra = [flag, value]  # --depth takes a literal choice value
-        code, out, err = _invoke("compare", str(old_dir), str(new_dir), *extra)
+        # sided value like "old=src" — the path follows the side prefix
+        side, _, name = value.partition("=")
+        (tmp_path / name).mkdir(exist_ok=True)  # --sources/--build-info need a real path
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), flag, f"{side}={tmp_path / name}"
+        )
         assert code != 0
         assert "not supported for directory/package" in (out + err)
 

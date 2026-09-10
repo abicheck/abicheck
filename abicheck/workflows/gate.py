@@ -94,9 +94,9 @@ from ..policy.exit_decision import (
     resolve_exit_decision,
 )
 from ..policy.exit_decision_precedence import (
+    EXIT_EVIDENCE_CONTRACT_ERROR,
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
-    resolve_release_exit_decision_for_report,
 )
 from ..policy.gate_decision import gate_decision_for_result
 from ..policy.gate_pack_fold import (
@@ -105,6 +105,10 @@ from ..policy.gate_pack_fold import (
     gate_exit_code_scheme,
 )
 from ..policy.outcome import ScopeCompleteness
+from ..policy.release_exit_decision import (
+    release_evidence_contract_contribution,
+    resolve_release_exit_decision_for_report,
+)
 from ..policy.release_gate_options import (
     GateOptions,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064 (private; __all__ excludes it by convention)
@@ -179,6 +183,8 @@ __all__ = [
     "missing_contract_exit_code",
     "no_comparison_completed_exit_contribution",
     "note_if_same_binary_compared",
+    "EXIT_EVIDENCE_CONTRACT_ERROR",
+    "release_evidence_contract_contribution",
     "resolve_compare_exit_decision",
     "resolve_compare_exit_decision_with_abort_axes",
     "resolve_exit_decision",

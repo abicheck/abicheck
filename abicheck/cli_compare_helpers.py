@@ -936,9 +936,9 @@ def _reject_flags_unsupported_for_set_inputs(
     compare``'s own rejection of a second one), so it is simply forwarded.
 
     Returns the ``--depth`` value the caller should forward to the fan-out
-    (D1: currently always ``"binary"`` or ``None`` --
-    :func:`~abicheck.cli_resolve._reject_depth_for_set_inputs` rejects
-    everything else outright).
+    -- any rung of the public ladder, or ``None``. No rung is rejected; a
+    shortfall is ADR-064's exit-7 axis, per member (see
+    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`).
     """
     _reject_set_input_flags(
         env_matrix_path,

@@ -46,7 +46,92 @@ from .outcome import (
     policy_gate_decision_for_exit_code,
 )
 
-__all__ = ["run_outcome_dict_for_release"]
+__all__ = [
+    "run_outcome_dict_for_release",
+    "unclassified_release_contribution_fields",
+]
+
+
+#: The release ``exit`` block's contribution fields that decode onto the
+#: ``run_outcome.operational`` axis, in the precedence order
+#: :func:`~abicheck.policy.exit_decision_precedence.resolve_release_exit_
+#: decision` itself resolves them -- so the status names the axis that
+#: actually decided the exit code, never a lower one it merely preserved.
+_OPERATIONAL_CONTRIBUTIONS: tuple[tuple[str, OperationalStatus], ...] = (
+    ("not_comparable_contribution", OperationalStatus.NOT_COMPARABLE),
+    (
+        "evidence_contract_error_contribution",
+        OperationalStatus.EVIDENCE_CONTRACT_ERROR,
+    ),
+    ("operational_error_contribution", OperationalStatus.EXTRACTION_ERROR),
+    (
+        "no_comparison_completed_contribution",
+        OperationalStatus.NO_COMPARISON_COMPLETED,
+    ),
+)
+
+#: The exact complement of the table above over every contribution field an
+#: :class:`~abicheck.policy.exit_decision.ExitDecision` publishes: the axes
+#: that deliberately decode onto *no* operational status, each because
+#: another ``run_outcome`` axis already carries it or because the release
+#: fan-out cannot produce it at all. Stating the complement rather than
+#: letting an unlisted field fall through is what makes
+#: :func:`unclassified_release_contribution_fields` able to answer at all --
+#: ``evidence_contract_error_contribution`` reached this decoder as a silent
+#: ``operational: "none"`` beside its own ``exit.code: 7`` precisely because
+#: an ``if`` chain has no complement to be short of (Codex review, P1, the
+#: fourth surface of that one defect).
+_NON_OPERATIONAL_CONTRIBUTIONS: frozenset[str] = frozenset(
+    {
+        # Decoded onto the `gate` axis by this same function, not `operational`.
+        "compatibility_contribution",
+        "removed_required_library_contribution",
+        # Orthogonal `0`/`1` floors with their own reported axis or field;
+        # ADR-049 §7's coverage axis is explicitly *not* an operational
+        # failure (accepting incomplete assurance is not a broken run).
+        "contract_coverage_contribution",
+        "analysis_assurance_contribution",
+        "crosscheck_promotion_contribution",
+        # ADR-065 D6: read from the caller's typed acquisition record via
+        # *scope*, never from this block (it is `0` under `warn` while the
+        # axis still reads `incomplete`).
+        "incomplete_scope_contribution",
+        # Axes no release fan-out can produce: `compare` has no `--budget`,
+        # and loadability is `deps`-only (ADR-068 D6).
+        "budget_overflow_contribution",
+        "loadability_contribution",
+    }
+)
+
+
+def unclassified_release_contribution_fields() -> frozenset[str]:
+    """Contribution fields this decoder classifies neither way -- always empty.
+
+    The executable half of the two tables above. A contribution field added
+    to :class:`~abicheck.policy.exit_decision.ExitDecision` without being
+    either decoded onto an operational status or listed as deliberately
+    non-operational would otherwise reach a release report as
+    ``operational: "none"`` beside a nonzero ``exit.code`` -- and
+    ``workflows.aggregate.gate.GateInfo.from_report_data`` treats that block
+    as authoritative, so a consumer of the saved report reads the run as
+    nonblocking while the process said it failed. That is not a hypothetical:
+    it is what the ADR-064 evidence-contract axis did here (Codex review,
+    P1), and an ``if`` chain could not have caught it. Asserted by
+    ``tests/test_outcome_release.py``.
+    """
+    from dataclasses import fields
+
+    from .exit_decision import ExitDecision
+
+    published = {
+        field.name
+        for field in fields(ExitDecision)
+        if field.name.endswith("_contribution")
+    }
+    classified = {key for key, _ in _OPERATIONAL_CONTRIBUTIONS} | (
+        _NON_OPERATIONAL_CONTRIBUTIONS
+    )
+    return frozenset(published - classified)
 
 
 def run_outcome_dict_for_release(
@@ -91,9 +176,15 @@ def run_outcome_dict_for_release(
     then ``no_comparison_completed_contribution`` (ADR-065 D7 --
     :attr:`OperationalStatus.NO_COMPARISON_COMPLETED`, the selected scope
     produced no valid comparison at all; ranked after the two above since
-    each of those already says *why* nothing completed). The remaining
-    ``ExitDecision`` contributions are always ``0`` for a release decision
-    and are not consulted.
+    each of those already says *why* nothing completed).
+
+    The full decode is ``_OPERATIONAL_CONTRIBUTIONS`` and its stated
+    complement ``_NON_OPERATIONAL_CONTRIBUTIONS``, which together must
+    cover every contribution field ``ExitDecision`` publishes
+    (:func:`unclassified_release_contribution_fields`) -- the remaining
+    contributions are *not* all ``0`` for a release decision, which is
+    what an earlier revision of this docstring claimed and what let
+    ADR-064's exit-7 axis land here unread.
 
     *scope* (ADR-065 D6) is the caller's own completeness read of its typed
     acquisition record -- deliberately a parameter rather than a decode of
@@ -117,12 +208,10 @@ def run_outcome_dict_for_release(
     gate = policy_gate_decision_for_exit_code(compat_exit_code)
 
     operational = OperationalStatus.NONE
-    if _int_contribution("not_comparable_contribution") != 0:
-        operational = OperationalStatus.NOT_COMPARABLE
-    elif _int_contribution("operational_error_contribution") != 0:
-        operational = OperationalStatus.EXTRACTION_ERROR
-    elif _int_contribution("no_comparison_completed_contribution") != 0:
-        operational = OperationalStatus.NO_COMPARISON_COMPLETED
+    for key, status in _OPERATIONAL_CONTRIBUTIONS:
+        if _int_contribution(key) != 0:
+            operational = status
+            break
 
     compatibility: Verdict | None
     try:

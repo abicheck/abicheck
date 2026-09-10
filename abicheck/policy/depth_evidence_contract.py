@@ -43,11 +43,24 @@ produced a `DiffResult` (the same point the `--abi3` axis is recorded), so it
 reports the same "the evidence contract this run pinned was not met" signal
 through the one axis every `compare` front end already resolves through
 `resolve_compare_exit_decision_with_abort_axes` — exit ``7``, not ``64`` —
-whichever resolution path produced the pair. `enforce_requested_depth`'s own
-hard-fail is unaffected and keeps firing first (exit 64) on the one path that
-already calls it; this function is what makes the *other* path (today: the
-native CLI) fail loudly at all, and gives both the same exit family ADR-064
-documents for this axis.
+whichever resolution path produced the pair.
+
+**Superseded (PR #1195): this is now `compare`'s only depth-floor
+mechanism.** An earlier revision of this paragraph recorded that
+`enforce_requested_depth`'s hard-fail "is unaffected and keeps firing first
+(exit 64) on the one path that already calls it". Keeping both meant a
+shortfall meant three different things depending on the surface: the native
+CLI (which never called it) recorded this axis, while `resolve_compare_
+request` raised for *every* rung and for stored snapshots too, pre-empting
+the recording below in exactly the cases it was written for. A directory
+`compare` routes through the latter and a single-pair one through the
+former, so packaging two binaries changed the exit code for the identical
+comparison. `service_compare_pipeline.resolve_compare_request` no longer
+calls `enforce_requested_depth` — see its own note — so every `compare`
+surface now answers a shortfall from here: `build`/`source` only, live
+sides only, exit 7, recorded rather than raised. `dump`'s own floors and
+`workflows.bundle_stored_pair_compare`'s separate call are untouched; each
+is a different command with its own tested contract.
 
 Never fires when *depth* is ``None``/``"binary"``/``"headers"`` — those are
 not the two rungs a request can outrun (``EVIDENCE_DEPTH_VALUES``): only a

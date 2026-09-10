@@ -6363,7 +6363,9 @@ looked like the obvious fix and wasn't.
   package handling; PR #1016 only extended `--depth binary`'s
   *acceptance* to a second operand shape that inherits a limitation the
   single-pair path has always had. `cli_compare_options.
-  _reject_depth_for_set_inputs`'s docstring now cross-references this
+  _resolve_depth_for_set_inputs` (named `_reject_depth_for_set_inputs`
+  until its per-rung allow-list was deleted -- see "A depth shortfall is a
+  hard per-member `ERROR` ..." below) cross-references this
   entry so the directory/package path states the same acknowledged
   limitation explicitly rather than silently inheriting an undocumented
   one.
@@ -7540,6 +7542,123 @@ deciding what `compare --depth binary` should do, which is a separate
 change with its own blast radius. Registered as a `KnownGap` on the
 `evidence.tier_shortcut_without_substitute` entry in
 `tests/regressions/manifest.py`.
+
+## ~~A depth shortfall is a hard per-member `ERROR` on a directory `compare` but a soft assurance signal on a single-pair one~~ — CLOSED
+
+**Closed in PR #1195**, in the same PR that surfaced it, after a Codex
+review round showed the divergence was wider than this entry first
+described. Kept here because the shape of the mistake is the reusable part.
+
+Measured, the two paths disagreed on *every* row, not just hard-vs-soft:
+
+| shortfall | scalar `compare` | directory `compare` |
+|---|---|---|
+| live, `--depth headers` | 0 | 4 (`ERROR`) |
+| live, `--depth build` | 7 | 4 |
+| live, `--depth source` | 7 | 4 |
+| stored snapshot, `--depth source` | 0 (live-only carve-out) | 4 |
+
+Two mechanisms existed and the fan-out reached the wrong one first.
+`policy/depth_evidence_contract.py` is the one this repo documents as
+closing the gap "for every `compare` caller from one place" — exit-7 axis,
+recorded not raised, `build`/`source` only, live-extraction only — and
+`service_compare_pipeline.classify_compare_pair` already called it with the
+right `old_is_live`/`new_is_live` flags. But `resolve_compare_request`
+called `enforce_requested_depth` unconditionally ~170 lines earlier, which
+raised first and pre-empted that recording in exactly the cases it was
+written for. The native scalar CLI escaped only because it does not route
+through `resolve_compare_request` at all.
+
+The fix: `resolve_compare_request` no longer calls `enforce_requested_depth`,
+so the exit-7 axis governs every `compare` surface; the release fan-out
+aggregates each member's `evidence_contract_error_contribution` with `max()`
+the way it already aggregates the contract-coverage floor, and emits its own
+stderr notice (the per-member `DiffResult` is discarded before the note a
+single-pair run renders). All eight rows of the matrix now agree, and a run
+without `--depth` is unchanged.
+
+`dump`'s own floors and `workflows.bundle_stored_pair_compare`'s separate
+`enforce_requested_depth` call were deliberately **not** touched — each is a
+different command with its own tested contract, and
+`test_cli_compare_bundle_facts_stored_pair.py` pins the bundle one
+explicitly (a stored pair *does* hard-fail there on the `headers` rung).
+That is a third behaviour for the same question, still open, and worth
+reading before anyone unifies further.
+
+The reusable lesson is the one the bug class
+`cli_surface.capability_guard_diverged_from_pipeline` now records: when two
+mechanisms implement the same rule and one is documented as "the one place",
+the other one silently winning on a subset of surfaces is not a redundancy,
+it is a divergence waiting for a front-end change to expose it.
+
+## A directory `compare`'s `-H`/`--header` set is applied to every member, so header-derived findings are reported against libraries they do not belong to
+
+Reproduced while verifying the `--depth`/header-graph behaviour above, on a
+two-member fixture (`libfoo.so` built from `foo.h`, `libbar.so` from nothing
+but its own source):
+
+```
+abicheck compare old/ new/ --header old=inc/foo.h --header new=inc_new/foo.h
+libbar.so BREAKING  type_size_changed:Widget, type_alignment_changed:Widget,
+                    type_field_type_changed:Widget, type_field_offset_changed:Widget,
+                    exported_not_public:bar_fn, public_not_exported:widget_area, ...
+libfoo.so BREAKING  type_size_changed:Widget, ... (the same four)
+```
+
+`Widget` lives in `foo.h` and is nothing to do with `libbar.so`, yet the
+whole `Widget` change set is reported once per member, and `libbar.so`
+additionally earns `exported_not_public`/`public_not_exported` findings for
+the mismatch between its own exports and a header set describing a different
+library. A release's finding count therefore scales with member count rather
+than with what changed, and `--output-dir`'s per-library reports carry the
+duplicates too.
+
+The cause is a missing *transport*, not a missing model. `cli_compare_release.py`
+resolves one `old_h`/`new_h`/`old_inc`/`new_inc` set for the whole release and
+passes it unchanged to every `_compare_one_library` call — but that function
+already takes its header list **per member** (`cli_compare_release_pairwise.py`'s
+`old_h` parameter, forwarded straight to `_run_compare_pair`); only the caller
+flattens it. And the per-member mapping already exists upstream:
+`build-output.json` carries per-target `public_header_roots`/
+`generated_header_roots`, `buildsource/baseline_publish.py`'s
+`derive_baseline_libraries()` turns those into `actions/baseline`'s
+`libraries[].header`, and `publish-baseline.yml` already dumps **each library
+with its own headers** at a selectable `depth`. `BundleSpec.targets` is a list
+of target ids and `TargetSpec.public_headers` exists per target, so the
+declaration is in the project schema too.
+
+So an earlier revision of this entry was wrong to frame this as "decide what
+the attribution model is" and to propose naming conventions or a new
+`.abicheck.yml` key. The model is declared; `compare` simply has no operand
+shape that carries it. Three things close this, in increasing order of scope:
+
+1. **De-duplicate first.** A header-derived finding that cannot be attributed
+   to one member should be reported **once**, release-scoped, rather than once
+   per member. That is the honest reading of the evidence ("which member this
+   affects was not established") and it removes most of the pain with no
+   guessing at all. The current N× duplication is the actual defect.
+2. **Carry the map into `compare`.** A per-member header operand (mirroring
+   `actions/baseline`'s own `libraries` JSON) so the fan-out resolves
+   `old_h`/`new_h` per member. Small, given the seam already exists.
+3. **Attribute by reachability** where no map is declared: a header-derived
+   finding belongs to the member(s) whose export surface reaches the entity —
+   `export_surface.compute_export_surface` and `type_reachability.py` already
+   do exactly this per library. Must fall back to (1), never to silence.
+
+Note that this is only half of header-aware package comparison. The other
+half is where OLD's headers come from at all:
+`buildsource/project_targets.py`'s `BUNDLE_CHECK_DEPTHS = {binary}` exists
+because a bundle baseline stages raw binaries and `check-project.yml` has one
+project-wide `header:` input, so `depth: headers` would parse *both* sides
+with the current checkout's headers and make a header-only change silently
+invisible — a false negative, strictly worse than this entry's over-reporting.
+Staging bundle baselines as per-member snapshots (what single-target mode
+already does) is what would let that restriction be relaxed.
+
+Deliberately not attempted as part of the `--depth` fix: it is a separate
+change in a different layer. Over-reporting is the safe direction — no finding
+is *lost* today — which is why this is a gap rather than a blocker on the fix
+that surfaced it.
 
 ## Suppression provenance stops at the display label outside the audit path
 
