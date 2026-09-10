@@ -396,6 +396,9 @@ def resolve_compare_request(
             include_labels=dict(request.include_labels) or None,
             notify=notify,
             changed_paths=request.changed_paths,  # ADR-043 D7 POI scoping
+            # ADR-068 Phase 4, absorbed from `ScanRequest.allow_build_query` (with `ScanRequest.build_config`'s own already-present `InputSpec.build_config` counterpart, which nothing on this path read before). `None` (not `False`) when unset, so the primitive keeps its own documented default rather than this request restating it -- and under that default `_gated_build_query_inputs` nulls `build_config` outright, passive keys included, so every pre-existing request resolves exactly as it did (it passed no `build_config` here at all). `compare` deliberately does not pass `build_config_locally_trusted`: that is `scan`'s own split, and giving it to `compare` would newly make a discovered config's passive settings affect a comparison -- a behaviour change this field's absorption does not carry. See `CompareRequest.allow_build_query`'s own docstring.
+            build_config=side.build_config,
+            allow_build_query=request.allow_build_query or None,
         )
 
     def _resolve_old_side() -> SideResolution:

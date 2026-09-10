@@ -25,6 +25,7 @@ region of ``run.sh``, groups the long flags by the subcommand each mode builds,
 and asserts every one is present in that subcommand's ``--help``. It fails on any
 action→CLI flag drift, for every mode, not just the one that broke.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,12 +43,16 @@ VALIDATE_SH = Path(__file__).resolve().parents[1] / "action" / "validate-inputs.
 
 # add_flag "--x" / add_single_flag "--x"  and  CMD+=(--x ...)
 _ADD_FLAG_RE = re.compile(r'add(?:_single)?_flag\s+"(--[a-z0-9-]+)"')
-_CMD_FLAG_RE = re.compile(r'CMD\+=\((--[a-z0-9-]+)')
+_CMD_FLAG_RE = re.compile(r"CMD\+=\((--[a-z0-9-]+)")
 # The subcommand a branch builds: CMD+=(dump) / CMD+=(deps tree) / CMD+=(deps
 # compare) — capture one or two bare words (never a "$VAR" or a --flag).
-_CMD_SUBCMD_RE = re.compile(r'CMD\+=\(([a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)\)')
+_CMD_SUBCMD_RE = re.compile(r"CMD\+=\(([a-z][a-z-]*(?:\s+[a-z][a-z-]*)?)\)")
 _KNOWN_SUBCOMMANDS = {
-    "dump", "compare", "deps tree", "deps compare", "scan",
+    "dump",
+    "compare",
+    "deps tree",
+    "deps compare",
+    "scan",
 }
 
 
@@ -102,8 +107,12 @@ def _valid_flags(subcommand: str) -> set[str]:
     help_flag = "--help-all" if subcommand in ("compare", "dump", "scan") else "--help"
     out = subprocess.run(
         [sys.executable, "-m", "abicheck", *parts, help_flag],
-        capture_output=True, text=True, check=True,
-        encoding="utf-8", errors="replace", env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
     ).stdout
     # rich-click wraps help lines, so a flag can be split across the box; join
     # first, then scoop every "--flag" token.
@@ -286,3 +295,49 @@ def test_every_validate_inputs_var_is_set_by_its_own_step() -> None:
         f"built on them never actually fires until the identical check "
         f"re-runs later in run.sh (if one exists)."
     )
+
+
+class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
+    """A retired input is rejected on every route, not just the legacy one.
+
+    ADR-068's second 2026-09-09 amendment retires three `mode: scan` inputs
+    (ruling (b)). `run.sh` first rejects them, then decides whether the run
+    dispatches to the legacy `scan` CLI or the translated `compare` one.
+
+    The order is the contract. The rejections originally sat *inside* the
+    `_SCAN_NEEDS_LEGACY_CLI` branch, so a scan that qualified for the compare
+    route skipped all three and silently ignored the retired input instead of
+    erroring (CodeRabbit review, PR #1186). The retirement is a property of
+    the input, not of which CLI the run happens to route onto.
+
+    Stated positionally rather than by executing both routes: the defect was
+    a *placement* one, and a fragment-level behavioural test would have to
+    reconstruct enough of run.sh's routing state to pick a route, which
+    re-encodes the very logic under test. `TestScanRetiredInputsFailPreflight`
+    in `test_action_validate_inputs.py` covers the behaviour on the earlier
+    preflight copy.
+    """
+
+    _RETIRED = ("INPUT_NEW_LIBRARY_SET", "INPUT_RISK_RULES", "INPUT_BUILD_TARGET")
+
+    def test_each_rejection_precedes_the_route_decision(self) -> None:
+        text = RUN_SH.read_text(encoding="utf-8")
+        route = text.index("_SCAN_NEEDS_LEGACY_CLI=true")
+        for name in self._RETIRED:
+            guard = text.find(f'if [[ -n "${{{name}:-}}" ]]; then\n  echo "::error::')
+            assert guard != -1, f"{name} has no ::error:: rejection in run.sh at all"
+            assert guard < route, (
+                f"{name}'s rejection sits after run.sh's route selection, so a "
+                f"scan routed onto compare would ignore it -- the exact gap "
+                f"CodeRabbit found on PR #1186."
+            )
+
+    def test_the_route_decision_still_exists_to_be_ordered_against(self) -> None:
+        """Guard against the ordering assertion passing vacuously.
+
+        If the routing block were renamed or removed, `index` above would
+        raise rather than silently succeed -- but only while this marker is
+        the real one, so pin that it appears exactly once.
+        """
+        text = RUN_SH.read_text(encoding="utf-8")
+        assert text.count("_SCAN_NEEDS_LEGACY_CLI=true") == 1

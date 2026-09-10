@@ -260,104 +260,71 @@ class TestScanRejectsDirectoryOrPackage:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestScanNewLibrarySet:
-    """ADR-056: new-library-set (--artifact-set) validation."""
+class TestScanRetiredInputsFailPreflight:
+    """ADR-068's second 2026-09-09 amendment, ruling (b): three `scan` inputs
+    are retired, and preflight -- not just `run.sh` -- is where a workflow
+    that still sets one must find out.
 
-    def test_directory_passes(self, tmp_path: Path) -> None:
-        lib_dir = tmp_path / "release" / "lib"
-        lib_dir.mkdir(parents=True)
-        result = _run_validate(
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": str(lib_dir)}
-        )
+    `validate-inputs.sh` runs *before* Python setup, the pixi/toolchain
+    provision and the abicheck install; `run.sh` runs after all three. Codex
+    review on PR #1186 caught the first attempt rejecting these only in
+    `run.sh`, so a workflow paid the whole provisioning cost to be told about
+    an input error already knowable from the inputs alone. `run.sh` keeps its
+    own copies for anyone invoking it directly.
+    """
+
+    @pytest.mark.parametrize(
+        ("env", "expected"),
+        [
+            ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "new-library-set"),
+            ({"INPUT_NEW_LIBRARY_SET": "release/lib"}, "new-library-set"),
+            ({"INPUT_RISK_RULES": "rules.yaml"}, "risk-rules"),
+            ({"INPUT_BUILD_TARGET": "//:math"}, "build-target"),
+        ],
+    )
+    def test_rejected_with_a_message_naming_the_input(
+        self, env: dict[str, str], expected: str
+    ) -> None:
+        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so",
+                                **env})
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
+        assert expected in result.stdout
+
+    def test_each_message_names_a_remedy_or_blocker(self) -> None:
+        """A hard removal with no deprecation window (ADR-068 D8) has to say
+        what to do instead, or the error is just a wall."""
+        for env, needle in (
+            ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "ADR-065 S3"),
+            ({"INPUT_RISK_RULES": "rules.yaml"}, "depth: source"),
+            ({"INPUT_BUILD_TARGET": "//:math"}, "mode: dump"),
+        ):
+            result = _run_validate(
+                {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so", **env}
+            )
+            assert result.returncode == 1
+            assert needle in result.stdout, (needle, result.stdout)
+
+    def test_a_plain_scan_is_unaffected(self) -> None:
+        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"})
         assert result.returncode == 0, result.stdout + result.stderr
-
-    def test_rejects_new_library_and_new_library_set_together(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-            }
-        )
-        assert result.returncode == 1
-        assert "new-library-set" in result.stdout
-        assert "new-library" in result.stdout
-
-    def test_rejects_against_with_new_library_set(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_AGAINST": "old.so",
-            }
-        )
-        assert result.returncode == 1
-        assert "against" in result.stdout
-
-    def test_rejects_abi_baseline_with_new_library_set(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_ABI_BASELINE": "latest-release",
-            }
-        )
-        assert result.returncode == 1
-
-    def test_rejects_old_header_with_new_library_set(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_OLD_HEADER": "old/include/foo.h",
-            }
-        )
-        assert result.returncode == 1
-        assert "old-header" in result.stdout
-
-    def test_rejects_old_include_with_new_library_set(self) -> None:
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_OLD_INCLUDE": "old/include",
-            }
-        )
-        assert result.returncode == 1
-
-    def test_allows_dry_run_with_new_library_set(self) -> None:
-        # CLI cleanup phase two, PR 5: --artifact-set --dry-run is a real
-        # preview now (cli_scan._run_artifact_set), not a hard rejection --
-        # this preflight must let it through to run.sh, not fail early the
-        # way it did while the CLI itself still rejected the combination.
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_DRY_RUN": "true",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-
-    def test_allows_estimate_alias_with_new_library_set(self) -> None:
-        # Same as above, via the deprecated estimate: true alias (run.sh
-        # converts it to INPUT_DRY_RUN=true downstream).
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_ESTIMATE": "true",
-            }
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::error::" not in result.stdout
 
     def test_warns_new_library_set_outside_scan(self) -> None:
+        """Inert on another mode, so it stays a warning there -- failing a
+        workflow over an input that never affected it would be gratuitous."""
         result = _run_validate(
             {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" in result.stdout
         assert "new-library-set" in result.stdout
+
+
+class TestRemovedInputTombstones:
+    """Inputs deleted from the product but kept registered in ``action.yml``
+    so a workflow still setting one is told, instead of silently losing the
+    setting."""
 
     def test_bundle_system_providers_is_a_hard_error(self) -> None:
         """A removed input that used to configure *analysis semantics* must
@@ -371,7 +338,6 @@ class TestScanNewLibrarySet:
         """
         for mode_env in (
             {"INPUT_MODE": "compare"},
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"},
             {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"},
             {"INPUT_MODE": "dump"},
         ):
@@ -1001,9 +967,11 @@ class TestModeScopedInputWarnings:
         assert "::warning::" in result.stdout
         assert "build-target" in result.stdout
 
-    @pytest.mark.parametrize("mode", ["dump", "scan"])
-    def test_build_target_silent_on_dump_and_scan(self, mode: str) -> None:
-        result = _run_validate({"INPUT_MODE": mode, "INPUT_BUILD_TARGET": "//:math"})
+    def test_build_target_silent_on_dump(self) -> None:
+        """`dump` is the only mode that still carries it: `scan
+        --build-target` is retired (ADR-068 (b)) and rejected outright by the
+        scan arm, which `TestScanRetiredInputsFailPreflight` pins."""
+        result = _run_validate({"INPUT_MODE": "dump", "INPUT_BUILD_TARGET": "//:math"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 

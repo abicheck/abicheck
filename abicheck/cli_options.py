@@ -1461,53 +1461,6 @@ def set_input_options(func: F) -> F:
     return func
 
 
-def artifact_set_options(func: F) -> F:
-    """``scan --artifact-set`` knobs (ADR-056).
-
-    A small, dedicated one rather than reuse of `release_options` wholesale
-    — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`/
-    `--instantiation-manifest`, only the set operand and (PR H, CLI cleanup
-    phase two) the same expected-provider ownership manifest `compare
-    --manifest` already enforces two-sided, applied here single-sided
-    (audit mode has no old side to diff). `--manifest`'s option text
-    otherwise matches `release_options`' below (same flag, same meaning,
-    just declared for a different command) rather than being redefined
-    with different wording.
-
-    CLI cleanup phase two, PR J: `--bundle-system-providers` is gone from
-    this group too — the system-provider allow-list extension is sourced
-    only from `.abicheck.yml`'s `bundle:` block now (auto-discovered from
-    `sources`, same as `release_options`' own removed twin; see
-    `cli_scan._run_artifact_set`'s own comment for the exact resolution).
-    """
-    func = click.option(
-        "--artifact-set",
-        "artifact_set",
-        multiple=True,
-        metavar="DIR|PATH",
-        help="Audit a *set* of libraries with no old side, as one artifact "
-        "(ADR-056): a directory (every discoverable shared library in it), "
-        "or a repeatable explicit path, one --artifact-set per member. "
-        "Mutually exclusive with the positional ARTIFACT and with --against "
-        "(audit-only — no old-side comparison for a set).",
-    )(func)
-    func = click.option(
-        "--manifest",
-        "manifest_path",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="ABI ownership manifest (YAML/JSON, same format as compare "
-        "--manifest, ADR-023) asserting which library in the set is the "
-        "expected provider of a symbol/pattern/template instantiation. "
-        "Checked against this one declared set (no old side to diff): an "
-        "unmatched entry, or a non-optional entry (optional_provider: "
-        "false) matched by a library other than its declared provider, is "
-        "bundle_manifest_entry_unsatisfied. Only meaningful with "
-        "--artifact-set.",
-    )(func)
-    return func
-
-
 #: ``compare``'s release-fanout/build-source/header-graph/evidence option
 #: groups moved to ``frontends/cli/options/release.py`` when this module
 #: reached the 2000-line hard cap -- the same split, for the same reason, as

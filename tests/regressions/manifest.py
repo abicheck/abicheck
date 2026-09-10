@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
 __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
@@ -507,6 +508,61 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "`compare()` report."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
+            ),
+        ),
+    ),
+    BugClass(
+        id="evidence.tier_shortcut_without_substitute",
+        invariant=(
+            "A cost shortcut that skips one evidence source because "
+            "another is expected to supply the same facts may only be "
+            "taken when that substitute source is actually present. With "
+            "the substitute absent, the shortcut leaves the run with "
+            "neither, and the loss is silent: the report still names the "
+            "tier that was requested. Two corollaries, each independently "
+            "falsified during review: an input that *names* the substitute "
+            "without feeding it to the consumer is not the substitute "
+            "(`--public-header-dir` is a provenance boundary, not an AST "
+            "input); and the question is per operand, since one shared "
+            "answer does not equalise two sides' evidence tiers, it only "
+            "decides which side gets starved."
+        ),
+        fixed_by=(1186,),
+        seed_tests=(
+            "tests/test_scan_depth_evidence_shortcut.py",
+            "tests/test_scan_compare_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "depth": ("headers", "auto"),
+            "change": ("record", "enum", "symbol"),
+            "header_input": ("none", "provenance_only", "baseline_only"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the DWARF-vs-header-AST shortcut "
+                    "(`cli_scan_helpers._uses_debug_presence_only`) is "
+                    "covered. The same shape exists wherever one "
+                    "extractor is skipped on the expectation that a "
+                    "richer one runs; none of the L3/L4/L5 collect-mode "
+                    "decisions has an equivalent 'the substitute is "
+                    "actually present' guard or generalized test yet."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "`--depth binary` is excluded from the seed test's "
+                    "scan-vs-compare matrix: the two genuinely diverge "
+                    "there (`scan` extracts symbols only, "
+                    "`compare --depth binary` still reads DWARF and "
+                    "reports `type_size_changed`), which is a question "
+                    "about whether `compare`'s binary rung honours its "
+                    "own pin rather than about this shortcut. Predates "
+                    "ADR-068 Phase 4 on both sides and is untested."
+                ),
+                reference="docs/contribute/known-gaps.md",
             ),
         ),
     ),
@@ -1218,72 +1274,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    BugClass(
-        id="report.untrusted_value_escapes_its_cell",
-        invariant=(
-            "A value the report does not control — a detector's description, "
-            "a demangled symbol, an extractor's error text, a file path — is "
-            "data, never structure. Rendering it into a structured format "
-            "(a Markdown table cell or code span today) must not let any "
-            "character in it end a row, split the table, or close a span. "
-            "The escaping rule has exactly one owner per format, shared by "
-            "every renderer, and its contract is stated over generated "
-            "adversarial values: a row assembled from n escaped cells always "
-            "parses back to n cells, for any n and any values. The oracle "
-            "counts separators off the rendered text and never re-runs the "
-            "escaper, so a bug in the escaper cannot make the check agree "
-            "with it."
-        ),
-        # #1185-era: `report/no_baseline.py`'s finding tables interpolated
-        # `change.description`/`change.symbol` raw, and the only escaping
-        # helper in the package was private to `report/comparison_scope.py`.
-        # Sharing it exposed a hole that helper had shipped with for its
-        # whole life: an odd-length run of backslashes immediately before a
-        # pipe pairs off against the escape emitted for that pipe, leaving a
-        # live cell separator. The generated-input property tests falsified
-        # both the original rule and the first, too-narrow fix for it.
-        fixed_by=(1185,),
-        seed_tests=(
-            "tests/test_markdown_cell.py",
-            "tests/test_no_baseline_report_formats.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "hostile_character": (
-                "pipe",
-                "backslash",
-                "backtick",
-                "newline",
-                "control",
-            ),
-            "renderer": ("comparison-scope-table", "audit-findings-table"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Only the Markdown renderers route through the shared "
-                    "escaper. The HTML, SARIF, JUnit and text renderers each "
-                    "carry their own quoting (or rely on a serializer's), and "
-                    "no gate asserts that a renderer interpolating an "
-                    "untrusted value uses an escaper at all — a new renderer "
-                    "can still interpolate one raw."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md",
-            ),
-        ),
-    ),
-    BugClass(
-        id="report.finding_entry_builder_parity",
-        invariant=(
-            "Every per-finding entry-builder for a shared `Change` "
-            "(`compare`'s `changes[]`, `scan --against`'s baseline dicts, "
-            "the release fan-out's capped `findings`) must resolve an "
-            "audit field (e.g. `reclassified_by`) via one canonical helper "
-            "-- never a sibling silently omitting a field another computes."
-        ),
-        fixed_by=(1176,),
-        seed_tests=("tests/test_disposition_reclassification.py",),
-    ),
 )
 
 
@@ -1291,7 +1281,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: sibling's own list. An assembly point, the shape `abicheck/
 #: change_registry.py` already uses -- adding a class to a sibling needs no
 #: edit here.
-BUG_CLASSES: tuple[BugClass, ...] = _ANALYSIS_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
+BUG_CLASSES: tuple[BugClass, ...] = (
+    _ANALYSIS_BUG_CLASSES + REPORT_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
+)
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}
 

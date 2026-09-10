@@ -70,6 +70,60 @@
 > retiring them now would be premature. See
 > [`plans/one-comparison-product.md`](../plans/one-comparison-product.md)
 > §3 row 31 for the running status.
+>
+> **Completed (2026-09-09, Phase 4's typed-API slice).** `ScanRequest`,
+> `ScanResult`, `ScanArtifactResult`, `ScanSetResult`, `Budget` and
+> `LayerResult` are **deleted**, along with `run_scan`/`run_audit`/
+> `run_scan_set` and their subprocess harnesses. `abicheck/service_scan.py`
+> defines no request or result type at all any more: what is left there is
+> the ADR-035 D10 dry-run *cost model* (`estimate_scan`, which now projects
+> one `InputSpec` rather than taking a request object) and the shared
+> header-input expansion helpers. `CompareRequest` -> `CompareResult` is the
+> one typed contract, which is what makes D1's completeness rule checkable
+> instead of aspirational — `compatibility_evaluation_frontend.
+> cross_front_end_differences()` had no second API namespace left to
+> reconcile, so `SCAN_REQUEST_SPELLINGS` (the per-request-type
+> selector-spelling remap the two-namespace situation forced) is deleted too.
+>
+> Each open gap listed above was closed by ADR-068's **second 2026-09-09
+> amendment**, whose ruling table classifies every scan-only capability as
+> (a) already covered by `compare`, (b) dropped, or (c) required. Applied
+> field by field:
+>
+> | `ScanRequest` field | Fate |
+> |---|---|
+> | `budget` (`Budget`) | (c) — landed earlier as `CompareRequest.budget_s`; the `Budget` wrapper itself had no second field any caller set, so it is deleted rather than mirrored |
+> | `allow_build_query` | (a) — **absorbed** as `CompareRequest.allow_build_query`, the one field in this table that needed new request surface. `resolve_side_snapshot` has accepted the pass-through since PR 3A; the compare pipeline now forwards it together with `InputSpec.build_config`, which nothing on that path read before. `False` (the default) keeps `_gated_build_query_inputs`' standing "never execute a build system as a side effect" rule, so every pre-existing request resolves unchanged |
+> | `build_config` | (a) — already `InputSpec.build_config`; now actually read (see the row above) |
+> | `risk_rules_path` | (b) — **dropped**, with the risk-driven `auto` depth escalation it fed. An omitted `--depth` resolves to the fixed `headers` rung the amendment names (`model.evidence_depth_levels.resolve_unpinned_level`) — deliberately *not* the `--mode` preset, which maps both `PR` and `AUDIT` to `(S5, SOURCE)` and would run a full source replay on every unpinned scan (Codex review, PR #1186) |
+> | `enabled_checks` / `severities` | (b) for `severities` (the `--crosscheck KEY=LEVEL` promotion syntax; replacement spelling is `policy.overrides.<CHANGE_KIND>`), (a) for `enabled_checks` (the checks run automatically inside `compare()`, plan §3 #3). Neither becomes request surface. The `scan` CLI's own `--crosscheck` flag is deliberately **not** deleted in this slice — see the note below |
+> | `build_targets` | (b) — **dropped** on `scan`. `dump --build-target` is untouched, and `InputSpec.build_targets` already exists for the request that needs it |
+> | `bundle_system_providers`, `bundle_manifest` | (b) — **dropped** with `--artifact-set`/`new-library-set` (blocked on ADR-065 S3). `bundle.py`'s own audit primitives stay: plan §3 #16 retires the *mode*, not the capability |
+> | `max_findings` | plan §3 #20 DELETE — never request surface; it stays a `scan`-CLI-local cap on its own baseline summary |
+> | `suppression`, `policy_file` | (a) — equivalent capability at a deliberately different resolution stage (`CompareRequest.suppress`/`policy_file_path` take paths `run_compare_request` resolves). Unchanged, as the audit above concluded |
+> | `mode`, `source_method`, `seeded`, `changed_src` | subsumed by `depth` + `changed_paths`, or internal bookkeeping. `estimate_scan` still takes `mode`/`source_method`/`seeded` as plain arguments, because a *cost projection* is parameterised by the level it prices, not by a request |
+>
+> **`SCAN_SCHEMA_VERSION` stays in the registry**, contrary to this
+> amendment's own opening paragraph: the `scan` command is still shipped, so
+> its `--format json` envelope (`ScanOutcome.to_dict()`) still has a live
+> version to publish. What left is the *typed* half — the marker no longer
+> stamps any Python result object, because there is none. The constant is
+> bumped to `1.31` to record that, and to record the two `scan` inputs the
+> (b) rulings removed. It leaves the registry when Phase 6 deletes the
+> command.
+>
+> **One (b) item deliberately not completed here, and why.** The ruling table
+> retires the `--crosscheck KEY=error` *promotion syntax*, but that syntax's
+> engine half is ADR-064's `crosscheck_promotion_contribution` — a published
+> `ExitDecision` axis with its own `exit`-block key, its own precedence rule
+> (`policy/exit_decision_precedence.py`), its own abort-envelope participant
+> (`workflows/scan_abort_result.py`) and its own `REPORT_SCHEMA_VERSION` 2.42
+> entry. Removing a *published exit axis* is an ADR-064 amendment, not a
+> typed-API slice, and it changes `compare`'s report schema as well as
+> `scan`'s. `ScanRequest.severities` — the thing this slice actually owns —
+> is gone; the `scan` CLI flag and its engine axis are left standing for that
+> follow-up. Recorded in
+> [`docs/contribute/known-gaps.md`](../known-gaps.md).
 
 **Date:** 2026-07-27 (D1–D3); Gap 3/D4 added 2026-07-27 after a second,
 more detailed external review of the same subject was checked line-by-line
@@ -407,7 +461,7 @@ it is — no existing caller's code changes. `run_compare_request_v2` is not
 Click-decorated and carries no CLI-facing surface of its own; it exists
 purely as a typed Python/service entry point for whoever picks up D1, so the
 naming isn't user-facing API surface a caller types day to day the way
-`run_scan`/`run_compare_request` are — it's an internal migration seam. The
+`run_compare_request` is — it's an internal migration seam. The
 point of the wrapper is purely to give a *future* field (resolved depth, an
 `EvaluationReceipt` once ADR-049 wires one up, a coverage summary) somewhere
 to land without a second tuple-shape break down the line — the same reasoning
@@ -465,7 +519,8 @@ the current value and its bump history)
 
 backed by the *existing* constants (`serialization.SCHEMA_VERSION`,
 `checker_types`/wherever `compare`'s `report_schema_version` lives,
-`service_scan`'s `scan_schema_version`, `build_output.py`'s
+`scan_engine`'s `scan_schema_version` (it was `service_scan`'s too until
+ADR-068 Phase 4 retired that module's typed envelopes), `build_output.py`'s
 `BUILD_OUTPUT_MANIFEST_NAME`-adjacent version, `run_plan.py`'s
 `RUN_PLAN_SCHEMA`) — this is a **read-only lookup facade**, not a new
 versioning scheme, and does not change any of those constants' current

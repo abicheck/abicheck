@@ -13,29 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Scan service — typed request/result contract and per-project cost estimate.
+"""Per-project cost estimate for one comparison operand, plus header expansion.
 
-ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` ->
-:class:`ScanResult` / ``[CostEstimate]`` -- that the CLI and CI wrappers all
-drive, so there is one engine and many renderings. A leaf module (must not
-import :mod:`abicheck.service`); its header-expansion helper
-(:func:`expand_header_inputs`) is re-exported by ``service`` for backward
-compatibility.
+ADR-068 Phase 4 (the typed-API slice) retired this module's own request and
+result types. :class:`ScanRequest`/:class:`ScanResult` (and their
+``--artifact-set`` siblings) are gone: a comparison's typed input is
+:class:`~abicheck.api_types.CompareRequest`, its typed output
+:class:`~abicheck.api_types.CompareResult`, and there is exactly one of each.
+What remains here is the ADR-035 D10 dry-run *cost model* --
+:func:`estimate_scan` projects the per-layer cost of resolving one
+:class:`~abicheck.api_types.InputSpec` at a given evidence depth, without
+running a compiler or parsing a binary -- and the header-input expansion
+helpers the extractors share.
+
+A leaf module (must not import :mod:`abicheck.service`); its header-expansion
+helper (:func:`expand_header_inputs`) is re-exported by ``service`` for
+backward compatibility.
 """
 
 from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field, replace
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .buildsource.build_query import (
-    PRUNED_HEADER_DIR_SEGMENTS,
-    drain_build_dir_cleanups,
-)
+from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compile_context import CompileContext as CompileContext  # re-exported, ADR-055 D1
 
 # pair_wide_cxx20_std_override lives in the leaf `cxx20_pair_dialect` module
@@ -45,29 +50,12 @@ from .compile_context import CompileContext as CompileContext  # re-exported, AD
 from .cxx20_pair_dialect import (
     pair_wide_cxx20_std_override as pair_wide_cxx20_std_override,
 )
-from .errors import PlanningError, ValidationError
+from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
-from .policy.outcome import run_outcome_dict_for_scan
-from .schemas import SCAN_SCHEMA_VERSION
-from .workflows.scan_abort_result import ScanAbortAxis, scan_abort_result_fields
-
-# The process-group kill machinery behind run_scan_subprocess/
-# run_scan_set_subprocess lives in the leaf `workflows.scan_subprocess` module
-# (moved for this module's own line-budget room, ADR-063 Phase 4's residual --
-# see that module's own docstring), re-exported here so every existing
-# `from .service_scan import _kill_process_tree`/`_descendant_pgids` call site
-# is unaffected.
-from .workflows.scan_subprocess import (
-    _descendant_pgids as _descendant_pgids,
-    _kill_process_tree as _kill_process_tree,
-)
 
 if TYPE_CHECKING:
-    from .bundle_manifest import InstantiationManifest
-    from .environment_matrix import EnvironmentMatrix
+    from .api_types import InputSpec
     from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
-    from .policy_file import PolicyFile
-    from .suppression import SuppressionList
 
 _logger = logging.getLogger(__name__)
 
@@ -158,8 +146,7 @@ def expand_public_header_inputs(headers: Iterable[Path]) -> list[str]:
 
 
 def _scan_imports() -> tuple[Any, ...]:
-    """Lazily import the buildsource level/risk vocabulary (keeps import cheap)."""
-    from .buildsource.risk import RiskRules, score_changed_paths
+    """Lazily import the evidence-depth vocabulary (keeps import cheap)."""
     from .model.evidence_depth_levels import (
         EvidenceDepth,
         ScanMode,
@@ -171,8 +158,6 @@ def _scan_imports() -> tuple[Any, ...]:
     )
 
     return (
-        RiskRules,
-        score_changed_paths,
         EvidenceDepth,
         ScanMode,
         SourceMethod,
@@ -181,81 +166,6 @@ def _scan_imports() -> tuple[Any, ...]:
         parse_user_depth,
         SourceScope,
     )
-
-
-@dataclass(frozen=True)
-class Budget:
-    """Optional scan budget — a failure guard, never a scope-shrinker (ADR-035 D3)."""
-
-    total_timeout: float | None = None  # seconds; overflow FAILS (never shrinks)
-    max_tus: int | None = None  # targeted-AST TU cap
-    partial_ok: bool = True  # a partial scan (missing tool/layer) is success
-
-
-# CompileContext lives in the leaf `compile_context` module (ADR-055 D1,
-# imported above, re-exported here) so api_types.py can depend on the type
-# without joining this file's import-cycle-allowlisted cluster.
-
-
-@dataclass(frozen=True)
-class ScanRequest:
-    """Typed input to the scan engine (ADR-035 D10). All additive over dump/compare."""
-
-    binaries: list[Path] = field(default_factory=list)
-    headers: list[Path] = field(default_factory=list)
-    includes: list[Path] = field(default_factory=list)
-    public_header_dirs: list[Path] = field(default_factory=list)
-    sources: Path | None = None
-    compile_db: Path | None = None
-    build_info: Path | None = None
-    baseline: str | Path | None = None
-    mode: str = "pr"  # ScanMode value (fixed preset)
-    source_method: str | None = None  # SourceMethod value; None = mode preset
-    depth: str | None = None  # EvidenceDepth value (coarse L-axis)
-    changed_paths: list[str] = field(default_factory=list)
-    seeded: bool = False  # a real diff seed was produced (even if changed_paths is [])
-    budget: Budget = field(default_factory=Budget)
-    lang: str = "c++"
-    # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
-    compile: CompileContext = field(default_factory=CompileContext)
-    # --against config-surface parity with `compare` (ADR-049 Phase 5 §6.4): a `baseline` comparison can be
-    # scoped/suppressed/policy-classified like a direct `compare` run, instead of the engine's old fixed defaults.
-    suppression: SuppressionList | None = None
-    policy: str = "strict_abi"
-    policy_file: PolicyFile | None = None
-    scope_to_public_surface: bool = True
-    force_public_symbols: set[str] | None = None
-    pattern_verdicts: bool = False
-    env_matrix: EnvironmentMatrix | None = None
-    collapse_versioned_symbols: bool = False
-    # ADR-049 Phase 5 §6.4 also names contract relevance/reason/evidence side among the fields the two commands
-    # must agree on. Same advisory contract as `compare`: stamping a decision never changes verdict or exit code.
-    contract_evaluation: bool = False
-    contract_mode: str | None = None
-    # ADR-056: options the single-binary CLI path (cli_scan.py) already forwards straight to run_scan_core,
-    # bypassing ScanRequest entirely. Both run_scan and run_scan_set (--artifact-set) honor these when set
-    # directly on a ScanRequest (P2 regression, Codex review: run_scan used to silently ignore them).
-    abi3_floor: tuple[int, int] | None = None
-    enabled_checks: frozenset[str] | None = None  # None = ALL_CHECKS default
-    severities: dict[str, str] = field(default_factory=dict)
-    build_config: Path | None = None
-    allow_build_query: bool = False
-    risk_rules_path: Path | None = None
-    # ADR-056 D2: caller-declared external DSO allow-list for the --artifact-set audit-mode bundle detector (closed-world escape hatch); unused by run_scan.
-    bundle_system_providers: tuple[str, ...] = ()
-    # ADR-056: real changed-path provenance (e.g. "--since origin/main"), as computed by
-    # cli_scan._resolve_changed_seed. run_scan_set forwards this into each member's report instead
-    # of a hardcoded placeholder; unused by run_scan (which threads its own directly).
-    changed_src: str = "run_scan_set"
-    # `--against` summary's findings/suppressed cap; see `scan --max-findings`.
-    max_findings: int | None = None
-    # P0.2 equivalent of `dump --build-target`; kw_only + appended last
-    # (checker_types.py's public-dataclass convention) so a positional insert
-    # can't rebind a later field (Codex review).
-    build_targets: tuple[str, ...] = field(default=(), kw_only=True)
-    severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064/PR G2
-    # No exit_code_scheme field any more -- PR G2 deleted the manual selector.
-    bundle_manifest: InstantiationManifest | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -277,35 +187,6 @@ class CostEstimate:
             "est_seconds": round(self.est_seconds, 3),
             "cache_hit_rate": round(self.cache_hit_rate, 3),
             "note": self.note,
-        }
-
-
-@dataclass(frozen=True)
-class LayerResult:
-    """Per-layer coverage of an *executed* scan (ADR-035 D10; reuses LayerCoverage)."""
-
-    method: str | None
-    layer: str
-    status: str  # "present" | "partial" | "skipped" | "not_collected"
-    facts: int = 0
-    elapsed_s: float = 0.0
-    skipped_reason: str | None = None
-    detail: str = ""
-    #: Source-surface boundary integrity counters (ADR-035 D4), carried from the
-    #: engine's coverage row so the rendered report can show a degraded link
-    #: (e.g. ``matched_symbols == 0``) rather than only an internal object.
-    counters: dict[str, int] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "layer": self.layer,
-            "status": self.status,
-            "facts": self.facts,
-            "elapsed_s": round(self.elapsed_s, 3),
-            "skipped_reason": self.skipped_reason,
-            "detail": self.detail,
-            "counters": dict(self.counters),
         }
 
 
@@ -550,13 +431,16 @@ def _count_bazel_build_info_tus(path: Path) -> int | None:
 
 
 def _resolve_estimate_level(
-    req: ScanRequest,
+    *,
+    mode: str,
+    source_method: str | None,
+    depth: str | None,
+    changed_paths: Sequence[str],
+    seeded: bool,
     resolved_level: tuple[SourceMethod, EvidenceDepth] | None,
 ) -> tuple[SourceMethod, EvidenceDepth, str]:
     """Resolve the (method, depth) level and its collect mode for the estimate."""
     (
-        RiskRules,
-        score_changed_paths,
         _EvidenceDepth,
         ScanMode,
         SourceMethod,
@@ -566,32 +450,32 @@ def _resolve_estimate_level(
         SourceScope,
     ) = _scan_imports()
 
-    mode = ScanMode(req.mode)
-    seeded = req.seeded or bool(req.changed_paths)
+    seeded = seeded or bool(changed_paths)
     if resolved_level is not None:
-        # The caller (the CLI scan path) already resolved the concrete (method, depth) level — including the auto/risk
-        # choice. Honor it verbatim so the estimate matches the real scan: re-resolving from req.source_method/depth
-        # here would re-apply the source-method > depth precedence and collapse a mode preset that pins a *deeper* depth
-        # than its method implies (``pr-deep`` = (s5, graph) → graph-full), under-pricing it (Codex review).
+        # The caller (the CLI scan path) already resolved the concrete (method, depth) level. Honor it verbatim so the
+        # estimate matches the real scan: re-resolving from source_method/depth here would re-apply the source-method >
+        # depth precedence and collapse a mode preset that pins a *deeper* depth than its method implies (``pr-deep`` =
+        # (s5, graph) -> graph-full), under-pricing it (Codex review).
         resolved, eff_depth = resolved_level
     else:
-        sm = SourceMethod(req.source_method) if req.source_method else None
-        dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
-        auto_method = None
-        # AUTO resolves from the risk score whenever a real diff seed was produced — including a *seeded but empty* diff
-        # (a no-op PR), which scores 0 → s0/off, mirroring what the real scan does. Treating a seeded empty diff as
-        # unseeded would fall back to the mode preset and over-estimate a no-op PR (Codex review). A non-empty changed
-        # set is itself proof of a seed.
-        if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
-            auto_method = score_changed_paths(
-                list(req.changed_paths), RiskRules.default()
-            ).recommended_method
+        sm = SourceMethod(source_method) if source_method else None
+        dp = parse_user_depth(depth)  # honors the symbols->binary alias (Codex)
+        # ADR-068's second 2026-09-09 amendment rules risk-driven ``auto``
+        # depth selection (b) -- dropped, so no risk score is consulted here
+        # any more. What an *unpinned command* resolves to instead
+        # (``resolve_unpinned_level``'s fixed ``headers`` rung) is deliberately
+        # NOT applied here: this function's own *mode* argument is a caller's
+        # explicit "price this preset" request, not an omitted ``--depth``.
+        # The ``scan`` CLI never relies on this branch for a real run's
+        # preview -- it pre-resolves its own level and passes it as
+        # *resolved_level* above -- so the two cannot disagree about what the
+        # run will execute.
         resolved, eff_depth = resolve_level(
-            mode=mode, source_method=sm, depth=dp, auto_method=auto_method
+            mode=ScanMode(mode), source_method=sm, depth=dp, auto_method=None
         )
     # ADR-043 D2/D3 zero-TU fix: pin the S5 replay scope to CHANGED only with a
-    # valid seed, else TARGET — an unseeded explicit-source estimate must not
-    # under-project to the "source-changed" default (no seed → no TUs).
+    # valid seed, else TARGET -- an unseeded explicit-source estimate must not
+    # under-project to the "source-changed" default (no seed -> no TUs).
     collect_mode = level_to_collect_mode(
         resolved,
         eff_depth,
@@ -600,51 +484,56 @@ def _resolve_estimate_level(
     return resolved, eff_depth, collect_mode
 
 
-def _estimate_total_tus(req: ScanRequest) -> tuple[int, str]:
+def _estimate_total_tus(side: InputSpec, compile_db: Path | None) -> tuple[int, str]:
     """Project-wide TU count and its provenance note for the estimate."""
     # Count TUs from the *same* effective build-info the real scan uses (`req.compile_db or req.build_info`) so an
     # explicit --compile-db wins over a Bazel --build-info here too — else the estimate could price a different
     # action graph than the scan executes (Codex review). A pack dir supplies its own L3 compile units; a Bazel
     # aquery/cquery jsonproto is routed through the Bazel adapter; a raw compile DB / source tree is counted
     # otherwise.
-    eff_build_info = req.compile_db or req.build_info
+    eff_build_info = compile_db or side.build_info
     bazel_tus = (
         _count_bazel_build_info_tus(eff_build_info)
         if eff_build_info is not None
         else None
     )
     pack_tus = _count_pack_tus(eff_build_info) if eff_build_info is not None else None
-    compile_db = _discover_compile_db(req.sources, eff_build_info)
+    discovered_db = _discover_compile_db(side.sources, eff_build_info)
     if bazel_tus is not None:
         total, note = bazel_tus, "Bazel aquery/cquery (build_evidence)"
     elif pack_tus is not None:
         total, note = pack_tus, "build-source pack (build_evidence)"
-    elif compile_db is not None:
+    elif discovered_db is not None:
         total, note = (
-            _count_compile_db_tus(compile_db),
-            f"compile DB: {compile_db.name}",
+            _count_compile_db_tus(discovered_db),
+            f"compile DB: {discovered_db.name}",
         )
-    elif req.sources is not None:
+    elif side.sources is not None:
         total, note = (
-            _count_source_tus(req.sources),
+            _count_source_tus(side.sources),
             "counted source files (no compile DB)",
         )
     else:
         total, note = (
             0,
             (
-                f"build.query: {req.build_config.name} [UNKNOWN: query-only build.query, real run's trusted query determines the actual count]"
-                if req.build_config is not None
-                and _build_config_declares_query(req.build_config)
+                f"build.query: {side.build_config.name} [UNKNOWN: query-only build.query, real run's trusted query determines the actual count]"
+                if side.build_config is not None
+                and _build_config_declares_query(side.build_config)
                 else "no source tree / compile DB"
             ),
         )
-    if req.build_targets:
+    if side.build_targets:
         note += _UNSCOPED_TU_NOTE_SUFFIX
     return total, note
 
 
-def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) -> int:
+def _estimate_replay_tus(
+    changed_paths: Sequence[str],
+    max_tus: int | None,
+    collect_mode: str,
+    total_tus: int,
+) -> int:
     """TUs the L4 replay (and its clang call-graph pass) would touch."""
     # The L4 replay scope: a changed-only collection touches at most the changed *source* TUs (POI-focused, D7); a
     # full/target scope touches every TU. The budget's max_tus is a documented cap (never shrinks scope silently —
@@ -653,7 +542,7 @@ def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) ->
     # 'changed')`` fails open to **all** TUs so header ABI changes are never silently missed, so the estimate must
     # charge ``total_tus`` for a header change rather than the single header path — else it understates L4 cost and
     # a user picks too small a budget (Codex review). An empty/seedless diff is likewise broad.
-    changed = [p for p in req.changed_paths if p]
+    changed = [p for p in changed_paths if p]
     source_changed = [p for p in changed if _is_source_tu_path(p)]
     header_changed = any(_is_header_path(p) for p in changed)
     if collect_mode == "source-changed":
@@ -668,22 +557,22 @@ def _estimate_replay_tus(req: ScanRequest, collect_mode: str, total_tus: int) ->
     else:
         # graph-full / baseline → full scope; graph-build emits no L4 row.
         replay_tus = total_tus
-    if req.budget.max_tus:
-        replay_tus = min(replay_tus, req.budget.max_tus)
+    if max_tus:
+        replay_tus = min(replay_tus, max_tus)
     return replay_tus
 
 
 def _intrinsic_layer_estimates(
-    req: ScanRequest, eff_depth: EvidenceDepth
+    side: InputSpec, eff_depth: EvidenceDepth
 ) -> list[CostEstimate]:
     """The always-present L0/L1/L2 rows (intrinsic layers, no S-method)."""
     from .model.evidence_depth_levels import EvidenceDepth
 
     # --depth binary is symbols-only: the real scan suppresses the L2 header AST, so
     # the estimate must not price an L2_header layer for headers that won't be parsed
-    # — else a programmatic caller's `ScanResult.estimate` plans a different cost than
-    # what executes (Codex review). Keyed on the resolved effective depth.
-    eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    # -- else a caller's dry-run preview plans a different cost than what
+    # executes (Codex review). Keyed on the resolved effective depth.
+    eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(side.headers)
     expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
     n_headers = len(expanded_headers)
     l2_seconds, l2_high_risk = _estimate_header_seconds(expanded_headers)
@@ -698,12 +587,13 @@ def _intrinsic_layer_estimates(
         )
     else:
         l2_note = "public-header AST (needs castxml or clang)"
+    n_binaries = 1 if side.path is not None else 0
     return [
         CostEstimate(
             None,
             "L0_binary",
-            len(req.binaries),
-            0.1 * max(1, len(req.binaries)),
+            n_binaries,
+            0.1 * max(1, n_binaries),
             0.0,
             "binary export table parse",
         ),
@@ -790,307 +680,47 @@ def _source_layer_estimates(
 
 
 def estimate_scan(
-    req: ScanRequest,
+    side: InputSpec,
     *,
+    mode: str = "pr",
+    source_method: str | None = None,
+    depth: str | None = None,
+    changed_paths: Sequence[str] = (),
+    seeded: bool = False,
+    max_tus: int | None = None,
+    compile_db: Path | None = None,
     resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
 ) -> list[CostEstimate]:
-    """Dry-run: projected per-layer cost of *req* for this project (ADR-035
-    D10). Probes the project (TU count, header fan-out, collect mode) and
-    returns one :class:`CostEstimate` per L-layer the level would touch --
-    **without running any compiler or parsing any binary**. Coarse anchors
-    (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a
-    precise wall-clock prediction."""
-    resolved, eff_depth, collect_mode = _resolve_estimate_level(req, resolved_level)
-    total_tus, tu_note = _estimate_total_tus(req)
-    replay_tus = _estimate_replay_tus(req, collect_mode, total_tus)
-    estimates = _intrinsic_layer_estimates(req, eff_depth)
+    """Dry-run: projected per-layer cost of one comparison operand for this
+    project (ADR-035 D10). Probes the project (TU count, header fan-out,
+    collect mode) and returns one :class:`CostEstimate` per L-layer the level
+    would touch -- **without running any compiler or parsing any binary**.
+    Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget
+    pick, not a precise wall-clock prediction.
+
+    Takes the canonical :class:`~abicheck.api_types.InputSpec` one side of a
+    comparison is already described by, plus the run-scoped scalars that are
+    not a property of the operand itself. ADR-068's Phase 4 typed-API slice
+    retired the ``ScanRequest`` this used to take: a cost preview is a
+    projection over an *input*, and the request type it lived on is gone.
+    """
+    resolved, eff_depth, collect_mode = _resolve_estimate_level(
+        mode=mode,
+        source_method=source_method,
+        depth=depth,
+        changed_paths=changed_paths,
+        seeded=seeded,
+        resolved_level=resolved_level,
+    )
+    total_tus, tu_note = _estimate_total_tus(side, compile_db)
+    replay_tus = _estimate_replay_tus(changed_paths, max_tus, collect_mode, total_tus)
+    estimates = _intrinsic_layer_estimates(side, eff_depth)
     estimates.extend(
         _source_layer_estimates(
-            resolved, collect_mode, total_tus, tu_note, replay_tus, req.build_targets
+            resolved, collect_mode, total_tus, tu_note, replay_tus, side.build_targets
         )
     )
     return estimates
-
-
-@dataclass(frozen=True)
-class ScanResult:
-    """Typed result of an executed scan (ADR-035 D10) — the one object the CLI
-    and library callers consume. ``findings`` are the raw cross-source
-    :class:`Change` objects; ``layers`` is the per-layer coverage;
-    ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the
-    projected per-layer cost for comparison against the actual run."""
-
-    verdict: str
-    exit_code: int
-    findings: list[Any] = field(default_factory=list)
-    layers: list[LayerResult] = field(default_factory=list)
-    confidence: dict[str, list[str]] = field(default_factory=dict)
-    estimate: list[CostEstimate] = field(default_factory=list)
-    report: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "scan_schema_version": SCAN_SCHEMA_VERSION,
-            "verdict": self.verdict,
-            "exit_code": self.exit_code,
-            "findings": len(self.findings),
-            "layers": [layer.to_dict() for layer in self.layers],
-            "confidence": {k: list(v) for k, v in self.confidence.items()},
-            "estimate": [e.to_dict() for e in self.estimate],
-            "report": dict(self.report),
-            "run_outcome": run_outcome_dict_for_scan(
-                self.verdict, self.exit_code, report=self.report
-            ),
-        }
-
-    @staticmethod
-    def _from_abort(
-        axis: ScanAbortAxis, p: dict[str, object] | None, *, msg: str | None = None
-    ) -> ScanResult:
-        return ScanResult(**scan_abort_result_fields(axis, prior_decision=p, msg=msg))
-
-
-@dataclass(frozen=True)
-class ScanArtifactResult:
-    """One member's :class:`ScanResult`, with the identity that result alone
-    doesn't carry (ADR-056 — neither `ScanResult` nor its nested report
-    carries a binary path or library name anywhere)."""
-
-    artifact: Path
-    result: ScanResult
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"artifact": str(self.artifact), **self.result.to_dict()}
-
-
-# ADR-056 D3: ScanSetResult's own verdict/exit-code precedence — not a reuse
-# of compare-release's `_RELEASE_VERDICT_ORDER`, which has no entries for the
-# two scan-specific failure verdicts a ScanResult can carry
-# (`BUDGET_OVERFLOW`/`EVIDENCE_CONTRACT_ERROR`).
-_SCAN_SET_COMPAT_ORDER: dict[str, int] = {
-    # NO_CHANGE ranks strictly below COMPATIBLE (not tied at 0): the bundle audit's own verdict is always appended
-    # to `candidates` below and often reads NO_CHANGE when it simply found nothing to flag -- with a tied rank, the
-    # >= tie-break (last-candidate-wins) let that placeholder silently override a real, positive COMPATIBLE result
-    # from every member scan (Codex review). A genuine "I actually compared this and it's fine" always outranks
-    # "there was nothing to compare here."
-    "NO_CHANGE": -1,
-    "COMPATIBLE": 0,
-    "COMPATIBLE_WITH_RISK": 1,
-    "API_BREAK": 2,
-    "BREAKING": 3,
-}
-_SCAN_SET_COMPAT_EXIT: dict[str, int] = {
-    "NO_CHANGE": 0,
-    "COMPATIBLE": 0,
-    "COMPATIBLE_WITH_RISK": 0,
-    "API_BREAK": 2,
-    "BREAKING": 4,
-}
-
-
-def _aggregate_scan_set_verdict(
-    per_artifact: list[ScanArtifactResult], bundle_verdict: str | None
-) -> tuple[str, int]:
-    """Combine per-member + bundle verdicts into one set-level verdict/exit.
-
-    1. Any member ``BUDGET_OVERFLOW`` -> the whole set is ``BUDGET_OVERFLOW``,
-       exit 5 (dominates: an unfinished analysis is worse than a finished one
-       that found a break, ADR-050 D2's ``not_comparable`` precedent).
-    2. Else, the worst compatibility verdict across `per_artifact` + the
-       bundle layer's own verdict (`_SCAN_SET_COMPAT_ORDER`), with the
-       matching exit code.
-    3. Any member ``EVIDENCE_CONTRACT_ERROR`` becomes the reported verdict,
-       at the same dedicated exit code the single-binary path uses
-       (``cli_scan.py``'s ``_EXIT_EVIDENCE_CONTRACT_ERROR = 7``), only when
-       step 2's worst was NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK; a
-       stronger API_BREAK/BREAKING keeps that verdict/exit. This 7 (not a
-       generic 1) closes the "--artifact-set / --format text" gap the
-       cli-cleanup-phase-two plan's PR G2 section left open.
-    4. Any member ``NOT_COMPARABLE`` becomes the reported verdict/exit 6
-       under that same condition, outranking step 3 (Codex review:
-       previously exited 0 here, dropping the run_outcome.operational
-       signal ``to_dict()`` already emits for this case).
-    """
-    if any(a.result.verdict == "BUDGET_OVERFLOW" for a in per_artifact):
-        return "BUDGET_OVERFLOW", 5
-
-    worst_verdict = "NO_CHANGE"
-    worst_rank = -1
-    candidates = [a.result.verdict for a in per_artifact]
-    if bundle_verdict is not None:
-        candidates.append(bundle_verdict)
-    for v in candidates:
-        rank = _SCAN_SET_COMPAT_ORDER.get(v)
-        if rank is not None and rank >= worst_rank:
-            worst_rank = rank
-            worst_verdict = v
-    exit_code = _SCAN_SET_COMPAT_EXIT.get(worst_verdict, 0)
-    no_stronger_break = worst_rank <= _SCAN_SET_COMPAT_ORDER["COMPATIBLE_WITH_RISK"]
-
-    if no_stronger_break and any(
-        a.result.verdict == "EVIDENCE_CONTRACT_ERROR" for a in per_artifact
-    ):
-        # Dedicated exit code, not a generic floor -- see step 3 above.
-        worst_verdict, exit_code = "EVIDENCE_CONTRACT_ERROR", 7
-    if no_stronger_break and any(
-        a.result.verdict == "NOT_COMPARABLE" for a in per_artifact
-    ):
-        worst_verdict, exit_code = "NOT_COMPARABLE", 6
-
-    return worst_verdict, exit_code
-
-
-@dataclass(frozen=True)
-class ScanSetResult:
-    """Result of :func:`run_scan_set` — the ``--artifact-set`` sibling of
-    :class:`ScanResult` (ADR-056). Not a change to what `run_scan`/
-    `ScanResult` return for the single-binary path.
-    """
-
-    verdict: str
-    exit_code: int
-    per_artifact: list[ScanArtifactResult] = field(default_factory=list)
-    bundle_findings: list[Any] = field(default_factory=list)
-    bundle_verdict: str | None = None
-    bundle_incomplete: bool = False
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "scan_schema_version": SCAN_SCHEMA_VERSION,
-            "verdict": self.verdict,
-            "exit_code": self.exit_code,
-            "per_artifact": [a.to_dict() for a in self.per_artifact],
-            # Full finding records, not just a count -- mirrors cli_compare_release_helpers.py's
-            # summary["bundle_findings"] shape, so a consumer of either can act on what produced
-            # bundle_verdict, not just its count (Codex review).
-            "bundle_findings": [
-                {
-                    "kind": f.kind.value,
-                    "symbol": f.symbol,
-                    "consumer_library": f.consumer_library,
-                    "provider_library": f.provider_library,
-                    "description": f.description,
-                    "old_value": f.old_value,
-                    "new_value": f.new_value,
-                    "affected_libraries": list(f.affected_libraries),
-                }
-                for f in self.bundle_findings
-            ],
-            "bundle_finding_count": len(self.bundle_findings),
-            "bundle_verdict": self.bundle_verdict,
-            "bundle_incomplete": self.bundle_incomplete,
-            "run_outcome": run_outcome_dict_for_scan(
-                self.verdict,
-                self.exit_code,
-                member_evidence_contract_error=any(
-                    a.result.verdict == "EVIDENCE_CONTRACT_ERROR"
-                    for a in self.per_artifact
-                ),
-                member_not_comparable=any(
-                    a.result.verdict == "NOT_COMPARABLE" for a in self.per_artifact
-                ),
-                bundle_incomplete=self.bundle_incomplete,
-                member_verdicts=[
-                    *(a.result.verdict for a in self.per_artifact),
-                    self.bundle_verdict,
-                ],
-            ),
-        }
-
-
-def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
-    """Map the engine's coverage rows onto typed :class:`LayerResult`s."""
-    out: list[LayerResult] = []
-    for row in coverage:
-        # Defensive int coercion: a hand-edited / forward-compat row could carry a
-        # non-numeric counter or facts value; skip it rather than abort the render.
-        counters: dict[str, int] = {}
-        for k, v in (row.get("counters") or {}).items():
-            try:
-                counters[str(k)] = int(v)
-            except (TypeError, ValueError):
-                continue
-        try:
-            facts = int(row.get("facts", 0) or 0)
-        except (TypeError, ValueError):
-            facts = 0
-        out.append(
-            LayerResult(
-                method=row.get("method"),
-                layer=str(row.get("layer", "")),
-                status=str(row.get("status", "")),
-                facts=facts,
-                detail=str(row.get("detail", "")),
-                skipped_reason=row.get("skipped_reason"),
-                counters=counters,
-            )
-        )
-    return out
-
-
-def _load_risk_rules_for_service(risk_rules_path: Path) -> Any:
-    """Load `--risk-rules` YAML for a service-layer caller, as a plain
-    `ValueError`: `risk_rules_path` is a plain `ScanRequest` field a direct
-    Python API caller can set without importing click, so this boundary
-    must not leak a click-flavored failure (CodeRabbit review). A malformed
-    profile is a `SnapshotError` from the engine, also not a `ValueError`;
-    `ClickException` is still caught because the CLI-side adapter raises it.
-    """
-    import click
-
-    from .errors import SnapshotError
-    from .workflows.scan_config import load_risk_rules as _load
-
-    try:
-        return _load(risk_rules_path)
-    except (click.ClickException, SnapshotError) as exc:
-        msg = (
-            exc.format_message() if isinstance(exc, click.ClickException) else str(exc)
-        )
-        raise ValueError(str(msg)) from exc
-
-
-def _resolve_member_scan_level(
-    req: ScanRequest,
-) -> tuple[Any, Any, list[str], bool, Any, Any, Any, str]:
-    """Resolve ``(sm, dp, changed, seeded, risk, resolved, eff_depth,
-    collect_mode)`` for one member -- shared by :func:`_run_scan_one_member`
-    and :func:`estimate_artifact_set`, per ``workflows/AGENTS.md``'s
-    "dry-run and execution must consume the same resolved plan" rule.
-    """
-    (
-        RiskRules,
-        score_changed_paths,
-        _EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        level_to_collect_mode,
-        resolve_level,
-        parse_user_depth,
-        SourceScope,
-    ) = _scan_imports()
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)
-    changed = [p for p in req.changed_paths if p]
-    seeded = req.seeded or bool(changed)
-    risk_rules = (
-        _load_risk_rules_for_service(req.risk_rules_path)
-        if req.risk_rules_path is not None
-        else RiskRules.default()
-    )
-    risk = score_changed_paths(changed, risk_rules)
-    auto_method = (
-        risk.recommended_method if (sm is SourceMethod.AUTO and seeded) else None
-    )
-    resolved, eff_depth = resolve_level(
-        mode=ScanMode(req.mode), source_method=sm, depth=dp, auto_method=auto_method
-    )
-    scope = SourceScope.CHANGED if seeded else SourceScope.TARGET
-    collect_mode = level_to_collect_mode(resolved, eff_depth, source_scope=scope)
-    return sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode
-
-
-_COST_PER_MEMBER_BUNDLE_AUDIT = 0.1  # per-member bundle-audit anchor, ~= L0_binary's
 
 
 def _build_config_declares_query(path: Path) -> bool:
@@ -1106,849 +736,3 @@ def _build_config_declares_query(path: Path) -> bool:
     except ValueError:
         return False
     return bool(config.query)
-
-
-def estimate_artifact_set(
-    req: ScanRequest, member_paths: list[Path]
-) -> tuple[dict[str, tuple[int, float]], list[str], str | None, frozenset[str]]:
-    """Per-layer cost total for ``scan --artifact-set --dry-run``: one
-    single-binary estimate per member at the level :func:`_resolve_member_scan_level`
-    resolves once (shared with :func:`_run_scan_one_member`), plus a
-    ``bundle_audit`` entry. Third return value: a blocker message, or
-    ``None`` -- set only when ``collect_mode != "off"`` (mirrors
-    ``scan_engine._check_scan_evidence_contract``'s short-circuit) and no
-    source/build evidence was given, matching ``EVIDENCE_CONTRACT_ERROR``.
-    The blocker message itself is a :meth:`DryRunResult.block` (always exit
-    1) -- distinct from the *real run's* dedicated exit 7 (both single-
-    artifact and ``--artifact-set``; see `_aggregate_scan_set_verdict`'s own
-    docstring). Kept out of *notes* so the caller routes it through
-    :meth:`DryRunResult.block` instead. Fourth value *unknown_layers* names
-    per-layer unknown-marked members (totals alone can't tell zero from
-    unknown).
-    """
-    sm, dp, _c, _s, _r, resolved, eff_depth, collect_mode = _resolve_member_scan_level(
-        req
-    )
-    totals: dict[str, tuple[int, float]] = {}
-    notes: list[str] = []
-    seen: set[str] = set()
-    unknown_layers: set[str] = set()
-    blocker: str | None = None
-    pinned = dp is not None or (sm is not None and sm != "auto")
-    cfg_query = req.build_config and _build_config_declares_query(req.build_config)
-    no_evidence = not (req.sources or req.build_info or cfg_query)
-    if pinned and collect_mode != "off" and no_evidence:
-        blocker = (
-            f"pinned depth '{eff_depth.value}' has no --sources/--build-info, "
-            "and --build-config declares no build.query -- the real run "
-            "would fail with EVIDENCE_CONTRACT_ERROR (exit 7), not run as "
-            "priced below."
-        )
-    for member_path in member_paths:
-        member_req = replace(req, binaries=[member_path], mode="audit")
-        for e in estimate_scan(member_req, resolved_level=(resolved, eff_depth)):
-            tus, seconds = totals.get(e.layer, (0, 0.0))
-            totals[e.layer] = (tus + e.tus, seconds + e.est_seconds)
-            unknown_layers.update({e.layer} if "[UNKNOWN" in e.note else ())
-            if e.note and e.note not in seen:
-                seen.add(e.note)
-                notes.append(e.note)
-    n = len(member_paths)
-    totals["bundle_audit"] = (n, _COST_PER_MEMBER_BUNDLE_AUDIT * n)
-    return totals, notes, blocker, frozenset(unknown_layers)
-
-
-#: Every ``ScanRequest`` field meaningful only for a baseline comparison,
-#: keyed to a predicate that's ``True`` when *req* carries a caller-set,
-#: non-default value (see `test_every_baseline_only_field_is_guarded`).
-_COMPARISON_ONLY_FIELD_PREDICATES: dict[str, Callable[[ScanRequest], bool]] = {
-    "suppression": lambda r: r.suppression is not None,
-    "policy": lambda r: r.policy != "strict_abi",
-    "policy_file": lambda r: r.policy_file is not None,
-    "scope_to_public_surface": lambda r: r.scope_to_public_surface is not True,
-    "force_public_symbols": lambda r: bool(r.force_public_symbols),
-    "pattern_verdicts": lambda r: r.pattern_verdicts,
-    "env_matrix": lambda r: r.env_matrix is not None,
-    "collapse_versioned_symbols": lambda r: r.collapse_versioned_symbols,
-    "contract_evaluation": lambda r: r.contract_evaluation,
-    "contract_mode": lambda r: r.contract_mode is not None,
-    "max_findings": lambda r: r.max_findings is not None,
-    "severity_preset": lambda r: r.severity_preset is not None,  # ADR-064/PR G2
-}
-
-
-def _reject_comparison_only_fields(req: ScanRequest) -> None:
-    """Raise :class:`ValidationError` for a set ``_COMPARISON_ONLY_FIELD_PREDICATES``
-    field with no baseline for it to apply to. Shared by :func:`run_scan`
-    (baseline ``None``/audit mode) and :func:`run_scan_set` (always
-    audit-only, ADR-056 D2) so both enforce the identical contract (P2
-    regression: ``run_scan_set()`` used to only validate ``req.baseline``).
-    """
-    _non_default = [
-        name
-        for name, is_set in _COMPARISON_ONLY_FIELD_PREDICATES.items()
-        if is_set(req)
-    ]
-    if _non_default:
-        raise ValidationError(
-            f"ScanRequest field(s) {', '.join(_non_default)} only take "
-            "effect with a baseline comparison (req.baseline set, and "
-            "req.mode not 'audit'); they configure compare_snapshots and "
-            "have no effect otherwise."
-        )
-
-
-def _scan_request_config(req: ScanRequest) -> Any:
-    """This request's resolved configuration, or ``None`` when unused.
-
-    The API counterpart of ``cli_scan``'s own resolution. Without it a
-    ``run_scan(ScanRequest(..., contract_evaluation=True))`` persisted the
-    context ``checker.compare`` reconstructs from its arguments -- which
-    keeps :class:`GateConfig`'s defaults, so the receipt claimed the
-    ``severity`` scheme while ``run_scan`` computed its 0/2/4 exit straight
-    from the compatibility verdict (Codex review). The CLI was wired first
-    and this path was left behind.
-
-    Every field is read as *stated*, matching
-    :func:`~abicheck.compatibility_evaluation_frontend.compare_request_inputs`:
-    a typed request has no "unset" representation, so a caller constructing
-    one chose those values whether deliberately or by accepting the
-    dataclass default. The gate fields are blanked for the same reason the
-    CLI blanks the project config's -- a scan's exit follows its verdict and
-    never consults them.
-
-    Resolved at :attr:`FrontEnd.API`, so the receipt names this request's own
-    fields rather than the ``--policy``/``--scope-public-headers`` flags
-    nobody typed -- and through
-    :data:`~abicheck.cli_scan_receipt.SCAN_REQUEST_SPELLINGS`, so they are
-    *this* request's names: the default API spelling is ``CompareRequest``'s,
-    which calls three of the same inputs ``scope_public``/
-    ``policy_file_path``/``suppress``, none of which a ``ScanRequest`` has
-    (Codex review, twice on the same receipt).
-    :func:`~abicheck.compatibility_evaluation_frontend.unstatable_selectors`
-    checks both halves now rather than leaving them to review.
-
-    A D7 same-tier conflict or a D8 pack conflict is a *usage* error about
-    the request, but the resolver raises its own :class:`ValueError`
-    subclasses for those. Unmapped, they escaped ``run_scan`` raw -- past a
-    ``try`` that catches only the budget and evidence-contract signals -- so
-    a caller guarding it with ``except ValidationError``, which every other
-    request-validation failure here raises, would not catch them.
-    ``cli_scan.py`` already maps the same failures to ``click.UsageError``;
-    this is the API's equivalent, so a bad request is reported the same way
-    on both front ends (CodeRabbit review). Mapped here rather than at the
-    one call site so a second caller cannot reintroduce the gap.
-
-    One ``except ValueError`` covers every case: ``FieldResolutionError``,
-    ``PackConflictError``, and ``PackManifestError`` -- the three
-    ``cli_scan.scan_cmd`` names individually -- are all ``ValueError``
-    subclasses (``PackManifestError`` through ``AbicheckError``), so naming
-    them adds no coverage. It is also strictly wider, which this front end
-    needs: an unknown ``ScanRequest.policy`` reaches
-    ``builtin_policy_identity`` and raises a *plain* ``ValueError`` that
-    none of the three would have caught. The CLI cannot reach that case --
-    ``--policy`` is a ``click.Choice``, so Click rejects an unknown base
-    before the resolver sees it -- which is why the two front ends' nets
-    differ: they admit different inputs, not different ideas of what a bad
-    request is. Keep them in sync if either gains a new failure mode.
-
-    The breadth has a real cost worth stating: an internal ``ValueError``
-    from a bug inside the resolver would also be reported as a bad request
-    rather than crashing. That is the accepted trade -- every ``ValueError``
-    this resolver raises today *is* a statement about the request's own
-    values, and misreporting a hypothetical internal one is better than
-    letting a genuine bad request escape as an unhandled exception through
-    a Tier-2 API whose other validation failures all raise
-    ``ValidationError``.
-    """
-    if not req.contract_evaluation or req.baseline is None:
-        return None
-    from .compatibility_evaluation_frontend import FrontEnd, stated_policy_base
-    from .errors import ValidationError
-    from .workflows.scan_config import resolve_scan_config
-
-    try:
-        return resolve_scan_config(
-            {
-                # Dropped when a `policy_file` overrode it, exactly as the comparison itself treats it -- otherwise an accepted
-                # request (unknown name, valid file) died in its own receipt before the comparison ran (Codex review, the same
-                # defect already fixed on the MCP path; the helper is shared now).
-                "policy": stated_policy_base(req.policy, req.policy_file),
-                "policy_file_path": None,
-                "suppress": None,
-                "scope_public_headers": req.scope_to_public_surface,
-                "public_symbols": tuple(sorted(req.force_public_symbols or ())),
-                "public_symbols_list": None,
-                "contract_mode": req.contract_mode,
-                # A `ScanRequest` has no pack field: ADR-049 D8 packs are a
-                # CLI selector today, so the API resolves none rather than
-                # letting the key resolve as "not stated" by omission (which
-                # is what the declared-params guard exists to prevent).
-                "pack_paths": (),
-                "severity_preset": req.severity_preset,  # ADR-064/PR G2
-            },
-            typed={"policy", "scope_public_headers"},
-            policy_file=req.policy_file,
-            suppression=req.suppression,
-            front_end=FrontEnd.API,
-        )
-    except ValueError as exc:
-        raise ValidationError(str(exc)) from exc
-
-
-def run_scan(req: ScanRequest) -> ScanResult:
-    """Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
-    The single engine entry point behind the ``scan`` CLI and the MCP scan
-    tool: resolves the deterministic level from *req* (as :func:`estimate_scan`
-    does), drives the shared orchestration core (``scan_engine.run_scan_core``),
-    and folds the projected ``estimate_scan`` cost in for projected-vs-actual
-    comparison. ``--budget`` overflow surfaces as ``exit_code`` 5 (never
-    shrinks scope).
-    """
-    (
-        RiskRules,
-        score_changed_paths,
-        EvidenceDepth,
-        ScanMode,
-        SourceMethod,
-        level_to_collect_mode,
-        resolve_level,
-        parse_user_depth,
-        SourceScope,
-    ) = _scan_imports()
-    from .buildsource.cross_source_checks import ALL_CHECKS
-    from .scan_engine import (
-        _BudgetOverflow,
-        _EvidenceContractError,
-        run_scan_core,
-    )
-    from .workflows.scan_config import public_provenance_set as _public_provenance_set
-    from .workflows.scan_gate_options import resolve_scan_gate_options  # ADR-064/PR G2
-
-    if len(req.binaries) != 1:
-        raise ValueError("run_scan accepts exactly one binary")
-    binary = req.binaries[0]
-
-    if req.max_findings is not None and req.max_findings < 1:
-        # Up front, not after a wasted full scan (Codex review).
-        raise ValidationError(
-            f"ScanRequest.max_findings must be positive, got {req.max_findings}"
-        )
-    # ADR-049 Phase 5 review (Codex, PR #657): these fields only mean anything for a baseline comparison (`run_scan_core` only calls `_run_baseline_compare` when `baseline is not None` AND `scan_mode is not ScanMode.AUDIT`) -- without one they'd be silently accepted and discarded, which could hide a `policy_file` requiring evidence the caller actually needed. Mirrors the CLI's identical `scan_cmd` guard.
-    if req.baseline is None or ScanMode(req.mode) is ScanMode.AUDIT:
-        _reject_comparison_only_fields(req)
-    else:
-        # ADR-049 Phase 6's own rule, applied where the CLI applies it: up front, not after the scan.
-        # `compare_snapshots` already rejects the combination at the Tier-2 boundary (`service._validate_contract_mode`,
-        # which this reuses rather than restating), so it was never silently accepted -- but reaching that check means a
-        # full scan runs first and then fails, where `scan_cmd` rejects the same request before any work (CodeRabbit
-        # review).
-        from .service import _validate_contract_mode
-
-        _validate_contract_mode(req.contract_mode, req.contract_evaluation)
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
-
-    changed = [p for p in req.changed_paths if p]
-    seeded = req.seeded or bool(changed)
-    risk_rules = (
-        _load_risk_rules_for_service(req.risk_rules_path)
-        if req.risk_rules_path is not None
-        else RiskRules.default()
-    )
-    risk = score_changed_paths(changed, risk_rules)
-
-    scan_mode = ScanMode(req.mode)
-    # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic API too: an explicit depth
-    # *always* pins (even with source_method=auto, which only picks the method), or a non-auto source_method does.
-    # So run_scan_core fails loud if it can't collect the evidence — same as the CLI. AUTO / preset- only requests
-    # stay best-effort (CodeRabbit review).
-    pinned_explicit = (dp is not None) or (
-        sm is not None and sm is not SourceMethod.AUTO
-    )
-    sm_pin = sm is not None and sm is not SourceMethod.AUTO
-    # Mirrors cli_scan._scan_explicit_flags'/_run_scan_one_member's level_explicit: consent to auto-running a
-    # trusted --config's build.query (a non-auto source_method, or an explicit depth with no source_method pinned).
-    # Without this the singular Python API path left level_explicit at run_scan_core's False default, so an explicit
-    # build_config + depth="build"/"source" could return EVIDENCE_CONTRACT_ERROR instead of auto-running the query
-    # the CLI and run_scan_set both already consent to (Codex review).
-    level_explicit = sm_pin or (sm is None and dp is not None)
-    is_auto = sm is SourceMethod.AUTO
-    auto_method = risk.recommended_method if (is_auto and seeded) else None
-    resolved, eff_depth = resolve_level(
-        mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
-    )
-    # ADR-043 D2/D3 zero-TU fix: the S5 replay scope is command-aware — a valid
-    # change seed scopes to CHANGED, otherwise TARGET (the current library
-    # target), so an explicit/pinned source depth with no diff seed never
-    # silently collects zero translation units (parity with the CLI's scan).
-    collect_mode = level_to_collect_mode(
-        resolved,
-        eff_depth,
-        source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
-    )
-    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its provenance) even when the caller
-    # passes headers, so the collected evidence matches the reported depth — parity with the CLI's `scan --depth
-    # binary`. Keyed on the *resolved* effective depth, not the raw depth: --source-method wins over --depth, so a
-    # source-method scan that also passes `depth="binary"` still needs the header AST (Codex review).
-    eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
-    prov_headers, prov_dirs = _public_provenance_set(
-        eff_headers, list(req.public_header_dirs)
-    )
-    effective_build_info = req.compile_db or req.build_info
-    budget_s = req.budget.total_timeout
-    budget_str = f"{budget_s:g}s" if budget_s is not None else None
-
-    import time as _time
-
-    # Own the inferred cmake build-dir cleanup so it outlives run_scan_core's S2
-    # preprocessor phase (which runs `clang -E` with a compile unit's `directory`
-    # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
-    build_dir_cleanups: list[Callable[[], None]] = []
-    try:
-        gate = resolve_scan_gate_options(req)
-    except ValueError as exc:
-        # `resolve_release_gate_options` raises bare `ValueError`
-        # (invalid `exit_code_scheme`) or `PolicyError` (invalid
-        # `severity_preset`, a `ValueError` subclass) for a malformed
-        # request -- neither is `ValidationError`, so a Tier-2 caller
-        # guarding this call with `except ValidationError` (the type
-        # every other malformed-`ScanRequest` field raises) would miss
-        # it and see the raw exception instead. Same translation
-        # `_resolve_scan_contract_config` above already applies to its
-        # own `resolve_scan_config` call (CodeRabbit review, fresh
-        # evidence, PR #1032).
-        raise ValidationError(str(exc)) from exc
-    try:
-        core = run_scan_core(
-            start=_time.monotonic(),
-            binary=binary,
-            headers=eff_headers,
-            includes=list(req.includes),
-            public_headers=prov_headers,
-            public_header_dirs=prov_dirs,
-            sources=req.sources,
-            effective_build_info=effective_build_info,
-            build_config=req.build_config,
-            baseline=Path(req.baseline) if req.baseline is not None else None,
-            lang=req.lang,
-            allow_build_query=req.allow_build_query,
-            scan_mode=scan_mode,
-            resolved=resolved,
-            eff_depth_enum=eff_depth,
-            collect_mode=collect_mode,
-            changed=changed,
-            changed_src="run_scan",
-            seeded=seeded,
-            risk=risk,
-            is_auto=is_auto,
-            enabled_checks=(
-                req.enabled_checks
-                if req.enabled_checks is not None
-                else frozenset(ALL_CHECKS)
-            ),
-            severities=dict(req.severities),
-            budget=budget_str,
-            budget_s=budget_s,
-            pinned_explicit=pinned_explicit,
-            level_explicit=level_explicit,
-            compile_context=None if req.compile.is_default else req.compile,
-            defer_cleanup=build_dir_cleanups,
-            suppression=req.suppression,
-            policy=req.policy,
-            policy_file=req.policy_file,
-            scope_to_public_surface=req.scope_to_public_surface,
-            force_public_symbols=req.force_public_symbols,
-            pattern_verdicts=req.pattern_verdicts,
-            env_matrix=req.env_matrix,
-            collapse_versioned_symbols=req.collapse_versioned_symbols,
-            contract_evaluation=req.contract_evaluation,
-            contract_mode=req.contract_mode,
-            resolved_config=_scan_request_config(req),
-            abi3_floor=req.abi3_floor,
-            max_findings=req.max_findings,
-            build_targets=req.build_targets,
-            sev_config=gate.severity,
-            exit_code_scheme=gate.exit_code_scheme,
-        )
-    except _BudgetOverflow as exc:
-        # The failure-guard contract: overflow is exit 5, never a shrunk scope.
-        return ScanResult._from_abort("budget_overflow", exc.prior_decision)
-    except _EvidenceContractError as exc:  # auto-strict, ADR-037 D5
-        return ScanResult._from_abort("evidence_contract_error", None, msg=exc.message)
-    finally:
-        # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
-        # have run/aborted. Best-effort: a removal/unlock error never masks the outcome.
-        drain_build_dir_cleanups(build_dir_cleanups)
-
-    outcome = core.outcome
-    return ScanResult(
-        verdict=outcome.verdict,
-        exit_code=outcome.exit_code,
-        findings=core.findings,
-        layers=_layers_from_coverage(outcome.coverage),
-        confidence={
-            k: list(v) for k, v in outcome.crosscheck.get("providers", {}).items()
-        },
-        estimate=estimate_scan(req),
-        report=outcome.to_dict(),
-    )
-
-
-def run_audit(req: ScanRequest) -> ScanResult:
-    """Single-release hygiene audit — :func:`run_scan` with the AUDIT mode (no
-    baseline, ADR-035 D8). A thin convenience wrapper so callers can name intent."""
-    from dataclasses import replace
-
-    return run_scan(replace(req, mode="audit", baseline=None))
-
-
-def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
-    """Child-process entry: run the scan and ship back the JSON-able result dict.
-
-    Detaches into its own process group (POSIX) so the parent can kill the whole
-    subtree — including any clang/castxml grandchildren — on timeout. Conveys a
-    sanitized ``(status, payload)`` pair; never lets an exception escape silently.
-    """
-    import os
-
-    from . import deadline
-
-    # _kill_process_tree's _descendant_pgids() walk is a point-in-time snapshot taken before proc.terminate() fires;
-    # a clang/castxml child this worker spawns via deadline.run_bounded() in the gap between that snapshot and the
-    # terminate() call is invisible to it. Without this, proc.terminate() (default SIGTERM disposition, since this
-    # is a fresh `spawn`-context process with no inherited handler) would kill the worker immediately, leaving that
-    # just-spawned detached process group permanently orphaned — the worker's own _active_pgroups registry never
-    # gets a handler chance to sweep it. install_sigterm_cleanup() gives this worker the same in-process cleanup
-    # handler the plain CLI path and the L4 ProcessPoolExecutor workers already install, so its own SIGTERM handler
-    # kills every group *it* has registered before the process actually exits — independent of what the outer
-    # descendant-pgid snapshot did or didn't see (Codex review, PR #591, round 9).
-    deadline.install_sigterm_cleanup()
-    try:
-        os.setsid()  # new process group; killpg(parent) reaches clang subprocs
-    except (OSError, AttributeError):
-        pass  # non-POSIX or already a leader — parent falls back to terminate()
-    try:
-        q.put(("ok", run_scan(req).to_dict()))
-    except BaseException as exc:  # noqa: BLE001 — convey, don't crash the worker
-        q.put(("err", f"{type(exc).__name__}: {exc}"))
-
-
-def run_scan_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
-    """Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()``.
-
-    The MCP server uses this so a deep/hung scan that exceeds the tool timeout is
-    *terminated* (process + clang subtree) rather than orphaned to keep burning
-    CPU after the timeout response is sent (ADR-035 / Codex review). Raises
-    :class:`TimeoutError` on overflow and :class:`RuntimeError` on a worker-side
-    failure (already sanitized to ``Type: message``).
-    """
-    import multiprocessing as mp
-    import queue as _queue
-
-    ctx = mp.get_context("spawn")  # no inherited locks/fds; portable
-    q: Any = ctx.Queue()
-    proc = ctx.Process(target=_scan_subprocess_worker, args=(req, q), daemon=True)
-    proc.start()
-    try:
-        try:
-            status, payload = q.get(timeout=timeout)
-        except _queue.Empty:
-            raise TimeoutError(f"scan exceeded {timeout:.0f}s") from None
-    finally:
-        if proc.is_alive():
-            _kill_process_tree(proc)
-        else:
-            proc.join(1)
-    if status == "err":
-        raise RuntimeError(payload)
-    return payload  # type: ignore[no-any-return]
-
-
-def _run_scan_one_member(
-    req: ScanRequest,
-    binary: Path,
-    *,
-    start: float,
-    budget_s: float | None,
-    changed_src: str,
-    sibling_exported_symbols: frozenset[str] = frozenset(),
-) -> ScanResult:
-    """One member's scan, for :func:`run_scan_set` (ADR-056). Mirrors
-    :func:`run_scan`'s body (a separate function so `run_scan` stays
-    byte-for-byte unchanged), with three differences: accepts an
-    externally-supplied ``start``/``budget_s`` (the *same*, unreduced total
-    passed to every member -- `run_scan_core`'s `_remaining_budget_s`
-    computes the shrinking remainder itself, so a pre-reduced value here
-    would double-subtract); forwards `abi3_floor`/`enabled_checks`/
-    `severities`/`build_config`/`allow_build_query`/`risk_rules_path`/
-    `build_targets`; accepts ``sibling_exported_symbols`` (G35: a sibling's
-    export also satisfies `public_not_exported`).
-    """
-    from .buildsource.cross_source_checks import ALL_CHECKS
-    from .model.evidence_depth_levels import EvidenceDepth, ScanMode, SourceMethod
-    from .scan_engine import _BudgetOverflow, _EvidenceContractError, run_scan_core
-    from .workflows.scan_config import public_provenance_set as _public_provenance_set
-
-    # Shared with the --artifact-set --dry-run preview (workflows.scan_estimate) -- workflows/AGENTS.md's
-    # "dry-run and execution must consume the same resolved plan" rule.
-    sm, dp, changed, seeded, risk, resolved, eff_depth, collect_mode = (
-        _resolve_member_scan_level(req)
-    )
-
-    scan_mode = ScanMode(req.mode)
-    sm_pin = sm is not None and sm is not SourceMethod.AUTO
-    pinned_explicit = (dp is not None) or sm_pin
-    # Mirrors cli_scan._scan_explicit_flags' level_explicit: consent to auto-running build.query (a non-auto
-    # source_method, or an explicit depth with no source_method pinned) -- without this, a trusted --config's
-    # build.query never auto-runs for a member even when the caller explicitly requested a deep depth (Codex
-    # review).
-    level_explicit = sm_pin or (sm is None and dp is not None)
-    is_auto = sm is SourceMethod.AUTO
-    eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
-    prov_headers, prov_dirs = _public_provenance_set(
-        eff_headers, list(req.public_header_dirs)
-    )
-    effective_build_info = req.compile_db or req.build_info
-    budget_str = f"{budget_s:g}s" if budget_s is not None else None
-
-    build_dir_cleanups: list[Callable[[], None]] = []
-    try:
-        core = run_scan_core(
-            start=start,
-            binary=binary,
-            headers=eff_headers,
-            includes=list(req.includes),
-            public_headers=prov_headers,
-            public_header_dirs=prov_dirs,
-            sources=req.sources,
-            effective_build_info=effective_build_info,
-            build_config=req.build_config,
-            baseline=None,
-            lang=req.lang,
-            allow_build_query=req.allow_build_query,
-            scan_mode=scan_mode,
-            resolved=resolved,
-            eff_depth_enum=eff_depth,
-            collect_mode=collect_mode,
-            changed=changed,
-            changed_src=changed_src,
-            seeded=seeded,
-            risk=risk,
-            is_auto=is_auto,
-            enabled_checks=(
-                req.enabled_checks
-                if req.enabled_checks is not None
-                else frozenset(ALL_CHECKS)
-            ),
-            severities=dict(req.severities),
-            budget=budget_str,
-            budget_s=budget_s,
-            level_explicit=level_explicit,
-            pinned_explicit=pinned_explicit,
-            compile_context=None if req.compile.is_default else req.compile,
-            defer_cleanup=build_dir_cleanups,
-            abi3_floor=req.abi3_floor,
-            sibling_exported_symbols=sibling_exported_symbols,
-            build_targets=req.build_targets,
-        )
-    except _BudgetOverflow as exc:
-        return ScanResult._from_abort("budget_overflow", exc.prior_decision)
-    except _EvidenceContractError as exc:
-        return ScanResult._from_abort("evidence_contract_error", None, msg=exc.message)
-    finally:
-        drain_build_dir_cleanups(build_dir_cleanups)
-
-    outcome = core.outcome
-    return ScanResult(
-        verdict=outcome.verdict,
-        exit_code=outcome.exit_code,
-        findings=core.findings,
-        layers=_layers_from_coverage(outcome.coverage),
-        confidence={
-            k: list(v) for k, v in outcome.crosscheck.get("providers", {}).items()
-        },
-        estimate=[],
-        report=outcome.to_dict(),
-    )
-
-
-def run_scan_set(req: ScanRequest) -> ScanSetResult:
-    """Execute an audit-mode, no-old-side scan over a *set* of artifacts
-    (ADR-056, ``scan --artifact-set``). The plural sibling of :func:`run_scan`,
-    sharing `ScanRequest` but never touching `run_scan`'s own code path --
-    `req.binaries` must have 2+ entries. `req.baseline` must be ``None``: a
-    service-layer guard so a directly-constructed `ScanRequest(binaries=
-    [...], baseline=old)` can't silently compare every member against the
-    same baseline (ADR-056 D2 scopes `--artifact-set` to audit-only).
-    """
-    import time as _time
-    from dataclasses import replace
-
-    from . import deadline as _deadline
-    from .bundle import (
-        artifact_set_member_exports,
-        audit_bundle,
-        check_artifact_set_soname_collisions,
-        discover_artifact_set,
-    )
-
-    # run_scan_set is audit-only by definition (ADR-056 D2) -- normalize mode here rather than trust every caller to
-    # set it. Without this, the documented minimal form ``run_scan_set(ScanRequest(binaries=[...]))`` left req.mode
-    # at ScanRequest's own default ("pr"), so each member's report claimed mode: "pr" despite this entry point never
-    # accepting a baseline (Codex review).
-    req = replace(req, mode="audit")
-
-    # Canonicalize/deduplicate before the cardinality check: two literal duplicates or symlink aliases of one DSO
-    # must not silently pass as a valid 2-member set (discover_artifact_set below dedupes via Path.resolve() too,
-    # which would otherwise report a "complete" audit of what's really a single library) (Codex review).
-    # Path.resolve() only follows symlinks, not hard links -- key on filesystem identity (st_dev, st_ino) when
-    # available so two hard-linked aliases of one DSO are also caught, not just symlink aliases (Codex review, same
-    # gap fixed in bundle.discover_artifact_set's own dedup).
-    seen_resolved: set[Path | tuple[int, int]] = set()
-    binaries: list[Path] = []
-    for binary in req.binaries:
-        try:
-            resolved = binary.resolve()
-        except OSError:
-            resolved = binary
-        try:
-            st = resolved.stat()
-            identity: Path | tuple[int, int] = (st.st_dev, st.st_ino)
-        except OSError:
-            identity = resolved
-        if identity in seen_resolved:
-            continue
-        seen_resolved.add(identity)
-        binaries.append(binary)
-
-    if len(binaries) < 2:
-        raise ValueError(
-            "run_scan_set requires 2 or more distinct binaries "
-            "(duplicate/symlink-aliased paths do not count separately)"
-        )
-    if req.baseline is not None:
-        raise ValueError("run_scan_set does not accept req.baseline (audit-only)")
-    # P2 regression (Codex review): run_scan_set is a public, re-exported service entry point (ADR-056) that a
-    # direct Python API caller can reach without going through cli_scan._run_artifact_set's own click-level "these
-    # flags only mean anything with --against" guard -- req.mode is already forced to "audit" above, so this always
-    # applies here (unlike run_scan, where it's conditional on baseline/mode).
-    _reject_comparison_only_fields(req)
-    if req.bundle_manifest is not None:
-        # P2 (Codex review): a direct ScanRequest(bundle_manifest=...) bypasses load_manifest()'s own validation.
-        from .bundle_manifest import _validate_manifest_entries
-        _validate_manifest_entries(Path("<typed-api>"), list(req.bundle_manifest.entries))
-
-    from .workflows.plan import scan_bazel_scoping_failure  # ADR-063 Phase 4
-
-    _, _, _, _, _, _, ed, cm = _resolve_member_scan_level(req)
-    _bi = req.compile_db or req.build_info
-    # sources=/build_config= closes the config-sourced (no explicit --build-target)
-    # root-target-scope dry-run/execution parity gap here too, now that this file
-    # has the line-budget room -- see docs/contribute/adr/063-one-semantic-pipeline.md's
-    # Phase 4 status entry ("Second slice" / residual) and the matching entry in
-    # docs/contribute/known-gaps.md.
-    if _bf := scan_bazel_scoping_failure(
-        req.headers,
-        ed,
-        cm,
-        _bi,
-        req.build_targets,
-        sources=req.sources,
-        build_config=req.build_config,
-    ):
-        raise PlanningError((_bf,))
-
-    # Start the shared budget clock *before* set discovery/validation, not after (Codex review):
-    # discover_artifact_set() stats every candidate path and parses each one's ELF program/dynamic table to classify
-    # it, real work on a large set -- if the clock only started once that finished, a slow discovery phase would be
-    # invisible to `--budget` entirely, so even `--budget 0s` could spend substantial time discovering before ever
-    # reporting overflow.
-    start = _time.monotonic()
-    budget_s = req.budget.total_timeout
-
-    # Validate/canonicalize the whole set *before* scanning any member (Codex review): run_scan_set is a public, re-
-    # exported service entry point (ADR-056) -- a direct Python API caller can reach it without ever going through
-    # cli_scan._run_artifact_set's own discover_artifact_set prevalidation, so an unsupported member or a canonical-
-    # identity collision here is not necessarily anomalous the way it would be for a CLI-originated request.
-    # Discovering first avoids two real problems with discovering after the per-member loop: (1) needlessly running
-    # potentially expensive member scans (compiler/build queries) for a request that was never valid to begin with,
-    # and (2) a member scan exhausting the budget and returning BUDGET_OVERFLOW *before* discovery ever runs, which
-    # would report budget exhaustion instead of the real, underlying ArtifactSetError.
-    libraries = discover_artifact_set(list(binaries), explicit=True)
-
-    # P2 regression (Codex review): validate cross-member DT_SONAME uniqueness before scanning any member, not only
-    # inside audit_bundle() after every member has already been individually scanned -- an earlier member scan
-    # exhausting --budget would otherwise mask this genuine usage error as an ordinary BUDGET_OVERFLOW, and every
-    # member's own (potentially expensive) scan would already have run for a request that was always going to be
-    # rejected.
-    remaining_for_soname_check = (
-        None if budget_s is None else budget_s - (_time.monotonic() - start)
-    )
-    if remaining_for_soname_check is not None and remaining_for_soname_check <= 0:
-        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
-    try:
-        with _deadline.deadline_scope(remaining_for_soname_check):
-            check_artifact_set_soname_collisions(libraries)
-    except _deadline.DeadlineExceeded:
-        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
-
-    # G35: cheap export-table pass so a member's own check learns siblings' exports.
-    remaining_for_exports = (
-        None if budget_s is None else budget_s - (_time.monotonic() - start)
-    )
-    if remaining_for_exports is not None and remaining_for_exports <= 0:
-        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
-    try:
-        with _deadline.deadline_scope(remaining_for_exports):
-            member_exports = artifact_set_member_exports(libraries)
-    except _deadline.DeadlineExceeded:
-        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
-    # No checkpoint after the *last* member's parse -- recheck before the loop.
-    if budget_s is not None and (_time.monotonic() - start) >= budget_s:
-        return ScanSetResult(verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=[])
-
-    all_exports = frozenset[str]().union(*member_exports.values())
-    per_artifact: list[ScanArtifactResult] = []
-    for name, binary in libraries.items():
-        siblings = all_exports - member_exports.get(name, frozenset())
-        result = _run_scan_one_member(
-            req,
-            binary,
-            start=start,
-            budget_s=budget_s,
-            changed_src=req.changed_src,
-            sibling_exported_symbols=siblings,
-        )
-        per_artifact.append(ScanArtifactResult(artifact=binary, result=result))
-        if result.verdict == "BUDGET_OVERFLOW":
-            # The failure-guard contract: never keep scanning past overflow.
-            return ScanSetResult(
-                verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
-            )
-
-    remaining = None if budget_s is None else budget_s - (_time.monotonic() - start)
-    if remaining is not None and remaining <= 0:
-        return ScanSetResult(
-            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
-        )
-
-    try:
-        # P2 regression (Codex review): the post-audit elapsed-time check below only detects an overflow *after*
-        # audit_bundle() already ran to completion -- it doesn't bound the call itself, so a pathologically large or
-        # malformed ELF set could still burn far more wall-clock than --budget allows before that check is ever reached.
-        # build_bundle_snapshot()'s per-library parsing loop now calls deadline.check() between members (the same
-        # cooperative, per-unit-of-work checkpoint pattern scan_engine already uses for per-header/per-TU work), so
-        # running audit_bundle() under this scope lets a real overflow raise mid-parse instead of only being caught
-        # afterward.
-        #
-        # audit_bundle()'s ambiguous duplicate-SONAME rejection (ArtifactSetError) is only detectable *here*, after
-        # actually parsing every member's ELF metadata -- propagates the same way discover_artifact_set()'s own
-        # ArtifactSetError does above (P2, Codex review x2): degrading either to bundle_incomplete=True let a genuinely
-        # invalid artifact set exit 0 with the cross-library audit silently skipped, misreading as full success for a
-        # direct Python API caller that never went through cli_scan._run_artifact_set's own prevalidation. The CLI's own
-        # try/except around run_scan_set() converts this into a click.UsageError (exit 64, "bad flags/inputs" per
-        # AGENTS.md's exit code table).
-        with _deadline.deadline_scope(remaining):
-            audit = audit_bundle(
-                libraries, bundle_system_providers=req.bundle_system_providers,
-                manifest=req.bundle_manifest,
-            )
-    except _deadline.DeadlineExceeded:
-        return ScanSetResult(
-            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
-        )
-    # The deadline_scope above only bounds the checkpoints build_bundle_snapshot() itself calls deadline.check()
-    # between (i.e. per library, not mid-parse of one) -- re-check elapsed time after the whole call so a real
-    # overflow within a single library's parse (or in _compute_resolution_graph/
-    # _detect_unresolved_intra_dependency, which have no checkpoints of their own) is still reported as
-    # BUDGET_OVERFLOW (the failure-guard contract) rather than a normal verdict that quietly ran over time (Codex
-    # review).
-    if budget_s is not None and (_time.monotonic() - start) > budget_s:
-        return ScanSetResult(
-            verdict="BUDGET_OVERFLOW", exit_code=5, per_artifact=per_artifact
-        )
-    # discover_artifact_set already validated every member looks like ELF, but build_bundle_snapshot() can still
-    # silently drop one whose actual parse failed or came back empty (bundle.py's own per-member try/except + empty-
-    # metadata skip). A reduced resolution graph missing a real provider can then invent an unresolved-import
-    # finding for a symbol that dropped member would have supplied -- mark the audit incomplete (no findings
-    # published) rather than risk a false positive (Codex review), the same degrade-not-raise contract the
-    # discovery-failure path above already uses.
-    if set(audit.snapshot.libraries) != set(libraries):
-        verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, None)
-        # P2 regression: a skipped audit must not silently exit 0 when every
-        # member scanned clean (a no-op for a worse per-member 7/2/4/5).
-        exit_code = max(exit_code, 1)
-        if verdict in ("NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"):
-            verdict = "BUNDLE_INCOMPLETE"
-        return ScanSetResult(
-            verdict=verdict,
-            exit_code=exit_code,
-            per_artifact=per_artifact,
-            bundle_incomplete=True,
-        )
-    bundle_verdict = audit.verdict.value
-    verdict, exit_code = _aggregate_scan_set_verdict(per_artifact, bundle_verdict)
-    return ScanSetResult(
-        verdict=verdict,
-        exit_code=exit_code,
-        per_artifact=per_artifact,
-        bundle_findings=list(audit.findings),
-        bundle_verdict=bundle_verdict,
-    )
-
-
-def _scan_set_subprocess_worker(req: ScanRequest, q: Any) -> None:
-    """Child-process entry for :func:`run_scan_set_subprocess` (ADR-056).
-    Mirrors :func:`_scan_subprocess_worker`'s process-group detachment and
-    SIGTERM cleanup verbatim -- same race, same fix: without these, a
-    clang/castxml child a member scan spawns can detach into its own group
-    in the gap between the parent's descendant-pgid snapshot and its
-    terminate() call, and outlive the worker as an orphan (Codex review).
-    """
-    import os
-
-    from . import deadline
-
-    deadline.install_sigterm_cleanup()
-    try:
-        os.setsid()
-    except (OSError, AttributeError):
-        pass
-    try:
-        q.put(("ok", run_scan_set(req).to_dict()))
-    except ValueError as exc:
-        q.put(("value_err", str(exc)))
-    except BaseException as exc:  # noqa: BLE001 — convey, don't crash the worker
-        q.put(("err", f"{type(exc).__name__}: {exc}"))
-
-
-def run_scan_set_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
-    """Run :func:`run_scan_set` in a killable child process (ADR-056).
-
-    The plural sibling of :func:`run_scan_subprocess` — MCP `abi_scan` must
-    route an `artifact_set` call through this, not the singular wrapper, so
-    the MCP tool timeout still terminates the process tree for a hung
-    multi-artifact scan instead of either being rejected outright or running
-    unbounded in the MCP server's own process.
-    """
-    import multiprocessing as mp
-    import queue as _queue
-
-    ctx = mp.get_context("spawn")
-    q: Any = ctx.Queue()
-    proc = ctx.Process(target=_scan_set_subprocess_worker, args=(req, q), daemon=True)
-    proc.start()
-    try:
-        try:
-            status, payload = q.get(timeout=timeout)
-        except _queue.Empty:
-            raise TimeoutError(f"scan exceeded {timeout:.0f}s") from None
-    finally:
-        if proc.is_alive():
-            _kill_process_tree(proc)
-        else:
-            proc.join(1)
-    if status in ("value_err", "err"):
-        raise (ValueError if status == "value_err" else RuntimeError)(payload)
-    return payload  # type: ignore[no-any-return]

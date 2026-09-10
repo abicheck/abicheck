@@ -381,9 +381,9 @@ class RunOutcome:
 #: The non-``Verdict`` strings a ``scan`` writer's own ``verdict`` field can
 #: carry -- ADR-063 D6's grounding for :class:`OperationalStatus`'s
 #: ``BUDGET_OVERFLOW``/``EVIDENCE_CONTRACT_ERROR``/``NOT_COMPARABLE``
-#: members (``scan_abort_result.py``, ``service_scan.ScanSetResult``'s own
-#: ``_SCAN_SET_COMPAT_ORDER`` gap for exactly these three strings).
-#: ``BUNDLE_INCOMPLETE`` (Codex review) is ``ScanSetResult.run_scan_set``'s
+#: members (``scan_abort_result.py``, and -- until ADR-068 Phase 4 retired it
+#: -- the typed ``ScanSetResult``'s ``_SCAN_SET_COMPAT_ORDER`` gap for these).
+#: ``BUNDLE_INCOMPLETE`` (Codex review) was the retired ``run_scan_set``'s
 #: own sentinel for "the cross-library bundle audit itself never ran because
 #: a discovered member dropped out of resolution" -- the same "something
 #: failed to be extracted/analyzed" shape :attr:`OperationalStatus.
@@ -436,9 +436,9 @@ def run_outcome_for_scan_fields(
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING,
 ) -> RunOutcome:
     """Build a :class:`RunOutcome` for one of ``scan``'s ``(verdict,
-    exit_code)`` report shapes (:class:`~abicheck.scan_engine.ScanOutcome`,
-    :class:`~abicheck.service_scan.ScanResult`,
-    :class:`~abicheck.service_scan.ScanSetResult`).
+    exit_code)`` report shapes -- :class:`~abicheck.scan_engine.ScanOutcome`
+    since ADR-068 Phase 4 retired the typed ``ScanResult``/``ScanSetResult``
+    envelopes that also used it.
 
     *severity_exit_code*, when given, is the nested compatibility-only exit
     code from a severity-scheme scan's own ``diff.severity.exit_code``
@@ -539,7 +539,7 @@ def run_outcome_for_scan_fields(
         # compatibility contribution unless a validated one was explicitly
         # given via *severity_exit_code* (the abort-report's own persisted
         # `exit.compatibility_contribution`, above). Without this,
-        # BUNDLE_INCOMPLETE's own exit-code-1 floor (`run_scan_set`'s
+        # BUNDLE_INCOMPLETE's own exit-1 floor (the retired `run_scan_set`'s
         # `max(exit_code, 1)`, with no `report=` to read a real
         # contribution from) read as a real ADDITION_QUALITY compatibility
         # gate despite `compatibility` already being `None` for the
@@ -738,8 +738,8 @@ def run_outcome_dict_for_scan(
     are mutually exclusive report shapes, never both present at once.
 
     *member_verdicts*, when given, is the raw per-member (+ bundle) verdict
-    strings a writer with no ``report=`` already has
-    (:class:`~abicheck.service_scan.ScanSetResult`'s set-level abort case):
+    strings a writer with no ``report=`` already has (the retired
+    ``ScanSetResult``'s set-level abort case was its one producer):
     the last-resort fallback, via :func:`worst_real_verdict`, deriving both
     the compat-exit contribution and the precise ``compatibility`` verdict
     -- not reducible to a bare int, since NO_CHANGE/COMPATIBLE/COMPATIBLE_

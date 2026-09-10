@@ -318,13 +318,15 @@ _HELP_ALL_COMMANDS: list[
         # the strict-suppressions/public-symbol family is gone (CLI audit
         # PR 4/5) but genuinely render in --help-all via their new "Policy &
         # severity"/"Public-surface scoping" panel membership (cli_help.py),
-        # so they stay valid examples here.
+        # so they stay valid examples here. `--risk-rules` was a fifth
+        # example until ADR-068's second 2026-09-09 amendment retired the
+        # flag (ruling (b)); its panel-mate `--crosscheck` is curated-visible,
+        # so it is not a substitute.
         (
             "--sysroot",
             "--ast-frontend",
             "--write",
             "--pattern-verdicts",
-            "--risk-rules",
         ),
         (
             "--header",

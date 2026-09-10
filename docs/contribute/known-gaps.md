@@ -7382,6 +7382,51 @@ that point drop the skip and go back to an unconditional comparison so a
 *future* regression on this field is caught structurally rather than by an
 absent key silently reading as "no divergence".
 
+## `--crosscheck KEY=LEVEL`'s engine half outlives its retirement ruling
+
+ADR-068's second 2026-09-09 amendment rules `--crosscheck KEY=error`'s
+promotion syntax **(b) — dropped, superseded**: every cross-source check
+already reaches `compare` as an ordinary `ChangeKind`, so the underlying
+capability (controlling one check's severity) exists as
+`policy.overrides.<CHANGE_KIND>: error` in `--policy`/`.abicheck.yml`.
+
+Phase 4's typed-API slice (2026-09-09) deleted the half it owned:
+`ScanRequest.severities`/`enabled_checks` are gone with the request type, and
+no typed caller can state either any more. **The `scan` CLI flag and its
+engine plumbing are still there**, deliberately. Its promotion is not a
+`scan`-local detail — it is ADR-064's `crosscheck_promotion_contribution`, a
+*published* `ExitDecision` axis:
+
+- `policy/exit_decision.py` carries the field and `resolve_exit_decision`'s
+  parameter; it is emitted in every persisted `exit` block.
+- `policy/exit_decision_precedence.py` carries it through a prior decision.
+- `workflows/scan_abort_result.py` names it as a fold participant for a
+  budget/evidence-contract abort.
+- `schemas/__init__.py`'s `REPORT_SCHEMA_VERSION` 2.42 entry documents it on
+  `compare`'s side of the report contract, and `action/run.sh` reads
+  `promoted_crosscheck` out of `blocking_categories` to word its own verdict
+  escalation.
+- `scan_engine._crosscheck_severity_exit`/`_promote_published_gate` and
+  `cli_scan_baseline`'s `info`/`warning` non-gating exclusion implement it.
+
+Removing a published exit axis changes `compare`'s report schema as well as
+`scan`'s and needs an ADR-064 amendment deciding what a consumer reading
+`crosscheck_promotion_contribution` should see afterwards — a different
+change from retiring a request field. It is not done in the typed-API slice,
+and the slice does not pretend otherwise.
+
+**What closing it looks like:** delete `--crosscheck` from `cli_scan.py`
+(both halves — the `KEY=off` enable/disable side has no separate ruling, but
+it is the same flag and `compare` runs every check unconditionally per plan
+§3 #3), delete `_parse_crosschecks`/`_CROSSCHECK_LEVELS`/
+`_PROMOTABLE_FINDING_KINDS`, drop `severities`/`enabled_checks` from
+`run_scan_core`/`_run_baseline_compare`, delete
+`_crosscheck_severity_exit`/`_promote_published_gate`/
+`CROSSCHECK_BLOCKING_CATEGORY`, retire the `ExitDecision` field under an
+ADR-064 amendment with its own `REPORT_SCHEMA_VERSION`/`SCAN_SCHEMA_VERSION`
+entries, and update `action/run.sh`'s two `promoted_crosscheck` readers plus
+`pr_comment_scan.py`'s `crosscheck_severities` promotion read.
+
 ## Retired CLI spellings still named in runtime messages
 
 **Status:** one instance fixed (PR #1184), the repo-wide sweep deliberately
@@ -7465,3 +7510,33 @@ legitimate three categories above is a gate in
 `RETIRED_SURFACES` docs sweep to first-party Python with a *small*,
 reasoned allowlist. Doing the gate first would invert that order and bake
 today's 25 unexamined sites into an allowlist nobody revisits.
+
+## `scan --depth binary` and `compare --depth binary` see different evidence
+
+`scan --depth binary` extracts exported symbols only. `compare --depth binary`
+on the same two live binaries still reads DWARF and reports type-level
+findings (`type_size_changed`, `type_field_added_compatible`) that the
+symbols-only view cannot produce. Verified live on a two-version C++ fixture:
+identical operands, identical pin, `compare` emits five changes and `scan`
+two.
+
+The two commands are not wrong in the same way. `scan` honours the pin as an
+*extraction floor and ceiling*; `compare`'s `--depth` projection
+(`policy/depth_projection.py`) drops the L3-L5 layers but does not restrict
+the L1 debug parse the resolution already performed, so the pin acts as a
+ceiling on collected layers rather than on read evidence. Which of the two is
+the intended contract at this rung is a `compare`-side question (ADR-063
+Phase 8's `--depth` ceiling), not a `scan` one.
+
+Left open deliberately. ADR-068 Phase 4's typed-API slice fixed the adjacent
+*headers*-rung divergence — `cli_scan_helpers._uses_debug_presence_only`
+dropped DWARF at the `HEADERS`/`BUILD` rungs even when no headers existed to
+replace it, so a header-less `scan` lost every type-level finding while
+naming the rung it was asked for — and the parity suite now pins the
+`headers` and unpinned rungs against `compare` as an oracle
+(`tests/test_scan_depth_evidence_shortcut.py`). The `binary` rung is
+excluded from that matrix and recorded here instead, since closing it means
+deciding what `compare --depth binary` should do, which is a separate
+change with its own blast radius. Registered as a `KnownGap` on the
+`evidence.tier_shortcut_without_substitute` entry in
+`tests/regressions/manifest.py`.

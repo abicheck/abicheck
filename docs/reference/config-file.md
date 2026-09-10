@@ -306,10 +306,10 @@ sole source for both settings now, replacing the removed
 libc/libstdc++/libgcc/libtbb allow-list) and `cohorts:` (a list of
 co-versioned library name prefixes enabling the `BUNDLE_SONAME_SKEW` check).
 Entries are stripped of surrounding whitespace and empty entries dropped at
-parse time. `system_providers:` applies to `compare`'s directory/package
-fan-out and `scan --artifact-set` alike; `cohorts:` (the SONAME-skew check)
-applies to compare only — an `--artifact-set` audit has no old/new release
-pair to detect a skew between, so it has no effect there. Distinct from the
+parse time. `system_providers:` and `cohorts:` (the SONAME-skew check) both apply to
+`compare`'s directory/package fan-out. (`system_providers:` also reached
+`scan --artifact-set` until ADR-068's second 2026-09-09 amendment retired
+that mode.) Distinct from the
 plural `bundles:` block below, which serves a different, unrelated purpose
 (the `project` command family's target declarations). See
 [Multi-binary § The bundle-analysis flags](../use/multi-binary.md#the-bundle-analysis-flags).
@@ -423,10 +423,16 @@ Both are recognized top-level keys (so they do not trigger the unknown-key
 error), but they are handled outside the `compare` config merge:
 
 - **`risk_rules:`** — a mapping of rule-name → `{ paths: [...], weight: <int> }`
-  path-glob risk profile. It is loaded by `scan`'s `--risk-rules <file>` option
-  (which reads a `risk_rules:` block from the given YAML file); it is **not**
-  auto-loaded from a discovered `.abicheck.yml`. Parsed by `RiskRules.from_dict`
-  in `buildsource/risk.py`. See [Evidence depth](../use/evidence-depth.md).
+  path-glob risk profile, parsed by `RiskRules.from_dict` in
+  `buildsource/risk.py`. **Nothing loads it any more:** `scan --risk-rules`,
+  the one option that ever read a `risk_rules:` block, is retired
+  (ADR-068's second 2026-09-09 amendment, ruling (b)), along with the
+  risk-driven `auto` depth escalation the profile fed. The key stays
+  recognized (so an existing file does not trigger the unknown-key error)
+  and the scorer still runs against its built-in default profile to produce
+  the *reported* risk score, but the score no longer selects an evidence
+  level: pin `--depth` to ask for one. See
+  [Evidence depth](../use/evidence-depth.md).
 - **`crosschecks:`** — reserved. The active mechanism for tuning cross-checks is
   `scan`'s repeatable `--crosscheck KEY=LEVEL` flag; the current code does not
   read a `crosschecks:` block from the file.

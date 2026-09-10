@@ -115,15 +115,16 @@ def _is_engine_module(rel: str) -> bool:
 # violation's 1-based rank among identically-described violations in the
 # same file, in top-to-bottom (line) order — stable unless a new,
 # identically-shaped import is inserted earlier in the same file, which is
-# the one case where re-numbering is actually correct (see
-# `service_scan.py`'s three `from .cli_scan_baseline import ...` entries
-# below — a real case this format has to disambiguate).
+# the one case where re-numbering is actually correct (`service_scan.py`
+# used to hold three identically-described `from .cli_scan_baseline import
+# ...` entries, the real case this format was shaped to disambiguate; they
+# went with `run_scan` in ADR-068 Phase 4's typed-API slice, and that file
+# no longer appears here at all).
 ENGINE_CLI_BOUNDARY_ALLOWLIST: frozenset[str] = frozenset(
     {
         "abicheck/scan_engine.py::import click::1",
         "abicheck/scan_engine.py::from .cli_scan_baseline import ...::1",
         "abicheck/scan_engine.py::from .cli_scan_helpers import ...::1",
-        "abicheck/service_scan.py::import click::1",
     }
 )
 

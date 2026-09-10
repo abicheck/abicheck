@@ -715,7 +715,11 @@ Core pipeline (in order of data flow):
    - `resolver.py` — symbol resolution
    - `type_metadata.py`, `dwarf_utils.py` — shared type helpers
    - `change_registry.py` — change kind registry
-   - `service.py` — service layer (Python API)
+   - `service.py` — service layer (Python API). One typed request/result pair:
+     `CompareRequest` -> `CompareResult` and `DumpRequest`. ADR-068 Phase 4's
+     typed-API slice retired `ScanRequest`/`ScanResult` (and `run_scan`/
+     `run_scan_set`) — `service_scan.py` is now the dry-run cost model
+     (`estimate_scan` over one `InputSpec`) plus header expansion, nothing more
    - `service_compare_pipeline.py` — ADR-055 D1: `run_compare_request`'s two
      phases (`resolve_compare_request` / `classify_compare_pair`), split so
      the native `compare` CLI can run its Click-dependent ADR-049
@@ -1205,7 +1209,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
 - `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
-- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran; also reported for `--artifact-set` when a member's own evidence-contract abort is the worst signal in the set, CLI cleanup phase two PR G2). Like `compare`, it also accepts `--severity-preset` (and `.abicheck.yml`'s `severity:` block); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above — there is no manual scheme selector any more (`--exit-code-scheme`/`exit_code_scheme:` were deleted, CLI cleanup phase two PR G2, ADR-064: the algorithm is purely derived from whether a severity setting is in effect). `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's `gate.severity.<category>` assignments apply the same way an explicit `--severity-preset` does, and cannot override one that was actually given (CLI or `.abicheck.yml`); a pack assigning `gate.exit_code_scheme` is rejected at load time.
+- `scan --against`: 0 = compatible, 2 = API break, 4 = ABI break, 5 = budget overflow, 6 = NOT_COMPARABLE (legacy scheme), 7 = evidence-contract error (ADR-037 D5 — a pinned `--depth`/`--source-method` with no source evidence collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module; no comparison ever ran). Like `compare`, it also accepts `--severity-preset` (and `.abicheck.yml`'s `severity:` block); under the resolved `severity` scheme the 0/2/4 portion is computed by `severity.compute_exit_code` instead of the raw verdict, same as `compare`'s severity-aware row above — there is no manual scheme selector any more (`--exit-code-scheme`/`exit_code_scheme:` were deleted, CLI cleanup phase two PR G2, ADR-064: the algorithm is purely derived from whether a severity setting is in effect). `--pack` gate-severity folding now reaches `scan` too (CLI cleanup phase two, "PR B" slice 3) — a `kind: gate` pack's `gate.severity.<category>` assignments apply the same way an explicit `--severity-preset` does, and cannot override one that was actually given (CLI or `.abicheck.yml`); a pack assigning `gate.exit_code_scheme` is rejected at load time.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare` and
   `scan --against` alike:** under `--contract`, the selected
   domain whose required evidence is incomplete contributes

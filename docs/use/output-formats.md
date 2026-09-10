@@ -692,10 +692,11 @@ Every JSON report carries a top-level `report_schema_version` field
 > object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …). It carries its
 > own top-level `scan_schema_version` field (`MAJOR.MINOR`, importable as
 > `abicheck.schemas.SCAN_SCHEMA_VERSION`) — independent of, and not
-> interchangeable with, `report_schema_version`. The typed Python
-> `ScanResult.to_dict()` envelope (`abicheck.service`) stamps the same value at
-> its own top level, in addition to nesting the `ScanOutcome` dict (with its
-> own `scan_schema_version`) under its `report` key. There is currently no
+> interchangeable with, `report_schema_version`. Through `1.30` the typed
+> Python `ScanResult.to_dict()` envelope stamped the same value and nested
+> the `ScanOutcome` dict under its `report` key; that type was removed in
+> ADR-068 Phase 4, so `scan --format json` is the only shape the marker
+> applies to now. There is currently no
 > packaged `.schema.json` for scan output (unlike `compare`'s
 > `compare_report.schema.json`); the version field is honored the same way
 > (accept a shared `MAJOR`, ignore unknown keys) until one exists.
@@ -740,7 +741,7 @@ Every JSON report carries a top-level `report_schema_version` field
 20 entries by default so a large diff can't blow up the always-on scan output
 — `compare --format json` remains the way to see every finding
 unconditionally. Raise or lower the cap per run with `scan --max-findings N`
-(`ScanRequest.max_findings` in the typed Python API), or globally via the
+or globally via the
 `ABICHECK_MAX_BASELINE_FINDINGS` environment variable when neither passes an
 explicit value; either configures the same cap, and it only changes how much
 of the diff a run itemizes — never the verdict or exit code.

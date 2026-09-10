@@ -94,9 +94,8 @@ from typing import Any
 #: The ``scan`` parameters that feed the resolver, in the spelling
 # ADR-061 Phase 4: these describe the resolver's own input contract, so they
 # moved with it. Re-exported here for the existing import sites.
-from .workflows.scan_config import (  # noqa: E402
-    SCAN_CONFIG_PARAMS as SCAN_CONFIG_PARAMS,
-    SCAN_REQUEST_SPELLINGS as SCAN_REQUEST_SPELLINGS,
+from .workflows.scan_config import (
+    SCAN_CONFIG_PARAMS as SCAN_CONFIG_PARAMS,  # noqa: E402
 )
 
 

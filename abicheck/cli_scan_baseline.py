@@ -22,8 +22,9 @@ sub-flows that stand apart from the always-on core pipeline —
   sniff :func:`_baseline_is_native_library`), and
 * ``scan --estimate`` (:func:`_emit_estimate`), plus the small header-provenance
   helpers they share with the core (:func:`_public_provenance_set`,
-  :func:`_expand_public_headers`) and the ``--risk-rules`` loader
-  (:func:`_load_risk_rules`).
+  :func:`_expand_public_headers`). The ``--risk-rules`` loader that used to
+  live here went with the flag (ADR-068's second 2026-09-09 amendment,
+  ruling (b)).
 
 ``cli_scan`` re-imports every name below so the historical import paths
 (``abicheck.cli_scan._run_baseline_compare`` etc., relied on by the scan tests
@@ -41,9 +42,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .checker_policy import ADDITION_KINDS
-from .errors import SnapshotError
 from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
-from .workflows.scan_config import RiskRules
 
 if TYPE_CHECKING:
     from .environment_matrix import EnvironmentMatrix
@@ -104,36 +103,38 @@ def _emit_estimate(
 ) -> None:
     """Render the ADR-035 D10 dry-run cost estimate (``scan --estimate``).
 
-    A thin front-end over :func:`service.estimate_scan`: builds a
-    :class:`service.ScanRequest`, probes the project (TU count, header fan-out)
-    and prints the projected per-layer cost — scanning nothing, running no
-    compiler. Always exits 0 (it is a probe, not a gate).
+    A thin front-end over :func:`service.estimate_scan`: describes the operand
+    as an :class:`~abicheck.api_types.InputSpec`, probes the project (TU count,
+    header fan-out) and prints the projected per-layer cost -- scanning
+    nothing, running no compiler. Always exits 0 (it is a probe, not a gate).
     """
     # Imported lazily (not at module top) so importing cli_scan_baseline never
     # forces cli's module-load tail — which imports cli_scan, which imports back
     # from here — to run before this module finishes (partial-init cycle).
+    from .api_types import InputSpec
     from .cli import _safe_write_output
-    from .service import Budget, ScanRequest, estimate_scan
+    from .service import estimate_scan
 
-    req = ScanRequest(
-        binaries=[binary],
+    side = InputSpec.of(
+        binary,
         headers=headers,
         includes=includes,
         sources=sources,
         build_info=build_info,
-        mode=mode,
-        source_method=resolved_method.value,
-        depth=eff_depth.value,
-        changed_paths=list(changed),
-        seeded=seeded,
-        budget=Budget(total_timeout=budget_s),
-        lang=lang,
     )
     # Pass the *already-resolved* level so the estimate mirrors the real scan
     # exactly — re-resolving from the round-tripped flags would re-apply the
     # source-method > depth precedence and lose a mode preset's deeper depth
     # (pr-deep = (s5, graph)); Codex review.
-    estimates = estimate_scan(req, resolved_level=(resolved_method, eff_depth))
+    estimates = estimate_scan(
+        side,
+        mode=mode,
+        source_method=resolved_method.value,
+        depth=eff_depth.value,
+        changed_paths=list(changed),
+        seeded=seeded,
+        resolved_level=(resolved_method, eff_depth),
+    )
     total = sum(e.est_seconds for e in estimates)
 
     if fmt == "json":
@@ -167,26 +168,11 @@ def _emit_estimate(
         click.echo(text)
 
 
-def _load_risk_rules(path: Path | None) -> RiskRules:
-    """CLI adapter over ``workflows.scan_config.load_risk_rules``.
-
-    Translates the engine's ``SnapshotError`` into a plain ``ClickException``
-    (**exit 1** -- operational, not a usage error: the flag was well-formed and
-    the file was not). Message unchanged from before the move.
-    """
-    from .workflows.scan_config import load_risk_rules
-
-    try:
-        return load_risk_rules(path)
-    except SnapshotError as exc:
-        raise click.ClickException(str(exc)) from exc
-
-
 #: Default cap on findings embedded in the ``scan --baseline`` summary so a
 #: large diff cannot blow up the always-on scan text/JSON output;
 #: ``--format json`` on the full ``compare`` command remains the way to see
 #: everything. Overridable per run via ``scan --max-findings``/
-#: ``ScanRequest.max_findings``, or globally via the
+#: ``scan --max-findings``, or globally via the
 #: ``ABICHECK_MAX_BASELINE_FINDINGS`` env var when neither passes an explicit
 #: value -- see :func:`_resolve_max_baseline_findings`.
 _MAX_BASELINE_FINDINGS = 20

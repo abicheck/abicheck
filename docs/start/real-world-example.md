@@ -188,7 +188,8 @@ abicheck compare baselines/libfoo-2.3.0.abi.json build/libfoo.so -H include/ \
   ```
 - `--since origin/main` (or `--changed-path …`) — which files changed, so it
   replays only the changed translation units. Without a seed, `--depth source`
-  falls back to a headers-only replay.
+  replays the whole current target instead (ADR-043 D7) — broader, not
+  shallower.
 
 !!! note "Cross-release body-change diff needs a source-aware baseline"
     The inline/template/macro/default-argument **body**-change comparison runs
@@ -203,8 +204,11 @@ binary-only, up to `source` = source-ABI replay — unseeded, it replays the
 whole library; with a `--since`/`--changed-path` seed, just the changed TUs);
 leave it off on `compare` and it infers the deepest rung `--sources`/
 `--build-info` already justify, bottoming out at `headers` if neither is
-given — never a risk-based choice. (Legacy `scan` alone has a risk-scored
-`auto` rung; `compare` has no equivalent.) **How each depth
+given — never a risk-based choice. (`scan` used to have a risk-scored `auto`
+rung; ADR-068's second 2026-09-09 amendment retired it, so omitting `--depth`
+on `scan` now resolves to a fixed `headers`. `compare` keeps the inference
+described above, so the two agree only when neither `--sources` nor
+`--build-info` is given.) **How each depth
 works, how to produce a compile database for `make`/`cmake`/`bazel`/`meson`,
 and the per-level input table live in [Evidence Depth](../use/evidence-depth.md)** —
 that's the home for the build-system details, kept out of this walkthrough on

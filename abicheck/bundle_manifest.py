@@ -286,10 +286,9 @@ def _validate_manifest_entries(source: Path | str, entries: list[ManifestEntry])
     identical error whether reached from a raw dict or a direct
     ``ManifestEntry(...)`` construction). This validation applies only to
     freshly-authored manifest input: :func:`load_manifest` (file loading)
-    and, for the typed-API path a direct ``ScanRequest(bundle_manifest=...)``
-    construction can otherwise bypass entirely,
-    :func:`abicheck.service_scan.run_scan_set` (both call this function
-    directly rather than each re-implementing the checks).
+    calls this function directly rather than re-implementing the checks. The
+    retired ``run_scan_set`` was a second such caller, for the typed-API path
+    a direct ``ScanRequest(bundle_manifest=...)`` could otherwise bypass.
     """
     for entry in entries:
         shape_count = sum(

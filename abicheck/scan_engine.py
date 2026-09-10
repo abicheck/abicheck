@@ -70,9 +70,9 @@ from .cli_scan_helpers import (
     _l3_collected,
     _pack_coverage,
     _source_abi_coverage,
-    _uses_debug_presence_only,
     l4_coverage_advisories,
     resolve_effective_allow_query,
+    scan_debug_presence_only,
     scan_pattern_roots,
 )
 from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
@@ -1058,12 +1058,12 @@ def run_scan_core(
 
     Pure of click/argv: it takes already-resolved inputs, runs the engine, and
     returns a :class:`ScanCoreResult`. Raises :class:`_BudgetOverflow` on budget
-    overflow (the CLI maps it to exit 5). This is the one body the CLI,
-    ``service.run_scan``, and the MCP scan tool share (ADR-035 D10).
+    overflow (the CLI maps it to exit 5). Shared with the typed
+    ``service.run_scan``/the MCP scan tool (ADR-035 D10) until both retired.
 
-    ``sibling_exported_symbols`` (G35, ``scan --artifact-set`` only via
-    ``service_scan.run_scan_set``) is forwarded to the always-on cross-check
-    tier's ``CrosscheckConfig`` unchanged — see
+    ``sibling_exported_symbols`` (G35, the retired ``scan --artifact-set``'s
+    only) is forwarded to the always-on cross-check tier's
+    ``CrosscheckConfig`` unchanged — see
     :class:`~abicheck.buildsource.cross_source_checks.CrosscheckConfig` for what it
     does. ``None``/empty for the single-binary ``scan``/``compare`` paths.
 
@@ -1096,8 +1096,8 @@ def run_scan_core(
     library and diverging from the baseline's own scoped evidence. Empty by
     default (the pre-existing, unscoped behavior).
     """
-    # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since a typed
-    # run_scan()/run_scan_subprocess caller has no cli_scan.py pre-flight.
+    # ADR-063 Phase 4 (Codex review): checked before S3/POI work, since the
+    # typed run_scan()/run_scan_subprocess callers (retired) had none.
     if _bf := scan_bazel_scoping_failure(
         headers,
         eff_depth_enum,
@@ -1208,7 +1208,7 @@ def run_scan_core(
                 compile_context=compile_context,
                 defer_cleanup=defer_cleanup,
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-                debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                debug_presence_only=scan_debug_presence_only(eff_depth_enum, headers),
                 include_dependencies=_scan_candidate_include_dependencies(baseline),
                 build_targets=build_targets,
                 # PR 3A blocker 6: the *other* side's resolved scope, handed in
@@ -1352,7 +1352,7 @@ def run_scan_core(
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-                    debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                    debug_presence_only=scan_debug_presence_only(eff_depth_enum, baseline_headers),
                     suppression=suppression,
                     policy=policy,
                     policy_file=policy_file,

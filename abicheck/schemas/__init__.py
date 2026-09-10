@@ -887,12 +887,14 @@ _ARTIFACT_NAMES = frozenset(
 REPORT_SCHEMA_VERSION = "3.14"  #: 3.14 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
-#: ``scan_schema_version`` at the top level of both public scan dict shapes:
+#: ``scan_schema_version`` at the top level of the public scan dict shape:
 #: :meth:`abicheck.scan_engine.ScanOutcome.to_dict` (the CLI's
 #: ``scan --format json`` contract — mode/level/risk/coverage/diff/verdict/
-#: exit_code) and :meth:`abicheck.service_scan.ScanResult.to_dict` (the typed
-#: Python service envelope — verdict/exit_code/findings/layers/confidence/
-#: estimate/report, where ``report`` nests the former). Same additive/breaking
+#: exit_code) and the abort envelope
+#: :func:`abicheck.workflows.scan_abort_result.scan_abort_result_fields`
+#: builds from the same fields. (Through 1.30 it also stamped the typed
+#: ``ScanResult``/``ScanSetResult`` Python envelopes; ADR-068 Phase 4
+#: retired those — see the 1.31 entry.) Same additive/breaking
 #: bump policy as :data:`REPORT_SCHEMA_VERSION` above; independent of it (scan
 #: and compare are separate contracts that evolve on their own schedules).
 #: Adding a top-level ``diff``-block key: update this version's history entry
@@ -1213,7 +1215,8 @@ REPORT_SCHEMA_VERSION = "3.14"  #: 3.14 -- see the comment immediately above.
 #: 1.28 -- ADR-065 S2, mirrors `compare`'s 2.50 entry: every scan-shaped ``run_outcome`` block gains the optional ``scope`` axis and every persisted ``exit`` block the two always-``0`` ADR-065 fold-participant keys (``incomplete_scope_contribution``/``no_comparison_completed_contribution``) -- additive; a scan never sets either nonzero.
 #: 1.29 -- ADR-067 C-S1, mirrors `compare`'s 2.51 entry for the one field the two commands share: ``scan --against``'s baseline-summary ``detectors[]`` entries gain an additive ``not_evaluated`` boolean, distinguishing a detector whose support gate refused it from one that ran and produced nothing (``changes_count: 0`` in both cases). Detector provenance is an ADR-049 Phase 5 §6.4 parity field, so it moves on both sides together. The rest of ADR-067's scalar audit (the ``disposition_audit`` block, per-suppression rule provenance) is `compare`-only in this slice and does not reach scan output. Renumbered from a conflicting 1.28 when the origin/main merge claimed that version first for ADR-065 S2's scope/exit fields.
 #: 1.30 -- ADR-063 Track T3 (Codex review, PR #1078, twenty-fifth round): mirrors `compare`'s 2.53 entry -- `cli_scan_baseline._finding_summary()` serializes the same `report_finding_id()` whose documented algorithm gained a seventh, conditional `disambiguator` input for a typedef/constant occurrence-level finding needing collision disambiguation. `scan --against`'s JSON carries the identical changed ids with no version signal until now. Renumbered twice by successive origin/main merges: first from a conflicting 1.28 (ADR-065 S2's mirrored ``run_outcome``/``exit`` additions), then from the resulting conflicting 1.29 (ADR-067 C-S1's ``not_evaluated`` mirror).
-SCAN_SCHEMA_VERSION = "1.30"
+#: 1.31 -- ADR-068 Phase 4's typed-API slice: the typed ``ScanResult``/``ScanSetResult`` envelopes this marker also stamped are **gone**, along with ``run_scan``/``run_scan_set`` and ``scan --artifact-set`` itself (ADR-068's second 2026-09-09 amendment rules ``--artifact-set``/``new-library-set`` (b) -- dropped, pending ADR-065 S3). ``scan_schema_version`` now marks exactly one shape: ``ScanOutcome.to_dict()``, the ``scan --format json`` CLI contract (and the abort envelope ``workflows.scan_abort_result`` builds from the same fields). The ``per_artifact``/``bundle_findings``/``bundle_verdict``/``bundle_incomplete`` aggregate form 1.5 introduced, and the typed ``findings``/``layers``/``confidence``/``estimate``/``report`` envelope, are both unreachable -- a consumer that fed ``abicheck.service.run_scan``/``run_scan_set`` output to ``aggregate`` must run ``abicheck scan --format json`` (or, for a set, one invocation per library) instead. The CLI shape itself is unchanged by this bump. Two ``scan`` inputs also leave the command under the same amendment's (b) rulings: ``--risk-rules`` (and with it the risk-driven ``auto`` depth escalation -- an omitted ``--depth`` now resolves to the fixed ``headers`` rung the amendment names, the same default ``compare`` always used, so the ``level`` block of a pre-1.31 run that left ``--depth`` unset can differ: it read the risk-scored rung when a seed was present and the ``(S5, SOURCE)`` ``--mode`` preset otherwise, where it now always reads ``s0``/``headers``. Pin ``--depth source`` to ask for source evidence) and ``--build-target``.
+SCAN_SCHEMA_VERSION = "1.31"
 
 
 def current(name: str) -> str | int:

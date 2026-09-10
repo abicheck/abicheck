@@ -90,6 +90,27 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     return [item for item in result.stdout.split("\x1f") if item]
 
 
+def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+    """Run the mode-branch region and return the raw result, so a rejected
+    input's own nonzero exit and `::error::` line can be asserted (`_run_cmd`
+    treats a nonzero exit as a harness failure)."""
+    script = _mode_branches_region() + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    env = dict(os.environ)
+    env.update(env_extra)
+    try:
+        return subprocess.run(
+            [_bash_executable(), script_path],
+            capture_output=True, text=True, encoding="utf-8", env=env,
+        )
+    finally:
+        os.unlink(script_path)
+
+
 def _build_target_pairs(cmd: list[str]) -> list[str]:
     return [cmd[j + 1] for j, v in enumerate(cmd) if v == "--build-target"]
 
@@ -113,25 +134,24 @@ class TestDumpBuildTarget:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestScanBuildTarget:
-    def test_forwarded_as_build_target_flags(self) -> None:
-        # `compare` has no `--build-target` option at all yet (unlike
-        # `dump`/`scan` -- see `tests/test_action_run_contract.py::
-        # test_action_flags_are_real_cli_options`), so a scan request that
-        # sets it always routes to the legacy `scan` CLI branch (ADR-068
-        # D2, plan Phase 4 commit 1), even with a baseline present, rather
-        # than reach `compare` and fail there as a CLI usage error. "scan"
-        # is still the real CLI verb dispatched here.
-        cmd = _run_cmd(
+class TestScanBuildTargetIsRetired:
+    """ADR-068's second 2026-09-09 amendment rules `scan --build-target` (b)
+    -- retired; `dump --build-target` (above) is unchanged. The Action
+    rejects the input for `mode: scan` with an explicit `::error::` instead
+    of forwarding a flag the command no longer has."""
+
+    def test_rejected_with_an_error_naming_dump(self) -> None:
+        result = _run_mode_branches(
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": "lib.so",
                 "INPUT_AGAINST": "baseline.json",
-                "INPUT_BUILD_TARGET": "//:math //:util",
+                "INPUT_BUILD_TARGET": "//:math",
             }
         )
-        assert "scan" in cmd
-        assert _build_target_pairs(cmd) == ["//:math", "//:util"]
+        assert result.returncode != 0
+        assert "no longer supports build-target" in result.stdout
+        assert "mode: dump" in result.stdout
 
     def test_absent_forwards_none(self) -> None:
         cmd = _run_cmd(
@@ -142,16 +162,3 @@ class TestScanBuildTarget:
             }
         )
         assert "--build-target" not in cmd
-
-    def test_artifact_set_branch_also_forwards_build_target(self) -> None:
-        # scan mode's build-source-evidence composition (including
-        # --build-target) runs unconditionally before the artifact vs
-        # --artifact-set dispatch, so a set scan gets it too.
-        cmd = _run_cmd(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_BUILD_TARGET": "//:math",
-            }
-        )
-        assert _build_target_pairs(cmd) == ["//:math"]
