@@ -894,7 +894,7 @@ def _is_consumer_affected(summary: dict[str, Any]) -> bool:
 
 
 def _consumer_impact_summary(summaries: list[dict[str, Any]]) -> dict[str, Any]:
-    """"N of M consumers affected" statistics across every supplied
+    """ "N of M consumers affected" statistics across every supplied
     ``--used-by`` consumer (Workstream D-S1's "Missing" item)."""
     from .model.consumer_spec import ConsumerImpactSummary
 

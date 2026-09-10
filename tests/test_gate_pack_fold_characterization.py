@@ -51,7 +51,9 @@ def _severity_levels(draw: st.DrawFn) -> dict[str, SeverityLevel]:
 @st.composite
 def _raw_category_values(draw: st.DrawFn) -> dict[str, str | None]:
     return {
-        c: draw(st.one_of(st.none(), st.sampled_from([lvl.value for lvl in SeverityLevel])))
+        c: draw(
+            st.one_of(st.none(), st.sampled_from([lvl.value for lvl in SeverityLevel]))
+        )
         for c in GATE_SEVERITY_CATEGORIES
     }
 
@@ -143,7 +145,9 @@ class TestApplyToCompareConfigCharacterization:
             {c: getattr(resolved_cfg.severity, c) for c in GATE_SEVERITY_CATEGORIES},
             levels,
         )
-        expected_severity = dataclasses.replace(resolved_cfg.severity, **expected_folded)
+        expected_severity = dataclasses.replace(
+            resolved_cfg.severity, **expected_folded
+        )
         assert got.severity == expected_severity
         assert got.severity_active is True
 

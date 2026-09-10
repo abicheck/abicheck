@@ -52,7 +52,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .gate_pack_fold import fold_gate_pack_severity, gate_exit_code_scheme
+from .effective_gate import EffectiveGate, GateSeverityState
+from .gate_pack_fold import gate_exit_code_scheme
 from .severity import SeverityConfig, resolve_severity_config
 
 
@@ -112,14 +113,18 @@ def apply_release_gate_pack(
     assessment T6): :func:`~abicheck.policy.gate_pack_fold.
     fold_gate_pack_severity` owns it, and ``pack_application.
     apply_to_compare_config`` -- single-pair ``compare``'s own gate-pack
-    application -- calls the identical function. What stays this function's
-    own job is the *shape* difference the two call sites genuinely have: the
-    release fan-out folds onto four independent optional raw CLI-or-config
-    strings, before any :class:`SeverityConfig` exists, where ``compare``
-    folds onto an already-resolved one. That difference is real (a release
-    run must still be able to distinguish "no severity setting in effect"
-    from "the default levels", which a resolved config cannot express), so
-    it is expressed here, around one shared fold, rather than by a second
+    application -- calls the identical function, and (P0's own follow-on)
+    both callers now fold through the identical
+    :class:`~abicheck.policy.effective_gate.GateSeverityState` value type
+    rather than each constructing its own ad hoc mapping. What stays this
+    function's own job is the *shape* difference the two call sites
+    genuinely have: the release fan-out folds onto four independent optional
+    raw CLI-or-config strings, before any :class:`SeverityConfig` exists,
+    where ``compare`` folds onto an already-resolved one. That difference is
+    real (a release run must still be able to distinguish "no severity
+    setting in effect" from "the default levels", which a resolved config
+    cannot express), so it is expressed here, in how this function builds
+    and reads back a :class:`GateSeverityState`, rather than by a second
     copy of the fold.
 
     A no-op when *pack_application* is ``None`` (no ``--pack`` given) or
@@ -127,15 +132,22 @@ def apply_release_gate_pack(
     the five inputs completely unchanged.
     """
     levels = {} if pack_application is None else pack_application.severity_levels
-    folded = fold_gate_pack_severity(
-        {
+    state = GateSeverityState(
+        levels={
             "abi_breaking": severity_abi_breaking,
             "potential_breaking": severity_potential_breaking,
             "quality_issues": severity_quality_issues,
             "addition": severity_addition,
         },
-        levels,
-    )
+        # Whether a severity setting is already in effect on *this* raw
+        # shape has no bearing on the fold itself (the release fan-out
+        # resolves that fact afterward, over all five raw inputs including
+        # the preset, via `_resolve_release_severity_config`) -- this state
+        # is built only to carry `levels` through the shared fold and is
+        # never read back for `.active`.
+        active=False,
+    ).folded(levels)
+    folded = state.levels
     return (
         severity_preset,
         folded["abi_breaking"],
@@ -231,6 +243,24 @@ class GateOptions:
         with, so the release fan-out cannot drift from either.
         """
         return gate_exit_code_scheme(self.severity is not None)
+
+    @property
+    def effective_gate(self) -> EffectiveGate:
+        """This object, projected onto the plan's shared
+        :class:`~abicheck.policy.effective_gate.EffectiveGate` shape
+        (duplication-and-convergence-assessment P0) -- the same shape
+        ``cli_helpers_compare.ResolvedCompareConfig.effective_gate`` exposes
+        for single-pair ``compare``, so a caller holding either object can
+        ask the identical question. The release fan-out resolves no
+        ``--require-complete-analysis``/scoped-gate (``--used-by``/
+        ``--required-symbol``) concept of its own at this object's scope --
+        those are per-library, single-pair facts -- so both stay at their
+        default (``False``/``None``) here; a caller that does have one
+        should build an :class:`EffectiveGate` directly via
+        :meth:`EffectiveGate.from_severity` instead of through this
+        property.
+        """
+        return EffectiveGate.from_severity(self.severity)
 
 
 def resolve_release_gate_options(
