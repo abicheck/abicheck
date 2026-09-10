@@ -41,3 +41,8 @@
   property with its own contribution, the failure text names only the axes
   that actually contributed, and the contract-coverage ledger's provider
   details are included. JSON, Markdown, oneline and SARIF already did this.
+  A gated document that carries *no* per-axis breakdown at all — reachable
+  only by a caller hand-building a `NoBaselineDocument`, whose `exit_axes`
+  defaults to empty — now says the record is missing rather than printing
+  the "contributing axes:" heading with nothing under it, which would read
+  as "every axis measured and cleared" for a suite that demonstrably gated.

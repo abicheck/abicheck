@@ -471,6 +471,45 @@ def test_a_non_coverage_gate_names_its_axis_without_a_coverage_block() -> None:
     )
 
 
+def test_a_gated_document_with_no_axes_recorded_says_so() -> None:
+    """A gated suite whose document carries no per-axis breakdown must say
+    the record is missing, not fall silent.
+
+    Unreachable for a document this package builds -- `exit_code` is
+    `max(exit_axes.values())`, so a nonzero one always has a nonzero axis
+    behind it. Reachable for a *hand-built* one, because `exit_axes`
+    defaults to empty and `NoBaselineDocument` is an ordinary frozen
+    dataclass a caller may construct or `replace` (the same tolerance the
+    plain-`ReportFinding` test above pins). Codecov found this as the one
+    partial branch in the fix: the sibling `if contributing:` was exercised
+    only in the direction that had something to list.
+
+    The assertion is about what the renderer *must not* do in that state:
+    not crash, not name an axis it has no record of, and not print the
+    "contributing axes:" heading with nothing under it -- an empty heading
+    reads as "measured, nothing contributed", which for a suite that
+    demonstrably gated is a false statement rather than a missing one.
+    """
+    base = compute_no_baseline_document(_result("case143_audit_accidental_export"))
+    doc = dataclasses.replace(base, exit_code=1, exit_axes={}, coverage_failures=())
+
+    failure = ET.fromstring(render_no_baseline_junit(doc)).find(".//failure")
+    assert failure is not None and failure.text
+    assert "audit exited 1" in failure.attrib["message"]
+
+    # It says the breakdown is absent...
+    assert "none recorded" in failure.text
+    # ...and names no axis, since it has the record for none of them.
+    for label in NO_BASELINE_EXIT_AXIS_LABELS.values():
+        assert label not in failure.text, (
+            f"named {label!r} as a cause with no per-axis record to support it"
+        )
+    # The bare heading its sibling branch prints must not appear alone: a
+    # consumer reading "contributing axes:" with no rows concludes every
+    # axis was measured and cleared, which contradicts the exit code.
+    assert "contributing axes:\n" not in failure.text
+
+
 def test_a_suppressed_entry_is_still_a_report_finding() -> None:
     """`doc.suppressed` entries stay usable as ordinary findings.
 

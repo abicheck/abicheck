@@ -416,6 +416,21 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
                 f"(contributed {doc.exit_axes[axis]})"
                 for axis in contributing
             ]
+        else:
+            # A document this package builds cannot reach here: its exit
+            # code is `max(exit_axes.values())`, so a nonzero one always has
+            # a nonzero axis behind it. A *hand-built* document can, since
+            # `exit_axes` defaults to empty -- and the honest answer is to
+            # say the record is missing rather than to leave a gated
+            # consumer with a bare number, which is the very failure the
+            # comment above names. Inventing an axis would be worse than
+            # silence; saying nothing was recorded is neither.
+            detail.append("")
+            detail.append(
+                "contributing axes: none recorded -- this document carries an "
+                "exit code with no per-axis breakdown, so which axis gated "
+                "cannot be answered from it."
+            )
         # The coverage ledger itself, for the one axis that can name a
         # specific provider -- the number alone says nothing about which
         # provider on which side fell short.
