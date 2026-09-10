@@ -34,7 +34,7 @@ import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
 from abicheck.junit_report import to_junit_xml
-from abicheck.model import AbiSnapshot, Function
+from abicheck.model import AbiSnapshot, DependencyInfo, Function
 from abicheck.policy.disposition_close import finalize_ledger
 from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.policy_file import PolicyFile
@@ -1178,6 +1178,98 @@ class TestRendererOrderIndependence:
             markdown_out = render_envelope("markdown", envelope)
 
         assert "| ABI/API Incompatibilities | ❌ `ERROR` | 0 |" in markdown_out
+
+    def test_gate_decision_for_result_reuses_the_envelope_s_captured_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``build_report_envelope`` computes
+        ``today`` once but called ``gate_decision_for_result`` with no
+        ``today``, so the gate could theoretically read a different date
+        than every finding it was built beside. ``gate_decision_for_result``
+        now receives the same captured value explicitly.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result([addition])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        severity_config = SeverityConfig(addition=SeverityLevel.ERROR)
+
+        with mock.patch(
+            "abicheck.policy.gate_decision.compute_gate_decision",
+            wraps=_import_attr("abicheck.policy.severity.compute_gate_decision"),
+        ) as spy:
+            envelope = build_report_envelope(
+                result, old, new, severity_config=severity_config
+            )
+
+        spy.assert_called_once()
+        assert spy.call_args.kwargs["today"] == envelope.resolved_today
+
+    def test_sarif_gate_contribution_reuses_the_envelope_s_frozen_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: SARIF's ``_contract_properties``
+        called ``gate_contribution_for_change`` with no ``today``, so a
+        finding's ``gateContribution`` could disagree with its own frozen
+        ``level`` (which already reuses the envelope's finding) once a
+        dated ``reclassify`` rule expires. Now threads ``envelope.
+        resolved_today`` through.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=date.today() + timedelta(days=1),
+                )
+            ],
+        )
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        removed.contract_relevance = ContractRelevance.IN_CONTRACT
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(
+            result, old, new, severity_config=SeverityConfig()
+        )
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch("abicheck.policy.selectors.date") as fake_date:
+            fake_date.today.return_value = date.today() + timedelta(days=2)
+            sarif_out = render_envelope("sarif", envelope)
+
+        assert '"gateContribution": 0' in sarif_out
+
+    def test_mutating_a_shared_dependency_info_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """CodeRabbit review, fresh evidence: ``dependency_info`` is a
+        single mutable object ``AbiSnapshot`` stores directly (not inside a
+        list/dict), so ``_snapshot_abi_snapshot``'s container-only copy
+        left it shared. Mutating ``old.dependency_info.nodes`` after
+        construction must not change a later render.
+        """
+        dep = DependencyInfo(nodes=[{"name": "libfoo.so"}])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", dependency_info=dep)
+        new = _snapshot("2.0")
+        envelope = self._envelope(_result([]), old, new, follow_deps=True)
+
+        assert envelope.old.dependency_info is not dep
+        assert envelope.old.dependency_info.nodes is not dep.nodes
+
+        md_before = render_envelope("markdown", envelope)
+        dep.nodes.append({"name": "libbar.so"})
+        md_after = render_envelope("markdown", envelope)
+
+        assert md_before == md_after, "dependency section moved on mutation"
+        assert "1 resolved DSOs" in md_before
 
 
 class TestSarifAndJunitDecisionBoundary:

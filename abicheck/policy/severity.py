@@ -539,6 +539,7 @@ def compute_exit_code(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> int:
     """Compute the process exit code based on severity configuration.
 
@@ -563,7 +564,7 @@ def compute_exit_code(
     worst = 0
     for change in gate_eligible_changes(changes):
         cat = classify_effective_change(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
         )
         if config.level_for(cat) == SeverityLevel.ERROR:
             worst = max(worst, _CATEGORY_EXIT_CODES[cat])
@@ -577,6 +578,7 @@ def gate_contribution_for_change(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> int:
     """What one finding contributes to the process exit code.
 
@@ -605,11 +607,11 @@ def gate_contribution_for_change(
     if config is None:
         return legacy_exit_code(
             effective_verdict_for_change(
-                change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+                change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
             )
         )
     category = classify_effective_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
     )
     if config.level_for(category) != SeverityLevel.ERROR:
         return 0
@@ -728,6 +730,7 @@ def compute_gate_decision(
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
     legacy_exit_code: int = 0,
+    today: date | None = None,
 ) -> GateDecision:
     """Compute the single, canonical :class:`GateDecision` for *changes*.
 
@@ -776,12 +779,8 @@ def compute_gate_decision(
     # `categorize_changes` itself is deliberately left unfiltered: it is also
     # the *display* partition, where a not-evaluated finding still belongs.
     gated = gate_eligible_changes(changes)
-    exit_code = compute_exit_code(
-        gated, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
-    )
-    categorized = categorize_changes(
-        gated, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
-    )
+    exit_code = compute_exit_code(gated, severity_config, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today)
+    categorized = categorize_changes(gated, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today)
     blocking_categories = tuple(
         cat.value
         for cat, cat_changes in (

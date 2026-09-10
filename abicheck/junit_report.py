@@ -60,6 +60,8 @@ from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_s
 from .reporter_markdown import _root_cause_key_and_display
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .model import AbiSnapshot
     from .policy.severity import IssueCategory
     from .report.document import ReportDocument
@@ -395,6 +397,7 @@ def _emit_testcases(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
+    today: date | None = None,
 ) -> None:
     """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
 
@@ -410,7 +413,7 @@ def _emit_testcases(
                 _maybe_add_failure(
                     tc, change_by_symbol[sym], result, kind_sets, severity_config,
                     relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-                    findings_by_id=findings_by_id)
+                    findings_by_id=findings_by_id, today=today)
     else:
         # No snapshot — only emit changed symbols
         for sym, c in sorted(change_by_symbol.items()):
@@ -420,7 +423,7 @@ def _emit_testcases(
             _maybe_add_failure(
                 tc, c, result, kind_sets, severity_config,
                 relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-                findings_by_id=findings_by_id)
+                findings_by_id=findings_by_id, today=today)
 
 
 def _append_extra_failures(
@@ -512,6 +515,7 @@ def _build_testsuite(
     *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this render projects: it supplies both that document and every per-finding verdict/category below, so JUnit resolves neither for itself.
     """
     kind_sets = result._effective_kind_sets()
+    resolved_today = None if envelope is None else envelope.resolved_today
 
     changes = list(result.changes)
     # Scoped-only changes: scope_diff_to_app/scope_diff_to_required_symbols
@@ -529,7 +533,7 @@ def _build_testsuite(
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
-            today=None if envelope is None else envelope.resolved_today,
+            today=resolved_today,
         )
         changes = _suppress_dangling_correlation_notes(changes)
 
@@ -623,7 +627,7 @@ def _build_testsuite(
     _emit_testcases(
         ts, all_symbols, change_by_symbol, result, kind_sets, severity_config,
         relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-        findings_by_id=findings_by_id,
+        findings_by_id=findings_by_id, today=resolved_today,
     )
     _append_extra_failures(
         ts, extra_changes, result, kind_sets, severity_config,
@@ -761,13 +765,14 @@ def _maybe_add_failure(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
+    today: date | None = None,
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure, and
     ``<properties>`` blocks with ADR-049's per-finding contract decision
     (CLI-audit P1) and any cross-detector correlation, regardless of
     pass/fail.
     """
-    _add_contract_properties(tc, change, result, severity_config)
+    _add_contract_properties(tc, change, result, severity_config, today=today)
     _add_correlation_property(tc, change)
     if _is_failure(
         change, result, kind_sets, severity_config,
@@ -784,6 +789,8 @@ def _add_contract_properties(
     change: Change,
     result: DiffResult,
     severity_config: SeverityConfig | None,
+    *,
+    today: date | None = None,
 ) -> None:
     """Append a ``<properties>`` block to testcase *tc* with the same
     canonical per-finding contract shape reporter.py's JSON output and
@@ -830,6 +837,7 @@ def _add_contract_properties(
                 severity_config,
                 policy=result.policy,
                 policy_file=result.policy_file,
+                today=today,
             )
         ),
     )

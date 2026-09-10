@@ -421,6 +421,19 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
     deep-copies in full, an ``AbiSnapshot`` element's own nested structure
     is deliberately left out of scope here for the size/performance reason
     stated above.
+
+    ``dependency_info`` (populated only under ``--follow-deps``) is a
+    single mutable object stored directly as one field, not inside a
+    list/dict, so it got neither treatment above and stayed fully shared
+    with the caller (CodeRabbit review, fresh evidence: mutating
+    ``old.dependency_info.nodes`` after this call changed a later render).
+    It gets the identical one-level-deeper shallow treatment this function
+    already gives the snapshot itself: a shallow ``copy.copy`` of the
+    object, plus a fresh container for each of its own list/dict fields --
+    deliberately not a recursive deep copy, for the same reason the rest of
+    this function isn't one, and deliberately scoped to this one known
+    field rather than every optional metadata attribute (``dwarf``/``elf``/
+    ...), several of which can be far larger than a dependency graph.
     """
     import copy
 
@@ -430,6 +443,14 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
             setattr(result, name, [copy.copy(v) for v in value])
         elif isinstance(value, dict):
             setattr(result, name, dict(value))
+    if result.dependency_info is not None:
+        dep = copy.copy(result.dependency_info)
+        for name, value in vars(dep).items():
+            if isinstance(value, list):
+                setattr(dep, name, list(value))
+            elif isinstance(value, dict):
+                setattr(dep, name, dict(value))
+        result.dependency_info = dep
     return result
 
 
@@ -481,7 +502,7 @@ def build_report_envelope(
     new = _snapshot_abi_snapshot(new) if new is not None else None
     opts = options if options is not None else RenderOptions()
     today = date.today()
-    gate = gate_decision_for_result(result, severity_config)
+    gate = gate_decision_for_result(result, severity_config, today=today)
     document = build_report_document(
         result,
         show_only=opts.show_only,

@@ -69,6 +69,8 @@ from abicheck.reporter_markdown import (
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from abicheck.report.finding import ReportFinding
     from abicheck.severity import GateDecision, SeverityConfig
 
@@ -317,6 +319,8 @@ def _contract_properties(
     relevance: Any,
     result: DiffResult,
     severity_config: Any,
+    *,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """The per-finding ADR-049 contract fields, in reporter.py's canonical shape.
 
@@ -352,6 +356,7 @@ def _contract_properties(
         severity_config,
         policy=result.policy,
         policy_file=result.policy_file,
+        today=today,
     )
     if change.contract_evidence_refs is not None:
         props["contractEvidenceRefs"] = list(change.contract_evidence_refs)
@@ -369,6 +374,7 @@ def _result_for(
     impact_root_cause: tuple[str, str] | None = None,
     impact_root_cause_evidence: dict[str, object] | None = None,
     finding: ReportFinding | None = None,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
 
@@ -490,7 +496,7 @@ def _result_for(
     # never opted into --contract, which is what keeps this
     # unconditional call inert for every pre-existing SARIF report.
     relevance = contract_relevance_of(change)
-    properties.update(_contract_properties(change, relevance, result, severity_config))
+    properties.update(_contract_properties(change, relevance, result, severity_config, today=today))
 
     level = _severity(change, result, severity_config, finding=finding)
     # ADR-049 D1/D9: compatibility policy did not score this finding, so it
@@ -879,6 +885,7 @@ def to_sarif(
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
                 finding=finding_by_id.get(id(change)),
+                today=_resolved_today,
             )
         )
 
@@ -905,7 +912,7 @@ def to_sarif(
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
         suppressed_result = _result_for(
-            change, result, severity_config, finding=finding_by_id.get(id(change))
+            change, result, severity_config, finding=finding_by_id.get(id(change)), today=_resolved_today,
         )
         suppressed_result["suppressions"] = [
             {
@@ -943,6 +950,7 @@ def to_sarif(
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
                 finding=finding_by_id.get(id(change)),
+                today=_resolved_today,
             )
         )
 

@@ -45,12 +45,16 @@ from typing import TYPE_CHECKING
 from .severity import GateDecision, SeverityConfig, compute_gate_decision
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from ..checker_types import DiffResult
 
 
 def gate_decision_for_result(
     result: DiffResult,
     severity_config: SeverityConfig | None,
+    *,
+    today: date | None = None,
 ) -> GateDecision | None:
     """Return the one severity gate decision for *result* under *severity_config*.
 
@@ -59,6 +63,12 @@ def gate_decision_for_result(
     verdict-only exit-code scheme). Always evaluated over ``result.changes``
     -- the full, unfiltered set -- so a display-only filter such as
     ``--show-only`` can never change the exit code a report's gate reflects.
+
+    *today* (ADR-061 gap C): an envelope-driven caller passes the exact date
+    it already captured for every other resolution it performs, so a dated
+    ``PolicyFile.reclassify`` rule's expiry can't be read differently by the
+    gate than by the findings it was already applied to (Codex review,
+    fresh evidence).
     """
     if severity_config is None:
         return None
@@ -68,4 +78,5 @@ def gate_decision_for_result(
         policy=result.policy,
         kind_sets=result._effective_kind_sets(),
         policy_file=result.policy_file,
+        today=today,
     )
