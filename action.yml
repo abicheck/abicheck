@@ -954,6 +954,10 @@ runs:
         INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
+        # Retired scan inputs, rejected in preflight so a workflow that still
+        # sets one fails before Python setup and the toolchain install
+        # (Codex review, PR #1186).
+        INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         INPUT_AGAINST: ${{ inputs.against }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}

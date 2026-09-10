@@ -2126,17 +2126,23 @@ class TestCompareRequestAllowBuildQuery:
         assert calls, "no side was resolved"
         assert all(c["build_config"] == cfg for c in calls)
 
-    def test_an_unauthorized_config_is_still_forwarded_for_the_gate_to_null(
+    def test_an_unauthorized_config_is_forwarded_and_then_nulled_by_the_gate(
         self, tmp_path, monkeypatch
     ):
         """The *gate* lives in `_gated_build_query_inputs`, not here.
 
-        The request forwards both values unconditionally; refusing to run a
-        config's `build.query` without consent is the primitive's own job, and
-        it is what keeps a passive `--config`'s non-executable settings
-        readable either way.
+        The request forwards both values unconditionally; deciding what an
+        un-consented config may contribute is the primitive's own job. Asserted
+        through that primitive rather than in prose (Codex review, PR #1186:
+        an earlier revision of this docstring claimed passive settings stayed
+        readable without consent, which is `scan`'s behaviour -- it passes
+        `build_config_locally_trusted` -- not `compare`'s). Under `compare`'s
+        default the *whole* config is nulled, `build.compile_db` included; that
+        is not a narrowing, because nothing on this path read `build_config`
+        before the field existed.
         """
         from abicheck.service import run_compare_request
+        from abicheck.workflows.artifact.resolve import _gated_build_query_inputs
 
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("build:\n  query: \"true\"\n", encoding="utf-8")
@@ -2145,6 +2151,14 @@ class TestCompareRequestAllowBuildQuery:
         assert calls, "no side was resolved"
         assert all(c["build_config"] == cfg for c in calls)
         assert all(c["allow_build_query"] is None for c in calls)
+        # What the primitive then does with that pair, both ways -- the real
+        # observable contract, independent of this call site's own wording.
+        assert _gated_build_query_inputs(
+            cfg, None, allow_build_query=False, build_config_locally_trusted=False
+        ) == (None, None)
+        assert _gated_build_query_inputs(
+            cfg, None, allow_build_query=True, build_config_locally_trusted=False
+        ) == (cfg, None)
 
     def test_the_retired_scan_request_fields_were_not_absorbed(self) -> None:
         """Every other open `ScanRequest` field is ruled (b) -- dropped, not

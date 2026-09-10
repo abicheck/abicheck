@@ -129,37 +129,24 @@ case "$MODE" in
     fi
     ;;
   scan)
-    # new-library-set (ADR-056, --artifact-set) is mutually exclusive with
-    # new-library (the single-artifact positional) -- carved out first so
-    # the directory/package rejection just below only ever applies to a
-    # bare new-library value, never to the dedicated set input (which is
-    # allowed to be a directory).
-    if [[ -n "$NEW_LIBRARY" && -n "$NEW_LIBRARY_SET" ]]; then
-      _fail "mode: scan cannot take both new-library and new-library-set -- new-library-set audits a *set* of libraries with no old side (ADR-056), new-library scans exactly one artifact (optionally against/abi-baseline). Set only one."
-    fi
+    # ADR-068's second 2026-09-09 amendment ruling table, checked here (not
+    # only in run.sh) so a workflow setting a retired input fails before
+    # Python setup, the pixi/toolchain provision and the abicheck install --
+    # the same fail-fast rationale as every other check in this script, and
+    # the drift Codex review caught on PR #1186. run.sh keeps its own copies
+    # for anyone invoking it directly (e.g. tests), exactly like the
+    # operand checks below.
     if [[ -n "$NEW_LIBRARY_SET" ]]; then
-      # --artifact-set is audit-only at the CLI level too (no old side for
-      # a set) -- fail here, before Python setup/dependency install, rather
-      # than let the CLI's own UsageError surface only after that (same
-      # fail-fast rationale as every other check in this script).
-      if [[ -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ]]; then
-        _fail "mode: scan with new-library-set does not support against/abi-baseline -- new-library-set is audit-only (no old side to compare a set against, ADR-056). Remove against/abi-baseline, or use new-library (a single artifact) for a baseline comparison instead."
-      fi
-      # --artifact-set dry-run/estimate IS implemented (CLI cleanup phase
-      # two, PR 5: cli_scan._run_artifact_set previews the set instead of
-      # rejecting --dry-run outright) -- no preflight rejection needed
-      # here any more; dry-run: true + new-library-set (and the deprecated
-      # estimate: true alias, which run.sh converts to INPUT_DRY_RUN=true
-      # downstream) both reach the real dry-run path in run.sh.
-      # cli_scan._run_artifact_set rejects old=/new= header/include scoping
-      # outright (no old side for a set) -- old-header/old-include are
-      # meaningless here; run.sh maps new-header/new-include to bare flags
-      # instead (Codex review, keeping this script and run.sh synchronized).
-      if [[ -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_OLD_INCLUDE:-}" ]]; then
-        _fail "mode: scan with new-library-set does not support old-header/old-include -- new-library-set is audit-only (no old side, ADR-056)."
-      fi
-    elif [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
-      _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, use new-library-set to audit a set with no old side, or use mode: compare against a directory/package for a multi-library binary comparison."
+      _fail "mode: scan no longer supports new-library-set (ADR-068 (b): scan --artifact-set is retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented -- routing it onto compare --no-baseline today would silently narrow those guarantees. Until that lands, run one scan per library."
+    fi
+    if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
+      _fail "mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
+    fi
+    if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
+      _fail "mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
+    fi
+    if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
+      _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, or use mode: compare against a directory/package for a multi-library binary comparison."
     fi
     # Allowlist, not a denylist: any value other than scan's two real
     # formats (including a typo like 'xml', not just the known-bad
@@ -375,21 +362,23 @@ if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" && "$MODE" != "scan" ]]; the
   _warn "public-header-dir is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
 fi
 
-# build-target: dump and scan modes only, same restriction and reasoning as
+# build-target: dump mode only, same restriction and reasoning as
 # public-header-dir directly above (the CLI's own --build-target flag exists
-# on those two subcommands only; compare has no equivalent). run.sh's
-# compare/deps-tree/deps-compare branches never forward it (Codex review).
+# on that subcommand only; compare never had an equivalent, and `scan
+# --build-target` is retired -- ADR-068's second 2026-09-09 amendment, ruling
+# (b), which the scan-mode arm above rejects outright rather than warning
+# about). run.sh's compare/deps-tree/deps-compare branches never forward it
+# (Codex review).
 _BUILD_TARGET="${INPUT_BUILD_TARGET:-}"
 if [[ -n "$_BUILD_TARGET" && "$MODE" != "dump" && "$MODE" != "scan" ]]; then
-  _warn "build-target is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
+  _warn "build-target is set but has no effect: it only applies to mode: dump (mode is '$MODE')."
 fi
 
-# new-library-set: scan mode only (ADR-056). The scan-mode arm above already
-# fails outright on an invalid combination (new-library also set, or
-# against/abi-baseline also set) -- this only covers the inert case (set on
-# a different mode entirely).
+# new-library-set: retired (ADR-068 (b)). The scan-mode arm above rejects it
+# outright; on any other mode it was always inert, so it stays a warning
+# there rather than failing a workflow the input never affected.
 if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
-  _warn "new-library-set is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
+  _warn "new-library-set is set but has no effect: it applied only to mode: scan, where it is now retired (ADR-068 (b): scan --artifact-set is gone, pending ADR-065 S3). Remove it."
 fi
 
 # Removed inputs, kept registered in action.yml as tombstones and rejected
