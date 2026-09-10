@@ -612,6 +612,7 @@ def build_markdown_document(
                     policy=result.policy,
                     kind_sets=result._effective_kind_sets(),
                     policy_file=result.policy_file,
+                    today=resolved_today,
                 )
             )
             if severity_config is not None

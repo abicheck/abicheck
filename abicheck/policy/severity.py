@@ -638,8 +638,14 @@ def categorize_changes(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> CategorizedChanges:
-    """Partition changes into the four issue categories."""
+    """Partition changes into the four issue categories.
+
+    *today* (ADR-061 gap C) pins a dated ``reclassify`` rule's expiry to an
+    envelope's own ``resolved_today`` instead of a fresh ``date.today()`` at
+    call time (Codex review, fresh evidence).
+    """
     abi: list[HasKind] = []
     potential: list[HasKind] = []
     quality: list[HasKind] = []
@@ -647,7 +653,7 @@ def categorize_changes(
 
     for c in changes:
         cat = classify_effective_change(
-            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
         )
         if cat == IssueCategory.ABI_BREAKING:
             abi.append(c)

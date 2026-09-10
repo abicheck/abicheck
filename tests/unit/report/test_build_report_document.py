@@ -1107,6 +1107,78 @@ class TestRendererOrderIndependence:
         assert "_Z3foov" in junit_before
         assert "_Z9renamed_ev" not in junit_after
 
+    def test_review_digest_counts_reuse_the_envelope_s_finalized_findings(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``compute_review_digest`` already
+        passed *findings* to the impacted-symbols list, but its own
+        category counts (breaking/source_breaks/risk/compatible) still came
+        from ``build_summary(result)``, independently recomputing. Reuses
+        the envelope's own findings for both now.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov")],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(result, old, new)
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch(
+            "abicheck.reclassify.effective_verdict_for_change",
+            return_value=Verdict.BREAKING,
+        ):
+            digest_out = render_envelope("review", envelope)
+
+        assert "❌ Breaking (ABI) | 0" in digest_out
+
+    def test_markdown_severity_summary_reuses_the_envelope_s_frozen_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``compute_severity_summary``'s
+        ``categorize_changes`` calls independently resolved a fresh
+        verdict/category, disagreeing with the envelope's own frozen
+        finding once a dated ``reclassify`` rule expires. Now reuses
+        ``envelope.resolved_today``.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=date.today() + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(
+            result, old, new, severity_config=SeverityConfig()
+        )
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch("abicheck.policy.selectors.date") as fake_date:
+            fake_date.today.return_value = date.today() + timedelta(days=2)
+            markdown_out = render_envelope("markdown", envelope)
+
+        assert "| ABI/API Incompatibilities | ❌ `ERROR` | 0 |" in markdown_out
+
 
 class TestSarifAndJunitDecisionBoundary:
     """ADR-061 Phase 2 gap C acceptance test: a guard for SARIF's and

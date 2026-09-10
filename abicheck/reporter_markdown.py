@@ -1271,6 +1271,7 @@ def compute_severity_summary(
     policy_file: object | None = None,
     scoped_counts: dict[str, int] | None = None,
     scoped_blocking_categories: tuple[str, ...] | None = None,
+    today: date | None = None,
 ) -> _rmd.SeveritySummary:
     """Build the severity configuration summary table's structured intermediate.
 
@@ -1288,7 +1289,8 @@ def compute_severity_summary(
     gating issue is a scoped-only change or missing-contract label (neither
     of which is in ``result.changes``) would show every category at 0 and
     "no exit impact" while the report elsewhere names a real, blocking
-    finding.
+    finding. *today*: an envelope's own ``resolved_today`` (ADR-061 gap C,
+    Codex, fresh evidence).
     """
     from .severity import (
         SeverityLevel,
@@ -1297,10 +1299,7 @@ def compute_severity_summary(
     )
 
     categorized = categorize_changes(
-        changes,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
+        changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
     )
     # ADR-049 D1: the `Count` column above is factual over what is
     # displayed, but `Exit Impact` is a claim about the *gate* -- so it has
@@ -1314,6 +1313,7 @@ def compute_severity_summary(
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         if all_changes is not None
         else categorized
@@ -1689,7 +1689,10 @@ def compute_review_digest(
     function to call ``report_findings_for`` a second time for the same
     render.
     """
-    summary = build_summary(result)
+    from .report.finding import report_findings_for
+
+    findings = findings if findings is not None else report_findings_for(result)
+    summary = build_summary(result, findings=findings)
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
@@ -1731,11 +1734,8 @@ def compute_review_digest(
     # here printed "safe to merge" directly above the symbol it says is
     # impacted (Codex review). The excluded finding keeps its own disclosed
     # section elsewhere in the report; this list is the digest of what gated.
-    from .report.finding import report_findings_for
     from .report.surface_changes import compute_surface_changes
 
-    if findings is None:
-        findings = report_findings_for(result)
     impacted = [
         f.change
         for f in findings
