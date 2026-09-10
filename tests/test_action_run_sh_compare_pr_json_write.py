@@ -552,17 +552,18 @@ def test_both_branches_share_the_same_write_guard() -> None:
     without it; asserting every call site references the shared helper keeps
     a future edit to one from silently leaving the others behind.
 
-    Three call sites since ADR-068 D2 / plan Phase 4 commit 1: `compare`'s
-    own branch, the legacy `scan` CLI branch (unchanged), and the new
-    `compare`-translated `mode: scan` branch's baseline-compare sub-case
-    (its audit-only/`--no-baseline` sub-case has no secondary --write to
-    guard at all -- see that branch's own comment).
+    Two call sites since ADR-068 D2 / plan Phase 4 commit 1 and its
+    2026-09-10 amendment: `compare`'s own native branch, and the
+    `compare`/`compare --no-baseline`-translated `mode: scan` branch, which
+    shares one PR_JSON sidecar-injection call site for both its baseline
+    and audit-only sub-cases (there is no longer a separate legacy `scan`
+    CLI branch to carry a third).
     """
     text = RUN_SH.read_text(encoding="utf-8")
     guarded = [
         line for line in text.splitlines() if "_extra_args_has_write_flag" in line
     ]
     # One definition, one or more docstring cross-references per branch, and
-    # three actual call sites -- assert on the calls specifically.
+    # two actual call sites -- assert on the calls specifically.
     calls = [line for line in guarded if "! _extra_args_has_write_flag" in line]
-    assert len(calls) == 3, guarded
+    assert len(calls) == 2, guarded

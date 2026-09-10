@@ -13,19 +13,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Behavioral tests for ``action/run.sh``'s ``scan`` exit-code-to-VERDICT
-mapping at exit 6 (``NOT_COMPARABLE``, ADR-050 D2) — extracted verbatim
-(same discipline as the sibling ``test_action_run_sh_*.py`` files) rather
-than hand-duplicated.
+"""Behavioral tests for ``action/run.sh``'s exit-code-to-VERDICT mapping
+around ``NOT_COMPARABLE`` (ADR-050 D2) and ``mode: scan``'s own final-exit
+dispatch — extracted verbatim (same discipline as the sibling
+``test_action_run_sh_*.py`` files) rather than hand-duplicated.
 
-Before this fix, exit 6 fell through to the generic ``*) VERDICT="ERROR"``
+Originally about the scan-only exit-6 NOT_COMPARABLE mapping specifically;
+before that fix, exit 6 fell through to the generic ``*) VERDICT="ERROR"``
 case, and ``_maybe_post_pr_comment``'s own ``[[ "$VERDICT" == "ERROR" ]]``
 guard then skipped posting entirely — so a real, JSON-report-carrying
 ``NOT_COMPARABLE`` scan result silently produced no sticky PR comment, even
 though ``pr_comment_scan.py`` renders it as a blocking "analysis incomplete"
-finding (see ``test_pr_comment_scan.py``'s matching JSON-layer test). The
-final-exit-code block is exercised too, so the fix doesn't accidentally
-turn a scope/profile mismatch into a passing step.
+finding (see ``test_pr_comment_scan.py``'s matching JSON-layer test).
+
+ADR-068's 2026-09-10 amendment closed the last gap keeping any `mode: scan`
+request on the legacy `scan` CLI, so `mode: scan` now shares `compare`'s
+own exit-code dispatch (exit 16, not scan's old exit 6) unconditionally --
+see each test's own docstring for what changed and what didn't. The
+final-exit-code block is exercised too, so the migration doesn't
+accidentally turn a scope/profile mismatch (or a severity-policy gate) into
+a passing step.
 """
 
 from __future__ import annotations
@@ -41,7 +48,7 @@ _CASE_END = "    esac\n"
 _FINAL_EXIT_START = "if [[ \"$VERDICT\" == \"ERROR\" ]]; then\n"
 _FINAL_EXIT_SCAN_START = (
     'elif [[ "$MODE" == "scan" ]]; then\n'
-    "  # Keyed on the raw `$MODE` input, not `$_CLI_MODE`"
+    "  # Keyed on the raw `$MODE` input"
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
@@ -60,11 +67,13 @@ def _bash_executable() -> str:
 
 
 def _exit_case_fragment() -> str:
-    """The ``case $ABICHECK_EXIT in ... esac`` block from the scan branch,
-    extracted verbatim (the second ``elif [[ "$MODE" == "scan" ]]`` region,
-    which maps ``ABICHECK_EXIT`` to ``VERDICT``)."""
+    """The ``case $ABICHECK_EXIT in ... esac`` block from the shared
+    `compare` exit-code dispatch, extracted verbatim -- since ADR-068's
+    2026-09-10 amendment, `mode: scan` has no dedicated exit-code dispatch
+    of its own any more: every `mode: scan` request (audit-only or
+    baseline) is served by this same block."""
     text = RUN_SH.read_text(encoding="utf-8")
-    marker = 'elif [[ "$_CLI_MODE" == "scan" ]]; then\n  # Keyed on `$_CLI_MODE`'
+    marker = "else\n  # compare exit codes:"
     start = text.index(marker)
     case_start = text.index(_CASE_START, start)
     case_end = text.index(_CASE_END, case_start) + len(_CASE_END)
@@ -138,6 +147,8 @@ _resolve_clean_exit_verdict() { VERDICT="COMPATIBLE"; }
 _severity_gate_exit() { echo "0"; }
 _is_cli_error() { return 1; }
 _coverage_gated() { return 1; }
+_assurance_gated() { return 1; }
+_scope_gated() { return 1; }
 _escalate_verdict_to_report() { :; }
 """
     script = (
@@ -150,10 +161,15 @@ _escalate_verdict_to_report() { :; }
     return _run_bash_script(script)
 
 
-def test_exit_6_maps_to_not_comparable_not_error():
-    result = _run_exit_mapping(6)
-    assert result.returncode == 0, result.stderr
-    assert "VERDICT=NOT_COMPARABLE" in result.stdout
+# `test_exit_6_maps_to_not_comparable_not_error` (legacy `scan` CLI's own
+# NOT_COMPARABLE code) lived here through ADR-068's second 2026-09-09
+# amendment; removed by its 2026-09-10 amendment, which closed the last gap
+# keeping any `mode: scan` request on the legacy `scan` CLI at all. Exit 6
+# can no longer reach `run.sh`'s dispatch through any live code path --
+# `compare`'s own NOT_COMPARABLE code is 16 (see
+# `test_compare_mode_not_comparable_still_fails_the_step` below), and every
+# `mode: scan` request now runs `compare`/`compare --no-baseline`
+# internally, never the raw `scan` CLI.
 
 
 def test_exit_4_still_maps_to_breaking():

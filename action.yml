@@ -835,8 +835,12 @@ outputs:
       assurance axis, which likewise leaves the compatibility verdict
       unchanged; rejected outright for a directory/package operand, so
       this verdict never applies there), API_BREAK,
-      BREAKING, REMOVED_LIBRARY (directory/package operands with
-      fail-on-removed-library set), or ERROR.
+      BREAKING, AUDIT_GATE (reachable here only when extra-args
+      explicitly combines --no-baseline with a gating --severity-preset on
+      a native mode: compare request -- see mode: scan's own AUDIT_GATE
+      entry below for the full axis description; the underlying CLI axis
+      means the same thing either way), REMOVED_LIBRARY (directory/package
+      operands with fail-on-removed-library set), or ERROR.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, COMPATIBLE_WITH_RISK (same exit-0 risk tier as
       compare's, above), SEVERITY_ERROR (with --against and a
@@ -844,6 +848,21 @@ outputs:
       category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
       (with --against and the require-complete-analysis input, same
       axis as compare's), API_BREAK, BREAKING,
+      AUDIT_GATE (audit-only, no baseline -- i.e. no against/abi-baseline
+      resolved, ADR-068's 2026-09-10 amendment: a real, BREAKING/
+      API_BREAK-classified finding was detected against the candidate's
+      own public surface while a severity preset other than `info-only`
+      was in effect -- either because the severity-preset input was set,
+      or because this Action injected `severity-preset: default` for you,
+      which it does automatically whenever an audit-only scan states no
+      preset of its own, so an audit-only step gates by default the same
+      way `mode: scan` always documented, unless you explicitly opt out
+      with `severity-preset: info-only`. This is NOT a two-sided
+      compatibility verdict -- an audit reports no additions, removals, or
+      compatibility verdict at all; only the candidate-side findings
+      themselves. Exit code 3, fails the step unconditionally, since no
+      fail-on-* input governs an axis with no compatibility verdict to
+      follow),
       NOT_COMPARABLE (with --against, when the candidate and baseline were
       not extracted under a comparable profile/scope contract -- ADR-050
       D2 -- so no comparison could run at all; this verdict fails the step

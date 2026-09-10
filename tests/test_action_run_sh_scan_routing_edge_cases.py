@@ -1,24 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
-"""``_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`` routing-predicate coverage (formerly
-``_SCAN_NEEDS_LEGACY_CLI``).
+"""Routing-predicate coverage for ``mode: scan``'s internal command assembly
+(formerly gated by ``_SCAN_NEEDS_LEGACY_CLI``, then
+``_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`` -- both retired).
 
-ADR-068's second 2026-09-09 amendment collapsed this predicate down to one
-surviving condition: audit-only (no real baseline) still routes to the
-legacy `scan` CLI, because `compare --no-baseline` does not yet reproduce
-`scan`'s own audit-mode exit-code behavior for a gating cross-source finding
-(`docs/contribute/known-gaps.md`'s "`compare --no-baseline` does not yet
-reproduce `scan`'s audit-mode findings" section). Every *other* request
-shape this file used to assert fell back to the legacy CLI -- unset depth,
-`--depth build`/`--depth source`, a header/include shared-root-plus-override
-combination, a compressed/neutral-named JSON-snapshot baseline, a
-compile-context flag or `--abi3`/`-o`/an unsupported `--format` value or a
-`compare`-only flag reaching `scan` through `extra-args`, an effective
-`format: json`, and a default (or explicit) `--pattern-verdicts` state --
-has since closed (see each class's own docstring for the specific evidence)
-and now routes unconditionally to `compare` whenever a real baseline is
-present, regardless of `extra-args` content. This file inverts every one of
-those old assertions to prove the new behavior, per that amendment's own
-per-condition ruling table.
+ADR-068's second 2026-09-09 amendment collapsed the original predicate down
+to one surviving condition: audit-only (no real baseline) stayed on the
+legacy `scan` CLI, because `compare --no-baseline` did not yet reproduce
+`scan`'s own audit-mode exit-code behavior for a gating cross-source
+finding. ADR-068's 2026-09-10 amendment closed that last gap
+(`policy/audit_gate_exit.py`'s orthogonal audit-gate exit axis), and this
+Action now routes every `mode: scan` request -- baseline or audit-only
+alike -- to `compare`/`compare --no-baseline` unconditionally; there is no
+`_SCAN_..._NEEDS_LEGACY_CLI`-shaped predicate left in `run.sh` at all. Every
+*other* request shape this file used to assert fell back to the legacy CLI
+-- unset depth, `--depth build`/`--depth source`, a header/include
+shared-root-plus-override combination, a compressed/neutral-named
+JSON-snapshot baseline, a compile-context flag or `--abi3`/`-o`/an
+unsupported `--format` value or a `compare`-only flag reaching `scan`
+through `extra-args`, an effective `format: json`, and a default (or
+explicit) `--pattern-verdicts` state -- had already closed before this
+(see each class's own docstring for the specific evidence) and routes
+unconditionally to `compare` whenever a real baseline is present,
+regardless of `extra-args` content. This file inverts every one of those
+old assertions, including the former "audit-only" survivor, to prove the
+current behavior.
 
 Mirrors ``test_action_run_sh_public_header_dir_parity.py``'s harness: sources
 the verbatim mode-branch region of ``run.sh`` via a real ``bash`` subprocess
@@ -135,27 +140,94 @@ def _region_through_extra_args_append() -> str:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestAuditOnlyIsTheOneSurvivingLegacyCliCondition:
+class TestAuditOnlyNoLongerNeedsLegacyCli:
     """The one condition ADR-068's second 2026-09-09 amendment left standing
-    (`_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`): a `mode: scan` request with no
-    real baseline (`--against`/`abi-baseline`, not forced audit-only) is
-    audit-only, and `compare --no-baseline` does not yet reproduce `scan`'s
-    audit-mode exit-code behavior for a gating cross-source finding
-    (`docs/contribute/known-gaps.md`). Every request shape in this file
-    that has a real baseline now routes to `compare` unconditionally; only
-    the absence of one keeps `scan` alive as a route."""
+    (a `mode: scan` request with no real baseline is audit-only, and
+    `compare --no-baseline` did not yet reproduce `scan`'s audit-mode
+    exit-code behavior for a gating cross-source finding) is closed by the
+    2026-09-10 amendment's audit-gate exit axis: audit-only now routes to
+    `compare --no-baseline` unconditionally too, exactly like a baseline
+    scan routes to plain `compare AGAINST ARTIFACT`. There is no
+    `MODE == "scan"` condition left in `run.sh`'s command assembly that
+    exists to serve a legacy-CLI fallback -- every request shape routes to
+    `compare`."""
 
-    def test_no_against_at_all_stays_on_legacy_cli(self) -> None:
+    def test_no_against_at_all_routes_to_compare_no_baseline(self) -> None:
         cmd = _run_cmd({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "lib.so"})
         assert cmd[0] == "abicheck"
-        assert cmd[1] == "scan"
+        assert cmd[1] == "compare"
+        assert "--no-baseline" in cmd, cmd
 
-    def test_audit_flag_forces_legacy_cli_even_with_against_set(self) -> None:
+    def test_audit_flag_routes_to_compare_no_baseline_even_with_against_set(
+        self,
+    ) -> None:
         # The deprecated `audit: true` alias skips --against outright even
         # when against/abi-baseline resolved to a value elsewhere in the
-        # workflow (FORCE_AUDIT_ONLY) -- still the same one condition.
+        # workflow (FORCE_AUDIT_ONLY) -- still routes to `compare
+        # --no-baseline`, never the two-sided `compare AGAINST ARTIFACT`.
         cmd = _run_cmd({**_BASE_INPUTS, "INPUT_AUDIT": "true"})
-        assert cmd[1] == "scan"
+        assert cmd[1] == "compare"
+        assert "--no-baseline" in cmd, cmd
+        assert "baseline.so" not in cmd, cmd
+
+    def test_audit_only_injects_default_severity_preset_when_unset(
+        self,
+    ) -> None:
+        # ADR-068's 2026-09-10 amendment: the audit-gate exit axis is
+        # opt-in via --severity-preset, so this Action injects `default`
+        # on the translated invocation to preserve mode: scan's own
+        # documented default-gating behavior when the caller stated no
+        # preset of their own.
+        cmd = _run_cmd({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "lib.so"})
+        assert cmd[1] == "compare"
+        assert "--no-baseline" in cmd, cmd
+        idx = cmd.index("--severity-preset")
+        assert cmd[idx + 1] == "default", cmd
+
+    def test_audit_only_keeps_an_explicit_severity_preset_input(self) -> None:
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_SEVERITY_PRESET": "info-only",
+            }
+        )
+        assert cmd[1] == "compare"
+        idx = cmd.index("--severity-preset")
+        assert cmd[idx + 1] == "info-only", cmd
+        # The injected default must not ALSO be present -- exactly one
+        # --severity-preset occurrence.
+        assert cmd.count("--severity-preset") == 1, cmd
+
+    def test_audit_only_keeps_an_explicit_severity_preset_via_extra_args(
+        self,
+    ) -> None:
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_EXTRA_ARGS": "--severity-preset strict",
+            },
+            region=_region_through_extra_args_append(),
+        )
+        assert cmd[1] == "compare"
+        # The dedicated-input injection must not fire when extra-args
+        # already states one -- only the extra-args occurrence reaches CMD.
+        assert cmd.count("--severity-preset") == 1, cmd
+        idx = cmd.index("--severity-preset")
+        assert cmd[idx + 1] == "strict", cmd
+
+    def test_baseline_scan_severity_preset_forwarding_is_unaffected(
+        self,
+    ) -> None:
+        # Negative control: the default-injection logic is scoped to the
+        # audit-only shape alone -- a baseline scan with no severity-preset
+        # input still forwards none at all (unchanged pre-existing
+        # behavior), never an injected default.
+        cmd = _run_cmd(_BASE_INPUTS)
+        assert cmd[1] == "compare"
+        assert "--no-baseline" not in cmd, cmd
+        assert "--severity-preset" not in cmd, cmd
 
     def test_real_baseline_routes_to_compare(self) -> None:
         # Negative control: any real baseline, with no other input set at
@@ -484,10 +556,16 @@ class TestExtraArgsReachCompareUnfilteredNow:
         assert cmd[1] == "compare"
         assert "--pattern-verdicts" in cmd, cmd
 
-    def test_no_pattern_verdicts_flag_on_legacy_cli_is_not_stripped(self) -> None:
-        # Negative control: audit-only (no baseline) is the one route left
-        # to the legacy `scan` CLI -- `--no-pattern-verdicts` there was
-        # never stripped (it's a real `scan` flag), and still isn't.
+    def test_no_pattern_verdicts_flag_on_audit_only_scan_is_not_stripped(
+        self,
+    ) -> None:
+        # Negative control, updated: audit-only (no baseline) no longer has
+        # a legacy-CLI route at all -- it now reaches `compare
+        # --no-baseline` unconditionally too, same as a baseline scan.
+        # `--no-pattern-verdicts` is a real `scan` flag with no `compare`
+        # equivalent, so it reaches $CMD unstripped either way (it would
+        # raise a real Click usage error if actually run, the accepted
+        # outcome for a flag compare genuinely lacks).
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
@@ -497,7 +575,8 @@ class TestExtraArgsReachCompareUnfilteredNow:
             },
             region=_region_through_extra_args_append(),
         )
-        assert cmd[1] == "scan"
+        assert cmd[1] == "compare"
+        assert "--no-baseline" in cmd, cmd
         assert "--no-pattern-verdicts" in cmd, cmd
 
     def test_other_extra_args_survive_alongside_pattern_verdicts(self) -> None:

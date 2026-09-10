@@ -121,15 +121,14 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
     ) -> None:
         # A baseline (against), an explicit --depth headers, and no other
         # input: this routes through the `compare` translation
-        # unconditionally now (ADR-068's second 2026-09-09 amendment
-        # collapsed the routing predicate down to one surviving condition --
-        # see `_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`'s own comment in run.sh).
-        # The `compare`-translation branch has no `--public-header-dir` flag
-        # at all (`compare` derives provenance and extraction scope from
-        # `-H` alone), so this only forwards it as a sided `-H new=` root
-        # (via `_add_unioned_sided_flag`); see
-        # `test_audit_only_legacy_scan_still_forwards_both_flags` below for
-        # the still-reachable legacy-CLI shape of this same input.
+        # unconditionally now (there is no legacy-CLI route left at all,
+        # per ADR-068's second 2026-09-09 amendment and its 2026-09-10
+        # amendment). The `compare`-translation branch has no
+        # `--public-header-dir` flag at all (`compare` derives provenance
+        # and extraction scope from `-H` alone), so this only forwards it
+        # as a sided `-H new=` root (via `_add_unioned_sided_flag`); see
+        # `test_audit_only_routes_to_compare_no_baseline_and_forwards_bare_dash_h`
+        # below for the audit-only (no baseline) shape of this same input.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
@@ -145,19 +144,17 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
         assert "new=include" in h_pairs, cmd
 
-    def test_audit_only_legacy_scan_still_forwards_both_flags(self) -> None:
-        # Audit-only (no baseline) is the one surviving condition that
-        # routes to the legacy `scan` CLI now (ADR-068's second 2026-09-09
-        # amendment) -- there is no longer any baseline+legacy-CLI
-        # combination reachable through this Action's own routing at all
-        # (a real baseline always routes to `compare`; `crosscheck`, which
-        # used to force legacy here, is now a rejected retired input
-        # instead, see `test_action_run_contract.py`'s own crosscheck
-        # rejection coverage). The legacy branch's own forwarding for this
-        # audit-only shape is unchanged: it still forwards
-        # `--public-header-dir` unconditionally *and* folds it into a bare
-        # (unsided) `-H` root -- see `test_action_compile_context_parity.py`
-        # for that still-unconditional forwarding.
+    def test_audit_only_routes_to_compare_no_baseline_and_forwards_bare_dash_h(
+        self,
+    ) -> None:
+        # Audit-only (no baseline) now routes to `compare --no-baseline`
+        # unconditionally too (ADR-068's 2026-09-10 amendment closed the
+        # last gap that kept it on the legacy `scan` CLI) -- there is no
+        # legacy-CLI route left at all. `compare --no-baseline` has no
+        # `--public-header-dir` flag either (same as the baseline shape
+        # above); with no baseline side to contaminate, the candidate-only
+        # `-H`/`-I` inputs are forwarded bare/unsided rather than through
+        # `_add_unioned_sided_flag`'s `new=` union.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
@@ -166,10 +163,10 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_DEPTH": "headers",
             }
         )
-        assert "scan" in cmd
-        assert "compare" not in cmd
-        i = cmd.index("--public-header-dir")
-        assert cmd[i + 1] == "include"
+        assert "compare" in cmd
+        assert "--no-baseline" in cmd
+        assert "scan" not in cmd
+        assert "--public-header-dir" not in cmd
         h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
         assert "include" in h_pairs, cmd
 
