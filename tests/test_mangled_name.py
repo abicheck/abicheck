@@ -110,6 +110,23 @@ def test_itanium_special_name_owner_identifiers() -> None:
     assert fn("_ZTVSt6vectorIiE") == frozenset({"std::vector", "vector"})
     assert fn("_ZTVN3std6vectorIiEE") == frozenset({"std::vector", "vector"})
     assert fn("_ZTVSt6vectorIiE") == fn("_ZTVN3std6vectorIiEE")
+    # Findings-analysis-fixes review round 5, finding 2: a GNU
+    # `__attribute__((abi_tag("tag")))`-carrying class's vtable mangles the
+    # tag directly onto the owner's bare name (`_ZTV1CB3tag`, confirmed
+    # against a real compiled `class __attribute__((abi_tag("tag"))) C {
+    # virtual ~C(); };`), but CastXML/clang model the record itself under its
+    # plain, untagged name `"C"`. The surface-candidate set here must strip
+    # the tag so it can still match that untagged model name -- unlike
+    # `itanium_special_name_owner_scope_components`, which must keep it (see
+    # that function's own test above and its docstring).
+    assert fn("_ZTV1CB3tag") == frozenset({"C"})
+    assert fn("_ZTI1CB3tag") == frozenset({"C"})
+    # A tag on a *templated* owner: tag stripped, template args untouched.
+    assert fn("_ZTV1CB3tagIiE") == frozenset({"C"})
+    # A tag nested inside a namespace-qualified owner.
+    assert fn("_ZTVN2ns1CB3tagE") == frozenset({"ns::C", "C"})
+    # A tag on a name embedded in a template-argument list.
+    assert fn("_ZTV3BoxI1CB3tagE") == frozenset({"Box", "C"})
 
 
 def test_itanium_special_name_owner_identifiers_is_host_independent_property() -> None:
@@ -135,6 +152,11 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
         # substitution shape and its fully-spelled equivalent.
         "_ZTVSt6vectorIiE",
         "_ZTVN3std6vectorIiEE",
+        # Review round 5, finding 2: ABI-tagged owners, plain and templated.
+        "_ZTV1CB3tag",
+        "_ZTV1CB3tagIiE",
+        "_ZTVN2ns1CB3tagE",
+        "_ZTV3BoxI1CB3tagE",
     ]
     for mangled in cases:
         first = fn(mangled)

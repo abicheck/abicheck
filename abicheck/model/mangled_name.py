@@ -35,6 +35,8 @@ later than the rest of this module (the Itanium half moved first) --
 
 from __future__ import annotations
 
+import re
+
 from .mangled_name_template_args import (
     collect_type_candidate_identifiers as _collect_type_candidate_identifiers,
     read_length_prefixed_name as _read_length_prefixed_name,
@@ -42,6 +44,22 @@ from .mangled_name_template_args import (
 )
 
 _ASCII_DIGITS = "0123456789"
+
+# Matches the `[abi:tag]` suffix `_parse_source_name_component` (and
+# `mangled_name_template_args._collect_nested_name_candidates`) attach to a
+# GNU-ABI-tagged (`__attribute__((abi_tag(...)))`) name's own bare spelling.
+# Only `itanium_special_name_owner_identifiers` strips this back off (see its
+# own docstring) -- `itanium_special_name_owner_scope_components` and every
+# other identity-oriented caller of the shared component parser must keep the
+# tag, so this pattern is deliberately not applied inside the parser itself.
+_ABI_TAG_SUFFIX_RE = re.compile(r"\[abi:[^\]]*\]")
+
+
+def _strip_abi_tag_suffixes(name: str) -> str:
+    """Remove every ``[abi:tag]`` marker from *name*, e.g. turning
+    ``"C[abi:tag]"`` back into the model's own untagged spelling ``"C"``."""
+    return _ABI_TAG_SUFFIX_RE.sub("", name)
+
 
 # Fixed Itanium operator-function codes (a leaf, like a source-name). Used so
 # operator overloads group (e.g. `operator[](int)` / `operator[](long)` both
@@ -551,9 +569,21 @@ def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | Non
             break
     if not bare_components:
         return None
-    result = set(template_identifiers)
-    result.add("::".join(bare_components))
-    result.add(bare_components[-1])
+    # GNU ABI tags (see `_parse_source_name_component`) are stripped from
+    # every candidate here -- but nowhere upstream -- because this function
+    # feeds `surface.py`'s *type-candidate* matching against the model's own
+    # (untagged) record names specifically; `itanium_special_name_owner_scope_components`
+    # and the shared parser above keep tags intact for identity purposes.
+    # Codex review, fresh evidence, findings-analysis-fixes review round 5,
+    # finding 2: an ABI-tagged internal class (`_ZTV1CB3tag`, i.e.
+    # `C[[gnu::abi_tag("tag")]]`) previously produced only the tagged
+    # candidate `"C[abi:tag]"`, which could never match the model's own
+    # untagged record name `"C"` -- so a tagged internal class's vtable/RTTI
+    # churn was conservatively kept in the public surface instead of being
+    # demoted, purely because of the tag.
+    result = {_strip_abi_tag_suffixes(x) for x in template_identifiers}
+    result.add(_strip_abi_tag_suffixes("::".join(bare_components)))
+    result.add(_strip_abi_tag_suffixes(bare_components[-1]))
     return frozenset(result)
 
 

@@ -600,6 +600,49 @@ class TestCompareDryRun:
         assert scan_result.exit_code in (0, 1), scan_result.output
         assert "projected total" in scan_result.output
 
+    def test_dry_run_rejects_malformed_project_policy_override(
+        self, tmp_path: Path
+    ) -> None:
+        # Findings-analysis-fixes review round 5, finding 1: a discovered
+        # .abicheck.yml's policy.overrides block used to be validated only
+        # once folded into a PolicyFile -- which never happens under
+        # --dry-run (emit_dry_run exits first) -- so an unknown ChangeKind
+        # slug produced a clean exit-0 dry run for the identical invocation
+        # the real comparison rejects as a usage error (exit 64).
+        old = tmp_path / "old.abi.json"
+        new = tmp_path / "new.abi.json"
+        _write_snapshot(old, "1.0")
+        _write_snapshot(new, "2.0")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "policy:\n  overrides:\n    not_a_kind: ignore\n", encoding="utf-8"
+        )
+        args = ["compare", str(old), str(new), "--config", str(cfg)]
+        runner = CliRunner()
+        dry = runner.invoke(main, [*args, "--dry-run"])
+        real = runner.invoke(main, args)
+        assert dry.exit_code == 64, dry.output
+        assert real.exit_code == 64, real.output
+
+    def test_dry_run_accepts_a_well_formed_project_policy_override(
+        self, tmp_path: Path
+    ) -> None:
+        # Negative control for the fix above: a *valid* override must not
+        # be rejected by the new preflight check.
+        old = tmp_path / "old.abi.json"
+        new = tmp_path / "new.abi.json"
+        _write_snapshot(old, "1.0")
+        _write_snapshot(new, "2.0")
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "policy:\n  overrides:\n    enum_member_renamed: ignore\n", encoding="utf-8"
+        )
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old), str(new), "--config", str(cfg), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+
 
 class TestDepsTreeDryRun:
     def test_writes_nothing_and_rejects_output(self, tmp_path: Path) -> None:

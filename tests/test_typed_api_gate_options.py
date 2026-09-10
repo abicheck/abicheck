@@ -508,6 +508,84 @@ class TestCompareRequestContractContextGateReceipt:
         assert prov.sha256 is None
         assert prov.selected_by[0].option == "pack_internal_namespaces"
 
+    def test_project_policy_overrides_receipt_shows_project_config_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        """Findings-analysis-fixes review round 5, finding 3: a direct
+        `run_compare_request()` call using `CompareRequest.project_policy_
+        overrides` (ADR-068 §3 #23's typed-API channel, weaker than an
+        explicit `--policy`/pack entry) used to build its receipt with no
+        `project=` input at all, so the override's provenance came back
+        `API_REQUEST` -- disagreeing with the `PROJECT_CONFIG` layer D7
+        actually places it at (the identical fold `classify_compare_pair`
+        already applies to the *scoring* `PolicyFile`). Mirrors
+        `test_pack_folded_receipt_names_both_real_contributors` above for
+        this sibling field."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.contract_relevance_types import SelectorLayer
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            project_policy_overrides=((ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),),
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.policy.overrides.get("var_removed") == Verdict.COMPATIBLE
+        prov = cfg.provenance["policy.overrides"]
+        assert prov.layer is SelectorLayer.PROJECT_CONFIG
+        options = {hop.option for hop in prov.selected_by}
+        assert "policy.overrides" in options
+
+    def test_project_policy_overrides_still_scores_the_comparison_itself(
+        self, tmp_path: Path
+    ) -> None:
+        """The receipt fix must not regress what actually gets scored --
+        `classify_compare_pair` still classifies through the project-config-
+        folded `PolicyFile`."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
+        )
+        assert result.diff.verdict.name == "COMPATIBLE"
+
+    def test_explicit_policy_file_outranks_project_policy_overrides_in_the_receipt(
+        self, tmp_path: Path
+    ) -> None:
+        """D7: `project_config` is the *weakest* tier -- an explicit
+        `--policy <file>` entry for the same kind must keep the file's own
+        `EXPLICIT_CLI`/`API_REQUEST` provenance, not be overwritten by the
+        project-config value (which never even reaches the merged
+        `PolicyFile` for that kind, per `apply_lower_precedence_overrides`'s
+        own "whatever's already stated wins" rule)."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.contract_relevance_types import SelectorLayer
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        policy_file_path = tmp_path / "policy.yml"
+        policy_file_path.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: break\n",
+            encoding="utf-8",
+        )
+        result = self._run(
+            old,
+            new,
+            policy_file_path=policy_file_path,
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        # The file's own value wins -- the project-config value never scores.
+        assert cfg.policy.overrides.get("func_removed") == Verdict.BREAKING
+        prov = cfg.provenance["policy.overrides"]
+        assert prov.layer is not SelectorLayer.PROJECT_CONFIG
+
 
 class TestCompareResultSeverityConfigRenderingParity:
     """Codex review, fresh evidence (PR #1032, commit 72fdf5b, file:line

@@ -414,6 +414,38 @@ def resolve_release_project_policy_overrides(
     return overrides or None
 
 
+def preflight_validate_project_policy_overrides(
+    project_cfg: Any, project_path: Path | None
+) -> None:
+    """Validate a discovered ``.abicheck.yml``'s ``policy.overrides`` block
+    *before* a ``compare --dry-run`` exit, not only when the real comparison
+    later folds it into a ``PolicyFile``.
+
+    Findings-analysis-fixes review round 5, finding 1 (Codex review, fresh
+    evidence): the scalar path's fold
+    (``workflows.policy_file.merge_project_config_policy_overrides``) and
+    the directory/package fan-out's own
+    (:func:`resolve_release_project_policy_overrides`, called from inside
+    ``_dispatch_release_compare``'s own dispatch block) both run *after*
+    ``cli_compare_helpers.run_compare``'s ``--dry-run`` emit
+    (``dry_run.emit_dry_run`` raises ``SystemExit`` before either fold is
+    ever reached) -- so a malformed override (an unknown ``ChangeKind``
+    slug, or an unrecognized severity spelling) previously produced a
+    successful, exit-0 dry run for the identical invocation the real
+    comparison rejects as a usage error (exit 64), for *either* operand
+    shape. Calling :func:`resolve_release_project_policy_overrides` here,
+    ahead of both the dry-run emit and the dispatch block, reuses the exact
+    same canonical validator both later folds already trust
+    (``policy.policy_file_project_overrides.
+    resolve_project_config_policy_overrides``) and its existing
+    ``click.BadParameter`` translation, so a malformed document is rejected
+    identically under ``--dry-run`` and under a real run -- discarding the
+    parsed mapping here, since only the validation (not the merge) belongs
+    this early.
+    """
+    resolve_release_project_policy_overrides(project_cfg, project_path)
+
+
 def resolve_bundle_policy_file(
     suppress: Path | None,
     policy: str,

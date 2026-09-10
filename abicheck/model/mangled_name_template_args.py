@@ -206,8 +206,23 @@ def collect_type_candidate_identifiers(s: str, start: int, end: int) -> frozense
             name, j = read_length_prefixed_name(s, i)
             if name is None:
                 break
-            names.add(name)
             i = j
+            # A GNU ABI tag (`B<tag>`, see `mangled_name._parse_source_name_
+            # component`'s own docstring) directly follows the name it
+            # tags, before any template-argument list. Fold it into `name`
+            # the same way that parser and `_collect_nested_name_candidates`
+            # above do -- otherwise the tag's own length-prefixed text
+            # (`"3tag"`) falls through to this same digit branch on the next
+            # loop iteration and is misread as an unrelated, free-standing
+            # type candidate (Codex review, fresh evidence,
+            # findings-analysis-fixes review round 5, finding 2 follow-up).
+            while i < end and s[i] == "B":
+                tag, k = read_length_prefixed_name(s, i + 1)
+                if tag is None:
+                    break
+                name = f"{name}[abi:{tag}]"
+                i = k
+            names.add(name)
             if i < end and s[i] == "I":
                 t_end = skip_template_args(s, i)
                 if t_end is None:

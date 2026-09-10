@@ -129,6 +129,16 @@ def parse_severity_value(value: Any) -> Verdict | None:
     return _SEVERITY_MAP.get(str(value).lower())
 
 
+_VERDICT_TO_SEVERITY: dict[Verdict, str] = {v: k for k, v in _SEVERITY_MAP.items()}
+
+
+def severity_value_for_verdict(verdict: Verdict) -> str | None:
+    """Inverse of :func:`parse_severity_value` (round 5 finding 3): lets a
+    caller holding an already-parsed override re-derive the raw spelling a
+    real ``.abicheck.yml`` would carry, for the same re-validation route."""
+    return _VERDICT_TO_SEVERITY.get(verdict)
+
+
 _VALID_BASE_POLICIES = VALID_BASE_POLICIES  # re-export alias for backward compat
 
 # ADR-033 D7 — evidence-aware policy controls. Each knob maps a *category* of

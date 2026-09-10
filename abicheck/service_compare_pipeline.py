@@ -534,9 +534,9 @@ def classify_compare_pair(
             ),
             base_policy=request.policy,
         )
-    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the
-    # weakest tier -- *after* the pack fold above, so a pack-claimed kind
-    # can't be overwritten (apply_lower_precedence_overrides's docstring).
+    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the weakest
+    # tier, after the pack fold above. Round 5 finding 3: kept OUT of the receipt call below, which re-derives the project contribution at the correct tier.
+    pf_before_project_fold = pf
     if request.project_policy_overrides:
         from .policy.policy_file_project_overrides import (
             apply_lower_precedence_overrides,
@@ -707,7 +707,7 @@ def classify_compare_pair(
     # workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(result, request, gate, pf, suppression)
+    install_resolved_gate_receipt(result, request, gate, pf_before_project_fold, suppression)
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the

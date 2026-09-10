@@ -1357,11 +1357,8 @@ def run_compare(
         ctx, project_cfg if isinstance(project_cfg, _BuildConfig) else None
     )
 
-    # P1.1 (Codex review): resolved ahead of the inline-embed block below (not
-    # just before _resolve_compare_snapshots, where this used to live) so a raw
-    # --old/new-sources tree's inline `dump` invocation also gets the per-side
-    # debug roots — otherwise --debug-root + --old-sources together silently
-    # dumped the inline side without detached DWARF.
+    # P1.1 (Codex review): resolved ahead of the inline-embed block below so a
+    # raw --old/new-sources tree's inline `dump` also gets per-side debug roots.
     resolved_old_debug, resolved_new_debug = _resolve_debug_roots(
         debug_roots, debug_roots_old, debug_roots_new
     )
@@ -1482,6 +1479,9 @@ def run_compare(
     )
     from .cli_compare_receipt import dry_run_scheme_label
 
+    # Round 5 finding 1: validate policy.overrides before --dry-run exits.
+    from .pack_application import preflight_validate_project_policy_overrides
+    preflight_validate_project_policy_overrides(project_cfg, cfg_path)
     if dry_run:
         from .dry_run import emit_dry_run
         from .frontends.cli.compare_dry_run import build_compare_dry_run_result

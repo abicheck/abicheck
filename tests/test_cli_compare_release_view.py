@@ -645,6 +645,49 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
             assert result.exit_code == 0, (token, result.output)
 
 
+class TestReleaseProjectPolicyOverrideRejectedUnderDryRun:
+    """Findings-analysis-fixes review round 5, finding 1: the directory/
+    package fan-out's own project-config-override validation
+    (``resolve_release_project_policy_overrides``, inside
+    ``_dispatch_release_compare``'s own dispatch block) is, like the
+    leaf/root-cause rejection above, unreachable under ``--dry-run`` --
+    so a malformed ``.abicheck.yml`` ``policy.overrides`` used to produce a
+    clean exit-0 dry run for a directory operand too."""
+
+    def test_malformed_override_rejected_under_dry_run_for_a_directory_operand(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "policy:\n  overrides:\n    not_a_kind: ignore\n", encoding="utf-8"
+        )
+        dry = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--config", str(cfg), "--dry-run",
+        )
+        real = _invoke(
+            "compare", str(old_dir), str(new_dir), "--config", str(cfg),
+        )
+        assert dry.exit_code == 64, dry.output
+        assert real.exit_code == 64, real.output
+
+    def test_well_formed_override_still_succeeds_under_dry_run(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir, new_dir = _write_removed_function_pair(tmp_path)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            "policy:\n  overrides:\n    enum_member_renamed: ignore\n",
+            encoding="utf-8",
+        )
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--config", str(cfg), "--dry-run",
+        )
+        assert result.exit_code == 0, result.output
+
+
 class TestReleaseViewFilteredRejected:
     """Codex review (PR #1180, fresh evidence): unlike ``report_mode``,
     ``show_filtered`` was never threaded through ``_dispatch_release_
