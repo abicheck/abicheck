@@ -408,3 +408,45 @@ class TestNamespaceComponentCannotMasqueradeAsOwner:
             False,
             REASON_NON_PUBLIC_TYPE,
         )
+
+
+class TestStdSubstitutionOwnerDemotesLikeItsFullySpelledEquivalent:
+    """Findings-analysis-fixes review round 4, finding 3: the canonical
+    Itanium ``St`` substitution for ``std::`` used to drop the qualified
+    ``std::X`` owner candidate entirely -- ``_ZTVSt6vectorIiE`` produced
+    only ``{"vector"}``, never ``{"std::vector", "vector"}`` the way the
+    ordinary, fully-spelled ``_ZTVN3std6vectorIiEE`` form already did. A
+    snapshot modeling an internal ``std::vector`` record but no bare
+    ``vector`` type read the substituted owner as unknown (keep) while
+    correctly demoting the fully-spelled one -- the exact same real class,
+    the exact same real ABI churn, classified two different ways purely by
+    which of the two equivalent mangled spellings the compiler happened to
+    emit for a given translation unit."""
+
+    def _surf(self, snap):
+        return compute_public_surface(snap)
+
+    def test_substituted_and_spelled_out_forms_classify_identically(self):
+        # Only the qualified `std::vector` is modeled (not a bare `vector`)
+        # and it is neither public nor reachable -- the shape that only
+        # demotes correctly once the qualified candidate is present.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("std::vector")],
+        )
+        s = self._surf(snap)
+        substituted = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVSt6vectorIiE",
+            description="",
+        )
+        spelled_out = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVN3std6vectorIiEE",
+            description="",
+        )
+        expected = (False, REASON_NON_PUBLIC_TYPE)
+        assert classify_change_surface(substituted, s, s) == expected
+        assert classify_change_surface(spelled_out, s, s) == expected

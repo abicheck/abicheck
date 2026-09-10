@@ -1849,12 +1849,12 @@
         "compatible_additions": {
           "type": "integer",
           "minimum": 0,
-          "description": "As of report_schema_version 3.15: genuine API-growth COMPATIBLE findings only (excludes quality_issues, e.g. public_surface_shrank). Before 3.15 this counted every COMPATIBLE finding; compatible_additions + quality_issues equals that old total."
+          "description": "As of report_schema_version 4.0 (a required field's own meaning changing is breaking, not additive): genuine API-growth COMPATIBLE findings only (excludes quality_issues, e.g. public_surface_shrank). Before 4.0 this counted every COMPATIBLE finding; compatible_additions + quality_issues equals that old total. A consumer sharing only the 3.x MAJOR component still reads the pre-4.0 meaning, per this schema's own major/minor versioning policy."
         },
         "quality_issues": {
           "type": "integer",
           "minimum": 0,
-          "description": "Additive (report_schema_version 3.13): the subset of COMPATIBLE findings that is not a genuine addition (e.g. public_surface_shrank, which is COMPATIBLE but reports a decrease). Disjoint from compatible_additions as of 3.15 -- see that field's own description."
+          "description": "Additive (report_schema_version 3.13): the subset of COMPATIBLE findings that is not a genuine addition (e.g. public_surface_shrank, which is COMPATIBLE but reports a decrease). Disjoint from compatible_additions as of 4.0 -- see that field's own description."
         },
         "total_changes": {
           "type": "integer",

@@ -102,6 +102,14 @@ def test_itanium_special_name_owner_identifiers() -> None:
     assert "dnnl" not in fn("_ZTVN4dnnl4pool6vectorIiEE")
     assert "pool" not in fn("_ZTVN4dnnl4pool6vectorIiEE")
     assert "ab" not in fn("_ZTVN4dnnl4pool6vectorIiEE")  # not even in this one
+    # Findings-analysis-fixes review round 4, finding 3: the canonical `St`
+    # substitution for `std::` must produce the identical qualified-owner
+    # candidate the fully-spelled `N3std...E` nested form already does --
+    # `_ZTVSt6vectorIiE` (`std::vector<int>`, the substituted spelling) and
+    # `_ZTVN3std6vectorIiEE` (the same type, spelled out) must agree.
+    assert fn("_ZTVSt6vectorIiE") == frozenset({"std::vector", "vector"})
+    assert fn("_ZTVN3std6vectorIiEE") == frozenset({"std::vector", "vector"})
+    assert fn("_ZTVSt6vectorIiE") == fn("_ZTVN3std6vectorIiEE")
 
 
 def test_itanium_special_name_owner_identifiers_is_host_independent_property() -> None:
@@ -123,6 +131,10 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
         "_ZTT3BoxIiE",
         "_ZTVN2ns5OuterIN2ns5InnerIiEEEE",
         "_ZTI6Result",
+        # Findings-analysis-fixes review round 4, finding 3: the `St`
+        # substitution shape and its fully-spelled equivalent.
+        "_ZTVSt6vectorIiE",
+        "_ZTVN3std6vectorIiEE",
     ]
     for mangled in cases:
         first = fn(mangled)
@@ -138,12 +150,13 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
         # qualified owner and its own bare tail may. Skip a component whose
         # own bare spelling coincidentally equals the tail's (e.g. an
         # `Outer::Outer`-shaped owner) since that overlap is legitimate, not
-        # a namespace-token leak.
+        # a namespace-token leak. `"std"` (the `St`-substitution's own
+        # synthesized component, review round 4 finding 3) is no longer
+        # exempted here: it must obey the identical rule as any other
+        # namespace-path component now that it is fused into the qualified
+        # owner rather than dropped.
         for idx, name in enumerate(components[:-1]):
-            if idx not in template_positions and name not in (
-                components[-1],
-                "std",
-            ):
+            if idx not in template_positions and name != components[-1]:
                 assert name not in first, (mangled, name, first)
 
 

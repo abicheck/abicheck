@@ -510,10 +510,25 @@ def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | Non
     s, nested = prefix
     i = 0
     n = len(s)
-    if s[i : i + 2] == "St":
-        i += 2
     bare_components: list[str] = []
     template_identifiers: set[str] = set()
+    if s[i : i + 2] == "St":
+        # The canonical Itanium `St` substitution for the `std::` scope
+        # prefix (see `itanium_scope_components`'s own docstring for the
+        # empirically-confirmed encoding). Codex review, fresh evidence,
+        # findings-analysis-fixes review round 4, finding 3: this branch
+        # used to advance `i` past `St` without ever appending `"std"` to
+        # `bare_components`, so `_ZTVSt6vectorIiE` (`std::vector<int>`)
+        # produced only `{"vector"}` -- never `{"std::vector", "vector"}`
+        # the way the ordinary, fully-spelled `_ZTVN3std6vectorIiEE` form
+        # already does (`itanium_scope_components_with_template_positions`
+        # appends `"std"` explicitly for that shape). A snapshot modeling an
+        # internal `std::vector` record but no bare `vector` would then read
+        # this owner as unknown and keep its vtable churn in-surface instead
+        # of demoting it, purely because of which of the two equivalent
+        # mangled spellings the compiler happened to emit.
+        bare_components.append("std")
+        i += 2
     while i < n:
         step = _step_next_component(s, i, nested)
         if step is None:

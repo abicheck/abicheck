@@ -381,12 +381,13 @@ def resolve_release_pack_application(
 ) -> Any:
     """Resolve ``--pack`` contributions for the directory/package release fan-out.
 
-    Returns a :class:`~abicheck.pack_application.PackApplication` (``None``
-    when no ``--pack`` was given), whose ``policy_overrides``/
-    ``internal_namespaces`` the caller threads into every library's own
-    ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces`` --
-    :func:`~abicheck.service_compare_pipeline.classify_compare_pair` folds
-    them against each library's freshly-loaded ``PolicyFile``.
+    Returns a :class:`~abicheck.pack_application.PackApplication` -- never
+    ``None`` (finding 1, round 4): with no ``--pack`` this is still where a
+    project-backed ``.abicheck.yml`` ``policy.overrides`` reaches a real
+    ``resolved_config`` (see :func:`record_release_resolved_config`), via an
+    *inert* application. ``policy_overrides``/``internal_namespaces`` are
+    threaded into each library's own ``CompareRequest`` fields the same way,
+    folded per library by :func:`~abicheck.service_compare_pipeline.classify_compare_pair`.
 
     Distinct from :func:`resolve_and_apply`, which also merges the packs into
     *one* ``PolicyFile`` object and *one* ``ResolvedCompareConfig``. That fits
@@ -453,14 +454,16 @@ def resolve_release_pack_application(
     unresolved-only pack); mapping those onto exit 64 is the caller's job.
     """
     pack_paths = tuple(params.get("pack_paths") or ())
-    if not pack_paths:
-        return None
+    # Runs regardless of `pack_paths` (finding 1) -- see docstring above.
     config = resolve_cli_config(params, **kwargs)
     from .pack_application import (
+        PackApplication,
         check_resolved_config_applies_packs,
         pack_application,
     )
 
+    if not pack_paths:
+        return PackApplication(policy_overrides={}, resolved_config=config)
     check_resolved_config_applies_packs(
         config,
         # `gate_supported` defaults to True: since CLI cleanup phase two "PR
@@ -505,14 +508,11 @@ def resolve_release_pack_application_from_ctx(
     run_compare``, already at the AI-readiness file-size cap) stays a single
     call rather than this whole resolution inlined at the call site.
 
-    ``None`` when *pack_paths* is empty -- no Click/file access at all in
-    that case, matching ``resolve_release_pack_application``'s own contract.
-    Raises ``click.UsageError`` directly (mapping a D7 same-tier conflict, a
-    D8 pack conflict, or an inapplicable/gate-only pack) rather than the raw
-    resolver exceptions, so the caller does not need its own except clause.
+    Resolved even when *pack_paths* is empty (finding 1, round 4) -- see
+    ``resolve_release_pack_application``'s own docstring. Raises
+    ``click.UsageError`` (mapping a D7/D8 conflict or an inapplicable pack)
+    rather than the raw resolver exceptions, so the caller needs no except.
     """
-    if not pack_paths:
-        return None
     import click
     import yaml
 

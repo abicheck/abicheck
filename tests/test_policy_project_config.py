@@ -323,6 +323,31 @@ class TestScanAgainstHonorsProjectConfigPolicyOverrides:
         )
         assert result.exit_code == 4, result.output
 
+    def test_malformed_override_is_a_clean_usage_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Findings-analysis-fixes review round 4, finding 2: a plain
+        `scan ARTIFACT --against BASELINE` with neither `--contract` nor
+        `--pack` reaches `_resolve_scan_evaluation_config`'s early return
+        (no deep resolution runs there), so the project-config override
+        fold is the *first* place a malformed `.abicheck.yml` override is
+        actually validated -- and used to raise an uncaught `PolicyError`
+        instead of the clean exit-64 usage error the scalar and directory/
+        package `compare` paths already produce for the identical input."""
+        old_p, new_p = self._write_scan_pair(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text(
+            "policy:\n  overrides:\n    not_a_real_kind: ignore\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(new_p), "--against", str(old_p)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 64, result.output
+
 
 class TestScalarCompareRejectsMalformedProjectConfigOverride:
     def test_unknown_kind_is_a_clean_usage_error(

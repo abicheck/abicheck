@@ -756,8 +756,7 @@ def _resolve_evaluation_config(
         # is a usage error, the exit code the resolver leaves to its front end.
         raise click.UsageError(str(exc)) from exc
     except PolicyError as exc:
-        # The resolver also parses `.abicheck.yml`'s `policy.overrides` now
-        # (finding 1) -- a malformed slug/severity there is a usage error too.
+        # A malformed `.abicheck.yml` `policy.overrides` entry (finding 1).
         raise click.BadParameter(str(exc), param_hint="--policy") from exc
     return evaluation_config, pf, resolved_cfg
 
@@ -1418,20 +1417,23 @@ def run_compare(
             report_mode,
             show_filtered=show_filtered,
         )
-        if pack_paths:
-            from .cli_compare_receipt import resolve_release_pack_application_from_ctx
+        # Resolved unconditionally, not only under `--pack` (finding 1,
+        # round 4): a no-pack run's own project-backed `.abicheck.yml`
+        # `policy.overrides` still needs to reach a real config for
+        # `record_release_resolved_config` -- see that resolver's docstring.
+        from .cli_compare_receipt import resolve_release_pack_application_from_ctx
 
-            release_pack_application = resolve_release_pack_application_from_ctx(
-                ctx,
-                contract_mode=contract_mode, scope_public_headers=scope_public_headers,
-                policy=policy, policy_file_path=policy_file_path, suppress=suppress,
-                require_justification=require_justification,
-                severity_preset=severity_preset,
-                pack_paths=pack_paths, contract_evaluation=contract_evaluation,
-                project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
-                policy_option=policy_selected_by, policy_path=policy_selected_path,
-                policy_sha256=policy_selected_sha,
-            )
+        release_pack_application = resolve_release_pack_application_from_ctx(
+            ctx,
+            contract_mode=contract_mode, scope_public_headers=scope_public_headers,
+            policy=policy, policy_file_path=policy_file_path, suppress=suppress,
+            require_justification=require_justification,
+            severity_preset=severity_preset,
+            pack_paths=pack_paths, contract_evaluation=contract_evaluation,
+            project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
+            policy_option=policy_selected_by, policy_path=policy_selected_path,
+            policy_sha256=policy_selected_sha,
+        )
 
     # Parsed here, in the preflight, not only at the post-comparison
     # attribution call: --dry-run returns before that call, so a malformed
