@@ -52,11 +52,13 @@ from ..policy_file import (
     dedup_validate_overrides_warnings,
     pending_validate_overrides_warnings,
 )
+from ..policy_file_project_overrides import merge_project_config_policy_overrides
 
 __all__ = [
     "PolicyFile",
     "builtin_policy_names",
     "builtin_policy_path",
     "dedup_validate_overrides_warnings",
+    "merge_project_config_policy_overrides",
     "pending_validate_overrides_warnings",
 ]

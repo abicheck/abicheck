@@ -57,6 +57,7 @@ from .build_config_schema import (
     STR_SUBKEYS as _STR_SUBKEYS,
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
+    dict_str_str_subkey_findings as _dict_str_str_subkey_findings,
     int_subkey_findings as _int_subkey_findings,
     opt_int as _opt_int,
 )
@@ -141,8 +142,6 @@ def _safe_compile_atom(key: str, value: str) -> str:
             f"compile.{key} must be a single compiler option atom, got {value!r}"
         )
     return value
-
-
 
 
 @dataclass
@@ -338,6 +337,14 @@ class BuildConfig:
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
+    #: ``policy.overrides`` -- ADR-068 §3 #23's documented replacement route
+    #: for the retired ``--crosscheck KEY=LEVEL`` flag: a ``ChangeKind`` slug
+    #: -> severity string mapping, raw (unvalidated beyond str/str shape;
+    #: `policy_file._parse_overrides` validates the real slugs/severities
+    #: once this is folded into a `PolicyFile` for the run -- see
+    #: `compatibility_evaluation_wiring.resolve_project_config_policy_
+    #: overrides`). Empty dict = no project-level overrides stated.
+    policy_overrides: dict[str, str] = field(default_factory=dict)
 
     #: ADR-037 §Backward-compat (G22 Phase 7): recognized ``.abicheck.yml`` keys.
     #: ``version:`` makes the config forward-compatible — an *unknown* key (a
@@ -371,10 +378,18 @@ class BuildConfig:
             "profiles",
             "baseline",
             "aggregate",
+            # ADR-068 §3 #23 (one-comparison-product.md): the documented
+            # `.abicheck.yml` replacement route for the retired
+            # `--crosscheck KEY=LEVEL` flag -- `policy.overrides` folds into
+            # the same `PolicyFile.overrides` mechanism `--policy <file>`'s
+            # own `overrides:` block already feeds.
+            "policy",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
-        "build": frozenset({"system", "query", "compile_db", "compile_db_filter", "targets"}),
+        "build": frozenset(
+            {"system", "query", "compile_db", "compile_db_filter", "targets"}
+        ),
         "sources": frozenset({"public_headers", "exclude", "graph"}),
         "severity": frozenset(
             {
@@ -430,6 +445,11 @@ class BuildConfig:
         "gate": frozenset({"fail_on_removed_library"}),
         "release": frozenset({"dso_only", "include_private_dso", "support_promise"}),
         "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
+        # ADR-068 §3 #23: `policy.overrides` -- a `ChangeKind` slug -> severity
+        # mapping, deep-validated (real slug, real severity) only once folded
+        # into a `PolicyFile` (`policy_file._parse_overrides`); this table
+        # only gates the block's own shape (a dict).
+        "policy": frozenset({"overrides"}),
     }
 
     @classmethod
@@ -466,6 +486,8 @@ class BuildConfig:
             ]
         if int_findings := _int_subkey_findings(key, sub, sub_value):
             return int_findings
+        if dict_findings := _dict_str_str_subkey_findings(key, sub, sub_value):
+            return dict_findings
         if sub not in _LIST_SUBKEYS.get(key, ()):
             return []
         if not isinstance(sub_value, (list, str)):
@@ -546,6 +568,7 @@ class BuildConfig:
         gate = _block(top, "gate")
         release = _block(top, "release")
         resource_limits = _block(top, "resource_limits")
+        policy = _block(top, "policy")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -657,11 +680,18 @@ class BuildConfig:
                 _SUPPORT_PROMISE_POLICIES,
                 "release.support_promise",
             ),
-            resource_limits_max_bundle_facts_decode_nodes=_opt_int(resource_limits, "max_bundle_facts_decode_nodes"),
+            resource_limits_max_bundle_facts_decode_nodes=_opt_int(
+                resource_limits, "max_bundle_facts_decode_nodes"
+            ),
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
                 else 0
+            ),
+            policy_overrides=(
+                dict(policy_overrides_raw)
+                if isinstance(policy_overrides_raw := policy.get("overrides"), dict)
+                else {}
             ),
         )
 
@@ -816,6 +846,14 @@ class BuildConfig:
             release["support_promise"] = self.release_support_promise
         return release
 
+    def _policy_block(self) -> dict[str, Any]:
+        """Non-default ``policy:`` keys (ADR-068 §3 #23's ``policy.overrides``,
+        the documented ``.abicheck.yml`` replacement route for the retired
+        ``--crosscheck KEY=LEVEL`` flag)."""
+        if self.policy_overrides:
+            return {"overrides": dict(self.policy_overrides)}
+        return {}
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -839,7 +877,13 @@ class BuildConfig:
             ("python", self._python_block()),
             ("gate", self._gate_block()),
             ("release", self._release_block()),
-            ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
+            (
+                "resource_limits",
+                {}
+                if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None
+                else {"max_bundle_facts_decode_nodes": n},
+            ),
+            ("policy", self._policy_block()),
         ):
             if block:
                 out[key] = block

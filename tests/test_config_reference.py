@@ -63,15 +63,31 @@ def test_every_block_subkey_has_a_resolved_type_or_is_flagged_unspecified():
         _STR_SUBKEYS,
         BuildConfig,
     )
-    from abicheck.buildsource.build_config_schema import INT_SUBKEYS as _INT_SUBKEYS
+    from abicheck.buildsource.build_config_schema import (
+        DICT_STR_STR_SUBKEYS as _DICT_STR_STR_SUBKEYS,
+        INT_SUBKEYS as _INT_SUBKEYS,
+    )
 
     gen = _load_gen()
     for block, subkeys in BuildConfig._KNOWN_BLOCK_KEYS.items():
         for subkey in subkeys:
             type_str = gen._subkey_type(
-                block, subkey, _BOOL_SUBKEYS, _STR_SUBKEYS, _LIST_SUBKEYS, _INT_SUBKEYS
+                block,
+                subkey,
+                _BOOL_SUBKEYS,
+                _STR_SUBKEYS,
+                _LIST_SUBKEYS,
+                _INT_SUBKEYS,
+                _DICT_STR_STR_SUBKEYS,
             )
-            assert type_str in {"bool", "str", "int", "list[str] (or a single str)", "unspecified"}
+            assert type_str in {
+                "bool",
+                "str",
+                "int",
+                "list[str] (or a single str)",
+                "mapping[str, str]",
+                "unspecified",
+            }
 
 
 def test_other_recognized_keys_section_has_no_absolute_github_link():

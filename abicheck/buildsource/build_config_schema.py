@@ -58,8 +58,50 @@ def int_subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
     if sub in INT_SUBKEYS.get(key, ()) and (
         not isinstance(sub_value, int) or isinstance(sub_value, bool)
     ):
-        return [f"{key}.{sub} must be an integer, got {type(sub_value).__name__}: {sub_value!r}"]
+        return [
+            f"{key}.{sub} must be an integer, got {type(sub_value).__name__}: {sub_value!r}"
+        ]
     return []
+
+
+#: New defect 3 (ADR-068's documented `.abicheck.yml` `policy:` replacement
+#: route for the retired `--crosscheck KEY=LEVEL` flag -- see
+#: `BuildConfig._KNOWN_BLOCK_KEYS["policy"]`): a flat ``str -> str`` mapping
+#: subkey, unlike every other subkey table above (a fixed key set). Deep
+#: content validation (real `ChangeKind` slugs, real severity spellings) is
+#: `policy_file._parse_overrides`'s job when this block is folded into a
+#: `PolicyFile` -- this only enforces the *shape* (a mapping of strings to
+#: strings) at ingestion time, the same "wrong type is a hard error, not a
+#: silent coercion" contract every sibling subkey table enforces.
+DICT_STR_STR_SUBKEYS: dict[str, frozenset[str]] = {
+    "policy": frozenset({"overrides"}),
+}
+
+
+def dict_str_str_subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
+    """Type findings for one ``<block>.<subkey>`` entry registered in
+    `DICT_STR_STR_SUBKEYS` -- a mapping whose every key and value must be a
+    string (e.g. ``policy.overrides: {func_removed: ignore}``)."""
+    if sub not in DICT_STR_STR_SUBKEYS.get(key, ()):
+        return []
+    if not isinstance(sub_value, dict):
+        return [
+            f"{key}.{sub} must be a mapping of string to string, got "
+            f"{type(sub_value).__name__}: {sub_value!r}"
+        ]
+    bad = [
+        (k, v)
+        for k, v in sub_value.items()
+        if not isinstance(k, str) or not isinstance(v, str)
+    ]
+    if bad:
+        return [
+            f"{key}.{sub} must be a mapping of string to string, got "
+            f"non-string key/value pair(s): {bad!r}"
+        ]
+    return []
+
+
 BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
     "suppression": frozenset({"strict", "require_justification"}),

@@ -92,7 +92,7 @@ from .cli_resolve import (
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .errors import AbicheckError, PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.options import reject_incoherent_secondary_writes
@@ -1803,6 +1803,19 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
+    # ADR-068 §3 #23: fold `.abicheck.yml`'s `policy.overrides` in at the
+    # PROJECT_CONFIG precedence tier -- an explicit `--policy <file>`'s own
+    # `overrides:` entry for a given kind always wins; only a kind it left
+    # unstated is filled in from the project config. A project config
+    # stating no `policy:` block at all returns `pf` unchanged.
+    from .workflows.policy_file import merge_project_config_policy_overrides
+
+    try:
+        pf = merge_project_config_policy_overrides(
+            pf, base_policy=policy, project_cfg=project_cfg, project_path=cfg_path
+        )
+    except PolicyError as e:
+        raise click.BadParameter(str(e), param_hint="--policy") from e
     # audit_suppressions=True implies suppress is not None (guarded earlier,
     # before the --dry-run emit above) -- _load_suppression_and_policy only
     # returns None here when suppress itself was None, so suppression is
