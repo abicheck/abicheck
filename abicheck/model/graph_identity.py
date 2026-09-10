@@ -388,10 +388,26 @@ def closure_location_free_identity(identity: str) -> str:
     A no-op for any identity carrying no closure/anonymous-tag marker at
     all (ordinary qualified names are returned unchanged), and idempotent
     (re-applying to an already-stripped identity is a no-op).
+
+    A match inside a ``"..."`` quoted literal is left untouched, mirroring
+    :func:`_strip_bare_anonymous_type_location`'s own guard (CodeRabbit
+    review): ``_normalize_graph_identity`` already protects quoted spans, so
+    marker-shaped *content* -- a C++20 fixed-string NTTP argument like
+    ``Tag<"lambda:foo.h:1:2">`` -- can reach here verbatim. Without this
+    guard, two distinct specializations quoting different literal text would
+    collapse onto the same coordinate-free identity, silently reconciling a
+    genuine ``declaration_renamed`` as unchanged.
     """
     if "at" not in identity and ":" not in identity:
         return identity
     normalized = _normalize_graph_identity(identity)
     if ":" not in normalized:
         return normalized
-    return _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.sub(r"\1", normalized)
+    quoted_spans = _quoted_spans(normalized)
+
+    def _replace(match: re.Match[str]) -> str:
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            return match.group(0)
+        return match.group(1)
+
+    return _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.sub(_replace, normalized)

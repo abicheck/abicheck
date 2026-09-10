@@ -222,6 +222,38 @@ class TestClosureCoordinateShiftIsNotARename:
         pair = _reconcile_one_pair(old_node, new_node)
         assert pair.outcome == OUTCOME_RENAMED
 
+    def test_quoted_marker_shaped_literal_is_not_stripped(self) -> None:
+        # Regression (CodeRabbit review): a C++20 fixed-string NTTP argument
+        # can quote text that merely *looks* like a normalized closure
+        # marker (e.g. a literal spelled "lambda:foo.h:1:2"). That text is
+        # not a real CastXML anonymous/lambda marker -- it must be left
+        # alone, so two specializations quoting genuinely different literal
+        # arguments must still classify as a real rename, not silently
+        # reconcile onto the same coordinate-free identity.
+        old_node = GraphNode(
+            id="type://old",
+            kind="record_type",
+            label='Tag<"lambda:foo.h:1:2">',
+            attrs={
+                "qualified_name": 'Tag<"lambda:foo.h:1:2">',
+                "def_file": "detail.h",
+            },
+        )
+        new_node = GraphNode(
+            id="type://new",
+            kind="record_type",
+            label='Tag<"lambda:foo.h:9:9">',
+            attrs={
+                "qualified_name": 'Tag<"lambda:foo.h:9:9">',
+                "def_file": "detail.h",
+            },
+        )
+        pair = _reconcile_one_pair(old_node, new_node)
+        assert pair.outcome == OUTCOME_RENAMED, (
+            "distinct quoted literal template arguments must not be "
+            "silently reconciled as an incidental coordinate shift"
+        )
+
 
 # ── closure_location_free_identity: primitive-level property tests ────────
 #
@@ -362,6 +394,20 @@ class TestClosureLocationFreeIdentityProperties:
         # ordinary ABI-surface identifiers.
         name = "ns::detail::Widget<int, std::vector<double>>"
         assert closure_location_free_identity(name) == name
+
+    def test_quoted_marker_shaped_text_is_never_stripped(self) -> None:
+        # Regression (CodeRabbit review): marker-shaped text inside a
+        # `"..."` quoted literal (a C++20 fixed-string NTTP argument, say)
+        # is source *content*, not a real anonymous/lambda marker -- it
+        # must pass through completely unchanged, mirroring
+        # `_strip_bare_anonymous_type_location`'s own quoted-span guard.
+        # Without it, two distinct quoted literals would collapse onto the
+        # same coordinate-free identity.
+        a = 'Tag<"lambda:foo.h:1:2">'
+        b = 'Tag<"lambda:foo.h:9:9">'
+        assert closure_location_free_identity(a) == a
+        assert closure_location_free_identity(b) == b
+        assert closure_location_free_identity(a) != closure_location_free_identity(b)
 
     def test_no_op_on_text_with_neither_at_nor_colon(self) -> None:
         # Exercises the cheap fast-path guard directly.
