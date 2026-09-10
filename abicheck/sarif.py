@@ -32,7 +32,7 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.checker_policy import (
     EvidenceStatus,
     ReachabilityState,
@@ -49,10 +49,11 @@ from abicheck.contract_gating import (
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
-from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.document import ReportDocument
+from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
+from abicheck.report.sarif_invocation import compute_sarif_invocation_exit
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import (
     _finding_id,
@@ -68,6 +69,9 @@ from abicheck.reporter_markdown import (
 from abicheck.severity import missing_contract_exit_code
 
 if TYPE_CHECKING:
+    from datetime import date
+
+    from abicheck.report.finding import ReportFinding
     from abicheck.severity import GateDecision, SeverityConfig
 
 # ---------------------------------------------------------------------------
@@ -100,6 +104,8 @@ def _severity(
     change: Change,
     result: DiffResult,
     severity_config: SeverityConfig | None = None,
+    *,
+    finding: ReportFinding | None = None,
 ) -> str:
     """Return the SARIF ``level`` for *change*.
 
@@ -125,21 +131,36 @@ def _severity(
     the coarser per-kind default severity from the policy registry, which is
     intentionally finer-grained than the 4-way verdict table (e.g.
     distinguishing "warning" additions from "note"-worthy ones).
+
+    *finding* (ADR-061 gap C), when given, is this change's already-resolved
+    :class:`~abicheck.report.finding.ReportFinding`: its ``category``/
+    ``verdict`` are used directly instead of re-deriving them from live,
+    mutable ``result`` state a caller could change between two projections
+    of one envelope (Codex review: a ``PolicyFile.overrides`` mutation
+    disagreed with the envelope's own frozen finding). A direct caller with
+    no envelope keeps the prior recompute.
     """
     if severity_config is not None:
-        from abicheck.severity import classify_effective_change
+        if finding is not None:
+            category = finding.category
+        else:
+            from abicheck.severity import classify_effective_change
 
-        category = classify_effective_change(
-            change,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+            category = classify_effective_change(
+                change,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+            )
         level = severity_config.level_for(category)
         return _SEVERITY_LEVEL_TO_SARIF.get(level.value, "warning")
 
     entry = policy_for(change.kind)
-    verdict = result._effective_verdict_for_change(change)
+    verdict = (
+        finding.verdict
+        if finding is not None
+        else result._effective_verdict_for_change(change)
+    )
     if verdict != entry.default_verdict:
         return _VERDICT_TO_SARIF_LEVEL.get(verdict, entry.severity)
     return entry.severity
@@ -298,6 +319,8 @@ def _contract_properties(
     relevance: Any,
     result: DiffResult,
     severity_config: Any,
+    *,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """The per-finding ADR-049 contract fields, in reporter.py's canonical shape.
 
@@ -333,6 +356,7 @@ def _contract_properties(
         severity_config,
         policy=result.policy,
         policy_file=result.policy_file,
+        today=today,
     )
     if change.contract_evidence_refs is not None:
         props["contractEvidenceRefs"] = list(change.contract_evidence_refs)
@@ -349,8 +373,13 @@ def _result_for(
     root_cause: tuple[str, str] | None = None,
     impact_root_cause: tuple[str, str] | None = None,
     impact_root_cause_evidence: dict[str, object] | None = None,
+    finding: ReportFinding | None = None,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Produce a SARIF result object for a Change.
+
+    *finding* (ADR-061 gap C), when given, is forwarded to :func:`_severity`
+    unchanged -- see that function's own docstring for what it drives.
 
     *root_cause*, when given (``--report-mode root-cause``, G29 Phase 3
     slice 5, ADR-052), is this finding's ``(root_cause_id, root_display)``
@@ -467,9 +496,9 @@ def _result_for(
     # never opted into --contract, which is what keeps this
     # unconditional call inert for every pre-existing SARIF report.
     relevance = contract_relevance_of(change)
-    properties.update(_contract_properties(change, relevance, result, severity_config))
+    properties.update(_contract_properties(change, relevance, result, severity_config, today=today))
 
-    level = _severity(change, result, severity_config)
+    level = _severity(change, result, severity_config, finding=finding)
     # ADR-049 D1/D9: compatibility policy did not score this finding, so it
     # contributed nothing to the verdict or the exit code -- emitting
     # `level: "error"` for it published a SARIF run whose annotations say
@@ -700,10 +729,10 @@ def to_sarif(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
+    report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
-    *report_document*, when given, is the shared build whose ``disposition_audit`` is reused verbatim (ADR-061 Phase 2 gap C) -- everything else here stays SARIF-specific.
+    *envelope* (ADR-061 gap C), when given, is the one completed ``ReportEnvelope`` this render projects: its shared document supplies ``disposition_audit`` and its already-resolved ``gate`` drives the severity-gate block and the invocation exit contract, so SARIF decides neither for itself. *report_document* is the narrower, pre-envelope form of the same reuse (document only); the envelope wins when both are given, and a direct caller with neither keeps the prior, independent behaviour.
     *severity_config*, when given, drives the invocation's ``exitCode`` from
     the actual severity-aware gate instead of inferring it purely from
     ``result.verdict`` — compatibility and "blocks CI" are independent
@@ -731,25 +760,22 @@ def to_sarif(
     parameter existed.
     """
     tool_version = _tool_version()
-    disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, report_document)  # ADR-061 Phase 2 gap C
+    gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
+    disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, resolved_document(envelope, report_document))  # ADR-061 Phase 2 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
-    # policyReclassify below as though it were still in effect.
+    # policyReclassify below as though it were still in effect. *today*
+    # pins that check to the envelope's own `resolved_today` (Codex, fresh).
+    _resolved_today = None if envelope is None else envelope.resolved_today
     _active_reclassify_rules: list[Any] = []
     if result.policy_file and result.policy_file.reclassify:
         from .reclassify import active_reclassify_rules
 
-        _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify)
+        _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify, _resolved_today)
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+        changes = apply_show_only(changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, _resolved_today)
         changes = _suppress_dangling_correlation_notes(changes)
 
     # Collect unique rules used
@@ -773,13 +799,7 @@ def to_sarif(
     # mode, which computes from the filtered set only).
     scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
     if show_only and scoped_only_changes:
-        scoped_only_changes = apply_show_only(
-            scoped_only_changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+        scoped_only_changes = apply_show_only(scoped_only_changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, _resolved_today)
 
     # G29 Phase 3 slice 5 (ADR-052): --report-mode root-cause adds
     # properties.rootCauseId/rootCause to every result rather than
@@ -832,6 +852,20 @@ def to_sarif(
     # library verdict (CLI-audit P1 fix); None means no scoping is active, so
     # _result_for's existing full-library severity computation is unchanged.
     relevant_ids = getattr(result, "scoped_relevant_finding_ids", None)
+    # ADR-061 gap C: resolve every finding this loop (and the two below) needs
+    # through the completed envelope, keyed by id(change) -- `_severity`'s
+    # `finding=` reads `.category`/`.verdict` from here rather than
+    # re-deriving them from `result`'s live, mutable `policy_file`/`policy`
+    # (Codex review). `findings_for` resolves an unindexed change (e.g. a
+    # suppressed one) the same way its per-change fallback always has.
+    finding_by_id: dict[int, ReportFinding] = {}
+    if envelope is not None:
+        finding_by_id = {
+            id(f.change): f
+            for f in envelope.findings_for(
+                [*changes, *result.suppressed_changes, *scoped_only_changes]
+            )
+        }
     for change in changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
@@ -850,6 +884,8 @@ def to_sarif(
                 ),
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
+                finding=finding_by_id.get(id(change)),
+                today=_resolved_today,
             )
         )
 
@@ -875,7 +911,9 @@ def to_sarif(
         rule_id = change.kind.value
         if rule_id not in rules_seen:
             rules_seen[rule_id] = _rule_for(change.kind)
-        suppressed_result = _result_for(change, result, severity_config)
+        suppressed_result = _result_for(
+            change, result, severity_config, finding=finding_by_id.get(id(change)), today=_resolved_today,
+        )
         suppressed_result["suppressions"] = [
             {
                 "kind": "external",
@@ -911,6 +949,8 @@ def to_sarif(
                 ),
                 impact_root_cause=_impact_rc_lookup.get(_finding_id(change)),
                 impact_root_cause_evidence=_impact_rc_evidence.get(_finding_id(change)),
+                finding=finding_by_id.get(id(change)),
+                today=_resolved_today,
             )
         )
 
@@ -951,61 +991,18 @@ def to_sarif(
                     )
                 )
 
-    gate_decision = gate_decision_for_result(result, severity_config)
     severity_gate = (
         _severity_gate_properties(gate_decision, severity_config)
         if gate_decision is not None and severity_config is not None
         else None
     )
     scoped_gate = _scoped_gate_properties(result)
-
-    # ADR-049 Phase 7: the orthogonal contract-coverage floor, folded into the
-    # invocation's exit code exactly as the process folds it. This block is
-    # SARIF's own machine-readable exit contract, and the comment below states
-    # it mirrors what the CLI really exits with -- so leaving it out published
-    # `exitCode: 0` beside a process that exited 1, and a consumer reading the
-    # artifact accepted a run its own notifications said was gated (Codex
-    # review, reproduced). `max`, for the same reason the process uses it: the
-    # axis raises a clean 0 and never lowers a real break's code.
-    #
-    # `executionSuccessful` stays True and is *not* folded: per the SARIF spec
-    # it reports whether the tool ran to completion, not whether it found
-    # blocking issues -- the spec's own example pairs `exitCode: 1` with
-    # `executionSuccessful: true`. Incomplete evidence is a finding about the
-    # comparison, not a failed execution.
-    from .contract_coverage_exit import coverage_exit_floor
-
-    # Workstream D-S1: `scoped_gate` never contributes to this invocation's
-    # exit code any more (see `_scoped_gate_properties`'s docstring) -- the
-    # base exit code always comes from the full-library severity/verdict.
-    _coverage_floor = coverage_exit_floor(result)
-    _base_exit_code = (
-        severity_gate["exitCode"]
-        if severity_gate is not None
-        else (
-            4
-            if result.verdict == Verdict.BREAKING
-            else 2
-            if result.verdict == Verdict.API_BREAK
-            else 0
-        )
-    )
-    _exit_code = max(_base_exit_code, _coverage_floor)
-    _exit_description = (
-        f"{result.verdict.value} (severity-gated)"
-        if severity_gate is not None
-        else result.verdict.value
-    )
-    if scoped_gate is not None:
-        # Informational only -- appended, never substituted (workstream D-S1).
-        _exit_description += (
-            f" [consumer-scoped assessment: {scoped_gate['gateVerdict']} "
-            f"(scope: {scoped_gate['gateScope']}), informational only]"
-        )
-    if _coverage_floor:
-        # Names the axis rather than only moving the number, so a reader of
-        # the artifact alone can tell a coverage floor from a gate decision.
-        _exit_description += " + incomplete contract coverage (exit 1)"
+    # ADR-061 gap C: SARIF's published exit contract is a decision, not a
+    # rendering choice -- it moved to report/sarif_invocation.py and reads the
+    # gate this render already resolved (see that module's docstring).
+    _invocation_exit = compute_sarif_invocation_exit(result, severity_gate, scoped_gate)
+    _exit_code = _invocation_exit.exit_code
+    _exit_description = _invocation_exit.description
 
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -1286,16 +1283,16 @@ def to_sarif_str(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
+    report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
 ) -> str:
-    """Serialize DiffResult to a SARIF JSON string; *report_document* is forwarded unchanged to :func:`to_sarif` (ADR-061 Phase 2 gap C)."""
+    """Serialize DiffResult to a SARIF JSON string; *report_document*/*envelope* are forwarded unchanged to :func:`to_sarif` (ADR-061 gap C)."""
     return render_mapping_as_json(
         to_sarif(
             result,
             show_only=show_only,
             report_mode=report_mode,
             severity_config=severity_config,
-            report_document=report_document,
+            report_document=report_document, envelope=envelope,
         ),
         indent=indent,
     )

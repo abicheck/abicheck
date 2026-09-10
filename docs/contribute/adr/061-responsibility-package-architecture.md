@@ -928,6 +928,45 @@ compute/render module split yet), and what the real, current boundary it
 asserts instead is (the disposition-audit reuse path specifically, checked
 both by call-count and by an AST scan of the actual call site).
 
+**Closure package 3 (`ReportEnvelope`): gap C's remaining half — *one*
+document per evaluation, not one per format — has now landed.** The five
+progress updates above each routed one format through the shared *build
+function*; what stayed open was that `service_render.render_output` called
+it once **per format branch**, so N formats of one evaluation still meant N
+documents that merely agreed. `abicheck/report/envelope.py`'s
+`ReportEnvelope` (the plan's Phase 4 design, not a second one) is now built
+once, above format selection, by `report/build.py`'s
+`build_report_envelope`: it resolves the severity `GateDecision` *first* and
+hands it to `build_report_document` (so the document's `severity` block and
+the object SARIF/HTML read are the same object, not two agreeing calls),
+resolves one `ReportFinding` per `Change` — `result.changes` **and**
+`scoped_only_changes` — and carries the presentation-only `RenderOptions`.
+`service_render.render_envelope(fmt, envelope)` then selects a pure
+projection. Every previously-open *decision* in the paragraphs below is
+closed by reading the envelope: SARIF's and HTML's own
+`gate_decision_for_result` calls, HTML's and the review digest's own
+`report_findings_for` calls, JUnit's own `build_report_findings` call, and
+Markdown's `surface_changes` re-resolution. SARIF's invocation
+`exitCode`/`exitCodeDescription` fold moved to `report/sarif_invocation.py`
+(a renderer does not own exit behaviour) and JUnit's disposition-audit
+properties to `report/junit_disposition.py`. Everything still listed as
+open below was re-examined item by item and is *presentation* — an
+arrangement of already-decided findings in a format-specific shape — or a
+separate document by this ADR's own earlier scope decision (`--stat`/
+`oneline`, Markdown's/JSON's `leaf`/`root-cause`); there is no third
+category left unaccounted for. The process exit fold
+(`cli._exit_with_severity_or_verdict`) deliberately stays in `frontends`:
+the envelope carries the exit decision the *report* publishes, not the code
+the CLI exits with. Verified by capturing 512 renders (4 change sets × 16
+option sets × 8 formats, `render_output` end to end) against the
+**pre**-refactor tree first and diffing byte-for-byte after — the same
+"golden first, then refactor" discipline this section's own durable lessons
+record — plus `TestRendererOrderIndependence`'s new cases: one envelope
+rendered into every format in several orders is byte-identical each time,
+`render_envelope` agrees with `render_output` byte-for-byte, and a
+call-count spy shows every decision function runs exactly once during
+envelope construction and *never again* across ten subsequent projections.
+
 **What remains open.** Markdown's `leaf`/`root-cause` alternate views (see
 the scope decision immediately below — these are separate, legitimate
 documents, same reasoning as JSON's own `leaf`/`root-cause`/`--stat`, not an
@@ -1018,7 +1057,8 @@ if a future session judges it worth doing.
 tests pass; mutability tests show renderers cannot alter the workflow result;
 no renderer computes an exit code or compatibility decision. Items 1, 4, and
 5 are met per format; item 2's "once" — one document shared by every format
-of one evaluation — is gap C.
+of one evaluation — was gap C, and is met by closure package 3's
+`ReportEnvelope` (see the gap C status section above).
 
 ### Phase 3 — converge artifact workflows
 
@@ -1415,6 +1455,17 @@ Phase 4's `ReportEnvelope`.
 **Completion test:** render the same completed document repeatedly and in
 different format orders; the semantic content is identical every time, and
 no renderer re-runs extraction, policy evaluation, or gate resolution.
+
+**Closed** by closure package 3 — see the gap C status section under Phase 2
+above for what landed and how it was verified. `abicheck/report/envelope.py`
+holds the `ReportEnvelope`, `report/build.build_report_envelope` builds it
+once above format selection, and `service_render.render_envelope` projects
+it. The completion test is executable in
+`tests/unit/report/test_build_report_document.py`'s
+`TestRendererOrderIndependence` (order-independent byte-identity across
+formats and repeated renders, plus a call-count spy proving every decision
+function runs once at envelope-construction time and never during a
+projection).
 
 ### D. Typed request/plan and operand convergence
 

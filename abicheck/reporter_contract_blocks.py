@@ -33,6 +33,7 @@ from .report.render_json import render_json
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import date
 
     from .checker_types import Change, DiffResult
     from .report.scoped_gate import ScopedGateChangeHelpers
@@ -506,6 +507,7 @@ def build_report_document_with_side_facts(
     gate: GateDecision | None = None,
     show_only: str | None = None,
     contract_evaluation: bool = False,
+    today: date | None = None,
 ) -> ReportDocument:
     """Fold in the shared side facts and freeze *d* as a :class:`ReportDocument`.
 
@@ -515,7 +517,10 @@ def build_report_document_with_side_facts(
     wants the *document* -- to project it into a non-JSON format, or to build
     it once and render it several times -- does not have to render to a JSON
     string and parse it back. ``render_json_with_side_facts`` itself is now a
-    thin ``build -> render`` wrapper kept for its existing callers.
+    thin ``build -> render`` wrapper kept for its existing callers. *today*,
+    forwarded to :func:`~abicheck.report.scoped_gate.apply_scoped_gate`, keeps
+    a scoped-only finding agreeing with an already-frozen ``ReportEnvelope``
+    (Codex review, fresh evidence).
     """
     from .report.cross_source_evolution import (
         compute_cross_source_evolution_summary,
@@ -541,6 +546,7 @@ def build_report_document_with_side_facts(
         severity_config=severity_config,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
+        today=today,
     )
     return ReportDocument.from_mapping(d)
 
