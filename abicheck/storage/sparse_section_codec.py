@@ -531,12 +531,13 @@ class DebugSection(_SparseSectionMixin):
             "clang_restrict_facts_reliable",
             "clang_va_list_facts_reliable",
             "castxml_var_access_facts_reliable",
+            "param_kind_facts_reliable",
             "parsed_with_build_context",
             "build_context_defines",
         }
     )
     #: Each mapped to `AbiSnapshot`'s own declared type: `.from_headers`/
-    #: `.parsed_with_build_context` and the seven `*_facts_reliable` flags
+    #: `.parsed_with_build_context` and the eight `*_facts_reliable` flags
     #: are plain `bool`; `.ast_toolchain_supported` is `bool | None`;
     #: `.ast_producer`/`.ast_fallback_reason`/`.frontend_context_kind`/
     #: `.ast_resolved_standard`/`.ast_cplusplus_macro`/`.ast_sysroot` are
@@ -568,6 +569,7 @@ class DebugSection(_SparseSectionMixin):
         "clang_restrict_facts_reliable": _BOOL,
         "clang_va_list_facts_reliable": _BOOL,
         "castxml_var_access_facts_reliable": _BOOL,
+        "param_kind_facts_reliable": _BOOL,
         "parsed_with_build_context": _BOOL,
         "build_context_defines": _UNORDERED_LIST,
     }

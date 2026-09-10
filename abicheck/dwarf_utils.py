@@ -17,6 +17,7 @@
 Used by dwarf_metadata.py, dwarf_advanced.py, and dwarf_unified.py to avoid
 duplicating low-level DIE attribute extraction logic.
 """
+
 # pylint: disable=invalid-name  # CU is the standard DWARF term (Compilation Unit)
 from __future__ import annotations
 
@@ -107,16 +108,19 @@ def resolve_die_ref(die: Any, attr_name: str, CU: Any) -> Any:
 
 #: Base set of DWARF tags to prune (skip subtrees).
 #: Each module extends this with its own additions (e.g. DW_TAG_subprogram).
-BASE_PRUNE_TAGS: frozenset[str] = frozenset({
-    "DW_TAG_inlined_subroutine",
-    "DW_TAG_lexical_block",
-    "DW_TAG_GNU_call_site",
-})
+BASE_PRUNE_TAGS: frozenset[str] = frozenset(
+    {
+        "DW_TAG_inlined_subroutine",
+        "DW_TAG_lexical_block",
+        "DW_TAG_GNU_call_site",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Member location decoding
 # ---------------------------------------------------------------------------
+
 
 def _read_uleb128(items: list[object], i: int) -> tuple[int, int]:
     """Read a ULEB128-encoded value from a raw byte list starting at *i*.
@@ -230,7 +234,10 @@ def _eval_tuple_item(item: tuple[object, ...], stack: list[int]) -> None:
 
 
 def _eval_raw_int_item(
-    item: int, items: list[object], i: int, stack: list[int],
+    item: int,
+    items: list[object],
+    i: int,
+    stack: list[int],
 ) -> int:
     """Evaluate a single raw-integer item onto *stack*.
 
@@ -284,6 +291,7 @@ def decode_member_location(val: int | list[object] | None) -> int:
 # DIE reference resolution
 # ---------------------------------------------------------------------------
 
+
 def resolve_type_die(die: Any, CU: Any) -> Any | None:
     """Resolve DW_AT_type reference on *die* to a target DIE, or None."""
     if "DW_AT_type" not in die.attributes:
@@ -292,6 +300,34 @@ def resolve_type_die(die: Any, CU: Any) -> Any | None:
         return resolve_die_ref(die, "DW_AT_type", CU)
     except Exception:  # noqa: BLE001
         return None
+
+
+#: DIE tags a parameter/variable-kind reader unwraps to see the true
+#: underlying type -- shared by ``dwarf_snapshot.py``'s pointer-depth count
+#: and its reference/rvalue-reference detection, so both agree on what
+#: counts as "just a wrapper" around the real type.
+_CV_TYPEDEF_TAGS = ("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_typedef")
+
+
+def unwrap_cv_typedef(type_die: Any, CU: Any, depth: int = 0) -> Any | None:
+    """*type_die*, unwrapped past any const/volatile/typedef wrapper DIE.
+
+    Used by ``dwarf_snapshot.py``'s ``_process_param`` to see past a
+    typedef'd reference/rvalue-reference the way its own pointer-depth count
+    already sees past a typedef'd pointer -- a plain :func:`resolve_type_die`
+    stops at the immediate DW_AT_type target, which for a typedef'd
+    parameter is the DW_TAG_typedef DIE itself, not the reference-type DIE
+    it names, silently reading a real reference as VALUE (Codex review, PR
+    #1200). Deliberately does NOT unwrap ``DW_TAG_pointer_type`` -- a
+    pointer's own referent kind is not the outer indirection kind
+    (``int *&`` is a REFERENCE to a pointer, matching castxml's/clang's
+    "outermost token wins" convention for the same spelling).
+    """
+    if type_die is None or depth > 10:
+        return type_die
+    if type_die.tag in _CV_TYPEDEF_TAGS:
+        return unwrap_cv_typedef(resolve_type_die(type_die, CU), CU, depth + 1)
+    return type_die
 
 
 # ---------------------------------------------------------------------------

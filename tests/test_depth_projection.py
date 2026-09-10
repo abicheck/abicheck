@@ -73,6 +73,22 @@ Six real, review-caught gaps are pinned by name here so they don't recur:
    ``pack.manifest.coverage`` still claiming ``PRESENT``/``PARTIAL``, so a
    report could still claim source-ABI/source-graph evidence backed a
    comparison the depth ceiling actually excluded it from.
+10. ``project_pair_to_depth`` picked :func:`_structural_facts_are_dwarf_
+    confirmed` **per side**, independently -- so a header-derived OLD
+    (stripped to L0: no params, no return type, no types/enums/typedefs)
+    compared against a DWARF-derived NEW of the IDENTICAL, unchanged
+    library (kept at L1: real params, real return type, real structural
+    facts) read every one of NEW's real facts as a fabricated addition —
+    worse than not projecting at all, since an unprojected comparison of
+    the same two snapshots has no such asymmetry to manufacture. Fixed by
+    computing ONE joint floor for both sides (the lower of the two
+    achievable rungs) rather than each side picking its own. A sibling
+    fix in the same round: ``typedefs_qualified``/``typedef_entity_ids``/
+    ``constant_entity_ids`` -- identity sidecars keyed exactly like
+    ``typedefs``/``constants`` -- were never cleared alongside their
+    partner dicts at all, so even a solo, correctly-symmetric projection
+    left a residual, fully-manufactured ``TYPEDEF_REMOVED``/
+    ``TYPEDEF_ADDED`` standing.
 """
 
 from __future__ import annotations
@@ -86,24 +102,29 @@ from abicheck import checker
 from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface
+from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
     EnumType,
     Function,
+    Param,
+    ParamKind,
     RecordType,
     ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
 )
-from abicheck.model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
+from abicheck.model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.depth_projection import (
+    _allow_dwarf_name,
     project_build_source_pack_to_depth,
+    project_pair_to_depth,
     project_snapshot_to_depth,
 )
 from abicheck.serialization import save_snapshot
@@ -791,3 +812,285 @@ class TestOutOfBandPackCapping:
         )
         assert code != 0
         assert "public_macro_value_changed" in out.lower()
+
+
+class TestProjectPairToDepthJointFloor:
+    """Pinned gap 10: ``project_pair_to_depth`` must pick ONE structural-
+    evidence floor for both sides, not one independently per side."""
+
+    def _header_derived(self) -> AbiSnapshot:
+        """OLD: header-derived, no DWARF -- ``kind`` is never determined
+        by a pre-fix header backend (the resting ``ParamKind.VALUE``)."""
+        return AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="take_ptr",
+                    mangled="_Z8take_ptrP1S",
+                    return_type="void",
+                    params=[Param(name="s", type="S*", pointer_depth=1)],
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+            typedefs={"my_int": "int"},
+            typedefs_qualified={"S::my_int": "int"},
+            typedef_entity_ids={},
+            constants={"FOO": "1"},
+            constant_entity_ids={},
+        )
+
+    def _dwarf_derived(self) -> AbiSnapshot:
+        """NEW: the SAME declarations, DWARF-derived -- ``dwarf_snapshot.py``
+        has always been a real ``kind`` producer."""
+        return AbiSnapshot(
+            library="lib",
+            version="2",
+            from_headers=False,
+            dwarf=DwarfMetadata(has_dwarf=True),
+            functions=[
+                Function(
+                    name="take_ptr",
+                    mangled="_Z8take_ptrP1S",
+                    return_type="void",
+                    params=[
+                        Param(
+                            name="s",
+                            type="S *",
+                            kind=ParamKind.POINTER,
+                            pointer_depth=1,
+                        )
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+        )
+
+    def test_mixed_family_binary_depth_is_no_change(self) -> None:
+        """The exact false-positive class this fix closes: mixing a
+        header-derived side (stripped to L0) with a DWARF-derived side
+        (kept at L1) of the IDENTICAL library must not manufacture a
+        change purely from which side happened to carry richer evidence."""
+        old, new = project_pair_to_depth(
+            self._header_derived(), self._dwarf_derived(), "binary"
+        )
+        result = checker.compare(old, new)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_both_sides_reduced_to_l0_symmetrically(self) -> None:
+        old, new = project_pair_to_depth(
+            self._header_derived(), self._dwarf_derived(), "binary"
+        )
+        assert old.functions[0].params == []
+        assert old.functions[0].return_type == "?"
+        assert new.functions[0].params == []
+        assert new.functions[0].return_type == "?"
+        assert old.types == new.types == []
+
+    def test_typedef_and_constant_identity_sidecars_cleared_symmetrically(
+        self,
+    ) -> None:
+        """The sibling fix: ``typedefs_qualified``/``typedef_entity_ids``/
+        ``constant_entity_ids`` must clear alongside their partner dicts, or
+        a solo, correctly-symmetric ``typedefs``/``constants`` projection
+        still leaves a residual, fully-manufactured TYPEDEF_REMOVED."""
+        old, new = project_pair_to_depth(
+            self._header_derived(), self._dwarf_derived(), "binary"
+        )
+        assert old.typedefs == {}
+        assert old.typedefs_qualified == {}
+        assert old.typedef_entity_ids == {}
+        assert old.constants == {}
+        assert old.constant_entity_ids == {}
+        result = checker.compare(old, new)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+
+    def test_self_comparisons_stay_clean_both_sides(self) -> None:
+        """Neither self-comparison should be affected by the joint-floor
+        computation -- only MIXING the two evidence families should be."""
+        headers = self._header_derived()
+        dwarf = self._dwarf_derived()
+        old_h, new_h = project_pair_to_depth(headers, headers, "binary")
+        assert checker.compare(old_h, new_h).verdict == checker.Verdict.NO_CHANGE
+        old_d, new_d = project_pair_to_depth(dwarf, dwarf, "binary")
+        assert checker.compare(old_d, new_d).verdict == checker.Verdict.NO_CHANGE
+
+    def test_both_sides_genuinely_dwarf_sourced_keeps_structural_facts(self) -> None:
+        """The joint floor must not over-collapse to L0 when BOTH sides
+        really do qualify for L1 -- only a MISMATCH forces the lower rung."""
+        dwarf = self._dwarf_derived()
+        old, new = project_pair_to_depth(dwarf, dwarf, "binary")
+        assert old.functions[0].params[0].kind is ParamKind.POINTER
+        assert old.types != []
+
+    def test_project_snapshot_to_depth_solo_default_is_unchanged(self) -> None:
+        """``project_snapshot_to_depth`` called on its own (no comparison
+        partner) still defaults to the per-snapshot answer -- only
+        ``project_pair_to_depth`` computes a joint one."""
+        projected = project_snapshot_to_depth(self._header_derived(), "binary")
+        assert projected.functions[0].params == []
+        dwarf_projected = project_snapshot_to_depth(self._dwarf_derived(), "binary")
+        assert dwarf_projected.functions[0].params[0].kind is ParamKind.POINTER
+
+
+class TestProjectPairToDepthPreservesDwarfPublicScope:
+    """Codex review, PR #1200: the joint floor above clears model
+    ``types``/``enums`` on BOTH sides when mixing evidence families, which
+    left ``diff_platform._diff_dwarf`` with an empty ``allowed_structs`` and
+    triggered its own "no header model, compare everything" fallback --
+    leaking a private, non-ABI struct's raw DWARF layout into the diff and
+    manufacturing a breaking finding for a struct that was never part of
+    either side's public surface. ``project_pair_to_depth`` must pre-scope
+    the raw ``dwarf.structs``/``.enums`` pool to what was genuinely publicly
+    known before stripping, so that fallback lands on the same, narrower
+    pool a header-present comparison would have used."""
+
+    def _make(
+        self, *, from_headers: bool, private_size: int, public_size: int = 32
+    ) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="lib",
+            version="1" if from_headers else "2",
+            from_headers=from_headers,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    # Part of the public header surface on at least one side
+                    # -- survives the joint scope.
+                    "S": StructLayout(name="S", byte_size=public_size),
+                    # NEVER named in either side's `types` -- a private,
+                    # non-ABI implementation-detail struct DWARF happens to
+                    # carry layout for. Its size genuinely differs between
+                    # old/new (an internal-only change, not a real ABI
+                    # break), which must stay invisible at `--depth binary`.
+                    "Private": StructLayout(name="Private", byte_size=private_size),
+                },
+                enums={
+                    # Same public/private split as the structs above, for
+                    # the sibling `dwarf_enum_scope` filtering branch.
+                    "E": EnumInfo(name="E", underlying_byte_size=4),
+                    "PrivateE": EnumInfo(
+                        name="PrivateE",
+                        underlying_byte_size=4,
+                        members={"A": private_size},
+                    ),
+                },
+            ),
+            types=[RecordType(name="S", kind="struct", size_bits=public_size * 8)]
+            if from_headers
+            else [],
+            enums=[EnumType(name="E", members=[])] if from_headers else [],
+        )
+
+    def test_private_dwarf_only_struct_size_drift_is_not_manufactured(self) -> None:
+        old = self._make(from_headers=True, private_size=8)
+        new = self._make(from_headers=False, private_size=16)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        result = checker.compare(old_p, new_p)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_dwarf_structs_pool_is_scoped_to_public_names(self) -> None:
+        old = self._make(from_headers=True, private_size=8)
+        new = self._make(from_headers=False, private_size=16)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert set(old_p.dwarf.structs) == {"S"}
+        assert set(new_p.dwarf.structs) == {"S"}
+
+    def test_dwarf_enums_pool_is_scoped_to_public_names(self) -> None:
+        """Sibling of the struct-scoping test above, for the identical
+        ``dwarf_enum_scope`` filtering branch."""
+        old = self._make(from_headers=True, private_size=8)
+        new = self._make(from_headers=False, private_size=16)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert set(old_p.dwarf.enums) == {"E"}
+        assert set(new_p.dwarf.enums) == {"E"}
+
+    def test_real_public_struct_size_change_still_detected(self) -> None:
+        """Negative control: the fix must not blind the detector to a real
+        change in a struct that WAS part of the public scope."""
+        old = self._make(from_headers=True, private_size=8, public_size=32)
+        new = self._make(from_headers=False, private_size=8, public_size=64)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        result = checker.compare(old_p, new_p)
+        assert any(
+            c.kind == ChangeKind.STRUCT_SIZE_CHANGED and c.symbol == "S"
+            for c in result.changes
+        )
+
+    def test_neither_side_carries_a_dwarf_block_at_all(self) -> None:
+        """``snap.dwarf is None`` (never populated at all, not merely
+        empty) must not raise when the joint floor tries to pre-scope it --
+        the ``if snap.dwarf is not None:`` guard's own False branch."""
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            dwarf=None,
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            from_headers=True,
+            dwarf=None,
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+        )
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert old_p.dwarf is None
+        assert new_p.dwarf is None
+
+    def test_empty_public_scope_skips_the_filter_entirely(self) -> None:
+        """Neither side names any struct/enum at all -- ``_public_dwarf_
+        scope`` returns empty frozensets, so ``if dwarf_struct_scope:``/
+        ``if dwarf_enum_scope:`` both take their False branch and the raw
+        DWARF pool (whatever it holds) is left untouched, not emptied."""
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={"Internal": StructLayout(name="Internal", byte_size=8)},
+                enums={"IE": EnumInfo(name="IE", underlying_byte_size=4)},
+            ),
+            types=[],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            from_headers=False,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={"Internal": StructLayout(name="Internal", byte_size=16)},
+                enums={"IE": EnumInfo(name="IE", underlying_byte_size=4)},
+            ),
+        )
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert set(old_p.dwarf.structs) == {"Internal"}
+        assert set(new_p.dwarf.structs) == {"Internal"}
+        assert set(old_p.dwarf.enums) == {"IE"}
+        assert set(new_p.dwarf.enums) == {"IE"}
+
+
+class TestAllowDwarfName:
+    """``_allow_dwarf_name`` -- the full-name-or-unqualified-suffix matcher
+    ``project_pair_to_depth`` uses to pre-scope the raw DWARF pool, and
+    ``diff_platform._diff_dwarf``'s own identically-behaved ``_allow_name``
+    mirrors. Exercised directly since every fixture above only ever uses
+    flat (unqualified) names, which never reaches the ``::``-split fallback
+    on its own."""
+
+    def test_full_name_match(self) -> None:
+        assert _allow_dwarf_name("ns::S", frozenset({"ns::S"})) is True
+
+    def test_unqualified_suffix_match(self) -> None:
+        assert _allow_dwarf_name("ns::S", frozenset({"S"})) is True
+
+    def test_no_match(self) -> None:
+        assert _allow_dwarf_name("ns::S", frozenset({"Other"})) is False

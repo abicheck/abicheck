@@ -70,12 +70,13 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..model import AccessLevel, Fact
+from ..model import AccessLevel, Fact, ParamKind
 from ..model.fact_registry import FACT_REGISTRY
 from .fact_schema_versions import (
     _FACT_FIELDS_SCHEMA_VERSION,
     _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS,
     _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
 )
@@ -445,8 +446,7 @@ def apply_case_a_fact_backfill(
     explicitly at construction time and is authoritative. ``evidenced``
     carries the second downgrade reason (see the body and
     :func:`evidenced_producers`): a producer this document shows no trace of
-    cannot have observed a fact only it produces, which no reliability flag
-    expresses.
+    cannot have observed a fact only it produces, which no flag expresses.
 
     ``fact_provenance``/``ast_producer`` carry the third downgrade reason
     (module docstring, "legacy-hybrid backfill blocker"): for a rule whose
@@ -581,6 +581,7 @@ def apply_legacy_fact_backfill(
     header_cv_facts_reliable_value: bool = True,
     clang_restrict_facts_reliable_value: bool = True,
     castxml_var_access_facts_reliable_value: bool = True,
+    param_kind_facts_reliable_value: bool = True,
     clang_field_initializer_facts_reliable_value: bool = True,
     clang_deprecation_facts_reliable_value: bool = True,
     # T9 / ADR-063 Phase 6 item 4: the raw `AbiSnapshot.fact_provenance` map,
@@ -780,6 +781,13 @@ def apply_legacy_fact_backfill(
                 _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
                 castxml_var_access_facts_reliable_value,
                 AccessLevel.PUBLIC,
+            ),
+            CaseAFactRule(
+                "Param",
+                "kind",
+                _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
+                param_kind_facts_reliable_value,
+                ParamKind.VALUE,
             ),
         ),
         evidenced=evidenced,

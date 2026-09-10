@@ -1139,13 +1139,30 @@ FACT_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Param",
         "kind",
-        _OTHER,
-        _OTHER,
+        _FULL,
+        _FULL,
         note=(
-            "The value/pointer/reference/rvalue-ref classification is derived "
-            "from DWARF type tags (`dwarf_snapshot.py`); a header-parsed "
-            "parameter keeps the `value` default and is distinguished by "
-            "`pointer_depth` and its type spelling instead."
+            "ADR-063 Phase 5 (eleventh batch, schema v45): the value/pointer/"
+            "reference/rvalue-ref classification. castxml resolves it "
+            "structurally from its own type graph "
+            "(`extract/headers/castxml/type_resolution.top_level_param_kind`); "
+            "clang has only the rendered `qualType` spelling to work from "
+            "(`extract/headers/clang/param_kind.py`, same spelling-heuristic "
+            "status as its sibling `pointer_depth`). Before this batch, "
+            "neither backend populated it at all -- see "
+            "`AbiSnapshot.param_kind_facts_reliable`."
+        ),
+    ),
+    FactRow(
+        "Param",
+        "kind_fact",
+        _NONE,
+        _NONE,
+        note=(
+            "ADR-063 Phase 5 (eleventh batch): Fact[ParamKind] sibling of "
+            "kind, bridge-derived on both backends the same way "
+            "is_restrict_fact is; guarded by "
+            "AbiSnapshot.param_kind_facts_reliable."
         ),
     ),
     FactRow(

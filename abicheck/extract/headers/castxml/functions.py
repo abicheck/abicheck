@@ -60,6 +60,7 @@ from .type_resolution import (
     is_global_scope,
     pointer_depth,
     resolve_cv_restrict,
+    top_level_param_kind,
     type_name,
 )
 
@@ -256,6 +257,13 @@ def parse_function_params(
                 Param(
                     name=p_name,
                     type=p_type,
+                    # See top_level_param_kind's own docstring: real,
+                    # structural evidence from castxml's type graph, not a
+                    # spelling heuristic. Previously never set at all, so
+                    # every parameter read the dataclass's own resting
+                    # ParamKind.VALUE regardless of its real spelling (see
+                    # AbiSnapshot.param_kind_facts_reliable).
+                    kind=top_level_param_kind(ctx, p_type_id),
                     pointer_depth=p_depth,
                     default=arg.get("default"),
                     # restrict has no ABI/mangling effect (unlike

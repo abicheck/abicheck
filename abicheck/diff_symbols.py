@@ -27,6 +27,7 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
+from .compare.fact_comparison import compare_facts
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -119,6 +120,7 @@ from .model import (
     AccessLevel,
     Function,
     Param,
+    ParamKind,
     RecordType,
     Variable,
     Visibility,
@@ -383,7 +385,23 @@ def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
     """Whether two positionally-matched parameters differ in an ABI-relevant way."""
     if _type_unknown(p_old.type) or _type_unknown(p_new.type):
         return False  # diffing a known type against unknown is meaningless
-    if p_old.kind != p_new.kind:
+    # Gated through compare_facts rather than a bare `p_old.kind !=
+    # p_new.kind`: neither header-AST backend
+    # determined a parameter's indirection kind at all before schema v45
+    # (AbiSnapshot.param_kind_facts_reliable), so every parameter's `kind`
+    # read the dataclass's own resting ParamKind.VALUE -- comparing that raw
+    # default against DWARF's real POINTER/REFERENCE/RVALUE_REF reading
+    # fabricated FUNC_PARAMS_CHANGED for every pointer/reference parameter
+    # whenever a header-derived snapshot was compared against a
+    # DWARF-derived one of the identical, unchanged library. Same shape as
+    # is_restrict/is_va_list's own producer gate (diff_param_qualifiers.py):
+    # a pair whose evidence is incomplete on either side is skipped here,
+    # not read as "confirmed same/different" -- the type-spelling comparison
+    # below (which already renders a pointer/reference in the spelling
+    # itself, e.g. "S*"/"S *") is what still catches a real kind change on
+    # such a pair.
+    kind_cmp = compare_facts(p_old.kind_fact, p_new.kind_fact, ParamKind.VALUE)
+    if kind_cmp.is_comparable and kind_cmp.old_value != kind_cmp.new_value:
         return True
     if canonicalize_type_name(p_old.type) == canonicalize_type_name(p_new.type):
         return False

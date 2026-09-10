@@ -37,6 +37,12 @@ _OMITTED_IS_VA_LIST: bool = cast(bool, _Omitted())
 # same shape as _OMITTED_IS_VA_LIST above (a bare False cannot double as an
 # omission marker), guarded by AbiSnapshot.clang_restrict_facts_reliable.
 _OMITTED_IS_RESTRICT: bool = cast(bool, _Omitted())
+# ADR-063 Phase 5 (eleventh batch): Param.kind's own omission sentinel.
+# ParamKind.VALUE is both this field's resting value and a real answer (a
+# genuine by-value parameter), so -- exactly like AccessLevel.PUBLIC for
+# Variable.access below -- a bare VALUE cannot mark "no producer ever
+# determined this"; guarded by AbiSnapshot.param_kind_facts_reliable.
+_OMITTED_PARAM_KIND: ParamKind = cast("ParamKind", _Omitted())
 # ADR-063 Phase 5 (ninth batch): `Function.deprecated`/`Variable.deprecated`
 # share the identical case-(a) shape -- `None` means "not deprecated" as
 # much as "not captured" (see Function.deprecated's own comment below), so
@@ -55,7 +61,13 @@ _OMITTED_VAR_ACCESS: AccessLevel = cast("AccessLevel", _Omitted())
 class Param:
     name: str
     type: str
-    kind: ParamKind = ParamKind.VALUE
+    # ADR-063 Phase 5 (eleventh batch): private omission sentinel, not a
+    # plain ParamKind.VALUE -- see kind_fact below and __post_init__. Every
+    # existing direct-construction call site that passes a real `kind=`
+    # value is unaffected (bridge_legacy_and_fact backfills Fact.present());
+    # only a caller that omits it entirely now yields Fact.not_collected()
+    # instead of a value indistinguishable from a genuine by-value param.
+    kind: ParamKind = _OMITTED_PARAM_KIND
     default: str | None = None  # has default value (value not preserved)
     pointer_depth: int = 0  # nesting: T=0, T*=1, T**=2
     # ADR-063 Phase 5 (tenth batch): private omission sentinel, not a plain
@@ -72,6 +84,12 @@ class Param:
     is_va_list_fact: Fact[bool] | None = field(default=None, kw_only=True)
     # Fact[bool] sibling of is_restrict -- case (a), see the field's comment.
     is_restrict_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    # Fact[ParamKind] sibling of kind -- case (a), see the field's comment
+    # above. A detector reads this (via compare/fact_comparison.compare_facts),
+    # never the plain kind field, whenever it needs to tell "confirmed
+    # by-value" apart from "no producer ever determined this parameter's
+    # indirection kind" (diff_symbols._params_differ).
+    kind_fact: Fact[ParamKind] | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         self.is_va_list, self.is_va_list_fact = bridge_legacy_and_fact(
@@ -79,6 +97,9 @@ class Param:
         )
         self.is_restrict, self.is_restrict_fact = bridge_legacy_and_fact(
             self.is_restrict, self.is_restrict_fact, _OMITTED_IS_RESTRICT, False
+        )
+        self.kind, self.kind_fact = bridge_legacy_and_fact(
+            self.kind, self.kind_fact, _OMITTED_PARAM_KIND, ParamKind.VALUE
         )
 
 

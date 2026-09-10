@@ -276,6 +276,11 @@
             "value": null
           },
           "kind": "value",
+          "kind_fact": {
+            "diagnostics": [],
+            "status": "not_collected",
+            "value": null
+          },
           "name": "s",
           "pointer_depth": 0,
           "type": "detail::SessionState &"
@@ -304,12 +309,13 @@
   "library": "libdemo.so",
   "macho": null,
   "numpy_capi": null,
+  "param_kind_facts_reliable": true,
   "parsed_with_build_context": false,
   "pe": null,
   "platform": null,
   "python_api": null,
   "python_ext": null,
-  "schema_version": 44,
+  "schema_version": 45,
   "scope_fallback": null,
   "source_mtime": null,
   "source_mtime_epoch": false,

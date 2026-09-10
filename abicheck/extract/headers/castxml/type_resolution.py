@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....model import ParamKind
 from ....name_classification import (
     strip_anonymous_type_location as _strip_anonymous_type_location,
 )
@@ -338,6 +339,43 @@ def pointer_depth_uncached(ctx: CastxmlParserContext, id_: str, depth: int = 0) 
     if el.tag in ("CvQualifiedType", "Typedef"):
         return pointer_depth(ctx, el.get("type", ""), depth + 1)
     return 0
+
+
+def top_level_param_kind(
+    ctx: CastxmlParserContext, id_: str, depth: int = 0
+) -> ParamKind:
+    """*id_*'s own top-level indirection kind: value/pointer/reference/
+    rvalue-reference, straight from castxml's real type-graph structure.
+
+    Mirrors :func:`pointer_depth_uncached`'s exact ``CvQualifiedType``/
+    ``Typedef`` unwrapping so the two stay consistent (a typedef'd pointer
+    counts for both), but distinguishes ``PointerType`` from
+    ``ReferenceType``/``RValueReferenceType`` -- the same distinction
+    ``dwarf_snapshot.py``'s own ``_process_param`` already makes from
+    ``DW_TAG_reference_type``/``DW_TAG_rvalue_reference_type``. Structural,
+    not a spelling heuristic (unlike the clang backend's own ``_param_kind``,
+    which has only the rendered ``qualType`` string to work from): castxml's
+    type graph names the node kind directly, the same way
+    :func:`cv_qualifies_pointer_value` already reads it.
+
+    Before this function existed, castxml never populated ``Param.kind`` at
+    all -- every parameter, pointer or not, read the dataclass's own resting
+    ``ParamKind.VALUE`` (see ``AbiSnapshot.param_kind_facts_reliable``).
+    """
+    if depth > 10 or not id_:
+        return ParamKind.VALUE
+    el = ctx.resolve(id_)
+    if el is None:
+        return ParamKind.VALUE
+    if el.tag == "PointerType":
+        return ParamKind.POINTER
+    if el.tag == "ReferenceType":
+        return ParamKind.REFERENCE
+    if el.tag == "RValueReferenceType":
+        return ParamKind.RVALUE_REF
+    if el.tag in ("CvQualifiedType", "Typedef"):
+        return top_level_param_kind(ctx, el.get("type", ""), depth + 1)
+    return ParamKind.VALUE
 
 
 def underlying_type_name(ctx: CastxmlParserContext, id_: str, depth: int = 0) -> str:

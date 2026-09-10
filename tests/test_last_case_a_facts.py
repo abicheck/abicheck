@@ -640,6 +640,12 @@ class TestEvidencedProducerInvariantAcrossEveryCaseAFact:
             {"is_va_list": False},
             {"is_va_list": True},
         ),
+        # ADR-063 Phase 5 (eleventh batch, schema v45): Param.kind_fact --
+        # the field the "field-by-field conversion complete" v41 note
+        # missed, since it was never flagged as availability-ambiguous in
+        # the first place. Both header-AST backends are affected, matching
+        # is_restrict's own reach.
+        ("Param", "kind", "functions", {"kind": "value"}, {"kind": "pointer"}),
     )
 
     #: Document shapes, one per point in the evidence domain.

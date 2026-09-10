@@ -251,11 +251,9 @@ class AbiSnapshot:
     # that fix has real "false" data, not merely absent data, so it cannot
     # be told apart from a genuine "not const" field by the value alone —
     # only a snapshot-level marker can. False only for a snapshot rehydrated
-    # from a persisted schema_version predating the fix (see
-    # serialization.SCHEMA_VERSION); a freshly-built in-memory snapshot
-    # (dump(), or any snapshot never round-tripped through JSON) defaults
-    # True, since it was necessarily produced by the current, fixed parser
-    # (Codex review, PR #582).
+    # from a persisted schema_version predating the fix (a fresh in-memory
+    # snapshot -- dump(), or one never round-tripped through JSON -- always
+    # defaults True; see serialization.SCHEMA_VERSION; Codex review, PR #582).
     header_cv_facts_reliable: bool = field(default=True, kw_only=True)
 
     # True when this snapshot's deprecated (every surface kind) and
@@ -267,10 +265,9 @@ class AbiSnapshot:
     # ``deprecated=None``/``is_scoped=False`` is indistinguishable by value
     # alone from a genuine "not deprecated"/"not scoped" fact, so only a
     # snapshot-level marker can tell them apart. False only for a snapshot
-    # rehydrated from a persisted pre-v19, clang-producer schema (see
-    # serialization.SCHEMA_VERSION); a freshly-built in-memory snapshot
-    # defaults True, since it was necessarily produced by the current, fixed
-    # parser. Does NOT need to be checked for "castxml" or "hybrid"
+    # rehydrated from a persisted pre-v19, clang-producer schema (a fresh
+    # in-memory snapshot always defaults True; see
+    # serialization.SCHEMA_VERSION). Does NOT need to be checked for "castxml" or "hybrid"
     # producers: castxml's own deprecated/is_scoped extraction predates this
     # field entirely (G28 Phase 1, always reliable), and a hybrid snapshot's
     # per-declaration ``fact_provenance`` already resolves to "castxml" for
@@ -334,9 +331,8 @@ class AbiSnapshot:
     # and, for a class whose vtable differs in slot count/order from the
     # blanket-empty legacy reading, a false ``TYPE_VTABLE_CHANGED`` too).
     # False only for a snapshot rehydrated from a persisted pre-v21,
-    # clang-producer schema (see serialization.SCHEMA_VERSION); a freshly-
-    # built in-memory snapshot defaults True, since it was necessarily
-    # produced by the current, fixed parser. Not needed for "castxml" or
+    # clang-producer schema (a fresh in-memory snapshot always defaults
+    # True -- see serialization.SCHEMA_VERSION). Not needed for "castxml" or
     # "hybrid" producers: castxml's own vtable reconstruction predates this
     # field entirely (always reliable), and DWARF's own vtable/vptr
     # extraction (``dwarf_snapshot.py``) is a wholly separate code path this
@@ -364,9 +360,8 @@ class AbiSnapshot:
     # blanket-False ones. Not needed for "castxml": its own
     # ``_resolve_cv_restrict`` extraction predates this field entirely.
     # False only for a snapshot rehydrated from a persisted pre-v22,
-    # clang/hybrid-producer schema (see serialization.SCHEMA_VERSION); a
-    # freshly-built in-memory snapshot defaults True, since it was
-    # necessarily produced by the current, fixed parser.
+    # clang/hybrid-producer schema (a fresh in-memory snapshot always
+    # defaults True -- see serialization.SCHEMA_VERSION).
     clang_restrict_facts_reliable: bool = field(default=True, kw_only=True)
 
     # True when this snapshot's Param.is_va_list facts are known-reliable
@@ -399,10 +394,9 @@ class AbiSnapshot:
     # this change — see ``dumper_castxml.py``), so a castxml snapshot's
     # blanket False is unconditionally correct-as-"not collected" the same
     # way it always was, on any schema version. False only for a snapshot
-    # rehydrated from a persisted pre-v23, clang-producer schema (see
-    # serialization.SCHEMA_VERSION); a freshly-built in-memory snapshot
-    # defaults True, since it was necessarily produced by the current,
-    # fixed parser.
+    # rehydrated from a persisted pre-v23, clang-producer schema (a fresh
+    # in-memory snapshot always defaults True -- see
+    # serialization.SCHEMA_VERSION).
     clang_va_list_facts_reliable: bool = field(default=True, kw_only=True)
 
     # True when this snapshot's Variable.access facts are known-reliable
@@ -431,10 +425,16 @@ class AbiSnapshot:
     # ``diff_symbols._diff_var_access`` requires ``ast_producer == "castxml"``
     # on both sides rather than consulting this flag for any other producer.
     # False only for a snapshot rehydrated from a persisted pre-v24,
-    # castxml-producer schema (see serialization.SCHEMA_VERSION); a
-    # freshly-built in-memory snapshot defaults True, since it was
-    # necessarily produced by the current, fixed parser.
+    # castxml-producer schema (a fresh in-memory snapshot always defaults
+    # True -- see serialization.SCHEMA_VERSION).
     castxml_var_access_facts_reliable: bool = field(default=True, kw_only=True)
+
+    # True when this snapshot's Param.kind facts are known-reliable when its
+    # own ``from_headers`` is True (schema v45) -- both header-AST backends
+    # left every parameter at the resting ``ParamKind.VALUE`` before this
+    # fix, unlike DWARF (always a real producer). See ``diff_symbols.
+    # _params_differ`` and ``docs/reference/fact-registry.md``.
+    param_kind_facts_reliable: bool = field(default=True, kw_only=True)
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
