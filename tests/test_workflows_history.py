@@ -386,6 +386,9 @@ class TestFindingEvolutionWiring:
         assert second.resolved[0].symbol == "subtract"
 
     def test_to_dict_serializes_evolution_fields(self, tmp_path: Path) -> None:
+        """``PairwiseSummary.to_dict()`` must round-trip the new
+        ``evolution_counts``/``resolved`` fields through JSON, the same way
+        every other field on this struct already does."""
         import json
 
         p1 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("subtract")])
