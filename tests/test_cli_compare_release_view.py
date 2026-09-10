@@ -400,6 +400,35 @@ class TestReleaseViewShowOnly:
         assert lib["findings_truncated_kinds"] == {"func_removed": 15}
         assert "findings_view_truncated_kinds" not in lib
 
+    def test_release_findings_for_render_drops_the_kind_ledger_when_the_filtered_view_is_untruncated(
+        self,
+    ) -> None:
+        """The sibling branch of the previous test, exercised directly:
+        when the filtered view itself was never truncated
+        (``findings_view_truncated`` false), any leftover
+        ``findings_truncated_kinds`` from the unfiltered projection must
+        still be dropped, not left describing a view the render never
+        shows."""
+        from abicheck.cli_compare_release_helpers import _release_findings_for_render
+
+        library_results = [
+            {
+                "library": "libfoo.so",
+                "findings": [{"kind": "func_removed", "symbol": "a"}],
+                "findings_truncated": True,
+                "findings_truncated_kinds": {"func_removed": 5},
+                "findings_view": [{"kind": "func_removed", "symbol": "a"}],
+                "findings_view_truncated": False,
+            }
+        ]
+        rendered = _release_findings_for_render(library_results, "functions")
+        lib = rendered[0]
+        assert lib["findings"] == [{"kind": "func_removed", "symbol": "a"}]
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
+        assert "findings_view" not in lib
+        assert "findings_view_truncated" not in lib
+
     def test_output_dir_summary_json_never_leaks_the_internal_accounting_keys(
         self, tmp_path: Path
     ) -> None:

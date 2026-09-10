@@ -410,3 +410,33 @@ class TestFindingEvolutionWiring:
         assert "evolution_counts" in pairwise_doc
         assert pairwise_doc["evolution_counts"]["not_evaluated"] == 1
         assert pairwise_doc["resolved"] == []
+
+    def test_to_dict_projects_a_non_empty_resolved_list(
+        self, tmp_path: Path
+    ) -> None:
+        """A pair whose own ``resolved`` list is non-empty must serialize
+        each entry through ``_resolved_finding_dict`` -- finding_id/kind/
+        symbol/description/old_value/new_value/source_location -- not just
+        the empty-list case ``test_to_dict_serializes_evolution_fields``
+        already covers."""
+        import json
+
+        p1 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("subtract")])
+        p2 = _save(tmp_path, "2.0.0", [_fn("add")])
+        p3 = _save(tmp_path, "3.0.0", [_fn("add"), _fn("multiply")])
+
+        result = run_history_request([p1, p2, p3])
+        second = result.pairwise[1]
+        assert len(second.resolved) == 1
+
+        doc = json.loads(json.dumps(result.to_dict()))
+        resolved_doc = doc["pairwise"][1]["resolved"]
+        assert len(resolved_doc) == 1
+        entry = resolved_doc[0]
+        assert entry["symbol"] == "subtract"
+        assert entry["kind"] == second.resolved[0].kind.value
+        assert entry["finding_id"]
+        assert set(entry) == {
+            "finding_id", "kind", "symbol", "description",
+            "old_value", "new_value", "source_location",
+        }

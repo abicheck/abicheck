@@ -789,6 +789,101 @@ class TestDirVsDir:
         assert "no matching" in out.lower() or "warning" in out.lower()
 
 
+class TestMaxReleaseFindingsResolver:
+    """Direct unit coverage of ``_resolve_max_release_findings_per_library``/
+    ``_accumulate_release_kind_counts``'s own edge cases -- the CLI-level
+    tests in ``TestDirVsDir`` above only ever exercise the "explicit valid
+    value" and "valid env var" paths; these hit the resolver's other
+    branches (invalid explicit value, malformed/non-positive env var,
+    nothing set) and the accumulator's empty-counter no-op directly."""
+
+    def test_non_positive_explicit_value_raises(self) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _resolve_max_release_findings_per_library,
+        )
+
+        with pytest.raises(ValueError, match="positive integer"):
+            _resolve_max_release_findings_per_library(0)
+        with pytest.raises(ValueError, match="positive integer"):
+            _resolve_max_release_findings_per_library(-5)
+
+    def test_malformed_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+            _resolve_max_release_findings_per_library,
+        )
+
+        monkeypatch.setenv(
+            "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "not-a-number"
+        )
+        assert (
+            _resolve_max_release_findings_per_library(None)
+            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        )
+
+    def test_non_positive_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+            _resolve_max_release_findings_per_library,
+        )
+
+        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "0")
+        assert (
+            _resolve_max_release_findings_per_library(None)
+            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        )
+
+    def test_nothing_set_returns_the_built_in_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+            _resolve_max_release_findings_per_library,
+        )
+
+        monkeypatch.delenv(
+            "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", raising=False
+        )
+        assert (
+            _resolve_max_release_findings_per_library(None)
+            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        )
+
+
+class TestAccumulateReleaseKindCounts:
+    def test_empty_kinds_and_no_existing_entry_is_a_no_op(self) -> None:
+        """The `if counter:` guard must skip setting the field at all when
+        there is nothing to accumulate -- a real branch, since every other
+        call site always passes at least one cut kind."""
+        from abicheck.cli_compare_release_matrix import (
+            _accumulate_release_kind_counts,
+        )
+
+        entry: dict[str, object] = {}
+        _accumulate_release_kind_counts(entry, "findings_truncated_kinds", [])
+        assert "findings_truncated_kinds" not in entry
+
+    def test_accumulates_onto_an_existing_running_dict(self) -> None:
+        """A second call must add to (never replace) a prior call's counts,
+        and the result is always sorted by kind name."""
+        from abicheck.cli_compare_release_matrix import (
+            _accumulate_release_kind_counts,
+        )
+
+        entry: dict[str, object] = {"findings_truncated_kinds": {"func_removed": 2}}
+        _accumulate_release_kind_counts(
+            entry, "findings_truncated_kinds", ["var_removed", "func_removed"]
+        )
+        assert entry["findings_truncated_kinds"] == {
+            "func_removed": 3,
+            "var_removed": 1,
+        }
+
+
 class TestBundleFactsOutStrandedLibraryWarning:
     """The `--bundle-facts-out` stranded-library fallback warns (rather than
     silently persisting a lossy entry) when the real resolve itself fails
