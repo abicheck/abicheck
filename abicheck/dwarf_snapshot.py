@@ -47,6 +47,7 @@ from .dwarf_utils import (
     has_real_dwarf_info,
     resolve_die_ref as _resolve_ref,
     resolve_type_die as _resolve_type_die,
+    unwrap_cv_typedef as _unwrap_cv_typedef,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .extract.dwarf_records import (
@@ -697,8 +698,8 @@ class _DwarfSnapshotBuilder:
         if ptr_depth > 0:
             kind = ParamKind.POINTER
 
-        # Detect reference types
-        type_die = _resolve_type_die(die, CU)
+        # Detect reference types (unwrapped past cv/typedef -- see unwrap_cv_typedef).
+        type_die = _unwrap_cv_typedef(_resolve_type_die(die, CU), CU)
         if type_die is not None:
             if type_die.tag == "DW_TAG_reference_type":
                 kind = ParamKind.REFERENCE

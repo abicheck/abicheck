@@ -51,6 +51,8 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.fact_comparison import FactComparability, compare_facts
+from abicheck.dwarf_utils import unwrap_cv_typedef
+from abicheck.extract.headers.clang.context import qualtype_desugared
 from abicheck.extract.headers.clang.functions import _param_kind
 from abicheck.model import (
     AbiSnapshot,
@@ -212,3 +214,60 @@ class TestClangParamKindSpelling:
     )
     def test_spellings(self, qual_type: str, expected: ParamKind) -> None:
         assert _param_kind(qual_type) is expected
+
+
+class TestQualtypeDesugared:
+    """``context.qualtype_desugared`` -- clang's own typedef-unwrap signal
+    (Codex review, PR #1200): a typedef'd parameter's ``qualType`` is the
+    bare alias name, with no ``&``/``*`` token for ``_param_kind`` to find,
+    so the caller must pass the desugared spelling instead."""
+
+    def test_prefers_desugared_when_present(self) -> None:
+        node = {"type": {"qualType": "Ref", "desugaredQualType": "int &"}}
+        assert qualtype_desugared(node) == "int &"
+
+    def test_falls_back_to_qualtype_when_no_typedef(self) -> None:
+        node = {"type": {"qualType": "int *"}}
+        assert qualtype_desugared(node) == "int *"
+
+    def test_falls_back_when_no_type_at_all(self) -> None:
+        assert qualtype_desugared({}) == ""
+
+    def test_empty_desugared_falls_back_to_qualtype(self) -> None:
+        # Defensive: clang's real output never emits an empty
+        # `desugaredQualType`, but a falsy value must not silently win over
+        # a real `qualType`.
+        node = {"type": {"qualType": "int *", "desugaredQualType": ""}}
+        assert qualtype_desugared(node) == "int *"
+
+
+class TestUnwrapCvTypedef:
+    """``dwarf_utils.unwrap_cv_typedef`` (Codex review, PR #1200): mirrors
+    ``dwarf_snapshot.py``'s own pointer-depth unwrap set
+    (const/volatile/typedef), used so a typedef'd reference/rvalue-reference
+    is recognized the same way a typedef'd pointer already was."""
+
+    class _FakeDie:
+        def __init__(self, tag: str) -> None:
+            self.tag = tag
+
+    def test_unwraps_const_typedef_chain_to_reference(self, monkeypatch) -> None:
+        import abicheck.dwarf_utils as dwarf_utils_module
+
+        ref_die = self._FakeDie("DW_TAG_reference_type")
+        const_die = self._FakeDie("DW_TAG_const_type")
+        typedef_die = self._FakeDie("DW_TAG_typedef")
+        chain = {id(typedef_die): const_die, id(const_die): ref_die}
+        monkeypatch.setattr(
+            dwarf_utils_module,
+            "resolve_type_die",
+            lambda die, CU: chain.get(id(die)),
+        )
+        assert unwrap_cv_typedef(typedef_die, CU=None) is ref_die
+
+    def test_does_not_unwrap_through_pointer(self) -> None:
+        pointer_die = self._FakeDie("DW_TAG_pointer_type")
+        assert unwrap_cv_typedef(pointer_die, CU=None) is pointer_die
+
+    def test_none_input_returns_none(self) -> None:
+        assert unwrap_cv_typedef(None, CU=None) is None

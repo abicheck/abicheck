@@ -102,6 +102,7 @@ from abicheck import checker
 from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface
+from abicheck.checker_policy import ChangeKind
 from abicheck.cli import main
 from abicheck.model import (
     AbiSnapshot,
@@ -934,3 +935,69 @@ class TestProjectPairToDepthJointFloor:
         assert projected.functions[0].params == []
         dwarf_projected = project_snapshot_to_depth(self._dwarf_derived(), "binary")
         assert dwarf_projected.functions[0].params[0].kind is ParamKind.POINTER
+
+
+class TestProjectPairToDepthPreservesDwarfPublicScope:
+    """Codex review, PR #1200: the joint floor above clears model
+    ``types``/``enums`` on BOTH sides when mixing evidence families, which
+    left ``diff_platform._diff_dwarf`` with an empty ``allowed_structs`` and
+    triggered its own "no header model, compare everything" fallback --
+    leaking a private, non-ABI struct's raw DWARF layout into the diff and
+    manufacturing a breaking finding for a struct that was never part of
+    either side's public surface. ``project_pair_to_depth`` must pre-scope
+    the raw ``dwarf.structs``/``.enums`` pool to what was genuinely publicly
+    known before stripping, so that fallback lands on the same, narrower
+    pool a header-present comparison would have used."""
+
+    def _make(
+        self, *, from_headers: bool, private_size: int, public_size: int = 32
+    ) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="lib",
+            version="1" if from_headers else "2",
+            from_headers=from_headers,
+            dwarf=DwarfMetadata(
+                has_dwarf=True,
+                structs={
+                    # Part of the public header surface on at least one side
+                    # -- survives the joint scope.
+                    "S": StructLayout(name="S", byte_size=public_size),
+                    # NEVER named in either side's `types` -- a private,
+                    # non-ABI implementation-detail struct DWARF happens to
+                    # carry layout for. Its size genuinely differs between
+                    # old/new (an internal-only change, not a real ABI
+                    # break), which must stay invisible at `--depth binary`.
+                    "Private": StructLayout(name="Private", byte_size=private_size),
+                },
+            ),
+            types=[RecordType(name="S", kind="struct", size_bits=public_size * 8)]
+            if from_headers
+            else [],
+        )
+
+    def test_private_dwarf_only_struct_size_drift_is_not_manufactured(self) -> None:
+        old = self._make(from_headers=True, private_size=8)
+        new = self._make(from_headers=False, private_size=16)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        result = checker.compare(old_p, new_p)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_dwarf_structs_pool_is_scoped_to_public_names(self) -> None:
+        old = self._make(from_headers=True, private_size=8)
+        new = self._make(from_headers=False, private_size=16)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert set(old_p.dwarf.structs) == {"S"}
+        assert set(new_p.dwarf.structs) == {"S"}
+
+    def test_real_public_struct_size_change_still_detected(self) -> None:
+        """Negative control: the fix must not blind the detector to a real
+        change in a struct that WAS part of the public scope."""
+        old = self._make(from_headers=True, private_size=8, public_size=32)
+        new = self._make(from_headers=False, private_size=8, public_size=64)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        result = checker.compare(old_p, new_p)
+        assert any(
+            c.kind == ChangeKind.STRUCT_SIZE_CHANGED and c.symbol == "S"
+            for c in result.changes
+        )

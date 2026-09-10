@@ -178,6 +178,39 @@ def qualtype(node: dict[str, Any]) -> str:
     return ""
 
 
+def qualtype_desugared(node: dict[str, Any]) -> str:
+    """*node*'s own type, unwrapped past any top-level typedef/alias chain.
+
+    ``type.desugaredQualType`` is present only when it differs from
+    ``qualType`` -- confirmed empirically (real Clang 18
+    ``-ast-dump=json``): absent for an ordinary, non-aliased type; present
+    and already FULLY unwrapped (including through a chain of nested
+    typedefs, ``typedef Ref Ref2;``) whenever the declared type is a type
+    alias. Falls back to :func:`qualtype` when absent, so a caller sees the
+    identical spelling either way for a non-aliased type.
+
+    Exists for ``param_kind`` alone (``param_kind.py``): a spelling
+    heuristic run against the raw, un-desugared ``qualType`` cannot see
+    through a typedef'd pointer/reference/rvalue-reference the way
+    castxml's own type-graph walk (``top_level_param_kind``) already does by
+    construction -- ``typedef int &Ref; void f(Ref);`` spells its
+    ``qualType`` as the bare alias name ``"Ref"``, with no ``&`` token for
+    the heuristic to find at all, so a castxml-derived snapshot (REFERENCE)
+    compared against a clang-derived one of the identical, unchanged
+    declaration (VALUE, the heuristic's blind-spot default) manufactured a
+    false ``FUNC_PARAMS_CHANGED`` (Codex review, PR #1200). Never used for
+    ``Param.type``'s own displayed spelling -- callers keep reading
+    :func:`qualtype` for that, so the alias name a user wrote is still what
+    a report shows.
+    """
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict):
+        desugared = type_obj.get("desugaredQualType")
+        if isinstance(desugared, str) and desugared:
+            return strip_anonymous_type_location(desugared)
+    return qualtype(node)
+
+
 def node_line(node: dict[str, Any]) -> int:
     loc = node.get("loc")
     if isinstance(loc, dict):

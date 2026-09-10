@@ -30,13 +30,18 @@ from abicheck.model import ParamKind
 def param_kind(type_str: str) -> ParamKind:
     """Best-effort top-level indirection kind from a written type spelling.
 
-    ADR-063 Phase 5 (eleventh batch): clang gives us only the rendered
-    ``qualType`` spelling here, not a type-graph node kind the way
-    castxml's ``PointerType``/``ReferenceType``/``RValueReferenceType``
-    tags do (see ``extract/headers/castxml/type_resolution.
-    top_level_param_kind``) -- same spelling-heuristic status as this
-    package's sibling ``_pointer_depth``, and sharing its identical
-    bracket-depth blind spot for a declarator-grouped indirection (e.g.
+    ADR-063 Phase 5 (eleventh batch): clang gives us only a rendered type
+    spelling here, not a type-graph node kind the way castxml's
+    ``PointerType``/``ReferenceType``/``RValueReferenceType`` tags do (see
+    ``extract/headers/castxml/type_resolution.top_level_param_kind``) --
+    same spelling-heuristic status as this package's sibling
+    ``_pointer_depth``. The caller (``functions.py``) passes the DESUGARED
+    spelling (``context.qualtype_desugared``), not the raw ``qualType``, so
+    a typedef'd pointer/reference/rvalue-reference is still recognized --
+    without that, a typedef'd indirection's alias name carries no
+    ``&``/``*`` token at all and this function would silently, wrongly
+    return ``VALUE`` (Codex review, PR #1200). Shares its bracket-depth
+    blind spot for a declarator-grouped indirection (e.g.
     ``int (*)[3]``, pointer-to-array): the ``*``/``&`` sits between literal
     parens there too, so it is skipped the same way ``_pointer_depth``
     already undercounts that shape to 0. Deliberately consistent with that

@@ -214,8 +214,43 @@ def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
     return default_versioned_names(index)
 
 
+def _allow_dwarf_name(name: str, allowed: frozenset[str]) -> bool:
+    """Match *name* against *allowed* by full name or unqualified (last
+    ``::`` component) -- mirrors ``diff_platform._diff_dwarf``'s own
+    ``_allow_name`` matching exactly, so the pre-scoping below and that
+    detector's later re-derivation of the identical scope agree.
+    """
+    return name in allowed or name.split("::")[-1] in allowed
+
+
+def _public_dwarf_scope(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[frozenset[str], frozenset[str]]:
+    """The joint struct/enum name scope ``diff_platform._diff_dwarf`` would
+    derive from *old*/*new*'s own (pre-projection) ``types``/``enums``.
+
+    Computed from the ORIGINAL, un-stripped snapshots, before either side's
+    ``types``/``enums`` are cleared -- see :func:`_strip_header_and_above_
+    evidence`'s own use of this for why a joint, non-DWARF-sourced
+    projection needs it precomputed rather than left to be re-derived from
+    the (by then empty) projected snapshots.
+    """
+    old_opaque = {t.name for t in old.types if getattr(t, "is_opaque", False)}
+    new_opaque = {t.name for t in new.types if getattr(t, "is_opaque", False)}
+    both_opaque = old_opaque & new_opaque
+    struct_scope = ({t.name for t in old.types} | {t.name for t in new.types}) - (
+        both_opaque
+    )
+    enum_scope = {e.name for e in old.enums} | {e.name for e in new.enums}
+    return frozenset(struct_scope), frozenset(enum_scope)
+
+
 def _strip_header_and_above_evidence(
-    snap: AbiSnapshot, *, dwarf_sourced: bool | None = None
+    snap: AbiSnapshot,
+    *,
+    dwarf_sourced: bool | None = None,
+    dwarf_struct_scope: frozenset[str] | None = None,
+    dwarf_enum_scope: frozenset[str] | None = None,
 ) -> None:
     """Blank every L2+ (header-AST) fact on *snap*, in place.
 
@@ -238,6 +273,43 @@ def _strip_header_and_above_evidence(
     --depth`` or a single-snapshot caller with no comparison partner — still
     defaults to the per-snapshot answer, which is the only question that
     makes sense with no other side to agree with.
+
+    **Why a caller ever passes *dwarf_struct_scope*/*dwarf_enum_scope*
+    explicitly:** when *dwarf_sourced* is ``False``, this function clears
+    *snap*'s own model ``types``/``enums`` to ``[]`` but, by this module's
+    own documented scope, never touches *snap*'s raw ``snap.dwarf.structs``/
+    ``.enums`` — those stay "deliberately out of scope" so
+    ``diff_platform._diff_dwarf`` can keep reading them directly. That
+    detector derives its own struct/enum name scope from
+    ``old.types``/``new.types`` and falls back to comparing **every** raw
+    DWARF struct/enum, unscoped, whenever that derived scope comes up empty
+    ("If the header model is absent... fall back to comparing all DWARF
+    types", that function's own comment) — a real fallback for a genuinely
+    header-absent snapshot, but a false trigger here: BOTH sides' model
+    ``types`` are empty only because this projection just cleared them, not
+    because no header model ever existed, so private/internal DWARF-only
+    structs (whose layout was never part of either side's public surface)
+    leaked into the layout diff and could manufacture a breaking
+    ``STRUCT_SIZE_CHANGED`` under ``--depth binary`` on two mixed-evidence
+    dumps of the identical, unchanged library (Codex review, PR #1200) — a
+    regression :func:`project_pair_to_depth`'s own joint-floor fix
+    introduced: independently-computed per-side scoping used to leave at
+    least the DWARF-sourced side's ``types`` non-empty (kept wholesale, per
+    the ``if dwarf_sourced:`` branch below), which alone kept
+    ``allowed_structs`` non-empty and the fallback from ever triggering in a
+    mixed pair; the joint floor now strips BOTH sides together, losing that
+    accidental scope. When given (:func:`project_pair_to_depth` precomputes
+    them, from the ORIGINAL un-stripped snapshots, via
+    :func:`_public_dwarf_scope`, only in the branch that actually needs
+    them), this function pre-filters *snap*'s own raw ``dwarf.structs``/
+    ``.enums`` down to that joint scope instead of leaving them untouched —
+    so even though ``_diff_dwarf``'s own later re-derivation still comes up
+    empty and still takes its "compare everything" fallback path, the pool
+    it falls back to has already been reduced to what was genuinely publicly
+    known before projection, not the raw, unscoped DWARF universe. A solo
+    :func:`project_snapshot_to_depth` call (no comparison partner, so no
+    scope to pass) leaves ``snap.dwarf`` exactly as untouched as before —
+    this only ever narrows, never widens, what a caller already saw.
 
     A function/variable with ``Visibility.HIDDEN`` (a real, non-exported
     header-only declaration, never a fact a binary-only view could see at
@@ -296,6 +368,28 @@ def _strip_header_and_above_evidence(
         # masking finally visible).
         snap.typedefs_qualified = {}
         snap.typedef_entity_ids = {}
+
+        # See this function's own docstring ("Why a caller ever passes
+        # *dwarf_struct_scope*/*dwarf_enum_scope* explicitly"): pre-scope
+        # the raw DWARF layout pool to what was genuinely publicly known
+        # before `types`/`enums` above were just cleared, so
+        # `diff_platform._diff_dwarf`'s own later fallback-to-everything
+        # (triggered because its own scope derivation now sees empty
+        # `types`/`enums` on both sides) falls back to a pool that was
+        # already reduced, not the raw, unscoped DWARF universe.
+        if snap.dwarf is not None:
+            if dwarf_struct_scope:
+                snap.dwarf.structs = {
+                    k: v
+                    for k, v in snap.dwarf.structs.items()
+                    if _allow_dwarf_name(k, dwarf_struct_scope)
+                }
+            if dwarf_enum_scope:
+                snap.dwarf.enums = {
+                    k: v
+                    for k, v in snap.dwarf.enums.items()
+                    if _allow_dwarf_name(k, dwarf_enum_scope)
+                }
 
     snap.constants = {}
     # Sidecar keyed exactly like `constants` (same docstring as above) --
@@ -394,7 +488,12 @@ def _project_build_source_pack(
 
 
 def project_snapshot_to_depth(
-    snap: AbiSnapshot, depth: str | None, *, dwarf_sourced: bool | None = None
+    snap: AbiSnapshot,
+    depth: str | None,
+    *,
+    dwarf_sourced: bool | None = None,
+    dwarf_struct_scope: frozenset[str] | None = None,
+    dwarf_enum_scope: frozenset[str] | None = None,
 ) -> AbiSnapshot:
     """Return a copy of *snap* capped to what an explicit ``--depth`` requested.
 
@@ -419,6 +518,12 @@ def project_snapshot_to_depth(
     JOINT answer instead. ``None`` (the default) keeps this function's own
     long-standing single-snapshot behavior, correct for a caller with no
     comparison partner to agree with.
+
+    *dwarf_struct_scope*/*dwarf_enum_scope*, when given, pre-scope *snap*'s
+    own raw ``dwarf.structs``/``.enums`` before ``types``/``enums`` are
+    cleared — see :func:`_strip_header_and_above_evidence`'s own docstring
+    for why :func:`project_pair_to_depth` passes these explicitly and a solo
+    caller (no comparison partner, so no joint scope to compute) never does.
     """
     if depth is None:
         return snap
@@ -432,7 +537,12 @@ def project_snapshot_to_depth(
 
     out = copy.deepcopy(snap)
     if rank < headers_rank:
-        _strip_header_and_above_evidence(out, dwarf_sourced=dwarf_sourced)
+        _strip_header_and_above_evidence(
+            out,
+            dwarf_sourced=dwarf_sourced,
+            dwarf_struct_scope=dwarf_struct_scope,
+            dwarf_enum_scope=dwarf_enum_scope,
+        )
     if rank < build_rank:
         out.build_mode = None
     if out.build_source is not None:
@@ -505,15 +615,43 @@ def project_pair_to_depth(
     overwhelmingly common case: no explicit ``--depth`` given) never pays
     for, or risks failing on, a `.dwarf`/`.from_headers` read this call
     would otherwise never need at all.
+
+    When the joint answer comes out ``False`` (at least one side is
+    header-derived), this also precomputes the joint public struct/enum name
+    scope (:func:`_public_dwarf_scope`, from the ORIGINAL, un-stripped
+    *old*/*new*) and passes it to both sides' own projection — see
+    :func:`_strip_header_and_above_evidence`'s own docstring ("Why a caller
+    ever passes *dwarf_struct_scope*/*dwarf_enum_scope* explicitly") for the
+    regression this closes: the joint floor above, by stripping BOTH sides'
+    model ``types``/``enums`` together, removes the one thing that used to
+    keep ``diff_platform._diff_dwarf``'s own scope derivation from coming up
+    empty and falling back to comparing every raw DWARF struct/enum
+    unscoped.
     """
     dwarf_sourced: bool | None = None
+    dwarf_struct_scope: frozenset[str] | None = None
+    dwarf_enum_scope: frozenset[str] | None = None
     if depth is not None:
         lowered = depth.lower()
         if lowered in DEPTH_RANK and DEPTH_RANK[lowered] < DEPTH_RANK["headers"]:
             dwarf_sourced = _structural_facts_are_dwarf_confirmed(
                 old
             ) and _structural_facts_are_dwarf_confirmed(new)
+            if not dwarf_sourced:
+                dwarf_struct_scope, dwarf_enum_scope = _public_dwarf_scope(old, new)
     return (
-        project_snapshot_to_depth(old, depth, dwarf_sourced=dwarf_sourced),
-        project_snapshot_to_depth(new, depth, dwarf_sourced=dwarf_sourced),
+        project_snapshot_to_depth(
+            old,
+            depth,
+            dwarf_sourced=dwarf_sourced,
+            dwarf_struct_scope=dwarf_struct_scope,
+            dwarf_enum_scope=dwarf_enum_scope,
+        ),
+        project_snapshot_to_depth(
+            new,
+            depth,
+            dwarf_sourced=dwarf_sourced,
+            dwarf_struct_scope=dwarf_struct_scope,
+            dwarf_enum_scope=dwarf_enum_scope,
+        ),
     )
