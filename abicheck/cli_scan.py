@@ -822,10 +822,13 @@ def _discover_scan_project_config(
     default=None,
     help="Evidence depth to collect -- the single dial, named by what you get: "
     "binary (symbols only), headers (+header AST), build (+build context), "
-    "source (+source replay & call graph). Omit for 'auto' (risk-driven when a "
-    "--since/--changed-path seed is present, else a sensible default). "
-    "--depth source uses changed-path scope when --since/--changed-path is "
-    "given, else the current library target -- never a zero-TU no-op.",
+    "source (+source replay & call graph). Omitting it means 'headers', the "
+    "same fixed default `compare` uses -- pin build or source explicitly to "
+    "collect them (through 2026-09-09 an omitted --depth was risk-scored from "
+    "the --since/--changed-path seed and could escalate on its own; ADR-068 "
+    "retired that). --depth source uses changed-path scope when "
+    "--since/--changed-path is given, else the current library target -- "
+    "never a zero-TU no-op.",
 )
 @click.option(
     "--since",

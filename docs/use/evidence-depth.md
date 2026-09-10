@@ -457,13 +457,13 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   --sources new=. --since origin/main --depth source
 ```
 
-- **Depth:** pinned explicitly here (`--depth source`) since `compare` has
-  no risk-driven `auto` selection — omitting `--depth` never picks a rung by
-  risk, but with `--sources new=.` already given (as above) it would still
-  infer `source-target` from that input, not `headers`; the pin exists for
+- **Depth:** pinned explicitly here (`--depth source`). Omitting `--depth`
+  never picks a rung by risk on either command any more, but with
+  `--sources new=.` already given (as above) `compare` would still infer
+  `source-target` from that input rather than `headers`; the pin exists for
   reproducibility, not because omitting it would fall back to `headers`
-  here. On `scan`, by contrast, omitting `--depth` with a diff seed present
-  resolves to `auto`'s risk-driven `source`.
+  here. On `scan`, omitting `--depth` *does* now mean `headers` — it infers
+  nothing from `--sources`, and no longer escalates from a diff seed.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
   break. `--budget` overflow (exit `5`) applies to both `compare` and `scan`
   — see [Exit Codes](../reference/exit-codes.md).
@@ -605,15 +605,21 @@ abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
 
 ### Omitting `--depth` — `auto`, and why it is not risk-driven any more
 
-Omitting `--depth` on `scan` resolves `auto` deterministically, from the mode
-preset alone. Through 2026-09-09 it also read a *risk score* over the changed
-paths and could escalate further; ADR-068's second amendment retired that
-(ruling (b)), along with the `--risk-rules` profile that configured it. The
-preset was never *narrower* than the risk-scored choice, so nothing a run
-used to detect goes undetected — what is gone is the occasional automatic
-escalation past it. **Pin `--depth source` (or `build`) explicitly** if you
-want a deeper rung on every run; that was always the advice for CI, and it is
-now the only way to ask.
+Omitting `--depth` on `scan` resolves `auto` to the fixed `headers` rung —
+the same default `compare` has always used. Through 2026-09-09 it read a
+*risk score* over the changed paths and escalated on its own; ADR-068's
+second amendment retired that (ruling (b)), along with the `--risk-rules`
+profile that configured it.
+
+> **This can hide findings a previous run reported.** A seeded scan whose
+> changed paths scored high used to escalate to `build`/`source` by itself,
+> so an unpinned run could report build- or source-only findings. It no
+> longer does. If a `scan` step relied on that escalation, **pin
+> `--depth source` (or `build`) explicitly** — that was always the advice for
+> a reproducible CI depth, and it is now the only way to ask for those
+> layers. This is the documented breaking change the amendment accepted: a
+> depth that is fixed and legible beats one that silently varied with the
+> diff.
 
 ```bash
 abicheck scan new.so -H include/ --depth source --since origin/main

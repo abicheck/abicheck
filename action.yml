@@ -446,11 +446,16 @@ inputs:
   depth:
     description: >
       Evidence-depth selector: binary, headers, build, or source. Used by
-      scan and dump modes, and by compare mode (--depth). In scan mode, omit
-      it for 'auto' (risk-driven); --depth source analyses the whole current
-      library target unless since/changed-path seeds a narrower changed
-      scope. Maps to --depth. (The deprecated scan-mode/source-method inputs
-      have been removed; use depth.)
+      scan and dump modes, and by compare mode (--depth). Omitting it means
+      'headers' in scan mode — set it to build or source explicitly to
+      collect those, since scan no longer escalates on its own (through
+      2026-09-09 an omitted depth was risk-scored from the since/changed-path
+      seed; ADR-068's second 2026-09-09 amendment retired that along with
+      risk-rules, so a workflow relying on the escalation must now pin the
+      rung it needs). --depth source analyses the whole current library
+      target unless since/changed-path seeds a narrower changed scope. Maps
+      to --depth. (The deprecated scan-mode/source-method inputs have been
+      removed; use depth.)
     required: false
   since:
     description: >

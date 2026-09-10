@@ -190,7 +190,7 @@ clang); without it the scan degrades gracefully and L0–L2 stay authoritative.
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
 | `allow-build-query` | — | Deprecated and ignored (the `--allow-build-query` dump flag it fed was always a no-op and has since been removed outright). Kept registered only for back-compat with an existing workflow that still sets it. |
-| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omit in scan mode for `auto` (risk-driven). |
+| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omitting it in scan mode means `headers` — pin `build`/`source` explicitly, since scan no longer escalates from the changed-path seed (ADR-068 (b)). |
 | `against` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). Maps to `--against`. Omit it (and `abi-baseline`) on a step to run a single-build hygiene lint instead — `scan` already runs audit-only whenever no baseline is given. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |

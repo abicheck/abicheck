@@ -125,7 +125,7 @@ jobs:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          depth: source   # pin the source-ABI replay -- compare has no risk-driven auto (see below)
+          depth: source   # pin the source-ABI replay -- nothing escalates on its own (see below)
           since: origin/${{ github.base_ref }}   # focus on changed files
           fail-on-api-break: true       # gate on source/API breaks too
 ```
@@ -138,12 +138,13 @@ base ref is available.
 ### Pin the depth
 
 `depth` is the single evidence-depth dial, and `mode: compare` reads the same
-values `mode: scan` does. Pin it for reproducible CI — unlike `scan`,
-`compare` has no risk-driven `auto` rung yet (plan §3 row 13). Omitting
-`depth` is not itself risk-based selection either way: `compare` infers
-`source`/`build` from whichever of `sources`/`build-info` is supplied with no
-`depth` pinned, and only bottoms out at `headers` when neither is given —
-never the risk-scored choice `auto` makes.
+values `mode: scan` does. **Pin it** — neither command escalates on its own
+any more (ADR-068's second 2026-09-09 amendment retired `scan`'s risk-driven
+`auto`, ruling (b), so a `mode: scan` step that relied on it now gets
+`headers` and must pin the rung it needs). Omitting `depth` is not risk-based
+selection either way: `compare` infers `source`/`build` from whichever of
+`sources`/`build-info` is supplied, and bottoms out at `headers` when neither
+is given; `scan` always resolves to `headers`.
 
 **`compare`'s pinned depth is not a contract the way `scan`'s is.** `scan
 --depth source` with no `--sources`/`--build-info` given hard-fails before
