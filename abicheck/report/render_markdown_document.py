@@ -255,9 +255,7 @@ def build_review_digest_document(
             else digest.disposition_audit.to_dict()
         ),
         "surface_changes": (
-            None
-            if digest.surface_changes is None
-            else digest.surface_changes.to_dict()
+            None if digest.surface_changes is None else digest.surface_changes.to_dict()
         ),
     }
     return ReportDocument.from_mapping(d)
@@ -745,7 +743,12 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append("")
         lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
     lines += render_footer()
-    text = "\n".join(lines)
+    # New defect 5 fix: every Markdown report format must end with a
+    # trailing newline (POSIX text-file convention; `render_review_digest`
+    # in `render_markdown.py` already follows it via `.rstrip() + "\n"`) --
+    # a bare `"\n".join(lines)` never carried one, since `render_footer()`'s
+    # own last element has no trailing blank-line entry.
+    text = "\n".join(lines).rstrip() + "\n"
     if d["demangle"]:
         from ..demangle import demangle_text
 
