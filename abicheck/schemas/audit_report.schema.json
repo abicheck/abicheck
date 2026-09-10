@@ -9,6 +9,7 @@
     "no_baseline",
     "library",
     "verdict",
+    "old_acquisition_state",
     "changes",
     "findings",
     "exit_code"

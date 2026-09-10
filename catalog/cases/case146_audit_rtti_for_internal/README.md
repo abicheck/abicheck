@@ -5,13 +5,15 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE`, but the audit flags an
-advisory finding: `_ZTI12InternalNode`/`_ZTV12InternalNode` (the C++
-typeinfo and vtable for `InternalNode`) are both exported from the dynamic
-symbol table, but `InternalNode` is declared **only in a private header** —
-`render()` is the sole function the public headers actually declare.
-Consumers can't name `InternalNode` in their own code, so they can't be
-handed one directly, but the exported RTTI still lets any code that obtains
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
+D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+COMPATIBLE classification above describes the case, not the command's output.)
+The audit flags an advisory finding: `_ZTI12InternalNode`/`_ZTV12InternalNode`
+(the C++ typeinfo and vtable for `InternalNode`) are both exported from the
+dynamic symbol table, but `InternalNode` is declared **only in a private
+header** — `render()` is the sole function the public headers actually
+declare. Consumers can't name `InternalNode` in their own code, so they can't
+be handed one directly, but the exported RTTI still lets any code that obtains
 an `InternalNode*` polymorphically (e.g. via a base-class pointer returned
 from elsewhere in the library) run `dynamic_cast`/`typeid` against it. That
 couples consumer binaries to an internal class's identity without the

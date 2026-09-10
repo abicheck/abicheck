@@ -174,11 +174,22 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
 
 @dataclass(frozen=True)
 class NoBaselineDocument:
-    """The one frozen, plain-value audit document every format projects.
+    """The one frozen audit document every format projects.
 
     Holds resolved values only -- no ``DiffResult``, no live policy
     objects -- so a renderer cannot re-derive a verdict or reach past what
     the compute half decided.
+
+    **What "frozen" does and does not buy** (CodeRabbit review). ``frozen=
+    True`` and the tuple-typed collections stop a renderer from rebinding a
+    field or reordering a finding list. They do not deep-freeze the
+    ``Change`` each :class:`~abicheck.report.finding.ReportFinding` carries,
+    which is an ordinary mutable dataclass -- the same one every other
+    ``compute_*``/``render_*`` pair in this package hands to its renderers.
+    Deep-copying it here would fork that shared shape for one command and
+    silently double a large report's allocation, so the barrier this class
+    actually enforces is *structural* (no verdict, no policy object, nothing
+    to re-derive from) rather than a memory-level guarantee.
     """
 
     library: str

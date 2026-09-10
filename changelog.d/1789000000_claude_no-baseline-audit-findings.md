@@ -8,6 +8,23 @@
   `compare` would. Resolved through the same function at the same
   CLI > config > default precedence, and `--config` is accepted rather than
   rejected, since the discovered file is now honored.
+- **The audit honors `.abicheck.yml`'s suppression *acceptance* rules.**
+  `suppression.require_justification` and `suppression.strict` decide
+  whether a suppression document may be used at all, and the audit resolved
+  the project config without reading either — so a reasonless or
+  long-expired rule that ordinary `compare` rejects was accepted, suppressed
+  the finding, and exited `0`. Both settings now reach the audit's real run
+  *and* its `--dry-run` validation load, so a preview cannot approve a run
+  that then cannot start.
+- **A saved ABICC Perl dump is exempt from the `--depth` floor, like any
+  other pre-built ABI description.** `--depth build`/`--depth source` is a
+  floor for live extraction, not a ceiling for a description someone already
+  wrote down, but the carve-out recognized only `.abi.json` and
+  `ProjectSnapshot` packages — so `--depth source` exited `7` on a saved
+  ABICC dump and `0` on the equivalent `.abi.json`. A `Module.symvers`
+  manifest and a bare BTF/CTF blob stay on the raw-evidence side, where the
+  floor still applies. Applies to two-sided `compare` too, through the same
+  shared predicate.
 - **SARIF says why a gated audit exited.** The coverage ledger reaches the
   `toolExecutionNotifications` array (SARIF's shape for "the run itself was
   limited") and the run's properties, and the exit-code description names
@@ -116,7 +133,7 @@
   `--old-variant`/`--new-variant`, `--bundle-facts-*`,
   `--since`/`--changed-path`, `--select`/`--select-required`,
   `--output-dir`, `--abi3`, `--budget`, `--severity-preset`, `--pack`,
-  `--config`, `--instantiation-manifest`, `--follow-deps`, `--search-path`,
+  `--instantiation-manifest`, `--follow-deps`, `--search-path`,
   `--ld-library-path`, `--debug-info` and `--devel-pkg`.
 
 - **A suppressed finding no longer disappears from a `--no-baseline`

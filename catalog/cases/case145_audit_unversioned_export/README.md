@@ -5,15 +5,17 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE`, but the audit flags an
-advisory finding: the library defines a symbol-versioning scheme
-(`DEMO_1.0` in `.gnu.version_d`) for `demo_init`/`demo_run`, yet a third
-export, `demo_experimental`, ships with **no version node at all**. Once
-consumers link against the bare (unversioned) `demo_experimental` symbol,
-the library has no way to later ship an incompatible `demo_experimental`
-under a new version node the way it can for the versioned symbols — the
-usual "add `DEMO_2.0`, keep `DEMO_1.0` for old binaries" escape hatch
-doesn't exist for a symbol that was never versioned in the first place.
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
+D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+COMPATIBLE classification above describes the case, not the command's output.)
+The audit flags an advisory finding: the library defines a symbol-versioning
+scheme (`DEMO_1.0` in `.gnu.version_d`) for `demo_init`/`demo_run`, yet a
+third export, `demo_experimental`, ships with **no version node at all**. Once
+consumers link against the bare (unversioned) `demo_experimental` symbol, the
+library has no way to later ship an incompatible `demo_experimental` under a
+new version node the way it can for the versioned symbols — the usual "add
+`DEMO_2.0`, keep `DEMO_1.0` for old binaries" escape hatch doesn't exist for a
+symbol that was never versioned in the first place.
 
 ## What this snapshot contains
 

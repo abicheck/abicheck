@@ -586,11 +586,29 @@ def test_a_coverage_gated_audit_publishes_the_ledger_that_gated_it() -> None:
     assert body["contract_coverage_failures"] == [
         dict(f) for f in doc.coverage_failures
     ]
-    if exit_code:
-        assert body["contract_coverage_failures"], (
-            "a run gated on the coverage axis must list what fell short; "
-            "publishing only the contribution is the defect this closes"
-        )
+    # The half above proves a *closed* domain still publishes the ledger
+    # (`[]`). The gated half needs a fixture that really is short of
+    # evidence -- `case143` closes `public` cleanly, so guarding this on
+    # `if exit_code:` made the assertion unreachable and it never ran
+    # (CodeRabbit review). Assert the gate fires first, then what it must
+    # publish.
+    gated = run_no_baseline_compare(
+        resolve_no_baseline_candidate(
+            example_catalog.case_dir("case145_audit_unversioned_export")
+            / "snapshot.abi.json"
+        ),
+        contract_evaluation=True,
+        contract_mode="public",
+    )
+    gated_payload, gated_exit = render_no_baseline(gated, "json")
+    assert gated_exit != 0, (
+        "case145 under `--contract public` is this suite's gated fixture; "
+        "if it stopped gating, this test proves nothing"
+    )
+    assert json.loads(gated_payload)["contract_coverage_failures"], (
+        "a run gated on the coverage axis must list what fell short; "
+        "publishing only the contribution is the defect this closes"
+    )
 
 
 def test_a_run_without_a_contract_omits_the_ledger_entirely() -> None:

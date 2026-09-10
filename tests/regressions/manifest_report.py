@@ -63,7 +63,12 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_markdown_cell.py",
             "tests/test_no_baseline_report_formats.py",
         ),
-        public_surfaces=("cli",),
+        # `()` and not `("cli",)`: both seed tests call the renderers and the
+        # escaper directly, never through Click or `abicheck.service`. A
+        # claimed surface a seed test does not reach conceals exactly the
+        # missing cross-surface coverage this registry exists to surface
+        # (CodeRabbit review; the same rule Codex established in PR #885).
+        public_surfaces=(),
         axes={
             "hostile_character": (
                 "pipe",
@@ -72,7 +77,11 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "newline",
                 "control",
             ),
-            "renderer": ("comparison-scope-table", "audit-findings-table"),
+            # Only what a seed test really renders. The scope table shares
+            # the escaper but no seed test drives a hostile value through
+            # it, so listing it here would overstate coverage -- recorded as
+            # a known gap below instead (CodeRabbit review).
+            "renderer": ("audit-findings-table",),
         },
         known_gaps=(
             KnownGap(
@@ -83,6 +92,16 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                     "no gate asserts that a renderer interpolating an "
                     "untrusted value uses an escaper at all — a new renderer "
                     "can still interpolate one raw."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+            KnownGap(
+                description=(
+                    "`report/comparison_scope.py`'s scope tables route "
+                    "through the same shared escaper, but no seed test "
+                    "renders a hostile value through that table -- the "
+                    "escaper's own contract is covered, the scope table's "
+                    "use of it is covered only by construction."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md",
             ),

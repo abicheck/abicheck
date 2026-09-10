@@ -18,15 +18,19 @@
 ## Verdict and consumer impact
 
 This is a **single-release audit** (ADR-035 "G20" corpus): there is no v1/v2
-pair to diff, just one build's evidence checked against itself. abicheck's
-verdict is `COMPATIBLE` — nothing here is a break today — but the audit flags
-an advisory ABI-hygiene finding: `debug_dump()` ships with default ELF
-visibility (so it's in the dynamic symbol table, and any consumer can `dlsym`
-or link against it) yet it is never declared in a public header. Whoever
-maintains this library believes `debug_dump()` is private and free to change
-or remove at will; in reality it's already load-bearing ABI for anyone who
-found it in `nm -D libdemo.so`. The fix belongs in *this* release, not after
-a consumer files a breakage report against a "private" function.
+pair to diff, just one build's evidence checked against itself. abicheck
+reports **no verdict at all** (`"verdict": null`): ADR-068 D2 — a single build
+has nothing to be compatible *with*, so the audit answers what is *present*,
+not whether something broke. (The catalog's own 🟢 COMPATIBLE classification
+above is a statement about the case, not about the command's output: nothing
+here is a break today.) The audit flags an advisory ABI-hygiene finding:
+`debug_dump()` ships with default ELF visibility (so it's in the dynamic
+symbol table, and any consumer can `dlsym` or link against it) yet it is never
+declared in a public header. Whoever maintains this library believes
+`debug_dump()` is private and free to change or remove at will; in reality
+it's already load-bearing ABI for anyone who found it in `nm -D libdemo.so`.
+The fix belongs in *this* release, not after a consumer files a breakage
+report against a "private" function.
 
 ## What this snapshot contains
 
