@@ -36,6 +36,8 @@ from typing import TYPE_CHECKING
 from .disposition_types import Disposition
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from datetime import date
+
     from ..checker_types import Change, DiffResult
 
 
@@ -49,20 +51,26 @@ class _GateContext:
     ``gate_contribution_for_change`` and ``effective_verdict_for_change``
     want them. Hoisting cut the closing pass from ~19% of a 2000-symbol
     ``compare()`` to a fraction of that, with no change to any answer -- the
-    values are constant for the whole pass by construction.
+    values are constant for the whole pass by construction. ``today``
+    (Codex review, fresh evidence) is carried the same way: a caller closing
+    an already-frozen ``ReportEnvelope``'s ledger passes its own captured
+    date once here, rather than every per-change call below re-resolving a
+    fresh ``date.today()``.
     """
 
     policy: str | None
     kind_sets: object | None
     policy_file: object | None
+    today: date | None = None
 
     @classmethod
-    def of(cls, result: DiffResult) -> _GateContext:
+    def of(cls, result: DiffResult, *, today: date | None = None) -> _GateContext:
         kind_sets_of = getattr(result, "_effective_kind_sets", None)
         return cls(
             policy=getattr(result, "policy", None),
             kind_sets=kind_sets_of() if callable(kind_sets_of) else None,
             policy_file=getattr(result, "policy_file", None),
+            today=today,
         )
 
 
@@ -118,5 +126,6 @@ def _kept_disposition(
         policy=gate.policy,
         kind_sets=gate.kind_sets,  # type: ignore[arg-type]
         policy_file=gate.policy_file,
+        today=gate.today,
     )
     return Disposition.GATING if contribution > 0 else Disposition.NON_GATING

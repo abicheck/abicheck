@@ -189,7 +189,7 @@ def build_report_document(
         today=today,
     )
     _add_suppression(d, result)
-    _add_disposition_audit(d, result, severity_config)
+    _add_disposition_audit(d, result, severity_config, today=today)
     _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
     _add_pattern_preprocessor_scan(d, result)
@@ -202,6 +202,7 @@ def build_report_document(
         require_complete_analysis=require_complete_analysis,
         severity_config=severity_config,
         include_exit_decision=include_exit_decision,
+        today=today,
     )
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)

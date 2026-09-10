@@ -1357,6 +1357,63 @@ class TestRendererOrderIndependence:
         assert json_out["policy_reclassify"], "expired rule dropped from disclosure"
         assert json_out["severity"]["categories"]["abi_breaking"]["count"] == 0
 
+    def test_json_document_exit_and_annotations_reuse_the_envelope_s_captured_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: with a severity configuration in
+        effect, ``_add_contract_context``'s ``exit`` block
+        (``resolve_compare_exit_decision_with_abort_axes`` ->
+        ``compute_exit_code``) and ``add_annotations``
+        (``annotation_report_entries`` -> ``_collect_annotations_detailed``)
+        still had no way to receive ``today`` even after the whole-document
+        fix above -- both independently resolved a fresh ``date.today()``.
+        Reproduced: a compatible finalized finding and
+        ``severity.exit_code: 0`` alongside a top-level ``exit.code: 4`` and
+        an ``::error``-level annotation, because those two helpers observed
+        the post-expiry date the rest of the document had already moved
+        past. ``today`` is now threaded through both.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        with mock.patch("abicheck.report.build.date") as fake_build_date, mock.patch(
+            "abicheck.policy.selectors.date"
+        ) as fake_selectors_date:
+            fake_build_date.today.return_value = captured_today
+            fake_selectors_date.today.return_value = captured_today + timedelta(days=2)
+            envelope = build_report_envelope(
+                result, old, new, severity_config=SeverityConfig()
+            )
+
+        assert envelope.resolved_today == captured_today
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert json_out["severity"]["exit_code"] == 0
+        assert json_out["exit"]["code"] == 0
+        assert not any(
+            "::error" in entry["annotation"] for entry in json_out["annotations"]
+        )
+
 
 class TestSarifAndJunitDecisionBoundary:
     """ADR-061 Phase 2 gap C acceptance test: a guard for SARIF's and

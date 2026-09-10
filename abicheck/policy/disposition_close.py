@@ -52,6 +52,8 @@ from .disposition_ledger import (
 from .rule_provenance import RuleProvenance, rule_provenance
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from datetime import date
+
     from ..checker_types import Change, DiffResult
     from ..suppression import Suppression
 
@@ -306,12 +308,9 @@ def _record_bucket(
 
 
 def finalize_ledger(
-    ledger: DispositionLedger,
-    result: DiffResult,
-    severity_config: object | None = None,
-    *,
-    verdict_scored: Iterable[Change] = (),
-    strict_acknowledgments: bool = False,
+    ledger: DispositionLedger, result: DiffResult, severity_config: object | None = None,
+    *, verdict_scored: Iterable[Change] = (), strict_acknowledgments: bool = False,
+    today: date | None = None,
 ) -> DispositionLedger:
     """Close *ledger* over *result*, labelling every not-yet-recorded change.
 
@@ -337,7 +336,7 @@ def finalize_ledger(
     def _bucket(name: str) -> list[Change]:
         return list(getattr(result, name, None) or [])
 
-    gate = _GateContext.of(result)
+    gate = _GateContext.of(result, today=today)
     for change in _bucket("changes"):
         # D1 counts *observed* changes. A policy-generated diagnostic is not
         # one: `ApplySuppression` emits SUPPRESSION_WOULD_HIDE_PUBLIC_BREAK
@@ -432,8 +431,8 @@ def finalize_ledger(
         ledger.record_suppression(
             change, rule=None, application_point="unrecorded_suppression"
         )
-    ledger.resolve_verdict_classes(result)
-    ledger.resolve_reclassifications(result)
+    ledger.resolve_verdict_classes(result, today=today)
+    ledger.resolve_reclassifications(result, today=today)
     # ADR-067 D5/C-S3: read generically off `result` -- a run that never
     # supplied `acknowledgments` (every pre-existing caller) is a no-op.
     # Mutates only `ledger`, never `result` -- `ledger_for()`'s fallback path
@@ -545,7 +544,7 @@ def close_consumer_scope(
 
 
 def ledger_for(
-    result: DiffResult, severity_config: object | None = None
+    result: DiffResult, severity_config: object | None = None, *, today: date | None = None
 ) -> DispositionLedger:
     """The conserved ledger for *result* — the one accessor every consumer uses.
 
@@ -568,16 +567,17 @@ def ledger_for(
     (ADR-064), strictly later. Passing it here is the audit *learning* the
     gate the run was actually scored on; it is not a renderer changing a
     gate, and it can only ever move a finding between ``gating`` and
-    ``non_gating`` (:meth:`DispositionLedger.with_gate`).
+    ``non_gating`` (:meth:`DispositionLedger.with_gate`). *today* keeps this
+    agreeing with an already-frozen ``ReportEnvelope`` (Codex review).
     """
     existing = getattr(result, "disposition_ledger", None)
     if isinstance(existing, DispositionLedger):
         return (
             existing
             if severity_config is None
-            else existing.with_gate(result, severity_config)
+            else existing.with_gate(result, severity_config, today=today)
         )
-    return finalize_ledger(DispositionLedger(), result, severity_config)
+    return finalize_ledger(DispositionLedger(), result, severity_config, today=today)
 
 
 def conservation_holds(ledger: DispositionLedger) -> bool:

@@ -110,6 +110,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import date
 
     from ..checker_types import DiffResult
     from .severity import SeverityConfig
@@ -586,6 +587,7 @@ def resolve_compare_exit_decision(
     scheme: str,
     *,
     require_complete_analysis: bool = False,
+    today: date | None = None,
 ) -> ExitDecision:
     """:func:`resolve_exit_decision`, deriving every contribution from
     *result* the same way `cli._exit_with_severity_or_verdict` does today.
@@ -645,7 +647,9 @@ def resolve_compare_exit_decision(
     (`reporter_contract_blocks.add_contract_context`, `cli._exit_with_
     severity_or_verdict`) calls the P3-aware wrapper instead as of that
     change -- this function itself is unchanged, still exactly the ordinary
-    gate/coverage/assurance fold with no knowledge of either axis.
+    gate/coverage/assurance fold with no knowledge of either axis. *today*,
+    forwarded to :func:`~.severity.compute_exit_code`, keeps this agreeing
+    with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
@@ -664,6 +668,7 @@ def resolve_compare_exit_decision(
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
+            today=today,
         )
     else:
         compatibility_contribution = legacy_exit_code(result.verdict)
