@@ -1603,6 +1603,11 @@ def _overrides_provenance(
                 layer=SelectorLayer.PROJECT_CONFIG,
                 option="policy.overrides",
                 path=project_path,
+                # CodeRabbit review, round 9/10: when a pack also
+                # contributed a *different* kind, this hop is the only
+                # provenance record naming which .abicheck.yml revision
+                # supplied the project-sourced one -- must carry its digest.
+                sha256=project_sha256,
             )
         )
     if not selected_by:

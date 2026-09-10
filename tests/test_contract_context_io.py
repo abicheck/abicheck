@@ -246,6 +246,51 @@ class TestResolvedConfigRoundTrip:
             kind="used_by", targets=("/opt/app1", "/opt/app2")
         )
 
+    def test_pack_overrides_round_trips(self) -> None:
+        """Round 9/10 finding (Codex review, fresh evidence):
+        ``pack_overrides`` (the strict, provenance-carrying subset of
+        ``policy.overrides`` a selected pack actually contributed) was
+        omitted from ``resolved_config_to_dict`` entirely, so
+        ``resolved_config_from_dict`` always reconstructed it empty --
+        applying a reloaded config silently dropped every pack policy
+        override's own provenance, distinct from ``overrides`` itself
+        (which already round-tripped, per the sibling test above)."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        identity = ImmutableIdentity(id="strict_abi", version=1, sha256="a" * 8)
+        config = dataclasses.replace(
+            self._full_config(),
+            policy=CompatibilityPolicyConfig(
+                base=identity,
+                overrides={
+                    ChangeKind.FUNC_REMOVED.value: Verdict.COMPATIBLE,
+                    ChangeKind.FUNC_ADDED.value: Verdict.COMPATIBLE_WITH_RISK,
+                },
+                # Only one of the two overrides is pack-sourced -- proves
+                # this isn't merely "the whole overrides mapping got
+                # duplicated into pack_overrides too".
+                pack_overrides={ChangeKind.FUNC_REMOVED.value: Verdict.COMPATIBLE},
+            ),
+        )
+        decoded = resolved_config_from_dict(
+            resolved_config_to_dict(config), config.provenance
+        )
+        assert dict(decoded.policy.pack_overrides) == {
+            ChangeKind.FUNC_REMOVED.value: Verdict.COMPATIBLE
+        }
+        assert decoded == config
+
+    def test_pack_overrides_absent_from_a_legacy_payload_defaults_empty(self) -> None:
+        """A context persisted by a pre-fix build has no ``pack_overrides``
+        key in its JSON at all -- must not be a hard load error, since the
+        field genuinely didn't exist yet for that artifact."""
+        config = self._full_config()
+        payload = resolved_config_to_dict(config)
+        del payload["policy"]["pack_overrides"]
+        decoded = resolved_config_from_dict(payload, config.provenance)
+        assert dict(decoded.policy.pack_overrides) == {}
+
     def test_gate_scope_none_round_trips_to_none(self) -> None:
         config = dataclasses.replace(
             self._full_config(),

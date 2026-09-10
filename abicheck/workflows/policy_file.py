@@ -48,6 +48,7 @@ from __future__ import annotations
 from ..policies import builtin_policy_names
 from ..policy.policy_file_project_overrides import (
     merge_project_config_policy_overrides,
+    project_config_policy_downgrade_warnings,
     resolve_project_config_policy_overrides,
 )
 from ..policy_file import (
@@ -64,5 +65,6 @@ __all__ = [
     "dedup_validate_overrides_warnings",
     "merge_project_config_policy_overrides",
     "pending_validate_overrides_warnings",
+    "project_config_policy_downgrade_warnings",
     "resolve_project_config_policy_overrides",
 ]

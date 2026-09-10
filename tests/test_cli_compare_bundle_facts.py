@@ -49,6 +49,17 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """Like :func:`_invoke`, but isolates stdout from stderr -- for a
+    ``--format json`` assertion that must not choke on a legitimate
+    ``Warning: ...`` line (round 9/10: a project-config HIGH-RISK override
+    warning, Codex/CodeRabbit review) landing on stderr, which
+    ``result.output``'s combined stream would otherwise interleave into the
+    JSON payload."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 def _build_so(tmp_path: Path, name: str, body: str) -> Path:
     gcc = shutil.which("gcc")
     if gcc is None:
@@ -151,7 +162,7 @@ class TestCompareOldBundleFacts:
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("policy:\n  overrides:\n    func_params_changed: ignore\n")
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(facts_path),
             str(new_dir),

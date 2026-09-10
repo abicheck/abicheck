@@ -151,3 +151,65 @@ def merge_project_config_policy_overrides(
         resolve_project_config_policy_overrides(project_cfg, project_path),
         base_policy=base_policy,
     )
+
+
+def project_config_policy_downgrade_warnings(
+    policy_file_before: Any,
+    policy_file_after: Any,
+    *,
+    project_path: Path | None,
+) -> list[str]:
+    """``HIGH RISK``/``validate_overrides()`` warnings for exactly the
+    override kinds *policy_file_after* gained over *policy_file_before*
+    through a :func:`merge_project_config_policy_overrides` /
+    :func:`apply_lower_precedence_overrides` fold -- i.e. only a kind
+    ``.abicheck.yml`` actually filled in, never one an explicit
+    ``--policy <file>``/``--pack`` already claimed (which already got its
+    own warning earlier, from ``_load_suppression_and_policy``'s own
+    ``pf.validate_overrides()`` call on the *pre-fold* file).
+
+    Round 9/10 finding (Codex review, fresh evidence): every CLI path warns
+    on a risky *explicit* ``--policy <file>`` downgrade, but the identical
+    downgrade stated in ``.abicheck.yml`` took effect completely silently,
+    because that warning check runs (once, in ``_load_suppression_and_
+    policy``) *before* this fold ever applies. The naive fix -- re-running
+    ``validate_overrides()`` on the whole post-fold file at each of this
+    fold's several call sites -- **is wrong**: it would re-warn about every
+    already-claimed, already-warned-about kind a stronger tier (an explicit
+    file or a ``--pack``) contributed, which neither Codex's finding nor
+    CodeRabbit's asked for, and it broke a real pre-existing test
+    (``--pack``-only risky overrides suddenly gaining a *second*, redundant
+    warning on the identical run, with no project config involved at all).
+    Diffing the override key sets isolates exactly the newly-added,
+    project-config-attributable delta.
+
+    Routed through the same ``pending_validate_overrides_warnings`` dedup
+    helper every other caller uses (a synthetic, source-stamped
+    :class:`~abicheck.policy_file.PolicyFile` carrying only the delta), so
+    a repeated fold of the identical ``.abicheck.yml`` across many
+    libraries within one ``compare-release`` run -- or across the several
+    call sites this fold now has -- surfaces the warning once per dedup
+    scope, not once per fold call. Returns ``[]`` when nothing changed (no
+    project overrides at all, or every kind the project stated was already
+    claimed at a stronger tier), so the common case does no extra work.
+    """
+    if policy_file_after is None:
+        return []
+    before_keys = (
+        frozenset(policy_file_before.overrides)
+        if policy_file_before is not None
+        else frozenset()
+    )
+    new_overrides = {
+        k: v for k, v in policy_file_after.overrides.items() if k not in before_keys
+    }
+    if not new_overrides:
+        return []
+    from ..policy_file import PolicyFile, pending_validate_overrides_warnings
+
+    delta = PolicyFile(
+        base_policy=policy_file_after.base_policy,
+        overrides=new_overrides,
+        source_path=project_path,
+    )
+    return pending_validate_overrides_warnings(delta)

@@ -293,9 +293,17 @@ class TestTemplatedOwnerHostIndependence:
     host-absent, the same comparison silently kept it in-surface. This is a
     *bug-class* regression: it must hold for every representative templated
     special-name owner, not only the one reported symbol, and under both a
-    present and an absent demangler -- proven here by monkeypatching the
-    shared ``abicheck.demangle.demangle()`` entry point both ways and
-    asserting the classification never changes.
+    present and an absent demangler -- proven here by monkeypatching
+    ``surface.py``'s own bound ``demangle`` name (``abicheck.surface.
+    demangle``) both ways and asserting the classification never changes.
+    CodeRabbit review (round 9/10, fresh evidence): an earlier version of
+    this test patched ``abicheck.demangle.demangle`` -- the *defining*
+    module's own attribute -- instead. ``surface.py`` binds ``demangle`` via
+    ``from .demangle import demangle``, so that patch left ``surface.py``'s
+    own already-bound reference untouched; had this classification actually
+    (incorrectly) still called through to the real demangler, the ``_boom``
+    stand-in below would never have fired and the test would have passed
+    anyway, proving nothing about whether demangling was actually avoided.
 
     **Scope of this invariant (round 8 correction):** it applies to every
     shape ``itanium_special_name_owner_scope_components``/
@@ -333,7 +341,7 @@ class TestTemplatedOwnerHostIndependence:
     ]
 
     def test_classification_identical_with_and_without_a_demangler(self):
-        import abicheck.demangle as demangle_mod
+        import abicheck.surface as surface_mod
 
         for mangled, present_type in self._CASES:
             snap = AbiSnapshot(
@@ -349,9 +357,9 @@ class TestTemplatedOwnerHostIndependence:
                 description="",
             )
 
-            original = demangle_mod.demangle
+            original = surface_mod.demangle
             try:
-                demangle_mod.demangle = lambda *a, **k: None  # simulate absent
+                surface_mod.demangle = lambda *a, **k: None  # simulate absent
                 absent_result = classify_change_surface(change, s, s)
 
                 def _boom(*a, **k):
@@ -359,10 +367,10 @@ class TestTemplatedOwnerHostIndependence:
                         f"demangle() must not be called for {mangled!r}"
                     )
 
-                demangle_mod.demangle = _boom  # simulate a call that would crash
+                surface_mod.demangle = _boom  # simulate a call that would crash
                 present_result = classify_change_surface(change, s, s)
             finally:
-                demangle_mod.demangle = original
+                surface_mod.demangle = original
 
             assert (
                 absent_result
@@ -447,13 +455,55 @@ class TestNamespaceComponentCannotMasqueradeAsOwner:
             REASON_NON_PUBLIC_TYPE,
         )
 
+    def test_unrelated_type_sharing_the_bare_owner_tail_cannot_demote(self):
+        """Round 9/10 finding (Codex review, fresh evidence): the round-3
+        fix above stops a bare *namespace-component* (``"ns"``) from
+        masquerading as the owner. It left a second-order hazard: the
+        retained bare *owner tail* itself can still do the same thing.
+        ``_ZTVN2ns7WrapperIiEE`` yields ``{"ns::Wrapper", "Wrapper"}`` --
+        if ``ns::Wrapper`` is absent from the snapshot (the real owner
+        genuinely unresolvable) but an unrelated, unreachable record
+        happens to be named bare ``Wrapper`` (no namespace at all -- not
+        the round-3 case), that unrelated record must not stand in for the
+        real, unresolvable owner either.
+
+        The snapshot also models an unrelated *qualified* type
+        (``other::Thing``) so the model demonstrably tracks qualification
+        (the real-world shape: DWARF-derived snapshots always store a
+        record's fully-qualified name, `dwarf_snapshot.py`'s
+        ``RecordType(name=qualified, ...)``) -- distinguishing this from
+        every other test in this file, which deliberately models every
+        type bare-only and relies on bare-tail matching for that
+        legitimately-unqualified-snapshot shape (see
+        ``TestTemplatedOwnerHostIndependence``'s own cases, which this fix
+        must not regress).
+        """
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            # A bare, unrelated `Wrapper` (not `ns::Wrapper`) -- unreachable
+            # from anything public. No `ns::Wrapper`/`ns` type modeled at
+            # all: the real owner is genuinely unresolvable. `other::Thing`
+            # is present purely to prove the model tracks qualification.
+            types=[_rec("Result"), _rec("Wrapper"), _rec("other::Thing")],
+        )
+        s = self._surf(snap)
+        change = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVN2ns7WrapperIiEE",
+            description="",
+        )
+        # Unresolvable owner -> "unknown, keep", never a confident demotion
+        # borrowed from the unrelated bare-named record.
+        assert classify_change_surface(change, s, s) == (True, None)
+
 
 class TestDemanglerFallbackForUnparseableShapes:
     """Round 8 finding: ``itanium_special_name_owner_scope_components``/
     ``itanium_special_name_owner_identifiers`` return ``None`` -- can't
     parse the shape at all -- for a valid Itanium special name outside
-    their structural subset, e.g. the bare ``Ss`` standard substitution
-    for ``std::basic_string<...>`` (``_ZTVSs``) or a local-class vtable
+    their structural subset, e.g. a local-class vtable owner
     (``_ZTVZ3foovE1A``). The round-1 fix removed the ``demangle()``
     fallback entirely for this ``owner_scope is None`` branch, which
     over-scoped the host-independence invariant
@@ -467,6 +517,22 @@ class TestDemanglerFallbackForUnparseableShapes:
     conservatively keeps (never a false break), matching the same
     accepted pattern ``FUNC_REMOVED_ELF_ONLY``'s ``demangled_symbol``
     already uses everywhere else in this codebase.
+
+    The bare ``Ss`` standard substitution for ``std::basic_string<...>``
+    (``_ZTVSs``) used to be this class's other case, but round 9/10's
+    macOS CI investigation found it was never actually a "structural
+    parser can't handle this shape" case in the first place -- it is a
+    fixed, ABI-mandated abbreviation (Itanium ABI Section 5.9), and
+    ``mangled_name.py``'s ``_STANDARD_SUBSTITUTION_OWNER_SCOPE`` now
+    resolves all six such codes structurally, the same way ``St`` was
+    already resolved for the scope-*prefix* case. It moved to
+    ``TestStandardSubstitutionOwnerResolvesStructurally`` below, which
+    pins that host-independence directly rather than through
+    ``demangle()`` (real macOS CI evidence: GNU's and LLVM's demanglers
+    render ``Ss`` using different spellings -- the full template form vs.
+    a shorthand alias -- so relying on ``demangle()`` output text for this
+    shape was never actually host-independent despite a demangler being
+    present on both hosts; see that class's own docstring).
     """
 
     def _surf(self, snap):
@@ -476,13 +542,12 @@ class TestDemanglerFallbackForUnparseableShapes:
     #: composed of, present in `types=` but unreachable from any public
     #: function -- i.e. the expected-non-public case once resolved).
     _CASES = [
-        ("_ZTVSs", "basic_string"),  # `Ss` == `std::basic_string<...>`.
         ("_ZTVZ3foovE1A", "A"),  # a local-class vtable owner.
     ]
 
     def test_structural_parsers_reject_both_shapes(self):
-        # Sanity precondition this whole test class rests on: both shapes
-        # are genuinely outside the structural parsers' subset, so the
+        # Sanity precondition this whole test class rests on: the shape
+        # is genuinely outside the structural parsers' subset, so the
         # `owner_scope is None` fallback branch is actually exercised
         # rather than accidentally testing the structural path instead.
         for mangled, _ in self._CASES:
@@ -574,6 +639,88 @@ class TestDemanglerFallbackForUnparseableShapes:
             surface_mod.demangle = original
         present_result = classify_change_surface(change, s, s)
         assert absent_result != present_result
+
+
+class TestStandardSubstitutionOwnerResolvesStructurally:
+    """Round 9/10 finding (Codex review, fresh evidence, real macOS CI
+    failure): the bare Itanium standard-substitution owner shapes (``Ss``,
+    ``Sa``, ``Sb``, ``Si``, ``So``, ``Sd`` -- Itanium ABI Section 5.9) used
+    to fall through to ``TestDemanglerFallbackForUnparseableShapes``'s
+    ``demangle()`` fallback, on the theory that they were just another
+    unparseable-by-the-structural-parser shape like a local-class vtable
+    owner. They are not: each is a *fixed*, ABI-mandated abbreviation for
+    one specific standard-library type, so they can (and, per this
+    codebase's own "fix the cause, not the instance" principle, should) be
+    resolved structurally, exactly like ``St``'s scope-prefix case already
+    is.
+
+    This matters beyond tidiness: relying on ``demangle()`` for this shape
+    was never actually host-independent the way the class-level docstring
+    up top assumed. A real macOS CI run demangled ``_ZTVSs`` via LLVM's
+    demangler (the only backend reachable there once the ``cxxfilt`` PyPI
+    package's libstdc++-only ``__cxa_demangle`` binding fails to load) and
+    got a shorthand alias spelling, not GNU's fully-spelled
+    ``std::basic_string<char, std::char_traits<char>, std::allocator<char>
+    >`` -- so the exact same comparison, run on two hosts that each had a
+    real, working demangler installed, produced two different type-
+    candidate sets purely from that spelling difference. Resolving these
+    six codes structurally in ``mangled_name.py`` (never through
+    ``demangle()`` at all) removes that gap entirely: the "std::string"
+    and "std::vector<int>" cases now classify identically on every host,
+    demangler installed or not.
+    """
+
+    def _surf(self, snap):
+        return compute_public_surface(snap)
+
+    def test_bare_substitution_owner_resolves_without_a_demangler(self):
+        import abicheck.surface as surface_mod
+
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("basic_string")],
+        )
+        s = self._surf(snap)
+        change = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVSs",
+            description="",
+        )
+        # `demangle()` forced to fail -- proves the classification does not
+        # depend on it at all for this shape, unlike the genuinely
+        # unparseable shapes `TestDemanglerFallbackForUnparseableShapes`
+        # covers.
+        original = surface_mod.demangle
+        try:
+            surface_mod.demangle = lambda *a, **k: None
+            assert classify_change_surface(change, s, s) == (
+                False,
+                REASON_NON_PUBLIC_TYPE,
+            )
+        finally:
+            surface_mod.demangle = original
+
+    def test_structural_parsers_resolve_all_six_standard_substitutions(self):
+        # Each code's structural resolution matches its known ABI expansion
+        # -- not just "returns something non-None".
+        expected = {
+            "_ZTVSa": ("std", "allocator"),
+            "_ZTVSb": ("std", "basic_string"),
+            "_ZTVSs": ("std", "basic_string"),
+            "_ZTVSi": ("std", "basic_istream"),
+            "_ZTVSo": ("std", "basic_ostream"),
+            "_ZTVSd": ("std", "basic_iostream"),
+        }
+        for mangled, scope in expected.items():
+            components, template_positions = (
+                itanium_special_name_owner_scope_components(mangled)
+            )
+            assert components == list(scope), mangled
+            assert template_positions == frozenset()
+            identifiers = itanium_special_name_owner_identifiers(mangled)
+            assert identifiers == frozenset({"::".join(scope), scope[-1]}), mangled
 
 
 class TestStdSubstitutionOwnerDemotesLikeItsFullySpelledEquivalent:

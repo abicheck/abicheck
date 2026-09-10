@@ -15,15 +15,15 @@
 
 """Orchestration body for the ``compare`` command (size-split from cli.py).
 
-The click-decorated ``compare`` wrapper in :mod:`abicheck.cli` parses options and
-delegates to :func:`run_compare` here, keeping cli.py under the AI-readiness
-file-size cap. This is *not* the leaf helper module ``cli_helpers_compare`` (plain,
-cli-independent utilities): ``run_compare`` drives the full single-pair compare
-flow and reuses the option-parsing/render/exit helpers that still live in
-:mod:`abicheck.cli` (imported back below — the by-design sibling cycle, allow-listed
-in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
-(``service.compare_snapshots``), never a direct ``checker.compare`` call
-(cli-contract, ADR-037 D10.1).
+The click-decorated ``compare`` wrapper in :mod:`abicheck.cli` parses options
+and delegates to :func:`run_compare` here, keeping cli.py under the
+AI-readiness file-size cap. Not the leaf helper module ``cli_helpers_compare``
+(plain, cli-independent utilities): ``run_compare`` drives the full
+single-pair compare flow and reuses the option-parsing/render/exit helpers
+still in :mod:`abicheck.cli` (imported back below -- the by-design sibling
+cycle, allow-listed in ``check_ai_readiness``). Verdict routing stays through
+the Tier-2 service (``service.compare_snapshots``), never a direct
+``checker.compare`` call (cli-contract, ADR-037 D10.1).
 """
 
 from __future__ import annotations
@@ -1524,24 +1524,20 @@ def run_compare(
             build_config=cfg_path, frontend_context=frontend_context,
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
-            # `cfg_path` above is `config` (explicit --config) OR the
-            # cwd-upward auto-discovered .abicheck.yml -- NOT necessarily
-            # the raw explicit CLI value merge_compile_config's own
-            # `build_config is not None` inference expects. Without this,
-            # an auto-discovered config's `compile.compiler` would bypass
-            # the untrusted-executable-selection gate entirely (Codex
-            # review, fresh evidence -- real finding on PR #1154).
+            # `cfg_path` is explicit --config OR an auto-discovered
+            # .abicheck.yml, not the raw CLI value merge_compile_config's
+            # `build_config is not None` inference expects -- without this
+            # an auto-discovered `compile.compiler` bypasses the untrusted-
+            # executable-selection gate (Codex review, PR #1154).
             config_explicit=(config is not None),
         )
         # Dirs the config appended past the CLI -I roots (mirrors the single-pair
         # `config_includes` split below): must survive a per-library-pair
         # `--old/new-include` override, which otherwise replaces `includes`.
         directory_config_includes = tuple(directory_includes[len(includes) :])
-        # Off the owner, never via ``abicheck.cli`` (see install_facade_guard).
+        # Off the owner, never via ``abicheck.cli`` (install_facade_guard);
+        # ADR-068 §3 #23: also thread policy.overrides to the release fan-out.
         from .frontends.cli.commands.compare import _dispatch_release_compare
-
-        # ADR-068 §3 #23: thread `.abicheck.yml` policy.overrides to the
-        # release fan-out too -- see the helper's own docstring.
         from .pack_application import resolve_release_project_policy_overrides
         _dispatch_release_compare(
             ctx,
@@ -1844,17 +1840,21 @@ def run_compare(
         policy_selected_sha=policy_selected_sha,
     )
     # ADR-068 §3 #23 / ADR-049 D7: fold `.abicheck.yml`'s `policy.overrides`
-    # in at the PROJECT_CONFIG tier -- deliberately *after* the pack fold
-    # just above, so a kind an explicit file or pack already claimed can't
-    # be overwritten (see `apply_lower_precedence_overrides`'s docstring).
-    from .workflows.policy_file import merge_project_config_policy_overrides
+    # in at PROJECT_CONFIG tier, after the pack fold above (see
+    # `apply_lower_precedence_overrides`'s docstring for why ordering matters).
+    from .workflows import policy_file as _policy_file_mod
 
+    _pf0 = pf
     try:
-        pf = merge_project_config_policy_overrides(
+        pf = _policy_file_mod.merge_project_config_policy_overrides(
             pf, base_policy=policy, project_cfg=project_cfg, project_path=cfg_path
         )
     except PolicyError as e:
         raise click.BadParameter(str(e), param_hint="--policy") from e
+    for w in _policy_file_mod.project_config_policy_downgrade_warnings(  # round 9/10
+        _pf0, pf, project_path=cfg_path
+    ):
+        click.echo(f"Warning: {w}", err=True)
     # A gate pack may have moved a severity level; later consumers read it
     # off here, so re-derive rather than keep the pre-pack value.
     sev_config = resolved_cfg.severity

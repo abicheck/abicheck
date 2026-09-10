@@ -457,6 +457,45 @@ def itanium_scope_components_with_template_positions(
 #: existing structural parser needs no new grammar.
 _SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TT")
 
+#: Itanium ABI Section 5.9 "Abbreviations" -- the six standard substitutions
+#: that abbreviate a complete standard-library *type* (unlike ``St``, which
+#: abbreviates only the ``std::`` scope *prefix* and can have further
+#: components appended -- see ``itanium_scope_components``'s own docstring).
+#: Maps each 2-character code to the scope-path a fully-spelled owner would
+#: produce, so a bare-substitution owner (e.g. ``_ZTVSs``, a vtable for
+#: ``std::string``) resolves exactly like the fully-spelled equivalent would
+#: through the general parser below -- never through the optional external
+#: ``demangle()`` fallback.
+#:
+#: Round 9/10 finding (Codex review, fresh evidence, macOS CI): before this,
+#: a bare-substitution owner fell all the way through to ``surface.py``'s
+#: ``demangle()`` fallback, and that fallback's output text is demangler-
+#: implementation-dependent for exactly these six codes -- GNU's demangler
+#: (the ``cxxfilt`` PyPI package's ``__cxa_demangle`` binding, or binutils
+#: ``c++filt``) renders ``Ss`` as the fully-spelled
+#: ``std::basic_string<char, std::char_traits<char>, std::allocator<char> >``,
+#: while LLVM's demangler (macOS's system ``c++filt``, the only backend
+#: reachable there once the libstdc++-only ``cxxfilt`` binding fails to
+#: load) renders the identical substitution using a shorthand alias instead.
+#: The *same* comparison, run on two demangler-equipped hosts, therefore
+#: produced two different type-candidate identifier sets purely from that
+#: spelling difference -- on the LLVM-demangled host the (still valid,
+#: demangler-equipped) spelling shared no identifier with a model record
+#: named ``basic_string``, silently falling through to "unknown, keep" as
+#: if no demangler were installed at all, which is exactly the
+#: reproducibility defect this whole structural-parser family exists to
+#: avoid for every *other* shape. Resolving these six codes structurally
+#: closes the gap the same way ``St`` already closes it for the scope-prefix
+#: case.
+_STANDARD_SUBSTITUTION_OWNER_SCOPE: dict[str, tuple[str, ...]] = {
+    "Sa": ("std", "allocator"),
+    "Sb": ("std", "basic_string"),
+    "Ss": ("std", "basic_string"),
+    "Si": ("std", "basic_istream"),
+    "So": ("std", "basic_ostream"),
+    "Sd": ("std", "basic_iostream"),
+}
+
 
 def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | None:
     """Type-candidate identifiers for a ``_ZTV``/``_ZTI``/``_ZTT`` special
@@ -522,6 +561,9 @@ def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | Non
     code, rest = mangled[2:4], mangled[4:]
     if code not in _SPECIAL_NAME_OWNER_CODES or not rest:
         return None
+    std_scope = _STANDARD_SUBSTITUTION_OWNER_SCOPE.get(rest)
+    if std_scope is not None:
+        return frozenset({"::".join(std_scope), std_scope[-1]})
     prefix = _itanium_strip_prefix("_Z" + rest)
     if prefix is None:
         return None
@@ -608,6 +650,9 @@ def itanium_special_name_owner_scope_components(
     code, rest = mangled[2:4], mangled[4:]
     if code not in _SPECIAL_NAME_OWNER_CODES or not rest:
         return None
+    std_scope = _STANDARD_SUBSTITUTION_OWNER_SCOPE.get(rest)
+    if std_scope is not None:
+        return list(std_scope), frozenset()
     return itanium_scope_components_with_template_positions("_Z" + rest)
 
 

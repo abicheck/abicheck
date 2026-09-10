@@ -480,6 +480,18 @@ def resolve_bundle_policy_file(
     ``policy.policy_file_project_overrides.apply_lower_precedence_overrides``
     for why the ordering matters. ``None``/empty is a no-op, matching every
     pre-existing caller.
+
+    A HIGH-RISK downgrade the project fold introduces gets the identical
+    ``Warning: ...`` diagnostic an explicit ``--policy <file>``'s own
+    downgrade already gets (round 9/10, Codex review, fresh evidence):
+    ``_load_suppression_and_policy`` above only ever surfaces
+    ``validate_overrides()`` warnings for what it itself loaded, before this
+    function's project-config fold runs, so a project-sourced downgrade
+    silently took effect with no diagnostic at all. Routed through the same
+    ``pending_validate_overrides_warnings`` dedup helper that call uses, so
+    a warning already surfaced for this same policy document within one
+    ``dedup_validate_overrides_warnings()`` scope (e.g. the whole
+    ``compare-release`` run) is not repeated per library/matrix cell.
     """
     from .frontends.cli.options.params import _load_suppression_and_policy
 
@@ -489,11 +501,26 @@ def resolve_bundle_policy_file(
     if project_policy_overrides:
         from .policy.policy_file_project_overrides import (
             apply_lower_precedence_overrides,
+            project_config_policy_downgrade_warnings,
         )
 
+        _pf_before_project_fold = pf
         pf = apply_lower_precedence_overrides(
             pf, dict(project_policy_overrides), base_policy=policy
         )
+        # Scoped to exactly the kinds this fold added -- never re-warns
+        # about a kind an explicit `--policy <file>`/`--pack` already
+        # claimed and already got its own warning for (see
+        # `project_config_policy_downgrade_warnings`'s docstring: a
+        # whole-file re-check here previously broke a real pre-existing
+        # `--pack`-only test by re-warning about a pack-sourced override
+        # with no project config involved at all).
+        import click
+
+        for warning in project_config_policy_downgrade_warnings(
+            _pf_before_project_fold, pf, project_path=None
+        ):
+            click.echo(f"Warning: {warning}", err=True)
     return pf
 
 

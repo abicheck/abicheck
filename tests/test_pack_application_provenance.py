@@ -77,3 +77,42 @@ def test_a_project_contributed_kind_does_not_leak_into_pack_overrides(
     # The project's kind is not this pack's (or any pack's) -- must not be
     # misreported as pack-sourced.
     assert "var_removed" not in contributed
+
+
+def test_project_contributed_selected_by_entry_carries_its_digest(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit review, round 9/10, fresh evidence: when a pack *and*
+    ``.abicheck.yml`` each contribute a different override kind, the
+    ``policy.overrides`` receipt entry names the pack as its `layer` and
+    lists the project's own contribution as a second ``SelectedByEntry`` --
+    which is the *only* provenance record for that project-sourced kind.
+    It previously omitted ``sha256``, so a receipt reader could not verify
+    which revision of ``.abicheck.yml`` actually supplied the override, even
+    though ``ProjectCompatibilityInputs.sha256`` was available the whole
+    time.
+    """
+    pack = _pack(
+        tmp_path,
+        "ignore-removals.yml",
+        "id: relax_removals\nversion: 1\nkind: policy\n"
+        "assignments:\n  func_removed: ignore\n",
+    )
+    project_digest = "d" * 64
+    config = resolve_compatibility_evaluation_config(
+        front_end=FrontEnd.CLI,
+        explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
+        project=ProjectCompatibilityInputs(
+            path=".abicheck.yml",
+            sha256=project_digest,
+            policy_overrides={"var_removed": "ignore"},
+        ),
+    )
+    provenance = config.provenance["policy.overrides"]
+    project_hops = [
+        hop
+        for hop in provenance.selected_by
+        if hop.option == "policy.overrides" and hop.path == ".abicheck.yml"
+    ]
+    assert len(project_hops) == 1
+    assert project_hops[0].sha256 == project_digest

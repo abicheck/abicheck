@@ -28,26 +28,21 @@ Three properties the implementation holds deliberately:
 *Order independence.* Every collection is written sorted, and every block's
 own ``__post_init__`` re-canonicalizes on read, so a context built by two
 different traversal orders serializes to identical bytes and decodes to an
-equal object. The gate says *byte*-independent for a reason: comparing the
-decoded objects is not enough if the bytes differ, since a consumer
-diffing two persisted reports would see spurious churn.
+equal object -- comparing decoded objects alone is not enough if the bytes
+differ, since a consumer diffing two persisted reports would see churn.
 
-*Version fields survive verbatim.* A block's version counters are written and
-read as-is rather than re-stamped with this build's current constants --
-re-stamping would erase exactly the mixed-version evidence D6 requires the
-reader to fail closed on. Reading does **not** itself enforce the ceiling;
+*Version fields survive verbatim.* A block's version counters are written
+and read as-is, never re-stamped with this build's current constants --
+that would erase the mixed-version evidence D6 requires failing closed on.
+Reading does **not** itself enforce the ceiling;
 :func:`~abicheck.contract_evidence.check_persisted_context_versions_supported`
-does, and :mod:`abicheck.contract_replay` calls it before using a decoded
-context. Keeping the two separate is what lets a tool *inspect* a
-newer-than-supported block (to report the version mismatch) without being
-forced to first accept it as evaluable.
+does, letting a tool *inspect* a newer-than-supported block without first
+accepting it as evaluable.
 
 *No lossy defaults on read.* An absent optional key decodes to ``None``/the
-empty collection, never to a plausible-looking substitute. A decoded
-``suppressions: None`` means "no suppression source was selected", which is
-a different fact from an empty rule list -- the same distinction
-:class:`~abicheck.compatibility_evaluation_config.SuppressionConfig` exists
-to preserve.
+empty collection, never a plausible-looking substitute -- a decoded
+``suppressions: None`` means "no suppression source selected", distinct
+from an empty rule list.
 """
 
 from __future__ import annotations
@@ -154,26 +149,17 @@ def _sequence_field(
 
 _GATE_SCOPE_FIELDS_SCHEMA_VERSION = 2
 """The ``evaluation_context.schema_version`` at which ``gate.require_complete_
-analysis``/``gate.scope`` were introduced (dedup-and-convergence plan, Phase 2
-item 1) -- matches ``contract_relevance_types.EVALUATION_CONTEXT_SCHEMA_
-VERSION``'s own bump for the same change, but is its own constant rather than
-a reference to that live ceiling: the ceiling moves on any future,
-unrelated bump to that block's shape, while this one names a fixed
-historical fact (the version these two specific keys started being
-unconditionally emitted) and must not drift with it.
+analysis``/``gate.scope`` were introduced -- its own constant (not a live
+reference to ``contract_relevance_types.EVALUATION_CONTEXT_SCHEMA_VERSION``)
+since that ceiling moves on any future, unrelated bump, while this one names
+a fixed historical fact that must not drift with it.
 
-Every writer at or above this version (this build's ``resolved_config_to_
-dict`` included) always emits both keys, so a payload declaring
-``schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION`` with either key
-missing is not a legitimate older-writer omission -- it is truncated or
-hand-crafted, and ``resolved_config_from_dict`` rejects it outright rather
-than silently defaulting (Codex review, fresh evidence, third round: the
-first two rounds closed "wrong type" and "explicit null", but neither
-covered a version-2-labeled payload simply missing the key). A payload
-declaring an older ``schema_version`` degrades to the field's documented
-default, per this module's own "no lossy defaults on read" rule -- that
-degrade is the *legitimate* forward-compatibility case, not the malformed
-one this constant exists to catch."""
+Every writer at or above this version always emits both keys, so a payload
+declaring ``schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION`` with either
+key missing is truncated or hand-crafted, and ``resolved_config_from_dict``
+rejects it outright rather than silently defaulting (Codex review). An older
+``schema_version`` legitimately degrades to the field's documented default,
+per this module's "no lossy defaults on read" rule."""
 
 
 def _bool(
@@ -409,6 +395,12 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 kind: verdict.value
                 for kind, verdict in sorted(config.policy.overrides.items())
             },
+            # Round 9/10: previously omitted, dropping pack-provenance on
+            # round-trip -- see `resolved_config_from_dict`'s own comment.
+            "pack_overrides": {
+                kind: verdict.value
+                for kind, verdict in sorted(config.policy.pack_overrides.items())
+            },
         },
         "gate": {
             "exit_code_scheme": config.gate.exit_code_scheme,
@@ -556,6 +548,14 @@ def resolved_config_from_dict(
                 kind: Verdict(verdict)
                 for kind, verdict in _require_mapping(
                     policy.get("overrides") or {}, what="policy.overrides"
+                ).items()
+            },
+            # Round 9/10: absent (pre-fix context) defaults to "nothing
+            # pack-contributed" -- see the writer's comment above.
+            pack_overrides={
+                kind: Verdict(verdict)
+                for kind, verdict in _require_mapping(
+                    policy.get("pack_overrides") or {}, what="policy.pack_overrides"
                 ).items()
             },
         ),

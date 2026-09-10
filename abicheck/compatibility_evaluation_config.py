@@ -24,22 +24,17 @@ precedence code exists here. That is the remainder of Phase 1 (plan Section
 9), tracked separately in ``docs/contribute/plans/public-contract-default.md``.
 
 Two existing, already-shipped types are reused rather than duplicated:
-
-- :class:`~abicheck.change_registry_types.Verdict` for
-  :attr:`CompatibilityPolicyConfig.overrides` (ADR-049 D8's per-``ChangeKind``
-  override, e.g. ``soname_bump_recommended: break``).
-- :class:`~abicheck.severity.SeverityConfig` for :attr:`GateConfig.severity`
-  (the existing four-category ``abi_breaking``/``potential_breaking``/
-  ``quality_issues``/``addition`` severity resolution ADR-049 D6 calls
-  ``gate.severity_overrides``) -- there is already one severity model in this
-  codebase and this module composes it instead of inventing a second one.
+:class:`~abicheck.change_registry_types.Verdict` for
+:attr:`CompatibilityPolicyConfig.overrides` (ADR-049 D8's per-``ChangeKind``
+override), and :class:`~abicheck.severity.SeverityConfig` for
+:attr:`GateConfig.severity` (the existing four-category severity resolution
+ADR-049 D6 calls ``gate.severity_overrides``) -- this module composes both
+instead of inventing second copies.
 
 Every dataclass here is frozen. Container fields (mappings/sequences) are
 normalized to :class:`types.MappingProxyType`/``tuple`` in ``__post_init__``
 so a caller's later mutation of the collection it passed in cannot silently
-change an already-constructed, supposedly-immutable config (ADR-049 D7:
-equivalent semantic inputs must resolve to an *equal* object, which requires
-the object to actually stay put).
+change an already-constructed, supposedly-immutable config (ADR-049 D7).
 """
 
 from __future__ import annotations
@@ -709,14 +704,12 @@ class CompatibilityPolicyConfig:
     every selected pack and the base policy (ADR-049 D8 composition order:
     "explicit per-ChangeKind override > selected packs > base policy").
 
-    ``pack_overrides`` (CodeRabbit review, round 8) is the strict subset of
-    ``overrides`` genuinely contributed by a selected ``kind: policy`` pack,
-    captured *before* ``.abicheck.yml``'s ``project_config``-tier
-    contribution is folded into ``overrides`` -- ``pack_application.
-    pack_application()`` used to re-derive "pack-contributed" from the fully
-    merged ``overrides``, which misread an uncontested project-sourced kind
-    as pack-sourced. Reading this field instead (D7's "read, don't
-    re-derive") fixes that leak; see ``pack_application()``'s own docstring.
+    ``pack_overrides`` (CodeRabbit review, round 8) is the strict, value-equal
+    subset of ``overrides`` genuinely contributed by a selected ``kind:
+    policy`` pack, captured *before* ``.abicheck.yml``'s project-config
+    contribution is folded in (D7's "read, don't re-derive" --
+    ``pack_application()`` used to misread an uncontested project-sourced
+    kind as pack-sourced); enforced as a real subset since round 9/10.
     """
 
     base: ImmutableIdentity
@@ -791,8 +784,15 @@ class CompatibilityPolicyConfig:
             ),
         )
         object.__setattr__(self, "overrides", _frozen_mapping(self.overrides))
-        # Always an internally-built subset of the already-validated
-        # `overrides` above -- frozen, not re-validated.
+        # CodeRabbit review, round 9/10: enforce pack_overrides is a real,
+        # value-equal subset of overrides -- nothing previously did.
+        if not isinstance(self.pack_overrides, Mapping):
+            raise TypeError(
+                f"CompatibilityPolicyConfig.pack_overrides must be a Mapping: {self.pack_overrides!r}"
+            )
+        bad = sorted(k for k, v in self.pack_overrides.items() if self.overrides.get(k) != v)
+        if bad:
+            raise ValueError(f"pack_overrides not a value-equal subset of overrides: {bad}")
         object.__setattr__(self, "pack_overrides", _frozen_mapping(self.pack_overrides))
 
 

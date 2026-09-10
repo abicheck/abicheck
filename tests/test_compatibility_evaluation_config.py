@@ -161,7 +161,6 @@ class TestConstruction:
                 base=_identity("strict_abi"), packs=("rust_c_ffi",)
             )
 
-
 class TestContractConfigUnresolvedBehavior:
     # ADR-049 D9: unresolved_behavior is a closed two-value vocabulary
     # ("not_checkable" default, "warn" the only opt-out) -- unlike

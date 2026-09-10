@@ -41,14 +41,12 @@ Lives under ``frontends/cli/commands/`` (ADR-061), not as a flat
 is frozen (``architecture/modules.yaml``'s ``frozen-root-family`` gate).
 
 Library-removal accounting (``--fail-on-removed-library``) is out of scope
-here (rejected explicitly, not silently ignored) -- computing it would mean
-re-scanning ``old_facts_path`` a second time only to read back
-``per_library_snapshots.keys()``, defeating the point of a caller handing in
-an already-loaded, potentially huge facts document to avoid re-parsing it.
+here (rejected, not silently ignored) -- computing it means re-scanning
+``old_facts_path`` a second time for ``per_library_snapshots.keys()``,
+defeating the point of handing in an already-loaded facts document.
 
 NEW_INPUT is extracted with the same ``_extract_if_package`` primitive the
-live release fan-out uses for a package (wheel/deb/rpm/tar), not just a
-directory. ``--devel-pkg new=...`` is honored the same way.
+live fan-out uses for a package, not just a directory (``--devel-pkg new=...`` too).
 
 **Every other flag `dispatch()` doesn't explicitly wire through is rejected
 outright (``click.UsageError``, exit 64)** --
@@ -375,16 +373,15 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
     suppression, policy_file = _load_suppression_and_policy(
         kwargs.get("suppress"), kwargs["policy"], kwargs.get("policy_file_path")
     )
-    # Round 9: this dispatcher bypasses run_compare entirely (module
-    # docstring), so it never picked up the PROJECT_CONFIG-tier
-    # `.abicheck.yml` `policy.overrides` fold every other route now
-    # applies -- `_early_cfg` already carries that field. No `--pack` fold
-    # to order against here (this command has none).
+    # Round 9: this dispatcher bypasses run_compare (module docstring), so
+    # it never picked up the PROJECT_CONFIG-tier `.abicheck.yml` fold every
+    # other route applies -- no `--pack` fold to order against (none here).
     from ....errors import PolicyError
-    from ....workflows.policy_file import merge_project_config_policy_overrides
+    from ....workflows import policy_file as _policy_file_mod
 
+    _pf0 = policy_file
     try:
-        policy_file = merge_project_config_policy_overrides(
+        policy_file = _policy_file_mod.merge_project_config_policy_overrides(
             policy_file,
             base_policy=kwargs["policy"],
             project_cfg=_early_cfg,
@@ -392,6 +389,10 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
         )
     except PolicyError as exc:
         raise click.BadParameter(str(exc), param_hint="--config") from exc
+    for w in _policy_file_mod.project_config_policy_downgrade_warnings(  # round 9/10
+        _pf0, policy_file, project_path=_early_cfg_path
+    ):
+        click.echo(f"Warning: {w}", err=True)
 
     # PR J: bundle: replaces --bundle-system-providers/--bundle-cohort.
     # kwargs["config"] is already resolved (explicit/auto-discovered) by

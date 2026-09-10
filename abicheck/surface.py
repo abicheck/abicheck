@@ -911,6 +911,40 @@ def _classify_type_level(
         return True, None
 
     known = {c for c in candidates if c in all_types}
+    # Round 9/10 (Codex review, fresh evidence): a bare (unqualified) tail
+    # candidate must not inherit the reachability of an unrelated,
+    # same-named type when its own *qualified* form was also supplied but
+    # failed to match anything in the model. `mangled_name.py`'s
+    # `itanium_special_name_owner_identifiers` emits exactly such a
+    # (qualified, bare) pair for every scoped vtable/RTTI/VTT owner --
+    # e.g. `_ZTVN2ns7WrapperIiEE` yields `{"ns::Wrapper", "Wrapper"}`. If
+    # `ns::Wrapper` is absent from the snapshot (the real owner is simply
+    # not modeled) but an unrelated, unreachable record happens to be named
+    # bare `Wrapper`, that unrelated record must not stand in for the real,
+    # unresolvable owner -- the same "bare-tail ambiguity" hazard
+    # `contract_evaluation._confirmed_type_matches`'s own docstring
+    # documents and guards against for the `exports`-domain closure.
+    #
+    # Gated on `all_types` actually containing at least one qualified
+    # (``::``-bearing) name: DWARF-derived snapshots always store a
+    # record's fully-qualified name (`dwarf_snapshot.py`'s `RecordType(
+    # name=qualified, ...)`), so on real evidence an unmatched qualified
+    # candidate is a trustworthy "the real owner isn't modeled" signal.
+    # A snapshot that stores every type bare (no qualification tracked at
+    # all -- some simpler/synthetic snapshot shapes) carries no such
+    # signal to begin with; without it, a namespaced owner's bare tail is
+    # the *only* way it could ever match a bare-only model, matching this
+    # module's other candidate-resolution rules' existing treatment of
+    # such a snapshot's bare names, so it stays trusted. Either way this
+    # can only ever narrow `known` toward the conservative "unknown ->
+    # keep" default -- never fabricate a demotion -- and never drops a
+    # bare candidate whose own qualified form was never supplied at all
+    # (a single-component owner with no scope, where qualified == bare).
+    if any("::" in t for t in all_types):
+        unconfirmed_qualified_tails = {
+            c.rsplit("::", 1)[1] for c in candidates if "::" in c and c not in all_types
+        }
+        known -= unconfirmed_qualified_tails
     if not known:
         # We cannot place this finding — keep it (never hide an unknown).
         return True, None
