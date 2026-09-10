@@ -37,6 +37,18 @@ on:
       # re-export facade. Kept both so a PR touching only the moved logic
       # still triggers this lane.
       - "abicheck/policy/classification.py"
+      # ADR-061 gap B, same reasoning, the three other owners this lane's
+      # own real-package --contract step exercises: checker_policy.py's
+      # second owner (per-finding evidence status/cross-source evolution,
+      # which feeds gate decisions the same way policy/classification.py
+      # does), and contract_gating.py's/contract_coverage_ledger.py's real
+      # owners (the "abicheck/contract_*.py" glob above only matches the
+      # flat facades, not their policy/-nested owners). A prior round of
+      # this same fix added policy/classification.py but missed these
+      # three (Codex review, fresh evidence).
+      - "abicheck/policy/evidence_status.py"
+      - "abicheck/policy/contract_finding_relevance.py"
+      - "abicheck/policy/coverage_ledger.py"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
