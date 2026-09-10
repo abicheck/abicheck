@@ -287,18 +287,28 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
     """The pack-supplied half of *config*, in the shapes the engine takes.
 
     *policy_file* is the ``--policy-file`` the run really loaded (``None``
-    when none was given). Its own overrides are subtracted from the resolved
-    ``policy.overrides``, which the resolver deliberately returns *merged*
-    (explicit re-applied last, so it is the final value rather than a delta):
-    keeping only the difference is what makes the result "what the packs
-    added", so folding it back onto that same policy file cannot silently
-    restate — or, on a future shape change, contradict — a value the file
-    already owns.
+    when none was given), used only to re-exclude its own explicit kinds as
+    a defensive second check (`CompatibilityPolicyConfig.pack_overrides`
+    already excludes them at the source).
+
+    CodeRabbit review, round 8: this used to derive "pack-contributed" by
+    subtracting *policy_file*'s own kinds from the fully **merged**
+    ``config.policy.overrides`` -- which also contains any
+    ``project_config``-tier (``.abicheck.yml``) contribution, so a project
+    kind neither the explicit file nor a pack claims survived that
+    subtraction and was misreported as pack-sourced (leaking into
+    ``PackApplication.policy_overrides``, ``is_empty()``, and the
+    pack-manifest receipt provenance). Reading ``config.policy.
+    pack_overrides`` instead -- the resolver's own pre-project-fold,
+    pack-only partition -- is the "read, don't re-derive" fix; see that
+    field's own docstring for the full account.
     """
     explicit_kinds = set((policy_file.overrides if policy_file else {}) or {})
-    resolved_overrides = getattr(getattr(config, "policy", None), "overrides", {}) or {}
+    resolved_pack_overrides = (
+        getattr(getattr(config, "policy", None), "pack_overrides", {}) or {}
+    )
     pack_overrides: dict[ChangeKind, Verdict] = {}
-    for slug, verdict in resolved_overrides.items():
+    for slug, verdict in resolved_pack_overrides.items():
         kind = slug if isinstance(slug, ChangeKind) else ChangeKind(slug)
         if kind not in explicit_kinds:
             pack_overrides[kind] = verdict

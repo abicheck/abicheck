@@ -14,8 +14,9 @@
 # limitations under the License.
 
 """New defect 3: ADR-068 §3 #23 documents ``.abicheck.yml``'s ``policy.
-overrides`` as the replacement route for the retired ``--crosscheck
-KEY=LEVEL`` flag -- but until this fix, a real ``.abicheck.yml`` carrying a
+overrides`` as the project-config policy-override mechanism, distinct from
+the still-live ``scan --crosscheck KEY=LEVEL`` flag -- but until this fix,
+a real ``.abicheck.yml`` carrying a
 top-level ``policy:`` key failed outright with ``Error: unknown .abicheck.yml
 key 'policy'``, so the documented route did not exist at all.
 

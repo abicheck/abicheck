@@ -370,8 +370,7 @@ more**:
 
 ### `policy:`
 
-ADR-068 §3 #23's documented replacement for the retired `--crosscheck
-KEY=LEVEL` flag. One key today: `overrides:`, a `ChangeKind` slug ->
+ADR-068 §3 #23's documented project-config policy override mechanism. One key today: `overrides:`, a `ChangeKind` slug ->
 severity mapping (`break`/`warn`/`risk`/`ignore`) — the identical vocabulary
 and validation `--policy <file>`'s own `overrides:` block uses (an unknown
 slug or severity spelling is a hard load error, not a silently-skipped

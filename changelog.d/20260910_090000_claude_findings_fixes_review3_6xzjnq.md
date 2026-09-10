@@ -14,8 +14,8 @@
   so the receipt and the value that scored the run can no longer drift
   apart.
 - **`scan --against` silently ignored `.abicheck.yml`'s `policy.overrides`,
-  the documented replacement for the retired `--crosscheck KEY=LEVEL`
-  flag.** An identical snapshot pair with `policy.overrides.func_removed:
+  the documented project-config policy override mechanism.** An identical
+  snapshot pair with `policy.overrides.func_removed:
   ignore` exited `0` under `compare` but `4` under `scan --against` — the
   project config was parsed but never folded into the `PolicyFile`
   `cli_scan.py` builds for the baseline comparison. Fixed by threading the

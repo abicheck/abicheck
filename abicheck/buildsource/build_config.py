@@ -504,6 +504,7 @@ class BuildConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
+        """Parse a raw ``.abicheck.yml`` mapping into a :class:`BuildConfig`."""
         if isinstance(data, dict):
             cls._validate_structure(data)
         top = data if isinstance(data, dict) else {}

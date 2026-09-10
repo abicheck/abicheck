@@ -99,8 +99,9 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
     # rather than coercing it into a version spelling).
     "python": frozenset({"abi3_floor"}),
 }
-#: New defect 3 (ADR-068's documented `.abicheck.yml` `policy:` replacement
-#: route for the retired `--crosscheck KEY=LEVEL` flag): a flat ``str ->
+#: New defect 3 (ADR-068 §3 #23's documented `.abicheck.yml` `policy:`
+#: project-config policy-override mechanism, distinct from the still-live
+#: `scan --crosscheck KEY=LEVEL` flag): a flat ``str ->
 #: str`` mapping subkey, unlike every other subkey table above (a fixed key
 #: set). Deep content validation (real `ChangeKind` slugs, real severity
 #: spellings) is `policy_file._parse_overrides`'s job once this is folded

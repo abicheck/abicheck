@@ -41,6 +41,20 @@ def test_itanium_scope_components_basic() -> None:
     assert mangled_name.itanium_scope_components("not a mangled name") is None
 
 
+def test_itanium_scope_components_conversion_operator() -> None:
+    """A conversion operator's own leaf component (``cv``, followed by the
+    raw, unparsed target-type encoding -- see ``_parse_operator_component``'s
+    own docstring) is a distinct terminal shape ``_step_next_component``
+    handles separately from an ordinary source-name/ctor/dtor component.
+    Real mangling for ``struct Foo { operator ns::Bar() {...} };``, verified
+    against a real g++ (`nm` on a compiled TU): ``_ZN3FoocvN2ns3BarEEv``.
+    """
+    assert mangled_name.itanium_scope_components("_ZN3FoocvN2ns3BarEEv") == [
+        "Foo",
+        "{op:cv:N2ns3BarEEv}",
+    ]
+
+
 def test_msvc_scope_components_basic() -> None:
     assert mangled_name.msvc_scope_components("?run@Foo@@QEAAXXZ") == ["Foo", "run"]
     assert mangled_name.msvc_scope_components("?instantiate@@YAXXZ") == ["instantiate"]
@@ -94,6 +108,17 @@ def test_itanium_special_name_owner_identifiers() -> None:
     assert fn("_ZN3Foo3barEv") is None
     assert fn("not a mangled name") is None
     assert fn("") is None
+    # A `TV`/`TI`/`TT` code whose remainder opens a nested-name wrapper
+    # (`N`) but never supplies a component before running out of string --
+    # the owner-component loop never executes at all, leaving no
+    # candidate to build a result from.
+    assert fn("_ZTVN") is None
+    # A malformed length-prefixed owner name: "9" claims a 9-char name
+    # only 1 character ("x") can ever satisfy.
+    assert fn("_ZTV9x") is None
+    # A well-formed short owner name carrying a GNU ABI tag whose own
+    # directly-attached template-argument list never closes.
+    assert fn("_ZTV1CB3tagI") is None
     # The exact adversarial shape Codex named: a bare namespace segment must
     # never appear standalone, even though it legitimately contributes to
     # the qualified owner and would otherwise "just happen" to be a

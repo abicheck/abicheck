@@ -1262,6 +1262,20 @@ def resolve_compatibility_evaluation_config(
     policy_overrides = resolve_policy_pack_overrides(
         pack_paths, explicit_overrides=policy_overrides_explicit, loaded=loaded_packs
     )
+    # CodeRabbit review, round 8: the strict subset of the merge above that
+    # is genuinely pack-contributed, captured *before* the project-config
+    # fold below can add its own kinds -- `CompatibilityPolicyConfig.
+    # pack_overrides`'s own docstring has the full account of why
+    # `pack_application.pack_application()` needs this instead of
+    # re-deriving "pack-contributed" from the fully-merged `overrides` minus
+    # the explicit file's kinds (that re-derivation misreads a
+    # project-contributed kind neither the file nor a pack claims as
+    # pack-sourced).
+    policy_pack_overrides_only = {
+        slug: verdict
+        for slug, verdict in policy_overrides.items()
+        if slug not in policy_overrides_explicit
+    }
     # One entry per pack that actually supplied a surviving override, each
     # naming its own manifest: a pack whose every assignment the policy file
     # also overrides contributed nothing, and a contract/gate pack in the same
@@ -1313,6 +1327,7 @@ def resolve_compatibility_evaluation_config(
         base=cast(ImmutableIdentity, policy_base),
         packs=policy_packs,
         overrides=policy_overrides,
+        pack_overrides=policy_pack_overrides_only,
     )
 
     # ── gate ────────────────────────────────────────────────────────────────

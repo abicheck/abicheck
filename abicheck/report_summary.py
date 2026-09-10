@@ -70,6 +70,8 @@ def surface_breakdown(changes: Sequence[HasKind]) -> SurfaceBreakdown:
 
 @dataclass(frozen=True)
 class ReportSummary:
+    """The report's top-level counts and compatibility percentages."""
+
     breaking: int
     source_breaks: int
     risk_count: int
@@ -179,6 +181,7 @@ def compatibility_metrics(
 
 
 def build_summary(result: DiffResult) -> ReportSummary:
+    """Build the report's top-level :class:`ReportSummary` from *result*."""
     # ADR-049 D1: the percentages are the compatibility axis, so they read the
     # same evaluated subset the four buckets below do. Passing every change
     # here let a run report `verdict: NO_CHANGE` and `breaking: 0` beside

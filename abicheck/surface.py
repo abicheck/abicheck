@@ -65,6 +65,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .demangle import demangle
 from .model import ScopeOrigin
 from .model.mangled_name import (
     itanium_special_name_owner_identifiers,
@@ -571,6 +572,11 @@ def classify_change_surface(
     type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
 
     def _resolve_type_candidates() -> set[str]:
+        """Candidate type names implicated by *change*, computed lazily.
+
+        See the comment below for why this is lazy (never called for a
+        finding `_classify_symbol_level` resolves on its own).
+        """
         # CodeRabbit review: this used to run unconditionally before the
         # symbol-level early return below, forking a `c++filt` (via
         # `demangle()`, in the mangled-owner branch) for every finding this
@@ -633,6 +639,15 @@ def classify_change_surface(
         # path AND its template-argument list(s), at any nesting depth --
         # exactly what `_type_identifiers()` would extract from a fully
         # demangled spelling, derived structurally instead.
+        #
+        # This host-independence invariant is scoped to shapes the
+        # structural parsers below CAN parse (plain or templated owner);
+        # a shape neither can parse at all (e.g. the `Ss`/`Sa`/... standard
+        # substitutions, or a local-class owner like `_ZTVZ3foovE1A`)
+        # legitimately still falls back to `demangle()` a few lines down --
+        # same as every other kind's host-dependent-but-conservative
+        # pattern (Codex review, round 8: the earlier fix over-scoped this
+        # and dropped that fallback for shapes it never covered).
         owner_identifiers = itanium_special_name_owner_identifiers(sym)
         if owner_identifiers is not None:
             return set(owner_identifiers) | _type_identifiers(change.caused_by_type)
@@ -640,7 +655,23 @@ def classify_change_surface(
         if owner_scope is not None:
             sym_for_types = "::".join(owner_scope[0])
         else:
-            sym_for_types = sym
+            # Round-8 finding: the structural parsers above only ever
+            # return None here for an Itanium special-name shape they
+            # flatly can't parse at all (e.g. `_ZTVSs`'s `Ss` substitution
+            # for `std::basic_string<...>`, or a local-class vtable like
+            # `_ZTVZ3foovE1A`) -- not for one they parsed and found
+            # non-public. The host-independence invariant documented above
+            # is scoped to shapes the structural parser CAN handle (so
+            # classification for THOSE never silently varies by host); it
+            # was never meant to forbid the pre-existing, dependency-free-
+            # when-possible `demangle()` fallback for a shape neither
+            # parser can handle at all -- the same "demangler available ->
+            # more precise; unavailable -> conservative unknown/keep,
+            # never a false break" pattern every other kind already uses
+            # (e.g. `FUNC_REMOVED_ELF_ONLY`'s `demangled_symbol`). Removing
+            # it entirely was a real precision regression on demangler-
+            # equipped hosts for these shapes, not a host-independence fix.
+            sym_for_types = demangle(sym) or sym
         return _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type
         )

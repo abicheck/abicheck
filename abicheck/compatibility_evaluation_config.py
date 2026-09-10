@@ -664,12 +664,8 @@ class SurfaceConfig:
     """
 
     explicit_scope: DigestedItems | None = None
-    #: Consumed set-wise (``internal_leak.py``'s ``is_internal_type`` builds
-    #: a ``set(internal_namespaces)`` before membership-testing), unlike
-    #: ``explicit_scope``/``variants`` where a deterministic parser + digest
-    #: already guarantees order-identity for equal-digest inputs --
-    #: canonicalized (sorted+deduped) the same way as ``overlays``/``packs``
-    #: for D7's equivalent-input equality guarantee.
+    #: Consumed set-wise, so canonicalized (sorted+deduped) the same way as
+    #: ``overlays``/``packs`` for D7's equivalent-input equality guarantee.
     internal_namespaces: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -712,11 +708,21 @@ class CompatibilityPolicyConfig:
     ``overrides`` is the explicit per-``ChangeKind`` override that wins over
     every selected pack and the base policy (ADR-049 D8 composition order:
     "explicit per-ChangeKind override > selected packs > base policy").
+
+    ``pack_overrides`` (CodeRabbit review, round 8) is the strict subset of
+    ``overrides`` genuinely contributed by a selected ``kind: policy`` pack,
+    captured *before* ``.abicheck.yml``'s ``project_config``-tier
+    contribution is folded into ``overrides`` -- ``pack_application.
+    pack_application()`` used to re-derive "pack-contributed" from the fully
+    merged ``overrides``, which misread an uncontested project-sourced kind
+    as pack-sourced. Reading this field instead (D7's "read, don't
+    re-derive") fixes that leak; see ``pack_application()``'s own docstring.
     """
 
     base: ImmutableIdentity
     packs: tuple[ImmutableIdentity, ...] = ()
     overrides: Mapping[str, Verdict] = field(default_factory=dict)
+    pack_overrides: Mapping[str, Verdict] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.base, ImmutableIdentity):
@@ -785,6 +791,9 @@ class CompatibilityPolicyConfig:
             ),
         )
         object.__setattr__(self, "overrides", _frozen_mapping(self.overrides))
+        # Always an internally-built subset of the already-validated
+        # `overrides` above -- frozen, not re-validated.
+        object.__setattr__(self, "pack_overrides", _frozen_mapping(self.pack_overrides))
 
 
 #: Valid :attr:`ScopedGateSelection.kind` values -- the two ADR-043
@@ -840,26 +849,17 @@ class GateConfig:
     four-category model rather than inventing a second severity vocabulary.
 
     ``exit_code_scheme`` validates against ``{"legacy", "severity"}`` --
-    ``"auto"`` (ADR-037 D12's third CLI-facing choice) is deliberately
-    excluded here: ``auto`` means "resolve to legacy or severity based on
-    whether a severity setting is in effect," and by the time a value
-    reaches this *effective*, already-resolved configuration that choice
-    must already be made (see ``cli.py``'s ``_announce_exit_scheme``: "auto
-    already resolved to legacy or severity by the time we get here").
+    ``"auto"`` is deliberately excluded: by the time a value reaches this
+    already-resolved configuration, "legacy vs. severity" must already be
+    decided (see ``cli.py``'s ``_announce_exit_scheme``).
 
     ``require_complete_analysis``/``scope`` (duplication-and-convergence
-    plan, Phase 2 item 1's scoping finding): two more gate-affecting inputs
-    that, before this, had no typed home at all -- ``require_complete_
-    analysis`` was threaded as a raw ``bool`` through ~15+ independent
-    function signatures (``cli.py``, ``cli_compare_helpers.py``,
-    ``cli_compare_options.py``), and a scoped-gate selection had none
-    (see :class:`ScopedGateSelection`). Added here, additively, so every
-    existing constructor of this frozen dataclass keeps working unchanged
-    (both new fields default to "no effect"). This is deliberately *not*
-    yet wired to those raw call sites or to a resolver that builds one of
-    these objects from real CLI/API input -- see this module's own
-    docstring ("no front end constructs one of these objects yet") and the
-    plan doc's Phase 2 item 1 for what's still open.
+    plan, Phase 2 item 1): two more gate-affecting inputs that previously had
+    no typed home (a raw ``bool`` threaded through ~15+ signatures, and no
+    home at all for a scoped-gate selection -- see :class:`ScopedGateSelection`).
+    Both default to "no effect"; not yet wired to those raw call sites or a
+    real resolver -- see this module's docstring and the plan's Phase 2
+    item 1.
     """
 
     exit_code_scheme: str = "severity"

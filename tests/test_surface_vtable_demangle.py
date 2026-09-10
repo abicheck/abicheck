@@ -43,6 +43,10 @@ from abicheck.model import (
     ScopeOrigin,
     Visibility,
 )
+from abicheck.model.mangled_name import (
+    itanium_special_name_owner_identifiers,
+    itanium_special_name_owner_scope_components,
+)
 from abicheck.surface import (
     REASON_NON_PUBLIC_TYPE,
     classify_change_surface,
@@ -271,6 +275,19 @@ class TestTemplatedOwnerHostIndependence:
     present and an absent demangler -- proven here by monkeypatching the
     shared ``abicheck.demangle.demangle()`` entry point both ways and
     asserting the classification never changes.
+
+    **Scope of this invariant (round 8 correction):** it applies to every
+    shape ``itanium_special_name_owner_scope_components``/
+    ``itanium_special_name_owner_identifiers`` can structurally parse --
+    plain and templated owners alike, which is every case in ``_CASES``
+    below. It does NOT apply to a shape neither structural parser can
+    parse at all (a standard `Ss`/`Sa`/... substitution alone, or a
+    local-class owner) -- for those, ``demangle()`` is still the
+    dependency-free-when-possible fallback, and legitimately classifies
+    differently by host the same way every other kind already does (see
+    ``TestDemanglerFallbackForUnparseableShapes`` below, which pins the
+    opposite direction: that the fallback is NOT dropped for those
+    shapes).
     """
 
     def _surf(self, snap):
@@ -408,6 +425,132 @@ class TestNamespaceComponentCannotMasqueradeAsOwner:
             False,
             REASON_NON_PUBLIC_TYPE,
         )
+
+
+class TestDemanglerFallbackForUnparseableShapes:
+    """Round 8 finding: ``itanium_special_name_owner_scope_components``/
+    ``itanium_special_name_owner_identifiers`` return ``None`` -- can't
+    parse the shape at all -- for a valid Itanium special name outside
+    their structural subset, e.g. the bare ``Ss`` standard substitution
+    for ``std::basic_string<...>`` (``_ZTVSs``) or a local-class vtable
+    (``_ZTVZ3foovE1A``). The round-1 fix removed the ``demangle()``
+    fallback entirely for this ``owner_scope is None`` branch, which
+    over-scoped the host-independence invariant
+    ``TestTemplatedOwnerHostIndependence`` establishes above (that
+    invariant is about shapes the structural parser CAN handle, never
+    about shapes it flatly can't) -- on a demangler-equipped host, an
+    otherwise-known private owner was silently demoted to "unknown, keep"
+    instead of correctly resolving and demoting. This restores the
+    fallback for exactly the unparseable branch and pins both directions:
+    a demangler-equipped host resolves and demotes; a demangler-less host
+    conservatively keeps (never a false break), matching the same
+    accepted pattern ``FUNC_REMOVED_ELF_ONLY``'s ``demangled_symbol``
+    already uses everywhere else in this codebase.
+    """
+
+    def _surf(self, snap):
+        return compute_public_surface(snap)
+
+    #: (mangled symbol, declared type name the demangled spelling is
+    #: composed of, present in `types=` but unreachable from any public
+    #: function -- i.e. the expected-non-public case once resolved).
+    _CASES = [
+        ("_ZTVSs", "basic_string"),  # `Ss` == `std::basic_string<...>`.
+        ("_ZTVZ3foovE1A", "A"),  # a local-class vtable owner.
+    ]
+
+    def test_structural_parsers_reject_both_shapes(self):
+        # Sanity precondition this whole test class rests on: both shapes
+        # are genuinely outside the structural parsers' subset, so the
+        # `owner_scope is None` fallback branch is actually exercised
+        # rather than accidentally testing the structural path instead.
+        for mangled, _ in self._CASES:
+            assert itanium_special_name_owner_scope_components(mangled) is None
+            assert itanium_special_name_owner_identifiers(mangled) is None
+
+    def test_demangler_present_resolves_and_demotes(self):
+        for mangled, present_type in self._CASES:
+            snap = AbiSnapshot(
+                library="l",
+                version="1",
+                functions=[_fn("api", ret="Result *")],
+                types=[_rec("Result"), _rec(present_type)],
+            )
+            s = self._surf(snap)
+            change = Change(
+                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+                symbol=mangled,
+                description="",
+            )
+            # Real c++filt-backed demangle() (available in this test
+            # environment) -- proves the fallback is actually wired, not
+            # merely mocked to succeed. `surface.py` binds `demangle` via
+            # `from .demangle import demangle`, so patching it must target
+            # `abicheck.surface.demangle` (the imported name), not
+            # `abicheck.demangle.demangle` (the defining module's own
+            # attribute) -- the latter would leave `surface.py`'s already-
+            # bound reference untouched.
+            assert classify_change_surface(change, s, s) == (
+                False,
+                REASON_NON_PUBLIC_TYPE,
+            ), mangled
+
+    def test_demangler_absent_conservatively_keeps(self):
+        import abicheck.surface as surface_mod
+
+        for mangled, present_type in self._CASES:
+            snap = AbiSnapshot(
+                library="l",
+                version="1",
+                functions=[_fn("api", ret="Result *")],
+                types=[_rec("Result"), _rec(present_type)],
+            )
+            s = self._surf(snap)
+            change = Change(
+                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+                symbol=mangled,
+                description="",
+            )
+            original = surface_mod.demangle
+            try:
+                surface_mod.demangle = lambda *a, **k: None  # simulate absent
+                # Unresolvable without a demangler -- conservative
+                # "unknown, keep" (never a false break), same as every
+                # other kind's demangler-less default.
+                assert classify_change_surface(change, s, s) == (True, None), mangled
+            finally:
+                surface_mod.demangle = original
+
+    def test_classification_may_legitimately_differ_by_host_for_these_shapes(self):
+        # Explicit converse of TestTemplatedOwnerHostIndependence: for a
+        # shape the structural parser can't handle at all, presence vs.
+        # absence of a demangler is allowed to change the classification
+        # (present -> correctly demoted; absent -> conservatively kept).
+        # This is not a regression of the host-independence invariant,
+        # which is scoped to shapes the structural parser CAN handle.
+        import abicheck.surface as surface_mod
+
+        mangled, present_type = self._CASES[0]
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec(present_type)],
+        )
+        s = self._surf(snap)
+        change = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol=mangled,
+            description="",
+        )
+        original = surface_mod.demangle
+        try:
+            surface_mod.demangle = lambda *a, **k: None
+            absent_result = classify_change_surface(change, s, s)
+        finally:
+            surface_mod.demangle = original
+        present_result = classify_change_surface(change, s, s)
+        assert absent_result != present_result
 
 
 class TestStdSubstitutionOwnerDemotesLikeItsFullySpelledEquivalent:

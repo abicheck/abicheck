@@ -1849,7 +1849,7 @@
         "compatible_additions": {
           "type": "integer",
           "minimum": 0,
-          "description": "As of report_schema_version 4.0 (a required field's own meaning changing is breaking, not additive): genuine API-growth COMPATIBLE findings only (excludes quality_issues, e.g. public_surface_shrank). Before 4.0 this counted every COMPATIBLE finding; compatible_additions + quality_issues equals that old total. A consumer sharing only the 3.x MAJOR component still reads the pre-4.0 meaning, per this schema's own major/minor versioning policy."
+          "description": "As of report_schema_version 4.0 (a required field's own meaning changing is breaking, not additive): genuine API-growth COMPATIBLE findings only (excludes quality_issues, e.g. public_surface_shrank). Before 4.0 this counted every COMPATIBLE finding, including quality_issues. Consumers that need the pre-4.0 genuine-growth count must subtract quality_issues. A consumer sharing only the 3.x MAJOR component still reads the pre-4.0 meaning, per this schema's own major/minor versioning policy."
         },
         "quality_issues": {
           "type": "integer",

@@ -30,7 +30,8 @@
   sub-blocks already enforce.
 - **`.abicheck.yml`'s documented `policy.overrides` route now exists.**
   ADR-068 §3 #23 named `--policy`/`.abicheck.yml`'s `policy.overrides` as
-  the replacement for the retired `--crosscheck KEY=LEVEL` flag, but a real
+  the project-config policy override mechanism (distinct from the
+  still-live `scan --crosscheck KEY=LEVEL` flag), but a real
   `.abicheck.yml` carrying a top-level `policy:` key failed outright with
   `Error: unknown .abicheck.yml key 'policy'` — the documented interface
   did not exist. `BuildConfig` now accepts `policy.overrides` (a

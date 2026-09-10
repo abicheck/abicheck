@@ -1291,8 +1291,9 @@ def scan_cmd(
         resolved_cfg=resolved_cfg,
     )
     # Findings-analysis-fixes review round 3, finding 2: `.abicheck.yml`'s
-    # `policy.overrides` block (ADR-068 §3 #23, the documented replacement
-    # for the retired `--crosscheck KEY=LEVEL` flag) reached the native
+    # `policy.overrides` block (ADR-068 §3 #23's documented project-config
+    # policy-override mechanism, distinct from the still-live `--crosscheck
+    # KEY=LEVEL` flag) reached the native
     # `compare` command and the directory/package release fan-out, but was
     # silently ignored here -- `scan --against` never read it at all, not
     # even when the same project config's `policy.overrides.func_removed:
