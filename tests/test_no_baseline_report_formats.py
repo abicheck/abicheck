@@ -42,6 +42,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.report.no_baseline import (
+    NO_BASELINE_EXIT_AXIS_LABELS,
     NO_BASELINE_EXIT_AXIS_NOTICES,
     NO_BASELINE_SUPPORTED_FORMATS,
     compute_no_baseline_document,
@@ -603,3 +604,94 @@ def test_a_run_without_a_contract_omits_the_ledger_entirely() -> None:
     assert doc.contract_selected is False
     payload, _ = render_no_baseline(result, "json")
     assert "contract_coverage_failures" not in json.loads(payload)
+
+
+def test_the_two_axis_tables_cover_the_same_axes() -> None:
+    """A long notice and a short label for every axis, and no orphan of either.
+
+    This is the drift guard the previous round needed and did not have: the
+    Markdown fix added notices, and `oneline` kept printing a bare exit code
+    because nothing tied the two projections to one list (Codex review, P2).
+    Keyed identically, an axis added to one is now missing from the other
+    loudly.
+    """
+    assert set(NO_BASELINE_EXIT_AXIS_LABELS) == set(NO_BASELINE_EXIT_AXIS_NOTICES)
+
+
+@pytest.mark.parametrize(
+    ("axis", "require_complete"),
+    [(axis, req) for axis, (_, req) in _GATED_AXIS_FIXTURES.items()],
+)
+def test_every_text_projection_names_the_axis_that_gated(
+    axis: str, require_complete: bool
+) -> None:
+    """Markdown *and* oneline must both say why, not just how much.
+
+    Stated over both text projections at once rather than per-renderer: the
+    defect was one renderer being fixed while its sibling silently kept
+    dropping the cause.
+    """
+    result = _axis_result(axis)
+    doc = compute_no_baseline_document(
+        result, require_complete_analysis=require_complete
+    )
+    contributing = {k for k, v in doc.exit_axes.items() if v}
+    assert axis in contributing
+
+    for fmt in ("markdown", "oneline"):
+        text, exit_code = render_no_baseline(
+            result, fmt, require_complete_analysis=require_complete
+        )
+        assert exit_code != 0
+        for key in contributing:
+            phrase = NO_BASELINE_EXIT_AXIS_LABELS[key]
+            headline = NO_BASELINE_EXIT_AXIS_NOTICES[key].split(" -- ")[0]
+            assert phrase in text or headline in text, (fmt, key, text)
+
+
+def test_a_clean_audit_oneline_names_no_axis() -> None:
+    """The complement, so "name the axis" cannot become "always name them all"."""
+    result = _result("case143_audit_accidental_export")
+    text, exit_code = render_no_baseline(result, "oneline")
+    assert exit_code == 0
+    for phrase in NO_BASELINE_EXIT_AXIS_LABELS.values():
+        assert phrase not in text
+
+
+def test_the_audit_json_validates_against_its_own_published_schema() -> None:
+    """The audit has a schema identity of its own, and it is a real one.
+
+    It stamped `report_schema_version`, the compare report's field, whose
+    schema tells consumers to accept any matching MAJOR — so an audit was
+    offered under a different document's identity, and failed that schema on
+    two counts: a null `verdict` there means ADR-050 D2's "comparability
+    rejected" and requires a `reason` an audit must not claim, and
+    `no_baseline` is outside the enum its `selection` field allows (Codex
+    review, P1).
+
+    Asserted both directions, since renaming the field alone would satisfy
+    the negative half while leaving the audit unvalidatable.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+    from abicheck.schemas import load_audit_report_schema, load_compare_report_schema
+
+    result = _result("case143_audit_accidental_export")
+    payload, _ = render_no_baseline(result, "json")
+    doc = json.loads(payload)
+
+    audit_errors = list(
+        jsonschema.Draft202012Validator(load_audit_report_schema()).iter_errors(doc)
+    )
+    assert not audit_errors, [e.message for e in audit_errors]
+
+    assert "report_schema_version" not in doc, (
+        "the compare report's identity field must not appear on an audit"
+    )
+    assert doc["audit_report_schema_version"], "the audit carries its own version"
+    compare_errors = list(
+        jsonschema.Draft202012Validator(load_compare_report_schema()).iter_errors(doc)
+    )
+    assert compare_errors, (
+        "an audit must not validate as a compare report — the two documents "
+        "mean different things by a null verdict"
+    )

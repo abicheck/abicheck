@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.github.io/abicheck/reference/schemas/v1/audit_report.schema.json",
+  "title": "abicheck single-build audit report",
+  "description": "Schema for the JSON document produced by `abicheck compare --no-baseline CANDIDATE --format json` (ADR-068 D2's single-build audit). Deliberately a separate schema from compare_report.schema.json, not a version of it: an audit has one operand and reports no compatibility verdict, so `verdict` is always null and means \"no comparison was performed\" -- not compare_report's ADR-050 D2 meaning, \"the comparability gate rejected this pair\", which is why that schema requires a `reason` alongside a null verdict and this one must not. Versioned independently via audit_report_schema_version; additive changes (new optional keys, new enum members) bump the MINOR component, breaking changes bump the MAJOR component.",
+  "type": "object",
+  "required": [
+    "audit_report_schema_version",
+    "no_baseline",
+    "library",
+    "verdict",
+    "changes",
+    "findings",
+    "exit_code"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "description": "One candidate-side finding: a hygiene or cross-source observation about this build alone. Never an addition, removal or modification -- those require two sides.",
+      "required": ["kind", "verdict", "category"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": {"type": "string", "description": "The ChangeKind slug."},
+        "symbol": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]},
+        "verdict": {"type": "string", "description": "The finding kind's own classification, NOT a verdict for the run -- an audit has none."},
+        "category": {"type": "string"},
+        "evolution": {
+          "type": ["string", "null"],
+          "description": "ADR-068 D3's evolution state. With OLD declared absent only these two are reachable: a finding is present in this build, or its evidence could not be evaluated. `introduced`/`resolved` state an OLD -> NEW relationship this run has no OLD for.",
+          "enum": ["persistent", "not_evaluated", null]
+        },
+        "candidate_side_enrichment": {"type": "boolean"},
+        "observed_value": {"type": ["string", "null"]},
+        "suppression_rule": {"type": ["string", "null"]}
+      }
+    }
+  },
+  "properties": {
+    "audit_report_schema_version": {
+      "type": "string",
+      "description": "SemVer-style version of THIS schema (e.g. \"1.0\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "no_baseline": {
+      "const": true,
+      "description": "Always true. The discriminator a consumer can branch on before reading anything else."
+    },
+    "library": {"type": "string"},
+    "new_version": {"type": ["string", "null"], "description": "The candidate build's version label."},
+    "old_acquisition_state": {
+      "type": "string",
+      "description": "ADR-065's acquisition state for the absent OLD side; `declared_absent` today.",
+      "enum": ["declared_absent"]
+    },
+    "verdict": {
+      "type": "null",
+      "description": "Always null, and it means \"no comparison was performed\" (ADR-068 D2) -- an audit judges one build against no baseline. It does NOT carry compare_report's null-verdict meaning, so no `reason` accompanies it."
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "Always empty, never omitted. Present so a consumer that reads `changes` off any abicheck report finds it, and finds it honestly empty: a one-sided run produces no comparison findings. The audit's content is `findings` below."
+    },
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "suppressed_findings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/finding"},
+      "description": "Findings a --suppress rule matched. Listed rather than dropped: a suppressed finding is a disposition, not an absence (vision.md, \"record before disposing\"). Each carries the rule that hid it."
+    },
+    "suppressed_count": {"type": "integer", "minimum": 0},
+    "cross_source_evolution": {
+      "type": ["object", "null"],
+      "description": "Counts per ADR-068 D3 evolution state across the findings above.",
+      "additionalProperties": true
+    },
+    "pattern_preprocessor_scan": {"type": ["object", "null"]},
+    "evidence_tiers": {"type": "array", "items": {"type": "string"}},
+    "run_outcome": {"type": "object", "additionalProperties": true},
+    "comparison_scope": {"type": "object", "additionalProperties": true},
+    "contract_coverage_failures": {
+      "type": "array",
+      "description": "ADR-049 Phase 5's unsuppressible coverage ledger. Emitted whenever a --contract domain was selected, `[]` when that domain closed cleanly; absent entirely when no domain was selected, which is a different thing.",
+      "items": {"type": "object", "additionalProperties": true}
+    },
+    "contract_coverage_exit_contribution": {"type": "integer", "minimum": 0},
+    "exit_axes": {
+      "type": "object",
+      "description": "Each orthogonal axis's own exit contribution. `exit_code` below is the max over these, so a consumer can tell which axis gated a run.",
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "exit_code": {"type": "integer", "minimum": 0}
+  }
+}

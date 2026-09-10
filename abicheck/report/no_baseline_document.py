@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from .finding import ReportFinding
 
 __all__ = [
+    "AUDIT_REPORT_SCHEMA_VERSION",
     "NO_BASELINE_REPORT_SCHEMA_VERSION",
     "NO_BASELINE_SUPPORTED_FORMATS",
     "NO_BASELINE_UNSUPPORTED_FORMATS",
@@ -61,8 +62,32 @@ __all__ = [
 #: intent. ``suppressed_findings`` landed in the same unreleased ``2.0``
 #: rather than as a ``2.1``: a suppressed finding disappearing entirely was
 #: a defect in this shape, not a later addition to a shipped one, and
-#: version numbers exist to warn consumers of a *published* change.
-NO_BASELINE_REPORT_SCHEMA_VERSION = "2.1"
+
+#: The audit report's **own** schema version, in its **own** namespace.
+#:
+#: Emitted as ``audit_report_schema_version``, not ``report_schema_version``.
+#: That distinction is the whole point: the packaged ``compare_report.schema.
+#: json`` tells consumers to "accept any version with the same MAJOR
+#: component", so stamping an audit into that field offered a *different
+#: document* under the compare report's identity. Verified against the real
+#: schema, not inferred: an audit validates with two errors -- a null
+#: ``verdict`` there means ADR-050 D2's "the comparability gate rejected this
+#: pair" and so requires ``reason``, which an audit has no business claiming,
+#: and ``no_baseline`` is not in the enum its ``selection`` field allows
+#: (Codex review, P1).
+#:
+#: Starts at ``1.0``: this is a new schema's first published version. It was
+#: briefly numbered ``2.0``/``2.1`` while it shared the compare report's
+#: field, which implied a version history in a namespace it never had.
+#:
+#: Bump MINOR for an additive field, MAJOR for a removal or a changed
+#: meaning -- the same policy ``REPORT_SCHEMA_VERSION`` follows.
+AUDIT_REPORT_SCHEMA_VERSION = "1.0"
+
+#: Deprecated alias kept for one release so an in-flight import does not
+#: break; it names the same string. Prefer the name above.
+NO_BASELINE_REPORT_SCHEMA_VERSION = AUDIT_REPORT_SCHEMA_VERSION
+
 
 #: Formats a ``--no-baseline`` audit renders one-sided.
 #:

@@ -42,7 +42,7 @@
   explained -- so a missed evidence contract exited `7` beside a report that
   mentioned nothing but shallow evidence. Every contributing axis now
   renders a notice in Markdown and appears under `exit_axes` in JSON
-  (audit report schema 2.1), read from the same function the exit code is
+  (`exit_axes` in the audit report), read from the same function the exit code is
   folded from.
 - **Markdown reports no longer let a finding's own text restructure a
   table.** A detector's description, a demangled symbol, or an extractor's
@@ -166,8 +166,17 @@
 
 ### Changed
 
-- **`compare --no-baseline`'s report schema is `2.0`.** `findings[]`,
-  `cross_source_evolution` and a candidate-only `pattern_preprocessor_scan`
-  block are new. `changes` remains present and always `[]`, so a consumer
-  reading it off any abicheck report still finds it — the audit's own content
-  is under `findings[]`.
+- **The audit has a schema identity of its own.** Its JSON carries
+  `audit_report_schema_version: "1.0"` and validates against a new published
+  `audit_report.schema.json`, rather than stamping the compare report's
+  `report_schema_version`. That field identifies a *compare* report, whose
+  schema tells consumers to accept any matching MAJOR — so an audit offered
+  there was a different document wearing another's identity, and failed that
+  schema on two counts: a null `verdict` means "the comparability gate
+  rejected this pair" there (and so requires a `reason` an audit must not
+  claim), where in an audit it means "no comparison was performed"; and
+  `no_baseline` is outside the enum its `selection` field allows.
+  `findings[]`, `cross_source_evolution`, `exit_axes` and a candidate-only
+  `pattern_preprocessor_scan` block are the audit's own; `changes` remains
+  present and always `[]`, so a consumer reading it off any abicheck report
+  still finds it.

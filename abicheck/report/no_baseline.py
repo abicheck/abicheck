@@ -64,6 +64,7 @@ from .document import ReportDocument
 from .finding import build_report_findings
 from .markdown_text import md_cell
 from .no_baseline_document import (
+    AUDIT_REPORT_SCHEMA_VERSION as AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_REPORT_SCHEMA_VERSION as NO_BASELINE_REPORT_SCHEMA_VERSION,
     NO_BASELINE_SUPPORTED_FORMATS as NO_BASELINE_SUPPORTED_FORMATS,
     NO_BASELINE_UNSUPPORTED_FORMATS as NO_BASELINE_UNSUPPORTED_FORMATS,
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
     from .finding import ReportFinding
 
 __all__ = [
+    "AUDIT_REPORT_SCHEMA_VERSION",
     "NO_BASELINE_REPORT_SCHEMA_VERSION",
     "NO_BASELINE_SUPPORTED_FORMATS",
     "NO_BASELINE_UNSUPPORTED_FORMATS",
@@ -137,6 +139,20 @@ def _operational_status(result: NoBaselineCompareResult) -> OperationalStatus:
 #: so a nonzero exit is always accompanied by the axis that produced it. A
 #: Markdown report that stated only the coverage axis exited 7 on a missed
 #: evidence contract while saying nothing about why (Codex review, P2).
+#: The same axes, as short phrases for the one-line view. Kept beside the
+#: long notices above and keyed identically, so an axis cannot be explained
+#: in one projection and silently dropped by the other -- which is exactly
+#: what happened: the Markdown fix left `oneline` still printing a bare
+#: `[exit 7]` with no word about the missed evidence contract (Codex review,
+#: P2). :func:`render_no_baseline_oneline` asserts the two tables agree.
+NO_BASELINE_EXIT_AXIS_LABELS: dict[str, str] = {
+    "contract_coverage": "contract coverage incomplete",
+    "analysis_assurance": "analysis assurance incomplete",
+    "evidence_contract": "evidence contract not met",
+    "incomplete_scope": "comparison scope incomplete",
+    "no_comparison_completed": "no audit completed",
+}
+
 NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
     "contract_coverage": (
         "**Contract coverage incomplete** -- the selected `--contract` domain's "
@@ -364,7 +380,12 @@ def _suppressed_json(finding: ReportFinding) -> dict[str, Any]:
 
 def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
     return {
-        "report_schema_version": NO_BASELINE_REPORT_SCHEMA_VERSION,
+        # The audit's *own* namespace, deliberately not
+        # `report_schema_version`: that field belongs to the compare
+        # report, whose schema tells consumers to accept any matching
+        # MAJOR -- so an audit stamped there is a different document
+        # wearing the compare report's identity (Codex review, P1).
+        "audit_report_schema_version": AUDIT_REPORT_SCHEMA_VERSION,
         "no_baseline": True,
         "library": doc.library,
         "new_version": doc.new_version,
@@ -540,12 +561,18 @@ def render_no_baseline_oneline(doc: NoBaselineDocument) -> str:
     # "Record before disposing" exists to prevent, and this is the view most
     # likely to be the only thing a reader sees.
     suppressed = f", {len(doc.suppressed)} suppressed" if doc.suppressed else ""
-    coverage = (
-        "; contract coverage incomplete" if doc.coverage_exit_contribution else ""
-    )
+    # Every contributing axis, not just contract coverage. A bare `[exit 7]`
+    # tells a reader they were gated and nothing about why, and this is the
+    # view most likely to be the only thing they see.
+    contributing = [
+        NO_BASELINE_EXIT_AXIS_LABELS[key]
+        for key in NO_BASELINE_EXIT_AXIS_LABELS
+        if doc.exit_axes.get(key)
+    ]
+    axes = f"; {', '.join(contributing)}" if contributing else ""
     return (
         f"{doc.library or '(unnamed)'} audit (no baseline): {count} candidate-side "
-        f"{noun}{suppressed}, no compatibility verdict{coverage} "
+        f"{noun}{suppressed}, no compatibility verdict{axes} "
         f"[exit {doc.exit_code}]\n"
     )
 

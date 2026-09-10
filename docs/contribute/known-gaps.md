@@ -7211,10 +7211,15 @@ The whole compute/render split is new in this pass too:
 — one `compute_no_baseline_document` resolving per-finding verdict/category,
 evolution counts, coverage and exit contributions, and pure `render_*` halves
 that format and decide nothing — so a new audit report section goes in the
-document, never into one renderer. The report schema counter moved to `2.0`
-(`findings[]`, `cross_source_evolution` and a candidate-only
-`pattern_preprocessor_scan` block are new; `changes: []` stays, so a consumer
-reading `changes` off any abicheck report still finds it).
+document, never into one renderer. The audit publishes its own schema
+(`abicheck/schemas/audit_report.schema.json`, `audit_report_schema_version`
+starting at `1.0`) rather than a version of the compare report's: `findings[]`,
+`cross_source_evolution`, `exit_axes` and a candidate-only
+`pattern_preprocessor_scan` block are its own, and `changes: []` stays, so a
+consumer reading `changes` off any abicheck report still finds it. It briefly
+stamped `report_schema_version` instead, which offered the audit under the
+compare report's identity -- see that field's own note in
+`report/no_baseline_document.py` for why that is not merely cosmetic.
 
 ### The Action's `mode: scan` still routes several request shapes to the legacy `scan` CLI
 
