@@ -94,6 +94,14 @@ def _release_md_evidence_contract(
     and its JUnit said `errors="0"` before those were fixed (Codex review).
     Absent when no member recorded the axis, so a run with no ``--depth`` pin
     is unchanged.
+
+    States the axis's **contribution**, never "this release exits 7": a
+    dominant axis can outrank it, and does -- a `not_comparable` member sends
+    the same release to 16 (`policy.exit_decision_precedence.
+    resolve_release_exit_decision`). Only the canonical `ExitDecision` knows
+    the outcome; this section knows one input to it, and says only that
+    (Codex review). Same phrasing the coverage-warnings section above uses,
+    for the same reason.
     """
     affected = [
         f"- `{lib['library']}`"
@@ -108,9 +116,9 @@ def _release_md_evidence_contract(
         "",
         *affected,
         "",
-        "The pinned `--depth` rung was not met for the members above, so this "
-        "release exits 7 (ADR-064 evidence-contract axis) and its findings "
-        "rest on shallower evidence than was asked for.",
+        "The pinned `--depth` rung was not met for the members above, so their "
+        "findings rest on shallower evidence than was asked for. Contributes 7 "
+        "to the release exit code (ADR-064 evidence-contract axis).",
     ]
 
 

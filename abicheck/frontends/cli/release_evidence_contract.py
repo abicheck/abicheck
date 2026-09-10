@@ -68,7 +68,7 @@ def release_evidence_contract_contribution(
 def evidence_contract_notice(
     library_results: Sequence[object], contribution: int
 ) -> str | None:
-    """The stderr line explaining a release's exit 7, or ``None``.
+    """The stderr line explaining this axis's contribution, or ``None``.
 
     Names the members that fell short and the remediation that actually
     works on this operand -- see the module docstring for why it cannot
@@ -111,8 +111,9 @@ def evidence_contract_error_entries(
             "library": str(entry.get("library")),
             "error": (
                 "Requested --depth evidence was not reached for this member; "
-                "the release's pinned rung is unmet (ADR-064 evidence-contract "
-                "axis, exit 7)."
+                "its findings rest on shallower evidence than was asked for. "
+                "Contributes 7 to the release exit code (ADR-064 "
+                "evidence-contract axis)."
             ),
         }
         for entry in library_results

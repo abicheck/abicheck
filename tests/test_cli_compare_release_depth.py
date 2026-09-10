@@ -524,6 +524,36 @@ class TestEveryReleaseFormatCarriesTheShortfall:
         else:
             assert "Evidence Depth Not Reached" in text, text[:400]
 
+    @pytest.mark.parametrize("fmt", ("junit", "markdown"))
+    def test_a_document_states_the_contribution_not_the_outcome(
+        self, live_release_dirs: tuple[Path, Path], tmp_path: Path, fmt: str
+    ) -> None:
+        """A renderer knows one input to the decision, not the decision.
+
+        The first version of the Markdown section said "this release exits
+        7" -- false the moment a `not_comparable` member sends the same
+        release to 16, which is the precedence this PR itself documents
+        (Codex review). Only the canonical `ExitDecision` knows the outcome,
+        so every prose surface states the *contribution*, matching the
+        coverage axis's own long-standing wording.
+        """
+        old_dir, new_dir = live_release_dirs
+        out = tmp_path / f"claim.{fmt}"
+        _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            "build",
+            "--format",
+            fmt,
+            "-o",
+            str(out),
+        )
+        text = out.read_text(encoding="utf-8")
+        assert "Contributes 7 to the release exit code" in text, text[:600]
+        assert "release exits 7" not in text, text[:600]
+
     @pytest.mark.parametrize("fmt", ("json", "junit", "markdown"))
     def test_a_clean_release_records_nothing(
         self, live_release_dirs: tuple[Path, Path], tmp_path: Path, fmt: str
