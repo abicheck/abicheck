@@ -34,12 +34,23 @@ DEBT_FIELDS = frozenset(
         "baseline_lines",
         "target",
         "rule",
+        "disposition",
         "category",
         "owner",
         "rationale",
         "review_by",
     }
 )
+
+#: ADR-061 gap F / definition-of-done item 16: every no-growth debt entry
+#: states, in the schema itself, whether it is still tracked migration work
+#: ("migrate" -- the common case today; this file must shrink toward empty
+#: or convert entries to "accept" as work lands) or a specific, reviewed,
+#: permanent architectural exception ("accept" -- a generated file, a
+#: data-only declarative catalog, or a parser whose state machine remains
+#: one responsibility, per D5). "Unclassified for now" is not a valid value;
+#: the schema has no such option.
+DEBT_DISPOSITIONS = frozenset({"migrate", "accept"})
 
 # ADR-063 D10 (implementation plan Phase 9): abicheck/policy/selectors.py is
 # the shared selector-matching leaf `suppression.py`'s `Suppression` and
@@ -286,6 +297,14 @@ def _validate_debt(
             findings.append(
                 Finding("schema", f"{where}.rule: only 'no_growth' is supported")
             )
+        if raw.get("disposition") not in DEBT_DISPOSITIONS:
+            findings.append(
+                Finding(
+                    "schema",
+                    f"{where}.disposition: must be one of "
+                    f"{', '.join(sorted(DEBT_DISPOSITIONS))}",
+                )
+            )
         for field in ("target", "category", "owner", "rationale"):
             if not isinstance(raw.get(field), str) or not raw[field].strip():
                 findings.append(
@@ -414,6 +433,115 @@ def _validate_dependency_direction_exceptions(
             ok = False
         if ok and isinstance(path, str) and isinstance(target, str):
             accepted.add((path, target))
+    return accepted
+
+
+#: Fields every ``architecture/dispositions.yaml`` entry carries regardless of
+#: its ``disposition``, plus the extra fields each of the three dispositions
+#: additionally requires (ADR-061 gap F / definition-of-done item 16).
+_DISPOSITION_COMMON_FIELDS = frozenset({"path", "disposition", "owner", "review_by"})
+_DISPOSITION_EXTRA_FIELDS: dict[str, frozenset[str]] = {
+    "migrate": frozenset({"target_layer", "slice", "rationale"}),
+    "retain": frozenset({"supported_reason"}),
+    "accept": frozenset({"reason"}),
+}
+
+
+def _validate_dispositions(
+    config: dict[str, Any],
+    layers: Mapping[str, dict[str, Any]],
+    findings: list[Finding],
+) -> set[str]:
+    """Validate ``architecture/dispositions.yaml`` (ADR-061 gap F).
+
+    Every unclassified first-party root module must carry exactly one of the
+    three recorded dispositions the ADR names: ``migrate`` (through a named
+    responsibility slice and target layer), ``retain`` (a genuinely supported
+    public module, with what makes it supported), or ``accept`` (a specific,
+    reasoned architectural exception). "Unclassified for now" is not a valid
+    ``disposition`` value -- the schema simply has no such option. Returns the
+    set of validated paths; a malformed entry contributes nothing (it must
+    not silently satisfy the completion check below).
+    """
+    raw_list = config.get("modules", [])
+    if config.get("schema_version") != SCHEMA_VERSION:
+        findings.append(
+            Finding(
+                "schema", "architecture/dispositions.yaml: schema_version must be 1"
+            )
+        )
+    if not isinstance(raw_list, list):
+        findings.append(
+            Finding("schema", "architecture/dispositions.yaml: modules must be a list")
+        )
+        return set()
+    accepted: set[str] = set()
+    seen: set[str] = set()
+    for index, raw in enumerate(raw_list):
+        where = f"architecture/dispositions.yaml modules[{index}]"
+        if not isinstance(raw, dict):
+            findings.append(Finding("schema", f"{where}: must be a mapping"))
+            continue
+        ok = True
+        path = _safe_relative_path(raw.get("path"), f"{where}.path", findings)
+        if path is None:
+            ok = False
+        elif not path.startswith("abicheck/") or not path.endswith(".py"):
+            findings.append(
+                Finding("schema", f"{where}.path: must name an abicheck Python module")
+            )
+            ok = False
+        elif path in seen:
+            findings.append(
+                Finding("schema", f"{where}.path: duplicate disposition path {path}")
+            )
+            ok = False
+        if isinstance(path, str):
+            seen.add(path)
+        disposition = raw.get("disposition")
+        extra_fields = _DISPOSITION_EXTRA_FIELDS.get(
+            disposition if isinstance(disposition, str) else ""
+        )
+        if extra_fields is None:
+            findings.append(
+                Finding(
+                    "schema",
+                    f"{where}.disposition: must be one of "
+                    f"{', '.join(sorted(_DISPOSITION_EXTRA_FIELDS))}",
+                )
+            )
+            ok = False
+            extra_fields = frozenset()
+        missing = (_DISPOSITION_COMMON_FIELDS | extra_fields) - raw.keys()
+        if missing:
+            findings.append(
+                Finding("schema", f"{where}: missing {', '.join(sorted(missing))}")
+            )
+            ok = False
+        for field in ("owner", *extra_fields):
+            value = raw.get(field)
+            if not isinstance(value, str) or not value.strip():
+                findings.append(
+                    Finding("schema", f"{where}.{field}: must be non-empty")
+                )
+                ok = False
+        if disposition == "migrate" and raw.get("target_layer") not in layers:
+            findings.append(
+                Finding(
+                    "schema",
+                    f"{where}.target_layer: unknown layer {raw.get('target_layer')!r}",
+                )
+            )
+            ok = False
+        try:
+            dt.date.fromisoformat(raw.get("review_by", ""))
+        except (TypeError, ValueError):
+            findings.append(
+                Finding("schema", f"{where}.review_by: must be an ISO date")
+            )
+            ok = False
+        if ok and isinstance(path, str):
+            accepted.add(path)
     return accepted
 
 
@@ -859,7 +987,11 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
     findings: list[Finding] = []
     modules = _load_mapping(root / "architecture/modules.yaml", findings)
     debt = _load_mapping(root / "architecture/debt.yaml", findings)
+    dispositions_config = _load_mapping(
+        root / "architecture/dispositions.yaml", findings
+    )
     layers = _validate_modules(modules, findings)
+    disposition_paths = _validate_dispositions(dispositions_config, layers, findings)
     _check_selector_leaf_purity(root, findings)
     limits = modules.get("limits", {})
     production_limit = (
@@ -1050,6 +1182,29 @@ def check_repository(root: Path, *, base_revision: str | None = None) -> list[Fi
                 Finding(
                     "root-module",
                     f"{path.relative_to(root)}: undeclared flat root module; create a responsibility-package owner",
+                )
+            )
+
+    # ADR-061 gap F / definition-of-done item 16: a flat root module with no
+    # owning layer must carry one of the three recorded dispositions
+    # (migrate/retain/accept) in architecture/dispositions.yaml. Scoped to
+    # root files only (mirroring the "root-module"/"frozen-root-family"
+    # checks above) -- a module physically under a responsibility package's
+    # own directory, or classified via a layer's legacy_paths, already has an
+    # owner and is not this check's concern. "Unclassified for now" is not a
+    # valid disposition; the schema has no such value.
+    for path in sorted((root / "abicheck").glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        if _source_layer_for(path, root, layers) is not None:
+            continue
+        relative = path.relative_to(root).as_posix()
+        if relative not in disposition_paths:
+            findings.append(
+                Finding(
+                    "unclassified-module-disposition",
+                    f"{relative}: no owning layer and no recorded ADR-061 disposition "
+                    "(migrate/retain/accept) in architecture/dispositions.yaml",
                 )
             )
 
