@@ -237,9 +237,7 @@ class TestAuditOnlyScanExplicitNonDefaultPresetIsHonored:
         assert outputs.get("verdict") == "AUDIT_GATE", outputs
         assert outputs.get("exit-code") == "3", outputs
 
-    def test_explicit_preset_reaches_the_cli_unduplicated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_explicit_preset_reaches_the_cli_unduplicated(self, tmp_path: Path) -> None:
         # A stronger version of the test above: the caller's own explicit
         # preset must appear on the assembled command line exactly once --
         # never alongside a second, injected `default` occurrence (Click

@@ -101,8 +101,8 @@ def test_both_set_is_a_hard_error() -> None:
 @pytest.mark.parametrize(
     ("build_info", "compile_db"),
     [
-        ("", ""),               # neither set: the ordinary case
-        ("build/", ""),         # the preferred spelling alone
+        ("", ""),  # neither set: the ordinary case
+        ("build/", ""),  # the preferred spelling alone
         ("", "compile_commands.json"),  # the compatibility spelling alone
     ],
 )
@@ -129,11 +129,7 @@ def test_the_guard_covers_only_the_scan_forwarding_sites() -> None:
     # line), not the function definition itself
     # (`_reject_scan_build_info_compile_db_conflict() {`, which also
     # contains the marker text but is not a call site).
-    calls = [
-        i
-        for i, line in enumerate(lines)
-        if line.strip() == _CALL_MARKER
-    ]
+    calls = [i for i, line in enumerate(lines) if line.strip() == _CALL_MARKER]
     assert len(calls) == 1, calls
     # Only real forwarding sites -- the guard's own comment/error text also
     # quotes the fallback expression, and a text scan would count that as
@@ -150,9 +146,7 @@ def test_the_guard_covers_only_the_scan_forwarding_sites() -> None:
     # which have no guard at all, come first in the file and are never
     # near a call.
     guarded = sum(
-        1
-        for call_at in calls
-        if any(0 < fb - call_at <= 10 for fb in fallbacks)
+        1 for call_at in calls if any(0 < fb - call_at <= 10 for fb in fallbacks)
     )
     assert guarded == 1, (calls, fallbacks)
 
@@ -181,7 +175,10 @@ def test_a_real_scan_mode_run_hits_the_guard(tmp_path: Path) -> None:
     }
     res = subprocess.run(
         [bash_executable(), str(RUN_SH)],
-        capture_output=True, text=True, env=env, cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
     )
     assert res.returncode == 1, res.stdout + res.stderr
     assert "are both set for mode: scan" in res.stdout
@@ -198,7 +195,10 @@ def _validate(env_extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
     env.update(env_extra)
     return subprocess.run(
         [bash_executable(), str(VALIDATE_SH)],
-        capture_output=True, text=True, env=env, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
     )
 
 
@@ -209,11 +209,13 @@ class TestTheValidatorRejectsItToo:
     first (Codex review)."""
 
     def test_both_set_in_scan_mode_fails_the_validator(self) -> None:
-        res = _validate({
-            "INPUT_MODE": "scan",
-            "INPUT_BUILD_INFO": "build/",
-            "INPUT_COMPILE_DB": "compile_commands.json",
-        })
+        res = _validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_BUILD_INFO": "build/",
+                "INPUT_COMPILE_DB": "compile_commands.json",
+            }
+        )
         assert res.returncode != 0, res.stdout + res.stderr
         assert "are both set for mode: scan" in res.stdout + res.stderr
 
@@ -222,11 +224,13 @@ class TestTheValidatorRejectsItToo:
         # Scan is the only mode whose behavior changed; compare and dump have
         # always resolved this pair by the build-info-wins fallback, so
         # rejecting them here would break workflows that were never wrong.
-        res = _validate({
-            "INPUT_MODE": mode,
-            "INPUT_BUILD_INFO": "build/",
-            "INPUT_COMPILE_DB": "compile_commands.json",
-        })
+        res = _validate(
+            {
+                "INPUT_MODE": mode,
+                "INPUT_BUILD_INFO": "build/",
+                "INPUT_COMPILE_DB": "compile_commands.json",
+            }
+        )
         assert "are both set for mode" not in res.stdout + res.stderr
 
     @pytest.mark.parametrize(
@@ -236,11 +240,13 @@ class TestTheValidatorRejectsItToo:
     def test_one_or_neither_passes_the_validator(
         self, build_info: str, compile_db: str
     ) -> None:
-        res = _validate({
-            "INPUT_MODE": "scan",
-            "INPUT_BUILD_INFO": build_info,
-            "INPUT_COMPILE_DB": compile_db,
-        })
+        res = _validate(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_BUILD_INFO": build_info,
+                "INPUT_COMPILE_DB": compile_db,
+            }
+        )
         assert "are both set for mode: scan" not in res.stdout + res.stderr
 
     def test_both_scripts_state_the_same_conflict(self) -> None:

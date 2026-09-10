@@ -466,7 +466,7 @@ def _run_add_flag_shlex_split(
     )
     script = (
         harness
-        + f'add_flag_shlex_split "--compiler-option" "$INPUT_GCC_OPTIONS"\n'
+        + 'add_flag_shlex_split "--compiler-option" "$INPUT_GCC_OPTIONS"\n'
         + "printf '%s\\n' \"${CMD[@]}\"\n"
     )
     env = {**os.environ, **(env_extra or {}), "INPUT_GCC_OPTIONS": value}
@@ -720,9 +720,7 @@ class TestCompileContextForwardingParity:
         """`mode: scan` now forwards these via a synthesized `--config`
         overlay too (ADR-068's 2026-09-10 amendment removed the legacy
         raw-flag branch) -- mirrors the dump/compare tests above exactly."""
-        cmd, _ = _run_region(
-            _SCAN_MODE_MARKER, _FULL_ENV, _DUMP_COMPILE_CONTEXT_START
-        )
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV, _DUMP_COMPILE_CONTEXT_START)
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["frontend"] == "clang"
         assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
@@ -1017,9 +1015,7 @@ class TestCompileContextForwardingParity:
         assert "--nostdinc" not in cmd
 
     def test_scan_omits_unset_flags(self) -> None:
-        cmd, _ = _run_region(
-            _SCAN_MODE_MARKER, {}, _DUMP_COMPILE_CONTEXT_START
-        )
+        cmd, _ = _run_region(_SCAN_MODE_MARKER, {}, _DUMP_COMPILE_CONTEXT_START)
         assert "--config" not in cmd
         assert "--compiler" not in cmd
         assert "--sysroot" not in cmd

@@ -94,7 +94,11 @@ def _compare_argv(
     }
     result = subprocess.run(
         [bash_executable(), str(RUN_SH)],
-        capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert captured.is_file(), "abicheck stub was never invoked"
@@ -103,7 +107,9 @@ def _compare_argv(
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestCompareDoesNotInjectALosingWrite:
-    @pytest.mark.parametrize("spelling", ["--write json=mine.json", "--write=json=mine.json"])
+    @pytest.mark.parametrize(
+        "spelling", ["--write json=mine.json", "--write=json=mine.json"]
+    )
     def test_a_user_write_suppresses_the_internal_one(
         self, tmp_path: Path, spelling: str
     ) -> None:
@@ -333,7 +339,11 @@ class TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand:
         }
         result = subprocess.run(
             [bash_executable(), str(RUN_SH)],
-            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+            check=False,
         )
         # run.sh's own fail-on-breaking wrapper maps a real ABI break to
         # exit 1 (its own step-failure convention), not abicheck's raw
@@ -410,16 +420,16 @@ def _compare_github_output(
     stub.write_text(
         "#!/usr/bin/env bash\n"
         "_out=''\n"
-        'while [[ $# -gt 0 ]]; do\n'
+        "while [[ $# -gt 0 ]]; do\n"
         '  case "$1" in\n'
-        "    -o) _out=\"$2\"; shift 2 ;;\n"
+        '    -o) _out="$2"; shift 2 ;;\n'
         "    *) shift ;;\n"
         "  esac\n"
         "done\n"
         'if [[ -n "$_out" ]]; then\n'
-        '  printf \'not-actually-sarif\\n\' > "$_out"\n'
+        "  printf 'not-actually-sarif\\n' > \"$_out\"\n"
         "else\n"
-        "  echo '{\"verdict\":\"COMPATIBLE\"}'\n"
+        '  echo \'{"verdict":"COMPATIBLE"}\'\n'
         "fi\n"
         "exit 0\n",
         encoding="utf-8",
@@ -449,7 +459,11 @@ def _compare_github_output(
     }
     result = subprocess.run(
         [bash_executable(), str(RUN_SH)],
-        capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+        check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return github_output.read_text(encoding="utf-8"), result.stdout + result.stderr

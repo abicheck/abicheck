@@ -88,7 +88,9 @@ from pathlib import Path
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
-_FINAL_EXIT_SCAN_START = 'elif [[ "$MODE" == "scan" ]]; then\n  # Keyed on the raw `$MODE` input'
+_FINAL_EXIT_SCAN_START = (
+    'elif [[ "$MODE" == "scan" ]]; then\n  # Keyed on the raw `$MODE` input'
+)
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
 

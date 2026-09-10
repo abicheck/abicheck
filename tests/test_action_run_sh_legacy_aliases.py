@@ -48,7 +48,9 @@ _ALIAS_END_MARKER = 'FORCE_AUDIT_ONLY="${INPUT_AUDIT:-false}"'
 # own computation, evaluated once before either shape is assembled, so this
 # is what the alias's effect is now tested through.
 _SCAN_HAS_BASELINE_START_MARKER = "_SCAN_HAS_BASELINE=false"
-_SCAN_HAS_BASELINE_END_MARKER = "\n\n# ADR-068's second 2026-09-09 amendment ruling table"
+_SCAN_HAS_BASELINE_END_MARKER = (
+    "\n\n# ADR-068's second 2026-09-09 amendment ruling table"
+)
 
 
 def _alias_region() -> str:

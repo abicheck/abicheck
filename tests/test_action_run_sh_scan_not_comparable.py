@@ -45,10 +45,9 @@ from pathlib import Path
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _CASE_START = "    case $ABICHECK_EXIT in\n"
 _CASE_END = "    esac\n"
-_FINAL_EXIT_START = "if [[ \"$VERDICT\" == \"ERROR\" ]]; then\n"
+_FINAL_EXIT_START = 'if [[ "$VERDICT" == "ERROR" ]]; then\n'
 _FINAL_EXIT_SCAN_START = (
-    'elif [[ "$MODE" == "scan" ]]; then\n'
-    "  # Keyed on the raw `$MODE` input"
+    'elif [[ "$MODE" == "scan" ]]; then\n  # Keyed on the raw `$MODE` input'
 )
 _FINAL_EXIT_SCAN_END = "\nelse\n"
 
@@ -154,7 +153,7 @@ _escalate_verdict_to_report() { :; }
     script = (
         stubs
         + f"ABICHECK_EXIT={abicheck_exit}\n"
-        + "STDERR_CONTENT=\"\"\n"
+        + 'STDERR_CONTENT=""\n'
         + _exit_case_fragment()
         + '\necho "VERDICT=$VERDICT"\n'
     )
@@ -185,7 +184,7 @@ def test_exit_99_unknown_still_maps_to_error():
 
 
 def test_not_comparable_still_fails_the_step():
-    script = _final_exit_scan_fragment() + "fi\necho \"FINAL_EXIT=$FINAL_EXIT\"\n"
+    script = _final_exit_scan_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
     script = (
         'MODE="scan"\n'
         '_CLI_MODE="scan"\n'
@@ -194,10 +193,9 @@ def test_not_comparable_still_fails_the_step():
         'ADVISORY_BREAK="false"\n'
         'INPUT_FAIL_ON_BREAKING="true"\n'
         'INPUT_FAIL_ON_API_BREAK="false"\n'
-        "_severity_gate_categories() { echo \"\"; }\n"
+        '_severity_gate_categories() { echo ""; }\n'
         "_coverage_gated() { return 1; }\n"
-        "FINAL_EXIT=0\n"
-        + script
+        "FINAL_EXIT=0\n" + script
     )
     result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr
@@ -221,7 +219,7 @@ def test_scan_severity_error_still_fails_the_step_when_routed_through_compare():
     a ``mode: scan`` caller's workflow never expected, even though the
     underlying ``compare`` CLI invocation itself already exited non-zero.
     """
-    script = _final_exit_scan_fragment() + "fi\necho \"FINAL_EXIT=$FINAL_EXIT\"\n"
+    script = _final_exit_scan_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
     script = (
         'MODE="scan"\n'
         '_CLI_MODE="compare"\n'  # the routed case this fix targets
@@ -288,9 +286,7 @@ def test_compare_mode_not_comparable_still_fails_the_step():
     ``compare``-mode branch of this final-exit block had no
     ``NOT_COMPARABLE`` arm at all, unlike its ``scan``-mode sibling
     (``test_not_comparable_still_fails_the_step`` above)."""
-    script = (
-        _final_exit_compare_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
-    )
+    script = _final_exit_compare_fragment() + 'fi\necho "FINAL_EXIT=$FINAL_EXIT"\n'
     script = (
         'MODE="compare"\n'
         '_CLI_MODE="compare"\n'
@@ -302,8 +298,7 @@ def test_compare_mode_not_comparable_still_fails_the_step():
         "_coverage_gated() { return 1; }\n"
         "_assurance_gated() { return 1; }\n"
         "_scope_gated() { return 1; }\n"
-        "FINAL_EXIT=0\n"
-        + script
+        "FINAL_EXIT=0\n" + script
     )
     result = _run_bash_script(script)
     assert result.returncode == 0, result.stderr

@@ -349,8 +349,7 @@ class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
         # shape of that one branch never silently ignores the retired input.
         text = RUN_SH.read_text(encoding="utf-8")
         route = text.index(
-            'elif [[ "$MODE" == "scan" ]]; then\n'
-            "  # ── Scan mode, routed through"
+            'elif [[ "$MODE" == "scan" ]]; then\n  # ── Scan mode, routed through'
         )
         for name in self._RETIRED:
             guard = text.find(f'if [[ -n "${{{name}:-}}" ]]; then\n  echo "::error::')
@@ -371,8 +370,7 @@ class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
         text = RUN_SH.read_text(encoding="utf-8")
         assert (
             text.count(
-                'elif [[ "$MODE" == "scan" ]]; then\n'
-                "  # ── Scan mode, routed through"
+                'elif [[ "$MODE" == "scan" ]]; then\n  # ── Scan mode, routed through'
             )
             == 1
         )
