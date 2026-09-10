@@ -384,11 +384,42 @@ def policy_file_with_packs(
     return updated
 
 
+def resolve_release_project_policy_overrides(
+    project_cfg: Any, project_path: Path | None
+) -> dict[ChangeKind, Verdict] | None:
+    """A discovered ``.abicheck.yml``'s ``policy.overrides``, resolved once
+    for the directory/package release fan-out (finding #4, second review
+    round) and forwarded as a plain value -- the same internal-parameter
+    shape ``compile_context``/``public_header_dirs``/``pack_application``
+    already use for this fan-out. Wraps
+    ``policy.policy_file_project_overrides.resolve_project_config_policy_overrides``,
+    converting a malformed override (an unknown ``ChangeKind`` slug or
+    severity spelling) into the same ``click.BadParameter`` the scalar
+    `compare` path already raises for the identical document, rather than
+    letting a raw :class:`~abicheck.errors.PolicyError` escape uncaught.
+    Returns ``None`` (not an empty dict) when nothing was stated, matching
+    ``project_policy_overrides``'s own "``None``/empty is a no-op" contract.
+    """
+    import click
+
+    from .errors import PolicyError
+    from .policy.policy_file_project_overrides import (
+        resolve_project_config_policy_overrides,
+    )
+
+    try:
+        overrides = resolve_project_config_policy_overrides(project_cfg, project_path)
+    except PolicyError as e:
+        raise click.BadParameter(str(e), param_hint="--policy") from e
+    return overrides or None
+
+
 def resolve_bundle_policy_file(
     suppress: Path | None,
     policy: str,
     policy_file_path: Path | None,
     application: PackApplication | None,
+    project_policy_overrides: Any = None,
 ) -> PolicyFile | None:
     """Resolve the ``PolicyFile`` a ``compare-release`` bundle analysis
     should score against (G38 Phase 16), mirroring the per-library/matrix
@@ -399,12 +430,28 @@ def resolve_bundle_policy_file(
     ``cli_compare_release_helpers.py`` because that module -- and its
     sibling ``cli_compare_release.py`` -- are pinned at a no-growth line-
     count baseline (``architecture/debt.yaml``, ADR-061); this module isn't.
+
+    *project_policy_overrides* (ADR-068 §3 #23 / ADR-049 D7, second review
+    round) is an already-resolved ``.abicheck.yml`` ``policy.overrides``
+    mapping (``ChangeKind -> Verdict``), folded in **after** the pack fold
+    above at the weaker PROJECT_CONFIG precedence tier -- see
+    ``policy.policy_file_project_overrides.apply_lower_precedence_overrides``
+    for why the ordering matters. ``None``/empty is a no-op, matching every
+    pre-existing caller.
     """
     from .frontends.cli.options.params import _load_suppression_and_policy
 
     _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if application is not None:
         pf = policy_file_with_packs(pf, application, base_policy=policy)
+    if project_policy_overrides:
+        from .policy.policy_file_project_overrides import (
+            apply_lower_precedence_overrides,
+        )
+
+        pf = apply_lower_precedence_overrides(
+            pf, dict(project_policy_overrides), base_policy=policy
+        )
     return pf
 
 

@@ -57,15 +57,13 @@ def test_every_known_top_key_appears_in_generated_reference():
 
 
 def test_every_block_subkey_has_a_resolved_type_or_is_flagged_unspecified():
-    from abicheck.buildsource.build_config import (
-        _BOOL_SUBKEYS,
-        _LIST_SUBKEYS,
-        _STR_SUBKEYS,
-        BuildConfig,
-    )
+    from abicheck.buildsource.build_config import BuildConfig
     from abicheck.buildsource.build_config_schema import (
+        BOOL_SUBKEYS as _BOOL_SUBKEYS,
         DICT_STR_STR_SUBKEYS as _DICT_STR_STR_SUBKEYS,
         INT_SUBKEYS as _INT_SUBKEYS,
+        LIST_SUBKEYS as _LIST_SUBKEYS,
+        STR_SUBKEYS as _STR_SUBKEYS,
     )
 
     gen = _load_gen()

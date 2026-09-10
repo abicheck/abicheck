@@ -47,7 +47,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -125,6 +125,7 @@ _CompareReleaseCommonArgs = tuple[
     bool,
     "list[Path] | None",
     bool,
+    "dict[Any, Any] | None",
 ]
 
 
@@ -159,6 +160,7 @@ def _run_compare_pair(
     depth: str | None = None,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -249,6 +251,7 @@ def _run_compare_pair(
         depth=depth,
         public_header_dirs=public_header_dirs,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        project_policy_overrides=project_policy_overrides,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -288,6 +291,7 @@ def _compare_one_library(
     explain_patterns: bool = False,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -355,6 +359,7 @@ def _compare_one_library(
             depth=depth,
             public_header_dirs=public_header_dirs,
             collapse_versioned_symbols=collapse_versioned_symbols,
+            project_policy_overrides=project_policy_overrides,
         )
         result = compare_result.diff
         pattern_modulations_text: str | None = None
@@ -673,6 +678,7 @@ def _compare_release_libraries(
     explain_patterns: bool = False,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -749,6 +755,7 @@ def _compare_release_libraries(
         explain_patterns,
         public_header_dirs,
         collapse_versioned_symbols,
+        project_policy_overrides,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

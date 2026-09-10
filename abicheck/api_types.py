@@ -778,6 +778,12 @@ class CompareRequest:
     pack_internal_namespaces: tuple[str, ...] | None = field(
         default=None, kw_only=True
     )
+    #: A resolved ``.abicheck.yml`` ``policy.overrides`` contribution
+    #: (ADR-068 §3 #23), weaker than an explicit ``--policy``/pack entry --
+    #: see ``policy.policy_file_project_overrides``. ``None``/empty: no-op.
+    project_policy_overrides: tuple[tuple[ChangeKind, Verdict], ...] | None = field(
+        default=None, kw_only=True
+    )
     #: The one automatic gate algorithm (ADR-064/CLI cleanup phase two PR
     #: G2) is fully determined by whether a severity setting is in effect
     #: -- there is no ``exit_code_scheme`` field here to force one direction

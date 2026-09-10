@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -435,6 +435,16 @@ def compare_release_cmd(
     # is a true no-op: every library is compared exactly as it was before
     # this parameter existed.
     collapse_versioned_symbols: bool = False,
+    # ADR-068 §3 #23 / ADR-049 D7 (second review round): `compare`'s
+    # directory/package fan-out resolves `.abicheck.yml`'s `policy.overrides`
+    # once, ahead of dispatch (the same place it already resolves
+    # `project_cfg`/`pack_application` for this fan-out -- see
+    # `resolve_project_config_policy_overrides`), and hands the resolved
+    # `ChangeKind -> Verdict` mapping over here -- same internal-parameter
+    # shape as `pack_application`/`compile_context` above. `None` (the
+    # default) is a true no-op: every library is compared exactly as it was
+    # before this parameter existed.
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -768,6 +778,7 @@ def compare_release_cmd(
                 explain_patterns=explain_patterns,
                 public_header_dirs=public_header_dirs,
                 collapse_versioned_symbols=collapse_versioned_symbols,
+                project_policy_overrides=project_policy_overrides,
             )
 
             for key in matched_keys:
@@ -1084,7 +1095,11 @@ def compare_release_cmd(
                 bundle_cohorts=bundle_cohorts,
                 policy=policy,
                 policy_file=resolve_bundle_policy_file(
-                    suppress, policy, policy_file_path, pack_application
+                    suppress,
+                    policy,
+                    policy_file_path,
+                    pack_application,
+                    project_policy_overrides,
                 ),
                 old_root=old_dir,
                 new_root=new_dir,

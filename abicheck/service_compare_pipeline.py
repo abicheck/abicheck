@@ -534,6 +534,17 @@ def classify_compare_pair(
             ),
             base_policy=request.policy,
         )
+    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the
+    # weakest tier -- *after* the pack fold above, so a pack-claimed kind
+    # can't be overwritten (apply_lower_precedence_overrides's docstring).
+    if request.project_policy_overrides:
+        from .policy.policy_file_project_overrides import (
+            apply_lower_precedence_overrides,
+        )
+
+        pf = apply_lower_precedence_overrides(
+            pf, dict(request.project_policy_overrides), base_policy=request.policy
+        )
     # The four Nones are the out-of-band pack-override params -- reusing the
     # raw sources/build_info paths would make `_resolve_side_pack` try (and
     # fail) to reload them as packs; None uses the embedded facts.
@@ -793,6 +804,7 @@ def run_compare(
     severity_preset: str | None = None,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -817,6 +829,11 @@ def run_compare(
     resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
     contribution -- see ``CompareRequest.pack_policy_overrides``'s own
     docstring for what folds them in and why. ``None``/empty is a no-op.
+
+    ``project_policy_overrides`` (ADR-068 §3 #23): weaker than both an
+    explicit ``--policy <file>`` and ``pack_policy_overrides`` above --
+    see ``CompareRequest.project_policy_overrides``. ``None``/empty is a
+    no-op.
 
     ``compile_context`` is a both-sides :class:`~abicheck.compile_context.
     CompileContext` (the L2 cross-toolchain/frontend family --
@@ -910,6 +927,9 @@ def run_compare(
             tuple(pack_policy_overrides.items()) if pack_policy_overrides else None
         ),
         pack_internal_namespaces=pack_internal_namespaces,
+        project_policy_overrides=(
+            tuple(project_policy_overrides.items()) if project_policy_overrides else None
+        ),
         depth=depth,
         severity_preset=severity_preset,
         collapse_versioned_symbols=collapse_versioned_symbols,

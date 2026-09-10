@@ -884,17 +884,9 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``symbol``/``old_value`` stay the raw mangled spelling unchanged
 #:       (machine formats never demangle those); this is display-only and
 #:       moves no verdict, severity, or exit code.
-#: 3.15 -- ``summary.compatible_additions`` (fixed, new defect 4): now
-#:       counts only genuine API-growth findings (``ADDITION_KINDS``),
-#:       excluding the ``summary.quality_issues`` subset (e.g. a
-#:       ``public_surface_shrank`` finding, a net *decrease*) it was
-#:       previously inflated with -- 3.13 added ``quality_issues`` to
-#:       *name* that subset but left ``compatible_additions`` itself
-#:       counting every ``COMPATIBLE`` finding. ``compatible_additions +
-#:       quality_issues`` equals the old (<=3.14) ``compatible_additions``
-#:       value, so a consumer of the old field can reconstruct it from the
-#:       new pair. No verdict, severity, or exit code moves -- this is a
-#:       report-summary-field *meaning* change only.
+#: 3.15 -- ``summary.compatible_additions`` now excludes
+#:       ``summary.quality_issues`` (was double-counted); old value =
+#:       compatible_additions + quality_issues. No verdict/exit change.
 REPORT_SCHEMA_VERSION = "3.15"  #: 3.15 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

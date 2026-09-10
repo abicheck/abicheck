@@ -243,6 +243,63 @@ overide:
     assert "overide" in str(exc_info.value)
 
 
+def test_policy_file_non_string_top_level_key_raises_policy_error(
+    tmp_path: Path,
+) -> None:
+    """Finding #5 (second review round): YAML happily parses a non-string
+    mapping key (``1: foo``) at any level -- a document mixing one alongside
+    an ordinary unknown *string* key (e.g. ``suppress:``) previously reached
+    ``_reject_unknown_keys``'s bare ``sorted(unknown)`` call, which raised an
+    uncaught ``TypeError`` (``int``/``str`` aren't orderable) instead of the
+    intended ``PolicyError`` -- an operational failure instead of a clean
+    usage error. Covers the general primitive (`policy_file_versioning.
+    _reject_unknown_keys`), not just this one caller: the identical mixed-key
+    document is exercised again below through the ``versioning:`` namespace,
+    a second caller of the same shared helper."""
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "non_string_top_level.yaml"
+    p.write_text(
+        """
+1: foo
+suppress:
+  exported_not_public: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError) as exc_info:
+        PolicyFile.load(p)
+    message = str(exc_info.value)
+    assert "suppress" in message
+    assert "1" in message
+
+
+def test_policy_file_versioning_non_string_key_raises_policy_error(
+    tmp_path: Path,
+) -> None:
+    """Same bug class as the top-level-key test above, exercised through
+    the ``versioning:`` namespace -- the other real caller of the shared
+    ``_reject_unknown_keys`` primitive this fix lives in."""
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "non_string_versioning_key.yaml"
+    p.write_text(
+        """
+versioning:
+  1: foo
+  bogus_key: bar
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError) as exc_info:
+        PolicyFile.load(p)
+    message = str(exc_info.value)
+    assert "bogus_key" in message
+    assert "1" in message
+
+
 @pytest.mark.parametrize(
     "known_key,value",
     [

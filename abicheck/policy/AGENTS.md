@@ -62,6 +62,7 @@ or a CLI flag directly is in the wrong layer.
   gate-pack severity fold and the one `"severity"`-iff-active scheme rule
   (hence `GateOptions`/`ResolvedCompareConfig`'s derived `exit_code_scheme`),
   shared by `release_gate_options.py` and the flat-root `pack_application.py`.
+- `policy_file_top_level.py` — top-level key check + `parse_base_policy` (moved from `policy_file.py`). `policy_file_project_overrides.py` — folds `.abicheck.yml` `policy.overrides` in at the weakest tier, after any `--pack` fold.
 - `public_surface.py` / `public_surface_closure.py` — ADR-063 Phase 3 D5's
   public-surface relevance query, split across two sibling leaf modules
   purely to keep each under the 800-line new-file cap (mechanical
@@ -99,7 +100,6 @@ or a CLI flag directly is in the wrong layer.
   that dependency pair would otherwise close a real import cycle
   (`public_surface_closure.py -> export_surface.py -> public_surface.py` and
   siblings) — see this module's own docstring for the full reasoning.
-
 - `selectors.py` / `selectors_namespace_glob.py` — ADR-063 D10
   (implementation plan Phase 9): the shared selector-matching primitive
   (`SelectorSet`) behind `suppression.py`'s `Suppression` and

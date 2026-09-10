@@ -254,8 +254,6 @@
         "abicheck/policies/__init__.py",
         "abicheck/policy_file.py",
         "abicheck/policy_file_acknowledgment.py",
-        "abicheck/policy_file_project_overrides.py",
-        "abicheck/policy_file_top_level.py",
         "abicheck/policy_file_versioning.py",
         "abicheck/post_processing.py",
         "abicheck/post_processing_context.py",

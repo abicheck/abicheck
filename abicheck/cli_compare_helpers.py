@@ -1533,9 +1533,16 @@ def run_compare(
         directory_config_includes = tuple(directory_includes[len(includes) :])
         # Off the owner, never via ``abicheck.cli`` (see install_facade_guard).
         from .frontends.cli.commands.compare import _dispatch_release_compare
+
+        # ADR-068 §3 #23: thread `.abicheck.yml` policy.overrides to the
+        # release fan-out too -- see the helper's own docstring.
+        from .pack_application import resolve_release_project_policy_overrides
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
+            project_policy_overrides=resolve_release_project_policy_overrides(
+                project_cfg, cfg_path
+            ),
             headers=headers, includes=directory_includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_includes_only=old_includes_only, new_includes_only=new_includes_only,
@@ -1803,19 +1810,6 @@ def run_compare(
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
     )
-    # ADR-068 §3 #23: fold `.abicheck.yml`'s `policy.overrides` in at the
-    # PROJECT_CONFIG precedence tier -- an explicit `--policy <file>`'s own
-    # `overrides:` entry for a given kind always wins; only a kind it left
-    # unstated is filled in from the project config. A project config
-    # stating no `policy:` block at all returns `pf` unchanged.
-    from .workflows.policy_file import merge_project_config_policy_overrides
-
-    try:
-        pf = merge_project_config_policy_overrides(
-            pf, base_policy=policy, project_cfg=project_cfg, project_path=cfg_path
-        )
-    except PolicyError as e:
-        raise click.BadParameter(str(e), param_hint="--policy") from e
     # audit_suppressions=True implies suppress is not None (guarded earlier,
     # before the --dry-run emit above) -- _load_suppression_and_policy only
     # returns None here when suppress itself was None, so suppression is
@@ -1843,6 +1837,18 @@ def run_compare(
         policy_selected_path=policy_selected_path,
         policy_selected_sha=policy_selected_sha,
     )
+    # ADR-068 §3 #23 / ADR-049 D7: fold `.abicheck.yml`'s `policy.overrides`
+    # in at the PROJECT_CONFIG tier -- deliberately *after* the pack fold
+    # just above, so a kind an explicit file or pack already claimed can't
+    # be overwritten (see `apply_lower_precedence_overrides`'s docstring).
+    from .workflows.policy_file import merge_project_config_policy_overrides
+
+    try:
+        pf = merge_project_config_policy_overrides(
+            pf, base_policy=policy, project_cfg=project_cfg, project_path=cfg_path
+        )
+    except PolicyError as e:
+        raise click.BadParameter(str(e), param_hint="--policy") from e
     # A gate pack may have moved a severity level; later consumers read it
     # off here, so re-derive rather than keep the pre-pack value.
     sev_config = resolved_cfg.severity

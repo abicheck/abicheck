@@ -77,20 +77,21 @@ def render() -> str:
     if str(REPO_DIR) not in sys.path:
         sys.path.insert(0, str(REPO_DIR))
     from abicheck.buildsource.build_config import (
-        _BOOL_SUBKEYS,
-        _LIST_SUBKEYS,
-        _STR_SUBKEYS,
         _TOP_LEVEL_INT_KEYS,
         _TOP_LEVEL_STR_KEYS,
         BuildConfig,
     )
 
-    # INT_SUBKEYS lives only in build_config_schema.py -- build_config.py
-    # itself never imports the raw table (it calls schema.int_subkey_findings
-    # instead), so this generator reads it straight from its own schema home.
+    # The raw subkey-type tables live only in build_config_schema.py --
+    # build_config.py itself never re-imports them as module-level names
+    # (it calls schema.subkey_findings() instead), so this generator reads
+    # them straight from their own schema home.
     from abicheck.buildsource.build_config_schema import (
+        BOOL_SUBKEYS as _BOOL_SUBKEYS,
         DICT_STR_STR_SUBKEYS as _DICT_STR_STR_SUBKEYS,
         INT_SUBKEYS as _INT_SUBKEYS,
+        LIST_SUBKEYS as _LIST_SUBKEYS,
+        STR_SUBKEYS as _STR_SUBKEYS,
     )
 
     known_top = BuildConfig._KNOWN_TOP_KEYS
