@@ -395,6 +395,17 @@ class TestClosureLocationFreeIdentityProperties:
         name = "ns::detail::Widget<int, std::vector<double>>"
         assert closure_location_free_identity(name) == name
 
+    def test_no_op_when_at_present_but_no_colon_survives_normalization(self) -> None:
+        # Exercises the second fast-path guard directly: an identity can
+        # contain the substring "at" (failing the cheap first check) while
+        # still carrying no ":" anywhere, including after normalization --
+        # e.g. an ordinary spelling like "static_cast" embeds "at" but is
+        # not location-shaped at all, so no marker regex ever matches.
+        name = "static_cast<Foo>"
+        assert "at" in name
+        assert ":" not in name
+        assert closure_location_free_identity(name) == name
+
     def test_quoted_marker_shaped_text_is_never_stripped(self) -> None:
         # Regression (CodeRabbit review): marker-shaped text inside a
         # `"..."` quoted literal (a C++20 fixed-string NTTP argument, say)
