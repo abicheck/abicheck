@@ -67,6 +67,7 @@ class TestReleaseEvidenceContractAxisIsPreserved:
     def test_rank_and_preservation(
         self, kwargs: dict, expected_code: int, expected_reason: str
     ) -> None:
+        """Which code decides, and that the axis is reported either way."""
         decision = resolve_release_exit_decision(
             not_comparable=kwargs.pop("not_comparable", False),
             severity_scheme_active=kwargs.pop("severity_scheme_active", False),

@@ -330,6 +330,7 @@ class TestLiveMemberShortfallMatchesTheScalarPath:
     def test_exit_code_equals_the_single_pair_compare_of_the_same_member(
         self, live_release_dirs: tuple[Path, Path], requested: str
     ) -> None:
+        """The class's invariant on a real artifact, at every rung."""
         old_dir, new_dir = live_release_dirs
         scalar_code, _ = _invoke(
             "compare",
@@ -369,6 +370,7 @@ class TestDepthShortfallIsExplainedNotSilent:
     def test_the_release_names_the_short_member_and_the_contribution(
         self, live_release_dirs: tuple[Path, Path], requested: str
     ) -> None:
+        """Exit 7 must arrive with the member named and the code stated."""
         old_dir, new_dir = live_release_dirs
         code, out = _invoke(
             "compare",
@@ -428,6 +430,7 @@ class TestTheReportAgreesWithTheProcessExit:
     def test_stdout_json_exit_block_matches_the_process_exit(
         self, live_release_dirs: tuple[Path, Path]
     ) -> None:
+        """The surface the original defect was reported on."""
         old_dir, new_dir = live_release_dirs
         code, out = _invoke(
             "compare",
@@ -496,6 +499,7 @@ class TestEveryReleaseFormatCarriesTheShortfall:
     def test_the_document_records_the_shortfall(
         self, live_release_dirs: tuple[Path, Path], tmp_path: Path, fmt: str
     ) -> None:
+        """Every accepted format states the shortfall in its own idiom."""
         old_dir, new_dir = live_release_dirs
         out = tmp_path / f"report.{fmt}"
         code, _ = _invoke(
@@ -553,6 +557,7 @@ class TestSetInputEvidenceFlagsStillRejected:
     def test_inline_evidence_flags_are_still_usage_errors(
         self, tmp_path: Path, flag: str, value: str
     ) -> None:
+        """An input the fan-out would silently drop stays a usage error."""
         old_dir, new_dir = _release_dirs(tmp_path, "headers")
         src_dir = tmp_path / "src"
         src_dir.mkdir()
