@@ -491,9 +491,9 @@ class DispositionLedger:
         and it is what makes ``suppressed_gating_records`` (hence
         ``semver.recommend_release``'s conserved delta) answerable at all.
         """
-        from ..checker_policy import is_cross_source_resolved
-        from ..contract_gating import is_evaluated
-        from ..reclassify import effective_verdict_for_change
+        from .contract_finding_relevance import is_evaluated
+        from .evidence_status import is_cross_source_resolved
+        from .reclassify import effective_verdict_for_change
 
         if not callable(getattr(result, "_effective_verdict_for_change", None)):
             return  # a duck-typed stand-in with no verdict to read
@@ -560,7 +560,7 @@ class DispositionLedger:
         is an overlay attribute (D2), independent of the terminal
         disposition policy or scope later assigned.
         """
-        from ..reclassify import reclassify_rule_for_change
+        from .reclassify import reclassify_rule_for_change
 
         gate = _GateContext.of(result)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):

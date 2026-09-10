@@ -15,9 +15,9 @@ own migration table draws a data/algorithm split for the change registry —
 blanket carve-out. `ChangeKindMeta.default_verdict`/`policy_overrides`/
 `impact`/`description_template` are declarative *data* (a lookup table and
 report-template strings), not the *code* that walks them to decide or
-render — `checker_policy.py`'s `policy_kind_sets()` and friends do that
-walking, and are slated to move to a `policy` package themselves once
-Phase 2-4 reaches them (still flat today). Read "never answers... does it
+render — `policy.classification.policy_kind_sets()` and friends do that
+walking (ADR-061 gap B; moved from the flat `checker_policy.py`, now a
+facade re-exporting it unchanged). Read "never answers... does it
 matter... how is it rendered" as about *algorithms*, not about *any field
 whose name sounds policy/report-shaped* — the catalog itself is exactly the
 kind of "what is this fact" (which `ChangeKind` defaults to which verdict,

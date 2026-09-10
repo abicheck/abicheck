@@ -423,7 +423,8 @@ def _header_ast_frontend_only(base: CompileContext) -> CompileContext:
     behaviour. The request-level ``frontend`` field still carries the value
     for L4 source-ABI replay, which is the only layer that can act on it.
     """
-    from .api_types import HEADER_AST_FRONTENDS, SUPPORTED_FRONTENDS
+    from .model.header_ast_frontends import HEADER_AST_FRONTENDS
+    from .workflows.request_inputs import SUPPORTED_FRONTENDS
 
     frontend = base.frontend.lower()
     if frontend in HEADER_AST_FRONTENDS:

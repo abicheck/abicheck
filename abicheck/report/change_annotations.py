@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..checker_policy import Verdict
+from ..policy.classification import Verdict
 from .cross_source_evolution import change_cross_source_evolution_field as _cse
 
 

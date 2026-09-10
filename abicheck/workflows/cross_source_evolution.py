@@ -177,9 +177,9 @@ from ..buildsource.cross_source_checks import (
     CrosscheckConfig,
     run_crosschecks,
 )
-from ..checker_policy import CrossSourceEvolution
 from ..checker_types import Change
 from ..model import AbiSnapshot
+from ..policy.evidence_status import CrossSourceEvolution
 
 
 def _default_identity(change: Change) -> Hashable:

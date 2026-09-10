@@ -584,7 +584,7 @@ def _compute_release_legacy_exit_code(
     so a real release-global break is never silently dropped just because
     some other library's operational failure happens to rank higher.
     """
-    from ..checker_policy import Verdict
+    from .classification import Verdict
     from .severity import legacy_exit_code
 
     worst = 0

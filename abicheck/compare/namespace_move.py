@@ -34,7 +34,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ..checker_policy import ChangeKind
 from ..checker_types import Change
 from ..diff_cxx_rules import (
     component_embeds_template_args,
@@ -45,6 +44,7 @@ from ..diff_cxx_rules import (
 )
 from ..diff_helpers import make_change
 from ..model import Function
+from ..model.change_catalog.kinds import ChangeKind
 from ..model.synthetic_key import (
     SYNTHETIC_CTOR_KEY_PREFIX,
     is_synthetic_ctor_key,

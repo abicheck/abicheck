@@ -326,7 +326,7 @@ def _change_row(c: Any, evidence_tiers: Sequence[str] = ()) -> dict[str, Any]:
     every pre-existing caller -- which has no evidence_tiers to hand --
     byte-identical to before this parameter existed.
     """
-    from ..checker_policy import evidence_status_for_result, impact_for
+    from ..policy.classification import evidence_status_for_result, impact_for
 
     kind = getattr(c, "kind", None)
     relevance = getattr(c, "contract_relevance", None)

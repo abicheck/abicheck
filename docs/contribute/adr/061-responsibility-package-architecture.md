@@ -1381,6 +1381,77 @@ names an owning layer; no canonical internal caller reaches an
 implementation through the compatibility route; the supported import paths
 still resolve, pinned by facade tests.
 
+**Closure status (2026-09-10).** Of the eleven `public_root_surfaces`
+entries this gap named, six moved their real implementation to a named
+owning layer behind a thin, delegation-only flat facade, with every
+physically-migrated internal caller switched to import the owner directly:
+`api_types` -> `workflows.request_inputs`/`workflows.contracts` (plus
+`model.header_ast_frontends` for the one constant `extract`-classified
+`buildsource/header_compile_context.py` also needs); `checker_policy` ->
+`policy.classification`/`policy.evidence_status`; `contract_coverage_ledger`
+-> `policy.coverage_ledger`; `qualified_name_segments` ->
+`compare.qualified_name_normalization` (the diffing-decision half) and
+`storage.closure_identity` (the snapshot-normalization half, sharing
+`storage`'s own `qualified_name_segments_walk.py` leaf). Two entries
+(`errors`, `dumper_contract`) already had a real owner recorded in that
+owning layer's `legacy_paths` — their `public_root_surfaces` membership was
+simply stale bookkeeping once the redundant migrated-caller exemption was
+confirmed unused, not an open gap; both were dropped from the list.
+
+Three entries — `checker_policy`, `contract_gating`, `reclassify` — stay
+deliberately unclassified, confirmed (not merely documented) to be the "no
+single layer" leaf this gap's own text anticipates: `abicheck/checker_types.py`
+(`model`-owned, and `model`'s ADR-061 imports are the standard library only)
+imports each directly, so giving any of the three a `policy` home would turn
+that pre-existing import into a real, gate-checked direction violation.
+`checker_policy`'s real implementation still moved to `policy.classification`/
+`policy.evidence_status` — the fix is "give the implementation a real owner,"
+not "every facade becomes classified" — `contract_gating`'s to
+`policy.contract_finding_relevance`, and `reclassify`'s to `policy.reclassify`;
+only the thin flat facade stays off every layer's `legacy_paths` so the one
+caller that structurally cannot depend on `policy` keeps resolving through
+it, unchanged.
+
+A twelfth entry was added during this closure, not removed: `contract_evidence`
+(needed by the new `policy.coverage_ledger`'s own `TYPE_CHECKING` import, but
+also read by `frontends`-classified `cli_compare_receipt.py`/
+`cli_scan_receipt.py`, so it cannot become `policy`-classified without
+breaking those) — the identical "no single layer" shape, discovered rather
+than pre-existing.
+
+`abicheck.schemas` was investigated and, despite looking like a clean `model`
+move at first (a dependency-free leaf of JSON Schema documents and version
+constants), turned out to be this gap's sharpest example of why the two
+questions must stay separate: its own `current()` reaches *forward* into
+`report` and `workflows` to answer "what version does abicheck emit for
+artifact X" from one place, while `workflows`/`report`/`frontends` callers
+reach *into* it for the reverse direction — a package that is both a callee
+and a caller of the same two layers has no ADR-061 layer that doesn't close a
+real cycle. Confirmed by attempting the `model` reclassification directly
+against `scripts/check_architecture.py`, not by inspection alone. Stays
+`public_root_surfaces`-listed.
+
+`serialization` is unchanged — still gap E's open item (see that gap's own
+entry): its ~1500-line codec proper remains a deliberately out-of-scope,
+not-yet-attempted classification, recorded as `disposition: migrate` in
+`docs/contribute/known-gaps.md` rather than half-moved.
+
+`header_only_dump` is unchanged and is not a gap-B instance at all on closer
+reading: its own module docstring already states, and this closure
+re-confirmed, that its flat placement is load-bearing — it bridges to
+`dumper.py`/`dumper_manifest.py`, both still unclassified, and a migrated
+package importing either would trip `unclassified-import` the moment
+`header_only_dump` itself moved into one. Its real fix is classifying
+`dumper.py`, a separate, much larger migration this gap does not attempt.
+
+Net: eight of the eleven original entries now name a real owner (six moved,
+two already had one); three are confirmed, not merely asserted, "no single
+layer" leaves; one (`serialization`) is an explicit, recorded `migrate`
+gap; `public_root_surfaces` itself shrank from eleven to seven entries
+(`checker_policy`, `contract_evidence`, `contract_gating`, `header_only_dump`,
+`reclassify`, `schemas`, `serialization`) — every remaining one a reviewed
+exception with a stated reason, not an unclassified default.
+
 ### C. One result, one document, several projections
 
 Phase 2 gave every format a real fact-vs-formatting boundary and a

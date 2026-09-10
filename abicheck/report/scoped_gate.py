@@ -256,7 +256,7 @@ def _fold_findings_into_changes(
     Each appended entry also registers its root-cause grouping key, and the
     summary counts are recomputed afterwards from the now-complete array.
     """
-    from ..checker_policy import EvidenceStatus, ReachabilityState
+    from ..policy.evidence_status import EvidenceStatus, ReachabilityState
     from ..reporter_markdown import (
         apply_show_only,
         root_cause_evidence_lookup_for_changes,
@@ -483,7 +483,7 @@ def _fold_findings_into_stat_summary(
     contribution is added on top of the already-correct full-library counts
     (workstream D-S1: purely additive, no `full_summary`/`summary` swap).
     """
-    from ..checker_policy import EvidenceStatus
+    from ..policy.evidence_status import EvidenceStatus
 
     _change_to_dict = helpers.change_to_dict
 

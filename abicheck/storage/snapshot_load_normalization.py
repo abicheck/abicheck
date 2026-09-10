@@ -20,10 +20,11 @@ parsed, before the result reaches any detector or index. Kept out of
 ``serialization.py`` itself (ADR-061 D1: ``storage/`` is the canonical owner
 of a snapshot format's schemas and migrations; that file is debt-baselined
 at its adoption ceiling, so new load-time migration logic belongs here, with
-only a thin call left at the call site). ``abicheck.qualified_name_segments``
-is a ``public_root_surfaces`` entry (its own docstring already frames it as
-a stable, dependency-free leaf shared across detectors), the same exemption
-``abicheck.serialization`` itself already uses.
+only a thin call left at the call site). The closure-identity renumbering
+helpers (``_LAMBDA_IDENTITY_FIELDS``/``_lambda_identity_containers_and_
+strings``) are this package's own ``closure_identity.py`` (ADR-061 gap B --
+moved there from the flat ``qualified_name_segments`` facade, which now
+only re-exports them for compatibility).
 """
 
 from __future__ import annotations
@@ -41,10 +42,10 @@ from ..model.build_mode_facts import (
 from ..model.extraction_contract import ExtractionContract
 from ..model.fact import Fact
 from ..name_classification import strip_anonymous_type_location
-from ..qualified_name_segments import (
+from ..qualified_name_segments_walk import _walk_rewrite_strings
+from .closure_identity import (
     _LAMBDA_IDENTITY_FIELDS,
     _lambda_identity_containers_and_strings,
-    _walk_rewrite_strings,
 )
 from .guards import decision_key, identity_text, mapping as _mapping_guard, strict_int
 

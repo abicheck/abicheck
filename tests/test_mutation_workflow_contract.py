@@ -569,7 +569,6 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
-            "abicheck.suppression",
         }
     ),
 }

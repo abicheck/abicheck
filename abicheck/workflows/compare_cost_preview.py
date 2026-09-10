@@ -147,8 +147,8 @@ def estimate_compare_dry_run_cost(
     probe itself raised -- mirroring ``cli_scan.py``'s own best-effort
     ``estimate_scan`` call, which the dry run must never let a probe failure
     turn into a hard crash."""
-    from ..api_types import InputSpec
     from ..service_scan import estimate_scan
+    from .request_inputs import InputSpec
 
     try:
         resolved_level = _resolve_compare_estimate_level(

@@ -79,7 +79,7 @@ def _one_change_result(change: Change, verdict: str) -> DiffResult:
     """A minimal :class:`DiffResult` carrying exactly *change*, so the
     release's severity aggregation and finding renderers read this finding
     the same way they read a per-library one."""
-    from ..checker_policy import Verdict
+    from ..policy.classification import Verdict
 
     return DiffResult(
         old_version="",

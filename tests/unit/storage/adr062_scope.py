@@ -65,6 +65,11 @@ import pathlib
 #: bytes or true EOF" for any reader, the other the bounded decoded-prefix
 #: classification built on it -- neither touches the v2 document surface
 #: this scope tracks, so neither belongs in the plan's module table.
+#: `closure_identity` is a seventh, the same class as `snapshot_load_
+#: normalization` just above: ADR-061 gap B's real owner behind the flat
+#: `qualified_name_segments` facade's anonymous/lambda-closure ordinal-
+#: identity renumbering -- snapshot string normalization, not a Phase 0
+#: identity/availability/versioning/package primitive.
 NON_ADR062_MODULES = frozenset(
     {
         "bounded_read",
@@ -87,6 +92,7 @@ NON_ADR062_MODULES = frozenset(
         "graph_section_codec",
         "sparse_section_codec",
         "snapshot_load_normalization",
+        "closure_identity",
     }
 )
 

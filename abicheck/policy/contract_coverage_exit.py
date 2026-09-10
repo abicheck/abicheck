@@ -49,7 +49,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from ..contract_coverage_ledger import (
+from .coverage_ledger import (
     coverage_exit_contribution as coverage_exit_contribution,
     coverage_failures_for_context as coverage_failures_for_context,
 )

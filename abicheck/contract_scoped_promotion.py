@@ -191,7 +191,7 @@ def recompute_verdict_after_promotion(
     """
     from .checker_policy import compute_verdict
     from .contract_gating import is_evaluated
-    from .reclassify import _VERDICT_ORDER
+    from .policy.reclassify import _VERDICT_ORDER
 
     changes = getattr(result, "changes", None)
     if not changes:

@@ -94,8 +94,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..api_types import HEADER_AST_FRONTENDS
 from ..model.evidence_depth_levels import USER_DEPTHS, EvidenceDepth
+from ..model.header_ast_frontends import HEADER_AST_FRONTENDS
 from .analysis_assurance_gate import analysis_assurance_issues
 from .build_config import KNOWN_TOP_LEVEL_KEYS
 

@@ -62,15 +62,14 @@ from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 
-from ..checker_policy import (
-    ADDITION_KINDS as ADDITION_KINDS,
-    ChangeKind as ChangeKind,
-    HasKind as HasKind,
-    Verdict as Verdict,
-    is_cross_source_resolved as is_cross_source_resolved,
-)
-from ..contract_gating import is_evaluated as is_evaluated
 from ..errors import PolicyError as PolicyError
+from ..model.change_catalog.kinds import ChangeKind as ChangeKind, HasKind as HasKind
+from .classification import (
+    ADDITION_KINDS as ADDITION_KINDS,
+    Verdict as Verdict,
+)
+from .contract_finding_relevance import is_evaluated as is_evaluated
+from .evidence_status import is_cross_source_resolved as is_cross_source_resolved
 
 # ADR-061 Phase 2: the per-change effective-verdict resolver, its disclosure
 # sibling, and the kind-set alias/resolver they share now live in
@@ -80,7 +79,7 @@ from ..errors import PolicyError as PolicyError
 # alias form so ``abicheck.severity.effective_verdict_for_change`` /
 # ``reclassify_rule_for_change`` / ``KindSets`` keep working unchanged for
 # every existing caller; see ``reclassify.py``'s docstring for the reasoning.
-from ..reclassify import (
+from .reclassify import (
     KindSets as KindSets,
     effective_verdict_for_change as effective_verdict_for_change,
     first_matching_reclassify_verdict as first_matching_reclassify_verdict,

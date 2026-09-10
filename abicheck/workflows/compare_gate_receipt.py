@@ -65,11 +65,11 @@ from typing import TYPE_CHECKING, Any
 from ..contract_relevance_types import SelectorLayer
 
 if TYPE_CHECKING:
-    from ..api_types import CompareRequest
     from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
+    from .contracts import CompareRequest
 
 
 def install_resolved_gate_receipt(

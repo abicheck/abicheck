@@ -43,6 +43,7 @@ from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.dedup_key import hashable_value
+from .compare.qualified_name_normalization import strip_inline_abi_namespaces
 from .fact_provenance import (
     both_known_backed_fact_qualified,
     same_producer_backed_fact_qualified,
@@ -57,7 +58,6 @@ from .model import AbiSnapshot
 from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .model.identity import EntityId
 from .model.qualified_name_split import iter_top_level_chars
-from .qualified_name_segments import strip_inline_abi_namespaces
 
 K = TypeVar("K")
 V = TypeVar("V")
