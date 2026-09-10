@@ -1719,13 +1719,17 @@ def compute_review_digest(
         source_breaks_count=summary.source_breaks,
         risk_count=summary.risk_count,
         # Codex review: additions_count/quality_issues_count are two rows
-        # in the same rendered table, so they must not overlap -- unlike
-        # the JSON summary (where compatible_additions stays the
-        # historical whole-bucket total by design), the digest's own
-        # "Additions" row means *only* genuine additions here, mirroring
-        # pr_comment.py's identical `max(compatible_additions - quality, 0)`
-        # derivation for the release path.
-        additions_count=max(summary.compatible_additions - summary.quality_issues, 0),
+        # in the same rendered table, so they must not overlap. New defect
+        # 4 fix: `summary.compatible_additions` (report_schema_version
+        # 3.15) now already counts only genuine additions -- it no longer
+        # needs (and must not receive) a second subtraction of
+        # `quality_issues` here, which used to be necessary when this field
+        # still carried the historical whole-bucket total. Use it directly;
+        # `pr_comment.py`'s own `max(compatible_additions - quality, 0)`
+        # derivation is for the *release* per-library field, a separate,
+        # differently-scoped JSON field that still carries the historical
+        # whole-bucket meaning (`cli_compare_release_pairwise.py`).
+        additions_count=summary.compatible_additions,
         quality_issues_count=summary.quality_issues,
         scoped=bool(scoped),
         out_of_surface_count=result.out_of_surface_count,

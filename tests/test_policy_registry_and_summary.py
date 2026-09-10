@@ -127,8 +127,9 @@ def test_build_summary_risk_count_zero_for_compatible() -> None:
 def test_build_summary_quality_issues_splits_out_public_surface_shrank() -> None:
     """A net public-surface *shrink* is COMPATIBLE (informational, not a
     break) but is not a genuine addition -- it must be visible in
-    quality_issues, not silently folded into "additions" with nothing to
-    distinguish it from real API growth (the field-name mislabel a CI
+    quality_issues, and (new defect 4 fix) must NOT also inflate
+    compatible_additions: a public_surface_shrank-only compatible batch
+    reports zero additions, not one (the field-name mislabel a CI
     dashboard reading compatible_additions alone would otherwise hit once
     surface metrics became unconditional -- ADR-027 Phase 5).
     """
@@ -147,17 +148,18 @@ def test_build_summary_quality_issues_splits_out_public_surface_shrank() -> None
     )
     summary = build_summary(result)
     assert summary.risk_count == 0
-    assert summary.compatible_additions == 1
+    assert summary.compatible_additions == 0
     assert summary.quality_issues == 1
 
 
 def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
     """A mixed compatible batch (one real addition, one surface-shrink
-    roll-up) reports both counts independently: compatible_additions stays
-    the historical total, quality_issues names only the non-addition
-    subset -- so `compatible_additions - quality_issues` recovers the real
-    addition count, mirroring cli_compare_release_pairwise.py's
-    ADDITION_KINDS-based `quality_issues` derivation for the release path.
+    roll-up) reports both counts independently and disjointly (new defect
+    4 fix): compatible_additions counts only the genuine addition,
+    quality_issues names only the non-addition subset -- the two sum to
+    the old (pre-3.15), historically-inflated total, mirroring
+    cli_compare_release_pairwise.py's ADDITION_KINDS-based `quality_issues`
+    derivation for the release path.
     """
     result = DiffResult(
         old_version="1.0",
@@ -174,9 +176,9 @@ def test_build_summary_quality_issues_does_not_shadow_real_additions() -> None:
         verdict=Verdict.COMPATIBLE,
     )
     summary = build_summary(result)
-    assert summary.compatible_additions == 2
+    assert summary.compatible_additions == 1
     assert summary.quality_issues == 1
-    assert summary.compatible_additions - summary.quality_issues == 1
+    assert summary.compatible_additions + summary.quality_issues == 2
 
 
 def test_build_summary_quality_issues_derives_from_effective_category(
@@ -219,7 +221,12 @@ def test_build_summary_quality_issues_derives_from_effective_category(
     )
     assert result.compatible == [demoted]
     summary = build_summary(result)
-    assert summary.compatible_additions == 1
+    # New defect 4 fix: this finding is QUALITY_ISSUES under
+    # `classify_effective_change` (its kind was overridden out of the
+    # effective addition set), so it must NOT count as a compatible
+    # addition either -- compatible_additions and quality_issues are
+    # disjoint now, not "compatible_additions is the whole bucket".
+    assert summary.compatible_additions == 0
     assert summary.quality_issues == 1
 
 
