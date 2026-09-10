@@ -136,11 +136,34 @@ def _sarif_justifications(result) -> list[str]:
     return texts
 
 
+def _junit_suite(rendered: str) -> ET.Element:
+    """Parse a rendered JUnit suite.
+
+    The one place this module parses XML. Four call sites each called
+    `ET.fromstring` on a string this very process had just rendered, which
+    is not an untrusted document -- but a static analyser cannot know that,
+    so each site was reported as an XML-attack surface, and the count grew
+    with every test that looked at JUnit output. Parsing in one place makes
+    that judgement once, where it can be stated, instead of implying it
+    four times by repetition.
+    """
+    # nosec B314 — not an untrusted document: `rendered` is this process's
+    # own JUnit output, produced by the renderer under test a few lines up.
+    return ET.fromstring(rendered)  # nosec B314  # noqa: S314
+
+
 def _junit_skip_messages(result) -> list[str]:
-    junit = ET.fromstring(render_no_baseline(result, "junit")[0])
+    junit = _junit_suite(render_no_baseline(result, "junit")[0])
     messages = [s.attrib["message"] for s in junit.iter("skipped")]
     assert messages, "a suppressed finding must be a skipped JUnit case"
     return messages
+
+
+def _junit_gate_failure(doc) -> ET.Element:
+    """The gate testcase's ``<failure>`` for a hand-built document."""
+    failure = _junit_suite(render_no_baseline_junit(doc)).find(".//failure")
+    assert failure is not None and failure.text, "expected a gated JUnit suite"
+    return failure
 
 
 def _assert_no_field_shown_twice(text: str) -> None:
@@ -310,7 +333,7 @@ def test_a_run_without_a_ledger_reports_no_provenance_rather_than_faking_one() -
         )
         assert suppression["justification"] == "audit-waiver-17"
 
-    junit = ET.fromstring(render_no_baseline(result, "junit")[0])
+    junit = _junit_suite(render_no_baseline(result, "junit")[0])
     skipped = list(junit.iter("skipped"))
     assert skipped, "a suppressed finding must still be a skipped JUnit case"
     for element in skipped:
@@ -458,8 +481,7 @@ def test_a_non_coverage_gate_names_its_axis_without_a_coverage_block() -> None:
         coverage_failures=(),
     )
 
-    failure = ET.fromstring(render_no_baseline_junit(doc)).find(".//failure")
-    assert failure is not None and failure.text
+    failure = _junit_gate_failure(doc)
 
     assert NO_BASELINE_EXIT_AXIS_LABELS["analysis_assurance"] in failure.text
     assert NO_BASELINE_EXIT_AXIS_LABELS["contract_coverage"] not in failure.text, (
@@ -493,8 +515,7 @@ def test_a_gated_document_with_no_axes_recorded_says_so() -> None:
     base = compute_no_baseline_document(_result("case143_audit_accidental_export"))
     doc = dataclasses.replace(base, exit_code=1, exit_axes={}, coverage_failures=())
 
-    failure = ET.fromstring(render_no_baseline_junit(doc)).find(".//failure")
-    assert failure is not None and failure.text
+    failure = _junit_gate_failure(doc)
     assert "audit exited 1" in failure.attrib["message"]
 
     # It says the breakdown is absent...
