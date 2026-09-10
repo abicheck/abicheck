@@ -17,6 +17,7 @@ field as two.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import xml.etree.ElementTree as ET
@@ -29,6 +30,8 @@ from abicheck.report.no_baseline import (
     compute_no_baseline_document,
     render_no_baseline,
 )
+from abicheck.report.no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
+from abicheck.report.no_baseline_render import render_no_baseline_junit
 from abicheck.suppression import Suppression, SuppressionList
 from abicheck.workflows.no_baseline_compare import (
     resolve_no_baseline_candidate,
@@ -69,6 +72,58 @@ def _result(case: str, filename: str = "snapshot.abi.json", *, suppression=None)
 # ---------------------------------------------------------------------------
 # Suppression provenance: the disposition audit's own record, not a label.
 # ---------------------------------------------------------------------------
+
+
+#: The three ways a rule can state its identity. A rule stating *both* is
+#: what exposed the original defect, and a fix that special-cased equality
+#: would still get label-only wrong -- so all three are always exercised.
+_STATING_COMBINATIONS = [
+    pytest.param("audit-waiver-17", "temporary vendor debug hook", id="both"),
+    pytest.param(None, "temporary vendor debug hook", id="reason-only"),
+    pytest.param("audit-waiver-17", None, id="label-only"),
+]
+
+
+def _labelled_result(label: str | None, reason: str | None):
+    """An audit whose single finding is suppressed by one rule stating *label*/*reason*."""
+    return _result(
+        "case143_audit_accidental_export",
+        suppression=SuppressionList(
+            [Suppression(symbol_pattern=".*", label=label, reason=reason)],
+            source_path="waivers.yaml",
+        ),
+    )
+
+
+def _sarif_justifications(result) -> list[str]:
+    sarif = json.loads(render_no_baseline(result, "sarif")[0])
+    texts = [
+        r["suppressions"][0]["justification"]
+        for r in sarif["runs"][0]["results"]
+        if r.get("suppressions")
+    ]
+    assert texts, "a suppressed finding must carry a SARIF suppression"
+    return texts
+
+
+def _junit_skip_messages(result) -> list[str]:
+    junit = ET.fromstring(render_no_baseline(result, "junit")[0])
+    messages = [s.attrib["message"] for s in junit.iter("skipped")]
+    assert messages, "a suppressed finding must be a skipped JUnit case"
+    return messages
+
+
+def _assert_no_field_shown_twice(text: str) -> None:
+    """The invariant behind every expected string here, stated separately.
+
+    Checked by splitting the rendered text and comparing part counts, never
+    by re-running the helper that produced it -- an oracle that shares the
+    implementation's logic cannot falsify it.
+    """
+    parts = [p.strip() for p in text.split(":")]
+    assert len(parts) == len(set(parts)), (
+        f"justification {text!r} repeats a field; one source rendered as two"
+    )
 
 
 def _labelled_and_reasoned() -> SuppressionList:
@@ -302,35 +357,36 @@ def test_a_suppression_justification_never_repeats_one_field_as_two(
     label-only wrong, and the invariant is "never present one field as
     two", not "handle this input".
     """
-    rule = Suppression(symbol_pattern=".*", label=label, reason=reason)
-    result = _result(
-        "case143_audit_accidental_export",
-        suppression=SuppressionList([rule], source_path="waivers.yaml"),
+    result = _labelled_result(label, reason)
+    assert compute_no_baseline_document(result).suppressed, (
+        "this fixture must have something to suppress"
     )
-    doc = compute_no_baseline_document(result)
-    assert doc.suppressed, "this fixture must have something to suppress"
 
-    sarif = json.loads(render_no_baseline(result, "sarif")[0])
-    justifications = [
-        r["suppressions"][0]["justification"]
-        for r in sarif["runs"][0]["results"]
-        if r.get("suppressions")
-    ]
-    assert justifications, "a suppressed finding must carry a SARIF suppression"
-    for text in justifications:
+    # The single-string projections. Both go through one helper, so they are
+    # checked together -- if they ever diverge, that is itself the bug.
+    for text in _sarif_justifications(result):
         assert text == expected
-        # The invariant behind the specific expectations above, stated
-        # independently of them: no field is ever printed twice.
-        parts = [p.strip() for p in text.split(":")]
-        assert len(parts) == len(set(parts)), (
-            f"justification {text!r} repeats a field; one source rendered as two"
+        _assert_no_field_shown_twice(text)
+    for message in _junit_skip_messages(result):
+        assert message == f"suppressed: {expected}", (
+            "JUnit and SARIF share one justification helper and must not "
+            "phrase it differently"
         )
 
-    # Markdown shows the label in its own column beside the reason, so it
-    # needs the same rule applied at a *different* shape -- and it was the
-    # site the first fix missed, printing a reason-only rule's reason under
-    # both headings (Codex review, P2, the second time). Asserted on the
-    # rendered row, so the two columns really differ.
+
+@pytest.mark.parametrize(("label", "reason"), _STATING_COMBINATIONS)
+def test_the_markdown_columns_never_show_one_field_as_two(
+    label: str | None, reason: str | None
+) -> None:
+    """The same rule at Markdown's shape: two columns, not one string.
+
+    Split from the single-string test above rather than folded into it,
+    because this is where the defect recurred: Markdown shows the label and
+    the reason in *separate columns*, so a test written only against the
+    helper's one-string shape could not have caught it (Codex review, P2,
+    the second time).
+    """
+    result = _labelled_result(label, reason)
     markdown = render_no_baseline(result, "markdown")[0]
     rows = [
         line
@@ -340,22 +396,12 @@ def test_a_suppression_justification_never_repeats_one_field_as_two(
     assert rows, "the suppressed finding must appear in the Markdown table"
     for row in rows:
         cells = [c.strip() for c in row.strip("|").split("|")]
-        label_cell, reason_cell = cells[3], cells[4]
-        assert label_cell != reason_cell, (
+        assert cells[3] != cells[4], (
             f"Markdown row {row!r} prints the same text as both the rule "
             "label and the reason; one field shown as two"
         )
-        assert label_cell == (label or "(rule gave no label)")
-        assert reason_cell == (reason or "(none stated)")
-
-    junit = ET.fromstring(render_no_baseline(result, "junit")[0])
-    skipped = [s.attrib["message"] for s in junit.iter("skipped")]
-    assert skipped, "a suppressed finding must be a skipped JUnit case"
-    for message in skipped:
-        assert message == f"suppressed: {expected}", (
-            "JUnit and SARIF share one justification helper and must not "
-            "phrase it differently"
-        )
+        assert cells[3] == (label or "(rule gave no label)")
+        assert cells[4] == (reason or "(none stated)")
 
 
 def test_a_non_coverage_gate_names_its_axis_without_a_coverage_block() -> None:
@@ -374,11 +420,6 @@ def test_a_non_coverage_gate_names_its_axis_without_a_coverage_block() -> None:
     test, and constructing it directly is what lets the combination be
     exercised at all.
     """
-    import dataclasses
-
-    from abicheck.report.no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
-    from abicheck.report.no_baseline_render import render_no_baseline_junit
-
     base = compute_no_baseline_document(_result("case143_audit_accidental_export"))
     doc = dataclasses.replace(
         base,
