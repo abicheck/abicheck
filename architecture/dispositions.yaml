@@ -135,6 +135,14 @@
       "review_by": "2026-12-15"
     },
     {
+      "path": "abicheck/qualified_name_segments.py",
+      "disposition": "retain",
+      "supported_reason": "ADR-061 gap B split this module's own two responsibilities into real owners: the qualified-name segmentation/versioned-namespace diffing decisions now live in compare/qualified_name_normalization.py, and the anonymous/lambda-closure ordinal-identity snapshot normalization now lives in storage/closure_identity.py (see each module's own docstring). This file is what remains -- a pure re-export facade over both, so every existing `from abicheck.qualified_name_segments import ...` path keeps working. It is not itself a candidate for a single owning layer: it imports both compare and storage, and classifying it into either would be a real model.may_import-shaped direction violation the same way checker_policy.py's own gap B entry describes.",
+      "owner": "abicheck maintainers",
+      "review_by": "2027-03-01",
+      "notes": "qualified_name_segments_walk.py, the third sibling file this split left behind, is classified into storage directly (modules.yaml's storage.legacy_paths) rather than recorded here, since storage.closure_identity is its only real caller."
+    },
+    {
       "path": "abicheck/reclassify.py",
       "disposition": "migrate",
       "target_layer": "policy",
