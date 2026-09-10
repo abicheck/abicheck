@@ -30,7 +30,12 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   the exit-7 axis governs every `compare` surface; the release fan-out
   aggregates each member's contribution with `max()` alongside the
   contract-coverage floor it already folds, and explains it on stderr rather
-  than exiting `7` silently. A run without an explicit `--depth` is
+  than exiting `7` silently. Every document a release publishes carries the
+  fact too — the JSON/`summary.json` `exit` block, the `run_outcome`
+  `operational` axis, a Markdown section, and JUnit `<error>` entries — since
+  a release document is rendered *before* the exit is taken, so a report-
+  driven consumer would otherwise read a run that exited `7` as clean. A run
+  without an explicit `--depth` is
   unaffected, as are `dump`'s own floors and the stored-bundle-facts pair
   comparison, which keep their separate, separately-tested contracts.
 
