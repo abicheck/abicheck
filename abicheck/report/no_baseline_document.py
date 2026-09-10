@@ -84,7 +84,16 @@ __all__ = [
 #:
 #: Bump MINOR for an additive field, MAJOR for a removal or a changed
 #: meaning -- the same policy ``REPORT_SCHEMA_VERSION`` follows.
-AUDIT_REPORT_SCHEMA_VERSION = "1.0"
+#:
+#: ``1.1`` adds ``suppression_provenance`` to a suppressed finding (ADR-067
+#: D3's full rule record beside the existing display label) and moves
+#: ``old_acquisition_state`` into the root ``required`` list, where it
+#: always belonged -- it is emitted unconditionally. Both are additive: a
+#: ``1.0`` consumer reading the fields it already knows is unaffected, which
+#: is exactly what MINOR promises. Bumped because a consumer that selects or
+#: caches a schema by this string could otherwise not tell the two contracts
+#: apart (Codex review, P2).
+AUDIT_REPORT_SCHEMA_VERSION = "1.1"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.

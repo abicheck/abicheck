@@ -42,6 +42,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.report.no_baseline import (
+    AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS,
     NO_BASELINE_EXIT_AXIS_NOTICES,
     NO_BASELINE_SUPPORTED_FORMATS,
@@ -705,7 +706,9 @@ def test_the_audit_json_validates_against_its_own_published_schema() -> None:
     assert "report_schema_version" not in doc, (
         "the compare report's identity field must not appear on an audit"
     )
-    assert doc["audit_report_schema_version"], "the audit carries its own version"
+    assert doc["audit_report_schema_version"] == AUDIT_REPORT_SCHEMA_VERSION, (
+        "the emitted version must be the constant, not a literal that can drift from it"
+    )
     compare_errors = list(
         jsonschema.Draft202012Validator(load_compare_report_schema()).iter_errors(doc)
     )
@@ -899,3 +902,34 @@ def test_junit_names_the_axis_that_gated_not_every_axis_that_could_have() -> Non
             "the coverage axis can name a specific provider; the bare "
             "contribution number cannot"
         )
+
+
+def test_the_published_audit_schema_copy_matches_the_packaged_one() -> None:
+    """The two copies of this schema stay byte-identical.
+
+    `scripts/publish_schemas.py` keeps `docs/reference/schemas/v1/` in sync
+    with the packaged copy, and `compare_report.schema.json` has had this
+    guard since its own docs mirror silently drifted (PR #595 -> #611).
+    The audit schema shipped without the equivalent, so its two copies were
+    hand-edited in step and nothing checked that they stayed that way —
+    `jsonschema`'s `additionalProperties` tolerance will not flag a stale
+    published copy, which is exactly how the first drift went unnoticed.
+    """
+    from abicheck.schemas import AUDIT_REPORT_SCHEMA_PATH
+
+    published = (
+        AUDIT_REPORT_SCHEMA_PATH.parent.parent.parent
+        / "docs"
+        / "reference"
+        / "schemas"
+        / "v1"
+        / "audit_report.schema.json"
+    )
+    assert published.is_file(), "the audit schema must be published, not packaged only"
+    assert published.read_text(encoding="utf-8") == AUDIT_REPORT_SCHEMA_PATH.read_text(
+        encoding="utf-8"
+    ), (
+        "the published audit schema has drifted from the packaged one; "
+        "run scripts/publish_schemas.py (or mirror the edit) so a consumer "
+        "reading the documented schema sees what the tool actually emits"
+    )

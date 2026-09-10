@@ -58,7 +58,7 @@
   "properties": {
     "audit_report_schema_version": {
       "type": "string",
-      "description": "SemVer-style version of THIS schema (e.g. \"1.0\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
+      "description": "SemVer-style version of THIS schema (currently \"1.1\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "no_baseline": {

@@ -29,7 +29,10 @@
   reason/source/expiry columns, the SARIF suppression's `justification`
   states the reason with the full record beside it in `properties`, and the
   JUnit `<skipped>` message and body do the same. `suppression_rule` is
-  unchanged for existing consumers.
+  unchanged for existing consumers, and `audit_report_schema_version` moves
+  to `1.1` — additive, so a `1.0` consumer is unaffected, but a consumer
+  that selects or caches a schema by that string can now tell the two
+  contracts apart.
 - **A gated audit's JUnit output names the axis that fired.** The suite
   carried only the total exit code and the contract-coverage contribution,
   and the failure text listed every axis that *might* have gated — so a
