@@ -253,7 +253,7 @@ RELATED_RULES: dict[str, list[str]] = {
         "public-api-gains-internal-dependency",
     ],
     "case197_header_graph_identity_reconciled": [
-        "internal-declaration-identity-reconciled",
+        "internal-declaration-coordinates-shifted",
         "public-api-gains-internal-dependency",
     ],
 }

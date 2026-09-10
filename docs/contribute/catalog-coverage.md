@@ -35,7 +35,7 @@ Every rule named below is defined in `catalog/catalog_rules.yaml`, the canonical
 | `empty-tag-type-gains-state` | `case94_empty_tag_gained_state` |
 | `exported-type-removed` | `case107_task_scheduler_init_removed`, `case108_task_class_removed`, `case78_task_arena_attach_tag`, `case82_sycl_overload_set_removed` |
 | `header-build-context-mismatch` | `case148_xcheck_header_build_mismatch` |
-| `internal-declaration-identity-reconciled` | `case197_header_graph_identity_reconciled` |
+| `internal-declaration-coordinates-shifted` | `case197_header_graph_identity_reconciled` |
 | `internal-declaration-moved-reconciled` | `case196_header_graph_move_reconciled` |
 | `internal-declaration-renamed-reconciled` | `case194_header_graph_rename_reconciled` |
 | `internal-symbol-required-by-public-api` | `case192_call_graph_break_survives_suppression` |

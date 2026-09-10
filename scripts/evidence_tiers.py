@@ -435,6 +435,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "declaration_renamed": "L5",
     "declaration_moved": "L5",
     "declaration_identity_reconciled": "L5",
+    "declaration_coordinates_shifted": "L5",
     # ADR-044 P1 items 1-2: call-graph analogue of
     # internal_type_leaks_via_public_api (L2 above) — only fires when the L5
     # graph's DECL_CALLS_DECL/DECL_REFERENCES_DECL edges prove a public entry

@@ -122,6 +122,7 @@ if TYPE_CHECKING:
 OUTCOME_RENAMED = "declaration_renamed"
 OUTCOME_MOVED = "declaration_moved"
 OUTCOME_RECONCILED = "declaration_identity_reconciled"
+OUTCOME_COORDINATES_ONLY = "declaration_coordinates_shifted"  # neither predicate fired -- distinct from OUTCOME_RECONCILED, where both did
 
 _MATCH_KIND_CANONICAL_ID = "canonical_id"
 _MATCH_KIND_ALIAS = "alias"
@@ -143,7 +144,7 @@ class ReconciledPair:
     old_node: GraphNode
     new_node: GraphNode
     match_kind: str  # canonical_id | alias | structural_context
-    outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED
+    outcome: str  # OUTCOME_RENAMED | OUTCOME_MOVED | OUTCOME_RECONCILED | OUTCOME_COORDINATES_ONLY
     old_identity: CanonicalIdentity
     new_identity: CanonicalIdentity
 
@@ -414,7 +415,7 @@ def _classify_outcome(
         return OUTCOME_RENAMED
     if moved and not renamed:
         return OUTCOME_MOVED
-    return OUTCOME_RECONCILED
+    return OUTCOME_RECONCILED if renamed and moved else OUTCOME_COORDINATES_ONLY
 
 
 #: One node kind's structural-context index: context -> the new-side node ids
@@ -742,6 +743,7 @@ _OUTCOME_PROSE: dict[str, str] = {
     OUTCOME_RENAMED: "renamed",
     OUTCOME_MOVED: "moved to a different declaring file",
     OUTCOME_RECONCILED: "identity-reconciled (both name and location evidence changed)",
+    OUTCOME_COORDINATES_ONLY: "no material identity change (coordinate-only shift)",
 }
 
 
@@ -823,6 +825,7 @@ def diff_graph_reconciliation_findings(
         OUTCOME_RENAMED: ChangeKind.DECLARATION_RENAMED,
         OUTCOME_MOVED: ChangeKind.DECLARATION_MOVED,
         OUTCOME_RECONCILED: ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+        OUTCOME_COORDINATES_ONLY: ChangeKind.DECLARATION_COORDINATES_SHIFTED,
     }
     boundary = f"[{EVIDENCE_TIER_L5}]"
     old_reachable = _public_reachable_ids(old_graph) if old_graph is not None else None

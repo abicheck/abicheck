@@ -85,7 +85,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`inline-function-removed`](inline-function-removed.md) | [case157_inline_function_removed](../case157_inline_function_removed.md) | — | — | — |
 | [`inline-namespace-moved`](inline-namespace-moved.md) | [case71_inline_namespace_moved](../case71_inline_namespace_moved.md) | — | — | — |
 | [`inline-namespace-version-bumped`](inline-namespace-version-bumped.md) | [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) | — | — | — |
-| [`internal-declaration-identity-reconciled`](internal-declaration-identity-reconciled.md) | — | — | — | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) |
+| [`internal-declaration-coordinates-shifted`](internal-declaration-coordinates-shifted.md) | — | — | — | [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) |
 | [`internal-declaration-moved-reconciled`](internal-declaration-moved-reconciled.md) | — | — | — | [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) |
 | [`internal-declaration-renamed-reconciled`](internal-declaration-renamed-reconciled.md) | — | — | — | [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) |
 | [`internal-enum-churn-scoped`](internal-enum-churn-scoped.md) | [case184_internal_enum_churn_scoped](../case184_internal_enum_churn_scoped.md) | — | — | — |

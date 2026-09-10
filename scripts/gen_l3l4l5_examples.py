@@ -662,16 +662,19 @@ def build_cases() -> dict[str, tuple[str, dict[str, Any], dict[str, Any]]]:
 
     # case197: the sibling scenario to case196, isolating ADR-048's
     # OTHER non-"pure move" reconciliation outcome
-    # (graph_reconcile.OUTCOME_RECONCILED / "declaration_identity_reconciled").
-    # _classify_outcome() reports `declaration_moved` when the qualified-name
-    # alias tier pairs two nodes AND the declaring file changed; it reports
-    # `declaration_identity_reconciled` -- the residual "neither individually
-    # fired" branch -- when the qualified name is paired but the declaring
-    # file stayed the SAME. case196 changes the header path
-    # (detail_v1.h -> detail_v2.h) alongside the signature; this case is the
-    # identical fixture with the header path held constant on both sides, so
-    # only the mangled-name-moving signature change (int -> long) perturbs
-    # node identity and the file-unchanged branch is what actually fires.
+    # (graph_reconcile.OUTCOME_COORDINATES_ONLY /
+    # "declaration_coordinates_shifted"). _classify_outcome() reports
+    # `declaration_moved` when the qualified-name alias tier pairs two
+    # nodes AND the declaring file changed; it reports
+    # `declaration_coordinates_shifted` (COMPATIBLE, not RISK -- distinct
+    # from the "both changed" declaration_identity_reconciled outcome) when
+    # the qualified name is paired but the declaring file stayed the SAME --
+    # neither `renamed` nor `moved` individually fired. case196 changes the
+    # header path (detail_v1.h -> detail_v2.h) alongside the signature; this
+    # case is the identical fixture with the header path held constant on
+    # both sides, so only the mangled-name-moving signature change
+    # (int -> long) perturbs node identity and the file-unchanged branch is
+    # what actually fires.
     # Reuses every design decision case196's own extended comment already
     # justifies (private+inline helper so the scenario stays
     # COMPATIBLE_WITH_RISK rather than a real BREAKING export removal, an

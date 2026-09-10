@@ -22,12 +22,21 @@ reconciliation never deletes or downgrades an artifact-proven finding.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
+from abicheck.buildsource.entity_identity import (
+    IDENTITY_TIER_CANONICAL,
+    CanonicalIdentity,
+)
 from abicheck.buildsource.graph_reconcile import (
+    _OUTCOME_PROSE,
+    OUTCOME_COORDINATES_ONLY,
     OUTCOME_MOVED,
     OUTCOME_RECONCILED,
     OUTCOME_RENAMED,
+    _classify_outcome,
     diff_graph_reconciliation_findings,
     reconcile_added_removed,
     reconcile_graph_diff,
@@ -387,8 +396,9 @@ def test_different_checkout_roots_not_misclassified_as_moved() -> None:
     result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
     assert len(result.reconciled) == 1
     # Same qualified name, same project-relative file -- neither renamed nor
-    # moved once the checkout root is stripped.
-    assert result.reconciled[0].outcome == OUTCOME_RECONCILED
+    # moved once the checkout root is stripped, so this is coordinate-only,
+    # not OUTCOME_RECONCILED (that outcome requires BOTH to have changed).
+    assert result.reconciled[0].outcome == OUTCOME_COORDINATES_ONLY
 
 
 def test_real_move_still_detected_across_different_checkout_roots() -> None:
@@ -612,8 +622,9 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
     )
     outcomes = {p.old_node.id: p.outcome for p in result.reconciled}
     assert len(result.reconciled) == 2
-    # Same project-relative file across checkout roots -- not moved.
-    assert outcomes["type://old_stable"] == OUTCOME_RECONCILED
+    # Same project-relative file across checkout roots -- not moved, and the
+    # name didn't change either, so this is coordinate-only.
+    assert outcomes["type://old_stable"] == OUTCOME_COORDINATES_ONLY
     # Genuinely moved to a different project subdirectory (detail/ -> public/).
     assert outcomes["type://old_moved"] == OUTCOME_MOVED
 
@@ -726,7 +737,9 @@ def test_diff_graph_reconciliation_findings_emits_each_change_kind() -> None:
     """Each of the three ChangeKinds is actually produced end-to-end from a
     real reconciled pair, not just referenced by name (mirrors
     tests/test_changekind_completeness.py's coverage requirement)."""
-    rename_parent = GraphNode(id="type://parent", kind="record_type", label="ns::Parent")
+    rename_parent = GraphNode(
+        id="type://parent", kind="record_type", label="ns::Parent"
+    )
     rename_old = GraphNode(
         id="type://old_rename",
         kind="record_type",
@@ -783,11 +796,13 @@ def test_diff_graph_reconciliation_findings_emits_each_change_kind() -> None:
     assert ChangeKind.DECLARATION_RENAMED in kinds
     assert ChangeKind.DECLARATION_MOVED in kinds
     # recon_old/recon_new share every alias (same mangled/qualified name,
-    # same file/scope: both empty) -- classified OUTCOME_RECONCILED since
-    # neither name nor file differs between the pair (a same-shape,
+    # same file/scope: both empty) -- classified OUTCOME_COORDINATES_ONLY
+    # since neither name nor file differs between the pair (a same-shape,
     # non-rename/non-move alias match, e.g. an attribute-only change a
-    # future producer might reconcile on).
-    assert ChangeKind.DECLARATION_IDENTITY_RECONCILED in kinds
+    # future producer might reconcile on) -- this is deliberately NOT
+    # DECLARATION_IDENTITY_RECONCILED, which is reserved for the opposite
+    # case where both name and file evidence changed together.
+    assert ChangeKind.DECLARATION_COORDINATES_SHIFTED in kinds
 
 
 def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
@@ -817,6 +832,7 @@ def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
             ChangeKind.DECLARATION_RENAMED,
             ChangeKind.DECLARATION_MOVED,
             ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+            ChangeKind.DECLARATION_COORDINATES_SHIFTED,
         )
 
 
@@ -1002,8 +1018,11 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     )
     new_snap = AbiSnapshot(library="test", version="2.0")
 
-    # A rename in the L5 graph, independent of the artifact-level change
-    # above -- exercises the exact production merge path (extra_changes).
+    # A reconciled pair in the L5 graph, independent of the artifact-level
+    # change above -- exercises the exact production merge path
+    # (extra_changes). Same qualified name/declaring file on both sides, so
+    # it classifies OUTCOME_COORDINATES_ONLY -- the specific outcome doesn't
+    # matter for this test, only that reconciliation findings are additive.
     old_type = GraphNode(
         id="type://old",
         kind="record_type",
@@ -1051,6 +1070,7 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
             ChangeKind.DECLARATION_RENAMED,
             ChangeKind.DECLARATION_MOVED,
             ChangeKind.DECLARATION_IDENTITY_RECONCILED,
+            ChangeKind.DECLARATION_COORDINATES_SHIFTED,
         )
     ]
     assert len(reconciled_in_result) == len(graph_findings)
@@ -1123,3 +1143,55 @@ def test_reconcile_added_removed_stays_fast_on_a_large_graph() -> None:
     # via structural context -- correctness check alongside the perf one.
     assert len(result.reconciled) == n
     assert elapsed < 10.0, f"reconciliation took {elapsed:.2f}s for {n} nodes"
+
+
+def _identity(qualified_name: str, declaring_file: str) -> CanonicalIdentity:
+    return CanonicalIdentity(
+        primary_id=f"id:{qualified_name}",
+        tier=IDENTITY_TIER_CANONICAL,
+        qualified_name=qualified_name,
+        source_relative=declaring_file,
+    )
+
+
+def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
+    """Bug-class regression: fix/declaration-renamed-fp-item2 (PR #1204)
+    taught renamed/moved to ignore coordinate churn, but the fallthrough
+    then lumped "neither changed" in with the opposite "both changed" case,
+    whose prose hard-codes "both ... changed". Invariant: for ANY (old,
+    new) pair, the returned outcome's prose must never claim a name change
+    when the name didn't change, nor a location change when the file
+    didn't -- exhaustive over name/file same-or-different, not just the two
+    known repro shapes, so it's a property of _classify_outcome itself."""
+    names = ("ns::Widget", "ns::WidgetV2")
+    files = ("a.h", "b.h")
+    name_claim_words = ("renamed", "name")
+    location_claim_words = ("moved", "location", "declaring file")
+    for old_name, new_name, old_file, new_file in itertools.product(
+        names, names, files, files
+    ):
+        name_changed = old_name != new_name
+        file_changed = old_file != new_file
+        outcome = _classify_outcome(
+            _identity(old_name, old_file), _identity(new_name, new_file)
+        )
+        prose = _OUTCOME_PROSE[outcome]
+        claims_name_change = any(w in prose for w in name_claim_words)
+        claims_location_change = any(w in prose for w in location_claim_words)
+        if not name_changed:
+            assert not claims_name_change, (
+                f"outcome {outcome!r} prose {prose!r} claims a name change "
+                f"for identical qualified names {old_name!r}"
+            )
+        if not file_changed:
+            assert not claims_location_change, (
+                f"outcome {outcome!r} prose {prose!r} claims a location "
+                f"change for identical declaring files {old_file!r}"
+            )
+        # And the positive side: the one case both predicates agree on
+        # (neither changed) must land on the dedicated outcome, never on
+        # OUTCOME_RECONCILED (this is the exact bug this test guards).
+        if not name_changed and not file_changed:
+            assert outcome == OUTCOME_COORDINATES_ONLY
+        if name_changed and file_changed:
+            assert outcome == OUTCOME_RECONCILED

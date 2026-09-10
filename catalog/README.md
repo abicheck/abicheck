@@ -470,7 +470,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [194](cases/case194_header_graph_rename_reconciled/README.md) | Internal Dependency Target Renamed, Safely Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [195](cases/case195_header_graph_ambiguous_rename_not_reconciled/README.md) | Ambiguous Simultaneous Rename, Correctly Not Reconciled | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [196](cases/case196_header_graph_move_reconciled/README.md) | Declaration Reconciled as Moved Across a Compound Edit | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
-| [197](cases/case197_header_graph_identity_reconciled/README.md) | Declaration Reconciled as Identity-Reconciled (Header Unchanged) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [197](cases/case197_header_graph_identity_reconciled/README.md) | Declaration Coordinates Shifted (Header Unchanged) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 | [198](cases/case198_public_struct_field_reorder/README.md) | Public Struct Field Reorder | Breaking | 🔴 BREAKING |
 | [199](cases/case199_public_function_parameter_added/README.md) | Parameter Added to an Exported Function | Breaking | 🔴 BREAKING |
 | [200](cases/case200_new_entry_point_instead_of_parameter_added/README.md) | New Entry Point Instead of a Changed Arity | Addition | 🟢 COMPATIBLE |
