@@ -327,3 +327,116 @@ class TestPairwiseTransparency:
         assert doc["schema"] == "abicheck.longitudinal-history/v1"
         assert doc["library"] == "libmath.so"
         assert len(doc["entries"]) == 2
+
+
+class TestFindingEvolutionWiring:
+    """ADR-068 Phase 1 item 2: ``apply_finding_evolution`` was a correspondence
+    primitive with no caller outside tests -- ``workflows/history.py`` (the
+    dedicated N>1-comparison consumer that primitive's own module docstring
+    names) now applies it once per adjacent pair against the *previous*
+    pair's own compare() result in the chain."""
+
+    def test_first_pair_has_no_previous_comparison(self, tmp_path: Path) -> None:
+        """The very first pairwise comparison in a chain has no earlier real
+        comparison to classify against -- its findings must read
+        `not_evaluated`, never a guessed `introduced`, and its own `resolved`
+        list must be empty (mirrors `apply_finding_evolution(..., None)`'s
+        own documented contract)."""
+        p1 = _save(tmp_path, "1.0.0", [_fn("add")])
+        p2 = _save(tmp_path, "2.0.0", [_fn("add"), _fn("multiply")])
+
+        result = run_history_request([p1, p2])
+        summary = result.pairwise[0]
+        counts = dict(summary.evolution_counts)
+        assert counts["not_evaluated"] == summary.change_count
+        assert counts["introduced"] == 0
+        assert counts["persistent"] == 0
+        assert counts["resolved"] == 0
+        assert summary.resolved == ()
+
+    def test_later_pair_classifies_against_the_prior_pair(
+        self, tmp_path: Path
+    ) -> None:
+        """A finding introduced in one pairwise diff that stops appearing in
+        the next is `resolved` and named in that pair's own `resolved` list;
+        a finding new to the later diff is `introduced` -- classified
+        against the *previous* pair's own result, not a third,
+        independently-invented comparison.
+
+        `persistent` is deliberately not exercised here: a finding's
+        `report_finding_id` embeds its old/new value, so the exact same
+        finding recurring identically across two *independent* real
+        `compare()` calls over three genuinely distinct snapshots is not a
+        constructible scenario (unlike re-running `compare()` against a
+        fixed, unmoving baseline) -- `test_finding_evolution.py`'s own
+        primitive-level tests (`test_identical_chain_step_is_fully_
+        persistent`, `test_partition_matches_set_difference`) already cover
+        `persistent` directly against hand-built `DiffResult`s, which is
+        where that state's contract belongs."""
+        p1 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("subtract")])
+        p2 = _save(tmp_path, "2.0.0", [_fn("add")])
+        p3 = _save(tmp_path, "3.0.0", [_fn("add"), _fn("multiply")])
+
+        result = run_history_request([p1, p2, p3])
+        assert len(result.pairwise) == 2
+        first, second = result.pairwise
+
+        # Pair 1 (1.0.0 -> 2.0.0): `subtract` removed, no earlier comparison
+        # to classify against -- not_evaluated.
+        assert dict(first.evolution_counts)["not_evaluated"] == first.change_count
+
+        # Pair 2 (2.0.0 -> 3.0.0): `multiply` added is introduced (absent
+        # from pair 1's own diff); `subtract`'s removal from pair 1 no
+        # longer appears at all in pair 2's diff (there is nothing left to
+        # remove), so it shows up as `resolved` here instead.
+        second_counts = dict(second.evolution_counts)
+        assert second_counts["introduced"] == 1
+        assert second_counts["resolved"] == 1
+        assert len(second.resolved) == 1
+        assert second.resolved[0].symbol == "subtract"
+
+    def test_to_dict_serializes_evolution_fields(self, tmp_path: Path) -> None:
+        """``PairwiseSummary.to_dict()`` must round-trip the new
+        ``evolution_counts``/``resolved`` fields through JSON, the same way
+        every other field on this struct already does."""
+        import json
+
+        p1 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("subtract")])
+        p2 = _save(tmp_path, "2.0.0", [_fn("add")])
+
+        result = run_history_request([p1, p2])
+        doc = json.loads(json.dumps(result.to_dict()))
+        pairwise_doc = doc["pairwise"][0]
+        assert "evolution_counts" in pairwise_doc
+        assert pairwise_doc["evolution_counts"]["not_evaluated"] == 1
+        assert pairwise_doc["resolved"] == []
+
+    def test_to_dict_projects_a_non_empty_resolved_list(
+        self, tmp_path: Path
+    ) -> None:
+        """A pair whose own ``resolved`` list is non-empty must serialize
+        each entry through ``_resolved_finding_dict`` -- finding_id/kind/
+        symbol/description/old_value/new_value/source_location -- not just
+        the empty-list case ``test_to_dict_serializes_evolution_fields``
+        already covers."""
+        import json
+
+        p1 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("subtract")])
+        p2 = _save(tmp_path, "2.0.0", [_fn("add")])
+        p3 = _save(tmp_path, "3.0.0", [_fn("add"), _fn("multiply")])
+
+        result = run_history_request([p1, p2, p3])
+        second = result.pairwise[1]
+        assert len(second.resolved) == 1
+
+        doc = json.loads(json.dumps(result.to_dict()))
+        resolved_doc = doc["pairwise"][1]["resolved"]
+        assert len(resolved_doc) == 1
+        entry = resolved_doc[0]
+        assert entry["symbol"] == "subtract"
+        assert entry["kind"] == second.resolved[0].kind.value
+        assert entry["finding_id"]
+        assert set(entry) == {
+            "finding_id", "kind", "symbol", "description",
+            "old_value", "new_value", "source_location",
+        }

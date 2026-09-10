@@ -1343,6 +1343,31 @@ class TestCompareDispatch:
         assert "release.dso_only" in stderr
         assert "--dso-only" not in stderr
 
+    def test_max_findings_per_library_warns_on_single_file(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review ("Reject this option on the single-pair
+        path"): `--max-findings-per-library` only bites the directory/
+        package release fan-out's aggregate summary -- a single-pair
+        `compare` has no such summary to cap. Previously it reached the
+        single-pair path silently (neither applied nor reported); it now
+        warns the same way every other release-fanout-only flag does on a
+        single-file input."""
+        old, new = _breaking_pair()
+        old_f = _write_snap(tmp_path / "old.json", old)
+        new_f = _write_snap(tmp_path / "new.json", new)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare", str(old_f), str(new_f),
+                "--max-findings-per-library", "1",
+            ],
+        )
+        assert result.exit_code == 4
+        stderr = result.stderr or ""
+        assert "only apply to directory/package" in stderr
+        assert "--max-findings-per-library" in stderr
+
 
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────
 

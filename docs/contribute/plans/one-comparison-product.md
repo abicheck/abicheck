@@ -507,11 +507,16 @@ refs) while both commands still exist. It starts red on every check in
    primitive (`policy/finding_evolution.py`:
    `compute_finding_evolution`/`compute_resolved_findings`/
    `apply_finding_evolution`), and the JSON projection
-   (`report/finding_evolution.py`, `report_schema_version` 3.5). Not yet
-   wired into any CLI command or into `workflows/history.py` (that consumer
-   wiring, and Markdown/HTML rendering, are follow-up work, matching this
-   phase's own "No CLI change" scope) — the primitive itself is what this
-   item asked for.
+   (`report/finding_evolution.py`, `report_schema_version` 3.5). **Follow-up
+   landed:** `workflows/history.py`'s `build_longitudinal_history` is now a
+   real consumer — `apply_finding_evolution` runs once per adjacent pair
+   against the *previous* pair's own `compare()` result in the chain, and
+   `PairwiseSummary` gains `evolution_counts`/`resolved` (projected without
+   importing `report/`, since `workflows/` may not depend on it — see that
+   module's own debt-ledger entry). `project history --format json`'s
+   `pairwise[]` entries carry the fields; still no CLI command consumes
+   `compare()`'s own single-pair `finding_evolution` block directly, and
+   Markdown/HTML rendering of either remains follow-up work.
 3. **Evidence-contract abort (exit `7`)** and **budget overflow (exit `5`)**
    become `compare` `ExitDecision` axes (ADR-064's precedence already models
    them; `compare` does not emit them yet).

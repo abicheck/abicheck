@@ -391,6 +391,21 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "distinct: -o names one file for one report, this names a "
         "directory receiving N. A genuine per-run output location."
     ),
+    "--max-findings-per-library": _keep(
+        "Directory/package fan-out only: caps how many findings the "
+        "aggregate summary itemizes per library (default 10, or "
+        "$ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY). Guard 1: a per-run "
+        "report-size knob, not a stable project property -- a CI job wants "
+        "to raise it for one large release without touching .abicheck.yml, "
+        "mirroring `scan --max-findings`'s identical, already-ruled knob. "
+        "Guard 2: not a duplicate spelling of anything else -- --output-dir "
+        "already gives an *uncapped* escape hatch, this is the capped "
+        "primary summary's own budget. Guard 3: never disables analysis or "
+        "changes a verdict/exit code -- it only bounds how much of an "
+        "unchanged finding set the aggregate document displays; "
+        "findings_truncated_kinds still discloses the exact shape of what "
+        "was cut."
+    ),
     "--view": _keep(
         "ADR-068 D4 / Phase 5: the single 'render which parts, how' "
         "selector that absorbed --report-mode, --show-only, "

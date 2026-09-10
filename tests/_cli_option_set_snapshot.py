@@ -92,6 +92,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--include-system-declarations",
         "--instantiation-manifest",
         "--ld-library-path",
+        "--max-findings-per-library",
         "--no-baseline",
         "--no-scope-public-headers",
         "--output",

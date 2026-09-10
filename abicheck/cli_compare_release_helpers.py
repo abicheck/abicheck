@@ -991,6 +991,15 @@ def _release_findings_for_render(
         has_view = "findings_view" in projected
         view = projected.pop("findings_view", None)
         view_truncated = projected.pop("findings_view_truncated", False)
+        # CodeRabbit review: the per-kind truncation ledger is exactly as
+        # full-vs-filtered as `findings`/`findings_truncated` themselves --
+        # swapping the findings list but leaving the *unfiltered* ledger in
+        # place let a rendered, filtered `findings` list carry a
+        # `findings_truncated_kinds` breakdown describing what the *full*
+        # diff cut, not what this filtered view cut. Popped unconditionally
+        # either way, matching `findings_view`/`findings_view_truncated`'s
+        # own "private, never reaches a render" contract.
+        view_truncated_kinds = projected.pop("findings_view_truncated_kinds", None)
         if show_only is not None and has_view:
             if view:
                 projected["findings"] = view
@@ -998,8 +1007,13 @@ def _release_findings_for_render(
                 projected.pop("findings", None)
             if view_truncated:
                 projected["findings_truncated"] = True
+                if view_truncated_kinds:
+                    projected["findings_truncated_kinds"] = view_truncated_kinds
+                else:
+                    projected.pop("findings_truncated_kinds", None)
             else:
                 projected.pop("findings_truncated", None)
+                projected.pop("findings_truncated_kinds", None)
         has_impact_view = "impact_table_view" in projected
         impact_view = projected.pop("impact_table_view", None)
         if show_only is not None and has_impact_view:

@@ -283,6 +283,12 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "per-library output applies to the release fan-out; use -o/--output "
         "or --write for a single artifact",
     ),
+    "max_findings_per_library": (
+        "--max-findings-per-library",
+        "the per-library findings cap applies to the release fan-out's "
+        "aggregate summary; a single-artifact audit has only one library "
+        "and no such summary to cap",
+    ),
     # -- applicable, simply not wired yet ---------------------------------
     "abi3": (
         "--abi3",

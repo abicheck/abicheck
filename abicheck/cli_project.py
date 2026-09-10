@@ -716,6 +716,14 @@ def project_history_cmd(
     coarse proxy that this snapshot's evidence may not have been complete
     enough to prove absence, not a claim that it was.
 
+    Each ``pairwise[]`` entry also carries ``evolution_counts`` (how many of
+    that pair's own findings are ``introduced``/``resolved``/``persistent``/
+    ``not_evaluated`` relative to the *previous* pair in this same chain --
+    ADR-068 Phase 1's ``FindingEvolution`` primitive) and ``resolved`` (the
+    findings that were present in the previous pair's diff but no longer
+    appear in this one). The first pair in a chain has no earlier comparison
+    to classify against, so its own findings read ``not_evaluated``.
+
     The report's ``coverage.gaps`` section flags a suspected missing
     intermediate release: two adjacent, SemVer-parseable labels that are not
     consecutive under the ordinary major/minor/patch increment rule. A

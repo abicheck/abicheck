@@ -644,6 +644,66 @@ class TestDirVsDir:
         assert lib["breaking"] == 15
         assert len(lib["findings"]) == 10
         assert lib["findings_truncated"] is True
+        # Codex review ("a presentation default masquerading as a
+        # contract"): the cut kinds must be visible without rerunning at a
+        # higher cap, same as `scan --against`'s own `findings_truncated_kinds`.
+        # 15 `func_removed` fill the cap's first 10 slots (5 cut); the
+        # library's own `public_surface_shrank` quality finding never gets a
+        # slot at all (the cap is already spent), so it's cut too.
+        assert lib["findings_truncated_kinds"] == {
+            "func_removed": 5,
+            "public_surface_shrank": 1,
+        }
+
+    def test_max_findings_per_library_overrides_the_default_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``compare --max-findings-per-library`` (Codex review: the release
+        cap was a hardcoded 10 with no override, unlike `scan --max-findings`)
+        raises the per-library findings cap; the env var does the same when no
+        explicit flag is given."""
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        old_funcs = [
+            Function(
+                name=f"foo{i}",
+                mangled=f"_Z4foo{i}v",
+                return_type="int",
+                visibility=Visibility.PUBLIC,
+            )
+            for i in range(15)
+        ]
+        old = _snap("1.0", old_funcs, library="libfoo.so")
+        new = _snap("2.0", [], library="libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        # 16 real findings total: 15 `func_removed` plus the library's own
+        # `public_surface_shrank` quality finding -- a cap of 16 is the
+        # smallest one that leaves nothing truncated.
+
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "json",
+            "--max-findings-per-library",
+            "16",
+        )
+        assert code == 4
+        lib = json.loads(out)["libraries"][0]
+        assert len(lib["findings"]) == 16
+        assert "findings_truncated" not in lib
+        assert "findings_truncated_kinds" not in lib
+
+        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "16")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        lib = json.loads(out)["libraries"][0]
+        assert len(lib["findings"]) == 16
+        assert "findings_truncated" not in lib
 
     def test_json_findings_include_severity_gated_addition(
         self, tmp_path: Path
@@ -727,6 +787,101 @@ class TestDirVsDir:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 1
         assert "no matching" in out.lower() or "warning" in out.lower()
+
+
+class TestMaxReleaseFindingsResolver:
+    """Direct unit coverage of ``_resolve_max_release_findings_per_library``/
+    ``_accumulate_release_kind_counts``'s own edge cases -- the CLI-level
+    tests in ``TestDirVsDir`` above only ever exercise the "explicit valid
+    value" and "valid env var" paths; these hit the resolver's other
+    branches (invalid explicit value, malformed/non-positive env var,
+    nothing set) and the accumulator's empty-counter no-op directly."""
+
+    def test_non_positive_explicit_value_raises(self) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _resolve_max_release_findings_per_library,
+        )
+
+        with pytest.raises(ValueError, match="positive integer"):
+            _resolve_max_release_findings_per_library(0)
+        with pytest.raises(ValueError, match="positive integer"):
+            _resolve_max_release_findings_per_library(-5)
+
+    def test_malformed_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+            _resolve_max_release_findings_per_library,
+        )
+
+        monkeypatch.setenv(
+            "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "not-a-number"
+        )
+        assert (
+            _resolve_max_release_findings_per_library(None)
+            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        )
+
+    def test_non_positive_env_var_falls_back_to_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+            _resolve_max_release_findings_per_library,
+        )
+
+        monkeypatch.setenv("ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", "0")
+        assert (
+            _resolve_max_release_findings_per_library(None)
+            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        )
+
+    def test_nothing_set_returns_the_built_in_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from abicheck.cli_compare_release_matrix import (
+            _MAX_RELEASE_FINDINGS_PER_LIBRARY,
+            _resolve_max_release_findings_per_library,
+        )
+
+        monkeypatch.delenv(
+            "ABICHECK_MAX_RELEASE_FINDINGS_PER_LIBRARY", raising=False
+        )
+        assert (
+            _resolve_max_release_findings_per_library(None)
+            == _MAX_RELEASE_FINDINGS_PER_LIBRARY
+        )
+
+
+class TestAccumulateReleaseKindCounts:
+    def test_empty_kinds_and_no_existing_entry_is_a_no_op(self) -> None:
+        """The `if counter:` guard must skip setting the field at all when
+        there is nothing to accumulate -- a real branch, since every other
+        call site always passes at least one cut kind."""
+        from abicheck.cli_compare_release_matrix import (
+            _accumulate_release_kind_counts,
+        )
+
+        entry: dict[str, object] = {}
+        _accumulate_release_kind_counts(entry, "findings_truncated_kinds", [])
+        assert "findings_truncated_kinds" not in entry
+
+    def test_accumulates_onto_an_existing_running_dict(self) -> None:
+        """A second call must add to (never replace) a prior call's counts,
+        and the result is always sorted by kind name."""
+        from abicheck.cli_compare_release_matrix import (
+            _accumulate_release_kind_counts,
+        )
+
+        entry: dict[str, object] = {"findings_truncated_kinds": {"func_removed": 2}}
+        _accumulate_release_kind_counts(
+            entry, "findings_truncated_kinds", ["var_removed", "func_removed"]
+        )
+        assert entry["findings_truncated_kinds"] == {
+            "func_removed": 3,
+            "var_removed": 1,
+        }
 
 
 class TestBundleFactsOutStrandedLibraryWarning:
