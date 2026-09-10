@@ -167,9 +167,60 @@ def _l3_collected(snap: Any) -> bool:
 # --- run_scan_core helpers ---------------------------------------------------
 
 
-def _uses_debug_presence_only(depth: EvidenceDepth) -> bool:
-    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap."""
-    return depth in {EvidenceDepth.HEADERS, EvidenceDepth.BUILD}
+def _uses_debug_presence_only(
+    depth: EvidenceDepth, *, has_header_evidence: bool
+) -> bool:
+    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap.
+
+    The "elsewhere" is the header AST: at the ``HEADERS`` and ``BUILD`` rungs a
+    scan parses public headers for type layout, so reducing DWARF to a mere
+    presence check costs nothing and saves a full debug-info parse.
+
+    *has_header_evidence* is what makes that conditional rather than assumed.
+    A scan given no headers at all reaches neither source of type facts --- the
+    header parse has nothing to read and DWARF was already downgraded --- so the
+    run silently loses every type-level finding while still reporting the rung
+    it was asked for. That is not a hypothetical: ``scan BIN --against OLD`` on
+    two real ELF libraries with DWARF and no ``--new-header`` returned
+    ``NO_CHANGE`` where ``compare OLD BIN`` on the identical pair reported
+    ``type_size_changed``/``func_removed`` and exited 4, because ``compare``
+    never downgrades DWARF this way. ``tests/test_scan_compare_parity.py``'s
+    ``TestBinaryAndMixedInputParity`` is the executable statement of that
+    contract; it only passed before ADR-068 Phase 4 because an unpinned scan
+    resolved to the ``SOURCE`` rung, which is not in this set, so the shortcut
+    was never taken on the path the suite exercised.
+
+    So the shortcut applies only when the evidence it defers to is actually
+    present. With no headers, DWARF stays the type source --- the same evidence
+    ``compare`` uses --- rather than being dropped in favour of nothing.
+    """
+    return has_header_evidence and depth in {
+        EvidenceDepth.HEADERS,
+        EvidenceDepth.BUILD,
+    }
+
+
+def scan_debug_presence_only(
+    depth: EvidenceDepth,
+    headers: Any,
+    public_headers: Any,
+    public_header_dirs: Any,
+    baseline_headers: Any,
+) -> bool:
+    """:func:`_uses_debug_presence_only` answered from a scan's own operands.
+
+    The header-evidence question is asked run-wide, not per side: a candidate
+    built with headers and a baseline built without would be two snapshots at
+    different evidence tiers, which manufactures findings rather than losing
+    them. So any header input on either side keeps the shortcut available for
+    both, and none anywhere withdraws it from both.
+    """
+    return _uses_debug_presence_only(
+        depth,
+        has_header_evidence=bool(
+            headers or public_headers or public_header_dirs or baseline_headers
+        ),
+    )
 
 
 def scan_pattern_roots(

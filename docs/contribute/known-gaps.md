@@ -7010,3 +7010,33 @@ legitimate three categories above is a gate in
 `RETIRED_SURFACES` docs sweep to first-party Python with a *small*,
 reasoned allowlist. Doing the gate first would invert that order and bake
 today's 25 unexamined sites into an allowlist nobody revisits.
+
+## `scan --depth binary` and `compare --depth binary` see different evidence
+
+`scan --depth binary` extracts exported symbols only. `compare --depth binary`
+on the same two live binaries still reads DWARF and reports type-level
+findings (`type_size_changed`, `type_field_added_compatible`) that the
+symbols-only view cannot produce. Verified live on a two-version C++ fixture:
+identical operands, identical pin, `compare` emits five changes and `scan`
+two.
+
+The two commands are not wrong in the same way. `scan` honours the pin as an
+*extraction floor and ceiling*; `compare`'s `--depth` projection
+(`policy/depth_projection.py`) drops the L3-L5 layers but does not restrict
+the L1 debug parse the resolution already performed, so the pin acts as a
+ceiling on collected layers rather than on read evidence. Which of the two is
+the intended contract at this rung is a `compare`-side question (ADR-063
+Phase 8's `--depth` ceiling), not a `scan` one.
+
+Left open deliberately. ADR-068 Phase 4's typed-API slice fixed the adjacent
+*headers*-rung divergence — `cli_scan_helpers._uses_debug_presence_only`
+dropped DWARF at the `HEADERS`/`BUILD` rungs even when no headers existed to
+replace it, so a header-less `scan` lost every type-level finding while
+naming the rung it was asked for — and the parity suite now pins the
+`headers` and unpinned rungs against `compare` as an oracle
+(`tests/test_scan_depth_evidence_shortcut.py`). The `binary` rung is
+excluded from that matrix and recorded here instead, since closing it means
+deciding what `compare --depth binary` should do, which is a separate
+change with its own blast radius. Registered as a `KnownGap` on the
+`evidence.tier_shortcut_without_substitute` entry in
+`tests/regressions/manifest.py`.

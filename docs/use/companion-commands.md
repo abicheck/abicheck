@@ -91,13 +91,17 @@ reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 
 | Removed | Was | Use instead |
 |------------|-----|-------------|
-| `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` (or just `auto` with a seed) |
+| `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` — pin the rung; omitting `--depth` resolves to `headers` and collects no L4 evidence at all |
 | `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
 | `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target, ADR-043 D7) |
 | `audit` | intra-version hygiene lint, no baseline | omit `--against` — the always-on hygiene/cross-source checks run on every scan regardless, and omitting `--against` is already a one-build audit (the old standalone `--audit` flag was itself removed as redundant, ADR-043 D5) |
 
-`--source-method auto` (risk-driven escalation) is now simply the default when
-you **omit** `--depth`.
+`--source-method auto`'s **risk-driven escalation is gone**, not relocated:
+ADR-068's second 2026-09-09 amendment retired it along with `--risk-rules`
+(ruling (b)). Omitting `--depth` still means `auto`, but `auto` now resolves
+to the fixed `headers` rung — the same default `compare` uses — so a workflow
+that relied on a high-risk diff escalating itself to `build`/`source` must now
+pin that rung explicitly.
 
 ## Still commands today
 

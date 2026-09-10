@@ -70,9 +70,9 @@ from .cli_scan_helpers import (
     _l3_collected,
     _pack_coverage,
     _source_abi_coverage,
-    _uses_debug_presence_only,
     l4_coverage_advisories,
     resolve_effective_allow_query,
+    scan_debug_presence_only,
     scan_pattern_roots,
 )
 from .errors import PlanningError, ProfileMismatchError, ScopeMismatchError
@@ -1208,7 +1208,7 @@ def run_scan_core(
                 compile_context=compile_context,
                 defer_cleanup=defer_cleanup,
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-                debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                debug_presence_only=scan_debug_presence_only(eff_depth_enum, headers, public_headers, public_header_dirs, baseline_headers),
                 include_dependencies=_scan_candidate_include_dependencies(baseline),
                 build_targets=build_targets,
                 # PR 3A blocker 6: the *other* side's resolved scope, handed in
@@ -1352,7 +1352,7 @@ def run_scan_core(
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-                    debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
+                    debug_presence_only=scan_debug_presence_only(eff_depth_enum, headers, public_headers, public_header_dirs, baseline_headers),
                     suppression=suppression,
                     policy=policy,
                     policy_file=policy_file,

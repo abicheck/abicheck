@@ -641,6 +641,11 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "use/github-action.md",
                 "use/github-action-source-scans.md",
                 "use/evidence-depth.md",
+                # Names `--risk-rules` once, in the "it is *not* risk-driven"
+                # paragraph explaining what an omitted `--depth` resolves to
+                # now and what it used to do -- the retirement is the point of
+                # the sentence, not a live instruction.
+                "learn/evidence-and-detectability.md",
                 "reference/exit-codes.md",
                 "reference/config-file.md",
             }
