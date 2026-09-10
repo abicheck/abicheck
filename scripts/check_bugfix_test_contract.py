@@ -463,7 +463,27 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "This diff touches policy/severity, where the semantic verdict, the CI "
         "gate decision and the process exit code are three separately "
         "configurable answers that a single assertion conflates.",
-        triggers=("checker_policy", "severity", "contract_gating", "exit"),
+        triggers=(
+            "checker_policy",
+            # ADR-061 gap B: checker_policy.py's real verdict-classification
+            # logic moved to policy/classification.py; checker_policy.py is
+            # now a re-export facade. "policy/classification" (not the bare
+            # "classification", which would also over-match
+            # report_classifications.py/name_classification.py) keeps this
+            # trigger scoped to the real owner.
+            "policy/classification",
+            # checker_policy.py's other gap-B owner: has_binary_evidence()/
+            # is_cross_source_resolved() feed policy.classification's/
+            # severity.py's own gate decisions.
+            "policy/evidence_status",
+            "severity",
+            "contract_gating",
+            # ADR-061 gap B: contract_gating.py's real logic moved to
+            # policy/contract_finding_relevance.py; contract_gating.py is now
+            # a re-export facade.
+            "policy/contract_finding_relevance",
+            "exit",
+        ),
     ),
 )
 

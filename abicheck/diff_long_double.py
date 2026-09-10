@@ -51,13 +51,13 @@ transitions (which DO change size or mangling) are covered above.
 """
 from __future__ import annotations
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, stdlib_namespaces_excluded
+from .model.change_catalog.kinds import ChangeKind
 
 # Human spellings of the long-double family, longest-first so a longer spelling
 # is normalized before a substring of it. ``long double`` is normalized as a

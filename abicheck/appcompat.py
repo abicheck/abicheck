@@ -35,27 +35,23 @@ from .appcompat_consumer_impact import (
     enrich_covered_changes,
 )
 from .checker import Change, DiffResult
-from .checker_policy import (
-    ChangeKind,
-    ReachabilityState,
-    Verdict,
-    compute_verdict,
-    is_cross_source_resolved,
-)
 from .diff_helpers import make_change
 from .impact.engine import assess_change
 from .model import AbiSnapshot, Visibility
+from .model.change_catalog.kinds import ChangeKind
 from .model.consumer_spec import (
     ConsumerAppInput,
     ConsumerUnreadableError,
     as_consumer_spec,
     verify_digest,
 )
+from .policy.classification import Verdict, compute_verdict
 from .policy.disposition_close import (
     close_consumer_scope,
     ledger_for,
     record_and_maybe_suppress_overlay,
 )
+from .policy.evidence_status import ReachabilityState, is_cross_source_resolved
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -943,11 +939,11 @@ def _promote_scoped_contract(
     reason, and the later aggregate pass gives them their decision for the
     report.
     """
-    from .contract_gating import is_evaluated
     from .contract_scoped_promotion import (
         recompute_verdict_after_promotion,
         stamp_scoped_changes,
     )
+    from .policy.contract_finding_relevance import is_evaluated
 
     already_classified = [
         c for c in changes if getattr(c, "contract_relevance", None) is not None

@@ -62,7 +62,6 @@ from .buildsource.poi import (
 )
 from .buildsource.preprocessor_facts import collect_preprocessor_facts
 from .buildsource.risk import RiskScore
-from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .checker_types import validate_evidence_depth
 from .cli_scan_baseline import _expand_public_headers, _run_baseline_compare
 from .cli_scan_helpers import (
@@ -82,6 +81,7 @@ from .model.evidence_depth_levels import (
     SourceMethod,
     public_depth_value,
 )
+from .policy.classification import API_BREAK_KINDS, BREAKING_KINDS
 from .schemas import SCAN_SCHEMA_VERSION
 from .workflows.artifact.execute import SideResolution
 from .workflows.artifact.resolve import BaselineReuseContext
@@ -280,11 +280,11 @@ def _build_new_snapshot(
     root target(s) the same way `dump --build-target` already does — see
     ``run_scan_core``'s own docstring for the full rationale.
     """
-    from .api_types import InputSpec
     from .errors import AbicheckError
     from .header_utils import split_public_header_inputs
     from .service_compare_evidence import SideEvidence, explicit_source_extractor
     from .workflows.artifact.execute import _resolve_side_snapshot_impl
+    from .workflows.request_inputs import InputSpec
 
     # L4 replay's own public-header roots, kept deliberately WIDER than the
     # L2/crosscheck-origin provenance set (`public_headers`/`public_header_dirs`

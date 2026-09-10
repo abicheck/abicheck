@@ -94,8 +94,8 @@ def _kept_disposition(
     reads ``gating`` for a lone addition, and ``abi_breaking: info`` correctly
     reads ``non_gating`` for a break the run lets through.
     """
-    from ..contract_gating import contract_relevance_of, is_evaluated
     from ..contract_relevance_types import ContractRelevance
+    from .contract_finding_relevance import contract_relevance_of, is_evaluated
 
     if not is_evaluated(change):
         # Compared against the enum members themselves, never a spelling of

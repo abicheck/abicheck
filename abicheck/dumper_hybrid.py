@@ -112,7 +112,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from . import qualified_name_segments
 from .comparability import PROFILE_FIELD_KEYS, _sha256_of
 from .diff_helpers import type_map_key
 from .dumper_castxml import (
@@ -147,6 +146,7 @@ from .model.mangled_name_template_args import skip_template_args as _skip_templa
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name
+from .storage import closure_identity
 
 _CTOR_MARKER = "{ctor}"
 _DTOR_MARKER = "{dtor}"
@@ -1203,7 +1203,7 @@ def run_hybrid_dump(
     completely unchanged for both sub-dumps — only the merge step
     (:func:`merge_snapshots`) is new.
     """
-    with qualified_name_segments.defer_closure_identity_renumbering():
+    with closure_identity.defer_closure_identity_renumbering():
         castxml_snap = dump_fn(so_path, headers, header_backend="castxml", **kwargs)
         clang_snap = dump_fn(so_path, headers, header_backend="clang", **kwargs)
-    return qualified_name_segments.renumber_anonymous_closure_identities(merge_snapshots(castxml_snap, clang_snap))
+    return closure_identity.renumber_anonymous_closure_identities(merge_snapshots(castxml_snap, clang_snap))

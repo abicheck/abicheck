@@ -34,13 +34,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from .checker_policy import (
-    EvidenceStatus,
-    HasKind,
-    evidence_status_for_result,
-    impact_for,
-)
-
 # Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
 # lives in one shared seam (``html_template``). ``_CSS`` is re-exported via
 # redundant alias (it was previously defined in this module) so any code that
@@ -49,6 +42,9 @@ from .checker_policy import (
 # directly -- those moved into ``report/render_html.py`` alongside the rest
 # of this module's formatting responsibility (ADR-061 Phase 2 item 1).
 from .html_template import _CSS as _CSS
+from .model.change_catalog.kinds import HasKind
+from .policy.classification import evidence_status_for_result, impact_for
+from .policy.evidence_status import EvidenceStatus
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
@@ -392,7 +388,7 @@ def compute_confidence(
         overrides = tuple((k.value, v.value) for k, v in policy_file.overrides.items())
     reclassify: tuple[str, ...] = ()
     if policy_file and getattr(policy_file, "reclassify", None):
-        from .reclassify import active_reclassify_rules
+        from .policy.reclassify import active_reclassify_rules
 
         reclassify = tuple(
             rule.describe()
@@ -699,7 +695,7 @@ def build_html_document(
     # effective verdict rendered it under the red "Changed Symbols (1)"
     # heading on a page whose banner reads NO_CHANGE (Codex review). It
     # gets its own section below instead. Empty without `--contract`.
-    from .contract_gating import contract_relevance_of, is_evaluated
+    from .policy.contract_finding_relevance import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
     scored_changes = [ch for ch in display_changes if is_evaluated(ch)]

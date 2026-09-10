@@ -19,17 +19,17 @@ enforces that a debt-tracked file's path cannot change within the same PR
 that would also need to renew its baseline, so it stays flat until a PR
 whose only job is that move does so deliberately.
 
-Three further legacy-path modules are classified nowhere by design, not by
-oversight: `checker_policy.py`, `contract_gating.py`, and `reclassify.py`
-are each documented, in their own module docstrings, as leaf modules that
-both `compare` (`checker_types.DiffResult`, `checker.py`) and `policy`
-(`severity.py`, this package) depend on — the "pull the shared logic out to
-a leaf both sides can depend on" pattern ADR-061 names for exactly this
-class of cross-layer dependency. Giving one of them a single layer would be
-wrong, not merely premature, so `modules.yaml`'s `public_root_surfaces`
-list — the ADR's own named escape hatch for behavior with no single clean
-owner (see `docs/contribute/adr/061-responsibility-package-architecture.md`
-D3) — carries them instead of a `legacy_paths` entry.
+Three flat facades are classified nowhere by design, not by oversight:
+`checker_policy.py`, `contract_gating.py`, `reclassify.py` (ADR-061 gap B).
+Each one's real implementation already moved to a real `policy` module
+(`classification.py`/`evidence_status.py`, `contract_finding_relevance.py`,
+`reclassify.py`); every migrated caller here (and `workflows`/`report`/
+`compare`) imports that owner directly. Only the flat facade stays
+unclassified, because `checker_types.py` (the `model`-owned, legacy
+`DiffResult`) imports it directly and `model` cannot statically depend on
+`policy` — giving the facade a layer would turn that into a real direction
+violation, so `public_root_surfaces` carries it instead (ADR D3). See
+`checker_policy.py`'s own docstring for the full reasoning.
 
 ## Permitted imports
 

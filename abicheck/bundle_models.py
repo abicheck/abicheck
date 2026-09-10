@@ -31,12 +31,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind, Verdict, compute_verdict, effective_category
 from .checker_types import Change, DiffResult
-from .contract_gating import is_evaluated
 from .model import AbiSnapshot, Function, Variable
+from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import ElfMetadata, SymbolBinding
 from .model.scope_acquisition import ScopeAcquisitionRecord
+from .policy.classification import Verdict, compute_verdict, effective_category
+from .policy.contract_finding_relevance import is_evaluated
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile

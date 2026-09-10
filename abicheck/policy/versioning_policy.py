@@ -54,7 +54,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, TypeVar
 
-from ..checker_policy import Verdict
+from .classification import Verdict
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult

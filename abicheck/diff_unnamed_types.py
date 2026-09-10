@@ -31,13 +31,13 @@ from __future__ import annotations
 
 import re
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
 from .model.export_index import all_export_names, build_raw_export_index_from_elf
 
 # Itanium unnamed-type productions, both <unqualified-name> alternatives:

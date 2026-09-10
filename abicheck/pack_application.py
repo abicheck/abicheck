@@ -67,7 +67,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .change_registry_types import Verdict
-from .checker_policy import ChangeKind
 from .compatibility_evaluation_frontend import (
     SEVERITY_CATEGORY_FIELDS,
 )
@@ -77,6 +76,7 @@ from .compatibility_evaluation_wiring import (
     load_selected_packs,
 )
 from .errors import PackManifestError
+from .model.change_catalog.kinds import ChangeKind
 from .policy.effective_gate import GateSeverityState
 from .policy.gate_pack_fold import GATE_SEVERITY_CATEGORIES
 

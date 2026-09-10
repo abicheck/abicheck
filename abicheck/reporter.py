@@ -28,18 +28,17 @@ if TYPE_CHECKING:
     from .severity import GateDecision, KindSets, SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import Change, DiffResult, Verdict
-from .checker_policy import (
-    ChangeKind,
-    EvidenceStatus,
-    HasKind,
+from .checker_types import validate_check_id, validate_evidence_depth
+from .impact import assess_change
+from .model.change_catalog.kinds import ChangeKind, HasKind
+from .policy.classification import (
     evidence_status_for_result,
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
-from .checker_types import validate_check_id, validate_evidence_depth
-from .impact import assess_change
 from .policy.disposition_close import ledger_for
 from .policy.disposition_ledger import RuleProvenance
+from .policy.evidence_status import EvidenceStatus
 from .policy.gate_decision import gate_decision_for_result
 from .report.change_annotations import (
     change_annotation_fields as _change_annotation_fields,
@@ -955,7 +954,7 @@ def _add_show_only_filter(
     finding). ``total_changes`` stays inclusive, matching the main summary's
     own rule: it counts what the filter *displays*, not what gated.
     """
-    from .contract_gating import is_evaluated
+    from .policy.contract_finding_relevance import is_evaluated
 
     d["show_only_filter"] = show_only
     scored = [c for c in changes if is_evaluated(c)]
@@ -1136,7 +1135,7 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult, *, today: da
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
     if result.policy_file and result.policy_file.reclassify:
-        from .reclassify import active_reclassify_rules
+        from .policy.reclassify import active_reclassify_rules
 
         active = active_reclassify_rules(result.policy_file.reclassify, today)
         if active:

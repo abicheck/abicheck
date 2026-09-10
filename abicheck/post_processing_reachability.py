@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .checker_policy import ReachabilityState
+from .policy.evidence_status import ReachabilityState
 from .post_processing_context import (
     _ENUM_MEMBER_KINDS,
     _PUBLIC_SOURCE_ABI_KINDS,

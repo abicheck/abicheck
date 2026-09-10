@@ -33,22 +33,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from abicheck.checker import Change, ChangeKind, DiffResult
-from abicheck.checker_policy import (
-    EvidenceStatus,
-    ReachabilityState,
+from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
+from abicheck.finding_identity import missing_contract_kind
+from abicheck.impact import assess_change
+from abicheck.policy.classification import (
     evidence_status_for_result,
     impact_caveat_for,
     impact_for,
     policy_for,
 )
-from abicheck.contract_gating import (
+from abicheck.policy.contract_finding_relevance import (
     contract_relevance_of,
     evaluation_status_of,
     is_evaluated,
 )
-from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
-from abicheck.finding_identity import missing_contract_kind
-from abicheck.impact import assess_change
+from abicheck.policy.evidence_status import EvidenceStatus, ReachabilityState
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.document import ReportDocument
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
@@ -769,7 +768,7 @@ def to_sarif(
     _resolved_today = None if envelope is None else envelope.resolved_today
     _active_reclassify_rules: list[Any] = []
     if result.policy_file and result.policy_file.reclassify:
-        from .reclassify import active_reclassify_rules
+        from .policy.reclassify import active_reclassify_rules
 
         _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify, _resolved_today)
 

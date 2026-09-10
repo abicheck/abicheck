@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from collections import deque
 
-from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .compare.dedup_key import hashable_value
 from .compare.opaque_types import (
@@ -37,6 +36,7 @@ from .diff_helpers import (
 from .diff_symbols import _PUBLIC_VIS, _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
+from .model.change_catalog.kinds import ChangeKind
 
 # Back-compat aliases: the ADR-063 Phase 2 migration moved the opaque-type
 # index and its construction into their `compare/` owner, but

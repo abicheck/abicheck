@@ -76,8 +76,8 @@ from ..buildsource.preprocessor_facts import (
     PreprocessorFactsResult,
     collect_preprocessor_facts,
 )
-from ..checker_policy import CrossSourceEvolution
 from ..model import AbiSnapshot, ScopeOrigin
+from ..policy.evidence_status import CrossSourceEvolution
 
 #: Schema version for the ``pattern_preprocessor_scan`` report block.
 #: Independent of every other schema version in this codebase (see

@@ -71,10 +71,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from ...api_types import InputSpec
     from ...compile_context import CompileContext
     from ...model import AbiSnapshot
     from ...service_compare_evidence import SideEvidence
+    from ..request_inputs import InputSpec
 
 __all__ = [
     "SideResolution",
@@ -302,8 +302,8 @@ def _resolve_side_snapshot_impl(
     # Real owner (`..input_resolution`), not the flat `abicheck.service`
     # facade this used to route through -- D6, never import back through
     # the old facade.
-    from ...api_types import required_path
     from ..input_resolution import resolve_input, sniff_text_format
+    from ..request_inputs import required_path
 
     # `InputSpec.path` is `Path | None` since PR 3A blocker 5 (so a source-only
     # dump is expressible), but this function resolves a *native artifact* --

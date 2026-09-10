@@ -103,7 +103,8 @@ from typing import TYPE_CHECKING
 from ..errors import PlanningError
 
 if TYPE_CHECKING:
-    from ..api_types import CompareRequest, DumpRequest, InputSpec
+    from .contracts import CompareRequest, DumpRequest
+    from .request_inputs import InputSpec
 
 __all__ = [
     "AnalysisPlan",
@@ -556,7 +557,7 @@ class AnalysisPlanner:
                 failure found is reported together (:attr:`PlanningError.failures`),
                 not only the first.
         """
-        from ..api_types import DumpRequest as _DumpRequest
+        from .contracts import DumpRequest as _DumpRequest
 
         sides: tuple[SidePlan, ...]
         if isinstance(request, _DumpRequest):

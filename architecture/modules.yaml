@@ -26,8 +26,6 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
-        "abicheck/qualified_name_segments.py",
-        "abicheck/qualified_name_segments_walk.py",
         "abicheck/report_side_facts.py",
         "abicheck/stable_abi.py",
         "abicheck/stable_abi_data.py",
@@ -46,7 +44,8 @@
         "abicheck/project_snapshot_legacy.py",
         "abicheck/project_snapshot_store.py",
         "abicheck/snapshot_io.py",
-        "abicheck/snapshot_platform_blocks.py"
+        "abicheck/snapshot_platform_blocks.py",
+        "abicheck/qualified_name_segments_walk.py"
       ]
     },
     "extract": {
@@ -423,14 +422,10 @@
     }
   },
   "public_root_surfaces": [
-    "abicheck.api_types",
     "abicheck.checker_policy",
-    "abicheck.contract_coverage_ledger",
+    "abicheck.contract_evidence",
     "abicheck.contract_gating",
-    "abicheck.dumper_contract",
-    "abicheck.errors",
     "abicheck.header_only_dump",
-    "abicheck.qualified_name_segments",
     "abicheck.reclassify",
     "abicheck.schemas",
     "abicheck.serialization"
@@ -439,9 +434,15 @@
     "abicheck.aggregate",
     "abicheck.aggregate_findings",
     "abicheck.aggregate_manifest",
+    "abicheck.api_types",
     "abicheck.bundle_facts",
     "abicheck.bundle_facts_serialization",
-    "abicheck.bundle_facts_store"
+    "abicheck.bundle_facts_store",
+    "abicheck.checker_policy",
+    "abicheck.contract_coverage_ledger",
+    "abicheck.contract_gating",
+    "abicheck.qualified_name_segments",
+    "abicheck.reclassify"
   ],
   "frozen_root_families": {
     "cli_": [

@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from collections.abc import Collection, Mapping
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.base_class_diff import diff_bases as _diff_bases
 from .compare.typedefs import (
@@ -102,6 +101,7 @@ from .model import (
     resolved_fact_value,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId, EntityKind
 from .model.semantic_ir_legacy_adapter import semantic_ir_covers_kind
 

@@ -993,12 +993,13 @@ def compare_release_cmd(
                 def _resolve_stranded_library(
                     old_path: Path,
                 ) -> StrandedLibraryResolution:
-                    from .api_types import DumpRequest, InputSpec
                     from .service_dump_pipeline import (
                         execute_dump_request,
                         resolve_dump_request,
                     )
                     from .workflows import extraction
+                    from .workflows.contracts import DumpRequest
+                    from .workflows.request_inputs import InputSpec
 
                     old_dbg = (
                         resolve_debug_info(old_path, old_debug_dir)

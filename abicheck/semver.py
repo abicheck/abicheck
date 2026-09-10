@@ -50,9 +50,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .checker_policy import ADDITION_KINDS, ChangeKind, Verdict, has_binary_evidence
 from .checker_types import Change, DiffResult
 from .contract_relevance_types import ContractRelevance
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import ADDITION_KINDS, Verdict
+from .policy.evidence_status import has_binary_evidence
 from .policy.versioning_policy import (
     PolicyAcceptance,
     VersioningPolicy,
@@ -256,7 +258,7 @@ def _unresolved_contract_findings(result: DiffResult) -> list[Change]:
     Empty for every run that did not pass ``--contract``: nothing
     carries a relevance, so nothing is unresolved.
     """
-    from .contract_gating import contract_relevance_of
+    from .policy.contract_finding_relevance import contract_relevance_of
 
     return [
         c

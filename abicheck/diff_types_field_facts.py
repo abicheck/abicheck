@@ -32,7 +32,6 @@ them to their own leaf module, ``diff_types_surface.py``, that both
 
 from __future__ import annotations
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.fact_comparison import compare_facts
 from .detector_registry import registry
@@ -57,6 +56,7 @@ from .model import (
     is_non_abi_surface_type as _is_non_abi_surface_type,
     stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
+from .model.change_catalog.kinds import ChangeKind
 from .model.identity import EntityId
 
 

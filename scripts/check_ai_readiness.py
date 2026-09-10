@@ -698,10 +698,22 @@ def check_changekind_detector_crossref(f: Findings) -> None:
     except Exception:
         return  # already reported by partition check
 
+    # `checker_policy.py` used to be the definition file, where every kind
+    # trivially appeared once; ADR-061 gap B turned it into a re-export
+    # facade with no per-kind references left at all, and moved the real
+    # verdict/policy logic that legitimately names specific kinds (e.g. the
+    # hard-coded exception lists `compute_verdict`/`effective_category`
+    # consult) to `policy/classification.py`. Both are excluded for the
+    # same reason: a policy-only reference to `ChangeKind.<NAME>` here is
+    # not evidence a *detector* still produces that kind — if the one real
+    # detector for a kind were later deleted while a policy-table mention
+    # of it survived, this scan must still catch the orphan rather than
+    # being satisfied by its own policy metadata.
+    _POLICY_ONLY_FILES = {"checker_policy.py", "classification.py"}
     detector_text = ""
     for path in PKG.rglob("*.py"):
-        if path.name == "checker_policy.py":
-            continue  # the definition file: every kind appears here trivially
+        if path.name in _POLICY_ONLY_FILES:
+            continue
         detector_text += "\n" + _read(path)
 
     for kind in ChangeKind:
@@ -709,7 +721,8 @@ def check_changekind_detector_crossref(f: Findings) -> None:
         if token not in detector_text:
             f.warn(
                 "changekind-detector",
-                f"{kind.name}: not referenced anywhere in abicheck/ outside checker_policy.py (orphan kind?)",
+                f"{kind.name}: not referenced anywhere in abicheck/ outside "
+                "checker_policy.py/policy/classification.py (orphan kind?)",
             )
 
 

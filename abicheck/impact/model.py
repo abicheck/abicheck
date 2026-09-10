@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..checker_policy import Confidence, ReachabilityState
+from ..policy.evidence_status import Confidence, ReachabilityState
 
 
 @dataclass(frozen=True)

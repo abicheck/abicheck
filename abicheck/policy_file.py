@@ -73,18 +73,14 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .checker_policy import (
-    VALID_BASE_POLICIES,
-    ChangeKind,
-    Verdict,
-    compute_verdict,
-    policy_kind_sets,
-)
 from .errors import PolicyError
+from .model.change_catalog.kinds import ChangeKind
+from .model.change_catalog.registry import VALID_BASE_POLICIES
 from .policy.acknowledgment_policy import (
     AcknowledgmentPolicy,
     built_in_default_acknowledgment_policy,
 )
+from .policy.classification import Verdict, compute_verdict, policy_kind_sets
 from .policy.policy_file_top_level import (
     parse_base_policy as _parse_base_policy,
     reject_unknown_top_level_keys,
@@ -96,16 +92,19 @@ from .policy.versioning_policy import (
 from .policy_file_acknowledgment import parse_acknowledgment_policy
 from .policy_file_versioning import parse_versioning_policy
 
-# NOTE: `.reclassify` is deliberately imported lazily (function-local) below,
-# never at module top level. `reclassify.py` imports `.suppression`, which
-# imports `.checker_types`, which imports `PolicyFile` from *this* module --
-# a top-level import here would complete that cycle. This mirrors the
-# existing convention every `SuppressionList` consumer in this codebase
-# already follows for the same reason (see e.g. `checker.py`, `service.py`).
+# NOTE: `.policy.reclassify` is deliberately imported lazily (function-local)
+# below, never at module top level (ADR-061 gap B: the real implementation
+# moved from the flat `.reclassify` facade to `.policy.reclassify`, which no
+# longer imports `.suppression` -- but its own module docstring still avoids
+# `.checker_types` for a different, still-live cycle: `checker_types.py`
+# imports `PolicyFile` from *this* module, so a top-level import here would
+# close that loop). This mirrors the existing convention every
+# `SuppressionList` consumer in this codebase already follows for the
+# analogous reason (see e.g. `checker.py`, `service.py`).
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from .reclassify import ReclassifyRule
+    from .policy.reclassify import ReclassifyRule
 
 # Severity name -> Verdict mapping
 _SEVERITY_MAP: dict[str, Verdict] = {
@@ -352,7 +351,7 @@ def _parse_reclassify(raw: Any, path: Path) -> list[ReclassifyRule]:
     implements, plus a required ``to:`` severity -- see
     ``abicheck/reclassify.py``'s module docstring.
     """
-    from .reclassify import RECLASSIFY_KNOWN_KEYS, ReclassifyRule
+    from .policy.reclassify import RECLASSIFY_KNOWN_KEYS, ReclassifyRule
 
     if not isinstance(raw, list):
         raise PolicyError(
@@ -504,7 +503,7 @@ def _resolve_change_verdict(
        still applied; downgrades on frozen symbols are silently rejected).
     4. Base policy verdict.
     """
-    from .reclassify import first_matching_reclassify_verdict
+    from .policy.reclassify import first_matching_reclassify_verdict
 
     kind = change.kind
     fnv = getattr(change, "frozen_namespace_violation", None)

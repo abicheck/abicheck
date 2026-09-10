@@ -45,10 +45,11 @@ import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
-from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
-from .contract_gating import is_evaluated
 from .junit_coverage_warnings import append_coverage_warnings_suite
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import Verdict
+from .policy.contract_finding_relevance import is_evaluated
 from .report.envelope import resolved_document as _resolved_document
 from .report.junit_disposition import (
     # ADR-061: moved to report/ (its historical private name is kept here
@@ -802,8 +803,11 @@ def _add_contract_properties(
     without ``--contract``, the default) gets nothing appended --
     this keeps every pre-existing JUnit report byte-for-byte unchanged.
     """
-    from .contract_gating import contract_relevance_of, evaluation_status_of
     from .contract_relevance_types import CompatibilityEvaluationStatus
+    from .policy.contract_finding_relevance import (
+        contract_relevance_of,
+        evaluation_status_of,
+    )
     from .severity import gate_contribution_for_change
 
     relevance = contract_relevance_of(change)

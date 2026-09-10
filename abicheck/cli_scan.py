@@ -1476,10 +1476,10 @@ def scan_cmd(
         raise click.UsageError(str(_bf))
 
     if dry_run:
-        from .api_types import InputSpec
         from .dry_run import emit_dry_run
         from .frontends.cli.scan_dry_run import render_scan_dry_run
         from .service_scan import estimate_scan
+        from .workflows.request_inputs import InputSpec
 
         # Computed here, not inside render_scan_dry_run: that module is a
         # canonical frontends/cli/ file, which must not import service_scan

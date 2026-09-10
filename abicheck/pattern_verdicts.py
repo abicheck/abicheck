@@ -50,7 +50,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind, EvidenceTier, ReachabilityState, Verdict
 from .checker_types import Change
 from .idioms import (
     AntiPattern,
@@ -61,6 +60,9 @@ from .idioms import (
     recognise_idioms,
 )
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import Verdict
+from .policy.evidence_status import EvidenceTier, ReachabilityState
 from .surface_graph import SurfaceGraph, build_surface_graph
 
 if TYPE_CHECKING:

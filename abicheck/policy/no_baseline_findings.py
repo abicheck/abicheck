@@ -74,7 +74,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..checker_policy import CrossSourceEvolution
+from .evidence_status import CrossSourceEvolution
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence

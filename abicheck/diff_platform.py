@@ -19,7 +19,6 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
 from .diff_helpers import _normalize_type_name, is_sentinel_enum_member, make_change
@@ -69,6 +68,7 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .model.binary_naming import strip_vendor_hash
+from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
 from .name_classification import RTTI_DATA_PREFIXES
 

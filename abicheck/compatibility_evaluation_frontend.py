@@ -80,7 +80,6 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from .change_registry_types import Verdict
-from .checker_policy import VALID_BASE_POLICIES, policy_kind_sets
 from .compatibility_evaluation_config import (
     AssuranceConfig,
     CompatibilityEvaluationConfig,
@@ -115,6 +114,8 @@ from .compatibility_evaluation_wiring import (
     resolve_selected_packs,
 )
 from .contract_relevance_types import ContractMode, SelectorLayer, coerce_contract_mode
+from .model.change_catalog.registry import VALID_BASE_POLICIES
+from .policy.classification import policy_kind_sets
 from .policy.gate_pack_fold import gate_exit_code_scheme
 from .policy.versioning_policy import (
     VersioningPolicy,
@@ -123,9 +124,9 @@ from .policy.versioning_policy import (
 from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .api_types import CompareRequest
     from .buildsource.build_config import BuildConfig
     from .policy_file import PolicyFile
+    from .workflows.contracts import CompareRequest
 
 # Field names double as provenance-receipt keys. Declared once so the receipt
 # a consumer reads and the pack-route table in
@@ -1055,9 +1056,8 @@ def resolve_compatibility_evaluation_config(
     # (Codex review, fresh evidence). One expression decides this and the
     # `default_is_stated` gate below, so the exemption and the precedence it
     # anticipates cannot drift apart.
-    preset_stated = (
-        explicit.severity_preset is not None
-        or (project is not None and project.severity_preset is not None)
+    preset_stated = explicit.severity_preset is not None or (
+        project is not None and project.severity_preset is not None
     )
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
         if (
@@ -1517,9 +1517,8 @@ def _severity_active(
     that assigns a category, since a pack-supplied severity is no less "in
     effect" than a config-supplied one.
     """
-    if (
-        explicit.severity_preset is not None
-        or (project is not None and project.severity_preset is not None)
+    if explicit.severity_preset is not None or (
+        project is not None and project.severity_preset is not None
     ):
         return True
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
