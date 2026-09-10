@@ -68,21 +68,40 @@ def test_itanium_special_name_owner_identifiers() -> None:
     # `itanium_special_name_owner_scope_components` used by surface.py's
     # *type-candidate* resolution instead of falling back to the optional
     # external demangler (host-dependent reproducibility defect).
+    #
+    # Findings-analysis-fixes review round 3, finding 4: the *qualified*
+    # owner (and its own bare tail) are the only namespace-carrying
+    # candidates -- a bare namespace-*path* segment (e.g. "ns" out of
+    # "ns::Foo") is never emitted standalone, mirroring how surface.py's own
+    # `_type_identifiers` treats an ordinary (non-mangled) qualified type
+    # string: a namespace qualifier is only ever part of the fused qualified
+    # token or its own trailing "::" segment, never a free-standing token.
     fn = mangled_name.itanium_special_name_owner_identifiers
-    # No template args: identical to the plain scope-component names.
+    # No template args: the qualified owner and its own bare tail.
     assert fn("_ZTV13InternalCache") == frozenset({"InternalCache"})
-    assert fn("_ZTVN2ns3FooE") == frozenset({"ns", "Foo"})
-    # A templated owner: identifiers from the scope path AND every name
-    # embedded in the template-argument list, at any nesting depth.
+    assert fn("_ZTVN2ns3FooE") == frozenset({"ns::Foo", "Foo"})
+    # A templated owner: the qualified owner/bare tail, plus every name
+    # embedded in the owner's own template-argument list(s), at any nesting
+    # depth -- but never a bare namespace-path segment.
     assert fn("_ZTV3BoxIiE") == frozenset({"Box"})
-    assert fn("_ZTVN4dnnl4pool6vectorIiEE") == frozenset({"dnnl", "pool", "vector"})
-    assert fn("_ZTIN3BoxIN2ab3BazEEE") == frozenset({"Box", "ab", "Baz"})
+    assert fn("_ZTVN4dnnl4pool6vectorIiEE") == frozenset(
+        {"dnnl::pool::vector", "vector"}
+    )
+    assert fn("_ZTIN3BoxIN2ab3BazEEE") == frozenset({"Box", "ab::Baz", "Baz"})
     assert fn("_ZTT3BoxIiE") == frozenset({"Box"})
     # Not a TV/TI/TT special name, or unparseable -- None, same contract as
     # the sibling scope-component function.
     assert fn("_ZN3Foo3barEv") is None
     assert fn("not a mangled name") is None
     assert fn("") is None
+    # The exact adversarial shape Codex named: a bare namespace segment must
+    # never appear standalone, even though it legitimately contributes to
+    # the qualified owner and would otherwise "just happen" to be a
+    # plausible-looking candidate on its own.
+    assert "ns" not in fn("_ZTVN2ns3FooE")
+    assert "dnnl" not in fn("_ZTVN4dnnl4pool6vectorIiEE")
+    assert "pool" not in fn("_ZTVN4dnnl4pool6vectorIiEE")
+    assert "ab" not in fn("_ZTVN4dnnl4pool6vectorIiEE")  # not even in this one
 
 
 def test_itanium_special_name_owner_identifiers_is_host_independent_property() -> None:
@@ -92,7 +111,10 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
     deterministic), and it never touches an external demangler (the
     function has no such dependency to begin with -- this pins that by
     construction, not by mocking, since the function imports nothing
-    optional)."""
+    optional). Also pins finding 4 (review round 3) as a property, not just
+    a fixed example: no namespace-*path* component (every scope component
+    before the trailing owner-class one) may ever appear as its own
+    standalone candidate."""
     fn = mangled_name.itanium_special_name_owner_identifiers
     cases = [
         "_ZTVN4dnnl4pool6vectorIiEE",
@@ -107,24 +129,22 @@ def test_itanium_special_name_owner_identifiers_is_host_independent_property() -
         second = fn(mangled)
         assert first == second, mangled
         assert first is not None, mangled
-        # The bare, non-templated scope components are always a subset of
-        # the full identifier set (template args can only ever add names).
         scope = mangled_name.itanium_special_name_owner_scope_components(mangled)
         assert scope is not None
-        # Every bare (non-template-suffixed) component name is present --
-        # a component that had no template args attached at all keeps its
-        # exact name; a templated one's un-suffixed prefix isn't
-        # necessarily a real token on its own, so only assert this for the
-        # untemplated indices.
-        template_positions = scope[1]
-        for idx, name in enumerate(scope[0]):
-            # "std" is the `St` two-letter abbreviation, not a real
-            # length-prefixed name token, so it is deliberately absent from
-            # the structural identifier extraction (see the function's own
-            # docstring) -- harmless for matching purposes, since no real
-            # declared type is ever named literally "std".
-            if idx not in template_positions and name != "std":
-                assert name in first, (mangled, name, first)
+        components, template_positions = scope
+        # Every namespace-*path* component (every component strictly before
+        # the trailing owner-class one) that carries no template args of its
+        # own must never appear as a standalone candidate -- only the fully
+        # qualified owner and its own bare tail may. Skip a component whose
+        # own bare spelling coincidentally equals the tail's (e.g. an
+        # `Outer::Outer`-shaped owner) since that overlap is legitimate, not
+        # a namespace-token leak.
+        for idx, name in enumerate(components[:-1]):
+            if idx not in template_positions and name not in (
+                components[-1],
+                "std",
+            ):
+                assert name not in first, (mangled, name, first)
 
 
 def test_diff_cxx_rules_reexports_the_identical_function_object() -> None:

@@ -1721,7 +1721,7 @@ def compute_review_digest(
         # Codex review: additions_count/quality_issues_count are two rows
         # in the same rendered table, so they must not overlap. New defect
         # 4 fix: `summary.compatible_additions` (report_schema_version
-        # 3.15) now already counts only genuine additions -- it no longer
+        # 4.0) now already counts only genuine additions -- it no longer
         # needs (and must not receive) a second subtraction of
         # `quality_issues` here, which used to be necessary when this field
         # still carried the historical whole-bucket total. Use it directly;

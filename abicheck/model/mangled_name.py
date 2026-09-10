@@ -35,6 +35,12 @@ later than the rest of this module (the Itanium half moved first) --
 
 from __future__ import annotations
 
+from .mangled_name_template_args import (
+    collect_type_candidate_identifiers as _collect_type_candidate_identifiers,
+    read_length_prefixed_name as _read_length_prefixed_name,
+    skip_template_args as _skip_template_args,
+)
+
 _ASCII_DIGITS = "0123456789"
 
 # Fixed Itanium operator-function codes (a leaf, like a source-name). Used so
@@ -93,68 +99,6 @@ _ITANIUM_OPERATORS = frozenset(
         "aw",
     }
 )
-
-
-def _read_length_prefixed_name(s: str, i: int) -> tuple[str | None, int]:
-    """Read a ``<len><identifier>`` source-name at ``s[i]``.
-
-    Returns ``(name, next_index)`` or ``(None, i)`` if malformed. Only ASCII
-    digits count as the length prefix — Python's ``str.isdigit()`` also accepts
-    Unicode digits (e.g. ``²``) that ``int()`` then rejects. Accumulates
-    digit-by-digit, capped at ``len(s)`` (mirrors ``source_link.
-    _consume_source_name``), so an untrusted symbol can't trip Python's
-    integer-conversion digit limit (Codex review, PR #930)."""
-    j, n = i, 0
-    while j < len(s) and s[j] in _ASCII_DIGITS:
-        n = n * 10 + (ord(s[j]) - ord("0"))
-        if n > len(s):
-            return None, i
-        j += 1
-    name = s[j : j + n]
-    return (None, i) if j == i or len(name) != n else (name, j + n)
-
-
-def _skip_template_args(s: str, i: int) -> int | None:
-    """``s[i] == 'I'``: return the index past the matching ``E``, or ``None``.
-
-    Tracks nested template-argument (``I``) and nested-name (``N``) openers so
-    the inner ``E`` of e.g. ``Box<ns::T>`` does not close the outer list early,
-    skips length-prefixed names so their literal ``I``/``N``/``E`` letters are
-    not miscounted, and consumes ``L<type><value>E`` literal operands as a unit
-    (non-type template args, e.g. ``Array<4>`` → ``ILi4EE``) so their value
-    digits aren't read as a length and their closing ``E`` isn't counted.
-    Pathological encodings (e.g. substitutions whose base-36 index contains
-    ``E``) may mis-balance; the caller treats ``None`` as "unparseable" and falls
-    back, so a wrong guess never produces a finding.
-    """
-    depth = 0
-    n = len(s)
-    while i < n:
-        c = s[i]
-        if c in _ASCII_DIGITS:
-            name, i = _read_length_prefixed_name(s, i)
-            if name is None:
-                return None
-            continue
-        if c == "L":
-            # Literal operand `L <type> <value> E` — consume through its own
-            # terminating E (literal values never contain an uppercase E).
-            close = s.find("E", i + 1)
-            if close == -1:
-                return None
-            i = close + 1
-            continue
-        if c in ("I", "N"):
-            depth += 1
-            i += 1
-        elif c == "E":
-            depth -= 1
-            i += 1
-            if depth == 0:
-                return i
-        else:
-            i += 1  # builtin type, qualifier, or substitution character
-    return None
 
 
 def strip_macho_itanium_decoration(mangled: str) -> str:
@@ -216,28 +160,39 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     return s, nested
 
 
-def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int, bool]:
+def _parse_source_name_component(
+    s: str, i: int
+) -> tuple[str | None, int, bool, str | None]:
     """Parse a length-prefixed source-name component (with optional template args
     and GNU ABI tags) starting at ``s[i]``.
 
-    Returns ``(name, next_index, template_attached)`` where *name* includes
-    any directly-attached ``I…E`` template-argument list and ``B<tag>`` GNU
-    ABI tags, and *template_attached* is ``True`` exactly when a template-
-    argument list was consumed -- tracked structurally here, at the one
-    place that ever attaches one, rather than left for a caller to guess
-    back out of the assembled *name* text. Guessing from text is unsound:
-    ``component_embeds_template_args()``'s own text-based heuristic (kept
-    for the qualified-name/header-tier-fallback shape, which has no parser
-    to ask) misreads an ordinary identifier like ``"ICE"`` or ``"IWidgetE"``
-    as a balanced ``I...E`` template block purely by coincidental spelling
-    (Codex review, fresh evidence) -- a real false positive this structural
-    flag exists to avoid for the one shape (a real Itanium mangling) that
-    has a parser available to answer the question exactly. Returns
-    ``(None, i, False)`` on any parse failure.
+    Returns ``(name, next_index, template_attached, bare_name)`` where *name*
+    includes any directly-attached ``I…E`` template-argument list and
+    ``B<tag>`` GNU ABI tags, and *template_attached* is ``True`` exactly when
+    a template-argument list was consumed -- tracked structurally here, at
+    the one place that ever attaches one, rather than left for a caller to
+    guess back out of the assembled *name* text. Guessing from text is
+    unsound: ``component_embeds_template_args()``'s own text-based heuristic
+    (kept for the qualified-name/header-tier-fallback shape, which has no
+    parser to ask) misreads an ordinary identifier like ``"ICE"`` or
+    ``"IWidgetE"`` as a balanced ``I...E`` template block purely by
+    coincidental spelling (Codex review, fresh evidence) -- a real false
+    positive this structural flag exists to avoid for the one shape (a real
+    Itanium mangling) that has a parser available to answer the question
+    exactly. *bare_name* is *name* with any directly-attached template-arg
+    text stripped back off (identical to *name* when *template_attached* is
+    ``False``) -- added so a caller building a *type* candidate (as opposed
+    to a signature-identity string, which wants the raw template text kept
+    distinct) can recover the component's own plain spelling without
+    re-guessing the split point from the assembled text (surface.py's
+    ``itanium_special_name_owner_identifiers`` review: a namespace-path
+    component's own bare name must never be conflated with names embedded in
+    a *different* component's template-argument list). Returns
+    ``(None, i, False, None)`` on any parse failure.
     """
     name, i = _read_length_prefixed_name(s, i)
     if name is None:
-        return None, i, False
+        return None, i, False, None
     n = len(s)
     # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag, or a
     # user `__attribute__((abi_tag(...)))`) attach to the unqualified name
@@ -270,14 +225,15 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int, bool]
         i = j
     # A directly-attached template-argument list belongs to this
     # component; keep it raw so Box<int> and Box<float> stay distinct.
+    bare_name = name
     if i < n and s[i] == "I":
         end = _skip_template_args(s, i)
         if end is None:
-            return None, i, False
+            return None, i, False, None
         name = name + s[i:end]
         i = end
-        return name, i, True
-    return name, i, False
+        return name, i, True, bare_name
+    return name, i, False, bare_name
 
 
 def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
@@ -379,10 +335,11 @@ def _parse_non_source_name_component(s: str, i: int) -> tuple[str | None, int]:
 
 def _step_next_component(
     s: str, i: int, nested: bool
-) -> tuple[str | None, int, bool, bool] | None:
+) -> tuple[str | None, int, bool, bool, str | None] | None:
     """Advance one component in the Itanium nested-name body ``s`` at position ``i``.
 
-    Returns ``(label, next_i, done, template_attached)`` on success:
+    Returns ``(label, next_i, done, template_attached, bare_name)`` on
+    success:
 
     - *label* is the parsed component string, or ``None`` when the position
       holds the nested-name ``E`` terminator (no component to append, just stop).
@@ -394,20 +351,25 @@ def _step_next_component(
       a source-name component (see :func:`_parse_source_name_component`);
       always ``False`` for a ctor/dtor/operator component, none of which can
       carry one.
+    - *bare_name* is *label* with any directly-attached template-arg text
+      stripped back off (equal to *label* when *template_attached* is
+      ``False``) -- see :func:`_parse_source_name_component`'s own docstring
+      for why a caller building type candidates wants this separately from
+      the raw, template-inclusive *label*.
 
-    Returns ``None`` (not a 4-tuple) when the component cannot be parsed at all
+    Returns ``None`` (not a 5-tuple) when the component cannot be parsed at all
     (an unrecognized/vendor operator, substitution, truncated source name) so
     the caller propagates failure by returning ``None`` from its own scope.
     """
     c = s[i]
     if nested and c == "E":
         # Normal terminator of the ``N…E`` nested-name wrapper; no component.
-        return None, i + 1, True, False
+        return None, i + 1, True, False, None
     if c in _ASCII_DIGITS:
-        name, new_i, template_attached = _parse_source_name_component(s, i)
+        name, new_i, template_attached, bare_name = _parse_source_name_component(s, i)
         if name is None:
             return None  # malformed source name — propagate failure
-        return name, new_i, not nested, template_attached
+        return name, new_i, not nested, template_attached, bare_name
     label, new_i = _parse_non_source_name_component(s, i)
     if label is None:
         return None  # conversion operator / substitution / vendor — not modelled
@@ -416,8 +378,8 @@ def _step_next_component(
         # target type follows immediately and is deliberately not parsed
         # (see _parse_operator_component) so stop right here regardless of
         # nesting, rather than attempt to step into that unparsed type.
-        return label, new_i, True, False
-    return label, new_i, not nested, False
+        return label, new_i, True, False, label
+    return label, new_i, not nested, False, label
 
 
 def itanium_scope_components_with_template_positions(
@@ -456,7 +418,7 @@ def itanium_scope_components_with_template_positions(
         step = _step_next_component(s, i, nested)
         if step is None:
             return None  # unmodelled or malformed component
-        label, i, done, template_attached = step
+        label, i, done, template_attached, _bare_name = step
         if label is not None:
             if template_attached:
                 template_positions.add(len(components))
@@ -478,51 +440,12 @@ def itanium_scope_components_with_template_positions(
 _SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TT")
 
 
-def _collect_source_names_in_span(s: str, start: int, end: int) -> frozenset[str]:
-    """Every length-prefixed source-name token appearing anywhere in
-    ``s[start:end]``, at any nesting depth.
-
-    Deliberately does not track ``I``/``N``/``E`` balance the way
-    :func:`_skip_template_args` does — *every* length-prefixed name in the
-    span is wanted here, regardless of how deeply nested (a scope
-    component's own name, a directly-nested type's name, and every class/
-    namespace name embedded in a template argument list all matter equally
-    for identifier-token matching; see
-    :func:`itanium_special_name_owner_identifiers`). A ``L<type><value>E``
-    non-type template-argument operand is skipped as a unit (its value
-    digits are not a length prefix and must not be misread as one); every
-    other non-digit byte (substitution codes, builtin type letters,
-    qualifiers, the ``I``/``N``/``E`` structural markers themselves) is
-    simply stepped over. A malformed length prefix stops the scan early
-    (returning what was found so far) rather than raising — mirrors this
-    module's fail-safe convention throughout.
-    """
-    names: set[str] = set()
-    i = start
-    while i < end:
-        c = s[i]
-        if c in _ASCII_DIGITS:
-            name, j = _read_length_prefixed_name(s, i)
-            if name is None:
-                break
-            names.add(name)
-            i = j
-            continue
-        if c == "L":
-            close = s.find("E", i + 1, end)
-            if close == -1:
-                break
-            i = close + 1
-            continue
-        i += 1
-    return frozenset(names)
-
-
 def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | None:
-    """Every raw identifier token in a ``_ZTV``/``_ZTI``/``_ZTT`` special
-    name's owning-class production — its scope path AND every class/
-    namespace name embedded in any template-argument list it carries, at
-    any nesting depth.
+    """Type-candidate identifiers for a ``_ZTV``/``_ZTI``/``_ZTT`` special
+    name's owning-class production: the fully-qualified owner name, its own
+    bare (rightmost) component, and every class/namespace name embedded in
+    any template-argument list the owner's path carries, at any nesting
+    depth.
 
     Purely structural (no ``c++filt``/``cxxfilt``), like
     :func:`itanium_special_name_owner_scope_components`. This function
@@ -539,6 +462,29 @@ def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | Non
     which established this rule for the non-templated case; this closes the
     templated case a fallback to :func:`~abicheck.demangle.demangle`
     previously (and host-dependently) handled.
+
+    Deliberately **does not** return a bare *namespace-path* component (the
+    ``"ns"`` in ``ns::Wrapper<int>``) as its own standalone candidate (Codex
+    review, fresh evidence): an earlier version of this function flattened
+    every length-prefixed name anywhere in the owner's scope path and its
+    template-argument lists into one undifferentiated set, so
+    ``_ZTVN2ns7WrapperIiEE`` produced ``{"ns", "Wrapper"}`` with "ns" fully
+    interchangeable with the real owner "Wrapper". Since
+    ``surface.py``'s ``_classify_type_level`` demotes a finding when *every*
+    resolvable candidate is confidently private/unreachable, an unrelated
+    modeled type that happens to share the bare namespace's own name (e.g. a
+    record literally named ``ns`` with no ``ns::Wrapper<int>`` reachable)
+    could stand in for the real, unresolvable owner and wrongly demote a
+    genuine break. The fix mirrors how ``surface.py``'s own
+    ``_type_identifiers`` already treats an ordinary (non-mangled) qualified
+    type string — a namespace qualifier is only ever part of the fused
+    qualified token or its own trailing ``::`` segment, never emitted
+    standalone — by building the qualified owner name and its bare tail from
+    each component's own *bare* (template-stripped) spelling
+    (:func:`_step_next_component`'s ``bare_name``) rather than from every
+    length-prefixed name found anywhere in the owner's whole span, and
+    collecting template-argument identifiers only from the exact substring
+    each component's own directly-attached ``I…E`` block occupies.
 
     Returns ``None`` under the identical conditions
     :func:`itanium_special_name_owner_scope_components` does (unrecognized
@@ -566,19 +512,34 @@ def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | Non
     n = len(s)
     if s[i : i + 2] == "St":
         i += 2
-    saw_component = False
+    bare_components: list[str] = []
+    template_identifiers: set[str] = set()
     while i < n:
         step = _step_next_component(s, i, nested)
         if step is None:
             return None
-        label, i, done, _template_attached = step
-        if label is not None:
-            saw_component = True
+        label, i, done, template_attached, bare_name = step
+        if label is not None and bare_name is not None:
+            bare_components.append(bare_name)
+            if template_attached:
+                # `label` is `bare_name` followed by the raw, directly-
+                # attached `I...E` template-argument text verbatim (see
+                # `_parse_source_name_component`'s own docstring), so the
+                # suffix after `bare_name` is exactly that template span --
+                # every length-prefixed name inside it is genuinely
+                # "embedded in a template-argument list", never a
+                # namespace-path component of an *enclosing* scope.
+                template_identifiers |= _collect_type_candidate_identifiers(
+                    label, len(bare_name), len(label)
+                )
         if done:
             break
-    if not saw_component:
+    if not bare_components:
         return None
-    return _collect_source_names_in_span(s, 0, i)
+    result = set(template_identifiers)
+    result.add("::".join(bare_components))
+    result.add(bare_components[-1])
+    return frozenset(result)
 
 
 def itanium_special_name_owner_scope_components(

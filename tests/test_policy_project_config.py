@@ -206,6 +206,124 @@ class TestCompareHonorsProjectConfigPolicyOverrides:
         assert result.exit_code == 4, result.output
 
 
+class TestScanAgainstHonorsProjectConfigPolicyOverrides:
+    """Findings-analysis-fixes review round 3, finding 2: ``scan --against``
+    is the documented replacement command for the retired crosscheck
+    promotion syntax (AGENTS.md's exit-code table), so it must honor
+    ``.abicheck.yml``'s ``policy.overrides`` the same way ``compare`` does
+    for an identical snapshot pair -- this used to fail: the project config
+    was parsed (``BuildConfig.policy_overrides``) but never folded into the
+    ``PolicyFile`` `cli_scan.py` builds for the baseline comparison, so
+    ``policy.overrides.func_removed: ignore`` changed ``compare``'s exit
+    code from 4 to 0 but left ``scan --against`` at 4 for the identical
+    pair."""
+
+    @staticmethod
+    def _elf(*names: str):
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+        return ElfMetadata(symbols=[ElfSymbol(name=n) for n in names])
+
+    def _write_scan_pair(self, tmp_path: Path) -> tuple[Path, Path]:
+        from abicheck.model import AccessLevel, ScopeOrigin
+
+        def _fn2(name: str, mangled: str) -> Function:
+            return Function(
+                name=name,
+                mangled=mangled,
+                return_type="void",
+                visibility=Visibility.PUBLIC,
+                access=AccessLevel.PUBLIC,
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            )
+
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[_fn2("api_a", "_Z5api_av"), _fn2("api_b", "_Z5api_bv")],
+            elf=self._elf("_Z5api_av", "_Z5api_bv"),
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            from_headers=True,
+            functions=[_fn2("api_a", "_Z5api_av")],
+            elf=self._elf("_Z5api_av"),
+        )
+        old_p = tmp_path / "old.abi.json"
+        new_p = tmp_path / "new.abi.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        return old_p, new_p
+
+    def test_project_config_policy_overrides_changes_scan_exit_code(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        old_p, new_p = self._write_scan_pair(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text(
+            "policy:\n  overrides:\n    func_removed: ignore\n",
+            encoding="utf-8",
+        )
+
+        # Baseline: no project config -> removed exported symbol is a hard
+        # ABI break under scan's default strict policy (exit 4), matching
+        # `compare`'s own baseline in the sibling test above.
+        baseline = CliRunner().invoke(
+            main,
+            ["scan", str(new_p), "--against", str(old_p)],
+            catch_exceptions=False,
+        )
+        assert baseline.exit_code == 4, baseline.output
+
+        # With the same project config `compare` already honors, discovered
+        # the same way (walking up from the CWD), `scan --against` must
+        # agree with `compare` on the same snapshot pair -- exit 0.
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            ["scan", str(new_p), "--against", str(old_p)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_explicit_pack_wins_over_project_config_for_scan_too(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The same D7 precedence rule already proven for `compare`'s
+        `--pack` above must hold for `scan --against` too: a project
+        config's `ignore` must never outrank an explicit `--pack`'s
+        `break` for the identical kind."""
+        old_p, new_p = self._write_scan_pair(tmp_path)
+        (tmp_path / ".abicheck.yml").write_text(
+            "policy:\n  overrides:\n    func_removed: ignore\n",
+            encoding="utf-8",
+        )
+        pack_path = tmp_path / "pack.yml"
+        pack_path.write_text(
+            "id: force_break\nversion: 1\nkind: policy\n"
+            "assignments:\n  func_removed: break\n",
+            encoding="utf-8",
+        )
+
+        monkeypatch.chdir(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "scan",
+                str(new_p),
+                "--against",
+                str(old_p),
+                "--contract",
+                "auto",
+                "--pack",
+                str(pack_path),
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 4, result.output
+
+
 class TestScalarCompareRejectsMalformedProjectConfigOverride:
     def test_unknown_kind_is_a_clean_usage_error(
         self, tmp_path: Path, monkeypatch

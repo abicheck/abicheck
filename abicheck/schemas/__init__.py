@@ -884,10 +884,13 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``symbol``/``old_value`` stay the raw mangled spelling unchanged
 #:       (machine formats never demangle those); this is display-only and
 #:       moves no verdict, severity, or exit code.
-#: 3.15 -- ``summary.compatible_additions`` now excludes
-#:       ``summary.quality_issues`` (was double-counted); old value =
-#:       compatible_additions + quality_issues. No verdict/exit change.
-REPORT_SCHEMA_VERSION = "3.15"  #: 3.15 -- see the comment immediately above.
+#: 4.0 -- BREAKING (Codex review): a required field's own *meaning*
+#:       changing is breaking per this file's policy even with no key
+#:       added/removed/retyped -- ``summary.compatible_additions`` now
+#:       excludes ``quality_issues`` instead of every ``COMPATIBLE`` finding
+#:       (3.15 shipped this as a MINOR bump before the mistake was caught).
+#:       Old value = compatible_additions + quality_issues.
+REPORT_SCHEMA_VERSION = "4.0"  #: 4.0 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of the public scan dict shape:

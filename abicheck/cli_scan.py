@@ -1290,6 +1290,27 @@ def scan_cmd(
         suppression=suppression, suppress=suppress, symbols_list=_symbols_list,
         resolved_cfg=resolved_cfg,
     )
+    # Findings-analysis-fixes review round 3, finding 2: `.abicheck.yml`'s
+    # `policy.overrides` block (ADR-068 §3 #23, the documented replacement
+    # for the retired `--crosscheck KEY=LEVEL` flag) reached the native
+    # `compare` command and the directory/package release fan-out, but was
+    # silently ignored here -- `scan --against` never read it at all, not
+    # even when the same project config's `policy.overrides.func_removed:
+    # ignore` made an identical snapshot pair exit 0 under `compare`. Folded
+    # in at the same `PROJECT_CONFIG` precedence tier `compare` uses
+    # (weaker than an explicit `--policy <file>` or `--pack`), and only
+    # here -- strictly after `_resolve_scan_evaluation_config`'s own
+    # `--pack` fold above, per `apply_lower_precedence_overrides`'s own
+    # caller contract, so a `--pack`'s explicit override for a kind still
+    # outranks a project-config one for the same kind.
+    from .workflows.policy_file import merge_project_config_policy_overrides
+
+    policy_file = merge_project_config_policy_overrides(
+        policy_file,
+        base_policy=policy,
+        project_cfg=project_cfg,
+        project_path=cfg_path,
+    )
     # A selected gate pack may have just moved `resolved_cfg`'s severity/
     # exit-code-scheme (CLI cleanup phase two, "PR B") -- re-derive the
     # values `run_scan_core` below actually gates on from the (possibly

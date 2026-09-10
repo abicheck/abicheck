@@ -334,3 +334,77 @@ class TestTemplatedOwnerHostIndependence:
                     REASON_NON_PUBLIC_TYPE,
                 )
             ), (mangled, absent_result, present_result)
+
+
+class TestNamespaceComponentCannotMasqueradeAsOwner:
+    """Findings-analysis-fixes review round 3, finding 4: a bare namespace
+    *component* pulled out of a templated ``_ZTV``/``_ZTI``/``_ZTT`` owner's
+    scope path must never stand in as its own independent implicated-type
+    candidate.
+
+    Before the fix, ``itanium_special_name_owner_identifiers`` flattened
+    every identifier anywhere in the owner's scope path and template
+    arguments into one undifferentiated set -- ``_ZTVN2ns7WrapperIiEE``
+    (``ns::Wrapper<int>``) produced ``{"ns", "Wrapper"}``. If the snapshot
+    happens to model an *unrelated* type literally named ``ns`` (reachable
+    from nothing public) but has no ``ns::Wrapper<int>``/``Wrapper`` of its
+    own, ``_classify_type_level`` would resolve ``known = {"ns"}`` -- not in
+    ``public_types`` -- and confidently demote the finding as
+    ``non-public-type``, even though the *real* owner (``ns::Wrapper<int>``)
+    is completely unresolvable from this evidence and the conservative
+    default for an unresolvable owner is "unknown, keep" (never hide a real
+    break). This is the false-positive-demotion direction; the sibling test
+    below (real internal-only owner, matching real ``real-break-preserved``
+    coverage) proves the fix doesn't ALSO make every internal-only owner
+    default to "keep" -- a genuinely resolvable, non-public owner must still
+    demote as before.
+    """
+
+    def _surf(self, snap):
+        return compute_public_surface(snap)
+
+    def test_unrelated_type_sharing_a_bare_namespace_name_cannot_demote(self):
+        # "ns" is modeled (so it participates in `all_types`) but is neither
+        # public nor reachable from any public function -- exactly the
+        # shape that would wrongly stand in for the real, unresolvable
+        # `ns::Wrapper<int>` owner under the pre-fix flattened extraction.
+        # No `ns::Wrapper`/`Wrapper` type is modeled at all: the real owner
+        # is genuinely unresolvable from this snapshot's evidence.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("ns")],
+        )
+        s = self._surf(snap)
+        change = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVN2ns7WrapperIiEE",
+            description="",
+        )
+        # An unresolvable owner must default to "unknown, keep" -- never a
+        # confident demotion borrowed from an unrelated same-named type.
+        assert classify_change_surface(change, s, s) == (True, None)
+
+    def test_real_internal_only_owner_still_demotes(self):
+        # Sibling real-break-preserved case: when the owner genuinely *is*
+        # resolvable and non-public (`ns::Wrapper` itself modeled, matching
+        # the qualified-owner candidate the fix still produces), the
+        # existing demotion behavior for a confidently non-public type must
+        # be completely unaffected by this fix.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("ns::Wrapper")],
+        )
+        s = self._surf(snap)
+        change = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVN2ns7WrapperIiEE",
+            description="",
+        )
+        assert classify_change_surface(change, s, s) == (
+            False,
+            REASON_NON_PUBLIC_TYPE,
+        )

@@ -75,7 +75,7 @@ class ReportSummary:
     risk_count: int
     #: Genuine API-growth ``COMPATIBLE``-verdict changes only (``ADDITION_
     #: KINDS``) -- **not** every ``COMPATIBLE`` finding. Before
-    #: ``report_schema_version`` 3.15 this field counted every ``COMPATIBLE``
+    #: ``report_schema_version`` 4.0 this field counted every ``COMPATIBLE``
     #: change, additions and quality issues (e.g. ``public_surface_shrank``,
     #: a net *decrease*) alike -- a real bug (new defect 4): 3.13 added
     #: :attr:`quality_issues` specifically to *name* the non-addition
@@ -85,7 +85,11 @@ class ReportSummary:
     #: :attr:`quality_issues`'s complement within the compatible set --
     #: ``compatible_additions + quality_issues`` equals the old (3.14 and
     #: earlier) ``compatible_additions`` total, the invariant every existing
-    #: consumer of the old field can reconstruct from the new pair. Mirrors
+    #: consumer of the old field can reconstruct from the new pair (the fix
+    #: first shipped as a MINOR 3.15 bump; a field's own meaning changing is
+    #: breaking under this schema's own policy, so it was renumbered to the
+    #: MAJOR 4.0 -- see ``schemas/__init__.py``'s own history comment).
+    #: Mirrors
     #: ``cli_compare_release_pairwise.py``'s per-library
     #: ``"compatible_additions"`` entry, which already excluded quality
     #: issues this way (``pr_comment.py``'s ``_per_library_counts``) --
@@ -94,8 +98,8 @@ class ReportSummary:
     #: The subset of *all* ``COMPATIBLE`` changes that is not a genuine
     #: addition (``ADDITION_KINDS``) -- e.g. ``public_surface_shrank``.
     #: :attr:`compatible_additions` above no longer includes this subset
-    #: (report_schema_version 3.15); a consumer that summed the two
-    #: pre-3.15 to recover "every compatible change" still can. Additive
+    #: (report_schema_version 4.0); a consumer that summed the two
+    #: pre-4.0 to recover "every compatible change" still can. Additive
     #: field; introduced in ``report_schema_version`` 3.13.
     quality_issues: int
     total_changes: int

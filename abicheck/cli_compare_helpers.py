@@ -755,6 +755,10 @@ def _resolve_evaluation_config(
         # A D7 same-tier conflict / D8 pack conflict / inapplicable manifest
         # is a usage error, the exit code the resolver leaves to its front end.
         raise click.UsageError(str(exc)) from exc
+    except PolicyError as exc:
+        # The resolver also parses `.abicheck.yml`'s `policy.overrides` now
+        # (finding 1) -- a malformed slug/severity there is a usage error too.
+        raise click.BadParameter(str(exc), param_hint="--policy") from exc
     return evaluation_config, pf, resolved_cfg
 
 
