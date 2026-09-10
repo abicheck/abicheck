@@ -30,8 +30,14 @@ from abicheck.report.no_baseline import (
     compute_no_baseline_document,
     render_no_baseline,
 )
-from abicheck.report.no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
-from abicheck.report.no_baseline_render import render_no_baseline_junit
+from abicheck.report.no_baseline_document import (
+    NO_BASELINE_EXIT_AXIS_LABELS,
+    SuppressedFinding,
+)
+from abicheck.report.no_baseline_render import (
+    render_no_baseline_junit,
+    render_no_baseline_sarif,
+)
 from abicheck.suppression import Suppression, SuppressionList
 from abicheck.workflows.no_baseline_compare import (
     resolve_no_baseline_candidate,
@@ -82,6 +88,30 @@ _STATING_COMBINATIONS = [
     pytest.param(None, "temporary vendor debug hook", id="reason-only"),
     pytest.param("audit-waiver-17", None, id="label-only"),
 ]
+
+
+def _render_document(doc, fmt: str) -> str:
+    """Project *doc* directly, bypassing `render_no_baseline`'s result input.
+
+    These tests hand-build a document, so they need the projection half on
+    its own rather than the `NoBaselineCompareResult` entry point.
+    """
+    from abicheck.report.no_baseline import (
+        _document_json,
+        render_no_baseline_markdown,
+    )
+
+    if fmt == "json":
+        return json.dumps(_document_json(doc))
+    if fmt == "markdown":
+        return render_no_baseline_markdown(doc)
+    if fmt == "sarif":
+        # Returns the SARIF *document*, not serialized text, unlike its
+        # siblings here -- serialize so every branch answers one type.
+        return json.dumps(render_no_baseline_sarif(doc))
+    if fmt == "junit":
+        return render_no_baseline_junit(doc)
+    raise AssertionError(f"unhandled format {fmt!r}")
 
 
 def _labelled_result(label: str | None, reason: str | None):
@@ -480,3 +510,49 @@ def test_a_suppressed_entry_is_still_a_report_finding() -> None:
     # disposition of findings rather than a separate kind of thing.
     for entry in [*doc.findings, *doc.suppressed]:
         assert isinstance(entry, ReportFinding)
+
+
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS - {"oneline"}))
+def test_a_document_holding_plain_findings_still_renders(fmt: str) -> None:
+    """`suppressed` entries that are not `SuppressedFinding` must not crash.
+
+    `NoBaselineDocument` is an ordinary frozen dataclass, so a caller can
+    build one or `dataclasses.replace` an existing one. A caller written
+    against the pre-pairing shape passes plain `ReportFinding` entries, and
+    every detailed renderer dereferenced `entry.provenance` directly — an
+    `AttributeError` from inside a renderer (Codex review, P2).
+
+    `None` is the right answer for such an entry rather than a papered-over
+    one: a document carrying plain findings genuinely holds no ledger
+    record, so "no provenance recorded" is what it truthfully has to say.
+    That is the same thing the renderers report for a run whose `DiffResult`
+    kept no ledger, and the opposite of inventing a record.
+    """
+    from abicheck.report.finding import ReportFinding
+
+    result = _result(
+        "case143_audit_accidental_export", suppression=_labelled_and_reasoned()
+    )
+    doc = compute_no_baseline_document(result)
+    assert doc.suppressed
+    downgraded = dataclasses.replace(
+        doc,
+        suppressed=tuple(
+            ReportFinding(
+                change=entry.change, verdict=entry.verdict, category=entry.category
+            )
+            for entry in doc.suppressed
+        ),
+    )
+    assert not any(isinstance(e, SuppressedFinding) for e in downgraded.suppressed), (
+        "the point of this test is entries that are NOT the paired type"
+    )
+
+    text = _render_document(downgraded, fmt)
+    assert text, f"{fmt} must still render"
+    # The finding itself is still disclosed -- losing provenance must not
+    # lose the disposition.
+    assert "exported_not_public" in text
+    assert "waivers.yaml" not in text, (
+        "a document with no ledger record must not name a source file"
+    )

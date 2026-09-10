@@ -76,6 +76,7 @@ from .no_baseline_document import (
     # of how `suppressed` is shaped. A consumer wanting the type imports it
     # from `no_baseline_document`, which owns it.
     SuppressedFinding,
+    suppression_provenance_of,
     suppression_rule_label,
 )
 
@@ -389,7 +390,8 @@ def _suppressed_json(entry: SuppressedFinding) -> dict[str, Any]:
     row = _finding_json(entry)
     row["disposition"] = "suppressed"
     row["suppression_rule"] = getattr(entry.change, "suppression_rule", None)
-    row["suppression_provenance"] = dict(entry.provenance) if entry.provenance else None
+    provenance = suppression_provenance_of(entry)
+    row["suppression_provenance"] = dict(provenance) if provenance else None
     return row
 
 
@@ -541,10 +543,11 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             # `label or reason`, so reading it here printed a reason-only
             # rule's reason twice, once under a heading claiming it was a
             # separate rule label (Codex review, P2).
-            rule = suppression_rule_label(change, entry.provenance) or (
+            entry_provenance = suppression_provenance_of(entry)
+            rule = suppression_rule_label(change, entry_provenance) or (
                 "(rule gave no label)"
             )
-            prov = entry.provenance or {}
+            prov = entry_provenance or {}
             reason = prov.get("reason") or "(none stated)"
             source = prov.get("source_file") or "(not recorded)"
             expires = prov.get("expires") or "(never)"

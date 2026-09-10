@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from .cross_source_evolution import change_cross_source_evolution_field
 from .no_baseline_document import (
     NO_BASELINE_EXIT_AXIS_LABELS,
+    suppression_provenance_of,
     suppression_rule_label,
 )
 
@@ -228,7 +229,7 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     # shows it as suppressed instead of never learning it existed
     # (``vision.md``'s "Record before disposing"; Codex review, P1).
     for finding, suppressed, provenance in [(f, False, None) for f in doc.findings] + [
-        (entry, True, entry.provenance) for entry in doc.suppressed
+        (entry, True, suppression_provenance_of(entry)) for entry in doc.suppressed
     ]:
         rule = _rule_for(finding.change.kind)
         rules.setdefault(rule["id"], rule)
@@ -371,7 +372,12 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
         # `suppressions` array for this and JUnit's nearest honest
         # equivalent is a skipped case -- the finding is reported, and its
         # disposition is legible, without claiming it broke anything.
-        _junit_finding_case(suite, entry, suppressed=True, provenance=entry.provenance)
+        _junit_finding_case(
+            suite,
+            entry,
+            suppressed=True,
+            provenance=suppression_provenance_of(entry),
+        )
 
     gate = ET.SubElement(
         suite,

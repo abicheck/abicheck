@@ -51,6 +51,7 @@ __all__ = [
     "NO_BASELINE_UNSUPPORTED_FORMATS",
     "NoBaselineDocument",
     "SuppressedFinding",
+    "suppression_provenance_of",
     "suppression_rule_label",
 ]
 
@@ -210,6 +211,29 @@ def suppression_rule_label(
         return str(label) if label else None
     collapsed = getattr(change, "suppression_rule", None)
     return str(collapsed) if collapsed else None
+
+
+def suppression_provenance_of(
+    entry: ReportFinding,
+) -> Mapping[str, Any] | None:
+    """The suppressing rule's record for *entry*, or ``None`` when it has none.
+
+    The one place any projection asks. ``NoBaselineDocument.suppressed`` is
+    typed as :class:`SuppressedFinding`, but the document is an ordinary
+    frozen dataclass a caller can build or ``dataclasses.replace`` by hand,
+    and a caller written against the pre-pairing shape passes plain
+    :class:`~abicheck.report.finding.ReportFinding` entries -- which made
+    every detailed renderer raise ``AttributeError`` on ``entry.provenance``
+    (Codex review, P2).
+
+    ``None`` for such an entry is the *truthful* answer, not a papered-over
+    one: a document carrying plain findings genuinely holds no ledger
+    record, so "no provenance recorded" is what it has to say. That is the
+    same distinction the renderers already draw for a run whose
+    ``DiffResult`` kept no ledger -- and the opposite of fabricating a
+    record, which is what this file's other rules forbid.
+    """
+    return getattr(entry, "provenance", None)
 
 
 @dataclass(frozen=True, slots=True)
