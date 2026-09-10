@@ -370,15 +370,7 @@ def _finalize_release_output(
     # single-pair run renders cannot be); the *decision* is not -- it goes
     # through `_exit_compare_release` like every other axis, so the process
     # exit and the persisted `exit` block cannot disagree.
-    from .frontends.cli.release_evidence_contract import (
-        evidence_contract_notice,
-        release_evidence_contract_contribution,
-    )
-
-    _evidence_contribution = release_evidence_contract_contribution(library_results)
-    _evidence_notice = evidence_contract_notice(library_results, _evidence_contribution)
-    if _evidence_notice:
-        click.echo(_evidence_notice, err=True)
+    from .cli_compare_release_helpers import _release_global_verdict
 
     _exit_compare_release(
         worst_verdict,
@@ -386,7 +378,10 @@ def _finalize_release_output(
         removed_keys,
         severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
-        evidence_contract_error_contribution=_evidence_contribution,
+        # The evidence-contract axis and its stderr notice are both derived
+        # from these, by the one resolver the persisted `exit` block reads.
+        library_results=library_results,
+        release_global_verdict=_release_global_verdict(bundle_result, matrix_result),
         incomplete_scope_exit_contribution=(
             scope_terms.decision.incomplete_scope_exit_contribution
             if scope_terms

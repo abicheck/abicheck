@@ -95,10 +95,8 @@ from ..policy.exit_decision import (
 )
 from ..policy.exit_decision_precedence import (
     EXIT_EVIDENCE_CONTRACT_ERROR,
-    release_evidence_contract_contribution,
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
-    resolve_release_exit_decision_for_report,
 )
 from ..policy.gate_decision import gate_decision_for_result
 from ..policy.gate_pack_fold import (
@@ -107,6 +105,10 @@ from ..policy.gate_pack_fold import (
     gate_exit_code_scheme,
 )
 from ..policy.outcome import ScopeCompleteness
+from ..policy.release_exit_decision import (
+    release_evidence_contract_contribution,
+    resolve_release_exit_decision_for_report,
+)
 from ..policy.release_gate_options import (
     GateOptions,
     _resolve_release_severity_config as _resolve_release_severity_config,  # re-exported, ADR-064 (private; __all__ excludes it by convention)

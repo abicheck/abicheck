@@ -15,15 +15,13 @@
 
 """The one place a directory/package ``compare`` exits.
 
-``_exit_compare_release`` is where every axis a release can be decided on --
-the verdict/severity code, a removed required library, ADR-064's
-evidence-contract axis, ADR-049's contract-coverage floor, ADR-065's two
-completeness floors, ADR-050's ``not_comparable`` -- meets one precedence
-order and one ``sys.exit``. Its numeric output is required to equal
-``policy.exit_decision_precedence.resolve_release_exit_decision_for_report``'s
-``.code`` for the same run (that function's own docstring states the
-invariant), which is why every axis has to be folded *here* rather than
-short-circuited by whichever caller computed it.
+``_exit_compare_release`` is where a directory/package ``compare`` turns
+one already-resolved release decision into a process status. The precedence
+over the axes a release can be decided on lives in
+``policy.exit_decision_precedence.resolve_release_exit_decision_for_report``
+-- the same function the persisted ``exit`` block is built from -- so the
+process status and the report cannot disagree *by construction* rather than
+by an asserted invariant over two implementations (Codex review, P1).
 
 Moved out of :mod:`abicheck.cli_compare_release_helpers` (PR #1195), which
 sat at its `architecture/debt.yaml` ``no_growth`` baseline with no room for
@@ -41,6 +39,10 @@ from __future__ import annotations
 
 import sys
 
+import click
+
+from .release_evidence_contract import evidence_contract_notice
+
 __all__ = ["_exit_compare_release"]
 
 
@@ -51,93 +53,77 @@ def _exit_compare_release(
     severity_exit_code: int | None = None,
     *,
     contract_coverage_exit_contribution: int = 0,
-    evidence_contract_error_contribution: int = 0,
+    library_results: list[dict[str, object]] | None = None,
+    release_global_verdict: str = "NO_CHANGE",
     incomplete_scope_exit_contribution: int = 0,
     no_comparison_completed_exit_contribution: int = 0,
 ) -> None:
-    """Exit compare-release with ABI-compatible status code mapping.
+    """Exit a directory/package ``compare`` with the release's own status code.
 
-    *incomplete_scope_exit_contribution*/*no_comparison_completed_exit_
-    contribution* (ADR-065 D6/D7) are two more ``0``/``1`` orthogonal
-    floors with exactly the coverage axis's rank in both schemes, so they
-    are folded into one floor with it below and then treated identically.
-    *removed_keys* is the **proven** removal set since S2 (D2), never the
-    raw ``unmatched_old`` set difference.
+    Resolves nothing itself. Every axis a release can be decided on -- the
+    verdict/severity code, a proven removed required library, ADR-064's
+    evidence-contract axis, ADR-049's contract-coverage floor, ADR-065's two
+    completeness floors, ADR-050's ``not_comparable`` -- and the precedence
+    order over them belong to
+    :func:`~abicheck.policy.exit_decision_precedence.resolve_release_exit_
+    decision_for_report`, which is also what the persisted ``exit`` block is
+    built from. This function reads that one decision and translates it to a
+    process status, which is all a frontend owes (`abicheck/frontends/
+    AGENTS.md`).
 
-    When *severity_exit_code* is not None, the severity-aware scheme is in
-    effect: that code replaces the verdict-based 2/4 mapping, except that
-    (a) a removed library still exits 8 in preference to the severity code, and
-    (b) an operational ERROR verdict (a library failed to dump/extract/compare)
-    still floors the exit at 4 — such failures produce no ``DiffResult.changes``
-    so the severity aggregation cannot see them, and must never be downgraded.
-    When None, the legacy verdict-based mapping is unchanged.
+    It used to reimplement that precedence as a parallel ladder of
+    ``sys.exit`` calls, with the report resolver's docstring asserting the
+    two agreed as an *invariant* rather than by construction (Codex review,
+    P1). A reachable-state parity harness confirmed they did agree across
+    2240 states -- so this is not a bug fix but the removal of the
+    conditions for one: PR #1195 added a fifth axis and had to add it twice,
+    and the second copy is exactly what let this branch's own first attempt
+    rank a proven removal below the evidence axis in one implementation
+    only.
 
-    ``worst_verdict == "not_comparable"`` (ADR-050 D2) is checked first, in
-    both schemes, ahead of even ``--fail-on-removed-library``'s exit 8: a
-    not_comparable result means the comparison couldn't establish what
-    changed at all, so an apparent "library removed" reading from an
-    incomparable pair is an unproven inference, not a real removal finding
-    entitled to its own exit code. Exits 16 — identical to native
-    ``compare``'s own not_comparable code, since it fires before severity
-    classification or the removed-library check ever run.
+    *library_results* is the per-member list the resolver reads the
+    evidence-contract and operational-error axes off. ``compare
+    --bundle-facts`` has no such list (its whole release is one folded
+    result) and passes none; its ``"ERROR"`` sentinel reaches the resolver
+    through *worst_verdict* instead, which is why that resolver takes the
+    union of both signals rather than scanning the list alone.
 
-    *contract_coverage_exit_contribution* is ADR-049 Phase 7's orthogonal
-    axis (release/package parity, CLI-audit P1), already aggregated with
-    max() across every library by the caller. Folded in with max() at every
-    exit point below (mirroring ``contract_coverage_exit.fold_coverage_exit``
-    for a single-pair ``compare``) except ``not_comparable``, which fires
-    before any library was even scored: it can raise a clean 0 to 1, never
-    lower a real 2/4/8, and is `0` (a no-op fold) for every run that never
-    passed ``--contract``.
+    Exits only for a nonzero code, so a clean release returns and lets its
+    caller finish normally.
     """
-    contract_coverage_exit_contribution = max(
-        contract_coverage_exit_contribution,
-        incomplete_scope_exit_contribution,
-        no_comparison_completed_exit_contribution,
+    # Via `workflows.gate`, not `policy` directly: `frontends -> policy` is
+    # forbidden (`architecture/modules.yaml`), and that rule is precisely why
+    # this function once carried its own copy of the precedence instead of
+    # reading the canonical decision. `workflows` is the sanctioned seam and
+    # already re-exports both names for exactly this purpose.
+    from ...workflows.gate import (
+        release_evidence_contract_contribution,
+        resolve_release_exit_decision_for_report,
     )
-    if worst_verdict == "not_comparable":
-        sys.exit(16)
-    # ADR-064's exit-7 axis, ranked directly below 16 -- same rank the
-    # persisted `exit` block applies (`resolve_release_exit_decision`), which
-    # this function's numeric output is required to agree with.
-    if evidence_contract_error_contribution:
-        sys.exit(evidence_contract_error_contribution)
-    if severity_exit_code is not None:
-        # Severity-aware scheme: removed-library 8 takes precedence over the
-        # severity code, otherwise emit the aggregated severity exit code.
-        if fail_on_removed and removed_keys:
-            sys.exit(8)
-        code = severity_exit_code
-        if worst_verdict == "ERROR":
-            code = max(code, 4)
-        code = max(code, contract_coverage_exit_contribution)
-        if code != 0:
-            sys.exit(code)
-        return
-    # ERROR is a compare-release-specific operational-failure sentinel (not a
-    # Verdict); it floors at 4. Otherwise the verdict→code mapping is the shared
-    # canonical one, so compare and compare-release never disagree (C7).
-    if worst_verdict == "ERROR":
-        sys.exit(max(4, contract_coverage_exit_contribution))
-    from ...checker_policy import Verdict
-    from ...workflows.gate import legacy_exit_code
 
-    code = (
-        legacy_exit_code(Verdict[worst_verdict])
-        if worst_verdict in Verdict.__members__
-        else 0
+    members = list(library_results or [])
+    decision = resolve_release_exit_decision_for_report(
+        worst_verdict,
+        fail_on_removed,
+        removed_keys,
+        severity_exit_code,
+        contract_coverage_exit_contribution,
+        members,
+        release_global_verdict,
+        incomplete_scope_contribution=incomplete_scope_exit_contribution,
+        no_comparison_completed_contribution=no_comparison_completed_exit_contribution,
     )
-    if code != 0:
-        # A real verdict-based break always wins outright; folding coverage
-        # in here is a no-op in practice (its own floor is 0/1, never above
-        # a real 2/4) but keeps the "never lowers a real code" invariant
-        # explicit rather than implicit in max()'s commutativity.
-        sys.exit(max(code, contract_coverage_exit_contribution))
-    if fail_on_removed and removed_keys:
-        # A removed library stays its own, separately-aggregated signal
-        # (AGENTS.md: "не смешивая его с entity contract relevance") --
-        # it is checked ahead of the coverage-only fallback below, mirroring
-        # the severity-scheme branch above.
-        sys.exit(8)
-    if contract_coverage_exit_contribution != 0:
-        sys.exit(contract_coverage_exit_contribution)
+    # Emitted here rather than by each caller: a release document is
+    # rendered before the exit is taken, and the fan-out has already
+    # discarded every member's `DiffResult` by then, so nothing downstream
+    # can explain a bare exit 7. Attaching it to the exit itself is also
+    # what stops a *second* caller from forgetting it -- `compare
+    # --bundle-facts` reaches this function without ever having emitted
+    # one (Codex P1 follow-through).
+    notice = evidence_contract_notice(
+        members, release_evidence_contract_contribution(members)
+    )
+    if notice:
+        click.echo(notice, err=True)
+    if decision.code != 0:
+        sys.exit(decision.code)

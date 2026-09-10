@@ -61,17 +61,37 @@ class TestReleaseEvidenceContractAxisIsPreserved:
             # A real ABI break is below it (ADR-064: a run whose pinned
             # evidence contract was unmet never established what changed).
             ({"verdict_or_severity_contribution": 4}, 7, "evidence_contract_error"),
-            # A proven removed library is *below* it, deliberately: exit 8
-            # is a finding derived from the very comparison the unmet
-            # contract says never established what changed -- including
-            # whether the removal set is trustworthy. So it must not mask
-            # the axis saying the analysis did not happen. This is the one
-            # place the release resolver's order is not a flat max over
-            # contributions (8 > 7); `not_comparable` below is, and wins,
-            # because "could not be compared at all" is strictly stronger
-            # than "did not reach the pinned rung".
+            # A *proven* removed library OUTRANKS it (8 > 7), and this row
+            # asserted the opposite when the axis first landed. Two reasons
+            # it was wrong, per Codex P2 on 656d9b0:
+            #   - ADR-065 D6 only emits 8 for a removal proven against NEW's
+            #     own complete inventory, which does not rest on the depth
+            #     evidence this axis reports short: depth governs change
+            #     detection *within* a library, inventory governs which
+            #     libraries exist. The old rationale ("the unmet contract
+            #     means the removal set may not be trustworthy") conflated
+            #     the two.
+            #   - It was unrepresentable. A dominant decision must exceed
+            #     every contribution it carries, so "dominant 7, preserved
+            #     8" has no encoding -- ranking evidence first therefore
+            #     *dropped* the removal axis, which is what made an
+            #     unrelated depth shortfall lower a real exit 8 to 7 and
+            #     flip `run_outcome.gate` from `abi_breaking` to `none`.
             (
                 {"removed_required_library": True, "severity_scheme_active": True},
+                8,
+                "removed_required_library",
+            ),
+            # ...but only where the scheme would actually have honoured the
+            # removal. Under the legacy scheme a nonzero verdict already
+            # outranks a removed library, so the removal is not an active
+            # axis and the evidence axis decides -- adding a shortfall must
+            # not *raise* such a release from 4 to 8.
+            (
+                {
+                    "removed_required_library": True,
+                    "verdict_or_severity_contribution": 4,
+                },
                 7,
                 "evidence_contract_error",
             ),
@@ -213,3 +233,142 @@ class TestASavedReleaseReportIsNotReadAsClean:
             ),
         }
         assert GateInfo.from_report_data(report).blocking is expected_blocking
+
+
+class TestTheExitAndTheReportComeFromOneResolution:
+    """The P1: `_exit_compare_release` must not re-implement the precedence.
+
+    It used to be a parallel ladder of `sys.exit` calls beside
+    `resolve_release_exit_decision_for_report`, with the two asserted to
+    agree as an *invariant* rather than agreeing by construction. They did
+    agree -- a reachable-state sweep found 0 divergences across 2240
+    states -- so the duplication was a latent hazard, not a live bug. It
+    stopped being latent in this very PR: a fifth axis had to be added
+    twice, and the second copy is what let a proven removal outrank the
+    evidence axis in one implementation and not the other.
+
+    The sweep is kept as a test rather than discarded once the delegation
+    landed, because its job now is to fail if anyone forks the algorithm
+    again. It also pins the derivations the delegation depends on, which a
+    single hand-written case would not: `worst_verdict` is *derived* from
+    `library_results` through the real release rollup, never chosen
+    independently of it. A first version of this sweep chose the two freely
+    and reported 240 "divergences" that were all impossible states.
+    """
+
+    @staticmethod
+    def _rollup(results: list[dict[str, object]]) -> str:
+        from abicheck.cli_compare_release_helpers import _RELEASE_VERDICT_ORDER
+
+        worst = "NO_CHANGE"
+        for entry in results:
+            if _RELEASE_VERDICT_ORDER.get(
+                str(entry["verdict"]), 0
+            ) > _RELEASE_VERDICT_ORDER.get(worst, 0):
+                worst = str(entry["verdict"])
+        return worst
+
+    def test_every_reachable_release_state_agrees(self) -> None:
+        import itertools
+
+        from abicheck.frontends.cli.release_exit import _exit_compare_release
+        from abicheck.policy.exit_decision_precedence import (
+            resolve_release_exit_decision_for_report,
+        )
+
+        member_verdicts = [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK",
+            "API_BREAK",
+            "BREAKING",
+            "ERROR",
+            "not_comparable",
+        ]
+        member_sets = [[v] for v in member_verdicts] + [
+            list(pair)
+            for pair in itertools.combinations_with_replacement(member_verdicts, 2)
+        ]
+        checked = 0
+        for members, severity, (removed, fail_on), coverage, evidence, scope in (
+            itertools.product(
+                member_sets,
+                [None, 0, 2, 4],
+                [([], False), (["libx"], True)],
+                [0, 1],
+                [0, 7],
+                [0, 1],
+            )
+        ):
+            results: list[dict[str, object]] = [
+                {
+                    "library": f"l{i}",
+                    "verdict": verdict,
+                    "evidence_contract_error_contribution": evidence if i == 0 else 0,
+                }
+                for i, verdict in enumerate(members)
+            ]
+            worst = self._rollup(results)
+            try:
+                _exit_compare_release(
+                    worst,
+                    fail_on,
+                    removed,
+                    severity,
+                    contract_coverage_exit_contribution=coverage,
+                    library_results=results,
+                    incomplete_scope_exit_contribution=scope,
+                    no_comparison_completed_exit_contribution=0,
+                )
+                exited = 0
+            except SystemExit as exc:
+                exited = int(exc.code or 0)
+            decision = resolve_release_exit_decision_for_report(
+                worst,
+                fail_on,
+                removed,
+                severity,
+                coverage,
+                results,
+                incomplete_scope_contribution=scope,
+                no_comparison_completed_contribution=0,
+            )
+            assert exited == decision.code, (
+                f"process exit {exited} != reported {decision.code} for "
+                f"members={members} severity={severity} removed={removed} "
+                f"coverage={coverage} evidence={evidence} scope={scope}"
+            )
+            # And the invariant that makes the whole encoding legal.
+            contributions = [
+                value
+                for key, value in decision.to_dict().items()
+                if key.endswith("_contribution")
+            ]
+            assert decision.code == max(contributions), decision
+            checked += 1
+        assert checked == 2240, checked
+
+    def test_a_shortfall_never_hides_a_proven_removed_library(self) -> None:
+        """The P2 as an end-to-end statement, in exit-code terms.
+
+        Adding an unrelated depth shortfall to a release that removed a
+        required library used to lower its exit from 8 to 7 and report
+        `run_outcome.gate: none`. Stated against both surfaces at once,
+        since the report field and the process status were both wrong.
+        """
+        from abicheck.policy.outcome_release import run_outcome_dict_for_release
+
+        def decide(evidence: bool) -> tuple[int, str, str]:
+            decision = _release_decision(
+                removed_required_library=True,
+                evidence_contract_error_contribution=7 if evidence else 0,
+            )
+            outcome = run_outcome_dict_for_release("NO_CHANGE", decision.to_dict())
+            return decision.code, str(outcome["gate"]), str(outcome["operational"])
+
+        without = decide(evidence=False)
+        with_shortfall = decide(evidence=True)
+        assert without == (8, "abi_breaking", "none")
+        # The removal still decides and is still gated; the shortfall is
+        # additionally reported on the orthogonal operational axis.
+        assert with_shortfall == (8, "abi_breaking", "evidence_contract_error")

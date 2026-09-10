@@ -34,8 +34,11 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   fact too — the JSON/`summary.json` `exit` block, the `run_outcome`
   `operational` axis, a Markdown section, and JUnit `<error>` entries — since
   a release document is rendered *before* the exit is taken, so a report-
-  driven consumer would otherwise read a run that exited `7` as clean. A run
-  without an explicit `--depth` is
+  driven consumer would otherwise read a run that exited `7` as clean. A
+  *proven* removed library (exit `8`) still outranks the axis and still gates
+  as ABI-breaking, since ADR-065 derives a removal from inventory
+  completeness rather than from the depth evidence the axis reports short. A
+  run without an explicit `--depth` is
   unaffected, as are `dump`'s own floors and the stored-bundle-facts pair
   comparison, which keep their separate, separately-tested contracts.
 
