@@ -394,6 +394,16 @@ also_copy = [
     "README.md",
     # Real repository inputs that tests read directly, not just directories.
     "repo_facts.json",
+    # tests/test_adr061_gap_b_facades.py::test_public_root_surfaces_matches_
+    # the_reviewed_exception_set reads the real architecture/modules.yaml
+    # directly (it's checking the reviewed public_root_surfaces exception
+    # set against the actual committed file, not a synthetic tmp_path tree
+    # the way test_architecture_check.py's own fixtures do) -- without this,
+    # the mutants/ copy has no architecture/ directory at all and the test
+    # aborts collection with FileNotFoundError, taking the whole `-x` lane
+    # down before a single mutant is measured. Same "copy-only, generous
+    # rather than minimal" rule as every other entry in this list.
+    "architecture",
     "action",
     "action.yml",
     "actions",
