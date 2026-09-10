@@ -134,6 +134,19 @@ class NoBaselineDocument:
     #: renderer computes an exit code of its own.
     coverage_exit_contribution: int
     exit_code: int
+    #: ADR-049 Phase 5's unsuppressible sibling ledger, already serialized.
+    #: The contribution above is a *number*; this is what a reader has to act
+    #: on -- which provider, on which side, fell short and why. Carrying only
+    #: the number meant even ``--format json`` exited 1 with no way to tell
+    #: (Codex review, P2). ``()`` when a domain closed cleanly is a real
+    #: answer and distinct from "no contract was selected"; the projections
+    #: keep that distinction by emitting ``[]`` only under a contract.
+    coverage_failures: tuple[Mapping[str, Any], ...] = ()
+    #: Whether this run selected a ``--contract`` domain at all. The ledger's
+    #: own emptiness cannot answer that -- a closed domain and no domain both
+    #: produce no failures -- and the two must not read the same to a
+    #: consumer.
+    contract_selected: bool = False
     #: Every orthogonal axis's own contribution, keyed as in
     #: ``no_baseline.NO_BASELINE_EXIT_AXIS_NOTICES`` and resolved from the
     #: same function ``exit_code`` above is folded from. Carried so a

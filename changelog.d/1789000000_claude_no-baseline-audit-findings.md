@@ -1,5 +1,18 @@
 ### Fixed
 
+- **A coverage-gated audit now publishes the ledger that gated it.** Under
+  `--contract`, the report kept only the numeric contribution, so even
+  `--format json` exited 1 with no way to see which provider, on which side,
+  fell short and why. `contract_coverage_failures` is now emitted whenever a
+  contract domain was selected — derived from the run's own persisted context
+  by the same function the two-sided report uses.
+- **`--version old=` is now a usage error** rather than a silently dropped
+  label. It was recorded as indistinguishable from the default, which was
+  wrong: only the default placeholder is. A bare `--version 1.2`, which
+  labels the candidate, keeps working.
+- **`--dry-run` validates `--suppress`/`--policy-file` before previewing.** A
+  malformed document exits `64` on the real run, so a preview that exited `0`
+  approved a run that could not start.
 - **The pinned-depth floor now applies to every operand this run parses**,
   not only to a recognized binary. `Module.symvers`, a bare BTF/CTF blob and
   an ABICC Perl dump each become a fresh snapshot that structurally cannot

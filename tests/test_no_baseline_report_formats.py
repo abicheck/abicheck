@@ -548,3 +548,58 @@ def test_a_clean_audit_carries_no_axis_notice(
     text, _ = render_no_baseline(result, "markdown")
     for notice in NO_BASELINE_EXIT_AXIS_NOTICES.values():
         assert notice.split(" -- ")[0] not in text
+
+
+def test_a_coverage_gated_audit_publishes_the_ledger_that_gated_it() -> None:
+    """A number is not actionable; the ledger behind it is.
+
+    Under `--contract`, the audit kept only `contract_coverage: 1` — so even
+    `--format json` exited 1 with no way to see which provider, on which
+    side, fell short and why (Codex review, P2). The ledger is now derived
+    from the run's own persisted contract context by the same function the
+    two-sided report uses, so what a reader sees and what gated them come
+    from one source.
+    """
+    result = _result("case143_audit_accidental_export")
+    doc = compute_no_baseline_document(result)
+    if not doc.contract_selected:
+        # The committed fixtures carry no contract context; drive the
+        # contract path explicitly rather than skipping, so this asserts.
+        result = run_no_baseline_compare(
+            resolve_no_baseline_candidate(
+                example_catalog.case_dir("case143_audit_accidental_export")
+                / "snapshot.abi.json"
+            ),
+            contract_evaluation=True,
+            contract_mode="public",
+        )
+        doc = compute_no_baseline_document(result)
+
+    assert doc.contract_selected, "the contract path must actually have run"
+    payload, exit_code = render_no_baseline(result, "json")
+    body = json.loads(payload)
+    assert "contract_coverage_failures" in body, (
+        "the ledger is emitted whenever a contract domain was selected — `[]` "
+        "is the real 'this domain closed', which an absent key cannot express"
+    )
+    assert body["contract_coverage_failures"] == [
+        dict(f) for f in doc.coverage_failures
+    ]
+    if exit_code:
+        assert body["contract_coverage_failures"], (
+            "a run gated on the coverage axis must list what fell short; "
+            "publishing only the contribution is the defect this closes"
+        )
+
+
+def test_a_run_without_a_contract_omits_the_ledger_entirely() -> None:
+    """The complement: no selected domain is not an empty one.
+
+    `[]` means "the domain closed with nothing missing". A run that selected
+    no domain has nothing to be short of, and must not claim otherwise.
+    """
+    result = _result("case143_audit_accidental_export")
+    doc = compute_no_baseline_document(result)
+    assert doc.contract_selected is False
+    payload, _ = render_no_baseline(result, "json")
+    assert "contract_coverage_failures" not in json.loads(payload)

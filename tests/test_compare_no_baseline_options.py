@@ -37,6 +37,7 @@ from abicheck.cli import main
 from abicheck.frontends.cli.commands.compare_no_baseline import (
     _INERT_DESTS,
     _OLD_ONLY_DESTS,
+    _SIDED_LABEL_DESTS,
     _SIDED_SINGLE_DESTS,
     _UNSUPPORTED_OPTIONS,
     _VIEW_DEFAULTS,
@@ -152,6 +153,7 @@ def test_every_compare_option_is_wired_or_declared() -> None:
         | set(_VIEW_DEFAULTS)
         | set(_OLD_ONLY_DESTS)
         | set(_SIDED_SINGLE_DESTS)
+        | set(_SIDED_LABEL_DESTS)
         | _CONSUMED_UPSTREAM
         | _CLICK_LEVEL
         | _DISPATCH_OWNED
@@ -302,7 +304,12 @@ def test_every_generated_destination_is_wired_or_declared() -> None:
     since those refuse it outright.
     """
     read = _dests_read_by_module()
-    guarded = set(_OLD_ONLY_DESTS) | set(_SIDED_SINGLE_DESTS) | set(_INERT_DESTS)
+    guarded = (
+        set(_OLD_ONLY_DESTS)
+        | set(_SIDED_SINGLE_DESTS)
+        | set(_SIDED_LABEL_DESTS)
+        | set(_INERT_DESTS)
+    )
     unaccounted = sorted(
         dest
         for dests in _NORMALIZED_DESTS.values()

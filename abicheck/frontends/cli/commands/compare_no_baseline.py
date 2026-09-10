@@ -54,6 +54,7 @@ from ..runtime import _safe_write_output, _write_or_echo
 from .no_baseline_rulings import (
     _INERT_DESTS as _INERT_DESTS,  # noqa: F401  — re-exported: the options test asserts against these tables
     _OLD_ONLY_DESTS as _OLD_ONLY_DESTS,  # noqa: F401
+    _SIDED_LABEL_DESTS as _SIDED_LABEL_DESTS,  # noqa: F401
     _SIDED_SINGLE_DESTS as _SIDED_SINGLE_DESTS,  # noqa: F401
     _UNSUPPORTED_OPTIONS as _UNSUPPORTED_OPTIONS,  # noqa: F401
     _VIEW_DEFAULTS as _VIEW_DEFAULTS,  # noqa: F401
@@ -403,6 +404,19 @@ def _run_no_baseline_compare_cmd(
         from ....dry_run import emit_dry_run
         from ..no_baseline_dry_run import build_no_baseline_dry_run_result
 
+        # Load the read-only policy documents *before* previewing. `--dry-run`
+        # promises to resolve and validate the invocation, and these are part
+        # of it: a malformed `--suppress`/`--policy-file` is exit 64 on the
+        # real run, so a preview that exits 0 approves a run that cannot
+        # start (Codex review, P2). Cheap and side-effect-free -- reading two
+        # config files is not the analysis `--dry-run` exists to skip -- and
+        # the result is discarded, since the preview needs the *validation*,
+        # not the rules.
+        _load_suppression_and_policy(
+            kwargs.get("suppress"),
+            kwargs.get("policy") or "strict_abi",
+            kwargs.get("policy_file_path"),
+        )
         emit_dry_run(
             build_no_baseline_dry_run_result(
                 candidate=candidate,

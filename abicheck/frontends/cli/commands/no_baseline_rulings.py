@@ -104,21 +104,18 @@ _OLD_ONLY_DESTS: dict[str, str] = {
 
 #: Destinations that are inert here *by construction*, with the reason.
 #:
-#: ``old_version`` is a display **label**, not evidence, and
-#: ``cli_options._split_sided_version`` always populates it -- with the
-#: literal placeholder ``"old"`` when the user says nothing. So an explicit
-#: ``--version old=`` is indistinguishable from the default by the time this
-#: dispatch runs, and guarding on it would reject *every* invocation (it did,
-#: briefly). An audit has no OLD side to label, so the value is dropped; the
-#: candidate's own label comes from ``new_version``, which is wired.
-#: Recorded here rather than left out of the accounting entirely, so the
-#: exhaustiveness test still sees a decision rather than an omission.
-_INERT_DESTS: dict[str, str] = {
-    "old_version": (
-        "a label for a side that does not exist; Click always populates it, so "
-        "an explicit value cannot be told from the default"
-    ),
-}
+#: Empty today. ``old_version`` lived here on the claim that an explicit
+#: ``--version old=`` could not be told from the default -- which was wrong,
+#: and Codex said so: ``cli_options._split_sided_version`` defaults it to the
+#: literal placeholder ``"old"``, so any *other* value was typed. What is
+#: genuinely indistinguishable is narrower -- a bare ``--version 1.2`` sets
+#: both sides, and that spelling must keep working, since labelling the
+#: candidate is its whole point. So the rule is the sided-single one below
+#: ("set to something the new dest did not also get"), not inertness, and
+#: ``old_version`` moved there. Kept as a named table because a genuinely
+#: inert destination is a decision the exhaustiveness test should see stated,
+#: not an omission -- the next one goes here with its reason.
+_INERT_DESTS: dict[str, str] = {}
 
 #: Evidence dests whose bare/``both=`` value lands on *both* sides
 #: (``cli_options._split_sided_single``: a bare path sets ``old`` and ``new``
@@ -131,6 +128,31 @@ _SIDED_SINGLE_DESTS: dict[str, tuple[str, str]] = {
     "old_sources": ("new_sources", "--sources old="),
     "old_build_info": ("new_build_info", "--build-info old="),
     "old_dump_manifest": ("new_dump_manifest", "--dump-manifest old="),
+}
+
+#: The per-destination *default* for a sided dest that is never ``None``.
+#:
+#: ``old_version``/``new_version`` are the one such pair: `_split_sided_
+#: version` always populates them, with the literal placeholders ``"old"``/
+#: ``"new"``, so "the user typed something" is "the value is not the
+#: placeholder" -- not "the value is set", which is always true, and not
+#: "the two sides differ", which is also always true by default. Both
+#: conditions have to hold together: not the default (so it was typed) *and*
+#: different from the new side (so it was typed as ``old=`` specifically,
+#: rather than as a bare ``--version 1.2`` that labels the candidate too --
+#: the spelling this path most wants to keep working).
+_SIDED_DEFAULTS: dict[str, str] = {"old_version": "old"}
+
+#: The label half of the same rule. Separate from the evidence family above
+#: only because it needs :data:`_SIDED_DEFAULTS`; the guard is one loop over
+#: both. ``old_version`` was recorded as *inert* until Codex pointed out that
+#: only its default is indistinguishable, not an explicit value.
+#:
+#: One residual, inherent to where this runs: ``--version old=1.2 --version
+#: new=1.2`` arrives identical to the bare form, so it is accepted and the
+#: redundant OLD label dropped.
+_SIDED_LABEL_DESTS: dict[str, tuple[str, str]] = {
+    "old_version": ("new_version", "--version old="),
 }
 
 
@@ -150,9 +172,14 @@ def _reject_old_sided_inputs(kwargs: dict[str, Any]) -> None:
         # every invocation, including ones passing nothing at all.
         if _was_given(kwargs.get(dest)):
             raise click.UsageError(_old_sided_message(spelling))
-    for dest, (new_dest, spelling) in _SIDED_SINGLE_DESTS.items():
+    for dest, (new_dest, spelling) in (
+        *_SIDED_SINGLE_DESTS.items(),
+        *_SIDED_LABEL_DESTS.items(),
+    ):
         old_value = kwargs.get(dest)
-        if old_value is not None and old_value != kwargs.get(new_dest):
+        if old_value is None or old_value == _SIDED_DEFAULTS.get(dest):
+            continue
+        if old_value != kwargs.get(new_dest):
             raise click.UsageError(_old_sided_message(spelling))
 
 

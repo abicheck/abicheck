@@ -6807,6 +6807,24 @@ why this PR records it rather than inventing the semantics. Until then
 `scan` must stay reachable for a gating audit job, and its retirement (§3 of
 `docs/contribute/plans/one-comparison-product.md`) is blocked on this.
 
+**An audit's contract-coverage ledger still names an `old` side.** Now that
+`compare --no-baseline --contract public` publishes
+`contract_coverage_failures` (it previously exited 1 carrying only the
+numeric contribution), the entries are visible -- and half of them read
+`"side": "old"` on a run whose OLD side is `declared_absent`. That is an
+artifact of the audit being implemented as a self-compare: the evidence
+collector sees two sides because it is handed the same snapshot twice.
+
+Deliberately **not** filtered here. The same records produced the exit
+contribution that gated the run, so dropping them from the listing would
+make the ledger disagree with the number beside it -- exactly the "read,
+don't re-derive" failure recorded elsewhere in this file. Doing it properly
+means the collector knowing the run is one-sided, so it records one side's
+observations rather than two identical ones, and the contribution follows;
+that is an ADR-049/ADR-068 question about how a one-sided run collects
+evidence, not a display fix. Until then the listing is honest about what
+gated, and this entry is what says why an `old` row appears at all.
+
 **The audit's SARIF and JUnit projections do not cross the canonical
 `ReportDocument` boundary** (Codex review, P1, partially addressed). The
 audit's JSON does: `report.no_baseline.no_baseline_report_document` wraps the

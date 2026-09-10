@@ -270,11 +270,31 @@ def compute_no_baseline_document(
         run_outcome=_run_outcome(result).to_dict(),
         comparison_scope=build_comparison_scope_section(_scope_decision(result)),
         coverage_exit_contribution=coverage_exit_floor(diff),
+        coverage_failures=_coverage_failures(diff),
+        contract_selected=getattr(diff, "contract_context", None) is not None,
         exit_code=no_baseline_exit_code(
             result, require_complete_analysis=require_complete_analysis
         ),
         exit_axes=_no_baseline_exit_axes(result, require_complete_analysis),
     )
+
+
+def _coverage_failures(diff: Any) -> tuple[dict[str, Any], ...]:
+    """The audit's contract-coverage ledger, already serialized.
+
+    Derived from the run's own persisted contract context by the same
+    function the two-sided report uses (``contract_coverage_ledger.
+    coverage_failures_for_context``), rather than re-derived here -- so the
+    failures a reader is shown are the ones the exit contribution beside them
+    was computed from. Empty when no contract context exists, which is every
+    run without ``--contract``.
+    """
+    from ..contract_coverage_ledger import coverage_failures_for_context
+
+    ctx = getattr(diff, "contract_context", None)
+    if ctx is None:
+        return ()
+    return tuple(f.to_dict() for f in coverage_failures_for_context(ctx))
 
 
 def _candidate_side_scan(block: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -375,6 +395,15 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         # contributing axis (Codex review, P2). `contract_coverage_exit_
         # contribution` above stays as its own long-standing key rather than
         # being folded away, so an existing consumer is unaffected.
+        # Emitted only under a contract, and then always -- `[]` is the real
+        # "this domain closed", which an absent key could not distinguish
+        # from "no contract was selected". Same convention as the two-sided
+        # report's own block.
+        **(
+            {"contract_coverage_failures": [dict(f) for f in doc.coverage_failures]}
+            if doc.contract_selected
+            else {}
+        ),
         "exit_axes": dict(doc.exit_axes),
         "exit_code": doc.exit_code,
     }
