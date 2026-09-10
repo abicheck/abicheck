@@ -76,6 +76,7 @@ __all__ = [
     "EffectiveGate",
     "GateSeverityState",
     "ScopedGateSelection",
+    "scoped_gate_selection_from_result",
 ]
 
 
@@ -142,6 +143,43 @@ class ScopedGateSelection:
 
     kind: str
     targets: tuple[str, ...] = ()
+
+
+def scoped_gate_selection_from_result(result: Any) -> ScopedGateSelection | None:
+    """The real ADR-043 scoped-gate selection a *completed* comparison
+    recorded (``result.gate_scope``/``.used_by``/``.required_symbols``),
+    projected into a typed :class:`ScopedGateSelection` -- ``None`` when the
+    run selected no scope at all, the common case.
+
+    Codex review (PR #1192): ``EffectiveGate``'s whole purpose is "the
+    complete answer to whether two runs gate identically", so a caller that
+    *has* a completed result must route through this rather than leaving
+    ``scope`` at its default -- two ``compare --required-symbol A``/
+    ``--required-symbol B`` runs against the same pair must not produce an
+    equal ``EffectiveGate``.
+
+    Reads the identical fields ``effective_config_digest._gate_scope_str``
+    already reads for the digest (duplicated rather than shared, since that
+    function returns a JSON-encoded string for hashing while this returns a
+    typed value; both are intentionally kept in sync with the same source
+    fields -- ``cli_helpers_compare._apply_used_by_scoping``/
+    ``_apply_required_symbol_scoping`` stamp ``DiffResult.gate_scope``/
+    ``used_by``/``required_symbols`` before either reads them).
+    """
+    gate_scope = getattr(result, "gate_scope", None)
+    if gate_scope is None:
+        return None
+    if gate_scope == "used_by":
+        used_by = getattr(result, "used_by", None) or ()
+        targets = tuple(sorted(str(entry.get("app", "")) for entry in used_by))
+    elif gate_scope == "required_symbol":
+        required = getattr(result, "required_symbols", None) or {}
+        targets = tuple(
+            sorted(str(e) for e in (required.get("required_entrypoints", ()) or ()))
+        )
+    else:
+        targets = ()
+    return ScopedGateSelection(kind=str(gate_scope), targets=targets)
 
 
 @dataclass(frozen=True)

@@ -86,6 +86,7 @@ from ..policy.effective_gate import (
     EffectiveGate,
     GateSeverityState,
     ScopedGateSelection,
+    scoped_gate_selection_from_result,
 )
 from ..policy.exit_decision import (
     ExitDecision,
@@ -187,6 +188,7 @@ __all__ = [
     "resolve_scope_decision",
     "resolve_severity_config",
     "scope_completeness_for_record",
+    "scoped_gate_selection_from_result",
     "snapshot_identity_digest",
     "validate_incomplete_scope_policy",
 ]
@@ -209,7 +211,12 @@ def snapshot_identity_digest(snap: AbiSnapshot) -> str:
     return snapshot_content_digest(snap)
 
 
-def effective_gate_for_resolved_compare_config(cfg: Any) -> EffectiveGate:
+def effective_gate_for_resolved_compare_config(
+    cfg: Any,
+    *,
+    result: Any = None,
+    require_complete_analysis: bool = False,
+) -> EffectiveGate:
     """*cfg* (a ``cli_helpers_compare.ResolvedCompareConfig``, taken as
     ``Any`` rather than imported -- that module is ``frontends``-classified,
     and ``workflows -> frontends`` is exactly the reverse of the permitted
@@ -228,10 +235,24 @@ def effective_gate_for_resolved_compare_config(cfg: Any) -> EffectiveGate:
     ``tests/test_release_gate_pack_fold_parity.py`` documents between the
     two raw objects.
 
-    No ``--require-complete-analysis``/scoped-gate (``--used-by``/
-    ``--required-symbol``) value is threaded through *cfg* today, so both
-    stay at their default (``False``/``None``) here; a caller that has one
-    of those should build an ``EffectiveGate`` directly via
-    ``EffectiveGate.from_severity`` instead of through this function.
+    *require_complete_analysis*/*result* carry the two other gate-changing
+    axes ``cfg`` alone cannot (Codex review, PR #1192: leaving these at their
+    default regardless of the real run made two invocations that genuinely
+    gate differently -- e.g. differing only in ``--require-complete-
+    analysis`` or ``--required-symbol`` -- produce an *equal* ``EffectiveGate``,
+    defeating the type's purpose). *require_complete_analysis* is the
+    identically-named CLI/API flag, known before any comparison runs.
+    *result* is the completed comparison's ``DiffResult`` (or ``None`` when
+    called before one exists, e.g. resolution-only/dry-run code); the scoped-
+    gate selection (``--used-by``/``--required-symbol``) it may have recorded
+    is read via :func:`~abicheck.policy.effective_gate.
+    scoped_gate_selection_from_result`. Both default to "no effect" so a
+    caller that genuinely has neither (a bare config-only comparison, as
+    ``tests/test_effective_gate.py``'s parity property exercises) is
+    unaffected.
     """
-    return EffectiveGate.from_severity(cfg.severity if cfg.severity_active else None)
+    return EffectiveGate.from_severity(
+        cfg.severity if cfg.severity_active else None,
+        require_complete_analysis=require_complete_analysis,
+        scope=scoped_gate_selection_from_result(result),
+    )

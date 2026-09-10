@@ -30,13 +30,16 @@ equality, per this closure package's completion-test contract.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from hypothesis import given, strategies as st
+from test_compare_release import _invoke, _snap, _write_snap
 
 from abicheck.model.scope_acquisition import AcquisitionState, InventoryCompleteness
 from abicheck.workflows.release_scope import (
     DIRECT_PAIR_KEY,
     ReleaseInventoryEvidence,
+    ReleaseScopePlan,
     ReleaseScopeResult,
     SideInventory,
     build_release_scope_record,
@@ -192,3 +195,76 @@ class TestReleaseScopePlanParity:
         assert cli_shaped.proven_removed_members == plan_shaped.proven_removed_members
         # 5. the whole resolved outcome is equal.
         assert cli_shaped == plan_shaped
+
+
+class TestReleaseScopeResultWiredIntoRealProductionFlow:
+    """Codex review (PR #1192): ``resolve_release_scope_result``/
+    ``ReleaseScopeResult`` must be a real production consumer of
+    ``compare-release``'s own flow, not merely unit-tested surface --
+    ``cli_compare_release.py`` now threads ``scope_result.record``
+    end-to-end after resolving it, replacing the bare
+    ``ScopeAcquisitionRecord`` everywhere downstream (bundle analysis,
+    scope-decision resolution, the stderr notices, the JSON writer).
+
+    Patches ``resolve_release_scope_result`` where
+    ``cli_compare_release.py`` resolves it (module-level import binding --
+    see ``abicheck/workflows/AGENTS.md``'s own note on this), and drives the
+    real CLI (``abicheck compare <dir> <dir>``) end to end, exactly the way
+    ``tests/test_compare_release.py``'s own ``TestDirVsDir`` does."""
+
+    def test_a_real_directory_compare_constructs_and_uses_the_result(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        snap = _snap()
+        _write_snap(old_dir / "libfoo.json", snap)
+        _write_snap(new_dir / "libfoo.json", snap)
+
+        calls: list[tuple[ReleaseScopePlan, object]] = []
+        real = resolve_release_scope_result
+
+        def _spy(plan: ReleaseScopePlan, record: object) -> ReleaseScopeResult:
+            calls.append((plan, record))
+            return real(plan, record)
+
+        with patch(
+            "abicheck.cli_compare_release.resolve_release_scope_result",
+            side_effect=_spy,
+        ):
+            code, out = _invoke("compare", str(old_dir), str(new_dir))
+
+        assert code == 0
+        assert "NO_CHANGE" in out
+        # The real production call happened exactly once, with a genuine
+        # plan (not a stub) and a record naming the one compared library --
+        # proof this is a live consumer, not dead, unreachable code.
+        assert len(calls) == 1
+        plan, record = calls[0]
+        assert isinstance(plan, ReleaseScopePlan)
+        available = record.members_in(AcquisitionState.AVAILABLE)
+        assert len(available) == 1
+        assert available[0].name == "libfoo.json"
+
+    def test_result_wiring_does_not_change_a_breaking_release_outcome(
+        self, tmp_path: Path
+    ) -> None:
+        """Characterization: routing through ``ReleaseScopeResult`` changes
+        no observable behavior -- the exact same exit code and verdict a
+        pre-wiring run produced."""
+        from test_compare_release import _breaking_pair
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old_foo, new_foo = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+        _write_snap(old_dir / "libbar.json", _snap())
+        _write_snap(new_dir / "libbar.json", _snap())
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
+        assert code == 4
+        assert "BREAKING" in out

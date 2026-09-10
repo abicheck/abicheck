@@ -242,9 +242,22 @@ def add_effective_config_digest(
         effective_config_digest,
         effective_config_fields,
     )
-    from .policy.gate_pack_fold import gate_exit_code_scheme
+    from .policy.effective_gate import EffectiveGate, scoped_gate_selection_from_result
 
-    scheme = exit_code_scheme or gate_exit_code_scheme(severity_config is not None)
+    # Route the scheme derivation through the one real, per-run
+    # `EffectiveGate` this comparison resolved (Codex review, PR #1192,
+    # closure package 4's own follow-up finding): *severity_config*,
+    # *require_complete_analysis*, and *result*'s own recorded scoped-gate
+    # selection (`--used-by`/`--required-symbol`) are exactly this run's
+    # three other gate-changing facts, so this is the real production call
+    # site that gives `EffectiveGate` genuinely varying values -- not merely
+    # a unit-tested, never-invoked type.
+    gate = EffectiveGate.from_severity(
+        severity_config,
+        require_complete_analysis=require_complete_analysis,
+        scope=scoped_gate_selection_from_result(result),
+    )
+    scheme = exit_code_scheme or gate.exit_code_scheme
     ec_fields = effective_config_fields(
         result,
         severity_config=severity_config,
@@ -376,8 +389,7 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
             suppression_rule_label(r, i) for i, r in enumerate(audit.expired_rules)
         ],
         "near_expiry_rules": [
-            suppression_rule_label(r, i)
-            for i, r in enumerate(audit.near_expiry_rules)
+            suppression_rule_label(r, i) for i, r in enumerate(audit.near_expiry_rules)
         ],
     }
 

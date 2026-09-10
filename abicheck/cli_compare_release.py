@@ -115,6 +115,7 @@ from .workflows.release_scope import (
     out_of_scope_provider_names,
     release_inventory_evidence,
     resolve_release_scope_plan,
+    resolve_release_scope_result,
     scoped_bundle_maps,
 )
 from .workflows.release_stored_inventory import (
@@ -840,13 +841,20 @@ def compare_release_cmd(
                     scope_plan.evidence,
                     **_scope_failed,
                 )
+            # ADR-061 gap D / DoD item 8, closure package 4 (Codex review,
+            # PR #1192): the release fan-out's realized scope outcome, paired
+            # with the plan it was resolved against -- from here on this run
+            # reads the acquisition record through `scope_result.record`
+            # exclusively, not a bare `ScopeAcquisitionRecord` threaded
+            # alongside an independent, un-paired plan.
+            scope_result = resolve_release_scope_result(scope_plan, scope_record)
             # A member --dso-only could not classify is this run's own
             # acquisition failure: an operational `ERROR` library result
             # (the same rank a failed extraction takes, floored at exit 4
             # under either --on-incomplete-scope policy), unless D9 narrowed
             # it out of scope -- then it is listed on the record only (Codex
             # review, twentieth round).
-            scope_states = {m.member: m.state for m in scope_record.members}
+            scope_states = {m.member: m.state for m in scope_result.record.members}
             for key in sorted(set(old_unclassified) | set(new_unclassified)):
                 reason = old_unclassified.get(key) or new_unclassified[key]
                 if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
@@ -862,10 +870,12 @@ def compare_release_cmd(
             # Decided by policy once; every consumer below (the writers, the
             # sidecar, the stderr notice, the exit) reads this one decision.
             scope_terms = comparison_scope_terms(
-                resolve_scope_decision(scope_record, on_incomplete_scope)
+                resolve_scope_decision(scope_result.record, on_incomplete_scope)
             )
-            removed_keys = [m.member for m in scope_record.proven_removed_members]
-            added_keys = [m.member for m in scope_record.proven_added_members]
+            removed_keys = [
+                m.member for m in scope_result.record.proven_removed_members
+            ]
+            added_keys = [m.member for m in scope_result.record.proven_added_members]
             # ADR-065 S4: the fan-out's unmatched/removed/added stderr notices,
             # now written from the acquisition record instead of the deleted
             # `_match_release_keys` set difference -- so one line can say
@@ -873,7 +883,7 @@ def compare_release_cmd(
             # says "unmatched" (naming why the proof is missing) otherwise.
             # Emitted here, not with the discovery-time warnings above, because
             # the record does not exist until the fan-out has run.
-            scope_notices = release_scope_warnings(scope_record)
+            scope_notices = release_scope_warnings(scope_result.record)
             warning_msgs.extend(scope_notices)
             if fmt != "json":
                 for msg in scope_notices:
@@ -886,7 +896,7 @@ def compare_release_cmd(
             # one becomes an ordinary per-component result so the existing
             # verdict fold, severity aggregation, report renderers and
             # disposition audit see it without a parallel pipeline.
-            for entry in support_promise_results(scope_record, support_promise):
+            for entry in support_promise_results(scope_result.record, support_promise):
                 library_results.append(entry)
                 entry_verdict = str(entry["verdict"])
                 if _RELEASE_VERDICT_ORDER.get(
@@ -1078,7 +1088,7 @@ def compare_release_cmd(
             # *proven* removals/additions only -- an unchecked member
             # is absent from it, not a deleted provider (Codex review).
             bundle_old_map, bundle_new_map = scoped_bundle_maps(
-                old_map, new_map, scope_record
+                old_map, new_map, scope_result.record
             )
             bundle_result, worst_verdict = _collect_bundle_result(
                 library_results,
@@ -1088,7 +1098,7 @@ def compare_release_cmd(
                 manifest_path=manifest_path,
                 bundle_system_providers=(
                     *bundle_system_providers,
-                    *out_of_scope_provider_names(scope_record),
+                    *out_of_scope_provider_names(scope_result.record),
                 ),
                 bundle_cohorts=bundle_cohorts,
                 policy=policy,
@@ -1099,7 +1109,7 @@ def compare_release_cmd(
                 new_root=new_dir,
                 old_variant=old_variant,
                 new_variant=new_variant,
-                scope_record=scope_record,
+                scope_record=scope_result.record,
             )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.

@@ -54,7 +54,10 @@ from abicheck.policy.release_gate_options import (
     resolve_release_gate_options,
 )
 from abicheck.policy.severity import SeverityConfig, SeverityLevel
-from abicheck.workflows.gate import effective_gate_for_resolved_compare_config
+from abicheck.workflows.gate import (
+    effective_gate_for_resolved_compare_config,
+    scoped_gate_selection_from_result,
+)
 
 _PRESETS = (None, "default", "strict", "info-only")
 
@@ -290,3 +293,112 @@ class TestEffectiveGateParity:
         assert effective_gate_for_resolved_compare_config(
             cfg2
         ) == EffectiveGate.from_severity(cfg2.severity)
+
+
+class _FakeResult:
+    """A minimal stand-in for the ``DiffResult`` fields
+    ``scoped_gate_selection_from_result`` reads -- mirrors
+    ``effective_config_digest._gate_scope_str``'s own reading contract."""
+
+    def __init__(
+        self,
+        gate_scope: str | None = None,
+        used_by: tuple[dict[str, object], ...] = (),
+        required_symbols: dict[str, object] | None = None,
+    ) -> None:
+        self.gate_scope = gate_scope
+        self.used_by = used_by
+        self.required_symbols = required_symbols or {}
+
+
+class TestScopedGateSelectionFromResult:
+    """``scoped_gate_selection_from_result``'s own contract."""
+
+    def test_none_when_no_scope_selected(self) -> None:
+        assert scoped_gate_selection_from_result(None) is None
+        assert scoped_gate_selection_from_result(_FakeResult()) is None
+
+    def test_used_by_reads_app_paths_sorted(self) -> None:
+        result = _FakeResult(
+            gate_scope="used_by",
+            used_by=({"app": "b.so"}, {"app": "a.so"}),
+        )
+        scope = scoped_gate_selection_from_result(result)
+        assert scope == ScopedGateSelection(kind="used_by", targets=("a.so", "b.so"))
+
+    def test_required_symbol_reads_entrypoints_sorted(self) -> None:
+        result = _FakeResult(
+            gate_scope="required_symbol",
+            required_symbols={"required_entrypoints": ["sym_b", "sym_a"]},
+        )
+        scope = scoped_gate_selection_from_result(result)
+        assert scope == ScopedGateSelection(
+            kind="required_symbol", targets=("sym_a", "sym_b")
+        )
+
+
+class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
+    """Codex review (PR #1192): the fix for "two invocations with genuinely
+    different exit/gate behavior produce an equal EffectiveGate" --
+    ``require_complete_analysis``/``result``-derived scope must actually
+    differentiate the returned object, not silently default away."""
+
+    def test_require_complete_analysis_differentiates(self) -> None:
+        cfg = resolve_compare_config(
+            None, cli_severity_preset=None, cli_scope_public=None
+        )
+        off = effective_gate_for_resolved_compare_config(
+            cfg, require_complete_analysis=False
+        )
+        on = effective_gate_for_resolved_compare_config(
+            cfg, require_complete_analysis=True
+        )
+        assert off != on
+        assert off.require_complete_analysis is False
+        assert on.require_complete_analysis is True
+
+    def test_used_by_scope_differentiates(self) -> None:
+        cfg = resolve_compare_config(
+            None, cli_severity_preset=None, cli_scope_public=None
+        )
+        no_scope = effective_gate_for_resolved_compare_config(cfg)
+        scoped = effective_gate_for_resolved_compare_config(
+            cfg, result=_FakeResult(gate_scope="used_by", used_by=({"app": "x"},))
+        )
+        assert no_scope != scoped
+        assert no_scope.scope is None
+        assert scoped.scope == ScopedGateSelection(kind="used_by", targets=("x",))
+
+    def test_two_different_required_symbol_selections_differentiate(self) -> None:
+        """The literal finding example: two runs differing only in which
+        symbol is required must not collapse to one EffectiveGate."""
+        cfg = resolve_compare_config(
+            None, cli_severity_preset=None, cli_scope_public=None
+        )
+        a = effective_gate_for_resolved_compare_config(
+            cfg,
+            result=_FakeResult(
+                gate_scope="required_symbol",
+                required_symbols={"required_entrypoints": ["sym_a"]},
+            ),
+        )
+        b = effective_gate_for_resolved_compare_config(
+            cfg,
+            result=_FakeResult(
+                gate_scope="required_symbol",
+                required_symbols={"required_entrypoints": ["sym_b"]},
+            ),
+        )
+        assert a != b
+
+    def test_no_result_and_no_flag_matches_the_prior_default_behavior(self) -> None:
+        """Characterization: a caller passing neither (this function's
+        original, pre-fix call shape) still gets the same all-defaults
+        EffectiveGate as before this fix."""
+        cfg = resolve_compare_config(
+            None, cli_severity_preset="strict", cli_scope_public=None
+        )
+        gate = effective_gate_for_resolved_compare_config(cfg)
+        assert gate == EffectiveGate.from_severity(cfg.severity)
+        assert gate.require_complete_analysis is False
+        assert gate.scope is None
