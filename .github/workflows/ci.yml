@@ -211,7 +211,19 @@ jobs:
     # 29m19s with 99% of the suite passed. 45 restores headroom over that
     # 27-29m; the per-platform cost of the stored-package path is a
     # separate, unowned investigation, not something a test budget fixes.
-    timeout-minutes: 45
+    #
+    # The drift repeated on the *Windows* leg again: on 2026-09-10, run
+    # 11381's windows-latest/3.13 job (github.com/abicheck/abicheck/actions/
+    # runs/34435814307/job/102752838266) was killed by the job-level
+    # timeout at 49m21s -- past the 45m budget above -- with every test
+    # that had run so far passing and the suite at 99% completion (mid
+    # tests/test_cli_compare_release_project_snapshot_package.py, the same
+    # stored-package test module PR #1079's own overrun was in). Same
+    # class of failure as 2026-09-05's: a job-level timeout racing an
+    # otherwise-green run, not a real test failure. 65 restores headroom
+    # over the ~49m21s observed here, matching the ~1.5x-of-observed
+    # pattern each prior bump in this comment already followed.
+    timeout-minutes: 65
     permissions:
       contents: read
       id-token: write
