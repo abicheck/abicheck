@@ -113,6 +113,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from ..checker_types import DiffResult
+    from ..model.change_catalog.registry import Verdict
     from .severity import SeverityConfig
 
 
@@ -670,11 +671,58 @@ def resolve_compare_exit_decision(
             policy_file=result.policy_file,
             today=today,
         )
-    else:
+    elif today is None:
+        # No caller passed a captured date -- every pre-existing invocation
+        # (the real CLI process exit runs synchronously right after
+        # `compare()`) keeps reading the cached verdict exactly as before.
         compatibility_contribution = legacy_exit_code(result.verdict)
+    else:
+        # Codex review, fresh evidence: `result.verdict` was frozen at
+        # `compare()` time. A render happening later under a captured
+        # `today` (an already-frozen `ReportEnvelope`) must agree with the
+        # same today-aware per-finding resolution `_change_to_dict` already
+        # uses for `changes[]`, or a dated `reclassify:` rule's expiry
+        # between `compare()` and render could report a finding as breaking
+        # there while this exit code stayed the stale, pre-expiry verdict's.
+        compatibility_contribution = legacy_exit_code(
+            _worst_effective_verdict(result, today)
+        )
     return resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
     )
+
+
+def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
+    """The legacy scheme's own worst-finding verdict, re-derived under
+    *today* instead of trusted from ``result.verdict``.
+
+    Scored over :func:`~.severity.gate_eligible_changes` -- the identical
+    population/exclusions ``compute_exit_code``'s severity branch already
+    uses -- taking the worst per-finding ``effective_verdict_for_change``
+    the same way ``checker_policy.compute_verdict`` folds a raw kind-set
+    category, just per-finding-resolved and today-aware rather than a bare
+    kind lookup. Only called when *today* is given (this function's own
+    caller keeps the cached ``result.verdict`` otherwise), so no
+    pre-existing caller's answer changes.
+    """
+    from ..model.change_catalog.registry import Verdict
+    from ..reclassify import effective_verdict_for_change
+    from .severity import gate_eligible_changes
+
+    eligible = gate_eligible_changes(result.changes)
+    if not eligible:
+        return Verdict.NO_CHANGE
+    verdicts = {
+        effective_verdict_for_change(
+            c, policy=result.policy, kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file, today=today,
+        )
+        for c in eligible
+    }
+    for candidate in (Verdict.BREAKING, Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):
+        if candidate in verdicts:
+            return candidate
+    return Verdict.COMPATIBLE
 

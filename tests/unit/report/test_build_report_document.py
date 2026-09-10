@@ -1414,6 +1414,108 @@ class TestRendererOrderIndependence:
             "::error" in entry["annotation"] for entry in json_out["annotations"]
         )
 
+    def test_disposition_audit_refreshes_a_stale_reclassify_overlay_on_an_existing_ledger(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``ledger_for`` reuses
+        ``result.disposition_ledger`` via ``with_gate`` whenever
+        ``checker.compare()`` already stamped one -- the ordinary case for a
+        real comparison. ``with_gate`` re-labels ``gating``/``non_gating``
+        dispositions but never re-ran ``resolve_reclassifications``/
+        ``resolve_verdict_classes``, so a ledger's ``reclassified_by``
+        overlay -- resolved once at *comparison* time -- stayed stamped
+        after the rule it names expired by envelope-construction time. The
+        JSON document's ``disposition_audit`` still reported the expired
+        rule as active while ``changes[]``/``policy_reclassify`` (both
+        re-resolved fresh from the envelope's own ``today``) correctly said
+        it was not.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today - timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        # Simulate checker.compare() stamping the ledger before the rule
+        # expired -- reclassified_by is set at this point.
+        result.disposition_ledger = finalize_ledger(
+            DispositionLedger(), result, None, today=captured_today - timedelta(days=2)
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        # Envelope construction happens "now" -- after the rule's expiry --
+        # with no mock needed since the rule already expired relative to the
+        # real current date. A severity_config is required so ledger_for()
+        # takes the with_gate() branch over the already-stamped ledger
+        # rather than returning it untouched.
+        envelope = build_report_envelope(
+            result, old, new, severity_config=SeverityConfig()
+        )
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert "policy_reclassify" not in json_out
+        assert json_out["disposition_audit"]["reclassified_total"] == 0
+        assert json_out["disposition_audit"]["reclassifications"] == []
+
+    def test_legacy_exit_code_reuses_the_envelope_s_captured_today(self) -> None:
+        """Codex review, fresh evidence: with no severity configuration in
+        effect, ``resolve_compare_exit_decision``'s non-severity branch
+        translated the *cached* ``result.verdict`` -- frozen at
+        ``compare()`` time -- into the legacy exit code, ignoring the new
+        ``today`` argument entirely. If a dated ``reclassify:`` rule expires
+        between ``compare()`` and envelope construction, the JSON document's
+        ``changes[]`` entry (re-derived fresh, correctly reporting
+        ``breaking``) could disagree with a stale, pre-expiry ``exit.code``
+        of ``0``. ``today`` is now honored via a fresh per-finding
+        recomputation when given.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today - timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+            # Simulate checker.compare()'s own cached verdict, computed
+            # while the rule was still active (before its expiry).
+            verdict=Verdict.COMPATIBLE,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        # No severity_config: the legacy scheme. Envelope construction
+        # happens "now" -- after the rule's expiry -- with no mock needed.
+        envelope = build_report_envelope(result, old, new)
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert json_out["changes"][0]["severity"] == "breaking"
+        assert json_out["exit"]["code"] == 4
+
 
 class TestSarifAndJunitDecisionBoundary:
     """ADR-061 Phase 2 gap C acceptance test: a guard for SARIF's and

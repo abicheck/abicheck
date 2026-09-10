@@ -65,6 +65,7 @@ from ..model.change_catalog.registry import Verdict
 from .disposition_gate import (
     _GateContext as _GateContext,
     _kept_disposition as _kept_disposition,
+    _reset_dated_overlays as _reset_dated_overlays,
 )
 from .disposition_types import (
     Disposition as Disposition,
@@ -301,12 +302,9 @@ class DispositionLedger:
         Under a **severity configuration** the acting gate is
         ``policy.gate_decision.gate_decision_for_result``, which scores
         ``result.changes`` and nothing else -- so membership in that list is
-        re-read here rather than trusted from recording time. Several later
-        passes move findings into it (``scope.show_redundant`` restores
-        redundant and opaque-downgraded rows; a scoped run folds its own),
-        and a record frozen at recording time then reported ``0 gating``
-        beside a real exit ``4``. One membership rule covers every such row,
-        whatever bucket it came from, which is what retired the narrower
+        re-read here rather than trusted from recording time (several later
+        passes move findings into it, e.g. ``scope.show_redundant`` restoring
+        redundant/opaque-downgraded rows), which is what retired the narrower
         ``legacy_gate_only`` flag this replaced.
         """
         gate = _GateContext.of(result, today=today)
@@ -321,6 +319,9 @@ class DispositionLedger:
             self._regated(record, change, result, severity_config, gate, severity_input)
             for record, change in zip(self._records, self._anchors)
         ]
+        gated._records = _reset_dated_overlays(gated._records)
+        gated.resolve_reclassifications(result, today=today)
+        gated.resolve_verdict_classes(result, today=today)
         return gated
 
     def with_suppressed(
