@@ -47,3 +47,11 @@
   `abicheck.surface.demangle`, the name `surface.py` actually binds), so it
   did not verify that a structurally-parseable owner genuinely avoids
   demangling.
+- **The bare-owner-tail fix above (this round's second item) regressed
+  `compare`'s scaling on a large union-churn corpus** (CI's performance
+  gates caught a real +48% wall-time regression and a quadratic tail-scaling
+  exponent): it recomputed a scan over every modeled type name on *every*
+  single type-level classification, instead of once per comparison. Fixed
+  by hoisting that computation into `SurfaceUnions` (built once per surface
+  pair and already reused across every finding), restoring the intended
+  linear scaling.
