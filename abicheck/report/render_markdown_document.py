@@ -106,6 +106,7 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .envelope import ReportEnvelope, resolved_document
 from .render_markdown import (
     ConfidenceSection,
     EnvironmentDriftEntry,
@@ -198,6 +199,7 @@ def build_review_digest_document(
     *,
     severity_config: Any = None,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """The ``--format review`` digest as a ``ReportDocument``.
 
@@ -216,18 +218,27 @@ def build_review_digest_document(
     choke point is the point of this closure, not just its safety). A direct
     caller with no such document (an existing Tier-2/test call site) keeps
     the prior behaviour by passing nothing.
+
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
+    document belongs to. Beyond supplying the document, it carries the
+    already-resolved per-finding verdicts the digest's "impacted symbols"
+    list used to re-resolve through its own ``report_findings_for`` call --
+    the same canonical primitive, but a second resolution of a decision this
+    render had already made.
     """
+    shared_document = resolved_document(envelope, report_document)
     shared_disposition_audit = (
         DispositionAudit.from_dict(
-            cast("Mapping[str, Any]", report_document.to_mapping()["disposition_audit"])
+            cast("Mapping[str, Any]", shared_document.to_mapping()["disposition_audit"])
         )
-        if report_document is not None
+        if shared_document is not None
         else None
     )
     digest = _reporter_markdown().compute_review_digest(
         result,
         severity_config=severity_config,
         disposition_audit=shared_disposition_audit,
+        findings=None if envelope is None else envelope.findings,
     )
     d: dict[str, object] = {
         "library": digest.library,
@@ -484,6 +495,7 @@ def build_markdown_document(
     show_recommendation: bool = False,
     demangle: bool = False,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """The full-mode (``to_markdown`` default view) report as a
     ``ReportDocument``. See this module's own docstring for scope.
@@ -499,11 +511,20 @@ def build_markdown_document(
     independently-resolved call to ``compute_disposition_audit`` over the
     same ledger. A direct caller with no such document (an existing
     Tier-2/test call site) keeps the prior behaviour by passing nothing.
+
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
+    document belongs to, and supersedes it: besides the document, it carries
+    the per-finding verdict/category set the ``surface_changes`` section
+    below used to resolve for itself. The severity groups, headline table and
+    per-change rows this function assembles stay Markdown's own presentation
+    -- an arrangement of already-decided findings, not a second opinion about
+    them.
     """
     rm = _reporter_markdown()
+    shared_document = resolved_document(envelope, report_document)
     shared_disposition_audit = (
-        report_document.to_mapping()["disposition_audit"]
-        if report_document is not None
+        shared_document.to_mapping()["disposition_audit"]
+        if shared_document is not None
         else None
     )
     verdict = result.verdict
@@ -600,7 +621,13 @@ def build_markdown_document(
         # already-resolved findings the severity groups above use, projected
         # as additions/removals/modifications so a compatible run still
         # itemizes what it added.
-        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
+        # ADR-061 gap C: the envelope already resolved a verdict/category per
+        # change; grouping them is presentation, resolving them again is not.
+        "surface_changes": compute_surface_changes(
+            result,
+            None if envelope is None else envelope.findings_for(changes),
+            changes=changes,
+        ).to_dict(),
         "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
         "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),

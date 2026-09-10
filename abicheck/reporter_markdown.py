@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .bundle_models import BundleDiffResult
+    from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
 from .checker import (
@@ -1638,6 +1639,7 @@ def compute_review_digest(
     *,
     severity_config: SeverityConfig | None = None,
     disposition_audit: DispositionAudit | None = None,
+    findings: Sequence[ReportFinding] | None = None,
 ) -> _rmd.ReviewDigest:
     """The structured intermediate for :func:`to_review_digest`.
 
@@ -1652,6 +1654,12 @@ def compute_review_digest(
     the one already computed by ``report/build.build_report_document``'s
     single shared call, rather than this function re-deriving an identical
     value from the same ledger a second time.
+
+    *findings* is the same reuse for the per-change verdicts the impacted-
+    symbols list below rests on: the ADR-061 gap C caller passes the
+    ``ReportEnvelope``'s already-resolved set instead of leaving this
+    function to call ``report_findings_for`` a second time for the same
+    render.
     """
     summary = build_summary(result)
     v = result.verdict
@@ -1697,7 +1705,8 @@ def compute_review_digest(
     from .report.finding import report_findings_for
     from .report.surface_changes import compute_surface_changes
 
-    findings = report_findings_for(result)
+    if findings is None:
+        findings = report_findings_for(result)
     impacted = [
         f.change
         for f in findings

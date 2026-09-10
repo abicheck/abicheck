@@ -32,7 +32,7 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from abicheck.checker import Change, ChangeKind, DiffResult, Verdict
+from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.checker_policy import (
     EvidenceStatus,
     ReachabilityState,
@@ -49,10 +49,11 @@ from abicheck.contract_gating import (
 from abicheck.contract_relevance_types import CompatibilityEvaluationStatus
 from abicheck.finding_identity import missing_contract_kind
 from abicheck.impact import assess_change
-from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.document import ReportDocument
+from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
+from abicheck.report.sarif_invocation import compute_sarif_invocation_exit
 from abicheck.report_model import VERDICT_TO_SARIF_LEVEL as _VERDICT_TO_SARIF_LEVEL
 from abicheck.reporter import (
     _finding_id,
@@ -700,10 +701,10 @@ def to_sarif(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
+    report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
 ) -> dict[str, Any]:
     """Convert a DiffResult to a SARIF 2.1.0 document (dict).
-    *report_document*, when given, is the shared build whose ``disposition_audit`` is reused verbatim (ADR-061 Phase 2 gap C) -- everything else here stays SARIF-specific.
+    *envelope* (ADR-061 gap C), when given, is the one completed ``ReportEnvelope`` this render projects: its shared document supplies ``disposition_audit`` and its already-resolved ``gate`` drives the severity-gate block and the invocation exit contract, so SARIF decides neither for itself. *report_document* is the narrower, pre-envelope form of the same reuse (document only); the envelope wins when both are given, and a direct caller with neither keeps the prior, independent behaviour.
     *severity_config*, when given, drives the invocation's ``exitCode`` from
     the actual severity-aware gate instead of inferring it purely from
     ``result.verdict`` — compatibility and "blocks CI" are independent
@@ -731,7 +732,8 @@ def to_sarif(
     parameter existed.
     """
     tool_version = _tool_version()
-    disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, report_document)  # ADR-061 Phase 2 gap C
+    gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
+    disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, resolved_document(envelope, report_document))  # ADR-061 Phase 2 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
     # policyReclassify below as though it were still in effect.
@@ -951,61 +953,18 @@ def to_sarif(
                     )
                 )
 
-    gate_decision = gate_decision_for_result(result, severity_config)
     severity_gate = (
         _severity_gate_properties(gate_decision, severity_config)
         if gate_decision is not None and severity_config is not None
         else None
     )
     scoped_gate = _scoped_gate_properties(result)
-
-    # ADR-049 Phase 7: the orthogonal contract-coverage floor, folded into the
-    # invocation's exit code exactly as the process folds it. This block is
-    # SARIF's own machine-readable exit contract, and the comment below states
-    # it mirrors what the CLI really exits with -- so leaving it out published
-    # `exitCode: 0` beside a process that exited 1, and a consumer reading the
-    # artifact accepted a run its own notifications said was gated (Codex
-    # review, reproduced). `max`, for the same reason the process uses it: the
-    # axis raises a clean 0 and never lowers a real break's code.
-    #
-    # `executionSuccessful` stays True and is *not* folded: per the SARIF spec
-    # it reports whether the tool ran to completion, not whether it found
-    # blocking issues -- the spec's own example pairs `exitCode: 1` with
-    # `executionSuccessful: true`. Incomplete evidence is a finding about the
-    # comparison, not a failed execution.
-    from .contract_coverage_exit import coverage_exit_floor
-
-    # Workstream D-S1: `scoped_gate` never contributes to this invocation's
-    # exit code any more (see `_scoped_gate_properties`'s docstring) -- the
-    # base exit code always comes from the full-library severity/verdict.
-    _coverage_floor = coverage_exit_floor(result)
-    _base_exit_code = (
-        severity_gate["exitCode"]
-        if severity_gate is not None
-        else (
-            4
-            if result.verdict == Verdict.BREAKING
-            else 2
-            if result.verdict == Verdict.API_BREAK
-            else 0
-        )
-    )
-    _exit_code = max(_base_exit_code, _coverage_floor)
-    _exit_description = (
-        f"{result.verdict.value} (severity-gated)"
-        if severity_gate is not None
-        else result.verdict.value
-    )
-    if scoped_gate is not None:
-        # Informational only -- appended, never substituted (workstream D-S1).
-        _exit_description += (
-            f" [consumer-scoped assessment: {scoped_gate['gateVerdict']} "
-            f"(scope: {scoped_gate['gateScope']}), informational only]"
-        )
-    if _coverage_floor:
-        # Names the axis rather than only moving the number, so a reader of
-        # the artifact alone can tell a coverage floor from a gate decision.
-        _exit_description += " + incomplete contract coverage (exit 1)"
+    # ADR-061 gap C: SARIF's published exit contract is a decision, not a
+    # rendering choice -- it moved to report/sarif_invocation.py and reads the
+    # gate this render already resolved (see that module's docstring).
+    _invocation_exit = compute_sarif_invocation_exit(result, severity_gate, scoped_gate)
+    _exit_code = _invocation_exit.exit_code
+    _exit_description = _invocation_exit.description
 
     return {
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -1286,16 +1245,16 @@ def to_sarif_str(
     show_only: str | None = None,
     report_mode: str = "full",
     severity_config: SeverityConfig | None = None,
-    report_document: ReportDocument | None = None,
+    report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
 ) -> str:
-    """Serialize DiffResult to a SARIF JSON string; *report_document* is forwarded unchanged to :func:`to_sarif` (ADR-061 Phase 2 gap C)."""
+    """Serialize DiffResult to a SARIF JSON string; *report_document*/*envelope* are forwarded unchanged to :func:`to_sarif` (ADR-061 gap C)."""
     return render_mapping_as_json(
         to_sarif(
             result,
             show_only=show_only,
             report_mode=report_mode,
             severity_config=severity_config,
-            report_document=report_document,
+            report_document=report_document, envelope=envelope,
         ),
         indent=indent,
     )

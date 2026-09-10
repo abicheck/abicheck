@@ -29,14 +29,19 @@ back into *this* module through ``importlib`` instead of a static
 ``from .report.build import ...``, so the pair never forms a real import
 cycle -- only one direction is a static edge.
 
-Scope note (2026-09-07): JSON's own ``report_mode="full"`` build is the
-first, and so far only, pipeline routed through this choke point. Markdown,
-HTML, SARIF, and JUnit still each build (and freeze) their own document
-independently -- see ``docs/contribute/adr/
-061-responsibility-package-architecture.md``'s Gap C status note and
-``docs/contribute/plans/duplication-and-convergence-assessment.md``'s
-Phase 4 status note for the precise, current per-format state and the
-remaining work.
+Scope note (gap C closure package 3): every format now projects **one**
+document, not one document per format. :func:`build_report_envelope` is the
+call that makes that true -- it resolves the severity gate, the per-finding
+verdict/category set and this document once, above format selection, and
+hands the resulting :class:`~abicheck.report.envelope.ReportEnvelope` to
+``service_render.render_envelope``. It lives here, next to the document build
+it composes, rather than in ``report/envelope.py`` (see that module's own
+docstring: an ``envelope -> build`` import edge would close a real cycle
+through ``reporter.py``). ``--stat``/``oneline`` and the ``leaf``/
+``root-cause`` views remain separate documents by design -- see
+``docs/contribute/adr/061-responsibility-package-architecture.md``'s gap C
+status note and ``docs/contribute/plans/
+duplication-and-convergence-assessment.md``'s Phase 4 note.
 """
 
 from __future__ import annotations
@@ -44,9 +49,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .document import ReportDocument
+from .envelope import RenderOptions, ReportEnvelope
+from .finding import build_report_findings
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
+    from ..model import AbiSnapshot
+    from ..policy.severity import GateDecision
     from ..workflows.gate import SeverityConfig
 
 
@@ -59,6 +68,7 @@ def build_report_document(
     require_complete_analysis: bool = False,
     include_exit_decision: bool = True,
     contract_evaluation: bool = False,
+    gate: GateDecision | None = None,
 ) -> ReportDocument:
     """Build the one canonical, format-neutral ``report_mode="full"`` document.
 
@@ -70,6 +80,19 @@ def build_report_document(
     ``show_recommendation``) is not a parameter here -- it belongs to the
     format's own render step, applied to a *projection* of this document,
     never to a second, differently-decided build.
+
+    *gate* (ADR-061 gap C) is the severity ``GateDecision``
+    :func:`build_report_envelope` below already resolved
+    for this render, so the envelope and this document cannot each resolve
+    one. Passing ``None`` (the default) resolves it here, exactly as before.
+    That default is unambiguous rather than a missing sentinel:
+    ``gate_decision_for_result`` returns ``None`` *if and only if*
+    ``severity_config`` is ``None``, so a real resolved gate is never ``None``
+    while a gate is configured -- "not supplied" and "resolved to no gate"
+    can only coincide in the one case where both answers are identical. That
+    same equivalence is why the fallback below is skipped outright when
+    ``severity_config is None``: resolving there could only ever return the
+    ``None`` this already holds.
     """
     # Static import of `reporter.py`'s own privately-defined helpers --
     # this is the one direction of the report.build <-> reporter dependency
@@ -129,7 +152,8 @@ def build_report_document(
         _add_show_only_filter(d, result, changes, show_only)
 
     # Severity-categorized summary when severity config is provided
-    gate = gate_decision_for_result(result, severity_config)
+    if gate is None and severity_config is not None:
+        gate = gate_decision_for_result(result, severity_config)
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
@@ -177,4 +201,65 @@ def build_report_document(
         gate=gate,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
+    )
+
+
+def build_report_envelope(
+    result: DiffResult,
+    old: AbiSnapshot,
+    new: AbiSnapshot | None = None,
+    *,
+    options: RenderOptions | None = None,
+    severity_config: SeverityConfig | None = None,
+) -> ReportEnvelope:
+    """Finalize every report decision for *result*, once, before format selection.
+
+    This is the only place the three shared resolutions run for a render:
+    ``gate_decision_for_result`` once, ``build_report_findings`` once per
+    change, and ``build_report_document`` once -- the gate resolved *first*
+    and handed to the document build, so the document's own ``severity``
+    block and the decision object SARIF's and HTML's gate blocks read are
+    literally the same object rather than two calls that agree.
+    """
+    from ..policy.gate_decision import gate_decision_for_result
+
+    opts = options if options is not None else RenderOptions()
+    gate = gate_decision_for_result(result, severity_config)
+    document = build_report_document(
+        result,
+        show_only=opts.show_only,
+        show_impact=opts.show_impact,
+        severity_config=severity_config,
+        require_complete_analysis=opts.require_complete_analysis,
+        contract_evaluation=opts.contract_evaluation,
+        gate=gate,
+    )
+    kind_sets = result._effective_kind_sets()
+    findings = build_report_findings(
+        result.changes,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
+    )
+    scoped_only = tuple(getattr(result, "scoped_only_changes", ()) or ())
+    scoped_only_findings = (
+        build_report_findings(
+            list(scoped_only),
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
+        )
+        if scoped_only
+        else ()
+    )
+    return ReportEnvelope(
+        result=result,
+        old=old,
+        new=new,
+        options=opts,
+        severity_config=severity_config,
+        document=document,
+        findings=findings,
+        gate=gate,
+        scoped_only_findings=scoped_only_findings,
     )

@@ -41,8 +41,7 @@ by `render_markdown_alternate.py`'s leaf-mode row renderer, leaving
 remaining caller, the scoped-gate text append in `cli_compare_fold.py`.
 HTML's and Markdown's whole-document assembly each split into its own
 `render_*_document.py` sibling once the combined module passed the
-architecture check's new-file ceiling — Markdown split again once
-leaf/root-cause landed. `render_html.py`/`render_markdown.py` keep the
+architecture check's new-file ceiling. `render_html.py`/`render_markdown.py` keep the
 reusable per-section renderers; the `*_document.py`/`*_alternate.py`
 siblings assemble the complete report from a finished document plus the
 `_*_from_mapping` reconstruction helpers a round trip requires (dataclass ->
@@ -60,8 +59,10 @@ per-`DiffResult` convenience (not a `DiffResult` method — `model` may not
 import this package); it recomputes every call rather than caching on the
 result instance, since a mutable `DiffResult` cache went stale across two
 renders with a mutation between them (Codex review). `findings_by_change_id`
-indexes findings by `id(change)` for O(1) lookup within one render only
-(`Change` has no `__hash__`).
+indexes by `id(change)` for O(1) lookup within one render only (`Change` has
+no `__hash__`).
+
+`envelope.py` is gap C's closure and the whole-*render* counterpart to `document.py`'s whole-report value: `ReportEnvelope` holds one completed evaluation's finalized decisions — the shared `ReportDocument`, the severity `GateDecision`, one `ReportFinding` per `Change` (`scoped_only_changes` included) — plus presentation-only `RenderOptions`. `report.build.build_report_envelope` builds it once above format selection (there, not here, so `envelope.py` stays a leaf: an `envelope -> build` edge closes a real cycle through `reporter.py`); `service_render.render_envelope(fmt, envelope)` projects it. A renderer takes an `envelope` parameter and *reads* decisions from it — `resolved_gate`/`resolved_document` keep a direct Tier-2/test caller without one working as before. **Never resolve a gate, a verdict, or a document inside a renderer handed an envelope.** `sarif_invocation.py` (SARIF's published invocation exit code — an exit decision, not a rendering choice) and `junit_disposition.py` moved out of the legacy monoliths for this; read `envelope.py`'s own docstring before adding a projection.
 
 `render_markdown.py` and `render_html.py`/`render_html_document.py` are the
 prose/markup projections, and they follow one shape you should copy for any
@@ -93,12 +94,11 @@ are non-empty; which reclassify rules are still active). Every module keeps
 a pre-split name anything still resolves through — a re-export avoids
 breaking a real caller, not to freeze a name forever (D8: "not retained
 solely because a test monkeypatches it... the test moves with the
-implementation"). HTML's and Markdown's whole-document closures each
-retired every name left with zero resolvers repo-wide, tests included,
-once every caller moved onto the new `build_*_document`/`ChangeRow`-shaped
-path (see git history for the exact lists); a name with a real surviving
-caller (e.g. `_abbr_symbol_text`/`_changes_table`, `appcompat_html.py`'s)
-stays.
+implementation"). HTML's and Markdown's whole-document closures each retired
+every name left with zero resolvers repo-wide, tests included, once every
+caller moved onto the new `build_*_document`/`ChangeRow`-shaped path (see git
+history); a name with a real surviving caller (e.g. `_abbr_symbol_text`/
+`_changes_table`, `appcompat_html.py`'s) stays.
 
 ADR-061 Phase 2 item 5 is closed: `scoped_gate.py`'s `apply_scoped_gate`
 folds scoped-gate JSON natively (pre-render), not a render -> parse -> patch

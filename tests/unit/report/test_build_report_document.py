@@ -20,9 +20,12 @@ exists to provide, for JSON and (below) SARIF's own reuse of it:
 from __future__ import annotations
 
 import ast
+import contextlib
+import importlib
 import inspect
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from unittest import mock
 
 import pytest
@@ -30,13 +33,20 @@ import pytest
 from abicheck.checker import Change, ChangeKind, DiffResult
 from abicheck.junit_report import to_junit_xml
 from abicheck.model import AbiSnapshot
-from abicheck.report.build import build_report_document
+from abicheck.report.build import build_report_document, build_report_envelope
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.report.document import ReportDocument
+from abicheck.report.envelope import RenderOptions, ReportEnvelope
 from abicheck.report.render_json import render_json
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif, to_sarif_str
-from abicheck.service_render import render_output
+from abicheck.service_render import render_envelope, render_output
+
+
+def _import_attr(dotted: str) -> object:
+    """The live callable a ``module.attr`` patch target names."""
+    module_name, _, attr = dotted.rpartition(".")
+    return getattr(importlib.import_module(module_name), attr)
 
 _BREAKING = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
 _ADDITION = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
@@ -290,7 +300,11 @@ class TestRendererOrderIndependence:
     never more (redundant re-decision).
     """
 
-    _FORMATS = ("json", "html", "sarif", "junit", "markdown")
+    # ``review`` and the ``md`` alias are in the set too: gap C's claim is
+    # about every format of one evaluation, and an alias that silently took a
+    # different path would be exactly the kind of divergence this class exists
+    # to catch.
+    _FORMATS = ("json", "html", "sarif", "junit", "markdown", "md", "review")
 
     @staticmethod
     def _render_all(
@@ -330,6 +344,145 @@ class TestRendererOrderIndependence:
             # len(formats) (would mean a format rebuilt the document a
             # second time within its own render).
             assert spy.call_count == len(formats)
+
+    # ------------------------------------------------------------------
+    # ADR-061 gap C closure package 3: the same guarantees for ONE shared
+    # `ReportEnvelope` rendered into every format, which is the stronger
+    # statement the two tests above cannot make. Above, each format render
+    # builds its own document from the same `DiffResult` (N documents that
+    # happen to agree); below, N formats project ONE completed envelope, so
+    # they cannot disagree by construction.
+    # ------------------------------------------------------------------
+
+    #: Every decision function a projection must NOT reach, keyed by the
+    #: module attribute a renderer actually resolves. Each is patched with
+    #: ``wraps=`` the real callable, so a projection that still calls one
+    #: renders correctly and is *counted* rather than broken -- the test
+    #: fails on the count, not on a mangled render.
+    _DECISION_SITES = (
+        "abicheck.report.build.build_report_document",
+        "abicheck.policy.gate_decision.gate_decision_for_result",
+        "abicheck.report.finding.build_report_findings",
+        "abicheck.report.finding.report_findings_for",
+        "abicheck.report.surface_changes.build_report_findings",
+    )
+
+    @staticmethod
+    def _envelope(
+        result: DiffResult, old: AbiSnapshot, new: AbiSnapshot, **options: object
+    ) -> ReportEnvelope:
+        return build_report_envelope(
+            result, old, new, options=RenderOptions(**options)  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def _render_all_from(
+        formats: tuple[str, ...], envelope: ReportEnvelope
+    ) -> dict[str, str]:
+        return {fmt: render_envelope(fmt, envelope) for fmt in formats}
+
+    @contextlib.contextmanager
+    def _decision_spies(self) -> Iterator[dict[str, mock.MagicMock]]:
+        """Patch every decision site at once, each wrapping the real callable."""
+        with contextlib.ExitStack() as stack:
+            yield {
+                target: stack.enter_context(
+                    mock.patch(target, wraps=_import_attr(target))
+                )
+                for target in self._DECISION_SITES
+            }
+
+    @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {},
+            {"show_only": "breaking"},
+            {"show_impact": True},
+            {"contract_evaluation": True, "require_complete_analysis": True},
+        ],
+        ids=["plain", "show_only", "impact", "contract"],
+    )
+    def test_one_envelope_renders_byte_identically_in_any_format_order(
+        self, changes: list[Change], options: dict[str, object]
+    ) -> None:
+        """The acceptance test ADR-061 gap C states: render the same completed
+        document repeatedly, in different format orders, and every format's
+        bytes must be identical every time.
+
+        Parametrized over several change sets *and* several option sets rather
+        than one fixed input: a fixed example would only foreclose the one
+        envelope it names, and the invariant claimed here ("a projection is a
+        pure function of the envelope") is a statement about all of them.
+        """
+        result = _result(changes)
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new, **options)
+
+        forward = self._render_all_from(self._FORMATS, envelope)
+        backward = self._render_all_from(tuple(reversed(self._FORMATS)), envelope)
+        again = self._render_all_from(self._FORMATS, envelope)
+
+        for fmt in self._FORMATS:
+            assert forward[fmt] == backward[fmt], (
+                f"{fmt!r} output differs depending on render order"
+            )
+            assert forward[fmt] == again[fmt], (
+                f"{fmt!r} output differs when the same envelope is rendered twice"
+            )
+
+    @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"show_only": "breaking"}, {"show_impact": True}],
+        ids=["plain", "show_only", "impact"],
+    )
+    def test_envelope_projection_matches_render_output_byte_for_byte(
+        self, changes: list[Change], options: dict[str, object]
+    ) -> None:
+        """``render_output`` is exactly "build one envelope, project it".
+
+        Without this, the two entry points could drift: ``render_output``
+        could keep threading an option a projection ignores (or vice versa),
+        and every other test here would still pass.
+        """
+        result = _result(changes)
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new, **options)
+
+        for fmt in self._FORMATS:
+            assert render_envelope(fmt, envelope) == render_output(
+                fmt, result, old, new, **options  # type: ignore[arg-type]
+            ), f"{fmt!r} disagrees between render_output and render_envelope"
+
+    def test_no_projection_re_runs_policy_or_gate_resolution(self) -> None:
+        """Every decision runs once, during envelope construction -- and none
+        of them runs again no matter how many formats are rendered after.
+
+        This is the half a byte-comparison cannot prove: five renderers each
+        re-deriving the same value from the same ``DiffResult`` produce
+        identical bytes too (that is exactly the pre-envelope state gap C
+        describes), so only a call count separates "cannot disagree" from
+        "happens to agree today".
+        """
+        result = _result([_BREAKING, _ADDITION, _QUALITY])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        with self._decision_spies() as spies:
+            envelope = build_report_envelope(result, old, new)
+            build_calls = {t: s.call_count for t, s in spies.items()}
+            # Render every format twice, in both orders: 10 projections.
+            for formats in (self._FORMATS, tuple(reversed(self._FORMATS))):
+                self._render_all_from(formats, envelope)
+            after = {t: s.call_count for t, s in spies.items()}
+
+        assert build_calls["abicheck.report.build.build_report_document"] == 1
+        assert build_calls["abicheck.policy.gate_decision.gate_decision_for_result"] == 1
+        for target in self._DECISION_SITES:
+            assert after[target] == build_calls[target], (
+                f"{target} ran again while projecting an already-completed "
+                f"envelope ({after[target] - build_calls[target]} extra call(s))"
+            )
 
 
 class TestSarifAndJunitDecisionBoundary:
