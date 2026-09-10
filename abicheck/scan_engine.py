@@ -1208,7 +1208,7 @@ def run_scan_core(
                 compile_context=compile_context,
                 defer_cleanup=defer_cleanup,
                 symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-                debug_presence_only=scan_debug_presence_only(eff_depth_enum, headers, baseline_headers),
+                debug_presence_only=scan_debug_presence_only(eff_depth_enum, headers),
                 include_dependencies=_scan_candidate_include_dependencies(baseline),
                 build_targets=build_targets,
                 # PR 3A blocker 6: the *other* side's resolved scope, handed in
@@ -1352,7 +1352,7 @@ def run_scan_core(
                     baseline_headers=baseline_headers,
                     baseline_includes=baseline_includes,
                     symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
-                    debug_presence_only=scan_debug_presence_only(eff_depth_enum, headers, baseline_headers),
+                    debug_presence_only=scan_debug_presence_only(eff_depth_enum, baseline_headers),
                     suppression=suppression,
                     policy=policy,
                     policy_file=policy_file,

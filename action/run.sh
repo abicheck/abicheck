@@ -2772,6 +2772,36 @@ print(sniff_text_format(Path(sys.argv[1])))
 # that one -- see the comment block above this section for what each one
 # guards against.
 _SCAN_NEEDS_LEGACY_CLI=false
+# ADR-068's second 2026-09-09 amendment ruling table, applied to this Action's
+# own input surface (D8: hard removal, no deprecation window). Each named a
+# `scan` CLI flag that no longer exists, so the only honest outcomes are a
+# clear error naming the blocker/replacement, or a silent downgrade to a
+# different operation than the workflow asked for.
+#
+# Deliberately **before** route selection below. These lived inside the
+# `_SCAN_NEEDS_LEGACY_CLI` branch, so a `mode: scan` run that qualified for
+# the translated `compare` route skipped all three and silently ignored the
+# retired input instead of rejecting it (CodeRabbit review, PR #1186). The
+# retirement is a property of the *input*, not of which CLI the run happens
+# to route onto. `action/validate-inputs.sh` rejects the same three earlier
+# still, before any toolchain install; these copies are what a direct
+# `run.sh` caller (tests, and anyone invoking it outside the composite Action)
+# gets, which is exactly why they must not sit behind a route decision.
+if [[ "$MODE" == "scan" ]]; then
+if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
+  echo "::error::mode: scan no longer supports new-library-set (ADR-068 (b): scan --artifact-set is retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented -- routing it onto compare --no-baseline today would silently narrow those guarantees. Until that lands, run one scan per library."
+  exit 1
+fi
+if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
+  echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
+  exit 1
+fi
+if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
+  echo "::error::mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
+  exit 1
+fi
+fi
+
 if [[ "$MODE" == "scan" ]]; then
   # Case-insensitive, matching `DepthParam.convert()` (Codex review,
   # PR #1172): a raw `INPUT_DEPTH` spelled `BUILD`/`SOURCE` (or any other
@@ -3261,23 +3291,6 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   # — there is no separate --audit/--mode/--source-method/--estimate flag any
   # more (CLI simplification).
   CMD+=(scan)
-  # ADR-068's second 2026-09-09 amendment ruling table, applied to this
-  # Action's own input surface (D8: hard removal, no deprecation window).
-  # Each of these named a `scan` CLI flag that no longer exists, so the only
-  # honest outcomes are a clear error naming the blocker/replacement or a
-  # silent downgrade to a different operation than the workflow asked for.
-  if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
-    echo "::error::mode: scan no longer supports new-library-set (ADR-068 (b): scan --artifact-set is retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented -- routing it onto compare --no-baseline today would silently narrow those guarantees. Until that lands, run one scan per library."
-    exit 1
-  fi
-  if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
-    echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
-    exit 1
-  fi
-  if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-    echo "::error::mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
-    exit 1
-  fi
   SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}"
   # scan has no per-library fan-out (unlike compare) — a directory/package
   # is normally caught early by action/validate-inputs.sh, before any

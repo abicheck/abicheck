@@ -30,11 +30,17 @@ independently:
   exhaustive enumeration over the whole ``EvidenceDepth`` domain, against an
   oracle ("never defer to evidence that is not there") that is not the
   implementation's own membership test.
+* :class:`TestPerSideHeaderEvidence` pins that the answer is per side. The
+  same shortcut applied run-wide does not equalise the two snapshots' evidence
+  tiers --- it only decides which side gets starved, and a starved *new* side
+  reads as a wholesale removal.
 * :class:`TestHeaderlessScanMatchesCompare` states the user-visible half
   against an *independent implementation* — ``compare``, which never applies
-  this shortcut — over several independently-chosen ABI changes and every
-  ``--depth`` a header-less pair can actually run, rather than the single
-  unpinned invocation that surfaced it.
+  this shortcut — over several independently-chosen ABI changes, every
+  ``--depth`` a header-less pair can actually run, with and without a
+  provenance-only ``--public-header-dir``, and once with headers on the
+  baseline side alone: four axes rather than the single unpinned invocation
+  that surfaced the bug.
 """
 
 from __future__ import annotations
@@ -102,27 +108,17 @@ class TestDebugShortcutProperties:
         )
 
 
-class TestRunWideHeaderEvidence:
-    """Both sides of a scan must be built at the same evidence tier."""
+class TestPerSideHeaderEvidence:
+    """Each side's shortcut is answered from that side's own header inputs."""
 
-    _SLOTS = ("headers", "baseline_headers")
+    def test_a_side_with_headers_may_take_the_shortcut(self) -> None:
+        assert (
+            scan_debug_presence_only(EvidenceDepth.HEADERS, (Path("inc/foo.h"),))
+            is True
+        )
 
-    @pytest.mark.parametrize("slot", _SLOTS)
-    def test_a_header_input_on_either_side_keeps_the_shortcut_available(
-        self, slot: str
-    ) -> None:
-        """One side's ``-H`` answers the question for both.
-
-        Enumerated over every side rather than the one the reported case used,
-        so a side added later cannot be silently left out of the disjunction.
-        """
-        kwargs: dict[str, object] = dict.fromkeys(self._SLOTS, ())
-        kwargs[slot] = (Path("inc/foo.h"),)
-        assert scan_debug_presence_only(EvidenceDepth.HEADERS, **kwargs) is True
-
-    def test_no_header_input_on_either_side_withdraws_the_shortcut(self) -> None:
-        empty: dict[str, object] = dict.fromkeys(self._SLOTS, ())
-        assert scan_debug_presence_only(EvidenceDepth.HEADERS, **empty) is False
+    def test_a_side_without_headers_may_not(self) -> None:
+        assert scan_debug_presence_only(EvidenceDepth.HEADERS, ()) is False
 
     def test_the_rung_still_governs_regardless_of_header_input(self) -> None:
         """Header evidence permits the shortcut; it never imposes it.
@@ -130,23 +126,26 @@ class TestRunWideHeaderEvidence:
         ``SOURCE`` is not a rung that defers DWARF to a header parse, so no
         amount of header input may turn the shortcut on there.
         """
-        seeded: dict[str, object] = dict.fromkeys(self._SLOTS, (Path("inc/foo.h"),))
-        assert scan_debug_presence_only(EvidenceDepth.SOURCE, **seeded) is False
+        assert (
+            scan_debug_presence_only(EvidenceDepth.SOURCE, (Path("inc/foo.h"),))
+            is False
+        )
 
-    def test_the_predicate_takes_only_inputs_the_ast_parse_reads(self) -> None:
-        """Provenance-only options must not be reachable as "header evidence".
+    def test_the_predicate_sees_one_side_only(self) -> None:
+        """Structural guard against re-widening this to a run-wide answer.
 
-        Stated structurally, over the signature itself, rather than by passing
-        a provenance value and asserting it is ignored: the narrowing is that
-        such a value has no parameter to arrive through at all. This is what
-        makes reintroducing one a visible signature change instead of a silent
-        widening of the disjunction (Codex review, PR #1186 --- counting
-        ``--public-header-dir`` reopened the very hole this module closes).
+        A revision that answered it once for the whole run starved whichever
+        side lacked headers while the other got a header AST, which reads as a
+        wholesale removal (see the function's own docstring). Pinning the arity
+        makes reintroducing a second side's headers a visible signature change
+        rather than a silent widening.
         """
         import inspect
 
-        params = set(inspect.signature(scan_debug_presence_only).parameters)
-        assert params == {"depth", *TestRunWideHeaderEvidence._SLOTS}
+        assert set(inspect.signature(scan_debug_presence_only).parameters) == {
+            "depth",
+            "side_headers",
+        }
 
 
 #: Independently-chosen ABI changes, each detectable only from type evidence
@@ -253,3 +252,60 @@ class TestHeaderlessScanMatchesCompare:
         assert scan_code == compare_code, (
             f"{where}: scan exit={scan_code} compare exit={compare_code}"
         )
+
+    @pytest.mark.parametrize("case", sorted(_CASES))
+    def test_one_sided_headers_do_not_starve_the_other_side(
+        self, tmp_path: Path, case: str
+    ) -> None:
+        """``--header old=DIR`` must not invent findings on the header-less side.
+
+        The asymmetric half of the same contract, and the one a run-wide answer
+        gets wrong: give only the baseline headers and a shared shortcut leaves
+        the old side with header-AST types and the new side with none, so every
+        type reads as removed. Verified against ``compare`` as the oracle
+        rather than against an expected finding list, since what matters is
+        that the extra evidence on one side does not *change the verdict*.
+        """
+        runner = CliRunner()
+        old, new = self._libs(tmp_path, case)
+        old_inc = tmp_path / "old-include"
+        old_inc.mkdir()
+        (old_inc / "case.h").write_text(_CASES[case][0])
+
+        _, baseline_json = self._run(
+            runner,
+            ["compare", str(old), str(new)],
+            tmp_path / "compare.json",
+        )
+        _, scan_json = self._run(
+            runner,
+            [
+                "scan",
+                str(new),
+                "--against",
+                str(old),
+                "--header",
+                f"old={old_inc}",
+            ],
+            tmp_path / "scan.json",
+        )
+
+        kinds = {f["kind"] for f in (scan_json.get("diff") or {}).get("findings", [])}
+        assert "type_removed" not in kinds, (
+            f"{case}: baseline-only headers fabricated a type_removed; "
+            f"scan reported {sorted(kinds)}"
+        )
+        # Deliberately *not* verdict equality. Extra evidence on one side may
+        # legitimately raise the risk tier -- an asymmetric run really does
+        # earn `layer_coverage_asymmetric`, and reporting it is the honest
+        # outcome, not a regression (`enum_member_added` moves COMPATIBLE ->
+        # COMPATIBLE_WITH_RISK for exactly that reason). What one-sided headers
+        # must never do is manufacture a *break* the symmetric run does not
+        # see, which is what the starved-side failure produced.
+        breaks = {"BREAKING", "API_BREAK"}
+        if _verdict(baseline_json) not in breaks:
+            assert _verdict(scan_json) not in breaks, (
+                f"{case}: baseline-only headers manufactured "
+                f"{_verdict(scan_json)} where compare reports "
+                f"{_verdict(baseline_json)}"
+            )

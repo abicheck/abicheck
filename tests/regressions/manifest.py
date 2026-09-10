@@ -518,7 +518,13 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "taken when that substitute source is actually present. With "
             "the substitute absent, the shortcut leaves the run with "
             "neither, and the loss is silent: the report still names the "
-            "tier that was requested."
+            "tier that was requested. Two corollaries, each independently "
+            "falsified during review: an input that *names* the substitute "
+            "without feeding it to the consumer is not the substitute "
+            "(`--public-header-dir` is a provenance boundary, not an AST "
+            "input); and the question is per operand, since one shared "
+            "answer does not equalise two sides' evidence tiers, it only "
+            "decides which side gets starved."
         ),
         fixed_by=(1186,),
         seed_tests=(
@@ -526,7 +532,11 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_scan_compare_parity.py",
         ),
         public_surfaces=("cli",),
-        axes={"depth": ("headers", "auto"), "change": ("record", "enum", "symbol")},
+        axes={
+            "depth": ("headers", "auto"),
+            "change": ("record", "enum", "symbol"),
+            "header_input": ("none", "provenance_only", "baseline_only"),
+        },
         known_gaps=(
             KnownGap(
                 description=(

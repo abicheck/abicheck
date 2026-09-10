@@ -377,9 +377,12 @@ additionally compares `ARTIFACT` against it.
 !!! warning "A pinned deep depth is a contract (fail-loud)"
     Pinning `--depth build|source` with **no source input**
     (`--sources`/`--build-info`) is an error, not a silent shallow scan: there
-    is nothing to collect L3/L4/L5 from. Pass the evidence, or use the default
-    `auto` for a best-effort binary scan (on `scan`; `dump`/`compare` degrade
-    the same way without erroring, since they have no `auto`).
+    is nothing to collect L3/L4/L5 from. Pass the evidence, or pin
+    `--depth binary`/`--depth headers` for a shallower run that is honest
+    about its rung. Omitting `--depth` on `scan` is *not* the way to ask for a
+    best-effort binary scan any more: since ADR-068's second 2026-09-09
+    amendment it resolves to a fixed `headers`, not to whatever the inputs
+    happen to support.
 
 `scan` is a front-end over `dump`/`compare`: the resolved depth selects an
 internal collection mode, which decides which L-layers get collected and at

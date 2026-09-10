@@ -213,7 +213,7 @@ identity; **DELETE** — leaves the product.
 | 11 | Source-graph analysis (L5) | `scan --depth source` | `compare --depth source` (already exists) | MERGE | ADR-037 D6 keeps L5 internal |
 | 12 | Changed-path localization (`--since`, `--changed-path`) | `cli_scan.py`, `buildsource/poi.py` | `compare --since` / `--changed-path` | COMPARE-STAGE (per-run input, ADVANCED KEEP) | Phase 2 |
 | 13 | Risk-driven evidence selection (`--depth auto`) | `risk.py`, `model/evidence_depth_levels.py` | — | **DELETE** | **Done** (2026-09-09, Phase 4's typed-API slice): ADR-068's second 2026-09-09 amendment rules this (b) -- dropped, not mirrored onto `compare`. An omitted `--depth` resolves to the fixed `headers` rung (`evidence_depth_levels.resolve_unpinned_level`), the same default `compare` always used; a job wanting a deeper rung pins it. The risk score is still computed and *reported*, it just selects nothing. Documented breaking change: an unpinned `scan` that used to escalate on a high-risk seed no longer does, so build/source-only findings need an explicit `--depth` |
-| 14 | Risk rule overrides (`--risk-rules`) | `cli_scan_baseline._load_risk_rules` | `.abicheck.yml` `risk:` | CONFIG | Phase 7 |
+| 14 | Risk rule overrides (`--risk-rules`) | `cli_scan_baseline._load_risk_rules` | — | **DELETE** | **Done** (2026-09-09, Phase 4's typed-API slice): ADR-068's second 2026-09-09 amendment rules this (b) -- dropped, not moved to `.abicheck.yml`. It existed to tune the risk-driven escalation row 13 retires; with nothing left to select, a `risk:` config key would configure a decision no longer taken. The score itself is still computed and reported |
 | 15 | CPython/`abi3` audit (`--abi3`) | `scan_abi3_resolve.py`, `scan_engine._run_abi3_audit` | `compare` candidate-side enrichment stage | COMPARE-STAGE; floor value is CONFIG (`python.abi3_floor`) | Phase 2 |
 | 16 | Artifact-set / multi-library audit (`--artifact-set`) | `service_scan.run_scan_set`, `bundle.py` | `compare --no-baseline DIR` over ADR-065 members | DELETE (mode); capability preserved | ADR-065 S3 component inventories |
 | 17 | Set member-identity/provider manifest (`scan --manifest`) | `cli_scan_helpers.load_artifact_set_manifest`; ADR-056; cli-cleanup PR H | `.abicheck.yml` bundle/provider contract, read by the same path | CONFIG | ADR-056 superseded; G42 provider resolution |
@@ -237,12 +237,19 @@ identity; **DELETE** — leaves the product.
 | 35 | Cost/dry-run estimation | `frontends/cli/scan_dry_run.py`, `artifact_set_dry_run.py` | `compare --dry-run` (ADR-043 D9 shared model) | MERGE | Phase 2 |
 | 36 | `scan`-specific tests (33 modules — corrected from "40"; see Phase 6's own deletion-order checklist for the exact list and the false positives the glob over-counted) | `tests/test_*scan*` | rewritten against `compare`, or deleted with the mode | DELETE last | Phase 6 |
 
-**Nothing in this table is classified DELETE for a capability a user
-currently gets.** The five DELETE rows are: a mode that duplicates
-`compare` (#1), a mode whose capability is preserved by another spelling
-(#16), a truncation knob that contradicts D4 (#20), and two internal
-artifacts — a schema (#30) and a typed API (#31) — replaced by canonical
-equivalents.
+The seven DELETE rows are: a mode that duplicates `compare` (#1), a mode
+whose capability is preserved by another spelling (#16), a truncation knob
+that contradicts D4 (#20), two internal artifacts — a schema (#30) and a
+typed API (#31) — replaced by canonical equivalents, and the two ADR-068's
+second 2026-09-09 amendment added: risk-driven evidence selection (#13) and
+the `--risk-rules` profile that fed it (#14).
+
+The first five removed nothing a user gets. **The last two do**, which is why
+they are called out rather than folded into that claim: an unpinned `scan`
+that used to escalate to `build`/`source` on a high-risk seed now stops at
+`headers`, so a job relying on that escalation must pin the rung it needs.
+The amendment accepted that cost explicitly (ruling (b): dropped, with no
+`compare` equivalent coming).
 
 ---
 

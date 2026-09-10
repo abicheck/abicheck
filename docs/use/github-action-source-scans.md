@@ -180,7 +180,7 @@ checked against the pin, while a live one is.
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
 | Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
-| Risk-driven depth selection (`auto`) | *Retired* (ADR-068's second 2026-09-09 amendment, ruling (b)). An omitted `depth` resolves to `headers` in every mode — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
+| Risk-driven depth selection (`auto`) | *Retired* (ADR-068's second 2026-09-09 amendment, ruling (b)). Under `mode: scan` an omitted `depth` now resolves to a fixed `headers`; under `mode: compare` it still infers from `sources`/`build-info` as the table above describes. Either way nothing is risk-scored — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
 | A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: scan` only — `mode: compare` reads no `budget` input yet |
 
 !!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"
