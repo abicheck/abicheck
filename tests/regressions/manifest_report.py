@@ -150,6 +150,27 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md",
             ),
+            KnownGap(
+                description=(
+                    "Two open instances of this class outside the audit "
+                    "path, found by grepping every `suppression_rule` reader "
+                    "after the audit's own two were fixed -- recorded rather "
+                    "than fixed here, since neither is in the scope the PR "
+                    "that found them was opened for. (1) `sarif.py`'s "
+                    "two-sided suppression `justification` reads only "
+                    "`Change.suppression_rule`, the `label or reason` "
+                    "display collapse, while the same run's JSON already "
+                    "publishes the full ADR-067 record via "
+                    "`reporter.py`'s `_suppressed_change_entry` -- the same "
+                    "between-formats split the audit's SARIF had. (2) "
+                    "`cli_scan_baseline.py`'s baseline `findings[]` entries "
+                    "carry the display label only, with no provenance field "
+                    "at all. Fixing either means routing "
+                    "`DispositionLedger.rule_for` to that builder, exactly "
+                    "as the audit now does."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
         ),
     ),
 )
