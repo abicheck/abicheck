@@ -1095,3 +1095,44 @@ class TestSchemaVersion:
         old, new = _breaking_pair()
         payload = json.loads(reporter.to_json(compare(old, new), report_mode="leaf"))
         assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
+
+
+class TestGateFailOnRemovedLibraryDigestField:
+    """Codex review (PR #1192, fourth round, finding 7): adding
+    ``gate.fail_on_removed_library`` to ``effective_config_fields`` is a
+    public-shape change -- the schema must declare it (both ``required`` and
+    ``properties``, matching the sibling ``gate.on_incomplete_scope``), and
+    ``REPORT_SCHEMA_VERSION`` must have moved past the version that shipped
+    without it (3.14), so schema-driven consumers can discover the field and
+    two same-``REPORT_SCHEMA_VERSION`` reports keep meaning "the digest
+    algorithm agrees"."""
+
+    def test_field_is_declared_required_and_typed_in_the_schema(self):
+        schema = load_compare_report_schema()
+        digest_schema = schema["properties"]["effective_config_fields"]
+        assert "gate.fail_on_removed_library" in digest_schema["required"]
+        assert (
+            digest_schema["properties"]["gate.fail_on_removed_library"]["type"]
+            == "string"
+        )
+
+    def test_report_schema_version_moved_past_314(self):
+        major, minor = (int(p) for p in REPORT_SCHEMA_VERSION.split("."))
+        assert (major, minor) > (3, 14)
+
+    def test_a_real_scalar_report_carries_the_new_field_empty(self):
+        """A scalar comparison resolves no release-fan-out scope, so the
+        field is present (schema-required) but empty -- matching the
+        sibling ``gate.on_incomplete_scope`` field's own contract."""
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        fields = payload["effective_config_fields"]
+        assert fields["gate.fail_on_removed_library"] == ""
+
+    @_requires_jsonschema
+    def test_real_report_carrying_the_new_field_still_validates(self):
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new)))
+        assert "gate.fail_on_removed_library" in payload["effective_config_fields"]
+        schema = load_compare_report_schema()
+        jsonschema.validate(instance=payload, schema=schema)

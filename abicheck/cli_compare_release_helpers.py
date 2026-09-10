@@ -1600,6 +1600,7 @@ def _format_release_json(
         severity_config, policy=policy, policy_file_path=policy_file_path,
         suppress=suppress, pack_application=pack_application,
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
+        fail_on_removed_library=fail_on_removed,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields
