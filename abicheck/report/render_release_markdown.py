@@ -43,6 +43,7 @@ __all__ = [
     "_release_md_bundle_findings",
     "_release_md_changed_libraries",
     "_release_md_coverage_warnings",
+    "_release_md_evidence_contract",
     "_release_md_libraries_table",
     "_release_md_matrix_findings",
 ]
@@ -80,6 +81,37 @@ def _release_md_coverage_warnings(
         for w in cast(list[str], lib.get("coverage_warnings") or [])
     ]
     return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
+
+
+def _release_md_evidence_contract(
+    library_results: list[dict[str, object]],
+) -> list[str]:
+    """Members whose pinned ``--depth`` rung their own evidence never reached.
+
+    ADR-064's exit-7 axis, rendered because this document is written *before*
+    the exit is taken: without it a release exiting 7 produced a Markdown
+    report with no mention of why, the same way its JSON said `exit.code: 0`
+    and its JUnit said `errors="0"` before those were fixed (Codex review).
+    Absent when no member recorded the axis, so a run with no ``--depth`` pin
+    is unchanged.
+    """
+    affected = [
+        f"- `{lib['library']}`"
+        for lib in library_results
+        if lib.get("evidence_contract_error_contribution")
+    ]
+    if not affected:
+        return []
+    return [
+        "",
+        "## ⚠️ Requested Evidence Depth Not Reached",
+        "",
+        *affected,
+        "",
+        "The pinned `--depth` rung was not met for the members above, so this "
+        "release exits 7 (ADR-064 evidence-contract axis) and its findings "
+        "rest on shallower evidence than was asked for.",
+    ]
 
 
 def _release_md_changed_libraries(

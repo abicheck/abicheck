@@ -477,6 +477,70 @@ class TestTheReportAgreesWithTheProcessExit:
         assert data["exit"]["evidence_contract_error_contribution"] == 0
 
 
+@pytest.mark.integration
+class TestEveryReleaseFormatCarriesTheShortfall:
+    """The bug class, stated across every format the release path accepts.
+
+    A release document is rendered *before* the exit is taken, so each
+    renderer has to carry the axis itself. Fixed three times in three
+    rounds -- JSON (`exit.code: 0`), then JUnit (`errors="0"`), then
+    Markdown (no mention at all) -- each time as a separate review finding
+    on the same defect. So this enumerates the formats instead of naming
+    one: a format added later, or one that stops carrying it, fails here.
+
+    `text`/`sarif`/`review`/`html` are deliberately absent: the release path
+    rejects them as usage errors (exit 64), so there is no document to check.
+    """
+
+    @pytest.mark.parametrize("fmt", ("json", "junit", "markdown"))
+    def test_the_document_records_the_shortfall(
+        self, live_release_dirs: tuple[Path, Path], tmp_path: Path, fmt: str
+    ) -> None:
+        old_dir, new_dir = live_release_dirs
+        out = tmp_path / f"report.{fmt}"
+        code, _ = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            "build",
+            "--format",
+            fmt,
+            "-o",
+            str(out),
+        )
+        assert code == 7, fmt
+        text = out.read_text(encoding="utf-8")
+        if fmt == "json":
+            assert json.loads(text)["exit"]["code"] == 7, text[:400]
+        elif fmt == "junit":
+            # The rendered totals, not just the presence of a string: a
+            # dashboard reads the attribute.
+            assert 'errors="0"' not in text.split("\n")[1], text[:200]
+        else:
+            assert "Evidence Depth Not Reached" in text, text[:400]
+
+    @pytest.mark.parametrize("fmt", ("json", "junit", "markdown"))
+    def test_a_clean_release_records_nothing(
+        self, live_release_dirs: tuple[Path, Path], tmp_path: Path, fmt: str
+    ) -> None:
+        """The control every one of the three fixes also needs: no `--depth`
+        pin must leave the document exactly as it was."""
+        old_dir, new_dir = live_release_dirs
+        out = tmp_path / f"clean.{fmt}"
+        code, _ = _invoke(
+            "compare", str(old_dir), str(new_dir), "--format", fmt, "-o", str(out)
+        )
+        assert code == 0, fmt
+        text = out.read_text(encoding="utf-8")
+        if fmt == "json":
+            assert json.loads(text)["exit"]["code"] == 0
+        elif fmt == "junit":
+            assert 'errors="0"' in text.split("\n")[1], text[:200]
+        else:
+            assert "Evidence Depth Not Reached" not in text
+
+
 class TestSetInputEvidenceFlagsStillRejected:
     """Regression guard for the *other* direction: the flags that genuinely
     have no per-library home must keep being rejected. Removing the rung
