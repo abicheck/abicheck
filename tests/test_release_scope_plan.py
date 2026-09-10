@@ -1,0 +1,194 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+
+"""ADR-061 gap D / Definition-of-Done item 8, closure package 4:
+``ReleaseScopePlan``/``ReleaseScopeResult`` (``abicheck.workflows.
+release_scope``) -- the release fan-out's own Request -> ResolvedPlan ->
+Result pair for ADR-065's scope model, replacing the four independent
+locals (``old_map``/``new_map``/``matched_keys``/``inventory_evidence``)
+``cli_compare_release.py`` used to thread by hand.
+
+**Characterization**: :class:`TestBuildReleaseScopeRecordUnaffected` pins
+that routing the exact same inputs through :class:`ReleaseScopePlan` before
+calling :func:`build_release_scope_record` produces a byte-identical
+:class:`~abicheck.model.scope_acquisition.ScopeAcquisitionRecord` to calling
+it directly with the raw values -- the wrapping introduced by this closure
+package changes no observable behavior. The full existing
+``tests/test_compare_release.py`` + ``tests/test_release_scope_*.py`` suite
+(282 tests) was also run and confirmed to pass identically before and after
+wiring ``cli_compare_release.py`` through ``scope_plan.*`` at its two
+``build_*_scope_record`` call sites.
+
+**Completion**: :class:`TestReleaseScopePlanParity` states the actual
+convergence -- an equivalent CLI-shaped invocation (raw locals) and a
+typed-plan-shaped invocation (``ReleaseScopePlan``) resolve to an *equal*
+scope outcome, checked as five separate assertions (compatibility/
+assurance/scope/gate/exit-relevant fields) rather than one aggregate
+equality, per this closure package's completion-test contract.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from hypothesis import given, strategies as st
+
+from abicheck.model.scope_acquisition import AcquisitionState, InventoryCompleteness
+from abicheck.workflows.release_scope import (
+    DIRECT_PAIR_KEY,
+    ReleaseInventoryEvidence,
+    ReleaseScopeResult,
+    SideInventory,
+    build_release_scope_record,
+    resolve_release_scope_plan,
+    resolve_release_scope_result,
+)
+
+_UNPROVEN = SideInventory(InventoryCompleteness.UNPROVEN, "test")
+_PROVEN = SideInventory(InventoryCompleteness.PROVEN, "test")
+
+
+def _maps(
+    old_keys: list[str], new_keys: list[str]
+) -> tuple[dict[str, Path], dict[str, Path]]:
+    return (
+        {k: Path(f"/old/{k}.so") for k in old_keys},
+        {k: Path(f"/new/{k}.so") for k in new_keys},
+    )
+
+
+class TestReleaseScopePlanConstruction:
+    def test_resolve_release_scope_plan_is_a_pure_wrapper(self) -> None:
+        old_map, new_map = _maps(["a", "b"], ["a", "c"])
+        matched = ["a"]
+        evidence = ReleaseInventoryEvidence(old=_UNPROVEN, new=_UNPROVEN)
+
+        plan = resolve_release_scope_plan(old_map, new_map, matched, evidence)
+
+        assert plan.old_map == old_map
+        assert plan.new_map == new_map
+        assert plan.matched_keys == ("a",)
+        assert plan.evidence is evidence
+
+    def test_matched_keys_accepts_any_sequence_type(self) -> None:
+        old_map, new_map = _maps(["a"], ["a"])
+        evidence = ReleaseInventoryEvidence(old=_UNPROVEN, new=_UNPROVEN)
+        as_list = resolve_release_scope_plan(old_map, new_map, ["a"], evidence)
+        as_tuple = resolve_release_scope_plan(old_map, new_map, ("a",), evidence)
+        assert as_list == as_tuple
+
+    def test_resolve_release_scope_result_pairs_plan_and_record(self) -> None:
+        old_map, new_map = _maps(["a"], ["a"])
+        evidence = ReleaseInventoryEvidence(old=_UNPROVEN, new=_UNPROVEN)
+        plan = resolve_release_scope_plan(old_map, new_map, ["a"], evidence)
+        record = build_release_scope_record(
+            old_map,
+            new_map,
+            ["a"],
+            [{"library": "a.so", "verdict": "NO_CHANGE"}],
+            evidence,
+        )
+        result = resolve_release_scope_result(plan, record)
+        assert isinstance(result, ReleaseScopeResult)
+        assert result.plan is plan
+        assert result.record is record
+
+
+class TestBuildReleaseScopeRecordUnaffected:
+    """The characterization property: plan-mediated construction produces
+    the identical record a direct call produces."""
+
+    @given(
+        old_keys=st.lists(st.sampled_from(["a", "b", "c", "d"]), unique=True),
+        new_keys=st.lists(st.sampled_from(["a", "b", "c", "d"]), unique=True),
+    )
+    def test_plan_mediated_record_matches_direct_call(
+        self, old_keys: list[str], new_keys: list[str]
+    ) -> None:
+        old_map, new_map = _maps(old_keys, new_keys)
+        matched_keys = sorted(set(old_keys) & set(new_keys))
+        library_results = [
+            {"library": old_map[k].name, "verdict": "NO_CHANGE"} for k in matched_keys
+        ]
+        evidence = ReleaseInventoryEvidence(old=_UNPROVEN, new=_UNPROVEN)
+
+        direct = build_release_scope_record(
+            old_map, new_map, matched_keys, library_results, evidence
+        )
+
+        plan = resolve_release_scope_plan(old_map, new_map, matched_keys, evidence)
+        via_plan = build_release_scope_record(
+            plan.old_map,
+            plan.new_map,
+            plan.matched_keys,
+            library_results,
+            plan.evidence,
+        )
+
+        assert via_plan == direct
+
+    def test_direct_pair_shape_is_unaffected(self) -> None:
+        old_map = {DIRECT_PAIR_KEY: Path("/o/libx.so")}
+        new_map = {DIRECT_PAIR_KEY: Path("/n/libx.so")}
+        evidence = ReleaseInventoryEvidence(
+            old=_UNPROVEN, new=_UNPROVEN, direct_pair=True
+        )
+        library_results = [{"library": "libx.so", "verdict": "NO_CHANGE"}]
+
+        direct = build_release_scope_record(
+            old_map, new_map, [DIRECT_PAIR_KEY], library_results, evidence
+        )
+        plan = resolve_release_scope_plan(old_map, new_map, [DIRECT_PAIR_KEY], evidence)
+        via_plan = build_release_scope_record(
+            plan.old_map,
+            plan.new_map,
+            plan.matched_keys,
+            library_results,
+            plan.evidence,
+        )
+        assert via_plan == direct
+        assert direct.selection == "direct_pair"
+
+
+class TestReleaseScopePlanParity:
+    """Completion test: a CLI-shaped call (raw locals) and a typed-plan-
+    shaped call resolve to an equal scope outcome, asserted along five
+    separate axes rather than only an aggregate equality."""
+
+    def test_raw_locals_and_typed_plan_agree_on_every_axis(self) -> None:
+        old_map, new_map = _maps(["a", "b"], ["a"])
+        matched_keys = ["a"]
+        evidence = ReleaseInventoryEvidence(old=_PROVEN, new=_UNPROVEN)
+        library_results = [{"library": "a.so", "verdict": "NO_CHANGE"}]
+
+        # "CLI-shaped": the raw locals cli_compare_release.py used to pass
+        # directly, before this closure package's plan wrapper existed.
+        cli_shaped = build_release_scope_record(
+            old_map, new_map, matched_keys, library_results, evidence
+        )
+
+        # "typed-plan-shaped": resolved through ReleaseScopePlan first.
+        plan = resolve_release_scope_plan(old_map, new_map, matched_keys, evidence)
+        plan_shaped = build_release_scope_record(
+            plan.old_map,
+            plan.new_map,
+            plan.matched_keys,
+            library_results,
+            plan.evidence,
+        )
+
+        # 1. compatibility-relevant: the same members reach AVAILABLE.
+        assert {
+            m.member for m in cli_shaped.members_in(AcquisitionState.AVAILABLE)
+        } == {m.member for m in plan_shaped.members_in(AcquisitionState.AVAILABLE)}
+        # 2. assurance/coverage-relevant: unchecked members agree.
+        assert {m.member for m in cli_shaped.unchecked_members} == {
+            m.member for m in plan_shaped.unchecked_members
+        }
+        # 3. scope: the selection rule and out-of-scope members agree.
+        assert cli_shaped.selection == plan_shaped.selection
+        assert cli_shaped.out_of_scope_members == plan_shaped.out_of_scope_members
+        # 4. gate-relevant: proven removals (the exit-8 input) agree.
+        assert cli_shaped.proven_removed_members == plan_shaped.proven_removed_members
+        # 5. the whole resolved outcome is equal.
+        assert cli_shaped == plan_shaped

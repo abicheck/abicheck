@@ -114,6 +114,7 @@ from .workflows.release_scope import (
     build_release_scope_record,
     out_of_scope_provider_names,
     release_inventory_evidence,
+    resolve_release_scope_plan,
     scoped_bundle_maps,
 )
 from .workflows.release_stored_inventory import (
@@ -645,6 +646,14 @@ def compare_release_cmd(
                 old_inventory=old_inventory,
                 new_inventory=new_inventory,
             )
+            # ADR-061 gap D / DoD item 8, closure package 4: the pre-
+            # execution half of ADR-065's scope model (which members are
+            # paired, and each side's own completeness evidence) as one
+            # resolved plan object rather than four independent locals
+            # threaded by hand -- see `ReleaseScopePlan`'s own docstring.
+            scope_plan = resolve_release_scope_plan(
+                old_map, new_map, matched_keys, inventory_evidence
+            )
 
             if fmt != "json":
                 for msg in warning_msgs:
@@ -814,21 +823,21 @@ def compare_release_cmd(
                 from .workflows.release_plan import build_declared_selection_record
 
                 scope_record = build_declared_selection_record(
-                    old_map,
-                    new_map,
-                    matched_keys,
+                    scope_plan.old_map,
+                    scope_plan.new_map,
+                    scope_plan.matched_keys,
                     library_results,
-                    inventory_evidence,
+                    scope_plan.evidence,
                     release_selection,
                     **_scope_failed,
                 )
             else:
                 scope_record = build_release_scope_record(
-                    old_map,
-                    new_map,
-                    matched_keys,
+                    scope_plan.old_map,
+                    scope_plan.new_map,
+                    scope_plan.matched_keys,
                     library_results,
-                    inventory_evidence,
+                    scope_plan.evidence,
                     **_scope_failed,
                 )
             # A member --dso-only could not classify is this run's own
