@@ -586,6 +586,62 @@ class TestCompareRequestContractContextGateReceipt:
         prov = cfg.provenance["policy.overrides"]
         assert prov.layer is not SelectorLayer.PROJECT_CONFIG
 
+    def test_no_change_project_override_is_rejected(self, tmp_path: Path) -> None:
+        """Findings-analysis-fixes review round 6, finding 2: a real
+        ``.abicheck.yml``/``--pack``/``--policy`` document can never assign
+        ``Verdict.NO_CHANGE`` (``policy_file._SEVERITY_MAP`` has no spelling
+        for it), so this is reachable only through a typed
+        ``CompareRequest.project_policy_overrides`` caller constructing an
+        already-parsed pair directly. Left unrejected, the scoring fold
+        still applied it (no vocabulary check of its own) while
+        ``severity_value_for_verdict`` silently dropped it from the
+        persisted receipt -- a comparison that quietly demoted a finding to
+        compatible while its own receipt showed no override at all."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            self._run(
+                old,
+                new,
+                project_policy_overrides=(
+                    (ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),
+                ),
+            )
+
+    def test_no_change_pack_override_is_rejected(self, tmp_path: Path) -> None:
+        """The identical rejection for the sibling ``pack_policy_overrides``
+        field -- the same bug class, the same typed-API-only reachability."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            self._run(
+                old,
+                new,
+                pack_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),),
+            )
+
+    def test_a_real_verdict_project_override_is_not_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: the new validator must not reject a real,
+        ordinary override -- only the nonsensical ``NO_CHANGE`` target."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
+        )
+        assert result.diff.verdict.name == "COMPATIBLE"
+
 
 class TestCompareResultSeverityConfigRenderingParity:
     """Codex review, fresh evidence (PR #1032, commit 72fdf5b, file:line

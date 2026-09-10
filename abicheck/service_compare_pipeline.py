@@ -161,9 +161,8 @@ def _deadline_bound_side_worker(
     ``contextvars`` don't cross a ``ThreadPoolExecutor`` boundary, so without
     this a worker submitted from :func:`resolve_compare_request`'s parallel
     branch would silently ignore ``CompareRequest.budget_s``. Mirrors
-    ``buildsource.source_replay._deadline_bound_worker`` (Codex review,
-    PR #591) -- its own copy, since that module is unrelated to `compare`.
-    """
+    ``buildsource.source_replay._deadline_bound_worker`` -- its own copy,
+    since that module is unrelated to `compare`."""
     from . import deadline
 
     with deadline.with_deadline_ts(deadline_ts):
@@ -501,6 +500,11 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
+    # Round 6 finding 2: reject Verdict.NO_CHANGE overrides (validator docstring has the full account).
+    from .pack_application import reject_no_change_override_target
+    reject_no_change_override_target(request.pack_policy_overrides, field_name="pack_policy_overrides")
+    reject_no_change_override_target(request.project_policy_overrides, field_name="project_policy_overrides")
+
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
     # request`'s own `enforce_requested_depth` call already confirmed both
     # sides' *resolved* evidence meets `request.depth` as a floor -- this is
@@ -514,15 +518,11 @@ def classify_compare_pair(
     )
     # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
     # policy/contract-surface contributions into the loaded PolicyFile, the
-    # same way `pack_application.policy_file_with_packs` already does for the
-    # single-pair `compare` CLI -- a no-op unless a caller (today, the
-    # release fan-out) populated `CompareRequest.pack_policy_overrides`/
-    # `pack_internal_namespaces`. `pf` is reused for the receipt below too
-    # (Codex review, fresh evidence, three rounds over): the receipt
-    # installer records the forwarded pack's own contribution honestly
-    # (`compare_gate_receipt._with_pack_forwarded_provenance`) rather than
-    # this call site needing to hide or discard the file's real identity --
-    # see that function's own docstring for the full account.
+    # same way `pack_application.policy_file_with_packs` does for single-pair
+    # `compare` -- a no-op unless a caller populated `CompareRequest.
+    # pack_policy_overrides`/`pack_internal_namespaces`. `pf` is reused for
+    # the receipt below too (`compare_gate_receipt._with_pack_forwarded_
+    # provenance` records the forwarded pack's own contribution honestly).
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 

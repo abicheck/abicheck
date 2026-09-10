@@ -46,9 +46,9 @@ Split out of :mod:`abicheck.cli_compare_helpers` when that file reached the
 an arbitrary cut. Deliberately a **leaf**: it imports nothing from its
 caller, so no cycle forms. "Which parameters did the user actually type" is
 the caller's question to answer (it holds the Click context), so the answers
-arrive here as data (*typed*) rather than this module reaching back for them,
-and ``resolved_cfg``/``project_cfg`` stay ``Any`` for the same reason --
-typing them would import the very module this one is split out of.
+arrive here as data (*typed*) rather than this module reaching back for
+them, and ``resolved_cfg``/``project_cfg`` stay ``Any`` -- typing them
+would import the very module this one is split out of.
 """
 
 from __future__ import annotations
@@ -114,10 +114,9 @@ def _suppression_source(suppression: Any, path: Any) -> Any:
     a second read could pair one content's digest with another's rules, the
     trap :meth:`SuppressionSource.from_file` documents for its own single
     read. A list with no ``source_sha256`` (``merge()`` drops it, and the
-    ABICC front end constructs several without one) still selected a source,
-    so it is reported as one -- the same absent-vs-empty rule
-    ``contract_context.suppression_config_for`` follows.
-    """
+    ABICC front end constructs several without one) still selected a
+    source, so it is reported as one -- the same absent-vs-empty rule
+    ``contract_context.suppression_config_for`` follows."""
     if suppression is None:
         return None
     from .compatibility_evaluation_frontend import SuppressionSource
@@ -147,12 +146,11 @@ def resolve_cli_config(
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
 
     *policy_option* names the flag that selected ``policy`` when it was not
-    ``--policy`` -- ``--required-symbol``, whose
-    contract switches an untouched ``--policy`` to ``plugin_abi``, with
-    *policy_path*/*policy_sha256* identifying the ``@FILE`` form's list file
-    when that is the form used. *project_sha256* is the digest of the
-    ``.abicheck.yml`` bytes
-    *project_cfg* was parsed from, so a project-supplied value names a
+    ``--policy`` -- ``--required-symbol``, whose contract switches an
+    untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
+    *policy_sha256* identifying the ``@FILE`` form's list file when that is
+    the form used. *project_sha256* is the digest of the ``.abicheck.yml``
+    bytes *project_cfg* was parsed from, so a project-supplied value names a
     revision rather than only a path.
 
     Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
@@ -756,45 +754,35 @@ def _release_summary_effective_config_block(
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
-    alike) -- narrower than a per-library sidecar's own digest, since no
-    ``CompatibilityEvaluationConfig`` exists at release-summary scope at
-    all, so this always resolves the *baseline* tier (see
-    ``effective_config_digest.py``'s own docstring for the two tiers).
+    alike) -- narrower than a per-library sidecar's own digest: this always
+    resolves the *baseline* tier's field *shape* (see
+    ``effective_config_digest.py``'s docstring for the two tiers), even
+    though ``pack_application.resolved_config`` is a real config since round
+    4's fix -- ``policy.overrides`` reads straight from it (round 6 finding
+    1) rather than switching the whole receipt to the rich tier, which would
+    move every other field and the pinned ``_tier`` for no reason this needs.
 
     P1 (CLI-audit): this used to compute the baseline tier from a bare,
     empty ``SimpleNamespace()`` -- carrying only *severity_config* -- so
     ``policy.base``/``policy.reclassify``/``policy.overrides``/
     ``suppressions`` all read empty regardless of the real
-    ``--policy``/``--policy-file``/``--suppress`` every library was
-    actually compared under, as if no policy existed at all. Every library
-    shares one such input (the per-library fan-out reloads it once per
-    library), so resolving it once more here the same way
+    ``--policy``/``--policy-file``/``--suppress`` every library was actually
+    compared under. Every library shares one such input, so resolving it
+    once more here the same way
     (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
-    folding *pack_application* like
-    :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
-    does) reproduces what any one library's own report shows for these
-    fields. Reloaded rather than threaded down because no per-library
-    ``PolicyFile`` is retained at this scope -- the reload runs inside the
-    same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
-    opens, so it doesn't duplicate a warning already logged per-library.
+    folding *pack_application*) reproduces what any one library's own report
+    shows for these fields. Reloaded rather than threaded down because no
+    per-library ``PolicyFile`` is retained at this scope -- the reload runs
+    inside the same ``dedup_validate_overrides_warnings()`` scope
+    ``compare_release_cmd`` opens, so it doesn't duplicate a warning
+    already logged per-library.
 
     Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``
     -- lives here since both callers are at their own ``no_growth`` cap.
 
-    *scope_public_headers* (found by a generalized parity test, PR #1016,
-    once the ``policy.base`` fix above showed the class was worth searching
-    for systematically): the same bug shape as ``policy`` above, just for a
-    second field. ``effective_config_fields_from_diff_result`` reads
-    ``result.scope_to_public_surface``/``.scope_to_public_surface_requested``
-    off whatever it's given; a bare ``SimpleNamespace`` that never sets them
-    falls back to that function's own ``getattr(..., default)`` -- ``False``/
-    ``True`` respectively -- regardless of what ``--scope-public-headers``/
-    ``--no-scope-public-headers`` actually resolved to for this run, exactly
-    as ``policy``/``policy_file`` did before P1. The release fan-out has no
-    ``--post-manifest``/forced-public-symbols concept of its own (unlike a
-    single-pair ``compare``, where ``scope_to_public_surface`` can diverge
-    from ``scope_to_public_surface_requested`` when a forced-public-symbols
-    allowlist is active), so both fields are simply the raw CLI value here.
+    *scope_public_headers*: same bug shape as *policy* above, one field --
+    the raw CLI value, since the release fan-out has no forced-public-
+    symbols concept of its own the way a single-pair ``compare`` does.
     """
     from types import SimpleNamespace
 
@@ -808,9 +796,21 @@ def _release_summary_effective_config_block(
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if pack_application is not None:
+        from dataclasses import replace as _replace
+
         from .pack_application import policy_file_with_packs
+        from .workflows.policy_file import PolicyFile
 
         pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
+        # Round 6 finding 1: fold above carries only the pack's own overrides -- resolved_config.policy.overrides is the one canonical D7 merge (file+pack+project); read it directly.
+        rc = getattr(pack_application.resolved_config, "policy", None)
+        rc_overrides = getattr(rc, "overrides", None)
+        if rc_overrides is not None:
+            pf = (
+                _replace(pf, overrides=dict(rc_overrides))
+                if pf
+                else PolicyFile(base_policy=policy, overrides=dict(rc_overrides))
+            )
     suppression_config = suppression_config_for(suppression)
     # `pf.base_policy`, not the raw `policy` argument, when a `--policy-file` resolved one (Codex review, PR #1016): `checker.compare`'s own `effective_policy = policy_file.base_policy if policy_file is not None else policy` is what a real per-library report's `policy.base` field reflects, so a policy document naming a non-default `base_policy:` (e.g. `sdk_vendor`) produced a release-summary digest still reading the CLI default (`strict_abi`) while every per-library report agreed on the real base -- this stand-in must resolve the identical way.
     effective_policy = pf.base_policy if pf is not None else policy
@@ -882,7 +882,9 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
             impact_table.get("root_entries") if isinstance(impact_table, dict) else None
         ) or []
         impact_direct_removals = (
-            impact_table.get("direct_removals", 0) if isinstance(impact_table, dict) else 0
+            impact_table.get("direct_removals", 0)
+            if isinstance(impact_table, dict)
+            else 0
         )
         has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
         if not findings and not has_impact:
@@ -995,7 +997,5 @@ def release_disposition_audit_block(
             policy=bundle_result.policy,
             policy_file=bundle_result.policy_file,
         )
-        audits.append(
-            compute_disposition_audit(bundle_as_diff_result, severity_config)
-        )
+        audits.append(compute_disposition_audit(bundle_as_diff_result, severity_config))
     return fold_disposition_audits(audits).to_dict()
