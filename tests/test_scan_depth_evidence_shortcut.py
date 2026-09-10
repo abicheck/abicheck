@@ -174,6 +174,20 @@ _CASES: dict[str, tuple[str, str]] = {
 }
 
 
+def _has_debug_evidence(payload: dict) -> bool:
+    """Whether the scanned candidate actually carried DWARF/PDB debug info.
+
+    Read from the report's own `L1_debug` coverage row, not inferred from the
+    platform: what matters to the shortcut is whether a debug fallback exists
+    for this operand, and a stripped Linux build has no more of one than an
+    MSVC-built DLL does.
+    """
+    for row in payload.get("coverage") or ():
+        if row.get("layer") == "L1_debug":
+            return bool(row.get("status") == "present")
+    return False
+
+
 def _verdict(payload: dict) -> str | None:
     """The compatibility verdict, wherever the format happens to carry it."""
     run_outcome = payload.get("run_outcome") or {}
@@ -265,6 +279,18 @@ class TestHeaderlessScanMatchesCompare:
         type reads as removed. Verified against ``compare`` as the oracle
         rather than against an expected finding list, since what matters is
         that the extra evidence on one side does not *change the verdict*.
+
+        **The premise is that the header-less side has DWARF to fall back on.**
+        That is what the fix preserves; where the candidate carries no debug
+        info at all there is nothing to preserve, the starvation is real rather
+        than self-inflicted, and `type_removed` is the honest answer. The first
+        revision of this test asserted the invariant unconditionally and failed
+        on the `windows-latest` integration lane, where the fixture is built by
+        MSVC and carries a PDB rather than DWARF. The precondition is now read
+        off the run's own `L1_debug` coverage row rather than gated on a
+        platform name -- a Linux build stripped of debug info must skip for the
+        same reason a Windows one does, and naming the OS would have hidden
+        that.
         """
         runner = CliRunner()
         old, new = self._libs(tmp_path, case)
@@ -289,6 +315,13 @@ class TestHeaderlessScanMatchesCompare:
             ],
             tmp_path / "scan.json",
         )
+
+        if not _has_debug_evidence(scan_json):
+            pytest.skip(
+                "candidate carries no debug info (MSVC/PDB, or a stripped "
+                "build), so there is no DWARF fallback for the shortcut to "
+                "preserve and this invariant does not apply"
+            )
 
         kinds = {f["kind"] for f in (scan_json.get("diff") or {}).get("findings", [])}
         assert "type_removed" not in kinds, (
