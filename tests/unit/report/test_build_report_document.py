@@ -771,6 +771,44 @@ class TestRendererOrderIndependence:
         assert dict(post_audit.counts)["gating"] == 1
         assert sum(dict(post_audit.counts).values()) == post_audit.detected_total
 
+    def test_mutating_a_shared_policy_file_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``PolicyFile`` is a custom mutable
+        object, not a list/tuple/dict the container-copy loop catches, so it
+        stayed shared with the caller even after every other fix in this
+        class. HTML's own ``compatibility_metrics`` call classifies straight
+        from ``envelope.result.policy_file`` (its own independent decision,
+        distinct from the per-finding verdict SARIF/JSON/Markdown already
+        read off the envelope) -- reassigning an override after construction
+        must not move the rendered binary-compatibility percentage.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        policy_file = PolicyFile()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[addition],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.policy_file is not policy_file, (
+            "the envelope shared the caller's own PolicyFile object"
+        )
+
+        html_before = render_envelope("html", envelope)
+        policy_file.overrides[ChangeKind.FUNC_ADDED] = Verdict.BREAKING
+        html_after = render_envelope("html", envelope)
+
+        assert html_before == html_after, (
+            "HTML's binary-compatibility percentage moved when a PolicyFile "
+            "mutated after the envelope was already built"
+        )
+
     def test_mutating_the_caller_s_snapshots_after_construction_cannot_reach_the_envelope(
         self,
     ) -> None:

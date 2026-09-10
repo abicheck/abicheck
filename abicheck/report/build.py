@@ -282,6 +282,16 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     severity_config)`` call, on this same snapshot, otherwise reads every
     gating record as outside its gate's ``severity_input``, since none of
     the ledger's recorded identities match these new objects).
+
+    ``policy_file`` gets the same deep copy: it is a custom, mutable
+    object (not a list/tuple/dict this loop otherwise catches), and more
+    than one format calls ``effective_verdict_for_change``/
+    ``classify_effective_change`` straight against ``envelope.result.
+    policy_file`` for its own classification -- HTML's own
+    ``compatibility_metrics`` call among them (Codex review, fresh
+    evidence: a `PolicyFile.overrides`` mutation after construction moved
+    HTML's binary-compatibility percentage while ``document``/``findings``
+    stayed at their frozen values).
     """
     import copy
 
@@ -302,6 +312,8 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
             setattr(snapshot, name, tuple(_snapshot_maybe_change(v) for v in value))
         elif isinstance(value, dict):
             setattr(snapshot, name, dict(value))
+    if snapshot.policy_file is not None:
+        snapshot.policy_file = copy.deepcopy(snapshot.policy_file)
     ledger = getattr(snapshot, "disposition_ledger", None)
     if ledger is not None:
         snapshot.disposition_ledger = _remap_disposition_ledger(ledger, identity_map)
