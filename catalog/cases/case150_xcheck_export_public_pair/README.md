@@ -44,22 +44,29 @@ abicheck compare --no-baseline snapshot.abi.json
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
-    reports the same set `scan` does.
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
 
 
 
 ## Expected abicheck finding
 
 ```text
-Coverage
-  crosscheck:exported_not_public present   binary exports ↔ public headers: 1 of 1 export(s) undocumented (0 accounted as documented API / compiler artifact); by reason: undeclared_export=1
-  crosscheck:public_not_exported present   public headers ↔ binary exports: 1 declaration(s) with an export obligation the binary does not satisfy
+# ABI audit: libdemo.so (no baseline)
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] exported_not_public: 1
-  [warning] public_not_exported: 1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-Verdict: COMPATIBLE (exit 0)
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: elf, header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `exported_not_public` | `_Z8internalv` | potential_breaking | present in this build | Symbol '_Z8internalv' is exported by the binary but declared in no public header (declared as function 'internal' in a non-public header). It is accidental ABI surface — hide it (visibility/version script) or document it. |
+| `public_not_exported` | `_Z10public_apiv` | potential_breaking | present in this build | Public header declares 'public_api' (expected symbol '_Z10public_apiv') but the binary does not export it. Code that compiles against the header gets an undefined-symbol link error. |
 ```
 
 ## Minimum evidence

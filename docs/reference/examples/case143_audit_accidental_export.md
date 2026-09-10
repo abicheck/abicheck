@@ -51,21 +51,28 @@ abicheck compare --no-baseline snapshot.abi.json
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
-    reports the same set `scan` does.
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
 
 
 
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE (exit 0)
+# ABI audit: libdemo.so (no baseline)
 
-crosscheck:exported_not_public present   binary exports ↔ public headers: 1 of 2
-  export(s) undocumented (1 accounted as documented API / compiler artifact);
-  by reason: undeclared_export=1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] exported_not_public: 1
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: elf, header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `exported_not_public` | `_Z11debug_dumpv` | potential_breaking | present in this build | Symbol '_Z11debug_dumpv' is exported by the binary but declared in no public header (declared as function 'debug_dump' in a non-public header). It is accidental ABI surface — hide it (visibility/version script) or document it. |
 ```
 
 ## Minimum evidence

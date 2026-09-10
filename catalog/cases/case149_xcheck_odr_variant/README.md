@@ -5,7 +5,13 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline comparison. abicheck's verdict is `API_BREAK` — two translation
+baseline comparison. This finding's own kind is classified `API_BREAK` (the severity
+ground-truth row above); the audit itself reports **no** compatibility
+verdict and exits `0` — an audit has no baseline to break against
+(ADR-068 D2), and unlike legacy `scan` it does not turn an
+`API_BREAK`-classified hygiene finding into a gating exit `2`. That
+difference is recorded in
+[`known-gaps.md`](../../../docs/contribute/known-gaps.md). The finding: two translation
 units materialize **one** public type, `geometry::Vec3`, with **different
 layouts** (one TU's definition carries an extra member behind a macro the
 other TU does not see). This is an ODR violation: the linker picks one
@@ -37,20 +43,28 @@ abicheck compare --no-baseline snapshot.abi.json
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
-    reports the same set `scan` does.
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
 
 
 
 ## Expected abicheck finding
 
 ```text
-Coverage
-  crosscheck:odr_type_variant present   L4 per-TU type layouts: 1 type(s) with divergent cross-TU definitions (ODR conflict)
+# ABI audit: libdemo.so (no baseline)
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] odr_type_variant: 1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-Verdict: API_BREAK (exit 2)
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `odr_type_variant` | `geometry::Vec3` | potential_breaking | present in this build | Type 'geometry::Vec3' has divergent per-translation-unit definitions in 'include/geometry/vec3.h': the source-replay surface recorded different layouts for the same type. Linking code that mixes them is undefined behavior — a consumer compiled against one layout silently reads the other. Reconcile the definitions (usually a macro/flag that changes the type per TU). |
 ```
 
 ## Minimum evidence

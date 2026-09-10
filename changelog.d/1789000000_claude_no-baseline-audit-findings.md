@@ -1,5 +1,16 @@
 ### Fixed
 
+- **Markdown reports no longer let a finding's own text restructure a
+  table.** A detector's description, a demangled symbol, or an extractor's
+  error text could contain a pipe, a newline, or a backtick and close a code
+  span, end a table row early, or split the table apart. The escaping rule
+  `report/comparison_scope.py` already applied to scope tables now lives in
+  one shared leaf (`report/markdown_text.py`) that the audit's finding tables
+  use too, so the two cannot drift. Generated-input property tests over that
+  primitive also found a hole the original had, and then falsified the first,
+  too-narrow fix for it: an odd-length run of backslashes immediately before
+  a pipe pairs off against the escape being emitted for that pipe, leaving a
+  live cell separator and one extra cell in the row.
 - **`abicheck compare --no-baseline` now reports the single-build audit's
   findings.** The audit is implemented as a self-compare, and it used to
   assert the resulting change set was empty — an invariant that held until

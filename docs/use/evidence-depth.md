@@ -67,8 +67,9 @@ one-build audit. `scan` is no longer required for that: as of 2026-09-09
 `compare --no-baseline CANDIDATE` reproduces the audit's findings in full
 (both the stored-snapshot crash and the live-binary empty-`changes` result
 are fixed), takes `--depth`/`--sources`/`--build-info`/`--contract`/
-`--dry-run`, and is pinned against `scan` on all eleven G20 audit fixtures
-by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
+`--dry-run`, and is pinned against `scan` — at least every check `scan`
+reports, counted per finding kind — on all eleven G20 audit fixtures by
+`tests/parity/test_no_baseline_audit_corpus_parity.py`.
 
 !!! info "This topic in three pages — you are on **Flags**"
     **Model** — [Evidence & Detectability](../learn/evidence-and-detectability.md):
@@ -491,9 +492,9 @@ abicheck compare --no-baseline libfoo.so -H include/
 The findings land under `findings[]` — `changes[]` stays empty and `verdict`
 stays `null`, because an audit reports no addition, removal, or
 compatibility verdict (ADR-068 D2). Legacy `abicheck scan CANDIDATE` (no
-`--against`) still runs the same checks; the two are pinned to the same
-finding set across all eleven G20 audit fixtures below by
-`tests/parity/test_no_baseline_audit_corpus_parity.py`.
+`--against`) still runs the same checks; the audit is pinned to report at
+least as many findings of every kind across all eleven G20 audit fixtures
+below by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
 
 `--sources`/`--build-info`/`--depth` work on the `--no-baseline` path too,
 so the L3/L4-dependent checks further down this section no longer need
@@ -518,7 +519,7 @@ real build flags, so it only fires when you also pass an L3 build input
 skipped coverage row, not a pass:
 
 ```bash
-abicheck scan libfoo.so -H include/ \
+abicheck compare --no-baseline libfoo.so -H include/ \
   --build-info build/compile_commands.json
 ```
 
@@ -575,10 +576,13 @@ succeed on a pinned deep depth.
 abicheck compare old.abi.json libfoo.so --sources new=. --depth source --dry-run
 ```
 
-`scan --sources . --depth source --dry-run` (no `--against`) still works too,
-and is the only `--dry-run`-honoring way to preview an *audit-only* run today
-— `compare --no-baseline`'s CLI slice doesn't read `--dry-run` yet (see
-[Scenario S5](../integration/scenarios/single-build-audit.md)).
+`compare --no-baseline CANDIDATE --sources . --depth source --dry-run`
+previews an *audit-only* run, and unlike two-sided `compare --dry-run` it
+**does** preview its own real run's floor: against a live candidate, a
+pinned `--depth build`/`--depth source` with no `--sources`/`--build-info`
+resolvable blocks the preview rather than reporting a clean plan (see
+[Scenario S5](../integration/scenarios/single-build-audit.md)). Legacy
+`scan --sources . --depth source --dry-run` still works too.
 
 ### Release baseline — unseeded `source`
 

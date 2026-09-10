@@ -55,20 +55,28 @@ abicheck compare --no-baseline snapshot.abi.json
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
-    reports the same set `scan` does.
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
 
 
 
 ## Expected abicheck finding
 
 ```text
-Coverage
-  crosscheck:public_to_internal_dependency present   L5 reachability: 1 public declaration(s) depending on an internal entity
+# ABI audit: libdemo.so (no baseline)
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] public_to_internal_dependency: 1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-Verdict: COMPATIBLE (exit 0)
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `public_to_internal_dependency` | `json_parse` | potential_breaking | present in this build | Public API 'json_parse' depends on internal entity 'validate_utf8' (declared in a private header / source file, not the public surface) via a DECL_CALLS_DECL edge. Consumers cannot see it, so a change to it is an undeclared behavioral risk. Make the dependency public or sever it. |
 ```
 
 The underlying edge, read directly off the loaded snapshot via

@@ -373,3 +373,83 @@ def test_an_unknown_format_is_an_internal_error_not_a_silent_default() -> None:
     """
     with pytest.raises(ValueError, match="unsupported --no-baseline format"):
         render_no_baseline(_result("case143_audit_accidental_export"), "html")
+
+
+# ---------------------------------------------------------------------------
+# Markdown structural integrity: a value the report does not control can
+# never restructure the document that renders it.
+# ---------------------------------------------------------------------------
+
+
+_MARKDOWN_HOSTILE = st.text(
+    alphabet=st.sampled_from(
+        ["|", "`", "\n", "\r", "\t", "\x00", "#", "-", "\\", " ", "x", "—"]
+    ),
+    min_size=0,
+    max_size=40,
+)
+
+
+def _markdown_finding_rows(text: str) -> list[str]:
+    """Every row of the candidate-side findings table in *text*."""
+    lines = text.splitlines()
+    start = lines.index("## Candidate-side findings")
+    rows = [
+        line
+        for line in lines[start:]
+        if line.startswith("| ") and not line.startswith("| --- ")
+    ]
+    assert rows, text
+    return rows
+
+
+def _cell_count(row: str) -> int:
+    """Cells in a Markdown table *row*, honoring backslash-escaped pipes.
+
+    A deliberately independent oracle: it counts unescaped ``|`` separators
+    from the rendered text rather than reusing ``md_cell``'s own escaping,
+    so a bug in that helper cannot make this measurement agree with it.
+    """
+    count = 0
+    escaped = False
+    for ch in row.strip().strip("|"):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+        elif ch == "|":
+            count += 1
+    return count + 1
+
+
+@settings(max_examples=60, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+@given(description=_MARKDOWN_HOSTILE, symbol=_MARKDOWN_HOSTILE)
+def test_a_hostile_finding_value_never_restructures_the_markdown_table(
+    description: str, symbol: str
+) -> None:
+    """A detector's own text is data, never Markdown structure.
+
+    Stated over generated adversarial values rather than one crafted
+    string (AGENTS.md's bug-class rule): a finding's ``description``/
+    ``symbol`` reach the renderer from a detector, a demangler, or a
+    header path, so *any* pipe, newline, backtick, or control character in
+    them must land inside one cell — never end the row early, split the
+    table, or leave the code span open for the rest of the document. The
+    invariant is structural (every row has the header's cell count, and
+    the table stays one contiguous block), not a golden string.
+    """
+    result = _result("case143_audit_accidental_export")
+    findings = list(result.findings)
+    assert findings, "fixture must carry at least one finding to perturb"
+    findings[0].description = description
+    findings[0].symbol = symbol
+
+    text, _ = render_no_baseline(result, "markdown")
+    rows = _markdown_finding_rows(text)
+    header_cells = _cell_count(rows[0])
+    assert header_cells == 5, rows[0]
+    for row in rows[1:]:
+        assert _cell_count(row) == header_cells, (row, description, symbol)
+    # One contiguous table: no generated newline may split it apart.
+    assert len(rows) == 1 + len(findings), (rows, description, symbol)

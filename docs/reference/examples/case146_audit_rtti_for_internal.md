@@ -53,20 +53,29 @@ abicheck compare --no-baseline snapshot.abi.json
     retires `scan`. This case was blocked on that migration until
     2026-09-09; the audit now reports the finding below directly, and
     `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
-    reports the same set `scan` does.
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
 
 
 
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE (exit 0)
+# ABI audit: libdemo.so (no baseline)
 
-crosscheck:rtti_for_internal_type present   typeinfo exports ↔ private-header
-  provenance: 2 RTTI symbol(s) for one of 1 private type(s)
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] rtti_for_internal_type: 2
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: elf, header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `rtti_for_internal_type` | `_ZTI12InternalNode` | potential_breaking | present in this build | Symbol '_ZTI12InternalNode' exports run-time type information for type 'InternalNode', which is declared only in a private (non-installed) header. Its typeinfo leaks onto the ABI surface though consumers cannot name the type — hide the type or stop exporting its RTTI. |
+| `rtti_for_internal_type` | `_ZTV12InternalNode` | potential_breaking | present in this build | Symbol '_ZTV12InternalNode' exports run-time type information for type 'InternalNode', which is declared only in a private (non-installed) header. Its typeinfo leaks onto the ABI surface though consumers cannot name the type — hide the type or stop exporting its RTTI. |
 ```
 
 ## Minimum evidence

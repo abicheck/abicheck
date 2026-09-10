@@ -180,7 +180,19 @@ def test_no_baseline_exit_code_is_clean_without_a_contract(
     """An audit's hygiene findings never gate on their own (ADR-028 D3 /
     ADR-035 D1: they stay advisory), and without ``--contract`` there is no
     coverage axis either -- so every fixture exits 0. This is what makes the
-    exit-1 contract case below a real signal rather than noise."""
+    exit-1 contract case below a real signal rather than noise.
+
+    This is a *deliberate* difference from legacy ``scan``, not an
+    unexamined baseline: ``scan`` derives a verdict from the same findings
+    and exits ``2`` on the two fixtures whose finding kind is
+    ``API_BREAK``-classified (case148, case149). ADR-068 D2 forbids an audit
+    reporting a compatibility verdict, and ``2`` is that family's own code,
+    so the audit cannot emit it. The consequence -- there is no way to gate
+    a CI job on an audit finding yet -- is recorded in
+    ``docs/contribute/known-gaps.md`` as an open ADR-068 amendment, and this
+    assertion is what would fail first if an audit-gate axis ever landed
+    without that decision being made.
+    """
     path = _fixture_path(case_name, filename)
     result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
     assert result.exit_code == 0, result.output

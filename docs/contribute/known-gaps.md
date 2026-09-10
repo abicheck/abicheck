@@ -6757,11 +6757,55 @@ nothing lost, nothing manufactured:
 | case151 (`thin`) | `private_header_leak: 1` | `private_header_leak: 1` |
 | case181 | `public_to_internal_dependency: 1` | `public_to_internal_dependency: 1` |
 
-The lane asserts the two halves separately, because checking only one is how
-this gap got in: *no capability loss* (every check `scan` fires,
-`compare --no-baseline` fires at least as often) and *nothing manufactured*
-(every reported finding is genuinely candidate-side, in a D3-permitted
-state, with `changes == []` and `verdict == null` still holding).
+The table above is the *measured* result on today's fixtures. What the lane
+**asserts** is deliberately weaker and directional, in two halves, because
+checking only one is how this gap got in: *no capability loss* (every check
+`scan` fires, `compare --no-baseline` fires at least as often, counted per
+finding kind) and *nothing manufactured* (every reported finding is
+genuinely candidate-side, in a D3-permitted state, with `changes == []` and
+`verdict == null` still holding). It is not an identical-report assertion,
+and must not be described as one: the contract this PR was gated on is
+"the same or a strictly richer finding set", so pinning equality would
+fail a future run that legitimately reports *more*.
+
+**One capability `scan` has that the audit report does not** (found while
+correcting that overstated claim, recorded rather than quietly reworded):
+`scan`'s `crosscheck` block carries a per-check *coverage row* — status
+(`present`/`skipped`/`partial`), its detail line, and the `providers` list
+that corroborated it. The audit report states each finding and its D3
+evolution state, and its `cross_source_evolution` block counts the four
+states, but no per-check row: a check that ran and found nothing, and a
+check that could not run at all, are both simply absent from `findings[]`
+(the Markdown renderer says so in prose; the JSON does not distinguish
+them). That is squarely against `vision.md`'s "record before disposing"
+and ADR-068 D9, so it is a real gap, not a design choice — it is left open
+here rather than folded into this PR because a coverage block is a report
+schema addition with its own compute/render pair, not a bug in the
+findings path this entry closed. `catalog/cases/case151_xcheck_provider_
+matrix/README.md` reads the providers off `run_crosschecks()` directly in
+the meantime, and says why.
+
+**A second capability difference, on the exit code** (found the same way, by
+regenerating the catalog's expected outputs against the real command instead
+of trusting the prose): legacy `scan` derives a *verdict* from an audit's own
+findings, so a hygiene finding whose `ChangeKind` is `API_BREAK`-classified
+gates CI at exit `2` — verified live, `scan` on `case148`'s and `case149`'s
+committed snapshots exits `2`, while `case143`'s `RISK`-classified finding
+exits `0`. `compare --no-baseline` exits `0` for all of them: ADR-068 D2 says
+an audit reports no compatibility verdict, and `2` is the compatibility
+family's own source-break code, so emitting it would be manufacturing
+exactly the signal D2 forbids. The CLI is at least loud rather than silently
+ignoring the request — `--severity-preset` with `--no-baseline` is a usage
+error (exit `64`) naming this reason, not a no-op.
+
+The gap is that there is then **no** way to gate a CI job on an audit finding
+today, which a `scan` user migrating a gating job needs. Closing it means an
+orthogonal audit-gate axis (its own exit code, folded with `max` like the
+coverage and evidence-contract axes, never `2`/`4`), plus deciding whether it
+is on by default or opt-in — an ADR-068 amendment, not a bug fix, which is
+why this PR records it rather than inventing the semantics. Until then
+`scan` must stay reachable for a gating audit job, and its retirement (§3 of
+`docs/contribute/plans/one-comparison-product.md`) is blocked on this.
 
 Per `AGENTS.md`'s bug-class rule the D3 invariant is **also** stated as a
 property test over generated inputs rather than eleven fixed cases:

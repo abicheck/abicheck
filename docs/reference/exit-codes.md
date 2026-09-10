@@ -209,9 +209,22 @@ exit-7 axis, matching the two-sided `compare` path exactly. A *stored*
 snapshot candidate (`.abi.json`) is exempt — this run never extracted it, so
 it cannot have fallen short of a pinned depth.
 
-`--dry-run` reports the same condition ahead of any analysis: a pinned
-`--depth build`/`--depth source` with no evidence input is a dry-run
-*blocker* (exit `1`), never a clean preview of a run that would exit `7`.
+`compare --no-baseline` never emits `2`/`4`: an audit reports no
+compatibility verdict (ADR-068 D2), so the compatibility family contributes
+nothing and only the orthogonal axes above can raise its exit code.
+`--severity-preset` is a usage error (`64`) there rather than a no-op.
+Legacy `scan`'s audit mode *did* gate at `2` on an `API_BREAK`-classified
+hygiene finding; that difference, and what closing it would take, is
+recorded in [`known-gaps.md`](../contribute/known-gaps.md).
+
+**On `compare --no-baseline` only**, `--dry-run` reports the same condition
+ahead of any analysis: against a *live* candidate, a pinned `--depth build`/
+`--depth source` with no evidence input is a dry-run *blocker* (exit `1`),
+never a clean preview of a run that would exit `7`. Two-sided
+`compare --dry-run` does **not** preview its own floor today — it still
+exits `0` on the same pinned-but-unsatisfiable depth (recorded in
+[`known-gaps.md`](../contribute/known-gaps.md); giving it the same preview
+is the natural follow-up, and would make it exit nonzero there too).
 
 ## Analysis-assurance contribution (P0.4)
 

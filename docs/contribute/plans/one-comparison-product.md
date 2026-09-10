@@ -435,7 +435,7 @@ per-row prerequisites in §3 and §4 are the detail beneath these.
 
 | # | Prerequisite | Gates | State today |
 |---|---|---|---|
-| P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | Not started; ADR-065 S2's record exists to extend |
+| P1 | An acquisition state for "OLD declared absent" in ADR-065's vocabulary, with its completeness/outcome consequences | `--no-baseline` (§3 #2), and therefore the whole audit half of the retirement | **Landed** (2026-09-09) — `declared_absent` is a real `AcquisitionState`, carried through `run_outcome`/`comparison_scope` and stated in every audit report's `old_acquisition_state` |
 | P2 | An evolution state on the canonical finding model, `not_evaluated` included, carried by `report/`'s compute/render pair | Every one-sided check migration (§3 #3-#8, #15) | **Landed**: a second, deliberately distinct enum from Phase 1 item 2's cross-comparison-chain `FindingEvolution` above — `checker_policy.CrossSourceEvolution` + `Change.cross_source_evolution` state how a cross-source check behaves across OLD/NEW *within one* `compare()` call, with `workflows.cross_source_evolution.compute_cross_source_evolution` as the model's first real producer and `report.cross_source_evolution`'s compute/render pair as its first real JSON projection (schema 3.7) — now covering all **eleven** checks: `unversioned_exported_symbol` and `private_header_leak` landed first (the latter generalized the matching primitive's per-finding identity — a symbol-only key silently collapsed two distinct leaked types flagged on the same function; identity is now a per-check function, defaulting to `symbol` for a check without that ambiguity), `exported_not_public`, `public_not_exported`, `rtti_for_internal_type`, `public_to_internal_dependency` joined next (two more, `rtti_for_internal_type` and `public_to_internal_dependency`, also needed the per-check identity generalization), and `header_build_context_mismatch`, `odr_type_variant`, `identity_collision_detected`, `compile_context_conflict`, and `source_surface_dso_mismatch` close out the row in this PR (`odr_type_variant`, `identity_collision_detected`, and `compile_context_conflict` also needed their own composite identity). All eleven checks are now reachable by every front end: `compare()` runs the whole stage automatically (`cross_source_checks` defaults to `True`), no opt-in flag anywhere (ADR-068 D4/D5). **The correctness crux** — a pre-existing problem must never read as newly introduced when a side's evidence can't confirm it — is exercised as a property test for all eleven checks. **Update (2026-09-09, Phase 4 commit 1, ADR-068 amendment):** the stripping behavior described above was itself the bug — a cross-source finding is `RISK`/`API_BREAK`-severity by design (D3's authority rule), never advisory-only, so `scan --against`'s baseline-compare path no longer strips it back out; `cli_scan_baseline._strip_automatic_cross_source_findings` is deleted, and a baseline `scan` now gates a cross-source finding exactly as `compare` does — same verdict, same severity, same exit-code contribution. `scan`'s own dedicated `crosscheck` report block and `--crosscheck KEY=error` promotion remain a separate, scan-only surface, unaffected. See §3 #3 above for the full account |
 | P3 | `compare` emitting the budget-overflow (`5`) and evidence-contract (`7`) exit axes | `scan`'s deletion (they are `scan`-only today; `cli_stack.py`'s own `5` is unrelated) | **Landed** (2026-09-09, Phase 4 commit 2) — `--budget` and the `--depth build`/`source` evidence-contract floor both emit their axis now; see §3 rows #19/#28 |
 | P4 | A public/internal boundary derivable from `-H` directory provenance plus `.abicheck.yml` `scope.public_header_dirs` | The leakage and public-vs-exported checks (§3 #4, #5, #22) | **Solved** for both named sources: `-H` directory provenance already fed `provenance.apply_provenance` (unchanged, file-vs-directory asymmetry preserved verbatim — a lone `-H` *file* still does not, on its own, establish a boundary the same way `scan --public-header-dir` requires a directory; note `compare`'s own pre-existing `-H` handling was already slightly looser than that rule before this PR and is left as it was found, see `workflows/cross_source_evolution.py`'s module docstring); this PR adds `.abicheck.yml`'s `scope.public_header_dirs` (a new key, distinct from the pre-existing `scope.public` boolean the plan's own shorthand risked conflating it with) as a second, additive source, threaded through `cli_compare_helpers.run_compare` → `cli_resolve._resolve_compare_snapshots`'s `config_public_header_dirs` parameter into the same `InputSpec.public_header_dirs`/`apply_provenance` machinery. No new CLI flag. `scan --public-header-dir` itself is untouched |
@@ -665,12 +665,16 @@ section's *actual* state, not the target it originally described:
   Action just hadn't caught up). **`_SCAN_NEEDS_LEGACY_CLI` itself is not
   yet deleted in this commit** — this investigation also surfaced a
   separate, real gap in `compare --no-baseline` (the audit-only path:
-  `--sources`/`--build-info`/`--depth`/`--dry-run` are not read by
-  `frontends/cli/commands/compare_no_baseline.py` today, and only `json`/
-  `markdown` formats are supported), outside this commit's file ownership,
-  that must close before every `mode: scan` request — audit-only included —
-  can safely route to `compare` unconditionally. See the known-gaps entry
-  for the exact remaining mechanical steps once that closes.
+  `--sources`/`--build-info`/`--depth`/`--dry-run` were not read by
+  `frontends/cli/commands/compare_no_baseline.py`, and only `json`/
+  `markdown` formats were supported), outside this commit's file ownership,
+  that had to close before every `mode: scan` request — audit-only included
+  — could safely route to `compare` unconditionally. **That gap closed on
+  2026-09-10**: all four options are read, and the supported format set is
+  `json`/`markdown`/`sarif`/`junit`/`oneline` (`html`/`review` remain a
+  usage error — an audit has no two-sided document for either to render).
+  `_SCAN_NEEDS_LEGACY_CLI`'s own deletion is the remaining mechanical step;
+  see the known-gaps entry.
 - **Typed API — not started.** `ScanRequest`/`ScanResult` still define every
   field they did before this commit (`service_scan.py`); only
   `collapse_versioned_symbols` has been absorbed into `CompareRequest`
@@ -701,9 +705,10 @@ section's *actual* state, not the target it originally described:
   `--source-method` are all removed spellings) and its dead `graph` rung is
   dropped. `tests/scenarios/ci_gating.yaml`'s SC-SCAN-BINARY-DEPTH-MATRIX-ARGS
   `flow:` line is corrected to a command that parses.
-  `examples/workflows/audit-release` and the nine G20 audit cases stay on
-  `scan`, annotated as blocked rather than dropped from the coverage
-  denominator; `validation/scripts/run_oneapi_scan.py` stays on `scan` for
+  `examples/workflows/audit-release` and the G20 audit cases were annotated
+  as blocked rather than dropped from the coverage denominator at the time;
+  both moved to `compare --no-baseline` on 2026-09-09/10 once the audit path
+  reproduced `scan`'s findings; `validation/scripts/run_oneapi_scan.py` stays on `scan` for
   the network-history reason its own docstring records.
 - **Blocker discovered while doing the above — now closed (2026-09-09).**
   `compare --no-baseline` did not reproduce `scan`'s audit-mode findings at
@@ -1362,7 +1367,7 @@ under Phase 0's parity harness while both commands exist.
 | F-19 | **Output-format invariance** | Canonical result block byte-identical across `--format`/`--view`/`--write`/demangle permutations; exit code identical |
 | F-20 | `--explain-patterns` does not change the verdict | Verdict/exit identical with and without it, on a fixture where the old implication changed both |
 | F-21 | Live vs. snapshot parity | `compare A.so B.so` ≡ `dump A.so && compare A.json B.so` for the same evidence |
-| F-22 | `--no-baseline` audit | Candidate-side findings present; evolution axis `not_evaluated`; **no** additions, removals, or compatibility verdict |
+| F-22 | `--no-baseline` audit | Candidate-side findings present; every one carries an evolution state drawn from `{persistent, not_evaluated}` — ADR-068 D3 permits both against a `declared_absent` OLD and forbids only `introduced`/`resolved`; **no** additions, removals, or compatibility verdict |
 | F-23 | `--no-baseline` over a directory | Replaces `scan --artifact-set`: per-member audit findings, one result document |
 | F-24 | Budget overflow / evidence-contract abort | Exits `5`/`7` from `compare` with the same precedence `scan` had (ADR-064) |
 | F-25 | Not-comparable operands | Exit `6`, no fabricated findings |

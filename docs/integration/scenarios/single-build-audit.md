@@ -24,8 +24,13 @@ window** (ADR-068 D8) once that migration completes, so treat
 aborting with an `AssertionError`, and a live binary plus `-H` rendering an
 empty result — are both fixed, and
 `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that
-`compare --no-baseline` reports the same finding set `scan` does across all
-eleven G20 audit fixtures.
+`compare --no-baseline` reports at least every check `scan` does — counted
+per finding kind, so no capability is lost — across all eleven G20 audit
+fixtures, while manufacturing no comparison of its own. It is a
+no-capability-loss floor, not an assertion that the two produce
+byte-identical reports: `scan`'s per-check coverage rows (status/detail/
+providers) have no audit-report equivalent yet, see
+[`known-gaps.md`](../../contribute/known-gaps.md).
 
 ## The CLI path: `compare --no-baseline`
 

@@ -61,6 +61,7 @@ from .cross_source_evolution import (
     render_cross_source_evolution_json,
 )
 from .finding import build_report_findings
+from .markdown_text import md_cell
 from .no_baseline_document import (
     NO_BASELINE_REPORT_SCHEMA_VERSION as NO_BASELINE_REPORT_SCHEMA_VERSION,
     NO_BASELINE_SUPPORTED_FORMATS as NO_BASELINE_SUPPORTED_FORMATS,
@@ -368,9 +369,10 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             change = finding.change
             state = change_cross_source_evolution_field(change) or "candidate-side"
             lines.append(
-                f"| `{change.kind.value}` | `{change.symbol or '-'}` | "
-                f"{finding.category.value} | {_EVOLUTION_NOTE.get(state, state)} | "
-                f"{change.description or ''} |"
+                f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
+                f"{md_cell(finding.category.value)} | "
+                f"{md_cell(_EVOLUTION_NOTE.get(state, state))} | "
+                f"{md_cell(change.description or '')} |"
             )
     if doc.suppressed:
         lines += [
@@ -389,8 +391,8 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             change = finding.change
             rule = getattr(change, "suppression_rule", None) or "(rule gave no reason)"
             lines.append(
-                f"| `{change.kind.value}` | `{change.symbol or '-'}` | "
-                f"{finding.category.value} | {rule} |"
+                f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
+                f"{md_cell(finding.category.value)} | {md_cell(rule)} |"
             )
     if doc.coverage_exit_contribution:
         lines += [
