@@ -65,8 +65,16 @@ import pathlib
 #: bytes or true EOF" for any reader, the other the bounded decoded-prefix
 #: classification built on it -- neither touches the v2 document surface
 #: this scope tracks, so neither belongs in the plan's module table.
-#: `closure_identity` is a seventh, the same class as `snapshot_load_
-#: normalization` just above: ADR-061 gap B's real owner behind the flat
+#: `bundle_facts_codec`/`bundle_facts_archive`/`bundle_facts_package` are a
+#: seventh: `BundleFacts`'s own JSON codec, G40 archive format, and
+#: multi-artifact `ProjectSnapshot` package adapter (ADR-061 gap E, moved
+#: here from the flat `bundle_facts_serialization.py`/`bundle_facts.py`/
+#: `bundle_facts_store.py`) -- the same class as `bundle_facts_validation`/
+#: `native_identity_aliases` just below: `BundleFacts`-adjacent storage
+#: helpers, not one of the Phase 0 identity/availability/versioning/package
+#: primitives this scope tracks.
+#: `closure_identity` is an eighth, the same class as `snapshot_load_
+#: normalization` above: ADR-061 gap B's real owner behind the flat
 #: `qualified_name_segments` facade's anonymous/lambda-closure ordinal-
 #: identity renumbering -- snapshot string normalization, not a Phase 0
 #: identity/availability/versioning/package primitive.
@@ -78,6 +86,9 @@ NON_ADR062_MODULES = frozenset(
         "bundle_archive_cd_guard",
         "bundle_archive_json_guard",
         "bundle_facts_validation",
+        "bundle_facts_codec",
+        "bundle_facts_archive",
+        "bundle_facts_package",
         "native_identity_aliases",
         "json_budget",
         "zstd_frame_guard",

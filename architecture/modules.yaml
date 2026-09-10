@@ -26,7 +26,10 @@
         "abicheck/evidence_depth.py",
         "abicheck/fact_provenance.py",
         "abicheck/name_classification.py",
+        "abicheck/qualified_name_segments.py",
+        "abicheck/qualified_name_segments_walk.py",
         "abicheck/report_side_facts.py",
+        "abicheck/stable_abi.py",
         "abicheck/stable_abi_data.py",
         "abicheck/errors.py"
       ]
@@ -161,8 +164,11 @@
         "abicheck/symvers_metadata.py",
         "abicheck/tu_fragment.py",
         "abicheck/tu_merge.py",
+        "abicheck/tu_merge_provenance.py",
         "abicheck/type_metadata.py",
-        "abicheck/dumper_contract.py"
+        "abicheck/dumper_contract.py",
+        "abicheck/dumper_manifest.py",
+        "abicheck/header_only_dump.py"
       ]
     },
     "compare": {
@@ -178,7 +184,11 @@
         "abicheck/buildsource/graph_reconcile.py",
         "abicheck/buildsource/source_diff.py",
         "abicheck/buildsource/source_graph_compare.py",
+        "abicheck/comparability_fields.py",
+        "abicheck/comparability_json.py",
+        "abicheck/comparability_language_mode.py",
         "abicheck/comparability_profile.py",
+        "abicheck/comparability_sequences.py",
         "abicheck/confidence.py",
         "abicheck/detector_registry.py",
         "abicheck/diff_abi_tags.py",
@@ -224,6 +234,7 @@
         "abicheck/diff_types_surface.py",
         "abicheck/diff_types_vtable.py",
         "abicheck/diff_unnamed_types.py",
+        "abicheck/diff_versioning.py",
         "abicheck/diff_vtable_layout.py",
         "abicheck/diff_wheel_deployment.py",
         "abicheck/finding_identity.py",
@@ -243,6 +254,7 @@
       ],
       "legacy_paths": [
         "abicheck/analysis_assurance.py",
+        "abicheck/analysis_assurance_layout.py",
         "abicheck/compatibility_evaluation_config.py",
         "abicheck/compatibility_evaluation_packs.py",
         "abicheck/contract_coverage_exit.py",
@@ -325,6 +337,7 @@
         "abicheck/service_input_resolution.py",
         "abicheck/service_scan.py",
         "abicheck/stack_checker.py",
+        "abicheck/product_baseline.py",
         "abicheck/aggregate.py",
         "abicheck/aggregate_findings.py",
         "abicheck/aggregate_manifest.py"
@@ -404,6 +417,7 @@
         "abicheck/cli_stack.py",
         "abicheck/compat/cli.py",
         "abicheck/dry_run.py",
+        "abicheck/config_paths.py",
         "abicheck/__main__.py",
         "abicheck/service_render.py"
       ]
@@ -423,6 +437,9 @@
     "abicheck.aggregate_findings",
     "abicheck.aggregate_manifest",
     "abicheck.api_types",
+    "abicheck.bundle_facts",
+    "abicheck.bundle_facts_serialization",
+    "abicheck.bundle_facts_store",
     "abicheck.checker_policy",
     "abicheck.contract_coverage_ledger",
     "abicheck.contract_gating",

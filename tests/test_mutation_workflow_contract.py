@@ -523,34 +523,29 @@ _ACCEPTED_KILL_LOSS = {
     # from a scratch `cwd` -- the same subprocess re-entry as the two entries
     # above, just discovered later (G38 bundle-facts PR, the first to trigger
     # this lane against a serialization.py change with this test present).
+    # Narrowed (ADR-061 gap E, BundleFacts value/persistence/orchestration
+    # split): `serialization.py`'s own `BundleFacts` reference is now a
+    # TYPE_CHECKING-only import of the lean `model.bundle_facts` module
+    # (whose own imports are just `bundle_manifest`/`model.snapshot`), not
+    # the old flat `bundle_facts.py`, whose function-scoped imports of
+    # `bundle_analysis.py`/`bundle.py`/etc. used to drag in the
+    # checker_policy/diff_symbols/finding_identity/policy.selectors chain
+    # transitively. `name_classification`/`serialization`/`snapshot_io`
+    # were already reached independently of that chain and still are.
     "tests/test_action_run_sh_annotate_renderer.py": frozenset(
         {
-            "abicheck.policy.classification",
-            "abicheck.policy.evidence_status",
-            "abicheck.diff_symbols",
-            "abicheck.finding_identity",
             "abicheck.name_classification",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
         }
     ),
     # Same subprocess re-entry as the entry immediately above, tripped by
     # this same G38 bundle-facts PR once it touched a second mutation-scoped
-    # module (bundle_signature_evidence.py):
-    # TestRealAbicheckWritesPersistedAnnotationsForADirectoryOperand shells
-    # out to a real `abicheck compare` via `action/run.sh` from a scratch
-    # `cwd` the identical way.
+    # module (bundle_signature_evidence.py). Narrowed the same way and for
+    # the same reason as that entry (ADR-061 gap E).
     "tests/test_action_run_sh_compare_pr_json_write.py": frozenset(
         {
-            "abicheck.policy.classification",
-            "abicheck.policy.evidence_status",
-            "abicheck.diff_symbols",
-            "abicheck.finding_identity",
             "abicheck.name_classification",
-            "abicheck.policy.selectors",
-            "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
         }
@@ -563,11 +558,15 @@ _ACCEPTED_KILL_LOSS = {
     # mutmut in one line:
     #   PYTHONPATH=<mutants dir> python -m pytest \\
     #     tests/test_reusable_workflows_project_evidence.py -k resolver_selects
+    # Narrowed by one entry (ADR-061 gap E, same reasoning as the two
+    # entries above): this file's own other import paths (not through
+    # `serialization.py`'s `BundleFacts` reference) still reach
+    # checker_policy/finding_identity/policy.selectors/suppression, but no
+    # longer reach diff_symbols now that the `BundleFacts` chain is gone.
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
             "abicheck.policy.classification",
             "abicheck.policy.evidence_status",
-            "abicheck.diff_symbols",
             "abicheck.finding_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",

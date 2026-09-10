@@ -67,8 +67,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..bundle_facts import BundleFacts
     from ..bundle_manifest import InstantiationManifest
+    from ..model.bundle_facts import BundleFacts
     from ..model.package_inventory import PackageInventory
 
 from ..model.scope_acquisition import (
@@ -84,6 +84,8 @@ __all__ = [
     "DIRECT_PAIR_KEY",
     "RELEASE_OPERATIONAL_VERDICTS",
     "ReleaseInventoryEvidence",
+    "ReleaseScopePlan",
+    "ReleaseScopeResult",
     "StrandedLibraryResolution",
     "build_release_scope_record",
     "build_stored_baseline_scope_record",
@@ -92,6 +94,8 @@ __all__ = [
     "out_of_scope_provider_names",
     "release_global_ran",
     "release_inventory_evidence",
+    "resolve_release_scope_plan",
+    "resolve_release_scope_result",
     "restrict_bundle_facts",
     "scope_manifest_to_members",
     "scoped_bundle_maps",
@@ -146,6 +150,53 @@ class ReleaseInventoryEvidence:
     #: The caller named NEW as one explicit artifact (a file operand), the
     #: only shape D9's current-artifact narrowing may read intent from.
     new_single_artifact: bool = False
+
+
+@dataclass(frozen=True)
+class ReleaseScopePlan:
+    """ADR-061 gap D / DoD item 8: the release fan-out's resolved scope-
+    *selection* plan (the ``workflows/artifact`` Request->ResolvedPlan->
+    Result pattern, applied to ADR-065's scope model) -- replaces four
+    locals ``cli_compare_release.py`` used to thread by hand. Knowable
+    before any comparison executes; the acquisition record (D1) is only
+    knowable afterward -- see :class:`ReleaseScopeResult`."""
+
+    old_map: Mapping[str, Path]
+    new_map: Mapping[str, Path]
+    matched_keys: tuple[str, ...]
+    evidence: ReleaseInventoryEvidence
+
+
+def resolve_release_scope_plan(
+    old_map: Mapping[str, Path],
+    new_map: Mapping[str, Path],
+    matched_keys: Sequence[str],
+    evidence: ReleaseInventoryEvidence,
+) -> ReleaseScopePlan:
+    """A :class:`ReleaseScopePlan` from an already-resolved matching pass."""
+    return ReleaseScopePlan(
+        old_map=dict(old_map),
+        new_map=dict(new_map),
+        matched_keys=tuple(matched_keys),
+        evidence=evidence,
+    )
+
+
+@dataclass(frozen=True)
+class ReleaseScopeResult:
+    """*plan*'s realized scope outcome: the acquisition record (D1), only
+    knowable once every selected member's comparison has completed, failed,
+    or gone unsupported."""
+
+    plan: ReleaseScopePlan
+    record: ScopeAcquisitionRecord
+
+
+def resolve_release_scope_result(
+    plan: ReleaseScopePlan, record: ScopeAcquisitionRecord
+) -> ReleaseScopeResult:
+    """Pair an already-built record with the *plan* it was resolved against."""
+    return ReleaseScopeResult(plan=plan, record=record)
 
 
 @dataclass(frozen=True)

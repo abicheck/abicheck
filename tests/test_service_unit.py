@@ -5456,16 +5456,14 @@ class TestDebugFormatResolution:
 
     def test_auto_is_not_rejected_for_a_non_elf_side(self, tmp_path, monkeypatch):
         # "auto" forces nothing, so there is nothing for a PE side to ignore.
-        self._spy(monkeypatch)
+        seen = self._spy(monkeypatch)
         old_p = tmp_path / "old.so"
         old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
         pe = tmp_path / "new.dll"
         pe.write_bytes(b"MZ" + b"\x00" * 200)
-        run_compare_request(
-            CompareRequest(
-                old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="auto"
-            )
-        )
+        req = CompareRequest(old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="auto")
+        run_compare_request(req)
+        assert seen["debug_format"] is None
 
     def test_snapshot_inputs_are_unaffected(self, tmp_path, monkeypatch):
         # A JSON snapshot has no detected binary format; same as the CLI, that
@@ -5474,13 +5472,14 @@ class TestDebugFormatResolution:
         new_p = tmp_path / "new.json"
         save_snapshot(AbiSnapshot(library="l", version="1"), old_p)
         save_snapshot(AbiSnapshot(library="l", version="2"), new_p)
-        run_compare_request(
+        result = run_compare_request(
             CompareRequest(
                 old=InputSpec(path=old_p),
                 new=InputSpec(path=new_p),
                 debug_format="dwarf",
             )
         )
+        assert (result.old_snapshot.version, result.new_snapshot.version) == ("1", "2")
 
 
 class TestComparePipelinePhases:

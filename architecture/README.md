@@ -15,9 +15,24 @@ It separates the desired dependency graph from temporary migration debt.
 - `debt.yaml` records every production Python module above ADR-061's 800-line
   ceiling and every test module above its 1,200-line ceiling at adoption. Each
   entry freezes its measured line count and gives a target owner, category,
-  maintainer, rationale, and review date. It is a no-growth ledger, not an
-  import allowlist, and should only shrink as vertical migrations land.
-- `scripts/check_architecture.py` validates both documents and enforces them.
+  maintainer, rationale, review date, and a `disposition` (`migrate`, the
+  common case — still tracked work — or `accept`, a specific, reviewed,
+  permanent exception per D5). It is a no-growth ledger, not an import
+  allowlist, and should shrink toward empty or convert entries to `accept`
+  as work lands; it should never become a permanent allowlist of untouched
+  migration work.
+- `dispositions.yaml` records, for every first-party root module with no
+  owning responsibility layer, one of ADR-061 gap F's three dispositions:
+  `migrate` (a named target layer and responsibility slice), `retain` (a
+  genuinely supported public module, with what makes it supported), or
+  `accept` (a specific architectural exception, with a reason).
+  "Unclassified for now" is not a value the schema accepts. Distinct from
+  `debt.yaml`: that ledger is about *line-count* debt on files that may
+  already have an owning layer; this one is about *ownership* itself —
+  gap F's own point is that "several ownership questions in this ADR never
+  got a debt.yaml entry only because the file was not oversized."
+- `scripts/check_architecture.py` validates all three documents and enforces
+  them.
 
 ## Schema
 
@@ -35,12 +50,26 @@ responsibility package. Scoped package `AGENTS.md` files are also checked
 against `limits.package_agents`.
 
 `debt.yaml` has `schema_version: 1` and a `files` list. Every record requires
-`path`, positive `baseline_lines`, `target`, `rule: no_growth`, `category`,
-`owner`, non-empty `rationale`, and an ISO `review_by` date. Paths are unique,
-repository-relative Python files below `abicheck/` or `tests/`, and the recorded
-baseline must meet the applicable production or test ceiling. The checker
-fails if a tracked file grows; a reduced file is allowed so debt can be paid
-down without coordinating a baseline update.
+`path`, positive `baseline_lines`, `target`, `rule: no_growth`,
+`disposition` (`migrate` or `accept`), `category`, `owner`, non-empty
+`rationale`, and an ISO `review_by` date. Paths are unique, repository-relative
+Python files below `abicheck/` or `tests/`, and the recorded baseline must
+meet the applicable production or test ceiling. The checker fails if a
+tracked file grows; a reduced file is allowed so debt can be paid down
+without coordinating a baseline update.
+
+`dispositions.yaml` has `schema_version: 1` and a `modules` list. Every
+record requires `path`, `disposition` (`migrate`/`retain`/`accept`), `owner`,
+and an ISO `review_by` date, plus disposition-specific fields: `migrate`
+additionally requires `target_layer` (a real `modules.yaml` layer name),
+`slice`, and `rationale`; `retain` additionally requires `supported_reason`;
+`accept` additionally requires `reason`. Paths are unique and must name a
+real `abicheck/*.py` module. The checker fails when a flat root module has no
+owning layer (neither a physical package directory nor a `legacy_paths`
+entry) and no matching entry here — a module can be exempted from needing a
+*classified importer* via `modules.yaml`'s `public_root_surfaces` and still
+owe a disposition record; the two lists answer different questions (ADR-061
+D8/gap B).
 
 On pull requests, CI passes the base revision through `ARCHITECTURE_BASE`,
 set to the PR's own base sha. A `push`-to-`main` or `workflow_dispatch` run
