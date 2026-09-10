@@ -159,6 +159,21 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
+                    "Nothing enforces that an axis declared on a BugClass is "
+                    "actually exercised by an assertion in one of its "
+                    "`seed_tests`. Splitting a test module for a size "
+                    "violation left this entry naming only the file the "
+                    "suppression-provenance assertions had moved *out* of, "
+                    "and no gate noticed: the declared record and renderer "
+                    "axes stood with nothing behind them, and a contributor "
+                    "following AGENTS.md's 'check BUG_CLASSES first' advice "
+                    "would have been sent to the wrong file (Codex review, "
+                    "P2). Fixed by hand here; the class of error is open."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+            KnownGap(
+                description=(
                     "Two open instances of this class outside the audit "
                     "path, found by grepping every `suppression_rule` reader "
                     "after the audit's own two were fixed -- recorded rather "
