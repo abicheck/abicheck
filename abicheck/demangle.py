@@ -155,8 +155,19 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     global _cxxfilt_import_confirmed_broken  # noqa: PLW0603
     try:
         import cxxfilt
-    except ImportError:
-        _cxxfilt_import_confirmed_missing = True
+    except ModuleNotFoundError as exc:
+        # A bare `ImportError` is not proof that `cxxfilt` itself is the
+        # missing module: cxxfilt could be installed and importable, but
+        # itself `import` a dependency that isn't -- that also raises
+        # `ImportError` (its `ModuleNotFoundError` subclass, specifically),
+        # naming the *dependency*, not `cxxfilt`, in `exc.name` (Codex
+        # review, fresh evidence, third round). Only a `ModuleNotFoundError`
+        # whose `.name` actually is "cxxfilt" proves the package itself is
+        # absent; anything else means cxxfilt is installed but broken.
+        if exc.name == "cxxfilt":
+            _cxxfilt_import_confirmed_missing = True
+        else:
+            _cxxfilt_import_confirmed_broken = True
     except Exception:  # noqa: BLE001
         # Not narrowed to ImportError alone: an installed cxxfilt module can
         # also fail to *import* for a reason other than "package not

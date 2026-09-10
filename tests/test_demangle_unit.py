@@ -211,6 +211,49 @@ class TestDemangle:
         assert result == "foo::bar()"
         assert _mod._warned_no_demangler is False
 
+    def test_cxxfilt_dependency_modulenotfounderror_is_not_cxxfilt_missing(
+        self, caplog
+    ):
+        """Codex review, fresh evidence (third round): a bare `ImportError`
+        is not proof that `cxxfilt` itself is the missing module -- cxxfilt
+        can be installed and importable, but its own `import` of some
+        dependency can fail, raising a `ModuleNotFoundError` (an
+        `ImportError` subclass) naming the DEPENDENCY, not `cxxfilt`, in
+        `.name`. That must be recorded as "cxxfilt broken", never as
+        "cxxfilt confirmed missing" -- and the eventual warning (with
+        c++filt also missing) must say so, not falsely claim "no cxxfilt
+        package"."""
+        real_import = __import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "cxxfilt":
+                raise ModuleNotFoundError(
+                    "No module named 'some_cxxfilt_dependency'",
+                    name="some_cxxfilt_dependency",
+                )
+            return real_import(name, *args, **kwargs)
+
+        with caplog.at_level("WARNING", logger=_mod._log.name):
+            with patch("builtins.__import__", side_effect=_fake_import):
+                with patch("subprocess.run", side_effect=FileNotFoundError):
+                    result = _mod.demangle("_ZN3foo3barEv")
+        assert result is None
+        assert _mod._cxxfilt_import_confirmed_missing is False
+        assert _mod._cxxfilt_import_confirmed_broken is True
+        [warning_text] = [r.getMessage() for r in caplog.records]
+        assert "cxxfilt failed to initialize" in warning_text
+        assert "no cxxfilt package" not in warning_text
+
+    def test_genuine_cxxfilt_modulenotfounderror_is_confirmed_missing(self):
+        """The positive counterpart: a `ModuleNotFoundError` whose `.name`
+        actually IS "cxxfilt" is genuine proof the package itself isn't
+        installed, and must still set `_cxxfilt_import_confirmed_missing`
+        (not merely `_cxxfilt_import_confirmed_broken`)."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
+            _mod.demangle("_ZN3foo3barEv")
+        assert _mod._cxxfilt_import_confirmed_missing is True
+        assert _mod._cxxfilt_import_confirmed_broken is False
+
     def test_warning_wording_distinguishes_broken_cxxfilt_from_missing_cxxfilt(
         self, caplog
     ):
