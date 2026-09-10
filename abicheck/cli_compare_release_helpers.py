@@ -720,9 +720,9 @@ def write_bundle_facts_out(
     Failure here (a bad *manifest_path*, an unwritable *bundle_facts_out*)
     is a usage error, unlike bundle *analysis* (which degrades to a warning).
     """
-    from .bundle_facts import capture_bundle_facts
     from .bundle_manifest import load_manifest
     from .serialization import save_bundle_facts
+    from .workflows.bundle_facts_capture import capture_bundle_facts
     from .workflows.extraction import _canonical_library_key
 
     try:

@@ -173,8 +173,8 @@ def resolve_bundle_side(side: BundleSideInput) -> ResolvedBundleSide:
     (``bundle_facts.bundle_snapshot_from_facts``).
     """
     from .bundle import build_bundle_snapshot
-    from .bundle_facts import bundle_snapshot_from_facts
     from .serialization import load_bundle_facts
+    from .workflows.bundle_facts_capture import bundle_snapshot_from_facts
 
     if isinstance(side, StoredBundleFactsInput):
         facts = load_bundle_facts(side.path, max_json_object_nodes=side.max_json_object_nodes)
@@ -403,7 +403,6 @@ def compare_release_against_bundle_facts(
     symbol/type identity, not a cross-library relationship.
     """
     from . import service
-    from .bundle_facts import compare_bundle_from_facts
     from .bundle_manifest import load_manifest
     from .bundle_models import BundleSignatureEvidence
     from .errors import (
@@ -415,6 +414,7 @@ def compare_release_against_bundle_facts(
     )
     from .package import discover_shared_libraries
     from .serialization import load_bundle_facts
+    from .workflows.bundle_facts_compare import compare_bundle_from_facts
     from .workflows.bundle_facts_library_overrides import (
         validate_matched_library_overrides,
     )

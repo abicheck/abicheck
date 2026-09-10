@@ -215,7 +215,7 @@ class TestReadBundleFactsPackage:
     ) -> None:
         """A `PackageManifest` may come from another producer -- untrusted
         input a reader must not eagerly materialize without bound."""
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts(
             {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
@@ -233,7 +233,7 @@ class TestReadBundleFactsPackage:
     ) -> None:
         """A *few* individually-sized artifacts can amplify past the count
         bound too -- charged against `DEFAULT_MAX_BUNDLE_DECODED_BYTES`."""
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts(
             {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
@@ -252,7 +252,7 @@ class TestReadBundleFactsPackage:
         """A one-artifact variant has no *next* iteration to catch an
         over-budget artifact at -- the artifact that itself crosses the
         budget must be rejected on the spot, not returned successfully."""
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts({"liba.so": _snapshot("liba.so")})
         store = InMemoryObjectStore()
@@ -291,7 +291,7 @@ class TestReadBundleFactsPackage:
         conversion order rather than trusting a single assert-raises."""
         import sys
 
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
         from abicheck.storage.bundle_archive_json_guard import bounded_encode_utf8
         from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
         from abicheck.storage.import_v1 import export_legacy_snapshot as real_export
@@ -373,7 +373,7 @@ class TestReadBundleFactsPackage:
         -- not the snapshot document's own size -- can catch this."""
         import json
 
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
         from abicheck.storage.dto import BUNDLE_COMPOSITION_SECTION_KIND
         from abicheck.storage.import_v1 import export_legacy_snapshot
 
@@ -413,7 +413,7 @@ class TestReadBundleFactsPackage:
         only when writing -- a hand-assembled bundle-composition section
         carrying more aliases than `DEFAULT_MAX_JSON_CONTAINER_NODES` must
         be refused even while comfortably under the byte ceiling."""
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts(
             {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
@@ -505,7 +505,7 @@ class TestBundleFactsPackageThroughDirectoryStore:
 
 class TestWriteBundleFactsPackageSchemaVersionConsistency:
     def test_disagreeing_source_schema_versions_raise(self, monkeypatch: Any) -> None:
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         real_bundle_facts_to_dict = module.bundle_facts_to_dict
 
@@ -552,7 +552,7 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
     def test_refuses_to_write_past_the_library_count_bound(
         self, monkeypatch: Any
     ) -> None:
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts(
             {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
@@ -567,7 +567,7 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
     def test_refuses_to_write_past_the_decoded_size_budget(
         self, monkeypatch: Any
     ) -> None:
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts(
             {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}
@@ -600,8 +600,8 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         the budget here is calibrated (via the exact `bounded_encode_utf8`
         primitive the real charge uses, not an approximate compact
         `json.dumps`) to cross specifically on the second item."""
-        import abicheck.bundle_facts_store as module
         import abicheck.serialization as serialization_module
+        import abicheck.storage.bundle_facts_package as module
         from abicheck.storage.bundle_archive_json_guard import bounded_encode_utf8
 
         facts = capture_bundle_facts(
@@ -659,7 +659,7 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         deliberately distinct from the (small) `AbiSnapshot.library` field,
         so only the fix under test -- not the snapshot's own size -- can
         catch this."""
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
         from abicheck.serialization import snapshot_to_dict
         from abicheck.storage.bundle_archive_json_guard import bounded_encode_utf8
 
@@ -699,7 +699,7 @@ class TestWriteBundleFactsPackageMirrorsReaderLimits:
         allocation per element -- a node-count amplification a byte-size
         charge alone cannot see, so the writer must refuse a bundle whose
         aggregate alias element count a reader would then refuse too."""
-        import abicheck.bundle_facts_store as module
+        import abicheck.storage.bundle_facts_package as module
 
         facts = capture_bundle_facts(
             {"liba.so": _snapshot("liba.so"), "libb.so": _snapshot("libb.so")}

@@ -1454,9 +1454,48 @@ orchestration conflation of the shape Phase 5 already solved for
   (the `public_root_surfaces` compatibility-facade treatment) — its own
   ~1500 remaining lines of codec logic are a separate, not-yet-attempted
   classification.
-- `bundle_facts.py` and its serialization/store siblings are classified
+- `bundle_facts.py` and its serialization/store siblings were classified
   `workflows`, conflating the `BundleFacts` value, its persistence, and
-  capture/comparison orchestration. **Not yet started.**
+  capture/comparison orchestration. **Closed:** applied the same split
+  Phase 5 proved for `*_metadata.py`. The value type and its construction
+  invariant (`require_degraded_members_known`, applied at every
+  construction/import choke point) moved to `model/bundle_facts.py`.
+  Persistence split three ways in `storage/`: `bundle_facts_codec.py`
+  (JSON (de)serialization, moved out of the flat `bundle_facts_serialization.py`),
+  `bundle_facts_archive.py` (the G40 content-addressed zip archive, moved
+  out of `bundle_facts.py`'s own G40 section), and `bundle_facts_package.py`
+  (the multi-artifact `ProjectSnapshot` package adapter, moved out of
+  `bundle_facts_store.py` and reclassified `storage` — its own historical
+  docstring had explained why it *couldn't* be `storage` yet, precisely
+  because `BundleFacts` had no settled layer; once it did, every dependency
+  this module actually has turned out to already be `storage`-legal).
+  Capture and comparison orchestration moved to `workflows/`:
+  `bundle_facts_capture.py` (`capture_bundle_facts`/`bundle_snapshot_from_facts`)
+  and `bundle_facts_compare.py` (`compare_bundle_from_facts`). The flat
+  `bundle_facts.py`/`bundle_facts_serialization.py`/`bundle_facts_store.py`
+  modules are now delegation-only compatibility facades (added to
+  `modules.yaml`'s `facades` list, each under the 150-line facade cap,
+  each with an explicit `__all__`) re-exporting the same public names, so
+  the documented Python API path (`docs/use/multi-binary.md`) and every
+  existing internal/test call site are unaffected. The one real,
+  unavoidable `serialization.py <-> storage.bundle_facts_codec` two-file
+  cycle (`bundle_facts_codec.py` needs `snapshot_to_dict`/`snapshot_from_dict`
+  from `serialization.py`; `serialization.py`'s own back-compat
+  `bundle_facts_to_dict`/etc. wrappers need the codec) is kept dynamic via
+  `importlib.import_module`, same shape as before the move, just retargeted
+  — not a new bridge, and not an `IMPORT_CYCLE_ALLOWLIST` entry. Every other
+  internal caller (`bundle_multibuild.py`, `bundle_side_input.py`,
+  `cli_compare_release_helpers.py`, `storage/import_bundle_facts.py`,
+  `storage/variant_composition.py`, `workflows/bundle_compare_operand.py`,
+  `workflows/bundle_stored_pair_compare.py`, `workflows/release_scope.py`)
+  now imports the canonical owner directly, per D6. Legacy-reader behavior
+  (schema-version fallback, the `degraded_members` marker, the G40 archive
+  format, resource-limit hardening) is pinned by the existing
+  `tests/test_bundle_facts*.py` suite, exercised unchanged before and after
+  the move; two of those files' `monkeypatch`-based tests were updated to
+  patch the real owner module (`storage.bundle_facts_archive`/
+  `storage.bundle_facts_package`) instead of the facade, per D10 ("unit
+  tests patch the owner module").
 - `probe_harness.py` (`compare`) needed `snapshot_to_dict`/
   `snapshot_from_dict` to serialize its own probe matrix. Comparison logic
   must not become the owner of persistence because a probe workflow needs

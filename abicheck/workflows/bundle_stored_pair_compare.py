@@ -166,11 +166,12 @@ def compare_stored_bundle_facts_pair(
     documented contracts.
     """
     from ..analysis_assurance import compute_analysis_assurance
-    from ..bundle_facts import bundle_snapshot_from_facts, compare_bundle_from_facts
     from ..bundle_manifest import load_manifest
     from ..policy.depth_projection import project_snapshot_to_depth
     from ..serialization import load_bundle_facts
     from .artifact.execute import enforce_requested_depth
+    from .bundle_facts_capture import bundle_snapshot_from_facts
+    from .bundle_facts_compare import compare_bundle_from_facts
     from .compare_policy import compare_snapshots
 
     old_facts = load_bundle_facts(
