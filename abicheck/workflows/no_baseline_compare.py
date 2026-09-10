@@ -258,15 +258,23 @@ def public_header_sets_for_candidate(
     )
 
 
-def candidate_is_live_artifact(path: Path) -> bool:
-    """Whether *path* is a native artifact this run would extract, not a
-    stored snapshot.
+def candidate_is_live_artifact(
+    path: Path,
+    *,
+    sources: Path | None = None,
+    build_info: Path | None = None,
+) -> bool:
+    """Whether this run performs a live extraction, rather than only reading
+    an already-serialized snapshot.
 
     Only the depth evidence-contract carve-out reads this (see
     ``policy.depth_evidence_contract``'s "Live extraction only" note): the
-    ``--depth build``/``--depth source`` floor means nothing for a side that
-    was already a serialized snapshot, since this run never extracted it and
-    so cannot have fallen short of a depth.
+    ``--depth build``/``--depth source`` floor means nothing for a run that
+    extracted nothing, since it cannot have fallen short of a depth. Three
+    things make a run live, and all three are checked: a native artifact
+    operand, a linker script resolving to one, and raw ``--sources``/
+    ``--build-info`` evidence this run collects from itself -- the last of
+    which makes even a stored-snapshot operand live.
 
     Lives here rather than in the CLI because the question is answered by
     ``binary_utils.detect_binary_format`` -- an ``extract``-layer primitive a
@@ -277,6 +285,21 @@ def candidate_is_live_artifact(path: Path) -> bool:
     silently *suppress* the exit-7 axis.
     """
     from ..binary_utils import detect_binary_format, resolve_linker_script_chain
+    from ..buildsource.raw_evidence import any_raw_evidence_input
+
+    # Raw `--sources`/`--build-info` makes the run live even when the
+    # *artifact* operand is a stored snapshot: the run collects L3-L5
+    # evidence itself, so a pinned depth is something it can genuinely fall
+    # short of. Testing the operand's path alone exempted exactly that case
+    # -- `compare --no-baseline case143.abi.json --sources <empty dir>
+    # --depth source` exited 0 with `elf, header` evidence where the
+    # equivalent two-sided invocation exited 7 (Codex review, P1). The
+    # two-sided path already encoded this as `old_fmt is not None or
+    # old_had_raw_evidence`; `buildsource.raw_evidence` is now the one owner
+    # of the predicate's other half, so the two sides share the rule rather
+    # than each carrying a copy of it.
+    if any_raw_evidence_input(sources, build_info):
+        return True
 
     try:
         # Follow a GNU ld INPUT()/GROUP() script to its target first: the

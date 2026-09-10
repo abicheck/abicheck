@@ -33,7 +33,8 @@ depend on this leaf, and nothing depends on both of them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -61,7 +62,7 @@ __all__ = [
 #: rather than as a ``2.1``: a suppressed finding disappearing entirely was
 #: a defect in this shape, not a later addition to a shipped one, and
 #: version numbers exist to warn consumers of a *published* change.
-NO_BASELINE_REPORT_SCHEMA_VERSION = "2.0"
+NO_BASELINE_REPORT_SCHEMA_VERSION = "2.1"
 
 #: Formats a ``--no-baseline`` audit renders one-sided.
 #:
@@ -133,3 +134,12 @@ class NoBaselineDocument:
     #: renderer computes an exit code of its own.
     coverage_exit_contribution: int
     exit_code: int
+    #: Every orthogonal axis's own contribution, keyed as in
+    #: ``no_baseline.NO_BASELINE_EXIT_AXIS_NOTICES`` and resolved from the
+    #: same function ``exit_code`` above is folded from. Carried so a
+    #: renderer can *explain* a nonzero exit instead of only reporting one:
+    #: the Markdown projection stated the coverage axis alone, so a missed
+    #: evidence contract exited 7 beside a report that said nothing about
+    #: it (Codex review, P2). Default ``()``-equivalent empty mapping keeps
+    #: a hand-constructed document (tests) valid.
+    exit_axes: Mapping[str, int] = field(default_factory=dict)

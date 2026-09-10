@@ -6807,6 +6807,23 @@ why this PR records it rather than inventing the semantics. Until then
 `scan` must stay reachable for a gating audit job, and its retirement (§3 of
 `docs/contribute/plans/one-comparison-product.md`) is blocked on this.
 
+**The audit's SARIF and JUnit projections do not cross the canonical
+`ReportDocument` boundary** (Codex review, P1, partially addressed). The
+audit's JSON does: `report.no_baseline.no_baseline_report_document` wraps the
+computed mapping in a real `ReportDocument`, so the structured output takes
+that type's defensive immutable snapshot the way every two-sided format
+does. SARIF and JUnit still read the typed `NoBaselineDocument` directly.
+That is deliberate as far as it goes -- `ReportDocument` is an *untyped*
+frozen mapping, and rewriting two renderers to index strings instead of
+typed fields is a type-safety downgrade, which is why the two-sided HTML and
+Markdown renderers also carry typed section structs -- but it does leave the
+audit's two structured non-JSON formats outside the boundary the
+`report/AGENTS.md` contract states for every format. The shared sections
+Codex was concerned about (`run_outcome`, `comparison_scope`) are already
+built by the same section builders the two-sided path uses, so those
+specifically cannot drift; a *new* shared section added to
+`ReportDocument` would still have to be added to the audit by hand.
+
 Per `AGENTS.md`'s bug-class rule the D3 invariant is **also** stated as a
 property test over generated inputs rather than eleven fixed cases:
 `tests/test_no_baseline_d3_properties.py` generates candidate snapshots

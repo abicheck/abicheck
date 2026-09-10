@@ -42,6 +42,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.report.no_baseline import (
+    NO_BASELINE_EXIT_AXIS_NOTICES,
     NO_BASELINE_SUPPORTED_FORMATS,
     compute_no_baseline_document,
     render_no_baseline,
@@ -453,3 +454,97 @@ def test_a_hostile_finding_value_never_restructures_the_markdown_table(
         assert _cell_count(row) == header_cells, (row, description, symbol)
     # One contiguous table: no generated newline may split it apart.
     assert len(rows) == 1 + len(findings), (rows, description, symbol)
+
+
+# ---------------------------------------------------------------------------
+# Every nonzero exit is explained, on every axis and in every format.
+# ---------------------------------------------------------------------------
+
+
+#: Per axis: the fixture that gates on it, and whether the run needs
+#: ``--require-complete-analysis``. Each entry is a *real* audit gated the
+#: way a user would gate it, never a hand-built document -- a document
+#: constructed with the axis pre-set would test the renderer against its own
+#: assumption rather than against what the engine produces.
+#: ``case145``'s assurance is genuinely ``partial`` (verified against the
+#: committed fixture), which is what makes the second row bite instead of
+#: skipping.
+_GATED_AXIS_FIXTURES = {
+    "evidence_contract": ("case143_audit_accidental_export", False),
+    "analysis_assurance": ("case145_audit_unversioned_export", True),
+}
+
+
+def _axis_result(axis: str):
+    """A result gated on *axis*, from the fixture that really gates on it."""
+    case, _ = _GATED_AXIS_FIXTURES[axis]
+    result = _result(case)
+    if axis == "evidence_contract":
+        # The one axis no committed fixture reaches on its own: it records a
+        # *live extraction* falling short of a pinned depth, and every G20
+        # fixture is a stored snapshot, which the floor deliberately exempts.
+        # Set through the same flag the workflow sets.
+        result.diff.evidence_contract_error = True
+    return result
+
+
+@pytest.mark.parametrize(
+    ("axis", "require_complete"),
+    [(axis, req) for axis, (_, req) in _GATED_AXIS_FIXTURES.items()],
+)
+def test_a_nonzero_exit_is_always_explained_in_the_report(
+    axis: str, require_complete: bool
+) -> None:
+    """A gated audit must say which axis gated it — in text and in JSON.
+
+    Stated over the axes themselves rather than over one reproducer: the
+    exit code is a `max` over several orthogonal axes, so a projection that
+    explains only the axis its author had in mind leaves every other axis
+    silently gating (Codex review, P2 — the Markdown report exited 7 on a
+    missed evidence contract while reporting only "no findings" and shallow
+    evidence). The oracle is the document's own axis breakdown, which is the
+    same mapping `no_baseline_exit_code` folds, so an axis added later is
+    covered by the same assertion instead of needing a new one.
+    """
+    result = _axis_result(axis)
+    doc = compute_no_baseline_document(
+        result, require_complete_analysis=require_complete
+    )
+    contributing = {k for k, v in doc.exit_axes.items() if v}
+    assert axis in contributing, (
+        f"fixture for {axis} no longer gates on it — the row would pass "
+        "vacuously, which is the failure this table exists to prevent"
+    )
+    assert doc.exit_code == max(doc.exit_axes.values())
+
+    text, exit_code = render_no_baseline(
+        result, "markdown", require_complete_analysis=require_complete
+    )
+    assert exit_code != 0
+    for key in contributing:
+        notice = NO_BASELINE_EXIT_AXIS_NOTICES[key]
+        # The notice's own leading phrase, up to the em-dash separator.
+        headline = notice.split(" -- ")[0]
+        assert headline in text, (key, text)
+
+    payload, _ = render_no_baseline(
+        result, "json", require_complete_analysis=require_complete
+    )
+    assert json.loads(payload)["exit_axes"] == dict(doc.exit_axes)
+
+
+def test_a_clean_audit_carries_no_axis_notice(
+    case: str = "case143_audit_accidental_export",
+) -> None:
+    """The complement: notices appear only when an axis actually gated.
+
+    Without this, "explain every nonzero exit" is trivially satisfied by
+    printing every notice unconditionally, which would tell a reader their
+    clean run failed five contracts.
+    """
+    result = _result(case)
+    doc = compute_no_baseline_document(result)
+    assert doc.exit_code == 0
+    text, _ = render_no_baseline(result, "markdown")
+    for notice in NO_BASELINE_EXIT_AXIS_NOTICES.values():
+        assert notice.split(" -- ")[0] not in text

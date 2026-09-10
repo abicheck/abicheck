@@ -504,3 +504,84 @@ def test_a_linker_script_operand_counts_as_live(tmp_path: Path) -> None:
     stored = tmp_path / "snap.abi.json"
     stored.write_text('{"library": "x"}')
     assert candidate_is_live_artifact(stored) is False
+
+
+@pytest.mark.parametrize("evidence_flag", ["--sources", "--build-info"])
+def test_raw_evidence_makes_even_a_stored_operand_live(
+    tmp_path: Path, evidence_flag: str
+) -> None:
+    """Liveness is a property of the *run*, not only of the operand's path.
+
+    A run given a raw ``--sources`` checkout or ``--build-info`` build dir
+    collects L3-L5 evidence itself, so a pinned ``--depth build``/``--depth
+    source`` is something it can genuinely fall short of — even when the
+    artifact operand is an already-serialized snapshot. Asking
+    ``detect_binary_format`` about the operand alone answered "stored" and
+    exempted exactly that case, so the audit reported a clean exit 0 where
+    the equivalent two-sided invocation exited 7 (Codex review, P1).
+
+    Both evidence flags are exercised, not just the reported one: they reach
+    the same predicate through the same parameter, and a fix wired for one
+    would silently leave the other open. The oracle is the *two-sided*
+    command's own exit code on the same inputs — the behavior the one-sided
+    path is supposed to match — rather than a hard-coded 7, so the two
+    cannot drift apart again.
+    """
+    from abicheck.workflows.no_baseline_compare import candidate_is_live_artifact
+
+    stored = tmp_path / "snap.abi.json"
+    stored.write_text('{"library": "x"}')
+    raw = tmp_path / "checkout"
+    raw.mkdir()
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "manifest.json").write_text('{"build_source_pack_version": 1}')
+
+    kwarg = "sources" if evidence_flag == "--sources" else "build_info"
+    assert candidate_is_live_artifact(stored) is False
+    assert candidate_is_live_artifact(stored, **{kwarg: raw}) is True, (
+        "raw evidence means this run extracts, so the pinned-depth floor applies"
+    )
+    assert candidate_is_live_artifact(stored, **{kwarg: pack}) is False, (
+        "a prebuilt pack is loaded, not collected from — it does not make the "
+        "run live, and treating it as live would fire the floor on a run that "
+        "never extracted anything"
+    )
+
+
+@pytest.mark.parametrize("depth", ["build", "source"])
+def test_a_stored_operand_with_raw_evidence_gates_like_the_two_sided_run(
+    tmp_path: Path, depth: str
+) -> None:
+    """End-to-end companion to the predicate test above, through the CLI.
+
+    Both pinned depths are covered because both are in the floor's gated
+    set; a fix keyed to one rung would leave the other silently exempt.
+    """
+    case = example_catalog.case_dir("case143_audit_accidental_export")
+    snapshot = case / "snapshot.abi.json"
+    empty = tmp_path / "src"
+    empty.mkdir()
+
+    audit = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(snapshot),
+        "--sources",
+        str(empty),
+        "--depth",
+        depth,
+    )
+    two_sided = invoke_cli(
+        "compare",
+        str(snapshot),
+        str(snapshot),
+        "--sources",
+        f"new={empty}",
+        "--depth",
+        depth,
+    )
+    assert audit.exit_code == two_sided.exit_code, (
+        f"one-sided exited {audit.exit_code}, two-sided {two_sided.exit_code} "
+        "on the same operand and the same unsatisfiable pinned depth"
+    )

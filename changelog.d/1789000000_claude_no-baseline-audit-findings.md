@@ -1,5 +1,20 @@
 ### Fixed
 
+- **`compare --no-baseline` now applies the pinned-depth floor when raw
+  `--sources`/`--build-info` is given**, even though the artifact operand is
+  a stored snapshot. Liveness is a property of the run, not only of the
+  operand's path: a run collecting L3-L5 evidence itself can genuinely fall
+  short of a pinned `--depth build`/`--depth source`. It exited `0` where the
+  equivalent two-sided invocation exited `7`. The predicate has one owner
+  now (`buildsource/raw_evidence.py`), shared with `compare`'s own inline-
+  collection routing.
+- **A gated audit now says which axis gated it.** The exit code is a `max`
+  over several orthogonal axes, but only the contract-coverage one was ever
+  explained -- so a missed evidence contract exited `7` beside a report that
+  mentioned nothing but shallow evidence. Every contributing axis now
+  renders a notice in Markdown and appears under `exit_axes` in JSON
+  (audit report schema 2.1), read from the same function the exit code is
+  folded from.
 - **Markdown reports no longer let a finding's own text restructure a
   table.** A detector's description, a demangled symbol, or an extractor's
   error text could contain a pipe, a newline, or a backtick and close a code

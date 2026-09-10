@@ -60,6 +60,7 @@ from .cross_source_evolution import (
     compute_cross_source_evolution_summary,
     render_cross_source_evolution_json,
 )
+from .document import ReportDocument
 from .finding import build_report_findings
 from .markdown_text import md_cell
 from .no_baseline_document import (
@@ -130,6 +131,73 @@ def _operational_status(result: NoBaselineCompareResult) -> OperationalStatus:
     return OperationalStatus.NONE
 
 
+#: The audit's orthogonal exit axes, in the order a reader meets them.
+#: Rendered as notices by every format and folded into one exit code by
+#: :func:`no_baseline_exit_code`, both off :func:`_no_baseline_exit_axes` --
+#: so a nonzero exit is always accompanied by the axis that produced it. A
+#: Markdown report that stated only the coverage axis exited 7 on a missed
+#: evidence contract while saying nothing about why (Codex review, P2).
+NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
+    "contract_coverage": (
+        "**Contract coverage incomplete** -- the selected `--contract` domain's "
+        "required evidence was not fully available on this candidate "
+        "(ADR-049 Phase 7)."
+    ),
+    "analysis_assurance": (
+        "**Analysis assurance incomplete** -- the evidence behind this audit was "
+        "not complete enough to be relied on, and `--require-complete-analysis` "
+        "makes that a failure rather than a note."
+    ),
+    "evidence_contract": (
+        "**Evidence contract not met** -- a pinned `--depth build`/`--depth "
+        "source` requested evidence this run did not reach; it did not silently "
+        "degrade to shallower evidence (ADR-064)."
+    ),
+    "incomplete_scope": (
+        "**Comparison scope incomplete** -- a selected, expected member never "
+        "reached a completed audit (ADR-065 D6/D7)."
+    ),
+    "no_comparison_completed": (
+        "**No audit completed** -- this run examined nothing, which never reads "
+        "as a clean pass (ADR-065)."
+    ),
+}
+
+
+def _no_baseline_exit_axes(
+    result: NoBaselineCompareResult, require_complete_analysis: bool
+) -> dict[str, int]:
+    """Every orthogonal axis's own contribution, keyed as in
+    :data:`NO_BASELINE_EXIT_AXIS_NOTICES`.
+
+    One owner, read by both the fold and the renderers, so the number a
+    reader is shown and the number that gated them cannot disagree -- the
+    same discipline ``contract_coverage_exit`` already applies to its own
+    axis. The compatibility axis is absent by construction, not zeroed:
+    ADR-068 D2 gives an audit none.
+    """
+    from ..analysis_assurance import analysis_assurance_exit_contribution
+    from ..policy.contract_coverage_exit import coverage_exit_floor
+    from ..policy.exit_decision_precedence import EXIT_EVIDENCE_CONTRACT_ERROR
+
+    scope_decision = _scope_decision(result)
+    return {
+        "contract_coverage": coverage_exit_floor(result.diff),
+        "analysis_assurance": analysis_assurance_exit_contribution(
+            result.diff, require_complete=require_complete_analysis
+        ),
+        "evidence_contract": (
+            EXIT_EVIDENCE_CONTRACT_ERROR
+            if getattr(result.diff, "evidence_contract_error", False)
+            else 0
+        ),
+        "incomplete_scope": scope_decision.incomplete_scope_exit_contribution,
+        "no_comparison_completed": (
+            scope_decision.no_comparison_completed_exit_contribution
+        ),
+    }
+
+
 def no_baseline_exit_code(
     result: NoBaselineCompareResult, *, require_complete_analysis: bool = False
 ) -> int:
@@ -153,27 +221,7 @@ def no_baseline_exit_code(
     ``max`` member like the rest: exit ``7`` is a *failed evidence
     contract*, orthogonal to how much coverage the run had.
     """
-    from ..analysis_assurance import analysis_assurance_exit_contribution
-    from ..policy.contract_coverage_exit import coverage_exit_floor
-    from ..policy.exit_decision_precedence import EXIT_EVIDENCE_CONTRACT_ERROR
-
-    scope_decision = _scope_decision(result)
-    coverage = coverage_exit_floor(result.diff)
-    assurance = analysis_assurance_exit_contribution(
-        result.diff, require_complete=require_complete_analysis
-    )
-    evidence_contract = (
-        EXIT_EVIDENCE_CONTRACT_ERROR
-        if getattr(result.diff, "evidence_contract_error", False)
-        else 0
-    )
-    return max(
-        coverage,
-        assurance,
-        evidence_contract,
-        scope_decision.incomplete_scope_exit_contribution,
-        scope_decision.no_comparison_completed_exit_contribution,
-    )
+    return max(_no_baseline_exit_axes(result, require_complete_analysis).values())
 
 
 def _finding_resolver(
@@ -225,6 +273,7 @@ def compute_no_baseline_document(
         exit_code=no_baseline_exit_code(
             result, require_complete_analysis=require_complete_analysis
         ),
+        exit_axes=_no_baseline_exit_axes(result, require_complete_analysis),
     )
 
 
@@ -319,8 +368,36 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         "run_outcome": doc.run_outcome,
         "comparison_scope": doc.comparison_scope,
         "contract_coverage_exit_contribution": doc.coverage_exit_contribution,
+        # Every orthogonal axis's own contribution, never omitted: the exit
+        # code above is a `max` over these, so publishing only the total
+        # leaves a gated consumer unable to tell *which* axis gated them --
+        # the same reason the Markdown projection renders a notice per
+        # contributing axis (Codex review, P2). `contract_coverage_exit_
+        # contribution` above stays as its own long-standing key rather than
+        # being folded away, so an existing consumer is unaffected.
+        "exit_axes": dict(doc.exit_axes),
         "exit_code": doc.exit_code,
     }
+
+
+def no_baseline_report_document(doc: NoBaselineDocument) -> ReportDocument:
+    """The audit as a canonical :class:`~abicheck.report.document.ReportDocument`.
+
+    ADR-061 Phase 2's boundary: a completed report a renderer cannot change.
+    :class:`NoBaselineDocument` is the audit's *compute* half -- typed,
+    resolved, with no ``DiffResult`` or live policy object left on it, the
+    same role ``ReportFinding`` and HTML's own frozen section structs play --
+    and this is where it crosses into the shared document type, so the
+    audit's structured output participates in that boundary rather than
+    running beside it (Codex review, P1). ``from_mapping`` takes a defensive
+    immutable snapshot, so a caller holding the result cannot mutate what
+    was rendered.
+
+    One residual, recorded rather than implied: the SARIF and JUnit
+    projections still read the typed document directly instead of this
+    frozen mapping. See ``docs/contribute/known-gaps.md``.
+    """
+    return ReportDocument.from_mapping(_document_json(doc))
 
 
 def no_baseline_json_report(result: NoBaselineCompareResult) -> dict[str, Any]:
@@ -394,14 +471,30 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
                 f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
                 f"{md_cell(finding.category.value)} | {md_cell(rule)} |"
             )
-    if doc.coverage_exit_contribution:
-        lines += [
-            "",
-            "> **Contract coverage incomplete** -- the selected `--contract` "
-            "domain's required evidence was not fully available on this "
-            "candidate (exit contribution 1, ADR-049 Phase 7).",
-        ]
+    lines += _exit_axis_notice_lines(doc)
     return "\n".join(lines) + "\n"
+
+
+def _exit_axis_notice_lines(doc: NoBaselineDocument) -> list[str]:
+    """One Markdown blockquote per axis that actually contributed.
+
+    Every contributing axis, not just contract coverage: an audit's exit
+    code is a `max` over several orthogonal axes, and a report that names
+    one of them leaves a reader who was gated by another with no
+    explanation at all (Codex review, P2). Reads the resolved
+    ``doc.exit_axes`` rather than re-deriving anything, so what is
+    explained is exactly what was folded. Nothing is emitted on a clean
+    run, and the notices carry no numbers of their own -- the exit code is
+    stated once, by the process.
+    """
+    contributing = [
+        NO_BASELINE_EXIT_AXIS_NOTICES[key]
+        for key, value in doc.exit_axes.items()
+        if value and key in NO_BASELINE_EXIT_AXIS_NOTICES
+    ]
+    if not contributing:
+        return []
+    return ["", *(f"> {notice}" for notice in contributing)]
 
 
 def no_baseline_markdown_report(result: NoBaselineCompareResult) -> str:
@@ -454,7 +547,10 @@ def render_no_baseline(
         result, require_complete_analysis=require_complete_analysis
     )
     if fmt == "json":
-        return _json.dumps(_document_json(doc), indent=2), doc.exit_code
+        return (
+            _json.dumps(no_baseline_report_document(doc).to_mapping(), indent=2),
+            doc.exit_code,
+        )
     if fmt == "markdown":
         return render_no_baseline_markdown(doc), doc.exit_code
     if fmt == "sarif":

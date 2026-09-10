@@ -107,6 +107,7 @@ from ..buildsource.pack_shape import purge_external_outputs
 from ..buildsource.pattern_facts import find_pattern_facts
 from ..buildsource.poi import build_points_of_interest, resolve_symbol_tus
 from ..buildsource.preprocessor_facts import collect_preprocessor_facts
+from ..buildsource.raw_evidence import any_raw_evidence_input, is_raw_evidence_input
 from ..buildsource.redaction import DEFAULT_REDACTION
 from ..buildsource.snapshot_exports import exported_symbols_from_snapshot
 from ..buildsource.source_graph_build import build_source_graph
@@ -257,6 +258,8 @@ __all__ = [
     "parse_dwarf",
     "parse_elf_metadata",
     "purge_external_outputs",
+    "any_raw_evidence_input",
+    "is_raw_evidence_input",
     "relink_surface_exports",
     "resolve_debug_info",
     "resolve_dependency_scope",

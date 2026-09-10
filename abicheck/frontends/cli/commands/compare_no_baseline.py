@@ -708,7 +708,11 @@ def _run_no_baseline_compare_cmd(
                 # The same carve-out the real run applies below, from the
                 # same helper -- so the preview and the run can never
                 # disagree about whether the depth floor bites.
-                candidate_is_live=candidate_is_live_artifact(candidate),
+                candidate_is_live=candidate_is_live_artifact(
+                    candidate,
+                    sources=inv.evidence.sources,
+                    build_info=inv.evidence.build_info,
+                ),
             )
         )
 
@@ -741,7 +745,11 @@ def _run_no_baseline_compare_cmd(
         # records it) rather than here, so a front end cannot pick up the
         # audit and forget the orthogonal axis.
         depth=inv.evidence.depth,
-        candidate_is_live=candidate_is_live_artifact(candidate),
+        candidate_is_live=candidate_is_live_artifact(
+            candidate,
+            sources=inv.evidence.sources,
+            build_info=inv.evidence.build_info,
+        ),
     )
 
     _emit_no_baseline_report(result, inv)
