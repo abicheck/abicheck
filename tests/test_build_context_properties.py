@@ -69,7 +69,9 @@ def test_windows_tokenizer_never_raises(text: str) -> None:
     -- malformed quoting has no invalid state under the documented rules
     (existing docstring claim), unlike shlex.split which can raise ValueError
     on an unbalanced quote."""
-    _split_windows_command_line(text)
+    result = _split_windows_command_line(text)
+    assert isinstance(result, list)
+    assert all(isinstance(token, str) for token in result)
 
 
 @given(tokens=st.lists(st.text(alphabet=_TOKEN_CHARS, max_size=12), max_size=8))
