@@ -652,8 +652,25 @@ def compare_release_cmd(
             # paired, and each side's own completeness evidence) as one
             # resolved plan object rather than four independent locals
             # threaded by hand -- see `ReleaseScopePlan`'s own docstring.
+            #
+            # Codex review (PR #1192, follow-up finding): rebinding
+            # `old_map`/`new_map`/`matched_keys` to the plan's own copies
+            # here -- rather than only reading `scope_plan.*` at the record
+            # builder after execution -- is what makes `scope_plan` the
+            # actual input execution consumes, not a DTO wrapper computed
+            # alongside it. `stored_degraded_members`, `compare_keys`, and
+            # `_compare_release_libraries` below (and every other reader in
+            # this function) now see exactly what the plan resolved, so a
+            # future normalization/selection rule added to
+            # `resolve_release_scope_plan` changes which pairs actually run,
+            # not merely how the post-execution record describes them.
             scope_plan = resolve_release_scope_plan(
                 old_map, new_map, matched_keys, inventory_evidence
+            )
+            old_map, new_map, matched_keys = (
+                dict(scope_plan.old_map),
+                dict(scope_plan.new_map),
+                list(scope_plan.matched_keys),
             )
 
             if fmt != "json":

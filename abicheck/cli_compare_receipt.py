@@ -804,7 +804,7 @@ def _release_summary_effective_config_block(
         effective_config_fields,
     )
     from .frontends.cli.options.params import _load_suppression_and_policy
-    from .workflows.gate import gate_exit_code_scheme
+    from .workflows.gate import EffectiveGate
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if pack_application is not None:
@@ -828,10 +828,9 @@ def _release_summary_effective_config_block(
         surface_metrics_enabled=True,
         reconcile_build_context_enabled=True,
     )
-    ec_scheme = gate_exit_code_scheme(severity_config is not None)
-    ec_fields = effective_config_fields(
-        ec_result, severity_config=severity_config, exit_code_scheme=ec_scheme
-    )
+    # No result/require_complete_analysis/scope at this release-summary scope.
+    gate = EffectiveGate.from_severity(severity_config)
+    ec_fields = effective_config_fields(ec_result, gate=gate)
     return effective_config_digest(ec_fields), ec_fields
 
 
@@ -882,7 +881,9 @@ def _release_md_library_findings(library_results: list[dict[str, object]]) -> li
             impact_table.get("root_entries") if isinstance(impact_table, dict) else None
         ) or []
         impact_direct_removals = (
-            impact_table.get("direct_removals", 0) if isinstance(impact_table, dict) else 0
+            impact_table.get("direct_removals", 0)
+            if isinstance(impact_table, dict)
+            else 0
         )
         has_impact = bool(impact_root_entries) or bool(impact_direct_removals)
         if not findings and not has_impact:
@@ -995,7 +996,5 @@ def release_disposition_audit_block(
             policy=bundle_result.policy,
             policy_file=bundle_result.policy_file,
         )
-        audits.append(
-            compute_disposition_audit(bundle_as_diff_result, severity_config)
-        )
+        audits.append(compute_disposition_audit(bundle_as_diff_result, severity_config))
     return fold_disposition_audits(audits).to_dict()

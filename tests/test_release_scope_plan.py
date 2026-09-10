@@ -29,6 +29,7 @@ equality, per this closure package's completion-test contract.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -268,3 +269,59 @@ class TestReleaseScopeResultWiredIntoRealProductionFlow:
         code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4
         assert "BREAKING" in out
+
+
+class TestScopePlanIsExecutionAuthoritative:
+    """Codex review (PR #1192, follow-up finding): `scope_plan` must be what
+    execution actually consumes, not a DTO only read by the post-execution
+    record builder -- a future normalization/selection rule added to
+    `resolve_release_scope_plan` must change *which pairs run*, not merely
+    how the reported `ReleaseScopeResult` describes them.
+
+    Proven here by patching `resolve_release_scope_plan` (where
+    `cli_compare_release.py` resolves it) to return a plan whose
+    `matched_keys` *narrows out* one of the two real, on-disk members, and
+    asserting the real execution never compares it -- if execution still
+    read the original locals instead of the plan, this member would still
+    be compared and reported."""
+
+    def test_a_plan_narrowed_matched_keys_actually_narrows_execution(
+        self, tmp_path: Path
+    ) -> None:
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        for name in ("libfoo.json", "libbar.json"):
+            snap = _snap(library=name.replace(".json", ".so"))
+            _write_snap(old_dir / name, snap)
+            _write_snap(new_dir / name, snap)
+
+        real = resolve_release_scope_plan
+
+        def _narrow_to_libfoo_only(old_map, new_map, matched_keys, evidence):
+            plan = real(old_map, new_map, matched_keys, evidence)
+            narrowed_keys = tuple(k for k in plan.matched_keys if "libbar" not in k)
+            assert narrowed_keys and narrowed_keys != plan.matched_keys
+            return ReleaseScopePlan(
+                old_map=plan.old_map,
+                new_map=plan.new_map,
+                matched_keys=narrowed_keys,
+                evidence=plan.evidence,
+            )
+
+        with patch(
+            "abicheck.cli_compare_release.resolve_release_scope_plan",
+            side_effect=_narrow_to_libfoo_only,
+        ):
+            code, out = _invoke(
+                "compare", str(old_dir), str(new_dir), "--format", "json"
+            )
+
+        assert code == 0
+        data = json.loads(out)
+        compared_names = {lib["library"] for lib in data["libraries"]}
+        # libbar was narrowed out of the plan before execution -- if
+        # execution still read the raw `matched_keys` local instead of
+        # `scope_plan.matched_keys`, libbar would still appear here.
+        assert compared_names == {"libfoo.json"}

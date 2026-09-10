@@ -238,32 +238,35 @@ def add_effective_config_digest(
     rather than silently absent from the fingerprint (Codex review,
     PR #803, fresh evidence).
     """
+    import dataclasses
+
     from .effective_config_digest import (
         effective_config_digest,
         effective_config_fields,
     )
     from .policy.effective_gate import EffectiveGate, scoped_gate_selection_from_result
 
-    # Route the scheme derivation through the one real, per-run
-    # `EffectiveGate` this comparison resolved (Codex review, PR #1192,
-    # closure package 4's own follow-up finding): *severity_config*,
-    # *require_complete_analysis*, and *result*'s own recorded scoped-gate
-    # selection (`--used-by`/`--required-symbol`) are exactly this run's
-    # three other gate-changing facts, so this is the real production call
-    # site that gives `EffectiveGate` genuinely varying values -- not merely
-    # a unit-tested, never-invoked type.
+    # The one real, per-run `EffectiveGate` this comparison resolved (Codex
+    # review, PR #1192, closure package 4's own follow-up findings):
+    # *severity_config*, *require_complete_analysis*, and *result*'s own
+    # recorded scoped-gate selection (`--used-by`/`--required-symbol`) are
+    # exactly this run's three other gate-changing facts. `scheme` may
+    # override the derived one (a caller's own already-resolved scheme,
+    # e.g. `scan --against`'s own `exit_scheme` -- see this function's own
+    # docstring on *exit_code_scheme*), so `gate` is rebuilt to actually
+    # carry it rather than leaving the model able to disagree with itself.
+    # `effective_config_fields` below reads every `gate.*` field from *this*
+    # object exclusively -- it is the digest's single source for them, not
+    # a second, independently-rederived projection of the same raw inputs.
     gate = EffectiveGate.from_severity(
         severity_config,
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
     )
     scheme = exit_code_scheme or gate.exit_code_scheme
-    ec_fields = effective_config_fields(
-        result,
-        severity_config=severity_config,
-        exit_code_scheme=scheme,
-        require_complete_analysis=require_complete_analysis,
-    )
+    if scheme != gate.exit_code_scheme:
+        gate = dataclasses.replace(gate, exit_code_scheme=scheme)
+    ec_fields = effective_config_fields(result, gate=gate)
     d["effective_config_digest"] = effective_config_digest(ec_fields)
     d["effective_config_fields"] = ec_fields
 
