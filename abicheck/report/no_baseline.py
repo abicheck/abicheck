@@ -76,6 +76,7 @@ from .no_baseline_document import (
     # of how `suppressed` is shaped. A consumer wanting the type imports it
     # from `no_baseline_document`, which owns it.
     SuppressedFinding,
+    suppression_rule_label,
 )
 
 if TYPE_CHECKING:
@@ -529,12 +530,18 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
         for entry in doc.suppressed:
             finding = entry.finding
             change = finding.change
-            # The label alone answers "which rule"; a reader deciding whether
-            # the waiver still applies needs the reason it was written for,
-            # the file it lives in, and when it lapses. The display label
-            # collapses label and reason into one string, so a rule stating
-            # both showed only its label here (Codex review, P1).
-            rule = getattr(change, "suppression_rule", None) or "(rule gave no label)"
+            # A reader deciding whether the waiver still applies needs the
+            # reason it was written for, the file it lives in, and when it
+            # lapses -- so those get their own columns beside the label.
+            #
+            # The label comes from the shared resolver, never from
+            # `Change.suppression_rule` directly: that field is
+            # `label or reason`, so reading it here printed a reason-only
+            # rule's reason twice, once under a heading claiming it was a
+            # separate rule label (Codex review, P2).
+            rule = suppression_rule_label(change, entry.provenance) or (
+                "(rule gave no label)"
+            )
             prov = entry.provenance or {}
             reason = prov.get("reason") or "(none stated)"
             source = prov.get("source_file") or "(not recorded)"

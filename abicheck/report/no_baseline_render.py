@@ -36,7 +36,10 @@ import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from .cross_source_evolution import change_cross_source_evolution_field
-from .no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
+from .no_baseline_document import (
+    NO_BASELINE_EXIT_AXIS_LABELS,
+    suppression_rule_label,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -74,17 +77,12 @@ def _suppression_justification(
     provenance at all -- the case where nothing better is knowable -- and
     then stands alone rather than being paired with anything.
     """
-    if provenance:
-        reason = provenance.get("reason")
-        label = provenance.get("label")
-        if reason and label:
-            return f"{label}: {reason}"
-        if reason or label:
-            return str(reason or label)
-    else:
-        collapsed = getattr(change, "suppression_rule", None)
-        if collapsed:
-            return str(collapsed)
+    label = suppression_rule_label(change, provenance)
+    reason = (provenance or {}).get("reason")
+    if reason and label:
+        return f"{label}: {reason}"
+    if reason or label:
+        return str(reason or label)
     return "suppressed by an abicheck --suppress rule"
 
 

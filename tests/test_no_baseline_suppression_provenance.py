@@ -253,6 +253,28 @@ def test_a_suppression_justification_never_repeats_one_field_as_two(
             f"justification {text!r} repeats a field; one source rendered as two"
         )
 
+    # Markdown shows the label in its own column beside the reason, so it
+    # needs the same rule applied at a *different* shape -- and it was the
+    # site the first fix missed, printing a reason-only rule's reason under
+    # both headings (Codex review, P2, the second time). Asserted on the
+    # rendered row, so the two columns really differ.
+    markdown = render_no_baseline(result, "markdown")[0]
+    rows = [
+        line
+        for line in markdown.splitlines()
+        if line.startswith("| `exported_not_public`")
+    ]
+    assert rows, "the suppressed finding must appear in the Markdown table"
+    for row in rows:
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        label_cell, reason_cell = cells[3], cells[4]
+        assert label_cell != reason_cell, (
+            f"Markdown row {row!r} prints the same text as both the rule "
+            "label and the reason; one field shown as two"
+        )
+        assert label_cell == (label or "(rule gave no label)")
+        assert reason_cell == (reason or "(none stated)")
+
     junit = ET.fromstring(render_no_baseline(result, "junit")[0])
     skipped = [s.attrib["message"] for s in junit.iter("skipped")]
     assert skipped, "a suppressed finding must be a skipped JUnit case"

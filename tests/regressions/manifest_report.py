@@ -132,6 +132,13 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1176, 1185),
         seed_tests=(
             "tests/test_disposition_reclassification.py",
+            # The audit's own suppression-provenance suite moved here when
+            # `test_no_baseline_report_formats.py` crossed its module-size
+            # cap. That module still carries the exit-axis half of this
+            # class; naming only it left the `suppression-provenance` record
+            # and renderer axes declared below unbacked by any seed test
+            # (Codex review, P2).
+            "tests/test_no_baseline_suppression_provenance.py",
             "tests/test_no_baseline_report_formats.py",
         ),
         axes={

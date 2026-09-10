@@ -49,6 +49,8 @@ __all__ = [
     "NO_BASELINE_SUPPORTED_FORMATS",
     "NO_BASELINE_UNSUPPORTED_FORMATS",
     "NoBaselineDocument",
+    "SuppressedFinding",
+    "suppression_rule_label",
 ]
 
 
@@ -179,6 +181,34 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
         "as a clean pass (ADR-065)."
     ),
 }
+
+
+def suppression_rule_label(
+    change: Any, provenance: Mapping[str, Any] | None
+) -> str | None:
+    """The suppressing rule's *label*, or ``None`` when it stated none.
+
+    The one owner of this question, because getting it wrong is easy and has
+    now been gotten wrong three times in this package alone.
+    ``Change.suppression_rule`` is ``SuppressionOutcome.rule_label()``'s
+    ``label or reason`` collapse -- a single string that does not say which
+    of the two it holds -- so reading it as a label is a coin flip. When the
+    run recorded provenance, the real ``label`` is knowable and the collapsed
+    field must not be consulted at all; only a run with no ledger entry falls
+    back to it, and there nothing better is knowable.
+
+    Every projection that shows a label separately from a reason routes
+    through here (the Markdown table's "Suppressed by" column, and
+    ``no_baseline_render._suppression_justification`` for SARIF and JUnit),
+    so a fourth call site cannot quietly form its own opinion. The failure
+    this prevents is a reason printed twice, once under a heading claiming
+    it is a rule label (Codex review, P2, twice).
+    """
+    if provenance:
+        label = provenance.get("label")
+        return str(label) if label else None
+    collapsed = getattr(change, "suppression_rule", None)
+    return str(collapsed) if collapsed else None
 
 
 @dataclass(frozen=True)
