@@ -304,11 +304,8 @@ def resolve_compare_request(
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`
             or names a frontend with no extractor for its evidence. **Not**
-            raised for a ``depth`` the resolved snapshots did not reach: since
-            PR #1195 that is ADR-064's exit-7 axis, recorded on the result by
-            ``policy.depth_evidence_contract`` (``build``/``source`` only,
-            live sides only) rather than raised, so a typed caller reads
-            ``DiffResult.evidence_contract_error`` instead of catching.
+            for an unreached ``depth`` since PR #1195 -- that is ADR-064's
+            exit-7 axis, read off ``DiffResult.evidence_contract_error``.
         PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
             finds a requested evidence input no resolved collector/backend
             combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
@@ -441,10 +438,9 @@ def resolve_compare_request(
     # resolve, not inside `_resolve_side`: it reads the on-disk ELF, so it
     # gains nothing from the extraction threads.
     populate_pair_dependency_info(request, old, new, old_fmt=old_fmt, new_fmt=new_fmt)
-    # No `enforce_requested_depth` here (PR #1195): a `compare` depth
-    # shortfall is ADR-064's exit-7 axis, recorded by `classify_compare_pair`
-    # below, which this call used to pre-empt. Why:
-    # `policy/depth_evidence_contract.py`'s docstring.
+    # No `enforce_requested_depth` here (PR #1195): a depth shortfall is
+    # ADR-064's exit-7 axis, recorded by `classify_compare_pair` below, which
+    # this call pre-empted. Why: `policy/depth_evidence_contract.py`.
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
     compile_contexts = resolved_pair_compile_contexts(
@@ -613,15 +609,17 @@ def classify_compare_pair(
         result.layer_coverage = layer_coverage_rows
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
-    # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195
-    # (see `resolve_compare_request`'s note). `pair.old_fmt`/`.new_fmt`
-    # (CodeRabbit review) come straight from the request's own operand
-    # path, so a stored-snapshot request correctly reads as non-live too.
+    # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195.
+    # Liveness via `input_spec_is_live`, the owner the native CLI uses, not
+    # `pair.old_fmt is not None`: that answers `None` for a GNU ld linker
+    # script this run does follow and parse (Codex review).
     from .policy.depth_evidence_contract import record_depth_evidence_contract_error
+    from .workflows.input_resolution import input_spec_is_live
 
     record_depth_evidence_contract_error(
         result, request.depth, old, new,
-        old_is_live=pair.old_fmt is not None, new_is_live=pair.new_fmt is not None,
+        old_is_live=input_spec_is_live(request.old),
+        new_is_live=input_spec_is_live(request.new),
     )
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain

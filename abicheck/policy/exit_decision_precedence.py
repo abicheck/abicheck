@@ -80,6 +80,7 @@ def _dominant_decision(
     compatibility_contribution: int = 0,
     contract_coverage_contribution: int = 0,
     analysis_assurance_contribution: int = 0,
+    evidence_contract_error_contribution: int = 0,
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
@@ -126,6 +127,11 @@ def _dominant_decision(
     compatibility contribution of `4`). Fail loudly instead.
     """
     dominant_field = _DOMINANT_FIELD[reason]
+    # Ignored when this *is* the dominant axis; preserved for every other, so
+    # a release that is `not_comparable` *and* short of its pinned rung still
+    # reports the shortfall (Codex review).
+    if dominant_field == "evidence_contract_error_contribution":
+        evidence_contract_error_contribution = 0
     preserved: tuple[int, ...]
     if prior is not None:
         preserved = (
@@ -142,6 +148,7 @@ def _dominant_decision(
             compatibility_contribution,
             contract_coverage_contribution,
             analysis_assurance_contribution,
+            evidence_contract_error_contribution,
             operational_error_contribution,
             incomplete_scope_contribution,
             no_comparison_completed_contribution,
@@ -170,17 +177,20 @@ def _dominant_decision(
             ),
             **{dominant_field: code},
         )
-    return ExitDecision(
-        code=code,
-        reasons=(reason,),
-        compatibility_contribution=compatibility_contribution,
-        contract_coverage_contribution=contract_coverage_contribution,
-        analysis_assurance_contribution=analysis_assurance_contribution,
-        operational_error_contribution=operational_error_contribution,
-        incomplete_scope_contribution=incomplete_scope_contribution,
-        no_comparison_completed_contribution=no_comparison_completed_contribution,
-        **{dominant_field: code},
-    )
+    # One mapping, not explicit keywords: `dominant_field` may name a field
+    # this function also preserves (evidence-contract is both), and passing
+    # both would be a duplicate-keyword TypeError. Dominant assigned last.
+    contributions = {
+        "compatibility_contribution": compatibility_contribution,
+        "contract_coverage_contribution": contract_coverage_contribution,
+        "analysis_assurance_contribution": analysis_assurance_contribution,
+        "evidence_contract_error_contribution": evidence_contract_error_contribution,
+        "operational_error_contribution": operational_error_contribution,
+        "incomplete_scope_contribution": incomplete_scope_contribution,
+        "no_comparison_completed_contribution": no_comparison_completed_contribution,
+    }
+    contributions[dominant_field] = code
+    return ExitDecision(code=code, reasons=(reason,), **contributions)
 
 
 #: ADR-064's exit code for a failed evidence contract, and ADR-037 D5's
@@ -499,19 +509,22 @@ def resolve_release_exit_decision(
             ExitReason.NOT_COMPARABLE,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
+            # The evidence branch below is unreachable once this returns, so
+            # without this a release that is `not_comparable` *and* short of
+            # its pinned rung would report `0` for the axis while the member
+            # entry and stderr both record it (Codex review). `16` > `7`, so
+            # `code`/`reasons` are unchanged; only the report gains the fact.
+            evidence_contract_error_contribution=evidence_contract_error_contribution,
             operational_error_contribution=operational_error_contribution,
             incomplete_scope_contribution=incomplete_scope_contribution,
             no_comparison_completed_contribution=no_comparison_completed_contribution,
         )
 
     if evidence_contract_error_contribution:
-        # Below `not_comparable`, above every other axis -- see this
-        # function's docstring. The other contributions are carried through
-        # for explainability exactly as the `not_comparable` branch carries
-        # them; `7` exceeds each of them (verdict/severity and operational
-        # error cap at `4`, the floors at `1`), so `reasons` still names
-        # only this axis. It does *not* exceed `8`/`16`, which is why those
-        # two are checked first and this one never masks them.
+        # Below `not_comparable`, above every other axis (including a proven
+        # removed library's `8` -- see this function's docstring for why that
+        # one place is deliberately not a flat max). Other contributions are
+        # carried for explainability as the branch above carries them.
         return _dominant_decision(
             evidence_contract_error_contribution,
             ExitReason.EVIDENCE_CONTRACT_ERROR,

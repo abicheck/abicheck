@@ -28,6 +28,11 @@ service layer, and that file is at its `architecture/debt.yaml` baseline.
 
 from __future__ import annotations
 
+import io
+import subprocess
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
+
 import pytest
 
 
@@ -70,3 +75,53 @@ def test_only_a_live_short_side_trips_the_contract(
 
     short_side_is_live = old_live if failing_side == "old" else new_live
     assert satisfied is not short_side_is_live
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("operand", ("binary", "linker_script"))
+def test_a_linker_script_operand_is_live_on_the_typed_api(
+    tmp_path: Path, operand: str
+) -> None:
+    """A GNU ld linker script is an operand this run *does* extract.
+
+    ``detect_binary_format`` answers ``None`` for one (it is a text file),
+    so the typed pipeline's first cut asked ``pair.old_fmt is not None`` and
+    read a script operand as a stored snapshot -- skipping the depth floor
+    for a side it then followed to a live DSO and parsed. It went unnoticed
+    while ``enforce_requested_depth`` still fired unconditionally, and
+    surfaced the moment that was removed (Codex review, P1 on `ba00389`).
+
+    Parametrized over the script and the DSO it resolves to, because the
+    invariant is that they answer the *same*: whether the caller names the
+    artifact directly or through a script it points at is not a fact about
+    how much evidence this run collected. Asserting only the script case
+    would pass against a build that had stopped gating both.
+    """
+    if not __import__("shutil").which("gcc"):
+        pytest.skip("gcc is required to build the live fixture")
+    src = tmp_path / "l.c"
+    src.write_text("int l(void){return 1;}\n", encoding="utf-8")
+    made = []
+    for side in ("old", "new"):
+        so = tmp_path / f"libreal_{side}.so"
+        subprocess.run(
+            ["gcc", "-shared", "-fPIC", "-o", str(so), str(src)],
+            check=True,
+            capture_output=True,
+        )
+        script = tmp_path / f"libscript_{side}.so"
+        script.write_text(f"INPUT({so.name})\n", encoding="utf-8")
+        made.append(so if operand == "binary" else script)
+
+    from abicheck.api_types import CompareRequest, InputSpec
+    from abicheck.service_compare_pipeline import run_compare_request
+
+    request = CompareRequest(
+        old=InputSpec.of(made[0]), new=InputSpec.of(made[1]), depth="build"
+    )
+    noise = io.StringIO()
+    with redirect_stderr(noise), redirect_stdout(noise):
+        result = run_compare_request(request).diff
+    # Neither side carries build evidence, and both are extracted by this
+    # run, so the pinned rung is unmet however the operand was spelled.
+    assert result.evidence_contract_error is True, result
