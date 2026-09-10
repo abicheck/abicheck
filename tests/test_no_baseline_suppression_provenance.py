@@ -172,7 +172,7 @@ def test_every_suppressed_finding_keeps_its_full_rule_provenance(
     assert len(rows) == len(doc.suppressed)
 
     for row, entry in zip(rows, doc.suppressed, strict=True):
-        recorded = ledger.rule_for(entry.finding.change)
+        recorded = ledger.rule_for(entry.change)
         assert recorded is not None, (
             "the run recorded no ledger entry, so this test would pass "
             "vacuously against a projection that emits nothing"
@@ -439,3 +439,44 @@ def test_a_non_coverage_gate_names_its_axis_without_a_coverage_block() -> None:
         "no ledger rows means no section; an empty heading would imply a "
         "domain that closed cleanly, which is a different fact"
     )
+
+
+def test_a_suppressed_entry_is_still_a_report_finding() -> None:
+    """`doc.suppressed` entries stay usable as ordinary findings.
+
+    `NoBaselineDocument` is reachable from `abicheck.report.no_baseline`, and
+    a consumer iterating `.suppressed` reads `.change`/`.verdict`/`.category`
+    the same way it reads `.findings`. An earlier version of this branch
+    paired the finding with its provenance side by side, which turned every
+    such read into an `AttributeError` — trading one regression for the
+    provenance fix (Codex review, P2).
+
+    Making `SuppressedFinding` *a* `ReportFinding` rather than a wrapper is
+    what keeps both true at once, and this pins it: the attribute reads and
+    the `isinstance` relationship are both asserted, since forwarding
+    properties would satisfy the first alone and still fail a consumer that
+    type-checks.
+    """
+    from abicheck.report.finding import ReportFinding
+
+    result = _result(
+        "case143_audit_accidental_export", suppression=_labelled_and_reasoned()
+    )
+    doc = compute_no_baseline_document(result)
+    assert doc.suppressed
+
+    for entry in doc.suppressed:
+        assert isinstance(entry, ReportFinding)
+        # Read exactly as a `.findings` entry would be.
+        assert entry.change is not None
+        assert entry.verdict is not None
+        assert entry.category is not None
+        # And the provenance rides along rather than replacing any of it.
+        assert entry.provenance is not None
+        assert entry.provenance["reason"] == "temporary vendor debug hook"
+
+    # The two collections are interchangeable to a consumer that does not
+    # care which is which -- the property that makes `.suppressed` a
+    # disposition of findings rather than a separate kind of thing.
+    for entry in [*doc.findings, *doc.suppressed]:
+        assert isinstance(entry, ReportFinding)

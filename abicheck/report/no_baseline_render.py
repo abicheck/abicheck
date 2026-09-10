@@ -228,7 +228,7 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     # shows it as suppressed instead of never learning it existed
     # (``vision.md``'s "Record before disposing"; Codex review, P1).
     for finding, suppressed, provenance in [(f, False, None) for f in doc.findings] + [
-        (entry.finding, True, entry.provenance) for entry in doc.suppressed
+        (entry, True, entry.provenance) for entry in doc.suppressed
     ]:
         rule = _rule_for(finding.change.kind)
         rules.setdefault(rule["id"], rule)
@@ -371,9 +371,7 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
         # `suppressions` array for this and JUnit's nearest honest
         # equivalent is a skipped case -- the finding is reported, and its
         # disposition is legible, without claiming it broke anything.
-        _junit_finding_case(
-            suite, entry.finding, suppressed=True, provenance=entry.provenance
-        )
+        _junit_finding_case(suite, entry, suppressed=True, provenance=entry.provenance)
 
     gate = ET.SubElement(
         suite,

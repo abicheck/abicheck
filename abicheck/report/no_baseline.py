@@ -284,7 +284,9 @@ def _suppressed_entries(
     ledger = getattr(diff, "disposition_ledger", None)
     return tuple(
         SuppressedFinding(
-            finding=finding,
+            change=finding.change,
+            verdict=finding.verdict,
+            category=finding.category,
             provenance=_provenance_row(ledger, finding.change),
         )
         for finding in findings
@@ -384,9 +386,9 @@ def _suppressed_json(entry: SuppressedFinding) -> dict[str, Any]:
       disposition audit exists to preserve (Codex review, P1). ``null``
       when the run kept no ledger entry for this finding.
     """
-    row = _finding_json(entry.finding)
+    row = _finding_json(entry)
     row["disposition"] = "suppressed"
-    row["suppression_rule"] = getattr(entry.finding.change, "suppression_rule", None)
+    row["suppression_rule"] = getattr(entry.change, "suppression_rule", None)
     row["suppression_provenance"] = dict(entry.provenance) if entry.provenance else None
     return row
 
@@ -528,8 +530,8 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             "| --- | --- | --- | --- | --- | --- | --- |",
         ]
         for entry in doc.suppressed:
-            finding = entry.finding
-            change = finding.change
+            finding = entry
+            change = entry.change
             # A reader deciding whether the waiver still applies needs the
             # reason it was written for, the file it lives in, and when it
             # lapses -- so those get their own columns beside the label.

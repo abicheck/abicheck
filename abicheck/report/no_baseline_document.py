@@ -37,9 +37,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .finding import ReportFinding
+
 if TYPE_CHECKING:
     from .cross_source_evolution import CrossSourceEvolutionSummary
-    from .finding import ReportFinding
 
 __all__ = [
     "AUDIT_REPORT_SCHEMA_VERSION",
@@ -211,9 +212,19 @@ def suppression_rule_label(
     return str(collapsed) if collapsed else None
 
 
-@dataclass(frozen=True)
-class SuppressedFinding:
+@dataclass(frozen=True, slots=True)
+class SuppressedFinding(ReportFinding):
     """One suppressed finding and the rule that actually hid it.
+
+    **A** :class:`~abicheck.report.finding.ReportFinding`, not a wrapper
+    around one: a suppressed entry *is* a finding, and the rule that hid it
+    is one more resolved fact about it. So ``entry.change``/``.verdict``/
+    ``.category`` work exactly as they do on any other finding, and
+    ``isinstance(entry, ReportFinding)`` holds -- which is what keeps every
+    consumer of ``NoBaselineDocument.suppressed`` working unchanged, rather
+    than trading an `AttributeError` for a provenance field (Codex review,
+    P2). A first version paired the two side by side and did force that
+    change on callers.
 
     *provenance* is the already-serialized
     :class:`~abicheck.policy.disposition_ledger.RuleProvenance` -- ADR-067
@@ -232,8 +243,7 @@ class SuppressedFinding:
     ADR-067 record while carrying strictly less.
     """
 
-    finding: ReportFinding
-    provenance: Mapping[str, Any] | None
+    provenance: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
