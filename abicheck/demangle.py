@@ -143,7 +143,17 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     global _cxxfilt_import_confirmed_missing  # noqa: PLW0603
     try:
         import cxxfilt
-    except ImportError:
+    except Exception:  # noqa: BLE001
+        # Not narrowed to ImportError: an installed cxxfilt module can also
+        # fail to *import* for a reason other than "package not installed"
+        # (e.g. an OSError/RuntimeError from a broken native dependency at
+        # module-init time) -- the prior implementation caught all import-
+        # time exceptions here and fell through to the c++filt fallback,
+        # and `_batch_phase2_cxxfilt()` still does the same (Codex review,
+        # fresh evidence: narrowing this to ImportError let such an
+        # exception escape uncaught, aborting demangle() even when c++filt
+        # itself works fine). Either way cxxfilt is not usable this run, so
+        # it counts toward "confirmed missing" the same as an ImportError.
         _cxxfilt_import_confirmed_missing = True
     else:
         try:

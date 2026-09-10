@@ -184,6 +184,33 @@ class TestDemangle:
                 _mod.demangle("_ZN3foo3bazEv")
         assert _mod._warned_no_demangler is True
 
+    def test_non_importerror_cxxfilt_import_failure_falls_through_to_cppfilt(self):
+        """Codex review, fresh evidence: an installed `cxxfilt` module can
+        fail to *import* for a reason other than "package not installed"
+        (e.g. an OSError/RuntimeError from a broken native dependency at
+        module-init time). Narrowing the import's except clause to
+        `ImportError` let such an exception escape uncaught, aborting
+        demangle() entirely instead of falling through to the working
+        c++filt fallback -- must behave the same as an ImportError."""
+        real_import = __import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "cxxfilt":
+                raise OSError("broken native dependency")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=_fake_import):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt", "_ZN3foo3barEv"],
+                    returncode=0,
+                    stdout="foo::bar()\n",
+                    stderr="",
+                )
+                result = _mod.demangle("_ZN3foo3barEv")
+        assert result == "foo::bar()"
+        assert _mod._warned_no_demangler is False
+
     def test_no_warning_when_cppfilt_present_but_symbol_fails(self):
         """Root-cause regression for the false-positive warning: cxxfilt is
         importable (present, working for other symbols) and the c++filt
