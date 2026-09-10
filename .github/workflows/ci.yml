@@ -223,7 +223,14 @@ jobs:
     # otherwise-green run, not a real test failure. 65 restores headroom
     # over the ~49m21s observed here, matching the ~1.5x-of-observed
     # pattern each prior bump in this comment already followed.
-    timeout-minutes: 65
+    #
+    # Scoped to the windows-latest leg only (Codex review, PR #1197):
+    # `timeout-minutes` is a job-level setting, so a flat 65 would also
+    # hand every ubuntu/macos matrix cell 20 extra minutes of runaway-hang
+    # budget on a required check, for a cost this comment's own evidence
+    # only ever measured on Windows. The other legs keep the 45m this
+    # comment's prior bumps established.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 65 || 45 }}
     permissions:
       contents: read
       id-token: write
