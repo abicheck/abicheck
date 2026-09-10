@@ -211,6 +211,33 @@ class TestDemangle:
         assert result == "foo::bar()"
         assert _mod._warned_no_demangler is False
 
+    def test_warning_wording_distinguishes_broken_cxxfilt_from_missing_cxxfilt(
+        self, caplog
+    ):
+        """Codex review, fresh evidence (second round): when an installed
+        `cxxfilt` fails to import with something other than `ImportError`
+        (a broken native dependency, say) and c++filt is also genuinely
+        missing, the warning must still fire (no demangler actually works)
+        but must NOT claim "no cxxfilt package" -- that package IS
+        installed, just broken. Only a genuine ImportError earns that
+        specific wording."""
+        real_import = __import__
+
+        def _fake_import(name, *args, **kwargs):
+            if name == "cxxfilt":
+                raise OSError("broken native dependency")
+            return real_import(name, *args, **kwargs)
+
+        with caplog.at_level("WARNING", logger=_mod._log.name):
+            with patch("builtins.__import__", side_effect=_fake_import):
+                with patch("subprocess.run", side_effect=FileNotFoundError):
+                    result = _mod.demangle("_ZN3foo3barEv")
+        assert result is None
+        assert _mod._warned_no_demangler is True
+        [warning_text] = [r.getMessage() for r in caplog.records]
+        assert "cxxfilt failed to initialize" in warning_text
+        assert "no cxxfilt package" not in warning_text
+
     def test_no_warning_when_cppfilt_present_but_symbol_fails(self):
         """Root-cause regression for the false-positive warning: cxxfilt is
         importable (present, working for other symbols) and the c++filt
