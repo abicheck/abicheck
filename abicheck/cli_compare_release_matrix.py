@@ -352,20 +352,20 @@ def _finalize_release_output(
                 err=True,
             )
 
-    # ADR-064's evidence-contract axis (exit 7): aggregated from the members
-    # and reported/exited by its own owner, ahead of the verdict-based exit
-    # below -- see that module for why it is not another floor folded into
-    # `_exit_compare_release`.
+    # ADR-064's evidence-contract axis (exit 7). The notice is this layer's
+    # own business (the per-member `DiffResult` is gone by now, so the note a
+    # single-pair run renders cannot be); the *decision* is not -- it goes
+    # through `_exit_compare_release` like every other axis, so the process
+    # exit and the persisted `exit` block cannot disagree.
     from .frontends.cli.release_evidence_contract import (
+        evidence_contract_notice,
         release_evidence_contract_contribution,
-        report_and_exit_on_evidence_contract,
     )
 
-    report_and_exit_on_evidence_contract(
-        library_results,
-        release_evidence_contract_contribution(library_results),
-        worst_verdict=worst_verdict,
-    )
+    _evidence_contribution = release_evidence_contract_contribution(library_results)
+    _evidence_notice = evidence_contract_notice(library_results, _evidence_contribution)
+    if _evidence_notice:
+        click.echo(_evidence_notice, err=True)
 
     _exit_compare_release(
         worst_verdict,
@@ -373,6 +373,7 @@ def _finalize_release_output(
         removed_keys,
         severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+        evidence_contract_error_contribution=_evidence_contribution,
         incomplete_scope_exit_contribution=(
             scope_terms.decision.incomplete_scope_exit_contribution
             if scope_terms

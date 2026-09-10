@@ -84,6 +84,7 @@ from ..policy.exit_decision import (
 )
 from ..policy.exit_decision_precedence import (
     EXIT_EVIDENCE_CONTRACT_ERROR,
+    release_evidence_contract_contribution,
     resolve_compare_exit_decision_with_abort_axes,
     resolve_release_exit_decision,
     resolve_release_exit_decision_for_report,
@@ -166,6 +167,7 @@ __all__ = [
     "no_comparison_completed_exit_contribution",
     "note_if_same_binary_compared",
     "EXIT_EVIDENCE_CONTRACT_ERROR",
+    "release_evidence_contract_contribution",
     "resolve_compare_exit_decision",
     "resolve_compare_exit_decision_with_abort_axes",
     "resolve_exit_decision",

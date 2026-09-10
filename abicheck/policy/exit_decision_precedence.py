@@ -359,6 +359,7 @@ def resolve_release_exit_decision(
     verdict_or_severity_contribution: int,
     removed_required_library: bool = False,
     contract_coverage_contribution: int = 0,
+    evidence_contract_error_contribution: int = 0,
     operational_error_contribution: int = 0,
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
@@ -449,6 +450,19 @@ def resolve_release_exit_decision(
     `removed_required_library_code` that does not strictly exceed a
     preserved contribution raises `ValueError`.
 
+    *evidence_contract_error_contribution* (PR #1195) is a member's pinned
+    ``--depth build``/``--depth source`` that its own live evidence never
+    reached -- ADR-064's exit-7 axis, aggregated across the release by
+    ``frontends.cli.release_evidence_contract``. Unlike the ``0``/``1``
+    floors it is a real code and a *dominant* axis: it is checked directly
+    below ``not_comparable`` and above everything else, because a run whose
+    pinned evidence contract was not met never established what changed.
+    That ranking is the same one :func:`resolve_scan_exit_decision` gives
+    the identical axis for ``scan``, and it is why this cannot be folded
+    with ``max()`` alongside the floors -- ``7`` would then silently
+    outrank a real ``4``/``8`` decided by a *different* member without
+    being named as the reason.
+
     *incomplete_scope_contribution*/*no_comparison_completed_contribution*
     (ADR-065 D6/D7, S2) are two more ``0``/``1`` fold participants, shaped
     exactly like *contract_coverage_contribution*: folded with ``max()``
@@ -477,6 +491,24 @@ def resolve_release_exit_decision(
         return _dominant_decision(
             not_comparable_code,
             ExitReason.NOT_COMPARABLE,
+            compatibility_contribution=verdict_or_severity_contribution,
+            contract_coverage_contribution=contract_coverage_contribution,
+            operational_error_contribution=operational_error_contribution,
+            incomplete_scope_contribution=incomplete_scope_contribution,
+            no_comparison_completed_contribution=no_comparison_completed_contribution,
+        )
+
+    if evidence_contract_error_contribution:
+        # Below `not_comparable`, above every other axis -- see this
+        # function's docstring. The other contributions are carried through
+        # for explainability exactly as the `not_comparable` branch carries
+        # them; `7` exceeds each of them (verdict/severity and operational
+        # error cap at `4`, the floors at `1`), so `reasons` still names
+        # only this axis. It does *not* exceed `8`/`16`, which is why those
+        # two are checked first and this one never masks them.
+        return _dominant_decision(
+            evidence_contract_error_contribution,
+            ExitReason.EVIDENCE_CONTRACT_ERROR,
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
             operational_error_contribution=operational_error_contribution,
@@ -539,6 +571,38 @@ def resolve_release_exit_decision(
         contract_coverage_contribution=contract_coverage_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,
+    )
+
+
+def release_evidence_contract_contribution(
+    library_results: list[dict[str, object]],
+) -> int:
+    """ADR-064's exit-7 axis, aggregated across a release's members.
+
+    ``max()`` over each member's own ``evidence_contract_error_contribution``
+    (stamped by the fan-out from its ``DiffResult``): one member whose pinned
+    ``--depth build``/``--depth source`` its own live evidence never reached
+    makes the release report the axis. ``0`` for every run without a
+    ``--depth`` pin.
+
+    Derived here, and called by :func:`resolve_release_exit_decision_for_report`
+    itself rather than passed in, on purpose: this axis first shipped as a
+    caller-supplied argument and one of the three call sites (the
+    ``--output-dir`` sidecar) was missed, so that file reported ``exit.code:
+    0`` for a run that exited ``7`` (Codex review). A value every reporter
+    must supply identically is not an argument.
+    """
+    return max(
+        (
+            contribution
+            for entry in library_results
+            if isinstance(entry, dict)
+            and isinstance(
+                contribution := entry.get("evidence_contract_error_contribution", 0),
+                int,
+            )
+        ),
+        default=0,
     )
 
 
@@ -701,6 +765,9 @@ def resolve_release_exit_decision_for_report(
         verdict_or_severity_contribution=verdict_or_severity_contribution,
         removed_required_library=removed_required_library,
         contract_coverage_contribution=contract_coverage_exit_contribution,
+        evidence_contract_error_contribution=release_evidence_contract_contribution(
+            library_results
+        ),
         operational_error_contribution=operational_error_contribution,
         incomplete_scope_contribution=incomplete_scope_contribution,
         no_comparison_completed_contribution=no_comparison_completed_contribution,

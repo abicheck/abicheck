@@ -138,9 +138,19 @@ def _invoke(*args: str) -> tuple[int, str]:
 
 
 def _release_json(out: str) -> dict:
+    """The release JSON document out of a mixed stdout/stderr capture.
+
+    ``CliRunner`` interleaves both streams, and warnings/notices can land on
+    either side of the document, so this decodes just the first complete
+    JSON value rather than assuming everything from the first ``{`` onward
+    is the document (which broke the moment this file started asserting on
+    a run that also emits a stderr notice).
+    """
     match = re.search(r"^\{", out, re.M)
     assert match is not None, f"no JSON document in output: {out[:400]}"
-    return json.loads(out[match.start() :])
+    document, _ = json.JSONDecoder().raw_decode(out[match.start() :])
+    assert isinstance(document, dict), document
+    return document
 
 
 # ── the invariant ──────────────────────────────────────────────────────────
@@ -395,6 +405,76 @@ class TestDepthShortfallIsExplainedNotSilent:
         # The flags the scalar note would have suggested are rejected here,
         # so the notice must not offer them as a `compare` option.
         assert "pass --build-info old=" not in out
+
+
+@pytest.mark.integration
+class TestTheReportAgreesWithTheProcessExit:
+    """A release's rendered decision must equal the code it exits with.
+
+    ``resolve_release_exit_decision_for_report``'s own docstring states this
+    as an invariant ("`.code` is nonetheless *provably* always equal to what
+    ``_exit_compare_release`` sys.exits with"), and a first version of this
+    axis broke it: the exit was taken *after* the summary had rendered, so a
+    one-member directory exited 7 while its own JSON reported
+    ``exit.code: 0``, ``reasons: ["clean"]`` and a zero contribution. A
+    report-driven CI consumer -- which never sees the process status -- read
+    that run as clean (Codex review, P1 on `2c1af1f`).
+
+    So this asserts agreement across *every* surface that publishes a
+    decision, not just the one field that was wrong, and does it by
+    comparing the two rather than pinning 7 in three places.
+    """
+
+    def test_stdout_json_exit_block_matches_the_process_exit(
+        self, live_release_dirs: tuple[Path, Path]
+    ) -> None:
+        old_dir, new_dir = live_release_dirs
+        code, out = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            "build",
+            "--format",
+            "json",
+        )
+        data = _release_json(out)
+        assert data["exit"]["code"] == code, data["exit"]
+        assert "evidence_contract_error" in data["exit"]["reasons"], data["exit"]
+        assert data["exit"]["evidence_contract_error_contribution"] == code
+
+    def test_output_dir_sidecar_matches_the_process_exit(
+        self, live_release_dirs: tuple[Path, Path], tmp_path: Path
+    ) -> None:
+        """The sidecar builds its own ``exit`` block from its own call, so
+        it can drift independently of the stdout one -- and did."""
+        old_dir, new_dir = live_release_dirs
+        out_dir = tmp_path / "reports"
+        code, _ = _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--depth",
+            "build",
+            "--format",
+            "json",
+            "--output-dir",
+            str(out_dir),
+        )
+        summary = json.loads((out_dir / "summary.json").read_text(encoding="utf-8"))
+        assert summary["exit"]["code"] == code, summary["exit"]
+
+    def test_a_clean_release_still_reports_clean(
+        self, live_release_dirs: tuple[Path, Path]
+    ) -> None:
+        """The complementary half: the fix must not stamp the axis on runs
+        that never pinned a rung."""
+        old_dir, new_dir = live_release_dirs
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        data = _release_json(out)
+        assert code == 0, out
+        assert data["exit"]["code"] == 0
+        assert data["exit"]["evidence_contract_error_contribution"] == 0
 
 
 class TestSetInputEvidenceFlagsStillRejected:

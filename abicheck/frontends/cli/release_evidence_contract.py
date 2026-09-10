@@ -22,7 +22,12 @@ evidence never reached is recorded, not raised
 member's contribution into the release's exit code, and say why it exited.
 Both live here, because they are one responsibility (this axis, at this
 cardinality) that was otherwise split across the release engine's
-aggregation site and its rendering site.
+aggregation site and its rendering site. The *decision* deliberately does
+not: it is fed into `_exit_compare_release` and into the persisted ``exit``
+block from the same aggregate, so the process exit and the report cannot
+disagree -- an earlier revision of this module exited here directly, after
+the summary had already been rendered, and produced a run that exited 7
+while its own JSON said ``exit.code: 0`` (Codex review).
 
 The second half is not cosmetic. The fan-out discards each member's
 ``DiffResult`` before the note ``record_depth_evidence_contract_error``
@@ -39,35 +44,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-__all__ = [
-    "evidence_contract_notice",
-    "release_evidence_contract_contribution",
-    "report_and_exit_on_evidence_contract",
-]
+__all__ = ["evidence_contract_notice", "release_evidence_contract_contribution"]
 
 
 def release_evidence_contract_contribution(
     library_results: Sequence[object],
 ) -> int:
-    """The release's own contribution: ``max()`` over every member's.
+    """The release's own contribution -- see the policy owner of the same name.
 
-    One member short of the pinned rung makes the release report the axis,
-    the same rule the sibling contract-coverage floor already applies. ``0``
-    for a run with no ``--depth`` pin, so every pre-existing invocation is
-    unchanged.
+    Re-exported here so this module reads as the one place the release's
+    evidence-contract axis is handled; the fold itself belongs to `policy`,
+    which is also where the report's `ExitDecision` derives it.
     """
-    return max(
-        (
-            contribution
-            for entry in library_results
-            if isinstance(entry, dict)
-            and isinstance(
-                contribution := entry.get("evidence_contract_error_contribution", 0),
-                int,
-            )
-        ),
-        default=0,
-    )
+    from ...workflows.gate import release_evidence_contract_contribution as _fold
+
+    return _fold(list(library_results))  # type: ignore[arg-type]
 
 
 def evidence_contract_notice(
@@ -97,37 +88,3 @@ def evidence_contract_notice(
         "directories, or compare the library individually."
     )
 
-
-def report_and_exit_on_evidence_contract(
-    library_results: Sequence[object],
-    contribution: int,
-    *,
-    worst_verdict: str,
-) -> None:
-    """Emit the notice and exit *contribution*, unless something outranks it.
-
-    Called ahead of ``_exit_compare_release`` rather than as another
-    parameter to it, because this is an *abort* axis, not one more floor to
-    fold: a run whose pinned evidence contract was not met never established
-    what changed, so ADR-064 puts it above the verdict mapping and above
-    ``--fail-on-removed-library``'s exit 8. Keeping it out of that function
-    also keeps the three genuine 0/1 floors it merges into one variable
-    (coverage, incomplete scope, no-comparison-completed) actually alike.
-
-    The one thing that does outrank it is ``not_comparable``: the scalar
-    resolver takes a plain ``max()`` over contributions, where 16 beats 7,
-    so this returns and lets ``_exit_compare_release`` reach its own 16.
-    Returns without exiting when *contribution* is ``0`` -- every run
-    without a ``--depth`` pin.
-    """
-    import sys
-
-    notice = evidence_contract_notice(library_results, contribution)
-    if notice is None:
-        return
-    import click
-
-    click.echo(notice, err=True)
-    if worst_verdict == "not_comparable":
-        return
-    sys.exit(contribution)
