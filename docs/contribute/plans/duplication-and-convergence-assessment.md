@@ -1678,6 +1678,31 @@ repeatedly and in different format orders, and require identical semantic
 content with no renderer re-running extraction, policy evaluation, or gate
 resolution. This is closure package 3 of that ADR's own sequence.
 
+**Landed (closure package 3).** `ReportEnvelope` exists at
+`abicheck/report/envelope.py`, built once per completed evaluation by
+`report/build.build_report_envelope` and projected by the new
+`service_render.render_envelope(fmt, envelope)`; `render_output` is now
+"build one envelope, project it". It carries the shared `ReportDocument`,
+the severity `GateDecision` (resolved *before* the document build and handed
+into it, so there is one resolution rather than two agreeing ones), one
+`ReportFinding` per `Change` including `scoped_only_changes`, and the
+presentation-only `RenderOptions`. Every renderer that previously re-derived
+one of those (SARIF's and HTML's gate, HTML's and the review digest's
+findings, JUnit's findings, Markdown's `surface_changes`) now reads the
+envelope; SARIF's invocation exit-code fold moved to
+`report/sarif_invocation.py`. The sketch above is the shape that landed with
+two deliberate deviations recorded here rather than silently: the envelope's
+`operational_state`/`inputs`/`resolution`/`effective_config`/`evidence`/
+`timings`/`advisories` fields belong to this phase's *other* halves (P0's
+`ExitDecision` model and the not-comparable/error paths) and are not
+fabricated here — a single-pair `render_output` only ever holds a completed
+`DiffResult`; and `exit_decision` stays where the report already publishes
+it (inside the shared document), because the process-exit fold is
+`frontends`' (`cli._exit_with_severity_or_verdict`), not a renderer's. The
+acceptance test is executable in
+`tests/unit/report/test_build_report_document.py`'s
+`TestRendererOrderIndependence`.
+
 **Item 1's per-finding verdict is not a fresh design question — ADR-061
 Phase 2 already scoped it and flagged the one real hazard.** Today,
 `junit_report.py`/`html_report.py`/`reporter_markdown.py` each independently

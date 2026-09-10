@@ -55,6 +55,8 @@ from typing import TYPE_CHECKING
 from .exit_decision import ExitDecision, ExitReason, resolve_exit_decision
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from ..checker_types import DiffResult
     from .severity import SeverityConfig
 
@@ -296,6 +298,7 @@ def resolve_compare_exit_decision_with_abort_axes(
     scheme: str,
     *,
     require_complete_analysis: bool = False,
+    today: date | None = None,
 ) -> ExitDecision:
     """`one-comparison-product.md` P3: `resolve_compare_exit_decision`,
     extended with the two ADR-064 abort axes `scan` already has.
@@ -321,6 +324,8 @@ def resolve_compare_exit_decision_with_abort_axes(
     `resolve_scan_exit_decision`'s own `prior_decision` -- see that
     function's own docstring for which of the two axes preserves it and
     which does not; this wrapper does not alter either rule, only calls it.
+    *today*, forwarded to the ordinary fold, keeps this agreeing with an
+    already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
 
     Both real production consumers of the *ordinary* resolver
     (`reporter_contract_blocks.add_contract_context`'s real JSON `exit`
@@ -335,6 +340,7 @@ def resolve_compare_exit_decision_with_abort_axes(
         sev_config,
         scheme,
         require_complete_analysis=require_complete_analysis,
+        today=today,
     )
     evidence_contract_error = getattr(result, "evidence_contract_error", False)
     budget_overflow = getattr(result, "budget_overflow", False)

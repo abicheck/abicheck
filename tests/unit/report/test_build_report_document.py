@@ -20,23 +20,44 @@ exists to provide, for JSON and (below) SARIF's own reuse of it:
 from __future__ import annotations
 
 import ast
+import contextlib
+import copy
+import importlib
 import inspect
 import json
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
+from datetime import date, timedelta
 from unittest import mock
 
 import pytest
 
-from abicheck.checker import Change, ChangeKind, DiffResult
+from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
 from abicheck.junit_report import to_junit_xml
-from abicheck.model import AbiSnapshot
-from abicheck.report.build import build_report_document
+from abicheck.model import AbiSnapshot, DependencyInfo, Function
+from abicheck.policy.disposition_close import finalize_ledger
+from abicheck.policy.disposition_ledger import DispositionLedger
+from abicheck.policy_file import PolicyFile
+from abicheck.reclassify import ReclassifyRule
+from abicheck.report.build import (
+    _snapshot_change,
+    build_report_document,
+    build_report_envelope,
+)
 from abicheck.report.disposition_audit import compute_disposition_audit
 from abicheck.report.document import ReportDocument
+from abicheck.report.envelope import RenderOptions, ReportEnvelope
 from abicheck.report.render_json import render_json
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif, to_sarif_str
-from abicheck.service_render import render_output
+from abicheck.service_render import render_envelope, render_output
+from abicheck.severity import SeverityConfig, SeverityLevel
+
+
+def _import_attr(dotted: str) -> object:
+    """The live callable a ``module.attr`` patch target names."""
+    module_name, _, attr = dotted.rpartition(".")
+    return getattr(importlib.import_module(module_name), attr)
 
 _BREAKING = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
 _ADDITION = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
@@ -290,7 +311,11 @@ class TestRendererOrderIndependence:
     never more (redundant re-decision).
     """
 
-    _FORMATS = ("json", "html", "sarif", "junit", "markdown")
+    # ``review`` and the ``md`` alias are in the set too: gap C's claim is
+    # about every format of one evaluation, and an alias that silently took a
+    # different path would be exactly the kind of divergence this class exists
+    # to catch.
+    _FORMATS = ("json", "html", "sarif", "junit", "markdown", "md", "review")
 
     @staticmethod
     def _render_all(
@@ -330,6 +355,1166 @@ class TestRendererOrderIndependence:
             # len(formats) (would mean a format rebuilt the document a
             # second time within its own render).
             assert spy.call_count == len(formats)
+
+    # ------------------------------------------------------------------
+    # ADR-061 gap C closure package 3: the same guarantees for ONE shared
+    # `ReportEnvelope` rendered into every format, which is the stronger
+    # statement the two tests above cannot make. Above, each format render
+    # builds its own document from the same `DiffResult` (N documents that
+    # happen to agree); below, N formats project ONE completed envelope, so
+    # they cannot disagree by construction.
+    # ------------------------------------------------------------------
+
+    #: Every decision function a projection must NOT reach, keyed by the
+    #: module attribute a renderer actually resolves. Each is patched with
+    #: ``wraps=`` the real callable, so a projection that still calls one
+    #: renders correctly and is *counted* rather than broken -- the test
+    #: fails on the count, not on a mangled render.
+    #: ``build.py``/``envelope.py`` each do ``from .finding import
+    #: build_report_findings`` -- that binds a name in *their own* module
+    #: namespace at import time, so patching
+    #: ``abicheck.report.finding.build_report_findings`` alone never sees a
+    #: call issued through either bound reference; the patch must target the
+    #: name each consumer actually calls (CodeRabbit review).
+    _DECISION_SITES = (
+        "abicheck.report.build.build_report_document",
+        "abicheck.policy.gate_decision.gate_decision_for_result",
+        "abicheck.report.finding.build_report_findings",
+        "abicheck.report.finding.report_findings_for",
+        "abicheck.report.surface_changes.build_report_findings",
+        "abicheck.report.build.build_report_findings",
+        "abicheck.report.envelope.build_report_findings",
+    )
+
+    @staticmethod
+    def _envelope(
+        result: DiffResult, old: AbiSnapshot, new: AbiSnapshot, **options: object
+    ) -> ReportEnvelope:
+        return build_report_envelope(
+            result, old, new, options=RenderOptions(**options)  # type: ignore[arg-type]
+        )
+
+    @staticmethod
+    def _render_all_from(
+        formats: tuple[str, ...], envelope: ReportEnvelope
+    ) -> dict[str, str]:
+        return {fmt: render_envelope(fmt, envelope) for fmt in formats}
+
+    @contextlib.contextmanager
+    def _decision_spies(self) -> Iterator[dict[str, mock.MagicMock]]:
+        """Patch every decision site at once, each wrapping the real callable."""
+        with contextlib.ExitStack() as stack:
+            yield {
+                target: stack.enter_context(
+                    mock.patch(target, wraps=_import_attr(target))
+                )
+                for target in self._DECISION_SITES
+            }
+
+    @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {},
+            {"show_only": "breaking"},
+            {"show_impact": True},
+            {"contract_evaluation": True, "require_complete_analysis": True},
+        ],
+        ids=["plain", "show_only", "impact", "contract"],
+    )
+    def test_one_envelope_renders_byte_identically_in_any_format_order(
+        self, changes: list[Change], options: dict[str, object]
+    ) -> None:
+        """The acceptance test ADR-061 gap C states: render the same completed
+        document repeatedly, in different format orders, and every format's
+        bytes must be identical every time.
+
+        Parametrized over several change sets *and* several option sets rather
+        than one fixed input: a fixed example would only foreclose the one
+        envelope it names, and the invariant claimed here ("a projection is a
+        pure function of the envelope") is a statement about all of them.
+        """
+        result = _result(changes)
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new, **options)
+
+        forward = self._render_all_from(self._FORMATS, envelope)
+        backward = self._render_all_from(tuple(reversed(self._FORMATS)), envelope)
+        again = self._render_all_from(self._FORMATS, envelope)
+
+        for fmt in self._FORMATS:
+            assert forward[fmt] == backward[fmt], (
+                f"{fmt!r} output differs depending on render order"
+            )
+            assert forward[fmt] == again[fmt], (
+                f"{fmt!r} output differs when the same envelope is rendered twice"
+            )
+
+    @pytest.mark.parametrize("changes", _CHANGE_COMBINATIONS)
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"show_only": "breaking"}, {"show_impact": True}],
+        ids=["plain", "show_only", "impact"],
+    )
+    def test_envelope_projection_matches_render_output_byte_for_byte(
+        self, changes: list[Change], options: dict[str, object]
+    ) -> None:
+        """``render_output`` is exactly "build one envelope, project it".
+
+        Without this, the two entry points could drift: ``render_output``
+        could keep threading an option a projection ignores (or vice versa),
+        and every other test here would still pass.
+        """
+        result = _result(changes)
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new, **options)
+
+        for fmt in self._FORMATS:
+            assert render_envelope(fmt, envelope) == render_output(
+                fmt, result, old, new, **options  # type: ignore[arg-type]
+            ), f"{fmt!r} disagrees between render_output and render_envelope"
+
+    def test_no_projection_re_runs_policy_or_gate_resolution(self) -> None:
+        """Every decision runs once, during envelope construction -- and none
+        of them runs again no matter how many formats are rendered after.
+
+        This is the half a byte-comparison cannot prove: five renderers each
+        re-deriving the same value from the same ``DiffResult`` produce
+        identical bytes too (that is exactly the pre-envelope state gap C
+        describes), so only a call count separates "cannot disagree" from
+        "happens to agree today".
+        """
+        result = _result([_BREAKING, _ADDITION, _QUALITY])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        with self._decision_spies() as spies:
+            envelope = build_report_envelope(result, old, new)
+            build_calls = {t: s.call_count for t, s in spies.items()}
+            # Render every format twice, in both orders: 10 projections.
+            for formats in (self._FORMATS, tuple(reversed(self._FORMATS))):
+                self._render_all_from(formats, envelope)
+            after = {t: s.call_count for t, s in spies.items()}
+
+        assert build_calls["abicheck.report.build.build_report_document"] == 1
+        assert build_calls["abicheck.policy.gate_decision.gate_decision_for_result"] == 1
+        for target in self._DECISION_SITES:
+            assert after[target] == build_calls[target], (
+                f"{target} ran again while projecting an already-completed "
+                f"envelope ({after[target] - build_calls[target]} extra call(s))"
+            )
+
+    def test_suppressed_changes_are_resolved_by_the_envelope_not_on_every_render(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: SARIF's own ``suppressions`` array
+        renders every ``result.suppressed_changes`` entry too, and
+        ``findings_for`` had no index entry for any of them (only
+        ``result.changes``/``scoped_only_changes`` were pre-resolved) --
+        every suppressed finding fell through to the per-change fallback,
+        re-running ``build_report_findings`` inside a renderer on every
+        single render. ``envelope.suppressed_findings`` closes that: SARIF's
+        lookup is now a pure index hit, resolved once at construction.
+        """
+        suppressed = Change(ChangeKind.VAR_REMOVED, "_Z3barv", "suppressed")
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            suppressed_changes=[suppressed],
+            policy="strict_abi",
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        with self._decision_spies() as spies:
+            envelope = build_report_envelope(result, old, new)
+            build_calls = {t: s.call_count for t, s in spies.items()}
+            assert envelope.suppressed_findings, (
+                "suppressed_changes were not pre-resolved at construction"
+            )
+            for formats in (self._FORMATS, tuple(reversed(self._FORMATS))):
+                self._render_all_from(formats, envelope)
+            after = {t: s.call_count for t, s in spies.items()}
+
+        for target in self._DECISION_SITES:
+            assert after[target] == build_calls[target], (
+                f"{target} ran again while projecting an already-completed "
+                f"envelope ({after[target] - build_calls[target]} extra call(s))"
+            )
+
+    def test_mutating_the_caller_s_result_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """A live handle on the ``DiffResult`` passed in must not leak.
+
+        Every projection above reads ``envelope.result`` directly for its own
+        presentation (HTML's/JUnit's bucketing, SARIF's rule catalog), not
+        only through ``document``/``findings``/``gate``. If the envelope held
+        the caller's own, still-mutable ``DiffResult`` object, a later
+        mutation of it -- appending a change, as a caller/sibling pass in
+        this codebase legitimately does elsewhere (``post_manifest.py``), or
+        reassigning ``.changes`` wholesale (``cli_scan_baseline.py``) --
+        would desynchronize those direct readers from the document/findings/
+        gate the envelope already froze, defeating the whole point of
+        building one envelope and projecting it into several formats
+        (reported by an external review of this refactor). This test
+        reproduces exactly that scenario: mutate the original object *after*
+        the envelope was built, then confirm every projection still reports
+        the pre-mutation state.
+        """
+        result = _result([])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        # Mutate the caller's own object after envelope construction: append
+        # a breaking change (the concrete scenario reported), and separately
+        # reassign `.changes` outright to prove reassignment can't leak in
+        # either.
+        result.changes.append(_BREAKING)
+        result.changes = [_BREAKING, _ADDITION]
+
+        assert envelope.result.changes == [], (
+            "the envelope's own result mutated when the caller's did"
+        )
+        assert envelope.document.to_mapping()["changes"] == [], (
+            "the frozen document disagreed with the envelope's own result"
+        )
+        assert envelope.findings == (), (
+            "findings disagreed with the envelope's own (unmutated) result"
+        )
+
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            assert "_Z3foov" not in rendered[fmt], (
+                f"{fmt!r} rendered a change appended to the caller's DiffResult "
+                "after the envelope was already built"
+            )
+
+    def test_mutating_a_shared_change_s_verdict_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """The element-level sibling of the container-mutation test above.
+
+        Snapshotting the containing lists is not enough on its own: ``Change``
+        is itself an ordinary mutable dataclass (pattern-verdict modulation
+        legitimately reassigns ``effective_verdict`` on one *during*
+        ``compare()``), so the envelope must not share the caller's own
+        ``Change`` objects either -- reported as a follow-up finding on the
+        fix above, since copying only the list containers still left the
+        mutable ``Change`` elements inside them shared by reference. This
+        reproduces the exact scenario reported: escalate a ``COMPATIBLE``
+        addition to ``BREAKING`` by reassigning ``effective_verdict`` after
+        the envelope was already built, then confirm every projection still
+        reports the pre-mutation, additive verdict.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result([addition])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.changes[0] is not addition, (
+            "the envelope shared the caller's own Change object by reference"
+        )
+
+        addition.effective_verdict = Verdict.BREAKING
+
+        assert envelope.result.changes[0].effective_verdict is None, (
+            "the envelope's own Change mutated when the caller's did"
+        )
+        assert envelope.findings[0].verdict != Verdict.BREAKING, (
+            "findings disagreed with the envelope's own (unmutated) Change"
+        )
+
+        sarif = to_sarif(envelope.result, envelope=envelope)
+        levels = {r["level"] for r in sarif["runs"][0]["results"]}
+        assert "error" not in levels, (
+            "SARIF escalated a change mutated on the caller's object after "
+            "the envelope was already built"
+        )
+
+        # Markdown's own static verdict legend always mentions "BREAKING" (a
+        # key explaining the marker, not a per-finding classification), so a
+        # bare substring check would false-positive on it; check the line
+        # naming the mutated symbol specifically instead.
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            symbol_lines = [
+                line for line in rendered[fmt].splitlines() if "_Z3newv" in line
+            ]
+            assert symbol_lines, f"{fmt!r} lost the mutated change entirely"
+            assert not any("BREAKING" in line for line in symbol_lines), (
+                f"{fmt!r} reported a change mutated on the caller's own "
+                "Change object after the envelope was already built"
+            )
+
+    def test_snapshot_change_decouples_a_nested_mutable_field(self) -> None:
+        """Codex review, fresh evidence: a shallow per-field list copy still
+        shares the *elements* of a nested container. ``impact_proof_path``
+        is ``list[dict[str, object]]`` -- copying the outer list decouples
+        appends/reassignment of the whole field, but mutating
+        ``impact_proof_path[0]["label"]`` in place would still reach both
+        the original and the "snapshot" through the same shared dict.
+        ``_snapshot_change`` is a primitive with its own contract
+        (independent of any one caller), so it gets its own direct test
+        rather than only an envelope-level one.
+        """
+        original = Change(
+            ChangeKind.FUNC_REMOVED,
+            "_Z3foov",
+            "removed",
+            impact_proof_path=[{"label": "original"}],
+        )
+        snapshot = _snapshot_change(original)
+        assert snapshot.impact_proof_path is not None
+        assert snapshot.impact_proof_path[0] is not original.impact_proof_path[0]
+
+        original.impact_proof_path[0]["label"] = "mutated"
+
+        assert snapshot.impact_proof_path[0]["label"] == "original"
+
+    def test_mutating_a_shared_structured_list_field_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``_snapshot_diff_result``'s
+        list-copy branch decoupled the *outer* container but shared each
+        non-``Change`` *element* unchanged. ``DiffResult.contract_conflicts``
+        is exactly such a field (``list[dict]``, read directly by
+        Markdown's own contract-conflicts section) -- mutating
+        ``contract_conflicts[0]["entity"]`` after construction must not
+        reach it.
+        """
+        conflict = {"conflict_kind": "type_mismatch", "entity": "Foo", "sources": []}
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            policy="strict_abi",
+            contract_conflicts=[conflict],
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.contract_conflicts[0] is not conflict, (
+            "the envelope shared the caller's own contract_conflicts entry"
+        )
+
+        markdown_before = render_envelope("markdown", envelope)
+        conflict["entity"] = "Mutated"
+        markdown_after = render_envelope("markdown", envelope)
+
+        assert markdown_before == markdown_after, (
+            "Markdown's contract-conflicts section moved when a "
+            "contract_conflicts entry mutated after the envelope was "
+            "already built"
+        )
+
+    def test_mutating_a_shared_dict_attribute_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """The dict-attribute sibling of the two mutation tests above.
+
+        ``DiffResult.comparability_assurance`` (and ``evidence_metrics``) are
+        mutable ``dict``s read straight off ``envelope.result`` by Markdown's/
+        HTML's confidence sections (CodeRabbit review). Reassigning or
+        mutating one after the envelope was already built must not reach
+        those sections either.
+        """
+        assurance = {"abi": "high"}
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            policy="strict_abi",
+            comparability_assurance=assurance,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.comparability_assurance is not assurance, (
+            "the envelope shared the caller's own comparability_assurance dict"
+        )
+
+        assurance["abi"] = "low"
+        assurance["injected_dimension"] = "unexpected"
+
+        assert envelope.result.comparability_assurance == {"abi": "high"}, (
+            "the envelope's own dict mutated when the caller's did"
+        )
+
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            assert "injected_dimension" not in rendered[fmt], (
+                f"{fmt!r} reported a key injected into the caller's own dict "
+                "after the envelope was already built"
+            )
+
+    def test_review_digest_merge_effect_reuses_the_envelope_s_gate(self) -> None:
+        """CodeRabbit review: the review digest's merge-effect phrase called
+        ``compute_exit_code`` independently even when an envelope had already
+        resolved a ``GateDecision`` -- a second, redundant severity
+        evaluation that happened to agree, not a projection of the one the
+        envelope already made. A ``FUNC_ADDED`` configured ``severity.
+        addition: error`` is ``COMPATIBLE`` but gate-blocking: the digest's
+        phrase must say so, and must do it by reading ``envelope.gate``, not
+        by re-deriving one.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result([addition])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        severity_config = SeverityConfig(addition=SeverityLevel.ERROR)
+        envelope = build_report_envelope(
+            result, old, new, severity_config=severity_config
+        )
+        assert envelope.gate is not None
+        assert envelope.gate.blocking
+
+        # `_severity_merge_effect` does `from .severity import
+        # compute_exit_code` as a function-local (call-time) import, so the
+        # name it resolves is `abicheck.severity`'s own re-export -- not
+        # `abicheck.policy.severity`'s origin function, which `abicheck.
+        # severity` already copied a static reference to at its own import
+        # time (patching the origin wouldn't touch that copy).
+        with mock.patch(
+            "abicheck.severity.compute_exit_code"
+        ) as compute_exit_code_spy:
+            digest = render_envelope("review", envelope)
+
+        compute_exit_code_spy.assert_not_called()
+        assert "blocked by severity policy" in digest
+
+    def test_sarif_level_reuses_the_envelope_s_finding_not_a_live_policy_file(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: SARIF's own ``_severity`` read
+        ``result.policy_file``/``result.policy`` directly for every result --
+        live, shared state a caller could still mutate after the envelope
+        was already built, even though ``build.py``'s snapshot decouples
+        every list/tuple/dict attribute and every ``Change`` object.
+        Mutating ``PolicyFile.overrides`` after construction (escalating a
+        ``FUNC_ADDED`` to ``BREAKING``) must not change SARIF's ``level``
+        for a finding the envelope already resolved as ``COMPATIBLE``.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        policy_file = PolicyFile()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[addition],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        policy_file.overrides[ChangeKind.FUNC_ADDED] = Verdict.BREAKING
+
+        sarif = to_sarif(envelope.result, envelope=envelope)
+        levels = {r["level"] for r in sarif["runs"][0]["results"]}
+        assert "error" not in levels, (
+            "SARIF re-derived a finding's level from a PolicyFile mutated "
+            "after the envelope was already built"
+        )
+
+    def test_snapshotting_changes_does_not_break_the_disposition_ledger(self) -> None:
+        """Codex review, fresh evidence, P1: ``DispositionLedger`` keys every
+        lookup on ``id(change)`` against the objects ``checker.compare()``
+        recorded it with. Replacing every ``Change`` with an independent
+        copy (this envelope's whole point) would otherwise desynchronize
+        ``with_gate``'s own ``id(change)`` membership test from the
+        snapshot's new objects, reading a real, blocking, gating finding as
+        ``effective_total: 0`` -- exactly the D3 conservation invariant
+        (``counts()`` sums to ``detected_total``) this ledger exists to
+        guarantee.
+        """
+        breaking = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result([breaking])
+        ledger = finalize_ledger(DispositionLedger(), result)
+        result.disposition_ledger = ledger  # type: ignore[attr-defined]
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        severity_config = SeverityConfig()
+
+        pre_audit = compute_disposition_audit(result, severity_config)
+        assert pre_audit.effective_total == 1
+
+        envelope = build_report_envelope(
+            result, old, new, severity_config=severity_config
+        )
+
+        assert envelope.result.disposition_ledger is not ledger
+        post_audit = compute_disposition_audit(envelope.result, severity_config)
+        assert post_audit.effective_total == pre_audit.effective_total == 1
+        assert dict(post_audit.counts)["gating"] == 1
+        assert sum(dict(post_audit.counts).values()) == post_audit.detected_total
+
+    def test_mutating_a_shared_policy_file_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``PolicyFile`` is a custom mutable
+        object, not a list/tuple/dict the container-copy loop catches, so it
+        stayed shared with the caller even after every other fix in this
+        class. HTML's own ``compatibility_metrics`` call classifies straight
+        from ``envelope.result.policy_file`` (its own independent decision,
+        distinct from the per-finding verdict SARIF/JSON/Markdown already
+        read off the envelope) -- reassigning an override after construction
+        must not move the rendered binary-compatibility percentage.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        policy_file = PolicyFile()
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[addition],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.policy_file is not policy_file, (
+            "the envelope shared the caller's own PolicyFile object"
+        )
+
+        html_before = render_envelope("html", envelope)
+        policy_file.overrides[ChangeKind.FUNC_ADDED] = Verdict.BREAKING
+        html_after = render_envelope("html", envelope)
+
+        assert html_before == html_after, (
+            "HTML's binary-compatibility percentage moved when a PolicyFile "
+            "mutated after the envelope was already built"
+        )
+
+    def test_mutating_a_shared_library_metadata_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``old_metadata``/``new_metadata``
+        (``LibraryMetadata``) are custom mutable objects too, read directly
+        by SARIF's own artifact-hash block and HTML's file-metadata section
+        -- reassigning ``old_metadata.path`` after construction must not
+        reach either.
+        """
+        old_metadata = LibraryMetadata(
+            path="/old/libfoo.so", sha256="a" * 64, size_bytes=100
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            policy="strict_abi",
+            old_metadata=old_metadata,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.old_metadata is not old_metadata, (
+            "the envelope shared the caller's own LibraryMetadata object"
+        )
+
+        sarif_before = render_envelope("sarif", envelope)
+        old_metadata.path = "/mutated/path.so"
+        sarif_after = render_envelope("sarif", envelope)
+
+        assert sarif_before == sarif_after, (
+            "SARIF's artifact path moved when LibraryMetadata mutated after "
+            "the envelope was already built"
+        )
+
+    def test_mutating_the_caller_s_snapshots_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``envelope.old``/``envelope.new``
+        were the caller's own, still-live ``AbiSnapshot`` operands.
+        ``build_report_document`` never reads them (JSON's version strings
+        come from ``result.old_version``/``new_version``, already immune),
+        but HTML's own version fields are read straight from ``envelope.
+        old``/``envelope.new`` -- reassigning ``old.version`` after
+        construction must not reach it.
+        """
+        result = _result([])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.old is not old and envelope.new is not new, (
+            "the envelope shared the caller's own AbiSnapshot objects"
+        )
+
+        old.version = "9.9.9-mutated"
+        new.version = "9.9.9-mutated"
+
+        assert envelope.old.version == "1.0"
+        assert envelope.new is not None and envelope.new.version == "2.0"
+
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            assert "9.9.9-mutated" not in rendered[fmt], (
+                f"{fmt!r} reported a version mutated on the caller's own "
+                "AbiSnapshot after the envelope was already built"
+            )
+
+    def test_markdown_severity_groups_reuse_the_envelope_s_finalized_verdicts(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``build_markdown_document`` already
+        passed the envelope's own findings to ``compute_surface_changes``,
+        but ``ReportModel.from_result`` and ``compute_headline_table`` still
+        called ``result._effective_verdict_for_change`` fresh for the
+        severity-group split and headline counts. A dated ``PolicyFile.
+        reclassify`` rule expired by render time could then move a finding
+        into Breaking Changes there while ``surface_changes`` still called
+        it compatible.
+
+        Simulates "already expired by render time" directly: the live
+        resolver is mocked to return ``BREAKING`` unconditionally. Markdown
+        now reuses the envelope's own (still ``COMPATIBLE``) finding for
+        both, so neither section should move.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov")
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(result, old, new)
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch(
+            "abicheck.reclassify.effective_verdict_for_change",
+            return_value=Verdict.BREAKING,
+        ):
+            markdown_out = render_envelope("markdown", envelope)
+
+        assert "Breaking Changes" not in markdown_out
+        assert "| Breaking changes | 0 |" in markdown_out
+        assert "| Compatible changes | 1 |" in markdown_out
+
+    def test_resolve_fallback_reuses_the_envelope_s_frozen_today(self) -> None:
+        """Codex review, fresh evidence: ``ReportEnvelope._resolve`` -- the
+        fallback for a display-only ``Change`` copy
+        ``_suppress_dangling_correlation_notes`` hands a renderer under
+        ``--show-only`` -- called ``build_report_findings`` with no
+        ``today``, reading a fresh ``date.today()`` instead of the date
+        the rest of the envelope's findings were resolved against.
+        ``_resolve`` now threads ``resolved_today`` through explicitly.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result([removed])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(result, old, new)
+
+        # Stands in for `_suppress_dangling_correlation_notes`'s own
+        # display-only copy: a different object with no entry in the
+        # envelope's identity index, so `findings_for` must fall to
+        # `_resolve`.
+        copy_of_removed = copy.copy(removed)
+
+        with mock.patch(
+            "abicheck.report.envelope.build_report_findings",
+            wraps=_import_attr("abicheck.report.finding.build_report_findings"),
+        ) as spy:
+            envelope.findings_for([copy_of_removed])
+
+        spy.assert_called_once()
+        assert spy.call_args.kwargs["today"] == envelope.resolved_today
+
+    def test_show_only_severity_filter_and_active_reclassify_disclosure_reuse_the_envelope_s_frozen_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``apply_show_only``'s severity
+        dimension and ``active_reclassify_rules`` (SARIF/HTML/Markdown's
+        policy disclosures) each defaulted to a fresh ``date.today()`` at
+        render/filter time instead of the envelope's own ``resolved_today``
+        -- so a dated ``reclassify`` rule active as of envelope construction
+        but read as expired later could vanish from a filter or disclosure,
+        disagreeing with the envelope's own frozen verdict. Mocking "time
+        passing" (``policy.selectors.date``, where these all bottom out
+        absent an explicit ``today``) must not move any of them.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=date.today() + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(
+            result, old, new, options=RenderOptions(show_only="compatible")
+        )
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch("abicheck.policy.selectors.date") as fake_date:
+            fake_date.today.return_value = date.today() + timedelta(days=2)
+            sarif_out = render_envelope("sarif", envelope)
+            markdown_out = render_envelope("markdown", envelope)
+            html_out = render_envelope("html", envelope)
+
+        assert "_Z3foov" in sarif_out, (
+            "--show-only compatible dropped the reclassified finding once "
+            "the rule read as expired against a fresh 'today'"
+        )
+        assert '"policyReclassify"' in sarif_out, (
+            "SARIF stopped disclosing the still-active-as-of-envelope rule"
+        )
+        assert "reclassify" in markdown_out.lower() or "→" in markdown_out
+        assert "_Z3foov" in html_out
+
+    def test_mutating_a_shared_snapshot_function_s_attribute_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """CodeRabbit review, fresh evidence: ``_snapshot_abi_snapshot``
+        copied only the containers, leaving each element (e.g. one
+        ``Function``) shared with the caller. JUnit's
+        ``_collect_all_symbols`` reads ``Function.mangled`` off
+        ``envelope.old`` for its testcase-classname map.
+        """
+        func = Function(name="foo", mangled="_Z3foov", return_type="void")
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", functions=[func])
+        new = _snapshot("2.0")
+        envelope = self._envelope(_result([]), old, new)
+
+        assert envelope.old.functions[0] is not func, "Function object shared"
+
+        junit_before = render_envelope("junit", envelope)
+        func.mangled = "_Z9renamed_ev"
+        junit_after = render_envelope("junit", envelope)
+
+        assert junit_before == junit_after, "testcase names moved on mutation"
+        assert "_Z3foov" in junit_before
+        assert "_Z9renamed_ev" not in junit_after
+
+    def test_review_digest_counts_reuse_the_envelope_s_finalized_findings(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``compute_review_digest`` already
+        passed *findings* to the impacted-symbols list, but its own
+        category counts (breaking/source_breaks/risk/compatible) still came
+        from ``build_summary(result)``, independently recomputing. Reuses
+        the envelope's own findings for both now.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov")],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(result, old, new)
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch(
+            "abicheck.reclassify.effective_verdict_for_change",
+            return_value=Verdict.BREAKING,
+        ):
+            digest_out = render_envelope("review", envelope)
+
+        assert "❌ Breaking (ABI) | 0" in digest_out
+
+    def test_markdown_severity_summary_reuses_the_envelope_s_frozen_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``compute_severity_summary``'s
+        ``categorize_changes`` calls independently resolved a fresh
+        verdict/category, disagreeing with the envelope's own frozen
+        finding once a dated ``reclassify`` rule expires. Now reuses
+        ``envelope.resolved_today``.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=date.today() + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(
+            result, old, new, severity_config=SeverityConfig()
+        )
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch("abicheck.policy.selectors.date") as fake_date:
+            fake_date.today.return_value = date.today() + timedelta(days=2)
+            markdown_out = render_envelope("markdown", envelope)
+
+        assert "| ABI/API Incompatibilities | ❌ `ERROR` | 0 |" in markdown_out
+
+    def test_gate_decision_for_result_reuses_the_envelope_s_captured_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``build_report_envelope`` computes
+        ``today`` once but called ``gate_decision_for_result`` with no
+        ``today``, so the gate could theoretically read a different date
+        than every finding it was built beside. ``gate_decision_for_result``
+        now receives the same captured value explicitly.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result([addition])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        severity_config = SeverityConfig(addition=SeverityLevel.ERROR)
+
+        with mock.patch(
+            "abicheck.policy.gate_decision.compute_gate_decision",
+            wraps=_import_attr("abicheck.policy.severity.compute_gate_decision"),
+        ) as spy:
+            envelope = build_report_envelope(
+                result, old, new, severity_config=severity_config
+            )
+
+        spy.assert_called_once()
+        assert spy.call_args.kwargs["today"] == envelope.resolved_today
+
+    def test_sarif_gate_contribution_reuses_the_envelope_s_frozen_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: SARIF's ``_contract_properties``
+        called ``gate_contribution_for_change`` with no ``today``, so a
+        finding's ``gateContribution`` could disagree with its own frozen
+        ``level`` (which already reuses the envelope's finding) once a
+        dated ``reclassify`` rule expires. Now threads ``envelope.
+        resolved_today`` through.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=date.today() + timedelta(days=1),
+                )
+            ],
+        )
+        from abicheck.contract_relevance_types import ContractRelevance
+
+        removed.contract_relevance = ContractRelevance.IN_CONTRACT
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(
+            result, old, new, severity_config=SeverityConfig()
+        )
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch("abicheck.policy.selectors.date") as fake_date:
+            fake_date.today.return_value = date.today() + timedelta(days=2)
+            sarif_out = render_envelope("sarif", envelope)
+
+        assert '"gateContribution": 0' in sarif_out
+
+    def test_mutating_a_shared_dependency_info_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """CodeRabbit review, fresh evidence: ``dependency_info`` is a
+        single mutable object ``AbiSnapshot`` stores directly (not inside a
+        list/dict), so ``_snapshot_abi_snapshot``'s container-only copy
+        left it shared. Mutating ``old.dependency_info.nodes`` after
+        construction must not change a later render.
+        """
+        dep = DependencyInfo(nodes=[{"name": "libfoo.so"}])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", dependency_info=dep)
+        new = _snapshot("2.0")
+        envelope = self._envelope(_result([]), old, new, follow_deps=True)
+
+        assert envelope.old.dependency_info is not dep
+        assert envelope.old.dependency_info.nodes is not dep.nodes
+
+        md_before = render_envelope("markdown", envelope)
+        dep.nodes.append({"name": "libbar.so"})
+        md_after = render_envelope("markdown", envelope)
+
+        assert md_before == md_after, "dependency section moved on mutation"
+        assert "1 resolved DSOs" in md_before
+
+    def test_mutating_a_shared_dependency_info_node_entry_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: the ``dependency_info`` fix above
+        gave ``nodes`` a fresh outer *list*, but a bare ``list(value)``
+        still shared each ``dict`` entry -- mutating
+        ``old.dependency_info.nodes[0]["soname"]`` after construction must
+        not change a later render.
+        """
+        node = {"soname": "libfoo.so.1"}
+        dep = DependencyInfo(nodes=[node])
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", dependency_info=dep)
+        new = _snapshot("2.0")
+        envelope = self._envelope(_result([]), old, new, follow_deps=True)
+
+        assert envelope.old.dependency_info.nodes[0] is not node
+
+        md_before = render_envelope("markdown", envelope)
+        node["soname"] = "libmutated.so.1"
+        md_after = render_envelope("markdown", envelope)
+
+        assert md_before == md_after, "dependency entry moved on mutation"
+        assert "libfoo.so.1" in md_before
+        assert "libmutated.so.1" not in md_after
+
+    def test_json_document_reuses_the_envelope_s_captured_today(self) -> None:
+        """Codex review, fresh evidence: ``build_report_envelope`` resolves
+        ``today`` once and threads it into ``gate_decision_for_result``/
+        ``build_report_findings``, but its own ``build_report_document`` call
+        (which builds the frozen JSON document *during the same
+        construction*) received ``gate`` and nothing else -- ``_add_changes_
+        block``, ``_add_policy_overrides``, and ``_build_severity_json`` (via
+        ``_change_to_dict``/``active_reclassify_rules``/``categorize_changes``)
+        still resolved a fresh ``date.today()``. If construction straddles
+        midnight on a dated ``reclassify`` rule's expiry, the document could
+        report a finding as breaking and omit the still-active rule while
+        ``envelope.findings``/``envelope.gate`` (resolved a moment earlier,
+        against the pre-midnight date) stayed compatible. ``today`` is now
+        threaded through the whole document build so both halves of the same
+        construction call agree.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        # Simulate construction straddling midnight: `build_report_envelope`'s
+        # own `today = date.today()` captures the date *before* the rule
+        # expires, but every unthreaded `date.today()` reached from inside
+        # `build_report_document`'s own helpers (via `policy.selectors.date`)
+        # resolves *after* it -- the two mocks stand in for the same wall
+        # clock read a moment apart, not two different clocks.
+        with mock.patch("abicheck.report.build.date") as fake_build_date, mock.patch(
+            "abicheck.policy.selectors.date"
+        ) as fake_selectors_date:
+            fake_build_date.today.return_value = captured_today
+            fake_selectors_date.today.return_value = captured_today + timedelta(days=2)
+            envelope = build_report_envelope(
+                result, old, new, severity_config=SeverityConfig()
+            )
+
+        assert envelope.resolved_today == captured_today
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert json_out["changes"][0]["severity"] == "compatible"
+        assert json_out["policy_reclassify"], "expired rule dropped from disclosure"
+        assert json_out["severity"]["categories"]["abi_breaking"]["count"] == 0
+
+    def test_json_document_exit_and_annotations_reuse_the_envelope_s_captured_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: with a severity configuration in
+        effect, ``_add_contract_context``'s ``exit`` block
+        (``resolve_compare_exit_decision_with_abort_axes`` ->
+        ``compute_exit_code``) and ``add_annotations``
+        (``annotation_report_entries`` -> ``_collect_annotations_detailed``)
+        still had no way to receive ``today`` even after the whole-document
+        fix above -- both independently resolved a fresh ``date.today()``.
+        Reproduced: a compatible finalized finding and
+        ``severity.exit_code: 0`` alongside a top-level ``exit.code: 4`` and
+        an ``::error``-level annotation, because those two helpers observed
+        the post-expiry date the rest of the document had already moved
+        past. ``today`` is now threaded through both.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        with mock.patch("abicheck.report.build.date") as fake_build_date, mock.patch(
+            "abicheck.policy.selectors.date"
+        ) as fake_selectors_date:
+            fake_build_date.today.return_value = captured_today
+            fake_selectors_date.today.return_value = captured_today + timedelta(days=2)
+            envelope = build_report_envelope(
+                result, old, new, severity_config=SeverityConfig()
+            )
+
+        assert envelope.resolved_today == captured_today
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert json_out["severity"]["exit_code"] == 0
+        assert json_out["exit"]["code"] == 0
+        assert not any(
+            "::error" in entry["annotation"] for entry in json_out["annotations"]
+        )
+
+    def test_disposition_audit_refreshes_a_stale_reclassify_overlay_on_an_existing_ledger(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``ledger_for`` reuses
+        ``result.disposition_ledger`` via ``with_gate`` whenever
+        ``checker.compare()`` already stamped one -- the ordinary case for a
+        real comparison. ``with_gate`` re-labels ``gating``/``non_gating``
+        dispositions but never re-ran ``resolve_reclassifications``/
+        ``resolve_verdict_classes``, so a ledger's ``reclassified_by``
+        overlay -- resolved once at *comparison* time -- stayed stamped
+        after the rule it names expired by envelope-construction time. The
+        JSON document's ``disposition_audit`` still reported the expired
+        rule as active while ``changes[]``/``policy_reclassify`` (both
+        re-resolved fresh from the envelope's own ``today``) correctly said
+        it was not.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today - timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        # Simulate checker.compare() stamping the ledger before the rule
+        # expired -- reclassified_by is set at this point.
+        result.disposition_ledger = finalize_ledger(
+            DispositionLedger(), result, None, today=captured_today - timedelta(days=2)
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        # Envelope construction happens "now" -- after the rule's expiry --
+        # with no mock needed since the rule already expired relative to the
+        # real current date. A severity_config is required so ledger_for()
+        # takes the with_gate() branch over the already-stamped ledger
+        # rather than returning it untouched.
+        envelope = build_report_envelope(
+            result, old, new, severity_config=SeverityConfig()
+        )
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert "policy_reclassify" not in json_out
+        assert json_out["disposition_audit"]["reclassified_total"] == 0
+        assert json_out["disposition_audit"]["reclassifications"] == []
+
+    def test_legacy_exit_code_reuses_the_envelope_s_captured_today(self) -> None:
+        """Codex review, fresh evidence: with no severity configuration in
+        effect, ``resolve_compare_exit_decision``'s non-severity branch
+        translated the *cached* ``result.verdict`` -- frozen at
+        ``compare()`` time -- into the legacy exit code, ignoring the new
+        ``today`` argument entirely. If a dated ``reclassify:`` rule expires
+        between ``compare()`` and envelope construction, the JSON document's
+        ``changes[]`` entry (re-derived fresh, correctly reporting
+        ``breaking``) could disagree with a stale, pre-expiry ``exit.code``
+        of ``0``. ``today`` is now honored via a fresh per-finding
+        recomputation when given.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today - timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+            # Simulate checker.compare()'s own cached verdict, computed
+            # while the rule was still active (before its expiry).
+            verdict=Verdict.COMPATIBLE,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        # No severity_config: the legacy scheme. Envelope construction
+        # happens "now" -- after the rule's expiry -- with no mock needed.
+        envelope = build_report_envelope(result, old, new)
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert json_out["changes"][0]["severity"] == "breaking"
+        assert json_out["exit"]["code"] == 4
 
 
 class TestSarifAndJunitDecisionBoundary:

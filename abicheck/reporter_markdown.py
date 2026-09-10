@@ -28,7 +28,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .bundle_models import BundleDiffResult
+    from .policy.severity import GateDecision
+    from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
 from .checker import (
@@ -308,6 +312,7 @@ class ShowOnlyFilter:
         policy: str,
         kind_sets: KindSets | None = None,
         policy_file: object | None = None,
+        today: date | None = None,
     ) -> bool:
         """Return True if *change* matches the severity filter.
 
@@ -318,7 +323,8 @@ class ShowOnlyFilter:
         `--show-only` could disagree with the JSON severity field and
         filtered_summary counts for any change whose effective category
         differs from its raw kind's policy bucket (a demoted opaque/PIMPL
-        layout change, or a kind moved by a policy-file override).
+        layout change, or a kind moved by a policy-file override). *today*:
+        an envelope's ``resolved_today`` (ADR-061 gap C, Codex, fresh).
         """
         if not self.severities:
             return True
@@ -329,6 +335,7 @@ class ShowOnlyFilter:
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         # NB: this maps to the CLI --show-only token vocabulary (hyphenated
         # "api-break"), which intentionally differs from the JSON-field
@@ -424,9 +431,10 @@ class ShowOnlyFilter:
         policy: str = "strict_abi",
         kind_sets: KindSets | None = None,
         policy_file: object | None = None,
+        today: date | None = None,
     ) -> bool:
         """Return True if *change* passes this filter."""
-        if not self._check_severity(change, policy, kind_sets, policy_file):
+        if not self._check_severity(change, policy, kind_sets, policy_file, today):
             return False
         if not self._check_element(change.kind.value):
             return False
@@ -487,12 +495,11 @@ def show_only_matches(
     policy: str = "strict_abi",
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> bool:
     """Return True if *change* matches ANY OR'd group of *show_only*."""
     return any(
-        group.matches(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
-        )
+        group.matches(change, policy, kind_sets, policy_file, today)
         for group in parse_show_only_groups(show_only)
     )
 
@@ -524,6 +531,7 @@ def apply_show_only(
     policy: str = "strict_abi",
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> list[Change]:
     """Filter changes according to a --show-only token string.
 
@@ -536,14 +544,13 @@ def apply_show_only(
 
     *show_only* may hold several ``SHOW_ONLY_GROUP_SEP``-joined OR'd groups (see
     :func:`parse_show_only_groups`) -- a change is kept if it matches ANY
-    one of them.
+    one of them. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
+    Codex, fresh).
     """
     return [
         c
         for c in changes
-        if show_only_matches(
-            show_only, c, policy=policy, kind_sets=kind_sets, policy_file=policy_file
-        )
+        if show_only_matches(show_only, c, policy, kind_sets, policy_file, today)
     ]
 
 
@@ -1264,6 +1271,7 @@ def compute_severity_summary(
     policy_file: object | None = None,
     scoped_counts: dict[str, int] | None = None,
     scoped_blocking_categories: tuple[str, ...] | None = None,
+    today: date | None = None,
 ) -> _rmd.SeveritySummary:
     """Build the severity configuration summary table's structured intermediate.
 
@@ -1281,7 +1289,8 @@ def compute_severity_summary(
     gating issue is a scoped-only change or missing-contract label (neither
     of which is in ``result.changes``) would show every category at 0 and
     "no exit impact" while the report elsewhere names a real, blocking
-    finding.
+    finding. *today*: an envelope's own ``resolved_today`` (ADR-061 gap C,
+    Codex, fresh evidence).
     """
     from .severity import (
         SeverityLevel,
@@ -1290,10 +1299,7 @@ def compute_severity_summary(
     )
 
     categorized = categorize_changes(
-        changes,
-        policy=policy,
-        kind_sets=kind_sets,
-        policy_file=policy_file,
+        changes, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
     )
     # ADR-049 D1: the `Count` column above is factual over what is
     # displayed, but `Exit Impact` is a claim about the *gate* -- so it has
@@ -1307,6 +1313,7 @@ def compute_severity_summary(
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         if all_changes is not None
         else categorized
@@ -1607,6 +1614,13 @@ _VERDICT_MERGE_EFFECT = {
 }
 
 
+def _merge_effect_from_exit_code(exit_code: int) -> str:
+    """The two merge-effect phrases, keyed by the resolved severity exit code."""
+    if exit_code == 0:
+        return "no error-level findings under the configured severity policy — safe to merge"
+    return "blocked by severity policy — review required before merge"
+
+
 def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) -> str:
     """Merge-effect phrase reflecting the actual severity-aware gate.
 
@@ -1617,6 +1631,13 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
     ``error`` does not. The hard-coded ``_VERDICT_MERGE_EFFECT`` phrases would
     misreport both cases, so this asks the severity gate directly instead of
     inferring "safe to merge" from the verdict alone.
+
+    Only called for a direct caller with no already-resolved
+    :class:`~abicheck.policy.severity.GateDecision` -- an envelope-driven
+    render passes one to :func:`compute_review_digest` instead (ADR-061 gap
+    C; CodeRabbit review) so this digest's merge-effect phrase reads the same
+    gate SARIF's/HTML's gate blocks do, rather than a second, independent
+    ``compute_exit_code`` call that happens to agree.
     """
     from .severity import compute_exit_code
 
@@ -1628,9 +1649,7 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
         kind_sets=eff_sets,
         policy_file=result.policy_file,
     )
-    if exit_code == 0:
-        return "no error-level findings under the configured severity policy — safe to merge"
-    return "blocked by severity policy — review required before merge"
+    return _merge_effect_from_exit_code(exit_code)
 
 
 def compute_review_digest(
@@ -1638,6 +1657,8 @@ def compute_review_digest(
     *,
     severity_config: SeverityConfig | None = None,
     disposition_audit: DispositionAudit | None = None,
+    findings: Sequence[ReportFinding] | None = None,
+    gate: GateDecision | None = None,
 ) -> _rmd.ReviewDigest:
     """The structured intermediate for :func:`to_review_digest`.
 
@@ -1646,22 +1667,41 @@ def compute_review_digest(
     compatibility and "blocks CI" are independent decisions once severity
     configuration is in play (see :func:`_severity_merge_effect`).
 
+    *gate*, when given, is the already-resolved
+    :class:`~abicheck.policy.severity.GateDecision` the merge-effect phrase
+    reads instead of a second, independent ``compute_exit_code`` call --
+    the ADR-061 gap C caller (``report/render_markdown_document.
+    build_review_digest_document``) passes the ``ReportEnvelope``'s own gate
+    (CodeRabbit review), the same decision SARIF's/HTML's gate blocks
+    project. A direct caller with no envelope (``severity_config`` given,
+    ``gate`` not) keeps the prior behaviour via :func:`_severity_merge_effect`.
+
     *disposition_audit*, when given, is used verbatim instead of resolving a
     fresh one from *result*/*severity_config* -- the ADR-061 gap C caller
     (``report/render_markdown_document.build_review_digest_document``) passes
     the one already computed by ``report/build.build_report_document``'s
     single shared call, rather than this function re-deriving an identical
     value from the same ledger a second time.
+
+    *findings* is the same reuse for the per-change verdicts the impacted-
+    symbols list below rests on: the ADR-061 gap C caller passes the
+    ``ReportEnvelope``'s already-resolved set instead of leaving this
+    function to call ``report_findings_for`` a second time for the same
+    render.
     """
-    summary = build_summary(result)
+    from .report.finding import report_findings_for
+
+    findings = findings if findings is not None else report_findings_for(result)
+    summary = build_summary(result, findings=findings)
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
-    effect = (
-        _severity_merge_effect(result, severity_config)
-        if severity_config is not None
-        else _VERDICT_MERGE_EFFECT.get(v, "")
-    )
+    if gate is not None:
+        effect = _merge_effect_from_exit_code(gate.exit_code)
+    elif severity_config is not None:
+        effect = _severity_merge_effect(result, severity_config)
+    else:
+        effect = _VERDICT_MERGE_EFFECT.get(v, "")
 
     # Manual-review banner: scoping requested but the public surface could not
     # be confirmed, so compatibility is unconfirmed (don't overclaim).
@@ -1694,10 +1734,8 @@ def compute_review_digest(
     # here printed "safe to merge" directly above the symbol it says is
     # impacted (Codex review). The excluded finding keeps its own disclosed
     # section elsewhere in the report; this list is the digest of what gated.
-    from .report.finding import report_findings_for
     from .report.surface_changes import compute_surface_changes
 
-    findings = report_findings_for(result)
     impacted = [
         f.change
         for f in findings
@@ -1718,17 +1756,12 @@ def compute_review_digest(
         breaking_count=summary.breaking,
         source_breaks_count=summary.source_breaks,
         risk_count=summary.risk_count,
-        # Codex review: additions_count/quality_issues_count are two rows
-        # in the same rendered table, so they must not overlap. New defect
-        # 4 fix: `summary.compatible_additions` (report_schema_version
-        # 4.0) now already counts only genuine additions -- it no longer
-        # needs (and must not receive) a second subtraction of
-        # `quality_issues` here, which used to be necessary when this field
-        # still carried the historical whole-bucket total. Use it directly;
-        # `pr_comment.py`'s own `max(compatible_additions - quality, 0)`
-        # derivation is for the *release* per-library field, a separate,
-        # differently-scoped JSON field that still carries the historical
-        # whole-bucket meaning (`cli_compare_release_pairwise.py`).
+        # additions_count/quality_issues_count are two rows in the same
+        # table, so they must not overlap. `summary.compatible_additions`
+        # (report_schema_version 4.0) already counts only genuine additions
+        # -- use it directly, no second `quality_issues` subtraction (that
+        # is `pr_comment.py`'s own release-field derivation, a separate,
+        # differently-scoped field -- `cli_compare_release_pairwise.py`).
         additions_count=summary.compatible_additions,
         quality_issues_count=summary.quality_issues,
         scoped=bool(scoped),
@@ -1861,8 +1894,13 @@ def _append_contract_conflicts_section(lines: list[str], result: DiffResult) -> 
     )
 
 
-def compute_policy_section(result: DiffResult) -> _rmd.PolicySection:
-    """The structured intermediate for :func:`_append_policy_section`."""
+def compute_policy_section(
+    result: DiffResult, *, today: date | None = None
+) -> _rmd.PolicySection:
+    """The structured intermediate for :func:`_append_policy_section`.
+
+    *today*: an envelope's ``resolved_today`` (ADR-061 gap C, Codex, fresh).
+    """
     overrides_text = None
     if result.policy_file and result.policy_file.overrides:
         overrides_text = ", ".join(
@@ -1880,7 +1918,7 @@ def compute_policy_section(result: DiffResult) -> _rmd.PolicySection:
         # disclosed as though it were still in effect.
         from .reclassify import active_reclassify_rules
 
-        active = active_reclassify_rules(result.policy_file.reclassify)
+        active = active_reclassify_rules(result.policy_file.reclassify, today)
         if active:
             # CodeRabbit review: code-span-wrap describe()'s raw selector
             # text (e.g. `_ZN6oneapi3dal.*`) -- unescaped, `_`/`*` read as

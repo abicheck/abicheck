@@ -67,10 +67,13 @@ from abicheck.html_report import (
     compute_summary_table,
     generate_html_report,
 )
+from abicheck.model import AbiSnapshot
 from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.policy_file import PolicyFile
 from abicheck.reclassify import ReclassifyRule
+from abicheck.report.build import build_report_envelope
 from abicheck.report.document import ReportDocument
+from abicheck.report.envelope import RenderOptions
 from abicheck.report.render_html_document import render_html_document
 from abicheck.severity import SeverityConfig, SeverityLevel
 
@@ -721,6 +724,69 @@ def test_html_show_only_filter_excluding_everything() -> None:
     assert "No changes match the current filter" in html_out
     assert "--view show=enums" in html_out
     assert "1 change(s) exist but are excluded by the filter" in html_out
+
+
+def test_html_envelope_show_only_dropping_a_correlated_target_does_not_crash() -> None:
+    """CodeRabbit review: an envelope-driven render's ``_lookup_verdict``
+    indexed only ``envelope.findings`` (keyed by ``result.changes``'
+    identity), but ``--show-only`` can hand the renderer
+    ``_suppress_dangling_correlation_notes``'s own shallow ``Change`` copies
+    (made whenever a change's ``correlated_change_kind`` names a target
+    ``--show-only`` just filtered out) -- those copies have no entry in that
+    index, so bucketing them raised ``KeyError``. ``_result()``'s own
+    ``removed`` finding already names a ``type_vtable_changed`` target no
+    fixture change carries, so filtering to ``functions`` (dropping the
+    unrelated ``TYPE_SIZE_CHANGED`` ``root`` finding, keeping ``removed``)
+    reproduces the copy path without needing a bespoke fixture.
+    """
+    result = _result()
+    old = AbiSnapshot(library="libfoo.so", version="1.0")
+    new = AbiSnapshot(library="libfoo.so", version="2.0")
+    envelope = build_report_envelope(
+        result, old, new, options=RenderOptions(show_only="functions")
+    )
+
+    html_out = generate_html_report(result, show_only="functions", envelope=envelope)
+
+    assert "_ZN3foo6removeEv" in html_out
+
+
+def test_html_compatibility_metrics_reuse_the_envelope_s_findings() -> None:
+    """Codex review, fresh evidence: ``compatibility_metrics`` recomputed
+    ``effective_verdict_for_change`` fresh on every render, even when an
+    envelope had already resolved it -- a dated ``PolicyFile.reclassify``
+    rule's expiry is checked against *today*, so the rendered
+    binary-compatibility percentage could move after the rule expires even
+    though the envelope's own document/findings stayed at their
+    construction-time value. HTML now passes the envelope's already-
+    resolved verdicts through instead of recomputing.
+    """
+    from unittest.mock import patch
+
+    removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+    policy_file = PolicyFile(
+        reclassify=[
+            ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov"),
+        ],
+    )
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libfoo.so",
+        changes=[removed],
+        policy="strict_abi",
+        policy_file=policy_file,
+    )
+    old = AbiSnapshot(library="libfoo.so", version="1.0")
+    new = AbiSnapshot(library="libfoo.so", version="2.0")
+    envelope = build_report_envelope(result, old, new)
+    assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+    with patch("abicheck.severity.effective_verdict_for_change") as spy:
+        html_out = generate_html_report(result, envelope=envelope)
+
+    spy.assert_not_called()
+    assert "100.0%" in html_out
 
 
 def test_html_compat_changes_table_empty_and_populated() -> None:

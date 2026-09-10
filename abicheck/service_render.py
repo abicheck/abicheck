@@ -26,9 +26,13 @@ from typing import TYPE_CHECKING
 
 from .errors import ValidationError
 from .model import AbiSnapshot
+from .report.build import build_report_envelope
+from .report.envelope import RenderOptions, ReportEnvelope
 from .reporter import to_json, to_markdown, to_stat, to_stat_json
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .checker_types import DiffResult
 
     # ADR-061: this module is classified `frontends`, which may not import
@@ -128,6 +132,17 @@ def render_output(
     review, two rounds — an earlier revision of this shim collapsed every
     case but JSON onto ``to_stat``, silently breaking a JUnit caller too).
 
+    ADR-061 gap C / duplication-and-convergence Phase 4: apart from the two
+    ``--stat``/``oneline`` short-circuits below (a summary-only document with
+    no shared-document counterpart -- see ``report/envelope.py``'s own scope
+    note), this function decides nothing per format. It builds **one**
+    :class:`~abicheck.report.envelope.ReportEnvelope` -- the shared document
+    (compatibility, assurance, scope, dispositions, the consumer-scoped gate
+    facts and the persisted exit decision), the severity ``GateDecision``, and
+    the per-finding verdict/category set, all final -- and then hands it to
+    :func:`render_envelope`, which selects a pure projection. No projection
+    re-runs extraction, policy evaluation or gate resolution.
+
     Raises:
         ValidationError: For unrecognised output format.
     """
@@ -143,184 +158,225 @@ def render_output(
     if (stat and fmt != "junit") or fmt == ONELINE_FORMAT:
         return to_stat(result, severity_config=severity_config)
 
-    if fmt == "json":
-        return _render_json_output(
-            result,
-            old,
-            new,
-            follow_deps=follow_deps,
+    _reject_unsupported_format(fmt)
+    envelope = build_report_envelope(
+        result,
+        old,
+        new,
+        options=RenderOptions(
             show_only=show_only,
             report_mode=report_mode,
             show_impact=show_impact,
-            severity_config=severity_config,
+            demangle=demangle,
+            follow_deps=follow_deps,
+            show_recommendation=show_recommendation,
             require_complete_analysis=require_complete_analysis,
             contract_evaluation=contract_evaluation,
-        )
+        ),
+        severity_config=severity_config,
+    )
+    return render_envelope(fmt, envelope)
 
-    if fmt == "sarif":
-        # ADR-061 Phase 2 gap C: SARIF now builds through the one shared
-        # document choke point (report.build.build_report_document), same as
-        # JSON's report_mode="full" build and the markdown/review/html
-        # branches -- see report/build.py's module docstring. SARIF's own
-        # compute step (sarif.to_sarif) reuses only the shared document's
-        # disposition_audit field today; its rule catalog, per-result level/
-        # location derivation, root-cause grouping, and scoped-gate/coverage
-        # blocks remain its own computation (see that function's own
-        # docstring for why). Built unconditionally, independent of
-        # report_mode -- unlike markdown's leaf/root-cause alternate views,
-        # SARIF's own "root-cause" report_mode only adds extra per-result
-        # properties on top of the same shape, so the one field this slice
-        # reuses (disposition_audit) is unaffected by it.
-        from .report.build import build_report_document
-        from .sarif import to_sarif_str
 
-        sarif_doc = build_report_document(
-            result,
-            show_only=show_only,
-            severity_config=severity_config,
-        )
-        return to_sarif_str(
-            result,
-            show_only=show_only,
-            report_mode=report_mode,
-            severity_config=severity_config,
-            report_document=sarif_doc,
-        )
+#: The formats :func:`render_envelope` projects. ``oneline``/``--stat`` is not
+#: here: it short-circuits above, being a summary-only document rather than a
+#: projection of the shared one (``report/envelope.py``'s scope note).
+_SUPPORTED_FORMATS = frozenset(
+    {"json", "sarif", "html", "junit", "markdown", "md", "review"}
+)
 
-    if fmt == "html":
-        # ADR-061 Phase 2 gap C: the default HTML view is built through the
-        # one shared document choke point (report.build.build_report_document),
-        # the same as JSON's report_mode="full" build and the markdown/review
-        # branches below -- see report/build.py's module docstring. HTML's
-        # own compute step (html_report.build_html_document) reuses only the
-        # shared document's disposition_audit field today; its bucketing,
-        # per-section rows, and compat_html ABICC-clone layout remain its own
-        # computation (see that function's own docstring for why).
-        from .html_report import generate_html_report
-        from .report.build import build_report_document
 
-        html_doc = build_report_document(
-            result,
-            show_only=show_only,
-            show_impact=show_impact,
-            severity_config=severity_config,
-        )
-        return generate_html_report(
-            result,
-            lib_name=old.library,
-            old_version=old.version,
-            new_version=new.version if new else "new",
-            old_symbol_count=result.old_symbol_count,
-            show_only=show_only,
-            show_impact=show_impact,
-            severity_config=severity_config,
-            demangle=demangle,
-            report_document=html_doc,
-        )
-
-    if fmt == "junit":
-        # ADR-061 Phase 2 gap C: JUnit now builds through the one shared
-        # document choke point (report.build.build_report_document), same
-        # structural depth as the markdown/review/html/sarif branches above
-        # -- see report/build.py's module docstring. JUnit's own compute
-        # step (junit_report._build_testsuite) reuses only the shared
-        # document's disposition_audit field today; its per-finding verdict/
-        # category resolution (already routed through report.finding's
-        # ReportFinding, ADR-061 Phase 2 item 4b), symbol/testcase tree, and
-        # root-cause grouping remain its own computation -- see that
-        # function's own docstring for why. Built unconditionally,
-        # independent of report_mode, for the same reason as SARIF's own
-        # branch above: JUnit's "root-cause" mode only adds extra <failure>
-        # attributes on top of the same shape.
-        from .junit_report import to_junit_xml
-        from .report.build import build_report_document
-
-        junit_doc = build_report_document(
-            result,
-            show_only=show_only,
-            severity_config=severity_config,
-        )
-        return to_junit_xml(
-            result,
-            old,
-            show_only=show_only,
-            severity_config=severity_config,
-            report_mode=report_mode,
-            report_document=junit_doc,
-        )
-
-    if fmt == "review":
-        # ADR-061 Phase 2 gap C: review is unconditional-recommendation
-        # markdown over the same one shared document JSON's full mode
-        # already builds -- see report/build.py's module docstring.
-        from .report.build import build_report_document
-        from .reporter import to_review_digest
-
-        review_doc = build_report_document(result, severity_config=severity_config)
-        txt = to_review_digest(
-            result, severity_config=severity_config, report_document=review_doc
-        )
-        if demangle:
-            from .demangle import demangle_text
-
-            txt = demangle_text(txt)
-        return txt
-
-    _SUPPORTED_FORMATS = {"json", "sarif", "html", "junit", "markdown", "md", "review"}
+def _reject_unsupported_format(fmt: str) -> None:
     if fmt not in _SUPPORTED_FORMATS:
         raise ValidationError(
             f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
         )
 
-    # Default: markdown. show_recommendation defaults to False here (CLI
-    # cleanup phase two, PR 1: --recommend removed as a CLI flag -- this
-    # function's own default stays the exact pre-removal Tier-2 Python API
-    # value, per this docstring's own explanation above). The CLI's own
-    # wrapper (cli._render_output) explicitly passes
-    # show_recommendation=True, so its output stays unconditional, matching
-    # review's own unconditional inclusion above and JSON's unconditional
-    # release_recommendation field -- but that is an explicit override at
-    # the CLI's own call site, not this function's default. A direct Tier-2
-    # caller omitting the keyword (or passing show_recommendation=False
-    # explicitly) still gets it suppressed here, same as before this PR
-    # (Codex review, fresh evidence -- an earlier revision hard-coded True
-    # regardless of the caller's own value).
-    # ADR-061 Phase 2 gap C: the default (full) view is built through the
-    # one shared document choke point (report.build.build_report_document),
-    # the same as JSON's report_mode="full" build -- see report/build.py's
-    # module docstring. --stat (handled above) and the leaf/root-cause
-    # alternate views stay their own separate, legitimate documents (this
-    # ADR's own scoping), so the shared build only runs for report_mode ==
-    # "full", not wastefully for a report_mode that would ignore it.
-    markdown_doc = None
-    if report_mode == "full":
-        from .report.build import build_report_document
 
-        markdown_doc = build_report_document(
-            result,
-            show_only=show_only,
-            show_impact=show_impact,
-            severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-            contract_evaluation=contract_evaluation,
-        )
-    md = to_markdown(
-        result,
-        show_only=show_only,
-        report_mode=report_mode,
-        show_impact=show_impact,
-        severity_config=severity_config,
-        show_recommendation=show_recommendation,
-        contract_evaluation=contract_evaluation,
-        report_document=markdown_doc,
+def render_envelope(fmt: str, envelope: ReportEnvelope) -> str:
+    """Project one already-completed *envelope* into *fmt*.
+
+    ADR-061 gap C's "one result, one document, several projections" is this
+    function's contract: every decision *fmt* could need was made by
+    :func:`~abicheck.report.build.build_report_envelope` before this call,
+    so rendering the same envelope into several formats, in any order, can
+    only produce the same semantic content each time -- no projection re-runs
+    extraction, policy evaluation, or gate resolution.
+
+    Public alongside :func:`render_output` because "render this one completed
+    evaluation into N formats" is a real caller shape (a CI run writing JSON
+    *and* a SARIF artifact *and* a job-summary digest); going through
+    ``render_output`` N times would rebuild the same envelope N times.
+
+    Raises:
+        ValidationError: For unrecognised output format.
+    """
+    _reject_unsupported_format(fmt)
+    projection: Callable[[ReportEnvelope], str] = _PROJECTIONS[fmt]
+    return projection(envelope)
+
+
+def _project_json(envelope: ReportEnvelope) -> str:
+    """JSON, rendered from the shared document in full mode.
+
+    ``leaf``/``root-cause`` JSON stays its own separate document build (the
+    same ADR-061 Phase 2 scope decision Markdown's alternate views record) --
+    a different report, not a different rendering of this one.
+    """
+    opts = envelope.options
+    return _render_json_output(
+        envelope.result,
+        envelope.old,
+        envelope.new,
+        follow_deps=opts.follow_deps,
+        show_only=opts.show_only,
+        report_mode=opts.report_mode,
+        show_impact=opts.show_impact,
+        severity_config=envelope.severity_config,
+        require_complete_analysis=opts.require_complete_analysis,
+        contract_evaluation=opts.contract_evaluation,
+        envelope=envelope,
     )
-    if follow_deps and (old.dependency_info or (new and new.dependency_info)):
-        md += _render_deps_section_md(old, new)
-    if demangle:
-        from .demangle import demangle_text
 
-        md = demangle_text(md)
-    return md
+
+def _project_sarif(envelope: ReportEnvelope) -> str:
+    """SARIF 2.1.0.
+
+    Gap-C disposition for SARIF's own remaining facts: the rule catalog
+    (``rules_seen``), the per-result ``level``/``location`` derivation and the
+    root-cause grouping are **presentation** -- a SARIF-shaped arrangement of
+    findings this envelope already decided, with no counterpart in any other
+    format's shape. Its invocation ``exitCode``/``exitCodeDescription`` was
+    not: computing an exit code is a decision, so it moved to
+    ``report/sarif_invocation.py`` and reads the envelope's gate instead of
+    resolving one of its own (``report/AGENTS.md``: "renderers do not own
+    process exit behavior").
+    """
+    from .sarif import to_sarif_str
+
+    return to_sarif_str(
+        envelope.result,
+        show_only=envelope.options.show_only,
+        report_mode=envelope.options.report_mode,
+        severity_config=envelope.severity_config,
+        envelope=envelope,
+    )
+
+
+def _project_html(envelope: ReportEnvelope) -> str:
+    """HTML.
+
+    Gap-C disposition for HTML's own remaining facts: the ``removed``/
+    ``added``/``changed`` bucketing, the per-section ``ChangeRow`` tables and
+    ``compat_html``'s ABICC severity-band layout are **presentation** -- they
+    arrange findings, and their already-resolved verdicts, into an HTML page's
+    sections; no other format has that shape. The two that were decisions --
+    the CI-gate card's gate and each row's verdict -- now read the envelope's
+    ``gate`` and ``findings``.
+    """
+    from .html_report import generate_html_report
+
+    return generate_html_report(
+        envelope.result,
+        lib_name=envelope.old.library,
+        old_version=envelope.old.version,
+        new_version=envelope.new.version if envelope.new else "new",
+        old_symbol_count=envelope.result.old_symbol_count,
+        show_only=envelope.options.show_only,
+        show_impact=envelope.options.show_impact,
+        severity_config=envelope.severity_config,
+        demangle=envelope.options.demangle,
+        envelope=envelope,
+    )
+
+
+def _project_junit(envelope: ReportEnvelope) -> str:
+    """JUnit XML.
+
+    Gap-C disposition for JUnit's own remaining facts: the symbol/testcase
+    tree and the root-cause grouping are **presentation** (a JUnit-shaped
+    arrangement of the same findings). Its per-finding verdict/category
+    resolution was *not* -- it is the same decision every other format reads
+    -- and now comes from the envelope, including for the scoped-only changes
+    JUnit folds in beyond ``result.changes``, which the envelope resolves too
+    rather than leaving JUnit to assemble its own policy inputs.
+    """
+    from .junit_report import to_junit_xml
+
+    return to_junit_xml(
+        envelope.result,
+        envelope.old,
+        show_only=envelope.options.show_only,
+        severity_config=envelope.severity_config,
+        report_mode=envelope.options.report_mode,
+        envelope=envelope,
+    )
+
+
+def _project_review(envelope: ReportEnvelope) -> str:
+    """The compact review digest (unconditional-recommendation Markdown)."""
+    from .reporter import to_review_digest
+
+    return _demangled(
+        to_review_digest(
+            envelope.result,
+            severity_config=envelope.severity_config,
+            envelope=envelope,
+        ),
+        envelope,
+    )
+
+
+def _project_markdown(envelope: ReportEnvelope) -> str:
+    """The full Markdown report (and its ``md`` alias).
+
+    ``show_recommendation`` stays this projection's own presentation option
+    with its pre-removal Tier-2 default of ``False`` (CLI cleanup phase two,
+    PR 1) -- ``cli._render_output`` passes ``True`` explicitly, which is why
+    the CLI's output is unconditional without this default changing.
+
+    Gap-C disposition for Markdown's own remaining facts: ``severity_groups``'
+    headed-section grouping is **presentation** over already-classified
+    findings, and the ``leaf``/``root-cause`` views are separate documents by
+    design (ADR-061 Phase 2's scope decision). Both are arrangements, not
+    second opinions; neither classifies anything the envelope did not decide.
+    """
+    opts = envelope.options
+    md = to_markdown(
+        envelope.result,
+        show_only=opts.show_only,
+        report_mode=opts.report_mode,
+        show_impact=opts.show_impact,
+        severity_config=envelope.severity_config,
+        show_recommendation=opts.show_recommendation,
+        contract_evaluation=opts.contract_evaluation,
+        envelope=envelope,
+    )
+    if opts.follow_deps and (
+        envelope.old.dependency_info or (envelope.new and envelope.new.dependency_info)
+    ):
+        md += _render_deps_section_md(envelope.old, envelope.new)
+    return _demangled(md, envelope)
+
+
+def _demangled(text: str, envelope: ReportEnvelope) -> str:
+    """Apply the human-facing ``demangle`` presentation option to *text*."""
+    if not envelope.options.demangle:
+        return text
+    from .demangle import demangle_text
+
+    return demangle_text(text)
+
+
+_PROJECTIONS: dict[str, Callable[[ReportEnvelope], str]] = {
+    "json": _project_json,
+    "sarif": _project_sarif,
+    "html": _project_html,
+    "junit": _project_junit,
+    "review": _project_review,
+    "markdown": _project_markdown,
+    "md": _project_markdown,
+}
 
 
 def _render_json_output(
@@ -335,24 +391,37 @@ def _render_json_output(
     severity_config: SeverityConfig | None,
     require_complete_analysis: bool = False,
     contract_evaluation: bool = False,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
-    """Render comparison result as JSON, optionally including dependency info."""
+    """Render comparison result as JSON, optionally including dependency info.
+
+    *envelope* (ADR-061 gap C) is the one completed envelope this render is a
+    projection of; its shared document *is* the full-mode JSON report. A
+    direct caller with no envelope (this function is re-exported from
+    ``abicheck.service``) keeps the prior behaviour and builds one document of
+    its own -- the same additive shape every other renderer's ``envelope``
+    parameter uses.
+    """
     if report_mode == "full":
         # ADR-061 Phase 2 gap C: the full-mode JSON report is built through
         # the one shared document choke point (report.build.
         # build_report_document) rather than to_json's own independent
         # dict-building pass -- see report/build.py's module docstring.
-        from .report.build import build_report_document
         from .report.render_json import render_json
 
-        doc = build_report_document(
-            result,
-            show_only=show_only,
-            show_impact=show_impact,
-            severity_config=severity_config,
-            require_complete_analysis=require_complete_analysis,
-            contract_evaluation=contract_evaluation,
-        )
+        if envelope is not None:
+            doc = envelope.document
+        else:
+            from .report.build import build_report_document
+
+            doc = build_report_document(
+                result,
+                show_only=show_only,
+                show_impact=show_impact,
+                severity_config=severity_config,
+                require_complete_analysis=require_complete_analysis,
+                contract_evaluation=contract_evaluation,
+            )
         base = render_json(doc)
     else:
         base = to_json(

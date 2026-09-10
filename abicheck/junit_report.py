@@ -49,14 +49,23 @@ from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change, DiffResult
 from .contract_gating import is_evaluated
 from .junit_coverage_warnings import append_coverage_warnings_suite
+from .report.envelope import resolved_document as _resolved_document
+from .report.junit_disposition import (
+    # ADR-061: moved to report/ (its historical private name is kept here
+    # so every existing caller and test resolves unchanged).
+    add_disposition_audit_properties as _add_disposition_audit_properties,
+)
 from .report.junit_scope import append_scope_suite
 from .reporter import _finding_id, _suppress_dangling_correlation_notes, apply_show_only
 from .reporter_markdown import _root_cause_key_and_display
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .model import AbiSnapshot
     from .policy.severity import IssueCategory
     from .report.document import ReportDocument
+    from .report.envelope import ReportEnvelope
     from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
@@ -388,6 +397,7 @@ def _emit_testcases(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
+    today: date | None = None,
 ) -> None:
     """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
 
@@ -403,7 +413,7 @@ def _emit_testcases(
                 _maybe_add_failure(
                     tc, change_by_symbol[sym], result, kind_sets, severity_config,
                     relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-                    findings_by_id=findings_by_id)
+                    findings_by_id=findings_by_id, today=today)
     else:
         # No snapshot — only emit changed symbols
         for sym, c in sorted(change_by_symbol.items()):
@@ -413,7 +423,7 @@ def _emit_testcases(
             _maybe_add_failure(
                 tc, c, result, kind_sets, severity_config,
                 relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-                findings_by_id=findings_by_id)
+                findings_by_id=findings_by_id, today=today)
 
 
 def _append_extra_failures(
@@ -492,7 +502,7 @@ def _build_testsuite(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    report_mode: str = "full", report_document: ReportDocument | None = None,
+    report_mode: str = "full", report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
 ) -> ET.Element:
     """Build a ``<testsuite>`` element from a single DiffResult.
 
@@ -502,8 +512,10 @@ def _build_testsuite(
     When *show_only* is active, only the filtered changes are emitted
     (no unchanged snapshot symbols) so the test count matches the filter.
     *report_document* is forwarded to :func:`_add_disposition_audit_properties` (see its docstring).
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` this render projects: it supplies both that document and every per-finding verdict/category below, so JUnit resolves neither for itself.
     """
     kind_sets = result._effective_kind_sets()
+    resolved_today = None if envelope is None else envelope.resolved_today
 
     changes = list(result.changes)
     # Scoped-only changes: scope_diff_to_app/scope_diff_to_required_symbols
@@ -521,19 +533,25 @@ def _build_testsuite(
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
+            today=resolved_today,
         )
         changes = _suppress_dangling_correlation_notes(changes)
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
 
-    # ADR-061 Phase 2 item 4b: resolve every verdict/category once. Built
-    # from *changes*, not just result.changes, since it also carries
+    # ADR-061 Phase 2 item 4b / gap C: every verdict/category is resolved
+    # once per render -- read off *envelope* when this render is a projection
+    # of one (it resolves result.changes and scoped_only_changes alike), and
+    # resolved here only for a direct caller that supplied none. Built from
+    # *changes*, not just result.changes, since it also carries
     # scoped_only_changes.
     from .report.finding import build_report_findings, findings_by_change_id
 
     findings_by_id = findings_by_change_id(
-        build_report_findings(
+        envelope.findings_for(changes)
+        if envelope is not None
+        else build_report_findings(
             changes, policy=result.policy, kind_sets=kind_sets, policy_file=result.policy_file
         )
     )
@@ -592,7 +610,7 @@ def _build_testsuite(
     # ADR-067 audit rows are appended into the same element rather than a
     # second one beside it.
     props = ET.SubElement(ts, "properties")
-    _add_disposition_audit_properties(props, result, severity_config, report_document=report_document)
+    _add_disposition_audit_properties(props, result, severity_config, report_document=_resolved_document(envelope, report_document))
     _add_scoped_properties(props, result)
 
     # G29 Phase 3 (ADR-052 follow-up): --report-mode root-cause adds
@@ -609,7 +627,7 @@ def _build_testsuite(
     _emit_testcases(
         ts, all_symbols, change_by_symbol, result, kind_sets, severity_config,
         relevant_ids=relevant_ids, root_cause_lookup=root_cause_lookup,
-        findings_by_id=findings_by_id,
+        findings_by_id=findings_by_id, today=resolved_today,
     )
     _append_extra_failures(
         ts, extra_changes, result, kind_sets, severity_config,
@@ -669,49 +687,6 @@ def _emit_missing_contract_testcases(
                 if entry is not None:
                     fail.set("rootCauseId", entry[0])
                     fail.set("rootCause", entry[1])
-
-
-def _add_disposition_audit_properties(
-    props: ET.Element, result: DiffResult, severity_config: object | None = None, report_document: ReportDocument | None = None
-) -> None:
-    """Append ADR-067 D3's raw-versus-effective counts as testsuite properties.
-
-    A JUnit consumer reads ``tests``/``failures``, which are the *effective*
-    numbers by construction -- a fully suppressed comparison reports zero
-    failures and would otherwise carry no trace that anything was detected at
-    all. These properties are that trace, in the one mechanism JUnit gives for
-    suite-level metadata; the per-disposition counts are emitted individually
-    so a dashboard can chart one without parsing a blob.
-
-    Unconditional, unlike the sibling scoped block, which is emitted only
-    under ``--used-by``/``--required-symbol(s)``: a raw-versus-effective
-    count a view can drop is not the invariant D3 states.
-    *report_document* (ADR-061 gap C), when given, is reused via ``disposition_audit_dict_reusing_document`` instead of a second ``compute_disposition_audit`` call -- mirrors ``sarif.to_sarif``.
-    """
-    from .report import disposition_audit as _da
-
-    audit = _da.DispositionAudit.from_dict(_da.disposition_audit_dict_reusing_document(result, severity_config, report_document))
-
-    def _prop(name: str, value: str) -> None:
-        p = ET.SubElement(props, "property")
-        p.set("name", name)
-        p.set("value", value)
-
-    _prop("abicheck.detected_total", str(audit.detected_total))
-    _prop("abicheck.effective_total", str(audit.effective_total))
-    for name, count in audit.counts:
-        _prop(f"abicheck.disposition.{name}", str(count))
-    for rule, count in audit.rules:
-        _prop(
-            f"abicheck.disposition_rule.{rule.rule_id or 'rule'}",
-            f"{count} finding(s); reason={rule.reason or 'none'}; "
-            f"intent={rule.intent}; source={rule.source_file or 'inline'}",
-        )
-    if audit.policy_overlays:  # findings the gate scores that are not detections
-        _prop("abicheck.policy_overlays", str(audit.policy_overlays))
-    if audit.not_evaluated_detectors:
-        names = ",".join(d.name for d in audit.not_evaluated_detectors)
-        _prop("abicheck.not_evaluated_detectors", names)
 
 
 def _add_scoped_properties(props: ET.Element, result: DiffResult) -> None:
@@ -790,13 +765,14 @@ def _maybe_add_failure(
     relevant_ids: frozenset[str] | None = None,
     root_cause_lookup: dict[str, tuple[str, str]] | None = None,
     findings_by_id: dict[int, ReportFinding] | None = None,
+    today: date | None = None,
 ) -> None:
     """Add a ``<failure>`` child to *tc* if the change is a failure, and
     ``<properties>`` blocks with ADR-049's per-finding contract decision
     (CLI-audit P1) and any cross-detector correlation, regardless of
     pass/fail.
     """
-    _add_contract_properties(tc, change, result, severity_config)
+    _add_contract_properties(tc, change, result, severity_config, today=today)
     _add_correlation_property(tc, change)
     if _is_failure(
         change, result, kind_sets, severity_config,
@@ -813,6 +789,8 @@ def _add_contract_properties(
     change: Change,
     result: DiffResult,
     severity_config: SeverityConfig | None,
+    *,
+    today: date | None = None,
 ) -> None:
     """Append a ``<properties>`` block to testcase *tc* with the same
     canonical per-finding contract shape reporter.py's JSON output and
@@ -859,6 +837,7 @@ def _add_contract_properties(
                 severity_config,
                 policy=result.policy,
                 policy_file=result.policy_file,
+                today=today,
             )
         ),
     )
@@ -993,7 +972,7 @@ def to_junit_xml(
     *,
     show_only: str | None = None,
     severity_config: SeverityConfig | None = None,
-    report_mode: str = "full", report_document: ReportDocument | None = None,
+    report_mode: str = "full", report_document: ReportDocument | None = None, envelope: ReportEnvelope | None = None,
 ) -> str:
     """Convert a single DiffResult to a JUnit XML string.
 
@@ -1022,6 +1001,10 @@ def to_junit_xml(
         before this parameter existed.
     report_document:
         ADR-061 gap C shared build; forwarded to :func:`_build_testsuite`.
+    envelope:
+        ADR-061 gap C completed ``ReportEnvelope``; forwarded to
+        :func:`_build_testsuite`, which reads its shared document and its
+        already-resolved per-finding verdicts/categories.
 
     Returns
     -------
@@ -1033,7 +1016,7 @@ def to_junit_xml(
 
     ts = _build_testsuite(
         result, old_snapshot, show_only=show_only, severity_config=severity_config,
-        report_mode=report_mode, report_document=report_document,
+        report_mode=report_mode, report_document=report_document, envelope=envelope,
     )
     root.append(ts)
 
