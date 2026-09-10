@@ -181,13 +181,25 @@ def _dominant_decision(
     )
 
 
+#: ADR-064's exit code for a failed evidence contract, and ADR-037 D5's
+#: before it: a run that pinned evidence (`--depth build`/`--depth source`,
+#: `--abi3`) it never actually reached. Named here, next to the resolver
+#: that owns the axis, because a second consumer now folds the same axis
+#: outside this resolver -- `report.no_baseline.no_baseline_exit_code`, the
+#: single-build audit's own `max` fold (ADR-068 D2 gives that run no
+#: compatibility contribution to fold through
+#: :func:`resolve_compare_exit_decision_with_abort_axes`, so it cannot
+#: reuse the resolver itself). One constant, so the two can never disagree.
+EXIT_EVIDENCE_CONTRACT_ERROR = 7
+
+
 def resolve_scan_exit_decision(
     *,
     budget_overflow_before_evidence_check: bool = False,
     evidence_contract_error: bool = False,
     budget_overflow: bool = False,
     not_comparable: bool = False,
-    evidence_contract_error_code: int = 7,
+    evidence_contract_error_code: int = EXIT_EVIDENCE_CONTRACT_ERROR,
     budget_overflow_code: int = 5,
     not_comparable_code: int = 6,
     prior_decision: ExitDecision | None = None,
@@ -319,7 +331,9 @@ def resolve_compare_exit_decision_with_abort_axes(
     from .exit_decision import resolve_compare_exit_decision
 
     ordinary = resolve_compare_exit_decision(
-        result, sev_config, scheme,
+        result,
+        sev_config,
+        scheme,
         require_complete_analysis=require_complete_analysis,
     )
     evidence_contract_error = getattr(result, "evidence_contract_error", False)
@@ -667,9 +681,13 @@ def resolve_release_exit_decision_for_report(
     not_comparable = worst_verdict == "not_comparable"
     severity_scheme_active = severity_exit_code is not None
     removed_required_library = fail_on_removed and bool(removed_keys)
-    operational_error_contribution = 4 if any(
-        isinstance(e, dict) and e.get("verdict") == "ERROR" for e in library_results
-    ) else 0
+    operational_error_contribution = (
+        4
+        if any(
+            isinstance(e, dict) and e.get("verdict") == "ERROR" for e in library_results
+        )
+        else 0
+    )
     verdict_or_severity_contribution = (
         (severity_exit_code or 0)
         if severity_scheme_active

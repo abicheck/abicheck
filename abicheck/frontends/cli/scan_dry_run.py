@@ -19,9 +19,7 @@ Split out of :mod:`abicheck.cli_scan` (CLI cleanup phase two, PR 5 follow-up)
 purely for line budget: that module is ``no_growth``-debt-tracked at its
 adoption baseline, and adding the ``--abi3`` dry-run precondition check
 (:mod:`abicheck.workflows.scan_abi3_dry_run`) had no room left to land
-in-place. Lives under :mod:`abicheck.frontends.cli`, alongside its
-``--artifact-set`` sibling :mod:`abicheck.frontends.cli.artifact_set_dry_run`
-(the same split, for the same reason, one PR earlier).
+in-place. Lives under :mod:`abicheck.frontends.cli`.
 """
 
 from __future__ import annotations
@@ -116,10 +114,7 @@ def render_scan_dry_run(
     already-accepted CLI-registration import cycle (``cli -> cli_scan ->
     frontends.cli.scan_dry_run -> ...``), and importing it directly from here
     would grow that cycle's membership (AI-readiness ``import-cycle-growth``,
-    fresh evidence) -- the identical reason
-    :mod:`abicheck.frontends.cli.artifact_set_dry_run` takes its own
-    ``totals``/``notes`` as already-computed data instead of calling
-    ``estimate_artifact_set`` itself.
+    fresh evidence).
 
     *scheme_label*/*sev_config* describe this invocation's **already-resolved**
     gate (the caller resolves them before emitting), so the preview states the

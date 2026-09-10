@@ -73,21 +73,30 @@ def test_compare_no_baseline_rejects_two_operands(tmp_path: Path) -> None:
     assert result.exit_code == 64, result.output
 
 
-def test_scan_supports_directory_audit_without_against() -> None:
-    """F-23: `scan --artifact-set` is an audit (no baseline) over N
-    libraries in one directory -- `--against` is optional, matching the
-    single-artifact audit shape scaled up to a whole release. Checked via
-    `--help-all` rather than a real multi-library discovery run:
-    `discover_artifact_set` parses real ELF program/dynamic tables, which
-    is real-binary-fixture territory (`integration`), not a fast-lane
-    concern -- this module's own compare-side test below is what actually
-    proves the gap, this is just "scan really has the option"."""
-    result = invoke_cli("scan", "--help-all")
-    assert result.exit_code == 0, result.output
-    assert "--artifact-set" in result.output
-    # --against is documented as optional even in --artifact-set mode
-    # (an audit, not a comparison) -- see cli_scan.py's own help text.
-    assert "Without --against" in result.output
+def test_no_command_offers_a_directory_audit_any_more() -> None:
+    """F-23, restated after the capability left `scan` too.
+
+    `scan --artifact-set` used to be the N-library, no-baseline audit this
+    module tracked as "scan has it, compare doesn't". ADR-068's second
+    2026-09-09 amendment rules it (b) -- retired, because preserving its
+    per-member manifest/coverage accounting needs ADR-065 S3's package
+    component inventories, and routing it onto `compare --no-baseline DIR`
+    before those land would silently narrow those guarantees. So the gap is
+    now *total*, which is the honest thing to pin: neither command offers a
+    directory audit, and `--artifact-set` is not merely undocumented but
+    gone from the parser. The single-artifact audit below is unaffected, and
+    `test_compare_directory_no_baseline_is_unreachable` pins compare's own
+    half.
+    """
+    assert invoke_cli("scan", "--help-all").exit_code == 0
+    assert "--artifact-set" not in invoke_cli("scan", "--help-all").output
+    # Not just hidden from help -- rejected by the parser.
+    rejected = invoke_cli("scan", "--artifact-set", "release/")
+    assert rejected.exit_code != 0
+    assert "No such option" in rejected.output
+    # The single-artifact audit it scaled up from is untouched: `--against`
+    # is still optional, and its absence still means an audit.
+    assert "Without --against" in invoke_cli("scan", "--help-all").output
 
 
 def test_compare_directory_no_baseline_is_unreachable(tmp_path: Path) -> None:

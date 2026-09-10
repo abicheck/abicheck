@@ -21,7 +21,7 @@ CLI cleanup phase two, PR C (PR 3A). Split out of
 gate's 800-line production file cap -- same reason ``cli_dump_request.py``/
 ``cli_dump_dry_run_build_query.py`` are their own modules rather than
 growing an already-large sibling. Lives under
-``frontends/cli/`` itself (alongside ``runtime.py``/``artifact_set_dry_run.py``)
+``frontends/cli/`` itself (alongside ``runtime.py``/``scan_dry_run.py``)
 rather than as a new flat ``cli_*.py`` root module: ADR-061's
 ``architecture/modules.yaml`` freezes that root family's member list, so a
 genuinely new module goes into its responsibility-package tree instead.

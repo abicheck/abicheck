@@ -809,6 +809,8 @@ class CompareRequest:
     #: module. ``False`` (the default) reproduces every pre-existing
     #: request's behavior unchanged.
     collapse_versioned_symbols: bool = field(default=False, kw_only=True)
+    #: One-comparison-product Phase 4 (ADR-068, ADR-055 amendment): absorbed from ``ScanRequest.allow_build_query`` -- the one field that amendment's field-by-field audit listed as a real, open ``CompareRequest`` gap and that survived ADR-068's second 2026-09-09 ruling table (``risk_rules_path``/``build_targets``/``bundle_system_providers``/``bundle_manifest``/``enabled_checks``/``severities`` are all ruled (b), dropped rather than absorbed). ``resolve_side_snapshot`` has accepted the pass-through since PR 3A; only the request had no way to state it, so a typed caller with a trusted ``.abicheck.yml`` ``build.query`` could not authorize running it. ``False`` (the default) is the Tier-2 "never execute a build system as a side effect of resolving an input" rule, so every pre-existing request is unchanged -- and under it ``_gated_build_query_inputs`` nulls the whole per-side ``InputSpec.build_config``, *including* passive keys such as ``build.compile_db``, exactly as it does for ``dump``'s own typed pipeline. That is not a narrowing: nothing on the ``compare`` path read ``build_config`` at all before this field existed. ``scan`` is the one caller that keeps a config's passive half readable without consent (it passes ``build_config_locally_trusted``, because its CLI-side gate authorizes only the executable field); giving ``compare`` the same split is a separate change with its own behavioural blast radius, not part of absorbing this field (Codex review, PR #1186). ``True`` asserts the same operator consent ``dump --allow-build-query`` expresses, and makes the whole config -- executable ``build.query`` included -- readable.
+    allow_build_query: bool = field(default=False, kw_only=True)
 
     def validation_errors(self) -> list[str]:
         """Return a list of human-readable validation problems (empty == valid).
@@ -1106,7 +1108,8 @@ class CompareResult:
     slot — a break for every positional caller. As a struct, a future field
     (a resolved-depth record, ADR-049's evaluation receipt, a coverage
     summary) is an additive attribute instead. The same reasoning ADR-035
-    applied to ``ScanRequest``/``ScanResult``, generalized to ``compare``.
+    applied to ``ScanRequest``/``ScanResult`` (both since retired -- ADR-068
+    Phase 4's typed-API slice), generalized to ``compare``.
     :meth:`as_tuple` reproduces the pre-0.6 shape in one line.
 
     ``suppression`` is the one field beyond that rename, and it is not

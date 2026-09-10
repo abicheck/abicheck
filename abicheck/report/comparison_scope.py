@@ -49,6 +49,7 @@ from ..model.scope_acquisition import (
 )
 from ..policy.outcome import ScopeCompleteness
 from ..policy.scope_completeness import ScopeDecision
+from .markdown_text import md_cell
 
 __all__ = [
     "ComparisonScopeTerms",
@@ -147,23 +148,11 @@ def build_comparison_scope_section(decision: ScopeDecision) -> dict[str, Any]:
     }
 
 
-def _md_cell(value: object) -> str:
-    """One Markdown table-cell/code-span-safe line for a value the report
-    does not control (a member's file name, an extractor's error text):
-    control characters flattened to spaces, a table pipe escaped, a
-    backtick neutralized, so neither can close a span, end a row, or start
-    a heading of its own (Codex review, twenty-first round)."""
-    out: list[str] = []
-    for ch in str(value):
-        if ch == "|":
-            out.append("\\|")
-        elif ch == "`":
-            out.append("'")
-        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
-            out.append(" ")
-        else:
-            out.append(ch)
-    return " ".join("".join(out).split())
+#: This module's long-standing spelling of the shared escaping rule, kept as
+#: a name so every call site below stays unchanged; the rule itself now lives
+#: in :mod:`abicheck.report.markdown_text` so ``no_baseline.py``'s finding
+#: tables apply the identical one rather than a second copy.
+_md_cell = md_cell
 
 
 def _unchecked_rows(section: Mapping[str, Any]) -> list[Mapping[str, Any]]:

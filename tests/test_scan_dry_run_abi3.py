@@ -33,6 +33,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from scan_estimate_helpers import EstimateOperand, estimate
 
 from abicheck.elf_metadata import (
     ElfImport,
@@ -41,11 +42,10 @@ from abicheck.elf_metadata import (
     SymbolBinding,
     SymbolType,
 )
-from abicheck.frontends.cli.artifact_set_dry_run import render_artifact_set_dry_run
 from abicheck.frontends.cli.scan_dry_run import render_scan_dry_run
 from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
 from abicheck.python_ext import detect_python_extension_from_binary
-from abicheck.service_scan import ScanRequest, _estimate_total_tus
+from abicheck.service_scan import _estimate_total_tus
 
 # ── detect_python_extension_from_binary: the cheap binary-only probe ──
 
@@ -331,203 +331,6 @@ def test_render_scan_dry_run_no_abi3_check_when_floor_unset(
     assert not called
 
 
-# ── render_artifact_set_dry_run: same precondition, per member ──
-
-
-def _set_dry_run_result(
-    discovered: dict[str, Path], *, abi3_floor: tuple[int, int] | None
-) -> object:
-    req = SimpleNamespace(
-        bundle_system_providers=(),
-        depth=None,
-        changed_src="none",
-        changed_paths=[],
-        sources=None,
-        build_info=None,
-        build_targets=(),
-        abi3_floor=abi3_floor,
-    )
-    return render_artifact_set_dry_run(
-        req,
-        discovered=discovered,
-        explicit=True,
-        header_backend="auto",
-        fmt="text",
-        totals={},
-        notes=[],
-        blocker=None,
-    )
-
-
-def test_artifact_set_dry_run_blocks_on_non_extension_member(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    good = tmp_path / "ext.so"
-    bad = tmp_path / "plain.so"
-    good.write_bytes(b"")
-    bad.write_bytes(b"")
-    discovered = {"ext.so": good, "plain.so": bad}
-
-    def _probe(path: Path) -> object | None:
-        return SimpleNamespace(is_extension=True) if path == good else None
-
-    monkeypatch.setattr(
-        "abicheck.python_ext.detect_python_extension_from_binary", _probe
-    )
-
-    result = _set_dry_run_result(discovered, abi3_floor=(3, 9))
-    assert result.exit_code == 1
-    assert any("plain.so" in b for b in result.blockers)
-    assert any("1 of 2 member(s)" in b for b in result.blockers)
-
-
-def test_artifact_set_dry_run_abi3_ok_when_all_members_qualify(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    a = tmp_path / "a.so"
-    b = tmp_path / "b.so"
-    a.write_bytes(b"")
-    b.write_bytes(b"")
-    discovered = {"a.so": a, "b.so": b}
-
-    monkeypatch.setattr(
-        "abicheck.python_ext.detect_python_extension_from_binary",
-        lambda p: SimpleNamespace(is_extension=True),
-    )
-
-    result = _set_dry_run_result(discovered, abi3_floor=(3, 9))
-    assert result.exit_code == 0
-    assert not result.blockers
-    lines = " ".join(result.sections.get("Consumer/contract scoping", []))
-    assert "stable-ABI audit: will run for all 2 member(s)" in lines
-
-
-def test_artifact_set_dry_run_skips_abi3_check_when_unset(tmp_path: Path) -> None:
-    a = tmp_path / "a.so"
-    a.write_bytes(b"")
-    result = _set_dry_run_result({"a.so": a}, abi3_floor=None)
-    assert result.exit_code == 0
-
-
-def test_artifact_set_dry_run_shows_unknown_not_zero_for_l3(tmp_path: Path) -> None:
-    """Codex review, fresh evidence: the aggregate renderer folded an
-    unknown member's (0, 0.0) into the summed L3_build total and rendered a
-    confident-looking "0 TU(s) total, ~0.00s" -- the separate [UNKNOWN note
-    bullet alone didn't stop that numeric row from misleading a reader."""
-    a = tmp_path / "a.so"
-    a.write_bytes(b"")
-    req = SimpleNamespace(
-        bundle_system_providers=(),
-        depth="build",
-        changed_src="none",
-        changed_paths=[],
-        sources=None,
-        build_info=None,
-        build_targets=(),
-        abi3_floor=None,
-    )
-    result = render_artifact_set_dry_run(
-        req,
-        discovered={"a.so": a},
-        explicit=True,
-        header_backend="auto",
-        fmt="text",
-        totals={"L3_build": (0, 0.0)},
-        notes=["build.query: .abicheck.yml [UNKNOWN: query-only build.query]"],
-        blocker=None,
-        unknown_layers=frozenset({"L3_build"}),
-    )
-    lines = result.sections.get("Resolved depth and source scope", [])
-    l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
-    assert l3_lines == [
-        "L3_build: TU count/cost unknown for at least one member (see notes below)"
-    ]
-    assert any("understating it" in ln for ln in lines)
-
-
-def test_artifact_set_dry_run_shows_unknown_not_zero_for_l4_and_l5(
-    tmp_path: Path,
-) -> None:
-    """Codex review, fresh evidence: L4/L5 derive their own TU counts from
-    L3's -- an earlier revision of this fix hardcoded the "unknown, not a
-    confident zero" treatment to the L3_build row alone, so a query-only
-    build config's summed L4_source_abi/L5_source_graph rows still showed a
-    misleading "0 TU(s) total, ~0.00s" even once L3's own row said
-    "unknown". ``unknown_layers`` (not a single project-wide flag) is what
-    lets the renderer apply the same honesty to every affected layer, not
-    just the one the earlier fix happened to check."""
-    a = tmp_path / "a.so"
-    a.write_bytes(b"")
-    req = SimpleNamespace(
-        bundle_system_providers=(),
-        depth="source",
-        changed_src="none",
-        changed_paths=[],
-        sources=None,
-        build_info=None,
-        build_targets=(),
-        abi3_floor=None,
-    )
-    result = render_artifact_set_dry_run(
-        req,
-        discovered={"a.so": a},
-        explicit=True,
-        header_backend="auto",
-        fmt="text",
-        totals={
-            "L3_build": (0, 0.0),
-            "L4_source_abi": (0, 0.0),
-            "L5_source_graph": (0, 0.0),
-        },
-        notes=[
-            "build.query: .abicheck.yml [UNKNOWN: query-only build.query, "
-            "real run's trusted query determines the actual count]",
-            "source-target replay scope (0 of 0 TU(s)) [UNKNOWN: derived "
-            "from an unknown L3 TU count, see L3_build note]",
-            "source graph fold/edges [UNKNOWN: derived from an unknown L3 "
-            "TU count, see L3_build note]",
-        ],
-        blocker=None,
-        unknown_layers=frozenset({"L3_build", "L4_source_abi", "L5_source_graph"}),
-    )
-    lines = result.sections.get("Resolved depth and source scope", [])
-    for layer in ("L3_build", "L4_source_abi", "L5_source_graph"):
-        layer_lines = [ln for ln in lines if ln.startswith(f"{layer}:")]
-        assert layer_lines == [
-            f"{layer}: TU count/cost unknown for at least one member (see notes below)"
-        ], layer_lines
-    assert any("understating it" in ln for ln in lines)
-
-
-def test_artifact_set_dry_run_normal_totals_unaffected(tmp_path: Path) -> None:
-    a = tmp_path / "a.so"
-    a.write_bytes(b"")
-    req = SimpleNamespace(
-        bundle_system_providers=(),
-        depth="build",
-        changed_src="none",
-        changed_paths=[],
-        sources=None,
-        build_info=None,
-        build_targets=(),
-        abi3_floor=None,
-    )
-    result = render_artifact_set_dry_run(
-        req,
-        discovered={"a.so": a},
-        explicit=True,
-        header_backend="auto",
-        fmt="text",
-        totals={"L3_build": (5, 1.25)},
-        notes=["compile DB: compile_commands.json"],
-        blocker=None,
-    )
-    lines = result.sections.get("Resolved depth and source scope", [])
-    l3_lines = [ln for ln in lines if ln.startswith("L3_build:")]
-    assert l3_lines == ["L3_build: 5 TU(s) total, ~1.25s -- summed over 1 member(s)"]
-    assert not any("understating it" in ln for ln in lines)
-
-
 # ── _estimate_total_tus: query-only build config prices as unknown, not 0 ──
 
 
@@ -538,8 +341,8 @@ def test_estimate_total_tus_query_only_config_marks_count_unknown(
     config_path.write_text(
         'build:\n  query: "cmake --build . --target compile_commands"\n'
     )
-    req = ScanRequest(binaries=[Path("lib.so")], mode="audit", build_config=config_path)
-    total, note = _estimate_total_tus(req)
+    req = EstimateOperand(binaries=[Path("lib.so")], mode="audit", build_config=config_path)
+    total, note = _estimate_total_tus(req.side(), req.compile_db)
     assert total == 0
     assert "UNKNOWN" in note
     assert "build.query" in note
@@ -548,8 +351,8 @@ def test_estimate_total_tus_query_only_config_marks_count_unknown(
 def test_estimate_total_tus_config_without_query_is_unaffected(tmp_path: Path) -> None:
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text("build:\n  system: cmake\n")
-    req = ScanRequest(binaries=[Path("lib.so")], mode="audit", build_config=config_path)
-    total, note = _estimate_total_tus(req)
+    req = EstimateOperand(binaries=[Path("lib.so")], mode="audit", build_config=config_path)
+    total, note = _estimate_total_tus(req.side(), req.compile_db)
     assert total == 0
     assert "UNKNOWN" not in note
     assert note == "no source tree / compile DB"
@@ -561,7 +364,7 @@ def test_render_scan_dry_run_wires_build_config_and_shows_unknown_not_zero(
     """End-to-end: the single-binary CLI dry-run path must actually reach
     ``_estimate_total_tus``'s query-only branch (Codex review: an earlier
     revision of this fix left ``render_scan_dry_run``'s own internal
-    ``ScanRequest`` without ``build_config`` at all, so the branch was
+    ``EstimateOperand`` without ``build_config`` at all, so the branch was
     unreachable from ``scan --dry-run`` itself), and the rendered preview
     must not report a numeric "0 TU(s), ~0.00s" for a count that is
     genuinely unknown rather than counted as zero.
@@ -572,21 +375,19 @@ def test_render_scan_dry_run_wires_build_config_and_shows_unknown_not_zero(
     ``cli_scan.py``'s ``scan_cmd`` does before calling it, to genuinely
     exercise the query-only ``_estimate_total_tus`` branch end to end.
     """
-    from abicheck.service_scan import Budget, estimate_scan
 
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text(
         'build:\n  query: "cmake --build . --target compile_commands"\n'
     )
-    estimate_req = ScanRequest(
+    estimate_req = EstimateOperand(
         binaries=[tmp_path / "lib.so"],
         mode="pr",
         source_method=SourceMethod.S1.value,
         depth=EvidenceDepth.BUILD.value,
-        budget=Budget(total_timeout=None),
         build_config=config_path,
     )
-    estimates = estimate_scan(
+    estimates = estimate(
         estimate_req, resolved_level=(SourceMethod.S1, EvidenceDepth.BUILD)
     )
     result = render_scan_dry_run(
@@ -610,8 +411,8 @@ def test_render_scan_dry_run_wires_build_config_and_shows_unknown_not_zero(
 
 
 def test_estimate_total_tus_no_build_config_is_unaffected() -> None:
-    req = ScanRequest(binaries=[Path("lib.so")], mode="audit")
-    total, note = _estimate_total_tus(req)
+    req = EstimateOperand(binaries=[Path("lib.so")], mode="audit")
+    total, note = _estimate_total_tus(req.side(), req.compile_db)
     assert total == 0
     assert "UNKNOWN" not in note
 
@@ -626,22 +427,20 @@ def test_estimate_scan_propagates_unknown_tu_count_to_l4_and_l5(
     L4_source_abi and L5_source_graph derive their own counts from it and
     must say so too, not price a confident-looking zero derived from a
     count that was never actually counted."""
-    from abicheck.service_scan import Budget, estimate_scan
 
     config_path = tmp_path / ".abicheck.yml"
     config_path.write_text(
         'build:\n  query: "cmake --build . --target compile_commands"\n'
     )
-    req = ScanRequest(
+    req = EstimateOperand(
         binaries=[tmp_path / "lib.so"],
         mode="pr",
         source_method=SourceMethod.S5.value,
         depth=EvidenceDepth.SOURCE.value,
         seeded=False,
-        budget=Budget(total_timeout=None),
         build_config=config_path,
     )
-    estimates = estimate_scan(
+    estimates = estimate(
         req, resolved_level=(SourceMethod.S5, EvidenceDepth.SOURCE)
     )
     by_layer = {e.layer: e for e in estimates}
@@ -658,66 +457,18 @@ def test_estimate_scan_does_not_mark_l4_l5_unknown_for_a_real_count(
 ) -> None:
     """Negative control: a real, counted TU total must not be flagged
     unknown just because L4/L5 pass through the same code path."""
-    from abicheck.service_scan import estimate_scan
 
     compile_db = tmp_path / "compile_commands.json"
     compile_db.write_text("[]")
-    req = ScanRequest(
+    req = EstimateOperand(
         binaries=[tmp_path / "lib.so"],
         mode="pr",
         source_method=SourceMethod.S5.value,
         depth=EvidenceDepth.SOURCE.value,
         compile_db=compile_db,
     )
-    estimates = estimate_scan(
+    estimates = estimate(
         req, resolved_level=(SourceMethod.S5, EvidenceDepth.SOURCE)
     )
     assert estimates
     assert not any("[UNKNOWN" in e.note for e in estimates)
-
-
-def test_estimate_artifact_set_reports_unknown_layers_per_layer(
-    tmp_path: Path,
-) -> None:
-    """``estimate_artifact_set``'s 4th return value names exactly the layers
-    at least one member's estimate flagged unknown -- not every layer, and
-    not a single project-wide bit that can't say which layer it means."""
-    from abicheck.service_scan import estimate_artifact_set
-
-    config_path = tmp_path / ".abicheck.yml"
-    config_path.write_text(
-        'build:\n  query: "cmake --build . --target compile_commands"\n'
-    )
-    a = tmp_path / "a.so"
-    a.write_bytes(b"")
-    req = ScanRequest(
-        binaries=[],
-        mode="pr",
-        depth=EvidenceDepth.SOURCE.value,
-        build_config=config_path,
-    )
-    totals, notes, blocker, unknown_layers = estimate_artifact_set(req, [a])
-    assert "L3_build" in unknown_layers
-    assert "L4_source_abi" in unknown_layers
-    assert "L5_source_graph" in unknown_layers
-    assert "L0_binary" not in unknown_layers
-    assert "bundle_audit" not in unknown_layers
-
-
-def test_estimate_artifact_set_unknown_layers_empty_for_real_counts(
-    tmp_path: Path,
-) -> None:
-    from abicheck.service_scan import estimate_artifact_set
-
-    compile_db = tmp_path / "compile_commands.json"
-    compile_db.write_text("[]")
-    a = tmp_path / "a.so"
-    a.write_bytes(b"")
-    req = ScanRequest(
-        binaries=[],
-        mode="pr",
-        depth=EvidenceDepth.SOURCE.value,
-        compile_db=compile_db,
-    )
-    _totals, _notes, _blocker, unknown_layers = estimate_artifact_set(req, [a])
-    assert unknown_layers == frozenset()

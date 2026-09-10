@@ -16,9 +16,11 @@
 """ADR-064 stage 1b: `abicheck.workflows.scan_abort_result`.
 
 `TestScanAbortResultFields` states `scan_abort_result_fields`'s own contract
-in isolation; `TestScanAbortExitReportWiring` exercises the real
-`service_scan.run_scan`/`_run_scan_one_member` catch sites that call it, so
-the wiring itself is proven, not only the pure function. Split from
+in isolation. The companion `TestScanAbortExitReportWiring` class exercised
+the real `service_scan.run_scan`/`_run_scan_one_member` catch sites; both
+went with the typed API in ADR-068 Phase 4, and the surviving caller -- the
+native `scan` CLI's own `_emit_scan_abort_report` -- is covered end-to-end
+by `tests/test_cli_scan_abort_report.py`. Split from
 `tests/test_exit_decision.py` (which owns `abicheck.policy.exit_decision*`
 directly) because this module's subject lives in `workflows`, not `policy`
 -- see `abicheck/workflows/scan_abort_result.py`'s own module docstring for
@@ -26,8 +28,6 @@ why the shaping logic moved there.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
@@ -256,80 +256,3 @@ class TestAuditPriorDecision:
         )
         assert fields["report"]["exit"]["code"] == 5
         assert fields["report"]["exit"]["compatibility_contribution"] == 2
-
-
-class TestScanAbortExitReportWiring:
-    """`service_scan.run_scan`/`_run_scan_one_member` build their
-    `ScanResult` via ``ScanResult(**scan_abort_result_fields(axis))`` on
-    `_BudgetOverflow`/`_EvidenceContractError` -- these tests exercise the
-    real catch sites (not just `scan_abort_result_fields` in isolation
-    above) to prove the wiring itself, not only the pure function it calls.
-    """
-
-    @pytest.mark.parametrize(
-        ("exc_name", "depth", "verdict", "exit_code", "reason"),
-        [
-            ("_BudgetOverflow", "binary", "BUDGET_OVERFLOW", 5, "budget_overflow"),
-            (
-                "_EvidenceContractError",
-                "source",
-                "EVIDENCE_CONTRACT_ERROR",
-                7,  # cli_scan.py's dedicated _EXIT_EVIDENCE_CONTRACT_ERROR
-                "evidence_contract_error",
-            ),
-        ],
-    )
-    def test_run_scan(self, monkeypatch, exc_name, depth, verdict, exit_code, reason):
-        from abicheck import scan_engine as _se, service_scan as _ss
-
-        exc = getattr(_se, exc_name)
-
-        def raising_core(**kw):
-            raise exc("aborted for this test")
-
-        monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
-
-        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth=depth)
-        res = _ss.run_scan(req)
-
-        assert res.verdict == verdict
-        assert res.exit_code == exit_code
-        assert res.report["exit"]["reasons"] == [reason]
-        assert res.report["scan_schema_version"] == SCAN_SCHEMA_VERSION
-        # Reaches the real to_dict() envelope, not just the dataclass field.
-        assert res.to_dict()["report"]["scan_schema_version"] == SCAN_SCHEMA_VERSION
-
-    @pytest.mark.parametrize(
-        ("exc_name", "depth", "verdict", "exit_code", "reason"),
-        [
-            ("_BudgetOverflow", "binary", "BUDGET_OVERFLOW", 5, "budget_overflow"),
-            (
-                "_EvidenceContractError",
-                "source",
-                "EVIDENCE_CONTRACT_ERROR",
-                7,  # cli_scan.py's dedicated _EXIT_EVIDENCE_CONTRACT_ERROR
-                "evidence_contract_error",
-            ),
-        ],
-    )
-    def test_run_scan_one_member(
-        self, monkeypatch, exc_name, depth, verdict, exit_code, reason
-    ):
-        from abicheck import scan_engine as _se, service_scan as _ss
-
-        exc = getattr(_se, exc_name)
-
-        def raising_core(**kw):
-            raise exc("aborted for this test")
-
-        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
-
-        req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth=depth)
-        res = _ss._run_scan_one_member(
-            req, Path("libfoo.so"), start=0.0, budget_s=None, changed_src="none"
-        )
-
-        assert res.verdict == verdict
-        assert res.exit_code == exit_code
-        assert res.report["exit"]["reasons"] == [reason]

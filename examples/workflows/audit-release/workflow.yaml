@@ -34,22 +34,29 @@ steps:
   - name: build
     run: python3 build_shared_lib.py -fPIC -g -Iinclude greet.c -o libgreet.so
   - name: audit
-    # Still `scan`, not `compare --no-baseline`: ADR-068 D2 makes the latter
-    # the declared spelling for a single-build audit, but run against this
-    # fixture today it exits 0 with an empty `changes` list and never emits
-    # the `exported_not_public` finding this step asserts. Tracked in
-    # docs/contribute/known-gaps.md; this step moves when that closes.
-    run: abicheck scan libgreet.so --header include
+    # ADR-068 D2's declared spelling for a single-build audit. This step was
+    # on `scan` until 2026-09-09, when `compare --no-baseline` started
+    # reporting the audit's findings at all -- see docs/contribute/known-gaps.md.
+    run: abicheck compare --no-baseline libgreet.so --header include
     expect:
       exit_code: 0
       stdout_contains:
         - exported_not_public
-        - COMPATIBLE
+        # An audit reports no compatibility verdict (D2), so there is no
+        # COMPATIBLE line to assert any more -- this is the honest
+        # replacement: the report states the OLD side's declared absence.
+        - declared absent
     # Re-run the identical command with a machine-readable format so the
-    # verdict can be asserted structurally rather than by grepping prose.
+    # result can be asserted structurally rather than by grepping prose.
     # The documented command above is still what runs first.
     json_variant:
       - --format
       - json
     expect_json:
-      verdict: COMPATIBLE
+      # `verdict: null` and `changes: []` are the audit's whole contract
+      # (D2); the finding rides under `findings[]`, not `changes[]`, so
+      # `change_kinds` would find nothing here by design.
+      no_baseline: true
+      verdict: null
+      findings[].kind:
+        - exported_not_public

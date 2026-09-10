@@ -294,7 +294,7 @@ _SCAN_EVIDENCE_CONTRACT_ERROR_VERDICT = "EVIDENCE_CONTRACT_ERROR"
 #: `ProfileMismatchError`/`ScopeMismatchError` handling) -- scan's legacy
 #: exit 6, mirroring `OperationalStatus.NOT_COMPARABLE`.
 _SCAN_NOT_COMPARABLE_VERDICT = "NOT_COMPARABLE"
-#: `service_scan.run_scan_set`'s P2 sentinel: the cross-library bundle audit
+#: The retired `run_scan_set`'s P2 sentinel: the cross-library bundle audit
 #: itself never ran even though every member scanned clean, so the set's own
 #: outcome must still block rather than read as a full pass (Codex review,
 #: fresh evidence -- this and `_SCAN_NOT_COMPARABLE_VERDICT` were the two

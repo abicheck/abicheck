@@ -43,7 +43,6 @@ __all__ = [
     "SCAN_CONFIG_PARAMS",
     "RiskRules",
     "RiskScore",
-    "SCAN_REQUEST_SPELLINGS",
     "load_risk_rules",
     "public_provenance_set",
     "resolve_scan_config",
@@ -74,27 +73,6 @@ SCAN_CONFIG_PARAMS: tuple[str, ...] = (
     # severity setting is in effect.
     "severity_preset",
 )
-
-#: How a :class:`~abicheck.service_scan.ScanRequest` spells the inputs whose
-#: default API name comes from :class:`~abicheck.api_types.CompareRequest`.
-#: "The API" is not one namespace: resolving a ``ScanRequest`` at
-#: ``FrontEnd.API`` alone still recorded ``scope_public``/``policy_file_path``/
-#: ``suppress``, none of which that entity has, so a replay consumer could not
-#: identify the input that produced the value (Codex review).
-#:
-#: Only the three that actually differ are listed -- ``policy``,
-#: ``force_public_symbols``, and ``contract_mode`` are spelled identically on
-#: both requests, and an unmapped field keeps its default spelling.
-#: ``tests/test_scan_compare_parity.py`` pins every entry against
-#: ``ScanRequest``'s real fields, so a renamed field fails there rather than
-#: silently reintroducing a name nobody can replay.
-SCAN_REQUEST_SPELLINGS: Mapping[str, str] = {
-    "scope_public": "scope_to_public_surface",
-    "policy_file_path": "policy_file",
-    "suppress": "suppression",
-}
-
-
 
 def public_provenance_set(
     headers: list[Path], public_header_dirs: list[Path]
@@ -163,14 +141,14 @@ def resolve_scan_config(
     parameters Click reports the user actually typed, which matters for the
     ones whose click default is indistinguishable from a stated value.
 
-    *front_end* defaults to the ``scan`` CLI. ``service_scan.run_scan``
-    passes :attr:`FrontEnd.API`, because a receipt may only name inputs its
-    caller really has: a ``ScanRequest`` sets ``policy`` and
-    ``scope_to_public_surface`` as typed fields, and recording those as
-    ``--policy``/``--scope-public-headers`` describes a command line nobody
-    ran, so the receipt could not identify the input that selected the
-    value (Codex review). Only the selector *spelling* and layer differ --
-    the normalization below is shared deliberately, see *params*.
+    *front_end* defaults to the ``scan`` CLI, and is the only front end left:
+    ADR-068's Phase 4 typed-API slice retired ``ScanRequest``/``run_scan``,
+    which was the one caller that passed :attr:`FrontEnd.API` here (and the
+    only reason this resolver ever needed a per-request-type selector-spelling
+    remap -- ``SCAN_REQUEST_SPELLINGS``, deleted with it). A typed caller
+    resolves a :class:`~abicheck.api_types.CompareRequest` through
+    :mod:`abicheck.compatibility_evaluation_frontend` directly, under that
+    entity's own field names.
 
     The normalization itself is :func:`compare_cli_inputs`, **reused rather
     than re-implemented**: ``scan``'s shared config surface deliberately uses
@@ -248,9 +226,6 @@ def resolve_scan_config(
     resolved_front_end = front_end if front_end is not None else FrontEnd.CLI
     return resolve_compatibility_evaluation_config(
         front_end=resolved_front_end,
-        api_spellings=(
-            SCAN_REQUEST_SPELLINGS if resolved_front_end is FrontEnd.API else None
-        ),
         explicit=compare_cli_inputs(
             params,
             explicit_parameters=typed,

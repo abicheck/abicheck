@@ -42,28 +42,23 @@ python3 build_shared_lib.py -fPIC -g -Iinclude greet.c -o libgreet.so
 
 # Audit it: no baseline needed -- just check that everything the ELF
 # export table exposes is something the public headers actually declare
-abicheck scan libgreet.so --header include
+abicheck compare --no-baseline libgreet.so --header include
 ```
-
-> **`scan` is being retired, and this is the one workflow still on it.**
-> [ADR-068](../../../docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-> D2 makes `abicheck compare --no-baseline libgreet.so --header include` the
-> spelling for this workflow. Run today against this very fixture, that
-> command exits `0` with an empty `changes` list and no cross-source block —
-> it never reports the `exported_not_public` finding below, which is the
-> whole point of the walkthrough. Every other workflow example here is
-> already `compare`-based; this one moves when the
-> [known gap](../../../docs/contribute/known-gaps.md) closes.
 
 ## What you get
 
 ```text
-crosscheck:exported_not_public present       binary exports ↔ public headers: 1 of 2 export(s) undocumented (1 accounted as documented API / compiler artifact); by reason: undeclared_export=1
+# ABI audit: libgreet.so (no baseline)
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] exported_not_public: 1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the
+candidate build alone, not a compatibility comparison. No additions,
+removals, or compatibility verdict are reported.
 
-Verdict: COMPATIBLE
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `exported_not_public` | `debug_dump` | potential_breaking | present in this build | Symbol 'debug_dump' is exported by the binary but declared in no public header. ... |
 ```
 
 Exit code is `0` — nothing is *broken* today, since there's no prior release

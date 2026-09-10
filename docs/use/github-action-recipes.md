@@ -541,8 +541,7 @@ Behavior knobs:
 - `pr-comment-detail: full` lists every change with source locations and expands
   all sections; `summary` reduces the comment to the verdict and counts.
 
-The same four inputs work for `mode: scan` against a single artifact (not
-`new-library-set` — that JSON has no single-artifact shape to render): the
+The same four inputs work for `mode: scan` against a single artifact: the
 comment renders `scan`'s own verdict, breaking/needs-review findings, a
 green "Public API additions" section, and a short risk/coverage summary
 line, without a second `compare` run:

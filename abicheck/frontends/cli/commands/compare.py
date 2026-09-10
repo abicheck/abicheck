@@ -295,12 +295,12 @@ def _source_is_pack(path: Path) -> bool:
     inline-collection path below (ADR-043: there is no separate ``merge`` command
     to route an inputs pack through anymore).
     """
-    # Single source of truth: the dump/collect side validates the same way via
-    # inline.is_pack_dir (content, not filename), so the two never disagree.
-    from ....cli_buildsource_helpers import _is_inputs_pack_dir
-    from ....workflows.extraction import is_pack_dir
+    # Single source of truth: `buildsource.raw_evidence` owns this rule for
+    # every caller now (the one-sided audit's own liveness check reads it too),
+    # so routing here and the depth floor there cannot answer it differently.
+    from ....workflows.extraction import is_raw_evidence_input
 
-    return is_pack_dir(path) or _is_inputs_pack_dir(path)
+    return not is_raw_evidence_input(path)
 
 
 def _embed_inline_source_side(

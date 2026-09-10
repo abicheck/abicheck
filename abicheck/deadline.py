@@ -41,11 +41,11 @@ Two independent pieces close that gap:
   session (POSIX) and, on timeout, kills the *whole* process group
   (SIGTERM, then SIGKILL after a short grace period) instead of just the one
   process ``subprocess.run`` would kill. Mirrors the escalation shape of the
-  existing MCP-path watchdog (``service_scan._kill_process_tree``), which
-  already gets this right for the outer `run_scan_subprocess` boundary — this
-  module gives the *inner* per-subprocess call sites (dumper.py's clang/
-  castxml invocations) the same no-orphans guarantee, without depending on
-  that MCP-only ``multiprocessing`` machinery.
+  MCP-path watchdog (``service_scan._kill_process_tree``, retired with
+  ``run_scan_subprocess`` in ADR-068 Phase 4), which already got this right
+  for that outer boundary — this module gives the *inner* per-subprocess call
+  sites (dumper.py's clang/castxml invocations) the same no-orphans
+  guarantee, without depending on that ``multiprocessing`` machinery.
 
 This module has no dependency on ``click``/CLI/service types — pure process +
 time-budget plumbing, safe to import from ``dumper.py``, ``scan_engine.py``,

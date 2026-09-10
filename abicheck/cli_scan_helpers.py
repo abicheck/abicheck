@@ -36,122 +36,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import click
-
 from .model.evidence_depth_levels import EvidenceDepth
 
 if TYPE_CHECKING:
     from .model.evidence_depth_levels import SourceMethod
-
-
-# --- operand/flag validation (click-free, no ScanOutcome dependency) --------
-
-
-def reject_incoherent_scan_operands(
-    *,
-    artifact: Path | None,
-    artifact_set: tuple[str, ...],
-    against: Path | None,
-    manifest_path: Path | None = None,
-) -> None:
-    """Reject operand/flag combinations ``scan`` cannot serve.
-
-    ``--artifact-set`` is a repeatable option (CLI cleanup phase two, PR 5):
-    ``artifact_set`` is the tuple Click collects, empty when the flag was
-    never given at all -- so "supplied" is exactly ``bool(artifact_set)``,
-    with no truthiness/``is not None`` mismatch left to reintroduce the
-    CodeRabbit-caught bug the comma-separated single-string form once had
-    (an empty ``--artifact-set ""`` still yields a non-empty one-element
-    tuple, so it is correctly treated as *supplied* here and rejected by the
-    empty-member check below, never silently read as "not set"). Any empty
-    or blank member is rejected explicitly rather than left to collapse to
-    ``Path("") == Path(".")`` and audit the whole CWD (CodeRabbit review,
-    preserved from the comma-separated form's own fix). ``--artifact-set``
-    is audit-only -- there is no old side for a set -- so ``--against`` is
-    rejected with it. ``--dry-run`` *is* supported (CLI cleanup phase two,
-    PR 5's set-mode-semantics slice) -- see
-    :func:`abicheck.frontends.cli.artifact_set_dry_run.render_artifact_set_dry_run`
-    -- so it is no longer rejected here.
-
-    ``--bundle-system-providers`` was the mirror case (it only meant
-    something *for* a set) until CLI cleanup phase two, PR J removed the
-    flag entirely -- the system-provider allow-list extension is sourced
-    only from ``.abicheck.yml``'s ``bundle:`` block now, which has no
-    per-run "supplied without --artifact-set" state to reject.
-    ``--manifest`` (PR H, ADR-056 D2) is the one remaining mirror case: an
-    expected-provider ownership assertion only means something checked
-    against a declared set.
-    """
-    if any(not member.strip() for member in artifact_set):
-        raise click.UsageError("--artifact-set must not be empty.")
-    supplied = bool(artifact_set)
-    if (artifact is not None) == supplied:
-        raise click.UsageError(
-            "scan requires exactly one of ARTIFACT or --artifact-set."
-        )
-    if supplied:
-        if against is not None:
-            raise click.UsageError(
-                "--against is not supported with --artifact-set "
-                "(audit-only -- no old side for a set)."
-            )
-    else:
-        if manifest_path is not None:
-            raise click.UsageError("--manifest requires --artifact-set.")
-
-
-def load_artifact_set_manifest(manifest_path: Path | None) -> Any:
-    """Load ``scan --artifact-set --manifest``'s optional ownership manifest.
-
-    Split out of ``cli_scan._run_artifact_set`` purely to keep that module
-    under the AI-readiness 2000-line hard cap -- the load itself mirrors
-    ``compare --manifest``'s own
-    ``cli_compare_release_helpers._analyze_release_bundle`` exactly: a
-    malformed ``--manifest`` is an explicit user input error, not an
-    environmental quirk, so it fails loudly (``click.ClickException``)
-    rather than degrading. Returns ``None`` when *manifest_path* is
-    ``None`` (the common case -- no ``--manifest`` given).
-    """
-    if manifest_path is None:
-        return None
-    from .bundle import load_manifest
-
-    try:
-        return load_manifest(manifest_path)
-    except Exception as exc:
-        raise click.ClickException(
-            f"Failed to load manifest {manifest_path}: {exc}",
-        ) from exc
-
-
-def resolve_artifact_set_paths(spec: tuple[str, ...]) -> tuple[list[Path], bool]:
-    """``--artifact-set`` values → ``(paths, explicit)`` (ADR-056).
-
-    ``spec`` is the tuple Click's repeatable ``--artifact-set`` collects (CLI
-    cleanup phase two, PR 5 -- the comma-separated single-string form this
-    replaced is gone, no alias). A single value naming a directory expands
-    to every discoverable shared library in it (``explicit=False`` -- an
-    unsupported file found this way is silently skipped, mirroring
-    ``build_bundle_snapshot``'s directory-scan behavior); anything else is
-    an explicit path list, one member per occurrence, every member of which
-    must resolve (``explicit=True``, per :func:`bundle.discover_artifact_set`).
-
-    Moved here from ``cli_scan.py`` (PR H, CLI cleanup phase two) purely to
-    keep that module under its 2000-line hard cap -- unchanged otherwise.
-    """
-    from .workflows.extraction import discover_shared_libraries
-
-    if len(spec) == 1:
-        candidate = Path(spec[0])
-        if candidate.is_dir():
-            return discover_shared_libraries(candidate), False
-    paths: list[Path] = []
-    for part in spec:
-        p = Path(part)
-        if not p.exists():
-            raise click.UsageError(f"--artifact-set member not found: {part}")
-        paths.append(p)
-    return paths, True
 
 
 def reject_incoherent_scan_secondary_output(
@@ -160,7 +48,6 @@ def reject_incoherent_scan_secondary_output(
     output: Path | None,
     secondary_fmt: str | None,
     secondary_output: Path | None,
-    artifact_set: tuple[str, ...],
 ) -> None:
     """Reject a ``--secondary-*`` combination that cannot mean anything.
 
@@ -176,22 +63,16 @@ def reject_incoherent_scan_secondary_output(
     service_scan -> scan_engine -> cli_scan_helpers``), so a
     ``cli_scan_helpers -> cli_options`` edge would close a real cycle the
     AI-readiness ``import-cycle-growth`` gate rejects -- see that leaf
-    module's own docstring. This wrapper adds only the one check specific to
-    ``scan``: ``--artifact-set`` has no single-artifact report to render a
-    second time at all.
+    module's own docstring. ``scan``'s own extra check (``--artifact-set``
+    had no single-artifact report to render a second time) went with that
+    flag -- ADR-068's second 2026-09-09 amendment rules ``--artifact-set``
+    (b), dropped -- so this is now a pure pass-through, kept for the one
+    import path ``cli_scan.py`` already uses.
     """
     from .frontends.cli.options import (
         reject_incoherent_secondary_output as _reject_shared,
     )
 
-    if artifact_set and (
-        secondary_fmt is not None or secondary_output is not None
-    ):
-        raise click.UsageError(
-            "--write is not supported with "
-            "--artifact-set -- there is no single-artifact report to render "
-            "a second time."
-        )
     _reject_shared(
         dry_run=dry_run,
         output=output,
@@ -286,9 +167,72 @@ def _l3_collected(snap: Any) -> bool:
 # --- run_scan_core helpers ---------------------------------------------------
 
 
-def _uses_debug_presence_only(depth: EvidenceDepth) -> bool:
-    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap."""
-    return depth in {EvidenceDepth.HEADERS, EvidenceDepth.BUILD}
+def _uses_debug_presence_only(
+    depth: EvidenceDepth, *, has_header_evidence: bool
+) -> bool:
+    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap.
+
+    The "elsewhere" is the header AST: at the ``HEADERS`` and ``BUILD`` rungs a
+    scan parses public headers for type layout, so reducing DWARF to a mere
+    presence check costs nothing and saves a full debug-info parse.
+
+    *has_header_evidence* is what makes that conditional rather than assumed.
+    A scan given no headers at all reaches neither source of type facts --- the
+    header parse has nothing to read and DWARF was already downgraded --- so the
+    run silently loses every type-level finding while still reporting the rung
+    it was asked for. That is not a hypothetical: ``scan BIN --against OLD`` on
+    two real ELF libraries with DWARF and no ``--new-header`` returned
+    ``NO_CHANGE`` where ``compare OLD BIN`` on the identical pair reported
+    ``type_size_changed``/``func_removed`` and exited 4, because ``compare``
+    never downgrades DWARF this way. ``tests/test_scan_compare_parity.py``'s
+    ``TestBinaryAndMixedInputParity`` is the executable statement of that
+    contract; it only passed before ADR-068 Phase 4 because an unpinned scan
+    resolved to the ``SOURCE`` rung, which is not in this set, so the shortcut
+    was never taken on the path the suite exercised.
+
+    So the shortcut applies only when the evidence it defers to is actually
+    present. With no headers, DWARF stays the type source --- the same evidence
+    ``compare`` uses --- rather than being dropped in favour of nothing.
+    """
+    return has_header_evidence and depth in {
+        EvidenceDepth.HEADERS,
+        EvidenceDepth.BUILD,
+    }
+
+
+def scan_debug_presence_only(depth: EvidenceDepth, side_headers: Any) -> bool:
+    """:func:`_uses_debug_presence_only` answered for **one side** of a scan.
+
+    Only the ``-H/--header`` inputs *for that side* count. They are what the
+    header-AST parse actually reads, and the shortcut defers to that parse ---
+    so a flag that names headers without feeding them to it is not evidence
+    for this question.
+
+    ``--public-header-dir`` is the case that makes that distinction
+    load-bearing rather than pedantic. It is a *provenance* boundary
+    (``workflows.scan_config.public_provenance_set``): it classifies origins as
+    public/internal so the leakage/RTTI cross-checks run, and adds nothing to
+    the AST extraction set. Counting it reopened exactly the hole this
+    predicate exists to close --- verified live, a
+    ``scan --against ... --public-header-dir DIR`` run reports
+    ``L2_header: skipped ("no public-header AST")`` and yet had DWARF
+    downgraded, losing the ``type_size_changed`` that ``compare`` reports on
+    the identical pair (Codex review, PR #1186).
+
+    **Per side, not run-wide.** An earlier revision answered this once for the
+    whole run, reasoning that a shared answer keeps both snapshots at one
+    evidence tier. That reasoning was wrong, and measurably so: with
+    ``--header old=DIR`` and no candidate headers, a shared *True* gives the
+    baseline header-AST types and the candidate presence-only DWARF, i.e. types
+    on the old side and none on the new --- which reads as a wholesale removal.
+    On the `catalog`-shaped C++ fixture in
+    ``tests/test_scan_depth_evidence_shortcut.py`` that fabricates a
+    ``type_removed`` for a struct neither version deleted. A shared answer does
+    not equalise the tiers; it only decides *which* side gets starved. Asking
+    per side gives each one the best evidence it actually has, which is what
+    keeps both carrying types at all (CodeRabbit review, PR #1186).
+    """
+    return _uses_debug_presence_only(depth, has_header_evidence=bool(side_headers))
 
 
 def scan_pattern_roots(

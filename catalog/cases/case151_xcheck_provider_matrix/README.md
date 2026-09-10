@@ -5,11 +5,12 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE` on both fixtures below — the
-ABI hasn't broken — but the audit's `private_header_leak` finding (public
+baseline. An audit reports no compatibility verdict at all (ADR-068 D2) —
+there is no baseline to compare against — but the audit's
+`private_header_leak` finding (public
 function `make_widget()` returns a private-header type, same shape as
 case144) is the fixed point of this case; what varies is **how much
-evidence corroborates it**. `abicheck scan`'s cross-check machinery records
+evidence corroborates it**. The cross-check machinery records
 which providers (evidence sources) contributed to each finding, and this
 case demonstrates that the list grows — without the finding itself
 changing — as more evidence becomes available.
@@ -27,39 +28,51 @@ evidence is attached:
 ## abicheck command
 
 ```bash
-abicheck scan thin.abi.json                 # 1 provider
-abicheck scan snapshot.abi.json             # + source_index corroboration
+abicheck compare --no-baseline thin.abi.json      # 1 provider
+abicheck compare --no-baseline snapshot.abi.json  # + source_index corroboration
 ```
 
-!!! note "Why `scan` and not `compare --no-baseline`"
-    [ADR-068](../../../docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D2 makes `abicheck compare --no-baseline <snapshot>` the declared spelling
-    for a single-build audit, and retires `scan` outright. This case is
-    **blocked on that migration**: run against either fixture today,
-    `compare --no-baseline` aborts with an unhandled `AssertionError` from
-    `workflows/no_baseline_compare.py`'s `assert not diff.changes` instead of
-    reporting the finding below. The commands above are what actually
-    reproduce this case until the
-    [known gap](../../../docs/contribute/known-gaps.md) closes.
 
 ## Expected abicheck finding
 
-Both fixtures report the same finding and the same verdict:
+Both fixtures report the identical finding (this is `snapshot.abi.json`;
+`thin.abi.json` differs only in the header line's evidence tiers):
 
 ```text
-Coverage
-  crosscheck:private_header_leak present   public API ↔ private-header provenance: 1 public declaration(s) exposing one of 1 private type(s)
+# ABI audit: libdemo.so (no baseline)
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] private_header_leak: 1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-Verdict: COMPATIBLE (exit 0)
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: elf, header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `private_header_leak` | `_Z11make_widgetv` | potential_breaking | present in this build | Public API 'make_widget' exposes type 'detail::WidgetImpl', which is declared only in a private (non-installed) header. Consumers including the public header pull in an unshipped declaration. Make the header self-contained or install the leaked header. |
 ```
 
-The provider list — not shown in the text renderer's coverage line above,
-but recorded in the `crosscheck.providers` field of `--format json` output
-and asserted directly by `run_crosschecks()` — is where the two fixtures
-diverge:
+The provider list is where the two fixtures diverge. It is **not** carried
+by the audit report in any format today — the one-sided report states each
+finding and its ADR-068 D3 evolution state, not the per-check coverage rows
+(status/detail/providers) legacy `scan`'s own `crosscheck` block carried;
+that difference is recorded in
+[`docs/contribute/known-gaps.md`](../../../docs/contribute/known-gaps.md).
+Read it directly off `run_crosschecks()`, the same call the audit's own
+cross-source pass drives:
+
+```bash
+python3 - <<'EOF'
+from abicheck.serialization import load_snapshot
+from abicheck.buildsource.cross_source_checks import run_crosschecks
+
+for path in ("thin.abi.json", "snapshot.abi.json"):
+    res = run_crosschecks(load_snapshot(path))
+    print(path, "private_header_leak providers:", res.providers["private_header_leak"])
+EOF
+```
 
 ```text
 thin.abi.json     private_header_leak providers: ['public_header_ast']

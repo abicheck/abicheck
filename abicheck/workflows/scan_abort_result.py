@@ -13,25 +13,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-064 stage 1b: shaping `service_scan.ScanResult` for an abort.
+"""ADR-064 stage 1b: shaping a `scan` abort's own report envelope.
 
 `abicheck.policy.exit_decision_precedence.resolve_scan_exit_decision`
 decides *which axis* explains a `run_scan_core` abort -- that is a policy
-question. Which verdict string/exit code `ScanResult` carries for each axis,
-and how the decision nests under `report["exit"]`, is a *report-shape*
+question. Which verdict string/exit code an abort report carries for each
+axis, and how the decision nests under `report["exit"]`, is a *report-shape*
 question `abicheck/policy/AGENTS.md` explicitly reserves for a different
 layer ("never 'how is it reported' -- that is `report/`"; here, the
-`workflows` layer, since `service_scan.ScanResult` is itself classified
-`workflows-or-frontends` in `architecture/debt.yaml`). An earlier revision
+`workflows` layer). Through ADR-068 Phase 4 the consumer was
+`service_scan.ScanResult`; with that type retired, the one consumer left is
+`cli_scan._emit_scan_abort_report`, the native CLI's own `--format json`
+abort envelope. An earlier revision
 of this function lived in `exit_decision_precedence.py` itself (Codex
 review, PR #967, fresh evidence) -- moved here instead of merely trimmed,
 since the shaping logic is real and still needed, just misplaced.
 
-`service_scan.py` and `scan_engine.py` are both under an ADR-061 no-growth
-debt entry (`architecture/debt.yaml`), so this could not be inlined at
-either of their two `_BudgetOverflow`/`_EvidenceContractError` catch sites
-either -- a new, small `workflows` leaf module is the only budget-neutral
-home left.
+`cli_scan.py` and `scan_engine.py` are both under an ADR-061 no-growth
+debt entry (`architecture/debt.yaml`), so this could not be inlined at a
+`_BudgetOverflow`/`_EvidenceContractError` catch site either -- a small
+`workflows` leaf module is the only budget-neutral home.
 
 `abicheck.schemas` (for `SCAN_SCHEMA_VERSION`) joined `architecture/
 modules.yaml`'s `public_root_surfaces` for this module -- the same "a
@@ -79,8 +80,7 @@ if TYPE_CHECKING:
 
 ScanAbortAxis = Literal["budget_overflow", "evidence_contract_error"]
 
-#: `run_scan_core`'s two abort exceptions -> the verdict/exit_code pair
-#: `service_scan.ScanResult` already used before it carried a `report` too.
+#: `run_scan_core`'s two abort exceptions -> their verdict/exit_code pair.
 _SCAN_ABORT_VERDICTS: dict[ScanAbortAxis, tuple[str, int]] = {
     "budget_overflow": ("BUDGET_OVERFLOW", 5),
     # 7, not the generic ClickException code 1: `cli_scan.py`'s
@@ -93,11 +93,13 @@ _SCAN_ABORT_VERDICTS: dict[ScanAbortAxis, tuple[str, int]] = {
 
 
 class ScanAbortResultFields(TypedDict):
-    """``ScanResult(**scan_abort_result_fields(axis))`` -- a `TypedDict`
-    (not a plain ``dict[str, object]``) so mypy checks each field's type
-    against `service_scan.ScanResult`'s own constructor when ``**``-unpacked,
-    instead of rejecting the unpack outright the way it does for an untyped
-    dict (whose values it cannot attribute to individual parameters).
+    """One abort's ``verdict``/``exit_code``/``report`` triple.
+
+    A `TypedDict` (not a plain ``dict[str, object]``) so mypy checks each
+    field's type individually -- it was ``**``-unpacked into the retired
+    `service_scan.ScanResult`'s constructor, which an untyped dict's values
+    cannot be attributed to, and the typing is still what lets a caller read
+    one field without a cast.
     """
 
     verdict: str
@@ -135,18 +137,15 @@ def scan_abort_result_fields(
     prior_decision: dict[str, Any] | None = None,
     msg: str | None = None,
 ) -> ScanAbortResultFields:
-    """Every `ScanResult` field `service_scan.run_scan`/
-    `_run_scan_one_member` need for one of `run_scan_core`'s two abort
-    exceptions, so the verdict/exit_code pairing stays next to the
+    """Every field a caller needs to report one of `run_scan_core`'s two
+    abort exceptions, so the verdict/exit_code pairing stays next to the
     `ExitDecision` that now explains it, instead of duplicated at each
     `except` site. `report["exit"]` mirrors what `scan_engine.py`'s own
     ``NOT_COMPARABLE`` outcome already persists via ``resolve_scan_exit_
     decision(not_comparable=True)``; `report["scan_schema_version"]`
-    mirrors the same key every real (non-abort) `ScanResult.report` already
-    carries (`ScanOutcome.to_dict()`'s own top-level stamp, per `tests/
-    test_scan_estimate.py`'s documented "both the service envelope and the
-    nested ... report carry the same scan schema version marker" contract
-    -- Codex review, PR #967).
+    mirrors `ScanOutcome.to_dict()`'s own top-level stamp, so an abort
+    envelope is versioned exactly like a completed one (Codex review,
+    PR #967).
 
     *prior_decision* is the raw ``ExitDecision.to_dict()`` form (not the
     dataclass itself) -- the only shape that survives the exception boundary

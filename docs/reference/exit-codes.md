@@ -171,20 +171,60 @@ there is no prior surface, so `run_outcome.scope` reads `complete` and the
 never emits an addition, a removal, or a compatibility verdict —
 `run_outcome.compatibility` and the top-level `verdict` are JSON `null`,
 and `changes` is always `[]`. The compatibility axis therefore always
-contributes `0` to the exit code; the orthogonal analysis-assurance axis
-still applies as it would for a two-sided run.
+contributes `0` to the exit code.
 
-**The contract-coverage axis does not, yet.** `compare --no-baseline`
-accepts `--contract`, but
-`frontends/cli/commands/compare_no_baseline.py` never forwards it (or a
-resolved `contract_mode`) to `run_no_baseline_compare` — the coverage
-ledger this axis folds from is simply never populated on this path. A
-`compare --no-baseline NEW --contract public` run against a headerless
-candidate exits `0`, where the equivalent two-sided `compare OLD NEW
---contract public` would exit `1` for missing public-header coverage.
-Treat `--contract` on `--no-baseline` as accepted but currently inert
-rather than as an active gate; this is a known gap, not documented
-behavior to rely on.
+The audit's own content is the candidate-side finding set — the eleven
+cross-source hygiene checks and the pattern/preprocessor pre-scan, reported
+under `findings[]` (not `changes[]`, which stays empty by construction).
+These stay advisory (ADR-028 D3 / ADR-035 D1: `RISK`/`API_BREAK`, never
+`BREAKING`), so **a hygiene finding never gates on its own** — an audit that
+reports several findings still exits `0` unless one of the orthogonal axes
+below fires. Every finding carries its ADR-068 D3 evolution state, which
+with a `declared_absent` OLD is always `persistent` or `not_evaluated`,
+never `introduced`.
+
+Three orthogonal axes still apply exactly as they would for a two-sided
+run, folded with the same `max` discipline:
+
+| Axis | Contributes | When |
+|---|---|---|
+| Analysis assurance (P0.4) | `1` | `--require-complete-analysis` and `analysis_assurance.status` is not `complete` |
+| Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
+| Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
+
+The contract-coverage row was inert until 2026-09-09 — `--contract` was
+parsed and documented on this path but never forwarded, so the ledger it
+folds from was never populated and a `compare --no-baseline NEW --contract
+public` run against a headerless candidate exited `0` where the two-sided
+equivalent exited `1`. It is now wired through the same
+`resolve_contract_evaluation`/`resolve_contract_domain` resolvers the
+two-sided path uses, so an equivalent one-sided and two-sided invocation
+activate identically. Without `--contract` the contribution is still always
+`0`, so every pre-existing invocation is unchanged.
+
+The evidence-contract row was added in the same pass, for the same reason:
+`--depth build` with no `--sources`/`--build-info` silently degraded to
+symbols-only evidence and reported a clean audit. It now records ADR-064's
+exit-7 axis, matching the two-sided `compare` path exactly. A *stored*
+snapshot candidate (`.abi.json`) is exempt — this run never extracted it, so
+it cannot have fallen short of a pinned depth.
+
+`compare --no-baseline` never emits `2`/`4`: an audit reports no
+compatibility verdict (ADR-068 D2), so the compatibility family contributes
+nothing and only the orthogonal axes above can raise its exit code.
+`--severity-preset` is a usage error (`64`) there rather than a no-op.
+Legacy `scan`'s audit mode *did* gate at `2` on an `API_BREAK`-classified
+hygiene finding; that difference, and what closing it would take, is
+recorded in [`known-gaps.md`](../contribute/known-gaps.md).
+
+**On `compare --no-baseline` only**, `--dry-run` reports the same condition
+ahead of any analysis: against a *live* candidate, a pinned `--depth build`/
+`--depth source` with no evidence input is a dry-run *blocker* (exit `1`),
+never a clean preview of a run that would exit `7`. Two-sided
+`compare --dry-run` does **not** preview its own floor today — it still
+exits `0` on the same pinned-but-unsatisfiable depth (recorded in
+[`known-gaps.md`](../contribute/known-gaps.md); giving it the same preview
+is the natural follow-up, and would make it exit nonzero there too).
 
 ## Analysis-assurance contribution (P0.4)
 
@@ -498,22 +538,15 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > ever exits `0`/`1`/`64`, never a verdict code; see
 > [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
 
-> **`scan --artifact-set`** (auditing 2+ libraries together, ADR-056) shares
-> this exact table with one addition: as of 2026-09-04, a member's own
-> evidence-contract abort exits the whole set at the identical dedicated `7`
-> above (`service_scan._aggregate_scan_set_verdict`), not a generic `1` —
-> before this date the set-level process floored at `1` for this axis
-> specifically because it had no per-member OS exit code of its own to
-> report, which made a `format: text` `--artifact-set` Action step
-> indistinguishable from a genuine CLI usage error at exit `1`. Re-checking
-> that constraint found it didn't actually block a dedicated code: the
-> *set's* own single process exit was always free to use `7`, since
-> `--artifact-set` accepts no severity policy (`--severity-preset` is
-> rejected outright) and no other code path ever
-> returned it. Exit `1` for a set is unambiguous too, now that it's no
-> longer shared: it means either a genuine CLI/operational error, or the
-> unrelated `BUNDLE_INCOMPLETE` case (the cross-library audit itself
-> couldn't run, with no worse per-member problem already reported).
+> **`scan --artifact-set`** (auditing 2+ libraries together, ADR-056) is
+> **retired** — ADR-068's second 2026-09-09 amendment rules it (b), a
+> documented breaking change with no deprecation window. The capability is
+> not abandoned: plan §3 #16 retires the *mode*, and it returns as
+> `compare --no-baseline DIR` over ADR-065 S3's package component
+> inventories, which are the prerequisite for preserving its per-member
+> selection and coverage accounting. Until then, run one `scan` per library.
+> Exit `1` on a `scan` is unchanged and means a genuine CLI/operational
+> error.
 
 ### `scan --against` and severity (mirrors `compare`)
 

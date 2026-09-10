@@ -1066,67 +1066,16 @@ def merge_compile_config(
     return merged, includes
 
 
-def resolve_contract_evaluation(contract_mode: str | None) -> bool:
-    """``--contract VALUE`` is what enables the ADR-049 evaluator on the CLI.
-
-    There used to be a separate ``--contract-evaluation`` switch, and
-    ``--contract`` without it was a hard `UsageError` (exit 64). That was
-    first loosened into an implication (naming a domain is enough to ask for
-    a decision against it), which left two ways to request one thing; the
-    standalone switch is now gone, so the flag *is* the request.
-
-    Deliberately CLI-only. The typed Python API (`api_types.CompareRequest.
-    validation_errors`) and the Tier-2 entry (`service._validate_contract_mode`)
-    keep requiring an explicit `contract_evaluation=True` alongside a
-    *contract_mode* -- both are documented public-API contracts (CLAUDE.md:
-    changing them is a breaking Python API change, coordinated separately from
-    a CLI ergonomics fix) and this resolver runs strictly before either is ever
-    constructed, so the value it derives is indistinguishable from an
-    explicitly-passed one to them.
-
-    The former domain-less evaluation (``--contract-evaluation`` with no
-    ``--contract``, whose domain fell through to the D7 chain below an
-    explicit CLI value) is spelled ``--contract auto``:
-    :func:`resolve_contract_domain` maps it back to ``None``, which is exactly
-    the state that lets `compatibility_evaluation_wiring.
-    resolve_legacy_contract_mode`'s ``--scope-public-headers`` reading, and
-    then `.abicheck.yml`, decide the domain.
-    """
-    return contract_mode is not None
-
-
-def resolve_contract_domain(
-    contract_mode: str | None, ctx: click.Context | None = None
-) -> str | None:
-    """Map ``--contract auto`` back to "no explicit domain stated".
-
-    ``auto`` exists only to separate the two questions the one flag now
-    answers: *evaluate at all* (any value) and *which domain* (a named one).
-    Downstream, "the caller stated no domain" has always been spelled ``None``,
-    and every D7 tier below ``explicit_cli`` keys off that -- so ``auto`` must
-    not reach the resolver as a literal, or it would read as an explicit CLI
-    value outranking the very layers it exists to defer to (and
-    ``contract_relevance_types.coerce_contract_mode`` would raise on it, since
-    ``auto`` is not a real ``ContractMode``).
-
-    Normalizing the local value alone is not enough: the two front ends read
-    the raw parameters differently -- ``compare`` hands
-    ``cli_compare_receipt.resolve_and_apply`` explicit values, but
-    ``cli_scan._resolve_scan_evaluation_config`` rebuilds its inputs from
-    ``ctx.params`` and its typed-parameter set from
-    ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied
-    there too, and the parameter source is demoted from ``COMMANDLINE`` to
-    ``DEFAULT`` -- ``auto`` is precisely the caller declining to state a
-    domain, so recording it as an explicit CLI value would re-create the
-    precedence bug this mapping exists to avoid (Codex review).
-    """
-    if contract_mode != "auto":
-        return contract_mode
-    if ctx is not None:
-        if "contract_mode" in ctx.params:
-            ctx.params["contract_mode"] = None
-        ctx.set_parameter_source("contract_mode", click.core.ParameterSource.DEFAULT)
-    return None
+# ADR-049 D7's `--contract` value resolvers moved to the leaf
+# `frontends/cli/options/contract.py` (see that module's own note for why:
+# the one-sided `--no-baseline` dispatch needs them without joining the CLI
+# registration SCC). Re-exported here (`X as X`, so ruff keeps them) because
+# this module is their documented import path -- `cli_compare_helpers` and
+# `cli_scan` both reach them here today, and neither needs to change.
+from .frontends.cli.options.contract import (  # noqa: E402
+    resolve_contract_domain as resolve_contract_domain,
+    resolve_contract_evaluation as resolve_contract_evaluation,
+)
 
 
 def _shared_frontend_explicit(ctx: click.Context) -> bool:
@@ -1508,53 +1457,6 @@ def set_input_options(func: F) -> F:
         type=click.Path(path_type=Path),
         default=None,
         help="Directory to write per-library reports (directory/package inputs only).",
-    )(func)
-    return func
-
-
-def artifact_set_options(func: F) -> F:
-    """``scan --artifact-set`` knobs (ADR-056).
-
-    A small, dedicated one rather than reuse of `release_options` wholesale
-    — `scan` doesn't need `--no-bundle-analysis`/`--bundle-cohort`/
-    `--instantiation-manifest`, only the set operand and (PR H, CLI cleanup
-    phase two) the same expected-provider ownership manifest `compare
-    --manifest` already enforces two-sided, applied here single-sided
-    (audit mode has no old side to diff). `--manifest`'s option text
-    otherwise matches `release_options`' below (same flag, same meaning,
-    just declared for a different command) rather than being redefined
-    with different wording.
-
-    CLI cleanup phase two, PR J: `--bundle-system-providers` is gone from
-    this group too — the system-provider allow-list extension is sourced
-    only from `.abicheck.yml`'s `bundle:` block now (auto-discovered from
-    `sources`, same as `release_options`' own removed twin; see
-    `cli_scan._run_artifact_set`'s own comment for the exact resolution).
-    """
-    func = click.option(
-        "--artifact-set",
-        "artifact_set",
-        multiple=True,
-        metavar="DIR|PATH",
-        help="Audit a *set* of libraries with no old side, as one artifact "
-        "(ADR-056): a directory (every discoverable shared library in it), "
-        "or a repeatable explicit path, one --artifact-set per member. "
-        "Mutually exclusive with the positional ARTIFACT and with --against "
-        "(audit-only — no old-side comparison for a set).",
-    )(func)
-    func = click.option(
-        "--manifest",
-        "manifest_path",
-        type=click.Path(exists=True, path_type=Path),
-        default=None,
-        help="ABI ownership manifest (YAML/JSON, same format as compare "
-        "--manifest, ADR-023) asserting which library in the set is the "
-        "expected provider of a symbol/pattern/template instantiation. "
-        "Checked against this one declared set (no old side to diff): an "
-        "unmatched entry, or a non-optional entry (optional_provider: "
-        "false) matched by a library other than its declared provider, is "
-        "bundle_manifest_entry_unsatisfied. Only meaningful with "
-        "--artifact-set.",
     )(func)
     return func
 

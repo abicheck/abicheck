@@ -562,7 +562,11 @@ def test_scan_json_format_is_structured(runner, baseline_snap, new_snap_compatib
     assert res.exit_code == 0, res.output
     payload = _payload(res)
     assert payload["mode"] == "pr"
-    assert payload["level"]["source_method"] == "s5"
+    # No --depth given -> the fixed `headers` rung (ADR-068's second
+    # 2026-09-09 amendment); this read `s5` while an unpinned scan still fell
+    # back to the `--mode` preset.
+    assert payload["level"]["source_method"] == "s0"
+    assert payload["level"]["depth"] == "headers"
     assert payload["verdict"] == "COMPATIBLE"
     # Coverage is mandatory and explicit (ADR-035 §4a): L0-L2 rows always present.
     layers = {row["layer"] for row in payload["coverage"]}
@@ -651,21 +655,6 @@ def test_scan_secondary_output_rejected_with_dry_run(runner, new_snap_compatible
     )
     assert res.exit_code != 0
     assert "--dry-run cannot be combined with --write" in res.output
-
-
-def test_scan_secondary_output_rejected_with_artifact_set(runner, tmp_path):
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--artifact-set",
-            str(tmp_path),
-            "--write",
-            f"json={tmp_path / 'x.json'}",
-        ],
-    )
-    assert res.exit_code != 0
-    assert "not supported with --artifact-set" in res.output
 
 
 def test_audit_mode_runs_without_baseline(runner, tmp_path):
@@ -793,8 +782,18 @@ def test_pinned_depth_without_evidence_errors(runner, new_snap_compatible):
     assert ok.exit_code == 0, ok.output
 
 
-def test_auto_method_uses_changed_path_risk(runner, new_snap_compatible):
-    # The default dial (no --depth) IS auto (ADR-037 D5): risk-driven when seeded.
+def test_changed_path_risk_is_reported_but_no_longer_selects_the_level(
+    runner, new_snap_compatible
+):
+    """The risk score survives as a *reported fact*; it stopped selecting depth.
+
+    ADR-068's second 2026-09-09 amendment rules risk-driven `auto` depth
+    selection (b). This case used to assert the opposite -- that
+    `include/**`'s public-header signal escalated an unpinned run to `s5` --
+    which is precisely the behaviour that was retired. What must still hold is
+    that the score is computed and published (a maintainer reads it), and that
+    it no longer moves `level`.
+    """
     res = runner.invoke(
         main,
         [
@@ -809,9 +808,12 @@ def test_auto_method_uses_changed_path_risk(runner, new_snap_compatible):
     assert res.exit_code == 0, res.output
     payload = _payload(res)
     assert payload["level"]["auto"] is True
-    # include/** is the public-header signal → auto escalates to s5.
-    assert payload["level"]["source_method"] == "s5"
+    # Still scored, still reported -- the highest-signal path class, unchanged.
     assert payload["risk"]["total"] == 50
+    # ... and it buys no extra evidence: the same fixed rung an unpinned scan
+    # with no seed at all resolves to.
+    assert payload["level"]["source_method"] == "s0"
+    assert payload["level"]["depth"] == "headers"
 
 
 def test_budget_overflow_fails(runner, new_snap_compatible):
@@ -1795,26 +1797,6 @@ def test_promoted_risk_verdict_matches_exit_code(runner, tmp_path, baseline_snap
     assert payload["verdict"] == "API_BREAK"
 
 
-def test_malformed_risk_rules_yaml_is_click_error(
-    runner, tmp_path, new_snap_compatible
-):
-    bad = tmp_path / "rules.yml"
-    # Invalid YAML (unbalanced brackets) → yaml.YAMLError, must be a clean CLI error.
-    bad.write_text("risk_rules: { unclosed: [1, 2", encoding="utf-8")
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--risk-rules",
-            str(bad),
-        ],
-    )
-    assert res.exit_code != 0
-    assert res.exception is None or isinstance(res.exception, SystemExit)
-    assert "cannot read --risk-rules" in res.output
-
-
 # NOTE: test_source_method_s2_runs_preprocessor_tier (--source-method s2) is
 # deleted — --source-method is gone and no --depth rung maps to S2
 # (_DEPTH_TO_METHOD has no S2 entry, nor does any --mode preset or the auto
@@ -1823,48 +1805,50 @@ def test_malformed_risk_rules_yaml_is_click_error(
 # tests/test_preprocessor_scan.py and tests/test_evidence_depth_levels.py.
 
 
-def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):
-    # A *successful* empty diff (no-op PR) is a valid seed → auto picks s0/off,
-    # distinct from a missing/failed seed which falls back to the preset (Codex).
-    # `HEAD...HEAD` is an empty diff in this repo's git.
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--since",
-            "HEAD",
-            "--format",
-            "json",
-        ],
-    )
-    if res.exit_code != 0 or "seed failed" in res.output:
-        pytest.skip("git unavailable / not a repo in this environment")
-    payload = _payload(res)
-    assert payload["level"]["source_method"] == "s0"
-    assert payload["level"]["collect_mode"] == "off"
+def test_unpinned_depth_resolves_to_headers_whatever_the_seed(
+    runner, new_snap_compatible
+):
+    """An omitted `--depth` resolves to the fixed `headers` rung, seed or no seed.
 
+    ADR-068's second 2026-09-09 amendment rules risk-driven `auto` depth
+    selection (b) -- dropped -- and names the replacement explicitly: "the same
+    fixed `headers` default `compare` always used". The `--mode` preset is
+    **not** the replacement (Codex review, PR #1186): `_MODE_PRESET` maps both
+    `PR` and `AUDIT` to `(S5, SOURCE)`, so falling back to it would run a full
+    source replay on every unpinned scan -- far more than the risk-scored
+    choice it replaced, which resolved a low-risk seeded PR to `s0`/off.
 
-def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible):
-    # auto + no --changed-path/--since seed must NOT collapse to s0/off — it falls
-    # back to the mode preset so source evidence isn't silently skipped (Codex).
-    # The zero-TU fix (this refactor) means an unseeded run resolves to TARGET
-    # scope (whole current library), not a zero-TU/changed no-op, so collect_mode
-    # is "source-target" here rather than "source-changed" (that's reserved for a
-    # real --since/--changed-path seed — see test_seeded_s5_with_sources_has_no_headers_only_advisory).
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            str(new_snap_compatible),
-            "--format",
-            "json",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    payload = _payload(res)
-    assert payload["level"]["source_method"] == "s5"
-    assert payload["level"]["collect_mode"] == "source-target"
+    Asserted against an explicit `--depth headers` run rather than against
+    literals, so this states the contract ("unpinned == headers") rather than
+    re-encoding `resolve_level`'s current answer.
+    """
+
+    def _level(*extra: str):
+        res = runner.invoke(
+            main, ["scan", str(new_snap_compatible), "--format", "json", *extra]
+        )
+        if "seed failed" in res.output:
+            pytest.skip("git unavailable / not a repo in this environment")
+        # Any *other* nonzero exit is a real CLI regression, not an
+        # environment gap -- skipping on it would let this contract test go
+        # green-by-skipping for the exact class of break it exists to catch.
+        assert res.exit_code == 0, res.output
+        return _payload(res)["level"]
+
+    explicit_headers = _level("--depth", "headers")
+    for seed in ([], ["--since", "HEAD"], ["--changed-path", "src/a.cpp"],
+                 ["--changed-path", "include/a.h"]):
+        unpinned = _level(*seed)
+        assert unpinned["source_method"] == explicit_headers["source_method"]
+        assert unpinned["depth"] == explicit_headers["depth"]
+        assert unpinned["collect_mode"] == explicit_headers["collect_mode"]
+    # And it really is the shallow rung, not a deep one both spellings share.
+    assert explicit_headers["depth"] == "headers"
+    assert explicit_headers["collect_mode"] == "off"
+    # `auto` still means "the user didn't pin it" -- only what it resolves to
+    # changed.
+    assert _level()["auto"] is True
+    assert explicit_headers["auto"] is False
 
 
 def test_unseeded_source_depth_resolves_to_target_scope(
