@@ -805,3 +805,58 @@ def test_the_published_audit_schema_copy_matches_the_packaged_one() -> None:
         "run scripts/publish_schemas.py (or mirror the edit) so a consumer "
         "reading the documented schema sees what the tool actually emits"
     )
+
+
+#: The audit schema's root ``required`` list, pinned.
+#:
+#: Growing this set is a *narrowing* of the validation contract, not an
+#: addition: a document that validated without the new entry stops
+#: validating. On a published schema version that is a MAJOR bump, or
+#: grounds for leaving the field optional -- MINOR is not available for it
+#: (see `AUDIT_REPORT_SCHEMA_VERSION`'s own note). The rule was prose only
+#: until a review pointed out that `1.1` had quietly grown this list while
+#: the comment beside it called the change "additive" (Codex review, P2);
+#: prose is what let that through, so the rule is executable here instead.
+#:
+#: Updating this set is therefore a deliberate act with a version decision
+#: attached. Do not edit it to make a failure go away.
+#: Read off the schema, not recalled: a first draft of this set was written
+#: from memory, named a `candidate` field the schema does not have, and
+#: omitted three it does. The test caught it, which is the point -- but it
+#: is worth recording that even the pin wanted checking against the source.
+_EXPECTED_AUDIT_ROOT_REQUIRED = frozenset(
+    {
+        "audit_report_schema_version",
+        "changes",
+        "exit_code",
+        "findings",
+        "library",
+        "no_baseline",
+        "old_acquisition_state",
+        "verdict",
+    }
+)
+
+
+def test_the_audit_schemas_required_list_is_pinned() -> None:
+    """A `required` entry may not appear without a version decision.
+
+    Deliberately asserts set *equality*, not `>=`: a one-directional check
+    would catch a removal while letting the tightening this test exists for
+    slip through, which is the direction that actually happened.
+    """
+    schema = json.loads(AUDIT_REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
+    actual = frozenset(schema["required"])
+    added = actual - _EXPECTED_AUDIT_ROOT_REQUIRED
+    removed = _EXPECTED_AUDIT_ROOT_REQUIRED - actual
+    assert not added, (
+        f"the audit schema's root `required` list grew by {sorted(added)}. That "
+        "narrows the contract: a document valid without those fields is now "
+        "rejected. If the schema version has been released, this needs a MAJOR "
+        "bump or the field left optional -- see AUDIT_REPORT_SCHEMA_VERSION's "
+        "note. Update this set only with that decision made."
+    )
+    assert not removed, (
+        f"the audit schema's root `required` list lost {sorted(removed)}; a "
+        "removal is a MAJOR change in the other direction"
+    )

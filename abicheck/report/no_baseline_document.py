@@ -87,16 +87,36 @@ __all__ = [
 #: field, which implied a version history in a namespace it never had.
 #:
 #: Bump MINOR for an additive field, MAJOR for a removal or a changed
-#: meaning -- the same policy ``REPORT_SCHEMA_VERSION`` follows.
+#: meaning -- the same policy ``REPORT_SCHEMA_VERSION`` follows. A third
+#: case the policy did not name, and should: **moving a field into
+#: ``required`` is a tightening, not an addition.** It does not change what
+#: a producer emits, but it changes what *validates* -- a document that was
+#: schema-valid without the field is rejected afterwards. On a published
+#: version that is a MAJOR change, or grounds for leaving the field
+#: optional; MINOR is not available for it.
 #:
-#: ``1.1`` adds ``suppression_provenance`` to a suppressed finding (ADR-067
-#: D3's full rule record beside the existing display label) and moves
-#: ``old_acquisition_state`` into the root ``required`` list, where it
-#: always belonged -- it is emitted unconditionally. Both are additive: a
-#: ``1.0`` consumer reading the fields it already knows is unaffected, which
-#: is exactly what MINOR promises. Bumped because a consumer that selects or
-#: caches a schema by this string could otherwise not tell the two contracts
-#: apart (Codex review, P2).
+#: ``1.1`` makes both kinds of change, and they are not the same kind.
+#: ``suppression_provenance`` on a suppressed finding (ADR-067 D3's full
+#: rule record beside the existing display label) is genuinely additive,
+#: which is what earns the MINOR bump: a consumer that selects or caches a
+#: schema by this string could otherwise not tell the two contracts apart.
+#: Moving ``old_acquisition_state`` into the root ``required`` list is the
+#: tightening. An earlier revision of this comment called both "additive"
+#: on the grounds that a ``1.0`` consumer reading known fields is
+#: unaffected -- that is the *producer's* view, and a schema's job is
+#: validation, where the change is strictly narrowing (Codex review, P2,
+#: correcting an earlier reply of mine that made the same conflation).
+#:
+#: It is accepted here for one reason, checked rather than assumed: version
+#: ``1.0`` was never released. This schema was introduced on 2026-09-10 in
+#: ``10c4de15``, after the last release (0.5.0, 2026-07-16), with every
+#: changelog fragment since still unreleased in ``changelog.d/`` -- so no
+#: published build has ever emitted a ``1.0`` audit document, and there is
+#: no such document anywhere to invalidate. ``required`` is also the
+#: truthful model, since the field is emitted unconditionally; a schema
+#: marking an always-present field optional describes the format less
+#: accurately. Once a release ships an audit document, the rule above
+#: applies with no such escape.
 AUDIT_REPORT_SCHEMA_VERSION = "1.1"
 
 #: Deprecated alias kept for one release so an in-flight import does not
