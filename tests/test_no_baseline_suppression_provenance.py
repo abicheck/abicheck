@@ -616,3 +616,46 @@ def test_a_document_holding_plain_findings_still_renders(fmt: str) -> None:
     assert "waivers.yaml" not in text, (
         "a document with no ledger record must not name a source file"
     )
+
+
+def test_suppressed_finding_equality_is_per_class() -> None:
+    """Equality does not cross the class boundary, and provenance counts.
+
+    Pins a deliberate choice, not an accident. Subclassing `ReportFinding`
+    means the generated `__eq__` requires the same runtime class, so a
+    suppressed entry never equals a bare finding with the same three
+    fields. A review asked for that cross-class equality back (Codex, P2).
+    Declined, and the reason is the assertion below it: restoring it
+    requires a hand-written `__eq__` that ignores provenance, at which
+    point two suppressions under *different waiver rules* compare equal --
+    a recorded field dropped on the way to a consumer, which is the defect
+    this whole class exists to fix. `field(compare=False)` is not an
+    alternative; the class check blocks cross-class equality regardless.
+
+    If someone deliberately changes this, these assertions are where the
+    trade gets re-decided rather than silently made.
+    """
+    from abicheck.report.finding import ReportFinding
+
+    result = _result(
+        "case143_audit_accidental_export", suppression=_labelled_and_reasoned()
+    )
+    doc = compute_no_baseline_document(result)
+    assert doc.suppressed
+    entry = doc.suppressed[0]
+
+    bare = ReportFinding(
+        change=entry.change, verdict=entry.verdict, category=entry.category
+    )
+    assert entry != bare, "a suppressed entry must not equal a bare finding"
+    assert bare != entry, "...and the inequality must be symmetric"
+
+    # Provenance is part of identity: same finding, different waiver.
+    other_rule = dataclasses.replace(entry, provenance={"rule_id": "some-other-rule"})
+    assert entry != other_rule, (
+        "two suppressions under different rules must not compare equal, or "
+        "provenance has stopped counting in equality"
+    )
+    # ...and an identical record still compares equal, so the check above is
+    # about the provenance value rather than object identity.
+    assert entry == dataclasses.replace(entry, provenance=entry.provenance)

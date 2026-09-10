@@ -270,6 +270,24 @@ class SuppressedFinding(ReportFinding):
     P2). A first version paired the two side by side and did force that
     change on callers.
 
+    **Equality is per-class, deliberately.** The generated ``__eq__``
+    requires the same runtime class, so a ``SuppressedFinding`` never
+    compares equal to a bare ``ReportFinding`` holding the same three
+    fields, in either direction, and provenance participates in equality
+    between two suppressed entries. A review asked for the former
+    cross-class equality to be preserved (Codex, P2); it was measured
+    rather than argued, and declined. ``field(compare=False)`` does not
+    achieve it -- the class check blocks cross-class equality regardless --
+    so the only route is a hand-written ``__eq__`` ignoring both the class
+    and provenance. That works, and symmetry and transitivity do hold, but
+    the price is that two suppressions under *different waiver rules*
+    compare equal: provenance stops counting in equality at all. Dropping a
+    recorded field on the way to a consumer is the exact defect this class
+    exists to fix, and equality is a consumer. No caller compares these
+    entries either -- every use of ``NoBaselineDocument.suppressed`` in this
+    repository iterates or projects. Pinned by
+    ``test_suppressed_finding_equality_is_per_class``.
+
     *provenance* is the already-serialized
     :class:`~abicheck.policy.disposition_ledger.RuleProvenance` -- ADR-067
     D3's full record (rule id, source file, reason, label, expiry), not a
