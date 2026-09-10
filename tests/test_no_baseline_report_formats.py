@@ -933,3 +933,73 @@ def test_the_published_audit_schema_copy_matches_the_packaged_one() -> None:
         "run scripts/publish_schemas.py (or mirror the edit) so a consumer "
         "reading the documented schema sees what the tool actually emits"
     )
+
+
+@pytest.mark.parametrize(
+    ("label", "reason", "expected"),
+    [
+        pytest.param(
+            "audit-waiver-17",
+            "temporary vendor debug hook",
+            "audit-waiver-17: temporary vendor debug hook",
+            id="both",
+        ),
+        pytest.param(
+            None,
+            "temporary vendor debug hook",
+            "temporary vendor debug hook",
+            id="reason-only",
+        ),
+        pytest.param("audit-waiver-17", None, "audit-waiver-17", id="label-only"),
+    ],
+)
+def test_a_suppression_justification_never_repeats_one_field_as_two(
+    label: str | None, reason: str | None, expected: str
+) -> None:
+    """`label: reason` only when the rule really states both.
+
+    `Change.suppression_rule` is `label or reason` — one string that does
+    not say which of the two it holds. Reading it as a label whenever
+    provenance had none rendered a reason-only rule as
+    `"<reason>: <reason>"`, presenting the reason as a separate rule label
+    (Codex review, P2). That is the shape
+    `suppression.require_justification` actively encourages, so it is the
+    common case rather than an edge one.
+
+    All three stating combinations are exercised, not just the reported
+    reason-only one: a fix that special-cased equality would still get
+    label-only wrong, and the invariant is "never present one field as
+    two", not "handle this input".
+    """
+    rule = Suppression(symbol_pattern=".*", label=label, reason=reason)
+    result = _result(
+        "case143_audit_accidental_export",
+        suppression=SuppressionList([rule], source_path="waivers.yaml"),
+    )
+    doc = compute_no_baseline_document(result)
+    assert doc.suppressed, "this fixture must have something to suppress"
+
+    sarif = json.loads(render_no_baseline(result, "sarif")[0])
+    justifications = [
+        r["suppressions"][0]["justification"]
+        for r in sarif["runs"][0]["results"]
+        if r.get("suppressions")
+    ]
+    assert justifications, "a suppressed finding must carry a SARIF suppression"
+    for text in justifications:
+        assert text == expected
+        # The invariant behind the specific expectations above, stated
+        # independently of them: no field is ever printed twice.
+        parts = [p.strip() for p in text.split(":")]
+        assert len(parts) == len(set(parts)), (
+            f"justification {text!r} repeats a field; one source rendered as two"
+        )
+
+    junit = ET.fromstring(render_no_baseline(result, "junit")[0])
+    skipped = [s.attrib["message"] for s in junit.iter("skipped")]
+    assert skipped, "a suppressed finding must be a skipped JUnit case"
+    for message in skipped:
+        assert message == f"suppressed: {expected}", (
+            "JUnit and SARIF share one justification helper and must not "
+            "phrase it differently"
+        )

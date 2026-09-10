@@ -60,17 +60,32 @@ def _suppression_justification(
 ) -> str:
     """The human-readable half of a suppression, best information first.
 
-    The reason a rule states, then its label, then a generic fallback. The
-    display label (`Change.suppression_rule`) is `label or reason`, so
-    reading only it publishes whichever the rule happened to state first and
-    silently drops the other.
+    ``label: reason`` when the rule states both, otherwise whichever single
+    field it states, otherwise a generic fallback.
+
+    The two sources are read separately and never mixed, which is the whole
+    point. ``Change.suppression_rule`` is ``label or reason`` -- one string
+    that does not say *which* it holds -- so treating it as a label whenever
+    provenance lacked one rendered a reason-only rule as
+    ``"<reason>: <reason>"``, presenting the reason as a separate rule label
+    (Codex review, P2). That is the shape ``suppression.require_justification``
+    actively encourages, so it is the common case, not an edge one.
+    The collapsed field is therefore consulted *only* when there is no
+    provenance at all -- the case where nothing better is knowable -- and
+    then stands alone rather than being paired with anything.
     """
-    prov = provenance or {}
-    reason = prov.get("reason")
-    label = prov.get("label") or getattr(change, "suppression_rule", None)
-    if reason and label:
-        return f"{label}: {reason}"
-    return str(reason or label or "suppressed by an abicheck --suppress rule")
+    if provenance:
+        reason = provenance.get("reason")
+        label = provenance.get("label")
+        if reason and label:
+            return f"{label}: {reason}"
+        if reason or label:
+            return str(reason or label)
+    else:
+        collapsed = getattr(change, "suppression_rule", None)
+        if collapsed:
+            return str(collapsed)
+    return "suppressed by an abicheck --suppress rule"
 
 
 def _sarif_result(
