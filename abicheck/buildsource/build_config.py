@@ -52,13 +52,11 @@ from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
 from .build_config_schema import (
-    BOOL_SUBKEYS as _BOOL_SUBKEYS,
-    LIST_SUBKEYS as _LIST_SUBKEYS,
-    STR_SUBKEYS as _STR_SUBKEYS,
     TOP_LEVEL_INT_KEYS as _TOP_LEVEL_INT_KEYS,
     TOP_LEVEL_STR_KEYS as _TOP_LEVEL_STR_KEYS,
-    int_subkey_findings as _int_subkey_findings,
     opt_int as _opt_int,
+    parse_policy_overrides as _parse_policy_overrides,
+    subkey_findings as _subkey_type_findings,
 )
 from .compile_options_safety import (  # PR #1146 finding #2 (sibling leaf module)
     reject_plugin_loading_options as _reject_plugin_loading_options,
@@ -72,10 +70,10 @@ _SEVERITY_PRESETS = ("default", "strict", "info-only")
 # ── strict-schema knowledge (ADR-043 CLI reset: no separate `config validate`
 # command — every real ingestion path enforces this) ─────────────────────────
 #
-# The subkey-type tables (_BOOL_SUBKEYS/_STR_SUBKEYS/_LIST_SUBKEYS/
-# _TOP_LEVEL_STR_KEYS/_TOP_LEVEL_INT_KEYS) are imported at module top from
-# `build_config_schema.py` (split out purely to stay under the AI-readiness
-# 2000-line hard cap).
+# The subkey-type tables AND the dispatch that checks a value against them
+# (`subkey_findings`) live in `build_config_schema.py` (split out purely to
+# stay under the AI-readiness 2000-line hard cap) -- `_subkey_findings`
+# below is a thin delegator.
 
 
 def _block(data: dict[str, object], key: str) -> dict[str, object]:
@@ -141,8 +139,6 @@ def _safe_compile_atom(key: str, value: str) -> str:
             f"compile.{key} must be a single compiler option atom, got {value!r}"
         )
     return value
-
-
 
 
 @dataclass
@@ -338,6 +334,10 @@ class BuildConfig:
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
+    #: ``policy.overrides`` (ADR-068 §3 #23's `--crosscheck` replacement) --
+    #: raw ``ChangeKind`` slug -> severity strings; see
+    #: `docs/reference/config-file.md`'s own `policy:` section.
+    policy_overrides: dict[str, str] = field(default_factory=dict)
 
     #: ADR-037 §Backward-compat (G22 Phase 7): recognized ``.abicheck.yml`` keys.
     #: ``version:`` makes the config forward-compatible — an *unknown* key (a
@@ -371,6 +371,7 @@ class BuildConfig:
             "profiles",
             "baseline",
             "aggregate",
+            "policy",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -430,6 +431,7 @@ class BuildConfig:
         "gate": frozenset({"fail_on_removed_library"}),
         "release": frozenset({"dso_only", "include_private_dso", "support_promise"}),
         "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
+        "policy": frozenset({"overrides"}),  # ADR-068 §3 #23
     }
 
     @classmethod
@@ -453,39 +455,11 @@ class BuildConfig:
 
     @classmethod
     def _subkey_findings(cls, key: str, sub: str, sub_value: object) -> list[str]:
-        """Type findings for one ``<block>.<subkey>`` entry."""
-        if sub in _BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
-            return [
-                f"{key}.{sub} must be a boolean, got "
-                f"{type(sub_value).__name__}: {sub_value!r}"
-            ]
-        if sub in _STR_SUBKEYS.get(key, ()) and not isinstance(sub_value, str):
-            return [
-                f"{key}.{sub} must be a string, got "
-                f"{type(sub_value).__name__}: {sub_value!r}"
-            ]
-        if int_findings := _int_subkey_findings(key, sub, sub_value):
-            return int_findings
-        if sub not in _LIST_SUBKEYS.get(key, ()):
-            return []
-        if not isinstance(sub_value, (list, str)):
-            return [
-                f"{key}.{sub} must be a string or list of strings, "
-                f"got {type(sub_value).__name__}: {sub_value!r}"
-            ]
-        # `_strs()` accepts a list container but a non-string element must be
-        # rejected outright, not coerced via `str(x)`.
-        bad = (
-            [x for x in sub_value if not isinstance(x, str)]
-            if isinstance(sub_value, list)
-            else []
-        )
-        if bad:
-            return [
-                f"{key}.{sub} must be a list of strings, got "
-                f"non-string element(s): {bad!r}"
-            ]
-        return []
+        """Type findings for one ``<block>.<subkey>`` entry -- delegates to
+        `build_config_schema.subkey_findings`, the single dispatch every
+        subkey type family goes through (see that module's own docstring
+        for why the whole chain lives there now, not just part of it)."""
+        return _subkey_type_findings(key, sub, sub_value)
 
     @classmethod
     def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:
@@ -530,6 +504,7 @@ class BuildConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
+        """Parse a raw ``.abicheck.yml`` mapping into a :class:`BuildConfig`."""
         if isinstance(data, dict):
             cls._validate_structure(data)
         top = data if isinstance(data, dict) else {}
@@ -546,6 +521,7 @@ class BuildConfig:
         gate = _block(top, "gate")
         release = _block(top, "release")
         resource_limits = _block(top, "resource_limits")
+        policy = _block(top, "policy")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -663,6 +639,7 @@ class BuildConfig:
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
                 else 0
             ),
+            policy_overrides=_parse_policy_overrides(policy),
         )
 
     def _build_block(self) -> dict[str, Any]:
@@ -840,6 +817,7 @@ class BuildConfig:
             ("gate", self._gate_block()),
             ("release", self._release_block()),
             ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
+            ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
         ):
             if block:
                 out[key] = block

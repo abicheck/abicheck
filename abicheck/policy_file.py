@@ -85,6 +85,10 @@ from .policy.acknowledgment_policy import (
     AcknowledgmentPolicy,
     built_in_default_acknowledgment_policy,
 )
+from .policy.policy_file_top_level import (
+    parse_base_policy as _parse_base_policy,
+    reject_unknown_top_level_keys,
+)
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,
@@ -123,6 +127,16 @@ def parse_severity_value(value: Any) -> Verdict | None:
     instead of re-declaring the four spellings a second time.
     """
     return _SEVERITY_MAP.get(str(value).lower())
+
+
+_VERDICT_TO_SEVERITY: dict[Verdict, str] = {v: k for k, v in _SEVERITY_MAP.items()}
+
+
+def severity_value_for_verdict(verdict: Verdict) -> str | None:
+    """Inverse of :func:`parse_severity_value` (round 5 finding 3): lets a
+    caller holding an already-parsed override re-derive the raw spelling a
+    real ``.abicheck.yml`` would carry, for the same re-validation route."""
+    return _VERDICT_TO_SEVERITY.get(verdict)
 
 
 _VALID_BASE_POLICIES = VALID_BASE_POLICIES  # re-export alias for backward compat
@@ -220,21 +234,6 @@ def _parse_require_evidence(raw: Any, path: Path) -> dict[str, bool]:
             )
         out[str(layer)] = want
     return out
-
-
-def _parse_base_policy(raw: dict[str, Any]) -> str:
-    """Extract and validate the ``base_policy`` field from a raw YAML mapping."""
-    base_policy = raw.get("base_policy", "strict_abi")
-    if not isinstance(base_policy, str):
-        raise PolicyError(
-            "'base_policy' must be a string, got " + type(base_policy).__name__
-        )
-    if base_policy not in _VALID_BASE_POLICIES:
-        raise PolicyError(
-            f"Unknown base_policy {base_policy!r}. "
-            f"Valid values: {sorted(_VALID_BASE_POLICIES)}"
-        )
-    return base_policy
 
 
 def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict]:
@@ -692,6 +691,7 @@ class PolicyFile:
             raise PolicyError(
                 f"Policy file must be a YAML mapping, got {type(raw).__name__}"
             )
+        reject_unknown_top_level_keys(raw)
 
         base_policy = _parse_base_policy(raw)
         overrides = _parse_overrides(raw.get("overrides", {}), path)

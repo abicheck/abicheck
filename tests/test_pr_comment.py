@@ -727,8 +727,8 @@ def test_severity_addition_error_classifies_non_added_kinds():
 
 
 def test_severity_quality_error_release_quality_breaking():
-    # compatible_additions conflates additions + quality; a quality-only gate
-    # must move the quality subset (not the additions) to Breaking.
+    # compatible_additions is additions-only since schema 4.0; a
+    # quality-only gate must move quality (not additions) to Breaking.
     report = {
         "verdict": "COMPATIBLE_WITH_RISK",
         "old_dir": "/o",
@@ -740,7 +740,7 @@ def test_severity_quality_error_release_quality_breaking():
                 "breaking": 0,
                 "source_breaks": 0,
                 "risk_changes": 0,
-                "compatible_additions": 5,
+                "compatible_additions": 3,
                 "quality_issues": 2,
             },
         ],
@@ -751,7 +751,7 @@ def test_severity_quality_error_release_quality_breaking():
         "unmatched_old": [],
         "unmatched_new": [],
     }
-    # quality (2) → breaking, additions (5-2=3) → safe
+    # quality (2) → breaking, additions (3) → safe
     model = build_model(report)
     assert model.counts == (2, 0, 3)
     assert model.breaking_categories == frozenset({"quality_issues"})

@@ -264,9 +264,7 @@ def build_review_digest_document(
             else digest.disposition_audit.to_dict()
         ),
         "surface_changes": (
-            None
-            if digest.surface_changes is None
-            else digest.surface_changes.to_dict()
+            None if digest.surface_changes is None else digest.surface_changes.to_dict()
         ),
     }
     return ReportDocument.from_mapping(d)
@@ -810,7 +808,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append("")
         lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
     lines += render_footer()
-    text = "\n".join(lines)
+    # Every Markdown report format ends with a trailing newline (POSIX
+    # convention; a bare `"\n".join(lines)` never carried one).
+    text = "\n".join(lines).rstrip() + "\n"
     if d["demangle"]:
         from ..demangle import demangle_text
 

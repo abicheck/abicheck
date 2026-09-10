@@ -49,6 +49,17 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """Like :func:`_invoke`, but isolates stdout from stderr -- for a
+    ``--format json`` assertion that must not choke on a legitimate
+    ``Warning: ...`` line (round 9/10: a project-config HIGH-RISK override
+    warning, Codex/CodeRabbit review) landing on stderr, which
+    ``result.output``'s combined stream would otherwise interleave into the
+    JSON payload."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 def _build_so(tmp_path: Path, name: str, body: str) -> Path:
     gcc = shutil.which("gcc")
     if gcc is None:
@@ -124,6 +135,82 @@ class TestCompareOldBundleFacts:
         lib = payload["libraries"]["libreal.so"]
         assert lib["verdict"] == "BREAKING"
         assert any(c["kind"] == "func_params_changed" for c in lib["changes"])
+
+    def test_project_config_policy_override_is_honored(self, tmp_path: Path) -> None:
+        """Codex review, round 9: this dispatcher bypasses ``run_compare``
+        entirely (module docstring), so it never picked up the
+        ``PROJECT_CONFIG``-tier ``.abicheck.yml`` ``policy.overrides`` fold
+        every other route (scalar ``compare``, ``scan --against``, the
+        release fan-out, the typed API) already applies -- an identical
+        ``func_params_changed`` break exited 4 here regardless of a real
+        ``policy.overrides.func_params_changed: ignore`` that made the
+        equivalent ordinary ``compare`` exit 0. Same fixture as the sibling
+        test above; only the added ``--config`` differs."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _build_so(old_dir, "libreal.so", "int add(int a, int b) { return a + b; }\n")
+        _build_so(
+            new_dir,
+            "libreal.so",
+            "int add(int a, int b, int c) { return a + b + c; }\n",
+        )
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("policy:\n  overrides:\n    func_params_changed: ignore\n")
+
+        code, out = _invoke_stdout(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--include-system-declarations",
+            "--format",
+            "json",
+            "--config",
+            str(cfg),
+        )
+
+        assert code == 0, out
+        payload = json.loads(out)
+        lib = payload["libraries"]["libreal.so"]
+        assert lib["verdict"] != "BREAKING"
+
+    def test_malformed_project_config_policy_override_is_a_clean_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        """The fold above (`merge_project_config_policy_overrides`) wraps a
+        malformed override -- an unrecognized `ChangeKind` slug here -- as
+        a clean `click.BadParameter` (exit 64), matching every other route's
+        own malformed-override handling, rather than an uncaught
+        `PolicyError` traceback."""
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        body = "int add(int a, int b) { return a + b; }\n"
+        _build_so(old_dir, "libreal.so", body)
+        _build_so(new_dir, "libreal.so", body)
+        facts_path = _write_old_facts(
+            tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
+        )
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("policy:\n  overrides:\n    not_a_real_kind: ignore\n")
+
+        code, out = _invoke(
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "--format",
+            "json",
+        )
+
+        assert code == 64, out
+        assert "Traceback" not in out
 
     def test_unchanged_library_is_no_change(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

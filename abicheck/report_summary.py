@@ -47,6 +47,7 @@ __all__ = [
 @dataclass(frozen=True)
 class SurfaceBreakdown:
     """Split of a change set by symbol origin (see ``classify_symbol_origin``)."""
+
     total: int
     rtti: int
     internal: int
@@ -64,29 +65,47 @@ def surface_breakdown(changes: Sequence[HasKind]) -> SurfaceBreakdown:
             internal += 1
         else:
             public += 1
-    return SurfaceBreakdown(total=rtti + internal + public, rtti=rtti,
-                            internal=internal, public=public)
+    return SurfaceBreakdown(
+        total=rtti + internal + public, rtti=rtti, internal=internal, public=public
+    )
 
 
 @dataclass(frozen=True)
 class ReportSummary:
+    """The report's top-level counts and compatibility percentages."""
+
     breaking: int
     source_breaks: int
     risk_count: int
-    #: All ``COMPATIBLE``-verdict changes, additions and quality issues alike
-    #: -- the historical, back-compat meaning of this field (mirrors
+    #: Genuine API-growth ``COMPATIBLE``-verdict changes only (``ADDITION_
+    #: KINDS``) -- **not** every ``COMPATIBLE`` finding. Before
+    #: ``report_schema_version`` 4.0 this field counted every ``COMPATIBLE``
+    #: change, additions and quality issues (e.g. ``public_surface_shrank``,
+    #: a net *decrease*) alike -- a real bug (new defect 4): 3.13 added
+    #: :attr:`quality_issues` specifically to *name* the non-addition
+    #: subset polluting this field, but left the field itself inflated,
+    #: so a consumer reading ``compatible_additions`` alone still read a
+    #: shrink as if it were growth. This field now counts only
+    #: :attr:`quality_issues`'s complement within the compatible set --
+    #: ``compatible_additions + quality_issues`` equals the old (3.14 and
+    #: earlier) ``compatible_additions`` total, the invariant every existing
+    #: consumer of the old field can reconstruct from the new pair (the fix
+    #: first shipped as a MINOR 3.15 bump; a field's own meaning changing is
+    #: breaking under this schema's own policy, so it was renumbered to the
+    #: MAJOR 4.0 -- see ``schemas/__init__.py``'s own history comment).
     #: ``cli_compare_release_pairwise.py``'s per-library
-    #: ``"compatible_additions"`` entry). A caller wanting *only* real API
-    #: growth should subtract :attr:`quality_issues`, the same derivation
-    #: ``pr_comment.py``'s ``_per_library_counts`` already performs for the
-    #: release path -- do not read this field alone as "additions occurred".
+    #: ``"compatible_additions"`` entry now calls :func:`build_summary`
+    #: directly to stay consistent with this field (Codex review, findings-
+    #: fixes round 10/11 -- it previously computed its own, still-inflated
+    #: total independently, and ``pr_comment.py``'s ``_release_lib_row``
+    #: compounded the gap with its own now-removed re-subtraction).
     compatible_additions: int
-    #: The subset of :attr:`compatible_additions` that is not a genuine
-    #: addition (``ADDITION_KINDS``) -- e.g. ``public_surface_shrank``,
-    #: which is ``COMPATIBLE`` but reports a *decrease*. Exists so a
-    #: consumer reading ``compatible_additions`` alone cannot mistake a
-    #: quality/informational finding (net surface shrink included) for real
-    #: API growth. Additive field; see ``report_schema_version`` 3.13.
+    #: The subset of *all* ``COMPATIBLE`` changes that is not a genuine
+    #: addition (``ADDITION_KINDS``) -- e.g. ``public_surface_shrank``.
+    #: :attr:`compatible_additions` above no longer includes this subset
+    #: (report_schema_version 4.0); a consumer that summed the two
+    #: pre-4.0 to recover "every compatible change" still can. Additive
+    #: field; introduced in ``report_schema_version`` 3.13.
     quality_issues: int
     total_changes: int
     binary_compatibility_pct: float
@@ -153,7 +172,10 @@ def compatibility_metrics(
             1
             for c in changes
             if effective_verdict_for_change(
-                c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+                c,
+                policy=policy,
+                kind_sets=kind_sets,
+                policy_file=policy_file,
             )
             == _Verdict.BREAKING
         )
@@ -261,7 +283,13 @@ def build_summary(
         breaking=len(breaking),
         source_breaks=len(source_breaks),
         risk_count=len(risk),
-        compatible_additions=len(compatible),
+        # compatible_additions excludes quality_issues (report_schema_version
+        # 4.0's compatible_additions correction) -- origin/main's own
+        # ADR-061 "reuse the envelope" rewrite of this function (PR #1193)
+        # reintroduced the pre-4.0 `len(compatible)` total here, which this
+        # merge resolution restores to the additions-only value (Codex
+        # review, findings-fixes round 10/11's original fix).
+        compatible_additions=len(compatible) - quality_issues,
         quality_issues=quality_issues,
         total_changes=len(result.changes),
         binary_compatibility_pct=metrics.binary_compatibility_pct,

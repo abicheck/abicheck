@@ -73,9 +73,10 @@ import functools
 import hashlib
 import json
 from collections.abc import Collection, Hashable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from .change_registry_types import Verdict
@@ -527,10 +528,24 @@ class ProjectCompatibilityInputs:
     severity_potential_breaking: str | None = None
     severity_quality_issues: str | None = None
     severity_addition: str | None = None
+    #: ``policy.overrides`` -- raw ``{slug: severity}`` pairs from
+    #: ``.abicheck.yml``'s ``policy:`` block (``BuildConfig.policy_
+    #: overrides``, ADR-068 §3 #23), stated at ``project_config`` tier.
+    #: Findings-analysis-fixes review round 3, finding 1: this field used
+    #: to reach only the *scoring* ``PolicyFile`` (out-of-band, after this
+    #: resolver already ran), never this typed config/receipt. Kept as raw
+    #: strings at this layer, mirroring ``_policy_file_override_slugs``'s
+    #: own shape -- parsing/validation stays the caller's job.
+    policy_overrides: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "public_symbols", _normalized_symbols(self.public_symbols)
+        )
+        # A frozen field holding a caller's mutable dict by reference is not
+        # actually immutable (Codex review) -- copy into a real one.
+        object.__setattr__(
+            self, "policy_overrides", MappingProxyType(dict(self.policy_overrides))
         )
 
     def severity_category(self, category: str) -> str | None:
@@ -563,6 +578,7 @@ class ProjectCompatibilityInputs:
             severity_potential_breaking=cfg.severity_potential_breaking,
             severity_quality_issues=cfg.severity_quality_issues,
             severity_addition=cfg.severity_addition,
+            policy_overrides=dict(getattr(cfg, "policy_overrides", None) or {}),
         )
 
 
@@ -765,6 +781,38 @@ def _policy_file_override_slugs(policy_file: PolicyFile | None) -> dict[str, Ver
     if policy_file is None:
         return {}
     return {kind.value: verdict for kind, verdict in policy_file.overrides.items()}
+
+
+def _project_config_override_slugs(
+    project: ProjectCompatibilityInputs | None,
+) -> dict[str, Verdict]:
+    """``.abicheck.yml``'s ``policy.overrides`` (ADR-068 §3 #23) as the same
+    slug-keyed mapping :func:`_policy_file_override_slugs` produces for
+    ``--policy-file``.
+
+    Parsed through the identical ``policy_file._parse_overrides`` validation
+    an explicit file's own ``overrides:`` block goes through, so an
+    unrecognized ``ChangeKind`` slug or severity spelling in the project
+    config is the identical hard :class:`~abicheck.errors.PolicyError`
+    either way -- never a silently-dropped entry. Findings-analysis-fixes
+    review round 3, finding 1: this is the canonical-resolver counterpart of
+    ``policy.policy_file_project_overrides.resolve_project_config_policy_
+    overrides`` (which returns a ``ChangeKind``-keyed mapping for folding
+    directly onto a ``PolicyFile``) -- this function exists so the *typed
+    config/receipt* this module resolves can carry the identical
+    project-contributed values with real ``PROJECT_CONFIG`` provenance,
+    instead of a project override reaching only the ``PolicyFile`` that
+    scores the run while the receipt stays silent about it.
+    """
+    if project is None or not project.policy_overrides:
+        return {}
+    from .policy_file import _parse_overrides
+
+    project_path = Path(project.path) if project.path else Path(".abicheck.yml")
+    # A plain-dict copy: `_parse_overrides` checks `isinstance(..., dict)`
+    # strictly, but `policy_overrides` is a frozen `MappingProxyType`.
+    parsed = _parse_overrides(dict(project.policy_overrides), project_path)
+    return {kind.value: verdict for kind, verdict in parsed.items()}
 
 
 @dataclass(frozen=True)
@@ -1213,6 +1261,20 @@ def resolve_compatibility_evaluation_config(
     policy_overrides = resolve_policy_pack_overrides(
         pack_paths, explicit_overrides=policy_overrides_explicit, loaded=loaded_packs
     )
+    # CodeRabbit review, round 8: the strict subset of the merge above that
+    # is genuinely pack-contributed, captured *before* the project-config
+    # fold below can add its own kinds -- `CompatibilityPolicyConfig.
+    # pack_overrides`'s own docstring has the full account of why
+    # `pack_application.pack_application()` needs this instead of
+    # re-deriving "pack-contributed" from the fully-merged `overrides` minus
+    # the explicit file's kinds (that re-derivation misreads a
+    # project-contributed kind neither the file nor a pack claims as
+    # pack-sourced).
+    policy_pack_overrides_only = {
+        slug: verdict
+        for slug, verdict in policy_overrides.items()
+        if slug not in policy_overrides_explicit
+    }
     # One entry per pack that actually supplied a surviving override, each
     # naming its own manifest: a pack whose every assignment the policy file
     # also overrides contributed nothing, and a contract/gate pack in the same
@@ -1231,6 +1293,24 @@ def resolve_compatibility_evaluation_config(
             and set(pack.assignments) - set(policy_overrides_explicit)
         )
     )
+    # Findings-analysis-fixes review round 3, finding 1: `.abicheck.yml`'s
+    # own `policy.overrides` (ADR-068 §3 #23) folds in here too, at the
+    # weakest (`project_config`) D7 tier -- only for a kind neither an
+    # explicit `--policy <file>` nor a selected `--pack` already claims,
+    # mirroring `policy.policy_file_project_overrides.apply_lower_
+    # precedence_overrides`'s own merge rule (which this module's own
+    # callers previously had to apply a second time, out-of-band, onto the
+    # scoring `PolicyFile` alone -- this is that same rule, run once, inside
+    # the canonical resolver, so the receipt this function returns and the
+    # `PolicyFile` a caller builds from it can no longer disagree).
+    project_overrides_all = _project_config_override_slugs(project)
+    project_overrides_contributed = {
+        slug: verdict
+        for slug, verdict in project_overrides_all.items()
+        if slug not in policy_overrides
+    }
+    if project_overrides_contributed:
+        policy_overrides = {**project_overrides_contributed, **policy_overrides}
     prov[POLICY_OVERRIDES_FIELD] = _overrides_provenance(
         layer,
         policy_source=policy_source,
@@ -1238,11 +1318,15 @@ def resolve_compatibility_evaluation_config(
         pack_option=pack_option,
         policy_file_option=spell("--policy", "policy_file_path"),
         explicit_overrides=policy_overrides_explicit,
+        project_contributed=project_overrides_contributed,
+        project_path=project.path if project is not None else None,
+        project_sha256=project.sha256 if project is not None else None,
     )
     policy = CompatibilityPolicyConfig(
         base=cast(ImmutableIdentity, policy_base),
         packs=policy_packs,
         overrides=policy_overrides,
+        pack_overrides=policy_pack_overrides_only,
     )
 
     # ── gate ────────────────────────────────────────────────────────────────
@@ -1456,6 +1540,9 @@ def _overrides_provenance(
     pack_option: str,
     policy_file_option: str,
     explicit_overrides: Mapping[str, Verdict],
+    project_contributed: Mapping[str, Verdict] = MappingProxyType({}),
+    project_path: str | None = None,
+    project_sha256: str | None = None,
 ) -> ValueProvenance:
     """Receipt entry for the merged ``policy.overrides`` mapping.
 
@@ -1468,6 +1555,16 @@ def _overrides_provenance(
     so a reader can tell which of several selected manifests supplied a given
     value and prove which revision of it did. A source whose every assignment
     a higher-precedence one shadowed did not contribute and is not listed.
+
+    *project_contributed* is ``.abicheck.yml``'s own ``policy.overrides``
+    (ADR-068 §3 #23), restricted by the caller to the kinds it actually won
+    (i.e. every kind neither *explicit_overrides* nor a selected pack already
+    claims -- D7 places ``project_config`` strictly below both). Findings-
+    analysis-fixes review round 3, finding 1: this parameter is what lets
+    the merged mapping's own receipt agree with what actually scored the
+    run when a project override wins a kind neither of the higher tiers
+    claims, instead of the receipt silently showing ``{}``/no contributor
+    for a value the comparison was genuinely run with.
     """
     selected_by: list[SelectedByEntry] = []
     if explicit_overrides:
@@ -1493,6 +1590,25 @@ def _overrides_provenance(
             key=lambda c: (c[0], c[1].id, c[1].version, c[1].sha256),
         )
     )
+    # `.abicheck.yml`'s own contribution, if any -- always the weakest tier
+    # (D7: project_config ranks below every explicit selection), so it is
+    # appended last and never changes which of the branches below wins the
+    # overall entry's own `layer`/`source_kind` when a higher tier also
+    # contributed; it only ever adds itself to `selected_by`, or -- when it
+    # is the *only* contributor -- becomes the winning branch itself.
+    if project_contributed:
+        selected_by.append(
+            SelectedByEntry(
+                layer=SelectorLayer.PROJECT_CONFIG,
+                option="policy.overrides",
+                path=project_path,
+                # CodeRabbit review, round 9/10: when a pack also
+                # contributed a *different* kind, this hop is the only
+                # provenance record naming which .abicheck.yml revision
+                # supplied the project-sourced one -- must carry its digest.
+                sha256=project_sha256,
+            )
+        )
     if not selected_by:
         return ValueProvenance(layer=SelectorLayer.BUILT_IN_DEFAULT)
     if explicit_overrides:
@@ -1503,17 +1619,29 @@ def _overrides_provenance(
             path=policy_source.path,
             selected_by=tuple(selected_by),
         )
-    # Pack-only: name the single contributing manifest outright when there is
-    # exactly one, rather than claiming a source the value did not all come
-    # from.
-    only = pack_contributors[0] if len(pack_contributors) == 1 else None
+    if pack_contributors:
+        # Pack-only (project may have also contributed a *different* kind,
+        # already appended above): name the single contributing manifest
+        # outright when there is exactly one, rather than claiming a source
+        # the value did not all come from.
+        only = pack_contributors[0] if len(pack_contributors) == 1 else None
+        return ValueProvenance(
+            layer=layer,
+            source_kind="pack_manifest",
+            reference=only[1].id if only else None,
+            version=only[1].version if only else None,
+            sha256=only[1].sha256 if only else None,
+            path=only[0] if only else None,
+            selected_by=tuple(selected_by),
+        )
+    # Project-config-only: neither an explicit `--policy <file>` nor a
+    # selected pack contributed anything -- the merged mapping came
+    # entirely from `.abicheck.yml`'s own `policy.overrides`.
     return ValueProvenance(
-        layer=layer,
-        source_kind="pack_manifest",
-        reference=only[1].id if only else None,
-        version=only[1].version if only else None,
-        sha256=only[1].sha256 if only else None,
-        path=only[0] if only else None,
+        layer=SelectorLayer.PROJECT_CONFIG,
+        source_kind="project_config",
+        sha256=project_sha256,
+        path=project_path,
         selected_by=tuple(selected_by),
     )
 

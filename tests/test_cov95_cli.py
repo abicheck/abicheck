@@ -1887,9 +1887,8 @@ class TestUsedByScoping:
         # `func_removed` -- asserting the new, correct finding set rather
         # than weakening the assertion, matching this same PR's own fix
         # pattern for the other surface-metrics-affected tests in this file.
-        assert result.stdout.strip().startswith(
-            "BREAKING: 1 breaking, 1 compatible (2 total)"
-        )
+        # public_surface_shrank is QUALITY_ISSUES, not an addition (defect 4).
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking (2 total)")
         assert "2 detected, 0 gating, 2 non_gating" in result.stdout
 
     def test_oneline_format_does_not_count_a_scoped_only_finding(
@@ -2015,7 +2014,8 @@ class TestUsedByScoping:
             "--depth", "headers",  # else ADR-063's ceiling fix demotes to FUNC_REMOVED_ELF_ONLY
         )
         assert result.exit_code == 4
-        assert result.stdout.strip().startswith("BREAKING: 1 breaking, 1 compatible (2 total)")
+        # Same defect-4 reasoning as the sibling test above.
+        assert result.stdout.strip().startswith("BREAKING: 1 breaking (2 total)")
         assert "2 detected, 1 gating, 1 non_gating" in result.stdout
 
     def test_markdown_scoped_banner_states_actual_exit_under_severity_scheme(

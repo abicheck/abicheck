@@ -433,14 +433,14 @@ class TestIntSubkeyHelpers:
         assert opt_int({}, "n") is None
 
     def test_int_subkey_findings_rejects_bool(self) -> None:
-        from abicheck.buildsource.build_config_schema import int_subkey_findings
+        from abicheck.buildsource.build_config_schema import subkey_findings
 
-        findings = int_subkey_findings(
+        findings = subkey_findings(
             "resource_limits", "max_bundle_facts_decode_nodes", True
         )
         assert findings and "must be an integer" in findings[0]
 
     def test_int_subkey_findings_unregistered_subkey_is_silent(self) -> None:
-        from abicheck.buildsource.build_config_schema import int_subkey_findings
+        from abicheck.buildsource.build_config_schema import subkey_findings
 
-        assert int_subkey_findings("scope", "public", "not-an-int") == []
+        assert subkey_findings("scope", "not_a_real_subkey", "not-an-int") == []

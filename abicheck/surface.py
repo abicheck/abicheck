@@ -67,7 +67,10 @@ from typing import TYPE_CHECKING
 
 from .demangle import demangle
 from .model import ScopeOrigin
-from .model.mangled_name import itanium_special_name_owner_scope_components
+from .model.mangled_name import (
+    itanium_special_name_owner_identifiers,
+    itanium_special_name_owner_scope_components,
+)
 from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_closure import resolve_public_surface
 
@@ -495,15 +498,41 @@ class SurfaceUnions:
     all_symbols: frozenset[str]
     public_types: frozenset[str]
     all_types: frozenset[str]
+    #: Round 10 perf fix (real CI performance-gate regression, `union_churn`
+    #: @ size=2000: +48% -- `_classify_type_level`'s bare-owner-tail guard
+    #: originally recomputed `any("::" in t for t in all_types)` on every
+    #: single call, turning the O(findings) classification loop this
+    #: dataclass exists to keep linear back into O(findings x len(all_types))
+    #: -- exactly the quadratic blowup its own docstring above warns against.
+    #: Computed once here instead, alongside the four set unions.
+    tracks_qualified_names: bool
+    #: Round 11 (Codex review): the union of both surfaces'
+    #: ``origin_by_qualified_key`` -- castxml/clang records index `all_types`
+    #: only by their *bare* leaf name (`policy/public_surface.py`), with the
+    #: real `ns::Foo` identity recorded here instead. `_classify_type_level`
+    #: must confirm a specific qualified candidate against this index, not
+    #: merely against `all_types`, or an unrelated qualified name elsewhere
+    #: in the snapshot pair wrongly demotes a valid bare-tail match whose own
+    #: real qualified form was never in `all_types` to begin with.
+    qualified_key_union: frozenset[str]
 
 
 def surface_unions(surf_old: PublicSurface, surf_new: PublicSurface) -> SurfaceUnions:
     """Compute the old∪new surface universes once for a surface pair."""
+    all_types = frozenset(surf_old.all_types | surf_new.all_types)
+    qualified_key_union = frozenset(
+        surf_old.origin_by_qualified_key.keys()
+        | surf_new.origin_by_qualified_key.keys()
+    )
     return SurfaceUnions(
         public_symbols=frozenset(surf_old.public_symbols | surf_new.public_symbols),
         all_symbols=frozenset(surf_old.all_symbols | surf_new.all_symbols),
         public_types=frozenset(surf_old.public_types | surf_new.public_types),
-        all_types=frozenset(surf_old.all_types | surf_new.all_types),
+        all_types=all_types,
+        tracks_qualified_names=(
+            any("::" in t for t in all_types) or bool(qualified_key_union)
+        ),
+        qualified_key_union=qualified_key_union,
     )
 
 
@@ -569,6 +598,11 @@ def classify_change_surface(
     type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
 
     def _resolve_type_candidates() -> set[str]:
+        """Candidate type names implicated by *change*, computed lazily.
+
+        See the comment below for why this is lazy (never called for a
+        finding `_classify_symbol_level` resolves on its own).
+        """
         # CodeRabbit review: this used to run unconditionally before the
         # symbol-level early return below, forking a `c++filt` (via
         # `demangle()`, in the mangled-owner branch) for every finding this
@@ -615,28 +649,54 @@ def classify_change_surface(
         # without it would otherwise keep every such finding in-surface
         # regardless of the class's real visibility, while a developer
         # machine with cxxfilt installed correctly demotes it.
+        #
+        # A templated owner (e.g. a libstdc++ container instantiation)
+        # previously fell back to `demangle()` here too, which reintroduced
+        # the exact host-dependent reproducibility defect this whole branch
+        # exists to avoid: on a host with `cxxfilt`/`c++filt` installed, a
+        # templated vtable/RTTI/VTT owner correctly resolved and could be
+        # demoted; on a host without one, it silently stayed "unknown, keep"
+        # -- the same comparison, run identically, produced a different
+        # finding count depending only on which optional tool happened to be
+        # on `PATH` (Codex review, fresh evidence — a real regression traced
+        # to this exact fallback). `itanium_special_name_owner_identifiers`
+        # is the dependency-free counterpart for this shape: every class/
+        # namespace identifier token embedded anywhere in the owner's scope
+        # path AND its template-argument list(s), at any nesting depth --
+        # exactly what `_type_identifiers()` would extract from a fully
+        # demangled spelling, derived structurally instead.
+        #
+        # This host-independence invariant is scoped to shapes the
+        # structural parsers below CAN parse (plain or templated owner);
+        # a shape neither can parse at all (e.g. the `Ss`/`Sa`/... standard
+        # substitutions, or a local-class owner like `_ZTVZ3foovE1A`)
+        # legitimately still falls back to `demangle()` a few lines down --
+        # same as every other kind's host-dependent-but-conservative
+        # pattern (Codex review, round 8: the earlier fix over-scoped this
+        # and dropped that fallback for shapes it never covered).
+        owner_identifiers = itanium_special_name_owner_identifiers(sym)
+        if owner_identifiers is not None:
+            return set(owner_identifiers) | _type_identifiers(change.caused_by_type)
         owner_scope = itanium_special_name_owner_scope_components(sym)
-        # Codex review, fresh evidence: the structural parser deliberately
-        # keeps a template owner's *raw encoded* argument list (see
-        # itanium_scope_components's own docstring -- "the raw
-        # template-argument encoding is kept so distinct specializations
-        # stay distinct", e.g. Box<int> -> "BoxIiE") rather than a
-        # canonical spelling like the model's own "Box<int>", so an owner
-        # whose own component carries a template-argument list can never
-        # match `all_types`/`public_types` -- unlike the non-template case
-        # this parser exists for, this is not "unmatched, conservatively
-        # kept" by design; it is a real match failure a demangler would
-        # resolve, on any host where one happens to be installed. Falling
-        # back to `demangle()` only for that specific shape keeps the
-        # dependency-free path for every ordinary (non-template) owner
-        # while not leaving a templated one strictly worse off than before
-        # this parser existed.
-        owner_has_template_args = (
-            owner_scope is not None and (len(owner_scope[0]) - 1) in owner_scope[1]
-        )
-        if owner_scope is not None and not owner_has_template_args:
+        if owner_scope is not None:
             sym_for_types = "::".join(owner_scope[0])
         else:
+            # Round-8 finding: the structural parsers above only ever
+            # return None here for an Itanium special-name shape they
+            # flatly can't parse at all (e.g. `_ZTVSs`'s `Ss` substitution
+            # for `std::basic_string<...>`, or a local-class vtable like
+            # `_ZTVZ3foovE1A`) -- not for one they parsed and found
+            # non-public. The host-independence invariant documented above
+            # is scoped to shapes the structural parser CAN handle (so
+            # classification for THOSE never silently varies by host); it
+            # was never meant to forbid the pre-existing, dependency-free-
+            # when-possible `demangle()` fallback for a shape neither
+            # parser can handle at all -- the same "demangler available ->
+            # more precise; unavailable -> conservative unknown/keep,
+            # never a false break" pattern every other kind already uses
+            # (e.g. `FUNC_REMOVED_ELF_ONLY`'s `demangled_symbol`). Removing
+            # it entirely was a real precision regression on demangler-
+            # equipped hosts for these shapes, not a host-independence fix.
             sym_for_types = demangle(sym) or sym
         return _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type
@@ -662,6 +722,8 @@ def classify_change_surface(
         public_types,
         surf_old,
         surf_new,
+        tracks_qualified_names=unions.tracks_qualified_names,
+        qualified_key_union=unions.qualified_key_union,
     )
 
 
@@ -860,6 +922,9 @@ def _classify_type_level(
     public_types: frozenset[str] | set[str],
     surf_old: PublicSurface,
     surf_new: PublicSurface,
+    *,
+    tracks_qualified_names: bool,
+    qualified_key_union: frozenset[str],
 ) -> tuple[bool, str | None]:
     """Classify a finding by the implicated type name(s). A finding is
     in-surface if *any* implicated type is reachable from the public API."""
@@ -877,6 +942,50 @@ def _classify_type_level(
         return True, None
 
     known = {c for c in candidates if c in all_types}
+    # Round 9/10 (Codex review, fresh evidence): a bare (unqualified) tail
+    # candidate must not inherit the reachability of an unrelated,
+    # same-named type when its own *qualified* form was also supplied but
+    # failed to match anything in the model. `mangled_name.py`'s
+    # `itanium_special_name_owner_identifiers` emits exactly such a
+    # (qualified, bare) pair for every scoped vtable/RTTI/VTT owner --
+    # e.g. `_ZTVN2ns7WrapperIiEE` yields `{"ns::Wrapper", "Wrapper"}`. If
+    # `ns::Wrapper` is absent from the snapshot (the real owner is simply
+    # not modeled) but an unrelated, unreachable record happens to be named
+    # bare `Wrapper`, that unrelated record must not stand in for the real,
+    # unresolvable owner -- the same "bare-tail ambiguity" hazard
+    # `contract_evaluation._confirmed_type_matches`'s own docstring
+    # documents and guards against for the `exports`-domain closure.
+    #
+    # Gated on `tracks_qualified_names` -- whether this snapshot pair tracks
+    # qualification at all, either via a qualified `all_types` entry (DWARF's
+    # own `.name` already *is* the qualified string) or via a non-empty
+    # `qualified_key_union` (castxml/clang's separate `.qualified_name`
+    # index, per `SurfaceUnions.qualified_key_union`'s own comment) --
+    # computed once per surface pair by `surface_unions`, not per call: a
+    # per-call scan here turned this whole classification loop quadratic
+    # again, a real CI performance-gate regression this fix closes.
+    #
+    # The confirmation check itself (Round 11, Codex review) tests a
+    # specific qualified candidate against `qualified_key_union` as well as
+    # `all_types` -- castxml/clang records index `all_types` only by their
+    # bare leaf name, with the real `ns::Foo` identity in
+    # `origin_by_qualified_key` instead (`policy/public_surface.py`), so an
+    # `all_types`-only test would treat every such candidate as unmatched
+    # regardless of whether the real owner is actually modeled, wrongly
+    # demoting a valid bare-tail match merely because an *unrelated*
+    # qualified name elsewhere in the snapshot pair made
+    # `tracks_qualified_names` true. Either way this can only ever narrow
+    # `known` toward the conservative "unknown -> keep" default -- never
+    # fabricate a demotion -- and never drops a bare candidate whose own
+    # qualified form was never supplied at all (a single-component owner
+    # with no scope, where qualified == bare).
+    if tracks_qualified_names:
+        unconfirmed_qualified_tails = {
+            c.rsplit("::", 1)[1]
+            for c in candidates
+            if "::" in c and c not in all_types and c not in qualified_key_union
+        }
+        known -= unconfirmed_qualified_tails
     if not known:
         # We cannot place this finding — keep it (never hide an unknown).
         return True, None

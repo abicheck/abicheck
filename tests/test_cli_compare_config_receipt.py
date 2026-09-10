@@ -240,6 +240,94 @@ class TestCanonicalResolverIsWhatRuns:
         assert ctx["field_provenance"]["policy.base"]["layer"] == "legacy_alias"
 
 
+class TestProjectConfigOverridesReachTheReceipt:
+    """Findings-analysis-fixes review round 3, finding 1: a project-config
+    override that actually changed a run's verdict must be visible in
+    ``resolved_config.policy.overrides``/``field_provenance["policy.
+    overrides"]`` -- not just applied to the scoring ``PolicyFile`` while
+    the receipt stays silent about it (the exact scenario Codex named:
+    ``--contract auto --format json`` scores a project override that makes
+    ``func_removed`` compatible, but the receipt used to still show
+    ``resolved_config.policy.overrides: {}``)."""
+
+    @staticmethod
+    def _invoke_and_get_context(tmp_path: Path, *args: str) -> tuple[int, dict]:
+        """Like the module-level ``_context`` helper, but without its
+        exit-code assumption -- a project-config override that genuinely
+        makes ``func_removed`` compatible is exactly the case this class
+        tests, and that exits 0, not (1, 2, 4)."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--format",
+                "json",
+                *args,
+            ],
+        )
+        out = result.output
+        i = out.find("{")
+        payload = json.loads(out[i:] if i >= 0 else out)
+        return result.exit_code, payload["contract_context"]["evaluation_context"]
+
+    def test_a_project_override_that_changes_the_verdict_is_in_the_receipt(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / ".abicheck.yml").write_text(
+            "policy:\n  overrides:\n    func_removed: ignore\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        exit_code, ctx = self._invoke_and_get_context(tmp_path)
+
+        # The override actually scored the run: no ABI/API break is left --
+        # proving the project config genuinely took effect for this run, not
+        # just that the receipt happens to mention it. exit 0 or 1: a clean
+        # compatible run, or the same run with the orthogonal contract-
+        # coverage axis (AGENTS.md) raising a clean 0 to 1 for incomplete
+        # header evidence -- either way, never the exit 4 an un-overridden
+        # func_removed break would produce.
+        assert exit_code in (0, 1), exit_code
+        assert ctx["resolved_config"]["policy"]["overrides"] == {
+            "func_removed": "COMPATIBLE"
+        }
+        prov = ctx["field_provenance"]["policy.overrides"]
+        assert prov["layer"] == "project_config"
+        assert prov["selected_by"][0]["option"] == "policy.overrides"
+
+    def test_an_explicit_policy_file_still_wins_in_the_receipt_too(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / ".abicheck.yml").write_text(
+            "policy:\n  overrides:\n    func_removed: ignore\n",
+            encoding="utf-8",
+        )
+        policy_path = tmp_path / "policy.yml"
+        policy_path.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: risk\n",
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        exit_code, ctx = self._invoke_and_get_context(
+            tmp_path, "--policy", str(policy_path)
+        )
+
+        assert exit_code in (0, 1), exit_code
+        assert ctx["resolved_config"]["policy"]["overrides"] == {
+            "func_removed": "COMPATIBLE_WITH_RISK"
+        }
+        options = {
+            e["option"]
+            for e in ctx["field_provenance"]["policy.overrides"]["selected_by"]
+        }
+        assert options == {"--policy"}
+
+
 class TestGateParityWithTheLiveRun:
     """The receipt's gate must be the gate the run was actually scored with.
 

@@ -508,6 +508,140 @@ class TestCompareRequestContractContextGateReceipt:
         assert prov.sha256 is None
         assert prov.selected_by[0].option == "pack_internal_namespaces"
 
+    def test_project_policy_overrides_receipt_shows_project_config_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        """Findings-analysis-fixes review round 5, finding 3: a direct
+        `run_compare_request()` call using `CompareRequest.project_policy_
+        overrides` (ADR-068 §3 #23's typed-API channel, weaker than an
+        explicit `--policy`/pack entry) used to build its receipt with no
+        `project=` input at all, so the override's provenance came back
+        `API_REQUEST` -- disagreeing with the `PROJECT_CONFIG` layer D7
+        actually places it at (the identical fold `classify_compare_pair`
+        already applies to the *scoring* `PolicyFile`). Mirrors
+        `test_pack_folded_receipt_names_both_real_contributors` above for
+        this sibling field."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.contract_relevance_types import SelectorLayer
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            project_policy_overrides=((ChangeKind.VAR_REMOVED, Verdict.COMPATIBLE),),
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        assert cfg.policy.overrides.get("var_removed") == Verdict.COMPATIBLE
+        prov = cfg.provenance["policy.overrides"]
+        assert prov.layer is SelectorLayer.PROJECT_CONFIG
+        options = {hop.option for hop in prov.selected_by}
+        assert "policy.overrides" in options
+
+    def test_project_policy_overrides_still_scores_the_comparison_itself(
+        self, tmp_path: Path
+    ) -> None:
+        """The receipt fix must not regress what actually gets scored --
+        `classify_compare_pair` still classifies through the project-config-
+        folded `PolicyFile`."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
+        )
+        assert result.diff.verdict.name == "COMPATIBLE"
+
+    def test_explicit_policy_file_outranks_project_policy_overrides_in_the_receipt(
+        self, tmp_path: Path
+    ) -> None:
+        """D7: `project_config` is the *weakest* tier -- an explicit
+        `--policy <file>` entry for the same kind must keep the file's own
+        `EXPLICIT_CLI`/`API_REQUEST` provenance, not be overwritten by the
+        project-config value (which never even reaches the merged
+        `PolicyFile` for that kind, per `apply_lower_precedence_overrides`'s
+        own "whatever's already stated wins" rule)."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.contract_relevance_types import SelectorLayer
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        policy_file_path = tmp_path / "policy.yml"
+        policy_file_path.write_text(
+            "base_policy: strict_abi\noverrides:\n  func_removed: break\n",
+            encoding="utf-8",
+        )
+        result = self._run(
+            old,
+            new,
+            policy_file_path=policy_file_path,
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
+        )
+        cfg = result.diff.contract_context.evaluation_context.resolved_config
+        # The file's own value wins -- the project-config value never scores.
+        assert cfg.policy.overrides.get("func_removed") == Verdict.BREAKING
+        prov = cfg.provenance["policy.overrides"]
+        assert prov.layer is not SelectorLayer.PROJECT_CONFIG
+
+    def test_no_change_project_override_is_rejected(self, tmp_path: Path) -> None:
+        """Findings-analysis-fixes review round 6, finding 2: a real
+        ``.abicheck.yml``/``--pack``/``--policy`` document can never assign
+        ``Verdict.NO_CHANGE`` (``policy_file._SEVERITY_MAP`` has no spelling
+        for it), so this is reachable only through a typed
+        ``CompareRequest.project_policy_overrides`` caller constructing an
+        already-parsed pair directly. Left unrejected, the scoring fold
+        still applied it (no vocabulary check of its own) while
+        ``severity_value_for_verdict`` silently dropped it from the
+        persisted receipt -- a comparison that quietly demoted a finding to
+        compatible while its own receipt showed no override at all."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            self._run(
+                old,
+                new,
+                project_policy_overrides=(
+                    (ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),
+                ),
+            )
+
+    def test_no_change_pack_override_is_rejected(self, tmp_path: Path) -> None:
+        """The identical rejection for the sibling ``pack_policy_overrides``
+        field -- the same bug class, the same typed-API-only reachability."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            self._run(
+                old,
+                new,
+                pack_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),),
+            )
+
+    def test_a_real_verdict_project_override_is_not_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        """Negative control: the new validator must not reject a real,
+        ordinary override -- only the nonsensical ``NO_CHANGE`` target."""
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+
+        old, new = _write(tmp_path, *_breaking_pair())
+        result = self._run(
+            old,
+            new,
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.COMPATIBLE),),
+        )
+        assert result.diff.verdict.name == "COMPATIBLE"
+
 
 class TestCompareResultSeverityConfigRenderingParity:
     """Codex review, fresh evidence (PR #1032, commit 72fdf5b, file:line
@@ -745,6 +879,95 @@ class TestInvalidExitCodeScheme:
                     policy="not_a_policy",
                 )
             )
+
+    def test_no_change_project_override_is_rejected_before_extraction_runs(
+        self,
+    ) -> None:
+        """Findings-analysis-fixes review round 7 (Codex review, fresh
+        evidence): round 6's NO_CHANGE rejection lived in
+        `classify_compare_pair`, which `run_compare_request` only reaches
+        *after* `resolve_compare_request` has already run extraction (or
+        invoked the build system, for a `build.query`-authorized request)
+        against a live operand -- so an invalid request could still perform
+        expensive, possibly side-effecting work before eventually failing.
+        Moved to `CompareRequest.validation_errors()`, the standard
+        pre-resolution hook every other invalid-request shape here already
+        uses (see the two sibling tests above). Same proof structure: a
+        nonexistent path would raise a filesystem error if extraction ran
+        first, so seeing `ValidationError` instead is direct evidence the
+        check now runs before it, for a live (not stored-snapshot) operand."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.so")
+        missing_new = Path("/nonexistent/new.so")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    project_policy_overrides=(
+                        (ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),
+                    ),
+                )
+            )
+
+    def test_no_change_pack_override_is_rejected_before_extraction_runs(
+        self,
+    ) -> None:
+        """The identical proof for the sibling `pack_policy_overrides` field."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.so")
+        missing_new = Path("/nonexistent/new.so")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    pack_policy_overrides=(
+                        (ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),
+                    ),
+                )
+            )
+
+    def test_validation_errors_reports_no_change_with_no_resolution_at_all(
+        self,
+    ) -> None:
+        """Even more direct than the two tests above: calling
+        `CompareRequest.validation_errors()`/`.validate()` never touches the
+        filesystem or any resolution machinery at all -- it's a pure,
+        side-effect-free check (the method's own docstring's contract),
+        so this proves the rejection is available with zero resolution
+        work attempted, not merely "before the extraction step happens to
+        run"."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+
+        request = CompareRequest(
+            old=InputSpec(path=Path("/nonexistent/old.so")),
+            new=InputSpec(path=Path("/nonexistent/new.so")),
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),),
+        )
+        errors = request.validation_errors()
+        assert any("NO_CHANGE" in e for e in errors)
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            request.validate()
 
 
 class TestPatternVerdictsStaysOptInAtTier2:

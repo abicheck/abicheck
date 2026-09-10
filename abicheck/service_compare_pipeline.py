@@ -161,9 +161,8 @@ def _deadline_bound_side_worker(
     ``contextvars`` don't cross a ``ThreadPoolExecutor`` boundary, so without
     this a worker submitted from :func:`resolve_compare_request`'s parallel
     branch would silently ignore ``CompareRequest.budget_s``. Mirrors
-    ``buildsource.source_replay._deadline_bound_worker`` (Codex review,
-    PR #591) -- its own copy, since that module is unrelated to `compare`.
-    """
+    ``buildsource.source_replay._deadline_bound_worker`` -- its own copy,
+    since that module is unrelated to `compare`."""
     from . import deadline
 
     with deadline.with_deadline_ts(deadline_ts):
@@ -514,15 +513,11 @@ def classify_compare_pair(
     )
     # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
     # policy/contract-surface contributions into the loaded PolicyFile, the
-    # same way `pack_application.policy_file_with_packs` already does for the
-    # single-pair `compare` CLI -- a no-op unless a caller (today, the
-    # release fan-out) populated `CompareRequest.pack_policy_overrides`/
-    # `pack_internal_namespaces`. `pf` is reused for the receipt below too
-    # (Codex review, fresh evidence, three rounds over): the receipt
-    # installer records the forwarded pack's own contribution honestly
-    # (`compare_gate_receipt._with_pack_forwarded_provenance`) rather than
-    # this call site needing to hide or discard the file's real identity --
-    # see that function's own docstring for the full account.
+    # same way `pack_application.policy_file_with_packs` does for single-pair
+    # `compare` -- a no-op unless a caller populated `CompareRequest.
+    # pack_policy_overrides`/`pack_internal_namespaces`. `pf` is reused for
+    # the receipt below too (`compare_gate_receipt._with_pack_forwarded_
+    # provenance` records the forwarded pack's own contribution honestly).
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from .pack_application import PackApplication, policy_file_with_packs
 
@@ -533,6 +528,17 @@ def classify_compare_pair(
                 internal_namespaces=request.pack_internal_namespaces,
             ),
             base_policy=request.policy,
+        )
+    # ADR-068 §3 #23 / ADR-049 D7: fold project-config overrides at the weakest
+    # tier, after the pack fold above. Round 5 finding 3: kept OUT of the receipt call below, which re-derives the project contribution at the correct tier.
+    pf_before_project_fold = pf
+    if request.project_policy_overrides:
+        from .policy.policy_file_project_overrides import (
+            apply_lower_precedence_overrides,
+        )
+
+        pf = apply_lower_precedence_overrides(
+            pf, dict(request.project_policy_overrides), base_policy=request.policy
         )
     # The four Nones are the out-of-band pack-override params -- reusing the
     # raw sources/build_info paths would make `_resolve_side_pack` try (and
@@ -696,7 +702,7 @@ def classify_compare_pair(
     # workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(result, request, gate, pf, suppression)
+    install_resolved_gate_receipt(result, request, gate, pf_before_project_fold, suppression)
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
@@ -793,6 +799,7 @@ def run_compare(
     severity_preset: str | None = None,
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -817,6 +824,11 @@ def run_compare(
     resolved ``--pack``'s ``policy.overrides``/``surface.internal_namespaces``
     contribution -- see ``CompareRequest.pack_policy_overrides``'s own
     docstring for what folds them in and why. ``None``/empty is a no-op.
+
+    ``project_policy_overrides`` (ADR-068 §3 #23): weaker than both an
+    explicit ``--policy <file>`` and ``pack_policy_overrides`` above --
+    see ``CompareRequest.project_policy_overrides``. ``None``/empty is a
+    no-op.
 
     ``compile_context`` is a both-sides :class:`~abicheck.compile_context.
     CompileContext` (the L2 cross-toolchain/frontend family --
@@ -910,6 +922,9 @@ def run_compare(
             tuple(pack_policy_overrides.items()) if pack_policy_overrides else None
         ),
         pack_internal_namespaces=pack_internal_namespaces,
+        project_policy_overrides=(
+            tuple(project_policy_overrides.items()) if project_policy_overrides else None
+        ),
         depth=depth,
         severity_preset=severity_preset,
         collapse_versioned_symbols=collapse_versioned_symbols,

@@ -42,6 +42,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `lang_explicit` | `bool` | `False` |
 | `pack_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `pack_internal_namespaces` | `tuple[str, ...] \| None` | `None` |
+| `project_policy_overrides` | `tuple[tuple[ChangeKind, Verdict], ...] \| None` | `None` |
 | `severity_preset` | `str \| None` | `None` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
@@ -382,6 +383,7 @@ Compare two ABI inputs and return the classified diff result.
 | `severity_preset` | `str \| None` | `None` |
 | `public_header_dirs` | `list[Path] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
+| `project_policy_overrides` | `dict[Any, Any] \| None` | `None` |
 
 **Returns:** `CompareResult`
 
