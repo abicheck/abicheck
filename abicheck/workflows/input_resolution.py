@@ -195,7 +195,7 @@ def is_stored_snapshot_operand(path: Path) -> bool:
             # package's own `manifest.json` content rather than its
             # filename, which a `BuildSourcePack` shares.
             return is_project_snapshot_package_dir(path)
-        return sniff_text_format(path) in ("json", "perl")
+        return sniff_text_format(path) in {"json", "perl"}
     except OSError:
         return False
 
