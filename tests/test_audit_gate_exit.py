@@ -178,11 +178,15 @@ class TestCompareHelpAllDocumentsTheAuditGateAxis:
         from abicheck.cli import main
 
         doc = main.commands["compare"].help or ""
-        assert "AUDIT_GATE_EXIT_CODE" in doc
-        assert "third, independent orthogonal axis" in doc
-        assert "opts that audit\ninto gating on its own findings" in doc
-        assert "contributing exit 3" in doc
-        assert "docs/reference/exit-codes.md" in doc
+        # Whitespace-normalized (single spaces) so a phrase spanning a
+        # docstring line wrap can't fail this assertion over incidental
+        # newline/indentation formatting -- only the wording is under test.
+        normalized_doc = " ".join(doc.split())
+        assert "AUDIT_GATE_EXIT_CODE" in normalized_doc
+        assert "third, independent orthogonal axis" in normalized_doc
+        assert "opts that audit into gating on its own findings" in normalized_doc
+        assert "contributing exit 3" in normalized_doc
+        assert "docs/reference/exit-codes.md" in normalized_doc
 
     def test_no_baseline_help_names_severity_preset_as_the_arming_switch(
         self,
@@ -194,11 +198,11 @@ class TestCompareHelpAllDocumentsTheAuditGateAxis:
         no_baseline = next(
             p for p in main.commands["compare"].params if p.name == "no_baseline"
         )
-        help_text = no_baseline.help or ""
-        assert "--severity-preset is the sole switch that arms" in help_text
-        assert "this audit's own gate" in help_text
-        assert "contributes exit 3" in help_text
-        assert SEVERITY_PRESET_DISABLES_AUDIT_GATE in help_text
+        normalized_help = " ".join((no_baseline.help or "").split())
+        assert "--severity-preset is the sole switch that arms" in normalized_help
+        assert "this audit's own gate" in normalized_help
+        assert "contributes exit 3" in normalized_help
+        assert SEVERITY_PRESET_DISABLES_AUDIT_GATE in normalized_help
 
     def test_help_all_actually_renders_both_additions(self) -> None:
         """A shallower smoke test on the real rendered surface: the two
