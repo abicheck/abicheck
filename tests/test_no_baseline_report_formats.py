@@ -713,3 +713,175 @@ def test_the_audit_json_validates_against_its_own_published_schema() -> None:
         "an audit must not validate as a compare report — the two documents "
         "mean different things by a null verdict"
     )
+
+
+# ---------------------------------------------------------------------------
+# Suppression provenance: the disposition audit's own record, not a label.
+# ---------------------------------------------------------------------------
+
+
+def _labelled_and_reasoned() -> SuppressionList:
+    """A rule stating BOTH a label and a reason.
+
+    This is the shape that exposed the bug: `SuppressionOutcome.rule_label()`
+    is `label or reason`, so a rule carrying both publishes its label and
+    silently drops the reason. A rule with only one of them cannot detect
+    that, which is why every test here uses both.
+    """
+    return SuppressionList(
+        [
+            Suppression(
+                symbol_pattern=".*",
+                label="audit-waiver-17",
+                reason="temporary vendor debug hook",
+            )
+        ],
+        source_path="waivers.yaml",
+    )
+
+
+@pytest.mark.parametrize(("case", "filename"), _FIXTURES)
+def test_every_suppressed_finding_keeps_its_full_rule_provenance(
+    case: str, filename: str
+) -> None:
+    """ADR-067 D3: a disposition keeps the rule *and the reason* that hid it.
+
+    The audit published `suppression_rule`, which is the display label —
+    `label or reason`, never both — so a reader could not tell why a waiver
+    was written or which file to edit to review it (Codex review, P1).
+
+    The oracle is the run's own disposition ledger, not the report: every
+    field the ledger recorded for the rule that fired must survive into the
+    projection. Asserted over the whole fixture corpus and over every
+    ledger-recorded field, so a projection that carries one field and drops
+    another still fails.
+    """
+    result = _result(case, filename, suppression=_labelled_and_reasoned())
+    doc = compute_no_baseline_document(result)
+    ledger = result.diff.disposition_ledger
+    assert doc.suppressed, "this fixture must have something to suppress"
+
+    body = json.loads(render_no_baseline(result, "json")[0])
+    rows = body["suppressed_findings"]
+    assert len(rows) == len(doc.suppressed)
+
+    for row, finding in zip(rows, doc.suppressed, strict=True):
+        recorded = ledger.rule_for(finding.change)
+        assert recorded is not None, (
+            "the run recorded no ledger entry, so this test would pass "
+            "vacuously against a projection that emits nothing"
+        )
+        assert row["suppression_provenance"] == recorded.to_dict(), (
+            "every field the ledger recorded must reach the report; the "
+            "display label alone collapses label and reason into one string"
+        )
+        # The specific loss the fix closes, stated independently of the
+        # ledger comparison above so it cannot be satisfied by an equality
+        # that happens to compare two equally-lossy values.
+        assert row["suppression_provenance"]["reason"] == (
+            "temporary vendor debug hook"
+        )
+        assert row["suppression_provenance"]["label"] == "audit-waiver-17"
+        assert row["suppression_provenance"]["source_file"] == "waivers.yaml"
+
+
+def test_the_markdown_suppression_table_shows_reason_and_source() -> None:
+    """The same record, in the projection a human actually reads.
+
+    A machine-readable field a person never sees does not close this: the
+    Markdown audit is the "which waivers are still justified?" view, so the
+    reason and the file to edit belong in its table.
+    """
+    result = _result(
+        "case143_audit_accidental_export", suppression=_labelled_and_reasoned()
+    )
+    text = render_no_baseline(result, "markdown")[0]
+
+    assert "audit-waiver-17" in text
+    assert "temporary vendor debug hook" in text, (
+        "the reason is what tells a reviewer whether the waiver still applies"
+    )
+    assert "waivers.yaml" in text, "and the file is where they would edit it"
+
+
+def test_a_diffresult_without_a_ledger_reports_no_provenance_rather_than_faking_one(
+    tmp_path: Path,
+) -> None:
+    """The complement: absent provenance is `null`, never invented.
+
+    A `DiffResult` rebuilt from JSON carries no disposition ledger. Emitting
+    a row derived from `Change.suppression_rule` there would look like a real
+    ADR-067 record while carrying strictly less, which is worse than saying
+    nothing.
+    """
+    result = _result(
+        "case143_audit_accidental_export", suppression=_labelled_and_reasoned()
+    )
+    object.__setattr__(result.diff, "disposition_ledger", None)
+    doc = compute_no_baseline_document(result)
+
+    assert doc.suppressed
+    assert all(p is None for p in doc.suppression_provenance)
+    body = json.loads(render_no_baseline(result, "json")[0])
+    assert all(
+        row["suppression_provenance"] is None for row in body["suppressed_findings"]
+    )
+
+
+def test_junit_names_the_axis_that_gated_not_every_axis_that_could_have() -> None:
+    """JUnit must say *which* orthogonal axis fired.
+
+    The suite carried only the total exit code and the contract-coverage
+    contribution, and the failure text listed every axis that might have
+    fired — so a consumer gated by the evidence contract learned nothing
+    (Codex review, P2). JSON, Markdown, oneline and SARIF all name it; JUnit
+    is now held to the same statement.
+
+    The oracle is `doc.exit_axes` — the same resolved mapping the other four
+    projections read — so the formats cannot drift apart, and each axis is
+    checked in both directions: a contributing axis must be named, a cleared
+    one must be published as `0` rather than omitted.
+    """
+    result = run_no_baseline_compare(
+        resolve_no_baseline_candidate(
+            example_catalog.case_dir("case145_audit_unversioned_export")
+            / "snapshot.abi.json"
+        ),
+        contract_evaluation=True,
+        contract_mode="public",
+    )
+    doc = compute_no_baseline_document(result)
+    payload, exit_code = render_no_baseline(result, "junit")
+    assert exit_code != 0, "the gated fixture must actually gate"
+
+    suite = ET.fromstring(payload)
+    props = {p.attrib["name"]: p.attrib["value"] for p in suite.iter("property")}
+    for axis, contribution in doc.exit_axes.items():
+        assert props[f"exit_axis.{axis}"] == str(contribution), (
+            f"axis {axis} must be published with its own contribution; a "
+            "cleared axis is a real '0', not an absent key"
+        )
+
+    failure = suite.find(".//failure")
+    assert failure is not None and failure.text
+    contributing = [a for a, c in doc.exit_axes.items() if c]
+    assert contributing, "this fixture must contribute on some axis"
+    for axis in contributing:
+        assert NO_BASELINE_EXIT_AXIS_LABELS[axis] in failure.text, (
+            f"the failure text must name the contributing axis {axis}"
+        )
+    for axis, contribution in doc.exit_axes.items():
+        if contribution:
+            continue
+        assert NO_BASELINE_EXIT_AXIS_LABELS[axis] not in failure.text, (
+            f"axis {axis} did not fire, so naming it in the failure text is "
+            "the same 'here is every axis that might have' non-answer this "
+            "test exists to forbid"
+        )
+
+    assert doc.coverage_failures, "this fixture gates on the coverage axis"
+    for failed in doc.coverage_failures:
+        assert str(failed["provider"]) in failure.text, (
+            "the coverage axis can name a specific provider; the bare "
+            "contribution number cannot"
+        )

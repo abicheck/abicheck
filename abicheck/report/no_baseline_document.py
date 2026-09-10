@@ -204,6 +204,22 @@ class NoBaselineDocument:
     #: disposing" rule requires "detected, then suppressed by rule X" to
     #: stay visible on a passing run, never to read as "nothing found".
     suppressed: tuple[ReportFinding, ...]
+    #: One entry per :attr:`suppressed` finding, positionally aligned: the
+    #: already-serialized :class:`~abicheck.policy.disposition_ledger.
+    #: RuleProvenance` of the rule that actually fired (``None`` only when
+    #: the run recorded no ledger entry for it).
+    #:
+    #: ADR-067 D3's full provenance -- rule id, source file, reason, label,
+    #: expiry -- not a display label. This carried
+    #: ``Change.suppression_rule`` instead, which is
+    #: ``SuppressionOutcome.rule_label()``'s deliberate ``label or reason``
+    #: collapse, so a rule stating both lost its reason and its source file
+    #: in every audit projection (Codex review, P1). Resolved through the
+    #: run's own ledger by object identity -- the same ``rule_for`` join
+    #: ``reporter.py``'s two-sided suppression block uses -- rather than by
+    #: re-evaluating the rule set, which could name a different rule than
+    #: the one that hid the finding.
+    suppression_provenance: tuple[Mapping[str, Any] | None, ...]
     evolution: CrossSourceEvolutionSummary | None
     pattern_preprocessor_scan: dict[str, Any] | None
     run_outcome: dict[str, Any]

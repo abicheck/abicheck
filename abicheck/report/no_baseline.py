@@ -74,7 +74,7 @@ from .no_baseline_document import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from ..checker_types import Change
     from ..policy.scope_completeness import ScopeDecision
@@ -240,6 +240,9 @@ def compute_no_baseline_document(
         evidence_tiers=tuple(diff.evidence_tiers),
         findings=resolve(result.findings),
         suppressed=resolve(result.suppressed_findings),
+        suppression_provenance=_suppression_provenance(
+            diff, result.suppressed_findings
+        ),
         evolution=compute_cross_source_evolution_summary(result.findings),
         pattern_preprocessor_scan=_candidate_side_scan(
             compute_pattern_preprocessor_scan_json(diff)
@@ -254,6 +257,36 @@ def compute_no_baseline_document(
         ),
         exit_axes=_no_baseline_exit_axes(result, require_complete_analysis),
     )
+
+
+def _suppression_provenance(
+    diff: Any, suppressed: Sequence[Any]
+) -> tuple[Mapping[str, Any] | None, ...]:
+    """ADR-067 D3's full rule provenance, one entry per suppressed finding.
+
+    Joined off the run's own ``disposition_ledger`` by object identity
+    (``DispositionLedger.rule_for``) -- the same lookup ``reporter.py``'s
+    two-sided ``suppression.suppressed_changes`` block uses, so the audit and
+    the comparison report name the same rule from one owner rather than two.
+    Deliberately not ``Change.suppression_rule``: that is
+    ``SuppressionOutcome.rule_label()``'s ``label or reason`` collapse, so a
+    rule carrying both dropped its reason, source file and expiry from every
+    audit projection (Codex review, P1).
+
+    ``None`` per entry, never a fabricated row, when the ledger holds no
+    record for that finding -- a ``DiffResult`` rebuilt from JSON has no
+    ledger at all, and inventing provenance there would be worse than
+    reporting none.
+    """
+    ledger = getattr(diff, "disposition_ledger", None)
+    if ledger is None:
+        return tuple(None for _ in suppressed)
+    return tuple(_provenance_row(ledger, change) for change in suppressed)
+
+
+def _provenance_row(ledger: Any, change: Any) -> Mapping[str, Any] | None:
+    rule = ledger.rule_for(change)
+    return None if rule is None else rule.to_dict()
 
 
 def _coverage_failures(diff: Any) -> tuple[dict[str, Any], ...]:
@@ -325,17 +358,29 @@ def _finding_json(finding: ReportFinding) -> dict[str, Any]:
     return row
 
 
-def _suppressed_json(finding: ReportFinding) -> dict[str, Any]:
+def _suppressed_json(
+    finding: ReportFinding, provenance: Mapping[str, Any] | None
+) -> dict[str, Any]:
     """One suppressed finding's JSON row: the finding, plus what hid it.
 
-    ``suppression_rule`` is the reason text the matching rule carried, so a
-    reader can answer "which rule, and why" without re-running with the
-    suppression file removed -- ADR-067's disposition-audit principle
-    applied to this report's own shape.
+    Two fields, because they answer different questions and one cannot stand
+    in for the other:
+
+    * ``suppression_rule`` -- the rule's short display label
+      (``SuppressionOutcome.rule_label()``'s ``label or reason``), kept
+      unchanged so an existing consumer reading it is unaffected.
+    * ``suppression_provenance`` -- ADR-067 D3's full record: rule id,
+      source file, reason, label, expiry. The display label collapses
+      ``label`` and ``reason`` into one string, so a rule stating both
+      published its label and silently dropped the reason and the file it
+      came from -- exactly the identify-and-review information the
+      disposition audit exists to preserve (Codex review, P1). ``null``
+      when the run kept no ledger entry for this finding.
     """
     row = _finding_json(finding)
     row["disposition"] = "suppressed"
     row["suppression_rule"] = getattr(finding.change, "suppression_rule", None)
+    row["suppression_provenance"] = dict(provenance) if provenance else None
     return row
 
 
@@ -362,7 +407,10 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         # suppressed" must not look the same to a consumer checking whether
         # policy hid anything (the same convention `contract_coverage_
         # failures` follows -- `[]` rather than omitted).
-        "suppressed_findings": [_suppressed_json(f) for f in doc.suppressed],
+        "suppressed_findings": [
+            _suppressed_json(f, p)
+            for f, p in zip(doc.suppressed, doc.suppression_provenance, strict=True)
+        ],
         "suppressed_count": len(doc.suppressed),
         "cross_source_evolution": render_cross_source_evolution_json(doc.evolution),
         "pattern_preprocessor_scan": doc.pattern_preprocessor_scan,
@@ -472,15 +520,28 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             "a *disposition*, not an absence -- a passing audit must still show "
             "what policy hid, and which rule hid it.",
             "",
-            "| Finding | Symbol | Severity | Suppressed by |",
-            "| --- | --- | --- | --- |",
+            "| Finding | Symbol | Severity | Suppressed by | Reason | Source | Expires |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
-        for finding in doc.suppressed:
+        for finding, prov in zip(
+            doc.suppressed, doc.suppression_provenance, strict=True
+        ):
             change = finding.change
-            rule = getattr(change, "suppression_rule", None) or "(rule gave no reason)"
+            # The label alone answers "which rule"; a reader deciding whether
+            # the waiver still applies needs the reason it was written for,
+            # the file it lives in, and when it lapses. The display label
+            # collapses label and reason into one string, so a rule stating
+            # both showed only its label here (Codex review, P1).
+            rule = getattr(change, "suppression_rule", None) or "(rule gave no label)"
+            prov = prov or {}
+            reason = prov.get("reason") or "(none stated)"
+            source = prov.get("source_file") or "(not recorded)"
+            expires = prov.get("expires") or "(never)"
             lines.append(
                 f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
-                f"{md_cell(finding.category.value)} | {md_cell(rule)} |"
+                f"{md_cell(finding.category.value)} | {md_cell(rule)} | "
+                f"{md_cell(str(reason))} | `{md_cell(str(source))}` | "
+                f"{md_cell(str(expires))} |"
             )
     lines += _exit_axis_notice_lines(doc)
     return "\n".join(lines) + "\n"

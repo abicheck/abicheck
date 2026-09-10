@@ -293,6 +293,20 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
     ):
         ET.SubElement(props, "property", {"name": name, "value": value or ""})
 
+    # One property per orthogonal exit axis, carrying its own contribution.
+    # Without these the suite published only the total and the coverage
+    # contribution, so a JUnit consumer gated by (say) the evidence contract
+    # could not tell *which* axis fired -- the failure text merely listed
+    # every axis that might have (Codex review, P2). Every axis the run
+    # resolved is emitted, contributing or not, so a `0` is a real "this axis
+    # was evaluated and cleared" rather than an absent key.
+    for axis, contribution in doc.exit_axes.items():
+        ET.SubElement(
+            props,
+            "property",
+            {"name": f"exit_axis.{axis}", "value": str(contribution)},
+        )
+
     for finding in doc.findings:
         _junit_finding_case(suite, finding, suppressed=False)
     for finding in doc.suppressed:
@@ -316,13 +330,40 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
                 "message": f"audit exited {doc.exit_code}",
             },
         )
-        failure.text = (
-            f"exit code: {doc.exit_code}\n"
-            f"contract coverage contribution: {doc.coverage_exit_contribution}\n"
+        # Name the axes that actually fired, and what each one means -- the
+        # same resolved `exit_axes` the JSON, Markdown, oneline and SARIF
+        # projections read, so no format explains an exit the others cannot
+        # (Codex review, P2). Listing every possible axis instead, as this
+        # used to, tells a gated consumer nothing.
+        contributing = [
+            axis for axis, contribution in doc.exit_axes.items() if contribution
+        ]
+        detail = [
+            f"exit code: {doc.exit_code}",
+            f"contract coverage contribution: {doc.coverage_exit_contribution}",
             "note: a candidate-side hygiene finding never gates on its own "
-            "(ADR-028 D3 / ADR-035 D1); this is one of the orthogonal axes "
-            "(contract coverage, analysis assurance, evidence contract)."
-        )
+            "(ADR-028 D3 / ADR-035 D1); an audit's exit code is a max over "
+            "orthogonal axes.",
+        ]
+        if contributing:
+            detail.append("")
+            detail.append("contributing axes:")
+            detail += [
+                f"- {NO_BASELINE_EXIT_AXIS_LABELS.get(axis, axis)} "
+                f"(contributed {doc.exit_axes[axis]})"
+                for axis in contributing
+            ]
+        # The coverage ledger itself, for the one axis that can name a
+        # specific provider -- the number alone says nothing about which
+        # provider on which side fell short.
+        if doc.coverage_failures:
+            detail.append("")
+            detail.append("contract coverage failures:")
+            detail += [
+                "- " + ", ".join(f"{k}={v}" for k, v in sorted(f.items()))
+                for f in doc.coverage_failures
+            ]
+        failure.text = "\n".join(detail)
     ET.indent(suite, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
         suite, encoding="unicode"

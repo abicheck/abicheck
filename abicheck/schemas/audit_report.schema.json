@@ -34,7 +34,24 @@
         },
         "candidate_side_enrichment": {"type": "boolean"},
         "observed_value": {"type": ["string", "null"]},
-        "suppression_rule": {"type": ["string", "null"]}
+        "suppression_rule": {
+          "type": ["string", "null"],
+          "description": "The rule's short display label (its `label`, else its `reason`). See `suppression_provenance` for the full record."
+        },
+        "suppression_provenance": {
+          "type": ["object", "null"],
+          "description": "ADR-067 D3's full provenance of the rule that hid this finding: rule id, source file, reason, label, expiry. Distinct from `suppression_rule`, which is only the short display label and so cannot carry both a label and a reason. `null` when the run recorded no ledger entry for this finding.",
+          "additionalProperties": true,
+          "properties": {
+            "rule_id": {"type": ["string", "null"], "description": "The rule's canonical selector-and-gate identity, so two rules sharing a label stay distinguishable."},
+            "source_file": {"type": ["string", "null"], "description": "The --suppress document the rule was loaded from."},
+            "reason": {"type": ["string", "null"]},
+            "label": {"type": ["string", "null"]},
+            "expires": {"type": ["string", "null"], "description": "ISO-8601 date, or null for a rule that never lapses."},
+            "intent": {"type": ["string", "null"]},
+            "allow_public_break": {"type": "boolean"}
+          }
+        }
       }
     }
   },

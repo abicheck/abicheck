@@ -8,23 +8,6 @@
   `compare` would. Resolved through the same function at the same
   CLI > config > default precedence, and `--config` is accepted rather than
   rejected, since the discovered file is now honored.
-- **The audit honors `.abicheck.yml`'s suppression *acceptance* rules.**
-  `suppression.require_justification` and `suppression.strict` decide
-  whether a suppression document may be used at all, and the audit resolved
-  the project config without reading either — so a reasonless or
-  long-expired rule that ordinary `compare` rejects was accepted, suppressed
-  the finding, and exited `0`. Both settings now reach the audit's real run
-  *and* its `--dry-run` validation load, so a preview cannot approve a run
-  that then cannot start.
-- **A saved ABICC Perl dump is exempt from the `--depth` floor, like any
-  other pre-built ABI description.** `--depth build`/`--depth source` is a
-  floor for live extraction, not a ceiling for a description someone already
-  wrote down, but the carve-out recognized only `.abi.json` and
-  `ProjectSnapshot` packages — so `--depth source` exited `7` on a saved
-  ABICC dump and `0` on the equivalent `.abi.json`. A `Module.symvers`
-  manifest and a bare BTF/CTF blob stay on the raw-evidence side, where the
-  floor still applies. Applies to two-sided `compare` too, through the same
-  shared predicate.
 - **SARIF says why a gated audit exited.** The coverage ledger reaches the
   `toolExecutionNotifications` array (SARIF's shape for "the run itself was
   limited") and the run's properties, and the exit-code description names
@@ -42,16 +25,17 @@
 - **`--dry-run` validates `--suppress`/`--policy-file` before previewing.** A
   malformed document exits `64` on the real run, so a preview that exited `0`
   approved a run that could not start.
-- **The pinned-depth floor now applies to every operand this run parses**,
-  not only to a recognized binary. `Module.symvers`, a bare BTF/CTF blob and
-  an ABICC Perl dump each become a fresh snapshot that structurally cannot
-  carry L3-L5 evidence, yet all three read as "already stored" and were
-  exempted: `compare --no-baseline Module.symvers --depth source` reported a
-  clean audit with no evidence tiers at all. The two-sided
-  `compare a.symvers b.symvers --depth source` did the same, so the rule now
-  has one owner (`workflows/input_resolution.side_is_live`) both forms call.
-  Only a genuinely serialized snapshot is exempt — in either of its shapes,
-  a `.abi.json` file or a directory-backed `ProjectSnapshot` package.
+- **The pinned-depth floor now applies to every operand this run derives a
+  description from**, not only to a recognized binary. A `Module.symvers`
+  manifest and a bare BTF/CTF blob each become a fresh snapshot that
+  structurally cannot carry L3-L5 evidence, yet both read as "already
+  stored" and were exempted: `compare --no-baseline Module.symvers --depth
+  source` reported a clean audit with no evidence tiers at all. The
+  two-sided `compare a.symvers b.symvers --depth source` did the same, so
+  the rule now has one owner (`workflows/input_resolution.side_is_live`)
+  both forms call. Exempt is an already-serialized ABI *description*, in any
+  of its shapes — a `.abi.json` file, a directory-backed `ProjectSnapshot`
+  package, or a saved ABICC Perl dump.
 - **`compare --no-baseline` accepts a `ProjectSnapshot` package directory.**
   It is a single artifact — `resolve_input` decodes one into exactly one
   snapshot, and a two-sided `compare` already accepted it — but a blanket
