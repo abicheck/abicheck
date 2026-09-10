@@ -164,6 +164,10 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1188,),
         seed_tests=("tests/test_compare_no_baseline_cli.py",),
+        # A real Click invocation: the seed test drives `compare
+        # --no-baseline` through `CliRunner().invoke(abicheck_main, ...)`,
+        # which is exactly what this field's rule asks for (CodeRabbit).
+        public_surfaces=("cli",),
         known_gaps=(
             KnownGap(
                 description=(
