@@ -374,6 +374,28 @@ class TestReleaseSummaryCarriesProjectConfigOverrides:
         assert release_fields["policy.overrides"] == library_fields["policy.overrides"]
         assert "func_removed=" in release_fields["policy.overrides"]
 
+    def test_a_hand_built_pack_application_with_no_resolved_config_is_a_no_op(
+        self,
+    ) -> None:
+        """Direct-call defensive-branch test: `_release_summary_effective_
+        config_block`'s round-6 fix reads `pack_application.resolved_config.
+        policy.overrides`, but every real production caller
+        (`resolve_release_pack_application(_from_ctx)`) always populates
+        `resolved_config` (round 4's own fix) -- a bare `PackApplication`
+        with no `resolved_config` set (the dataclass default, `None`) is
+        not a shape production ever constructs, but the function must still
+        degrade gracefully rather than crash on `getattr(None, ...)` if a
+        test double or a future caller ever does."""
+        from abicheck.cli_compare_receipt import (
+            _release_summary_effective_config_block,
+        )
+        from abicheck.pack_application import PackApplication
+
+        _digest, fields = _release_summary_effective_config_block(
+            None, pack_application=PackApplication(policy_overrides={})
+        )
+        assert fields["policy.overrides"] == ""
+
 
 class TestReleasePolicyOverrideWarningFiresOnce:
     """P3 (CLI-audit): a directory/package `compare` calls

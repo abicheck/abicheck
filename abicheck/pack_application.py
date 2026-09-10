@@ -76,7 +76,7 @@ from .compatibility_evaluation_wiring import (
     INTERNAL_NAMESPACES_FIELD,
     load_selected_packs,
 )
-from .errors import PackManifestError, ValidationError
+from .errors import PackManifestError
 from .policy.gate_pack_fold import (
     GATE_SEVERITY_CATEGORIES,
     fold_gate_pack_severity,
@@ -444,36 +444,6 @@ def preflight_validate_project_policy_overrides(
     this early.
     """
     resolve_release_project_policy_overrides(project_cfg, project_path)
-
-
-def reject_no_change_override_target(
-    overrides: Iterable[tuple[ChangeKind, Verdict]] | None, *, field_name: str
-) -> None:
-    """Reject ``Verdict.NO_CHANGE`` as a typed-API override target.
-
-    Findings-analysis-fixes review round 6, finding 2: a real ``.abicheck.yml``/
-    ``--pack``/``--policy`` document can never assign this verdict --
-    ``policy_file._SEVERITY_MAP`` only ever spells ``break``/``warn``/``risk``/
-    ``ignore``, none of which maps to it -- so this is reachable only through
-    a typed ``CompareRequest.pack_policy_overrides``/``project_policy_overrides``
-    caller constructing an already-parsed pair directly. Left unrejected, the
-    scoring fold (``classify_compare_pair``) still applies it (it does no
-    vocabulary check of its own), but ``workflows.compare_gate_receipt``'s
-    ``severity_value_for_verdict`` has no spelling for it and silently drops
-    it from the persisted receipt -- so the comparison quietly demotes a
-    finding to compatible while replaying the receipt would restore the
-    default breaking verdict. Rejecting here, at the one choke point both
-    override fields already pass through, closes the gap for both instead of
-    only patching the receipt reader.
-    """
-    for kind, verdict in overrides or ():
-        if verdict is Verdict.NO_CHANGE:
-            raise ValidationError(
-                f"{field_name} may not target Verdict.NO_CHANGE (kind "
-                f"{kind.value!r}) -- NO_CHANGE is not a real override "
-                "severity and has no policy-file spelling to persist in "
-                "the run's receipt; use a real verdict."
-            )
 
 
 def resolve_bundle_policy_file(

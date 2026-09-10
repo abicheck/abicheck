@@ -824,9 +824,8 @@ class CompareRequest:
         Lives here (Tier 2) so the CLI and MCP front-ends surface *identical*
         error text for the same bad request (ADR-037 D9 / goal AC 8): value
         validation (language / AST frontend enums) and the cross-flag
-        feasibility rules (an ``android`` frontend has no header-AST path, so it
-        needs source inputs).
-        """
+        feasibility rules (an ``android`` frontend has no header-AST path,
+        so it needs source inputs)."""
         errors: list[str] = []
         errors += _lang_errors(self.lang)
         frontend = self.frontend.lower()
@@ -907,19 +906,12 @@ class CompareRequest:
                 )
         errors += _depth_errors(self.depth)
         errors += frontend_context_errors(self.frontend_context)
-        # Fail fast on a misspelled severity_preset (Codex review, fresh
-        # evidence): `resolve_release_gate_options` already rejects an
-        # unknown preset, but `classify_compare_pair` only calls it *after*
-        # `resolve_compare_request` has already run extraction — a project-
-        # controlled build/source step that can be slow or side-effecting.
-        # Checking here means a bad value is a Tier-2 ValidationError before
-        # any of that runs, for every front end that calls
-        # `validate()`/`validation_errors()` (native `compare` CLI
-        # included, via `cli_compare_receipt.py`). `SEVERITY_PRESETS` is
-        # `resolve_severity_config`'s own lookup table, checked here without
-        # calling it (this method must stay side-effect-free; resolving
-        # would also require a real `SeverityConfig` this validation has no
-        # use for).
+        # Fail fast on a misspelled severity_preset: `classify_compare_pair`
+        # only rejects it *after* `resolve_compare_request` has already run
+        # extraction. Checking here means a bad value is a Tier-2
+        # ValidationError before any of that runs, for every front end.
+        # `SEVERITY_PRESETS` is checked without calling `resolve_severity_
+        # config` (this method must stay side-effect-free).
         if self.severity_preset is not None:
             from .policy.severity import SEVERITY_PRESETS
 
@@ -946,6 +938,14 @@ class CompareRequest:
                 f"budget_s must be a finite, non-negative number of seconds "
                 f"or None; got {self.budget_s!r}"
             )
+        # Round 7: moved from classify_compare_pair (ran after extraction).
+        for field_name, overrides in (
+            ("pack_policy_overrides", self.pack_policy_overrides),
+            ("project_policy_overrides", self.project_policy_overrides),
+        ):
+            for kind, verdict in overrides or ():
+                if verdict is Verdict.NO_CHANGE:
+                    errors.append(f"{field_name} kind {kind.value!r} may not target Verdict.NO_CHANGE")
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)

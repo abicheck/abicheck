@@ -500,11 +500,6 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # Round 6 finding 2: reject Verdict.NO_CHANGE overrides (validator docstring has the full account).
-    from .pack_application import reject_no_change_override_target
-    reject_no_change_override_target(request.pack_policy_overrides, field_name="pack_policy_overrides")
-    reject_no_change_override_target(request.project_policy_overrides, field_name="project_policy_overrides")
-
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: `resolve_compare_
     # request`'s own `enforce_requested_depth` call already confirmed both
     # sides' *resolved* evidence meets `request.depth` as a floor -- this is

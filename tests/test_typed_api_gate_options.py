@@ -880,6 +880,95 @@ class TestInvalidExitCodeScheme:
                 )
             )
 
+    def test_no_change_project_override_is_rejected_before_extraction_runs(
+        self,
+    ) -> None:
+        """Findings-analysis-fixes review round 7 (Codex review, fresh
+        evidence): round 6's NO_CHANGE rejection lived in
+        `classify_compare_pair`, which `run_compare_request` only reaches
+        *after* `resolve_compare_request` has already run extraction (or
+        invoked the build system, for a `build.query`-authorized request)
+        against a live operand -- so an invalid request could still perform
+        expensive, possibly side-effecting work before eventually failing.
+        Moved to `CompareRequest.validation_errors()`, the standard
+        pre-resolution hook every other invalid-request shape here already
+        uses (see the two sibling tests above). Same proof structure: a
+        nonexistent path would raise a filesystem error if extraction ran
+        first, so seeing `ValidationError` instead is direct evidence the
+        check now runs before it, for a live (not stored-snapshot) operand."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.so")
+        missing_new = Path("/nonexistent/new.so")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    project_policy_overrides=(
+                        (ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),
+                    ),
+                )
+            )
+
+    def test_no_change_pack_override_is_rejected_before_extraction_runs(
+        self,
+    ) -> None:
+        """The identical proof for the sibling `pack_policy_overrides` field."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+        from abicheck.service import run_compare_request
+
+        missing_old = Path("/nonexistent/old.so")
+        missing_new = Path("/nonexistent/new.so")
+        assert not missing_old.exists()
+        assert not missing_new.exists()
+
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            run_compare_request(
+                CompareRequest(
+                    old=InputSpec(path=missing_old),
+                    new=InputSpec(path=missing_new),
+                    pack_policy_overrides=(
+                        (ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),
+                    ),
+                )
+            )
+
+    def test_validation_errors_reports_no_change_with_no_resolution_at_all(
+        self,
+    ) -> None:
+        """Even more direct than the two tests above: calling
+        `CompareRequest.validation_errors()`/`.validate()` never touches the
+        filesystem or any resolution machinery at all -- it's a pure,
+        side-effect-free check (the method's own docstring's contract),
+        so this proves the rejection is available with zero resolution
+        work attempted, not merely "before the extraction step happens to
+        run"."""
+        from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.change_registry_types import Verdict
+        from abicheck.checker_policy import ChangeKind
+        from abicheck.errors import ValidationError
+
+        request = CompareRequest(
+            old=InputSpec(path=Path("/nonexistent/old.so")),
+            new=InputSpec(path=Path("/nonexistent/new.so")),
+            project_policy_overrides=((ChangeKind.FUNC_REMOVED, Verdict.NO_CHANGE),),
+        )
+        errors = request.validation_errors()
+        assert any("NO_CHANGE" in e for e in errors)
+        with pytest.raises(ValidationError, match="NO_CHANGE"):
+            request.validate()
+
 
 class TestPatternVerdictsStaysOptInAtTier2:
     """Codex review, second look (PR #1154 follow-up: "Obtain ADR approval
