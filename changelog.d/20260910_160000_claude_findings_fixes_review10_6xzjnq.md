@@ -55,3 +55,42 @@
   by hoisting that computation into `SurfaceUnions` (built once per surface
   pair and already reused across every finding), restoring the intended
   linear scaling.
+- **`CompatibilityPolicyConfig.pack_overrides` accepted a raw string equal
+  to a `Verdict`'s own value** (e.g. `"BREAKING"`) as if it were a real
+  `Verdict` member, since `Verdict` is a `str, Enum` subclass and the
+  subset check's `==` comparison could not tell the two apart — the value
+  then reached `resolved_config_to_dict()`'s `.value` access and raised
+  `AttributeError` instead of failing at construction. Construction now
+  requires every `pack_overrides` value to be a real `Verdict` instance.
+- **A persisted `evaluation_context`'s `policy.pack_overrides` read
+  `null`/absent identically**, silently discarding real pack provenance for
+  a present-but-malformed `null` value instead of failing loudly the way
+  every other decoder in `contract_context_io.py` does. Only a genuinely
+  *absent* key now defaults to empty; `EVALUATION_CONTEXT_SCHEMA_VERSION`
+  is bumped to 4 and the key is required outright at/above that version.
+- **A directory/package `compare`'s per-library `compatible_additions`/
+  `quality_issues` counts disagreed with the scalar `compare` report's own
+  split for the identical comparison** — the release path (and the
+  PR-comment renderer reading its JSON) still used the old, raw-kind
+  `ADDITION_KINDS` formula the scalar report's `compatible_additions`
+  schema-4.0 correction had already moved away from. Both release call
+  sites now call `report_summary.build_summary` directly, the same
+  function the scalar report uses, so the two paths can no longer drift.
+- **`surface.py`'s bare-owner-tail confirmation tested a candidate's
+  qualified form only against `all_types`, which castxml/clang records never
+  populate with their qualified spelling** (that identity lives separately
+  in `origin_by_qualified_key`) — so a real, modeled-but-private owner was
+  wrongly treated as unresolvable ("unknown, keep") instead of being
+  confidently demoted, whenever an unrelated qualified name elsewhere in the
+  snapshot pair happened to make qualification-tracking active. The
+  confirmation check now also consults `origin_by_qualified_key` directly.
+- **`ProjectCompatibilityInputs.policy_overrides` retained a caller's
+  mutable dict by reference despite the dataclass being frozen**, so
+  mutating the caller's dict (or a later resolution reusing the same
+  input object) could silently change what an already-constructed input
+  resolved to. Now copied into a real `MappingProxyType` on construction.
+- **The `pack_overrides` `null`-coercion fix above was too narrow**: the
+  underlying `.get(key, {})` fix already covers every non-mapping shape
+  (`[]`, `false`, `""`, a plain string), not just `null` — the fix is
+  unchanged, generalized with a parametrized regression test covering all
+  five malformed shapes instead of only the one CodeRabbit reported.

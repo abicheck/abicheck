@@ -245,10 +245,9 @@ class SelectedByEntry:
     #: A *composed* field (``policy.overrides``, ``surface.explicit_scope``)
     #: has no single winning source to describe in
     #: :class:`ValueProvenance`'s own ``reference``/``version``/``sha256``, so
-    #: without this the identities of every contributor were lost and a later
-    #: edit to one of them could not be proved against the receipt (ADR-049
-    #: D6; Codex review, fresh evidence). ``None`` for a hop that selects no
-    #: manifest at all -- a typed flag, a project-config key.
+    #: without this a contributor's identity was unprovable against the
+    #: receipt (ADR-049 D6; Codex review). ``None`` for a hop selecting no
+    #: manifest -- a typed flag, a project-config key.
     identity: ImmutableIdentity | None = None
     #: The digest of the file this hop named, for a source that has content
     #: but no versioned identity -- a ``.abicheck.yml``, a policy document.
@@ -367,11 +366,8 @@ class ValueProvenance:
                     f"not {value!r}."
                 )
         # An empty sha256 is exactly as unable to detect content drift on
-        # replay as no digest at all -- ImmutableIdentity/DigestedItems/
-        # SuppressionConfig already reject this via _require_nonempty_digest
-        # (though those fields are unconditionally required, unlike this
-        # one: None here means "no digest", "" would mean "a digest that
-        # proves nothing"). Codex review.
+        # replay as no digest at all (None here means "no digest", ""
+        # would mean "a digest that proves nothing"). Codex review.
         if self.sha256 is not None and not self.sha256:
             raise ValueError(
                 "ValueProvenance.sha256 must be a non-empty digest or None, "
@@ -707,9 +703,8 @@ class CompatibilityPolicyConfig:
     ``pack_overrides`` (CodeRabbit review, round 8) is the strict, value-equal
     subset of ``overrides`` genuinely contributed by a selected ``kind:
     policy`` pack, captured *before* ``.abicheck.yml``'s project-config
-    contribution is folded in (D7's "read, don't re-derive" --
-    ``pack_application()`` used to misread an uncontested project-sourced
-    kind as pack-sourced); enforced as a real subset since round 9/10.
+    contribution is folded in (D7's "read, don't re-derive"); enforced as a
+    real ``Verdict``-valued subset since round 9/10/11.
     """
 
     base: ImmutableIdentity
@@ -727,12 +722,10 @@ class CompatibilityPolicyConfig:
                 '"strict_abi") through to a config that cannot support exact '
                 "replay (ADR-049 D6)."
             )
-        # A non-Mapping overrides (e.g. a list of valid slugs) previously
-        # sailed through the key/value checks below -- which only iterate --
-        # then crashed with "AttributeError: 'list' object has no attribute
-        # 'items'" at the `.items()` call further down, instead of the
-        # deliberate configuration error this constructor exists to produce
-        # (CodeRabbit review).
+        # A non-Mapping overrides previously sailed through the key/value
+        # checks below (which only iterate), then crashed with AttributeError
+        # at `.items()` instead of the deliberate error this constructor
+        # exists to produce (CodeRabbit review).
         if not isinstance(self.overrides, Mapping):
             raise TypeError(
                 "CompatibilityPolicyConfig.overrides must be a Mapping[str, "
@@ -741,11 +734,9 @@ class CompatibilityPolicyConfig:
                 "adapter passing e.g. a list of slugs would otherwise crash "
                 "deep inside this constructor instead of at the boundary."
             )
-        # A non-str key (e.g. overrides={123: Verdict.BREAKING}) previously
-        # reached `sorted()` below unvalidated, crashing with
-        # "TypeError: '<' not supported between instances of 'str' and
-        # 'int'" when mixed with a real str key, instead of the deliberate
-        # configuration error this constructor exists to produce (Codex
+        # A non-str key previously reached `sorted()` below unvalidated,
+        # crashing with TypeError when mixed with a real str key, instead of
+        # the deliberate error this constructor exists to produce (Codex
         # review).
         non_string_keys = sorted(
             repr(k) for k in self.overrides if not isinstance(k, str)
@@ -769,12 +760,10 @@ class CompatibilityPolicyConfig:
             raise TypeError(
                 "CompatibilityPolicyConfig.overrides values must be Verdict "
                 f"members, not raw strings: {non_verdict}. The `Mapping[str, "
-                "Verdict]` annotation isn't runtime-enforced, so an untyped "
-                'adapter passing a raw string (e.g. "BREAKING" or the '
-                'YAML-facing "break") would otherwise freeze silently -- '
-                "policy_file.py's _SEVERITY_MAP already normalizes the "
-                "YAML spellings to real Verdict members before reaching "
-                "this constructor; any other front end must do the same."
+                "Verdict]` annotation isn't runtime-enforced -- policy_file.py's "
+                "_SEVERITY_MAP already normalizes YAML spellings to real "
+                "Verdict members before reaching this constructor; any other "
+                "front end must do the same."
             )
         object.__setattr__(
             self,
@@ -789,6 +778,16 @@ class CompatibilityPolicyConfig:
         if not isinstance(self.pack_overrides, Mapping):
             raise TypeError(
                 f"CompatibilityPolicyConfig.pack_overrides must be a Mapping: {self.pack_overrides!r}"
+            )
+        non_verdict_pack = sorted(
+            k for k, v in self.pack_overrides.items() if not isinstance(v, Verdict)
+        )
+        if non_verdict_pack:
+            # A raw string equal to a Verdict's own value (e.g. "BREAKING")
+            # passes the subset check below by == coincidence (CodeRabbit).
+            raise TypeError(
+                "CompatibilityPolicyConfig.pack_overrides values must be "
+                f"Verdict members, not raw strings: {non_verdict_pack}"
             )
         bad = sorted(k for k, v in self.pack_overrides.items() if self.overrides.get(k) != v)
         if bad:

@@ -532,23 +532,20 @@ class ProjectCompatibilityInputs:
     #: ``.abicheck.yml``'s ``policy:`` block (``BuildConfig.policy_
     #: overrides``, ADR-068 §3 #23), stated at ``project_config`` tier.
     #: Findings-analysis-fixes review round 3, finding 1: this field used
-    #: to reach only the *scoring* ``PolicyFile`` (via ``cli_compare_
-    #: helpers.py``'s own out-of-band ``merge_project_config_policy_
-    #: overrides`` call, applied *after* this whole resolver already ran),
-    #: never this typed config/receipt -- so a project override that
-    #: genuinely changed a run's verdict left ``resolved_config.policy.
-    #: overrides``/``effective_config_fields["policy.overrides"]`` empty,
-    #: disagreeing with what actually scored the run. Kept as raw strings
-    #: (not parsed ``ChangeKind``/``Verdict`` pairs) at this layer, mirroring
-    #: ``_policy_file_override_slugs``'s own raw-string shape for the
-    #: explicit-file/pack tiers below -- parsing/validation stays the
-    #: caller's job (``policy_file._parse_overrides``), same division of
-    #: labor every other tier here already has.
+    #: to reach only the *scoring* ``PolicyFile`` (out-of-band, after this
+    #: resolver already ran), never this typed config/receipt. Kept as raw
+    #: strings at this layer, mirroring ``_policy_file_override_slugs``'s
+    #: own shape -- parsing/validation stays the caller's job.
     policy_overrides: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self, "public_symbols", _normalized_symbols(self.public_symbols)
+        )
+        # A frozen field holding a caller's mutable dict by reference is not
+        # actually immutable (Codex review) -- copy into a real one.
+        object.__setattr__(
+            self, "policy_overrides", MappingProxyType(dict(self.policy_overrides))
         )
 
     def severity_category(self, category: str) -> str | None:
@@ -812,7 +809,9 @@ def _project_config_override_slugs(
     from .policy_file import _parse_overrides
 
     project_path = Path(project.path) if project.path else Path(".abicheck.yml")
-    parsed = _parse_overrides(project.policy_overrides, project_path)
+    # A plain-dict copy: `_parse_overrides` checks `isinstance(..., dict)`
+    # strictly, but `policy_overrides` is a frozen `MappingProxyType`.
+    parsed = _parse_overrides(dict(project.policy_overrides), project_path)
     return {kind.value: verdict for kind, verdict in parsed.items()}
 
 

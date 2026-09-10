@@ -868,13 +868,10 @@ _ARTIFACT_NAMES = frozenset(
 #: 3.12 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2b
 #:       (ADR-068 D3/D4/D5, plan §3 #6/#8): an additive, always-present
 #:       top-level ``pattern_preprocessor_scan`` object -- the folded,
-#:       per-side lexical pattern pre-scan + preprocessor pre-scan result
-#:       (``workflows.pattern_preprocessor_scan``), mirroring
-#:       ``cross_source_evolution``'s own "run independently on OLD and
-#:       NEW, fold via the same four-state evolution axis" shape for the
-#:       two other scan-only primitives ADR-068 §1 named. On by default,
-#:       automatic, no front end flag (D4/D5); never a verdict on its own,
-#:       so no existing finding, verdict, or exit code moves.
+#:       per-side lexical pattern pre-scan + preprocessor pre-scan result,
+#:       mirroring ``cross_source_evolution``'s own shape for the two other
+#:       scan-only primitives ADR-068 §1 named. On by default, automatic, no
+#:       front end flag; never a verdict on its own.
 #: 3.13 -- additive ``summary.quality_issues``: the non-addition subset of unchanged ``summary.compatible_additions``, mirroring the release fan-out's per-library field of the same name; no verdict moves.
 #: 3.14 -- additive per-change ``demangled_symbol`` (Codex review): a
 #:       human-readable demangling of ``symbol``/``old_value``, present only
@@ -887,13 +884,11 @@ _ARTIFACT_NAMES = frozenset(
 #: 3.15 -- additive, always-present ``gate.fail_on_removed_library``
 #:       (ADR-065's flag), mirroring ``gate.on_incomplete_scope`` (2.50).
 #: 4.0 -- BREAKING (Codex review): a required field's own *meaning*
-#:       changing is breaking per this file's policy even with no key
-#:       added/removed/retyped -- ``summary.compatible_additions`` now
-#:       excludes ``quality_issues`` instead of every ``COMPATIBLE`` finding
-#:       (an earlier draft of this same fix shipped as a MINOR bump before
-#:       the mistake was caught and corrected to this MAJOR one -- unrelated
-#:       to 3.15 above, which is a different, already-released feature).
-#:       Old value = compatible_additions + quality_issues.
+#:       changing is breaking even with no key added/removed/retyped --
+#:       ``summary.compatible_additions`` now excludes ``quality_issues``
+#:       instead of every ``COMPATIBLE`` finding (unrelated to 3.15 above,
+#:       a different, already-released feature). Old value =
+#:       compatible_additions + quality_issues.
 REPORT_SCHEMA_VERSION = "4.0"  #: 4.0 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as

@@ -506,17 +506,33 @@ class SurfaceUnions:
     #: -- exactly the quadratic blowup its own docstring above warns against.
     #: Computed once here instead, alongside the four set unions.
     tracks_qualified_names: bool
+    #: Round 11 (Codex review): the union of both surfaces'
+    #: ``origin_by_qualified_key`` -- castxml/clang records index `all_types`
+    #: only by their *bare* leaf name (`policy/public_surface.py`), with the
+    #: real `ns::Foo` identity recorded here instead. `_classify_type_level`
+    #: must confirm a specific qualified candidate against this index, not
+    #: merely against `all_types`, or an unrelated qualified name elsewhere
+    #: in the snapshot pair wrongly demotes a valid bare-tail match whose own
+    #: real qualified form was never in `all_types` to begin with.
+    qualified_key_union: frozenset[str]
 
 
 def surface_unions(surf_old: PublicSurface, surf_new: PublicSurface) -> SurfaceUnions:
     """Compute the old∪new surface universes once for a surface pair."""
     all_types = frozenset(surf_old.all_types | surf_new.all_types)
+    qualified_key_union = frozenset(
+        surf_old.origin_by_qualified_key.keys()
+        | surf_new.origin_by_qualified_key.keys()
+    )
     return SurfaceUnions(
         public_symbols=frozenset(surf_old.public_symbols | surf_new.public_symbols),
         all_symbols=frozenset(surf_old.all_symbols | surf_new.all_symbols),
         public_types=frozenset(surf_old.public_types | surf_new.public_types),
         all_types=all_types,
-        tracks_qualified_names=any("::" in t for t in all_types),
+        tracks_qualified_names=(
+            any("::" in t for t in all_types) or bool(qualified_key_union)
+        ),
+        qualified_key_union=qualified_key_union,
     )
 
 
@@ -707,6 +723,7 @@ def classify_change_surface(
         surf_old,
         surf_new,
         tracks_qualified_names=unions.tracks_qualified_names,
+        qualified_key_union=unions.qualified_key_union,
     )
 
 
@@ -907,6 +924,7 @@ def _classify_type_level(
     surf_new: PublicSurface,
     *,
     tracks_qualified_names: bool,
+    qualified_key_union: frozenset[str],
 ) -> tuple[bool, str | None]:
     """Classify a finding by the implicated type name(s). A finding is
     in-surface if *any* implicated type is reachable from the public API."""
@@ -938,29 +956,34 @@ def _classify_type_level(
     # `contract_evaluation._confirmed_type_matches`'s own docstring
     # documents and guards against for the `exports`-domain closure.
     #
-    # Gated on `tracks_qualified_names` -- whether `all_types` contains at
-    # least one qualified (``::``-bearing) name (computed once per surface
-    # pair by `surface_unions`, not per call: a per-call `any(...)` scan
-    # over `all_types` here turned this whole classification loop
-    # quadratic again, a real CI performance-gate regression this fix
-    # closes -- see `SurfaceUnions.tracks_qualified_names`'s own comment).
-    # DWARF-derived snapshots always store a record's fully-qualified name
-    # (`dwarf_snapshot.py`'s `RecordType(name=qualified, ...)`), so on real
-    # evidence an unmatched qualified candidate is a trustworthy "the real
-    # owner isn't modeled" signal. A snapshot that stores every type bare
-    # (no qualification tracked at all -- some simpler/synthetic snapshot
-    # shapes) carries no such signal to begin with; without it, a
-    # namespaced owner's bare tail is the *only* way it could ever match a
-    # bare-only model, matching this module's other candidate-resolution
-    # rules' existing treatment of such a snapshot's bare names, so it
-    # stays trusted. Either way this can only ever narrow `known` toward
-    # the conservative "unknown -> keep" default -- never fabricate a
-    # demotion -- and never drops a bare candidate whose own qualified
-    # form was never supplied at all (a single-component owner with no
-    # scope, where qualified == bare).
+    # Gated on `tracks_qualified_names` -- whether this snapshot pair tracks
+    # qualification at all, either via a qualified `all_types` entry (DWARF's
+    # own `.name` already *is* the qualified string) or via a non-empty
+    # `qualified_key_union` (castxml/clang's separate `.qualified_name`
+    # index, per `SurfaceUnions.qualified_key_union`'s own comment) --
+    # computed once per surface pair by `surface_unions`, not per call: a
+    # per-call scan here turned this whole classification loop quadratic
+    # again, a real CI performance-gate regression this fix closes.
+    #
+    # The confirmation check itself (Round 11, Codex review) tests a
+    # specific qualified candidate against `qualified_key_union` as well as
+    # `all_types` -- castxml/clang records index `all_types` only by their
+    # bare leaf name, with the real `ns::Foo` identity in
+    # `origin_by_qualified_key` instead (`policy/public_surface.py`), so an
+    # `all_types`-only test would treat every such candidate as unmatched
+    # regardless of whether the real owner is actually modeled, wrongly
+    # demoting a valid bare-tail match merely because an *unrelated*
+    # qualified name elsewhere in the snapshot pair made
+    # `tracks_qualified_names` true. Either way this can only ever narrow
+    # `known` toward the conservative "unknown -> keep" default -- never
+    # fabricate a demotion -- and never drops a bare candidate whose own
+    # qualified form was never supplied at all (a single-component owner
+    # with no scope, where qualified == bare).
     if tracks_qualified_names:
         unconfirmed_qualified_tails = {
-            c.rsplit("::", 1)[1] for c in candidates if "::" in c and c not in all_types
+            c.rsplit("::", 1)[1]
+            for c in candidates
+            if "::" in c and c not in all_types and c not in qualified_key_union
         }
         known -= unconfirmed_qualified_tails
     if not known:

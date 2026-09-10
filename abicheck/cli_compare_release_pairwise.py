@@ -27,18 +27,13 @@ sequential/parallel dispatch over every matched library
 Extracted purely to keep :mod:`abicheck.cli_compare_release` itself under
 the AI-readiness 2000-line hard cap -- see this module's own sibling,
 :mod:`abicheck.cli_compare_release_matrix` (matrix-result collection,
-output finalization, gating, and input-discovery -- the *other* half of
-what :func:`abicheck.cli_compare_release.compare_release_cmd` calls but
-does not itself define), for the fuller rationale: `architecture/debt.yaml`
-pins :mod:`abicheck.cli_compare_release` (and its pre-existing sibling
-:mod:`abicheck.cli_compare_release_helpers`) at their exact adoption-time
-line count, and a single combined engine module would itself have landed
-over the AI-readiness 800-line production cap for a *new* file -- so the
-per-pair engine and the matrix/output half are two separate, independently
-mechanical extractions instead of one. A mechanical extraction (unchanged
-function bodies). :mod:`abicheck.cli_compare_release` re-exports every
-name here that an existing test or caller imports directly (``from
-abicheck.cli_compare_release import ...``) for back-compat -- new code
+output finalization, gating, and input-discovery), for the fuller
+rationale: `architecture/debt.yaml` pins :mod:`abicheck.cli_compare_release`
+at its exact adoption-time line count, and a single combined engine module
+would itself have landed over the 800-line cap for a *new* file. A
+mechanical extraction (unchanged function bodies).
+:mod:`abicheck.cli_compare_release` re-exports every name here that an
+existing test or caller imports directly for back-compat -- new code
 should import from here directly.
 """
 
@@ -370,13 +365,15 @@ def _compare_one_library(
                 f"\n== {old_path.name} ==\n{render_pattern_modulations(result)}"
             )
         v = result.verdict.value
-        # compatible_additions historically counts *all* compatible changes
-        # (additions + quality issues). Emit the quality subset separately so
-        # downstream consumers (e.g. the PR-comment renderer) can gate the two
-        # categories independently under the config's severity.quality_issues.
-        from .checker_policy import ADDITION_KINDS
+        # compatible_additions/quality_issues must agree with the scalar
+        # `compare` report's own split (`build_summary`'s effective-category
+        # logic), not a raw `c.kind not in ADDITION_KINDS` test -- the two
+        # previously disagreed on the same one-library comparison (Codex
+        # review, findings-fixes round 10/11).
+        from .report_summary import build_summary
 
-        n_quality = sum(1 for c in result.compatible if c.kind not in ADDITION_KINDS)
+        _summary = build_summary(result)
+        n_quality = _summary.quality_issues
         # ADR-067 C-S2: this library's own raw-versus-effective disposition
         # audit, the same shape scalar `compare`'s JSON report carries
         # (`report.disposition_audit.compute_disposition_audit`/`.to_dict()`)
@@ -392,7 +389,7 @@ def _compare_one_library(
             "breaking": len(result.breaking),
             "source_breaks": len(result.source_breaks),
             "risk_changes": len(result.risk),
-            "compatible_additions": len(result.compatible),
+            "compatible_additions": _summary.compatible_additions,
             "quality_issues": n_quality,
             "disposition_audit": compute_disposition_audit(
                 result, severity_config
@@ -620,16 +617,16 @@ def _suppress_lockstep_soname_findings(
         entry["disposition_audit"] = compute_disposition_audit(
             result, severity_config
         ).to_dict()
-        # Recompute the cached per-library counts after the mutation.
-        from .checker_policy import ADDITION_KINDS
+        # Recompute the cached per-library counts via `build_summary`,
+        # same as above (Codex review, findings-fixes round 10/11).
+        from .report_summary import build_summary
 
+        _summary = build_summary(result)
         entry["breaking"] = len(result.breaking)
         entry["source_breaks"] = len(result.source_breaks)
         entry["risk_changes"] = len(result.risk)
-        entry["compatible_additions"] = len(result.compatible)
-        entry["quality_issues"] = sum(
-            1 for c in result.compatible if c.kind not in ADDITION_KINDS
-        )
+        entry["compatible_additions"] = _summary.compatible_additions
+        entry["quality_issues"] = _summary.quality_issues
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
             # Codex review, fresh evidence ("Keep per-library output-dir

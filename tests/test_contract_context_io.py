@@ -291,6 +291,29 @@ class TestResolvedConfigRoundTrip:
         decoded = resolved_config_from_dict(payload, config.provenance)
         assert dict(decoded.policy.pack_overrides) == {}
 
+    @pytest.mark.parametrize(
+        "malformed", [None, [], False, "", "not-a-mapping"], ids=repr
+    )
+    def test_pack_overrides_present_but_malformed_is_a_hard_load_error(
+        self, malformed: object
+    ) -> None:
+        """CodeRabbit + Codex review, round 10/11: a *present* ``pack_
+        overrides`` of any non-mapping shape -- not just ``null`` -- must
+        not be silently treated the same as a genuinely absent key. The
+        original ``.get(...) or {}`` pattern coerced every falsy value
+        (``null``, ``[]``, ``false``, ``""``) to an empty mapping before
+        validation ever ran, discarding real pack provenance instead of
+        failing loudly; a *truthy* non-mapping (a plain string) is included
+        too, since the general fix (presence check, not truthiness, before
+        ``_require_mapping``) must reject every non-mapping shape uniformly
+        rather than only the falsy ones the ``or {}`` bug happened to hit.
+        Only a genuinely absent key defaults to empty."""
+        config = self._full_config()
+        payload = resolved_config_to_dict(config)
+        payload["policy"]["pack_overrides"] = malformed
+        with pytest.raises(TypeError, match=r"policy\.pack_overrides"):
+            resolved_config_from_dict(payload, config.provenance)
+
     def test_gate_scope_none_round_trips_to_none(self) -> None:
         config = dataclasses.replace(
             self._full_config(),

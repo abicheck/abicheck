@@ -1006,6 +1006,21 @@ class TestProjectConfigProjection:
     def test_absent_config_projects_to_none(self):
         assert ProjectCompatibilityInputs.from_build_config(None) is None
 
+    def test_policy_overrides_is_frozen_against_the_callers_own_mutation(self):
+        """Codex review, findings-fixes round 11: a frozen dataclass field
+        holding the caller's mutable dict by *reference* is not actually
+        immutable -- mutating the caller's dict after construction must not
+        change what an already-built ``ProjectCompatibilityInputs``
+        resolves to (a reused or concurrently shared input could otherwise
+        silently produce a different effective policy/provenance receipt
+        across resolutions)."""
+        caller_dict = {"func_removed": "ignore"}
+        project = ProjectCompatibilityInputs(policy_overrides=caller_dict)
+        caller_dict["var_removed"] = "ignore"
+        assert dict(project.policy_overrides) == {"func_removed": "ignore"}
+        with pytest.raises(TypeError):
+            project.policy_overrides["func_added"] = "error"  # type: ignore[index]
+
 
 class TestMalformedInput:
     """Every route validates its own value, and every bad input fails loudly."""

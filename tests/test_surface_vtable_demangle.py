@@ -498,6 +498,44 @@ class TestNamespaceComponentCannotMasqueradeAsOwner:
         # borrowed from the unrelated bare-named record.
         assert classify_change_surface(change, s, s) == (True, None)
 
+    def test_castxml_style_bare_record_confirms_via_qualified_key_index(self):
+        """Codex review, round 11: a further refinement of the round-9/10
+        bare-owner-tail fix above. CastXML/Clang records are indexed in
+        ``PublicSurface.all_types`` only by their *bare* leaf name, while
+        the real ``ns::Foo`` identity is retained separately in
+        ``origin_by_qualified_key`` (``policy/public_surface.py``). The
+        round-10 fix tested a candidate's qualified form only against
+        ``all_types``, so a real, modeled-but-private owner indexed under
+        ``origin_by_qualified_key`` was wrongly treated as *unresolvable*
+        (over-conservative "unknown, keep") instead of being confidently
+        demoted as non-public -- even though its real qualified origin was
+        available all along. An unrelated DWARF-style qualified record
+        (``other::Thing``) is included purely to trigger
+        ``tracks_qualified_names``, matching the exact shape Codex reported.
+        """
+        foo = RecordType(
+            name="Foo", kind="struct", size_bits=64, qualified_name="ns::Foo"
+        )
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="int")],  # Foo itself is NOT reachable
+            types=[foo, _rec("other::Thing")],
+        )
+        s = self._surf(snap)
+        change = Change(
+            kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            symbol="_ZTVN2ns3FooE",
+            description="",
+        )
+        # The real owner IS modeled (just under origin_by_qualified_key, not
+        # all_types) and is genuinely non-public -> a confident demotion,
+        # not the "unknown, keep" fallback a round-10-only fix would give.
+        assert classify_change_surface(change, s, s) == (
+            False,
+            REASON_NON_PUBLIC_TYPE,
+        )
+
 
 class TestDemanglerFallbackForUnparseableShapes:
     """Round 8 finding: ``itanium_special_name_owner_scope_components``/

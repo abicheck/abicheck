@@ -332,7 +332,7 @@ CONTRACT_EVIDENCE_SCHEMA_VERSION: int = 1
 """Version of the persisted, policy-independent ``contract_evidence`` block
 (observed provider records, declarations, manifests, raw type graph)."""
 
-EVALUATION_CONTEXT_SCHEMA_VERSION: int = 3
+EVALUATION_CONTEXT_SCHEMA_VERSION: int = 4
 """Version of the persisted ``evaluation_context`` block (the resolved
 ``CompatibilityEvaluationConfig`` plus field-level provenance).
 
@@ -354,7 +354,18 @@ particular run stated nothing for it," which version 2 alone never
 distinguished. A v3 reader knows the key is gone by construction; the scan
 envelope's own, independently-versioned ``SCAN_SCHEMA_VERSION`` bump to
 1.27 covers only the *scan* report's ``evidence_contract_error_message``
-addition and says nothing about this block."""
+addition and says nothing about this block.
+
+Bumped to 4 (Codex review, findings-fixes round 10/11): ``policy.pack_
+overrides`` is a new persisted partition, distinguishing a pack-sourced
+override from a project-config-sourced one -- a v3 reader ignores the key
+entirely (unknown keys are dropped, not errors) and reconstructs every
+override as unattributed, silently losing that distinction rather than
+failing closed on the newer wire shape. A v4 writer always emits the key
+(possibly ``{}``); ``resolved_config_from_dict`` requires it outright at
+``gate_schema_version >= 4``, the same "own writer always emits it, so
+absence is truncation" rule :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`
+already established for schema 2's fields."""
 
 DECISION_RECEIPT_SCHEMA_VERSION: int = 1
 """Version of the persisted ``decision_receipt`` block (evaluated roots,

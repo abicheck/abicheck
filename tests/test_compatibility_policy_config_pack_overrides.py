@@ -76,6 +76,24 @@ def test_non_mapping_pack_overrides_is_rejected() -> None:
         )
 
 
+def test_pack_overrides_raw_string_equal_to_a_verdict_value_is_rejected() -> None:
+    # CodeRabbit review, round 10/11: Verdict is a `str, Enum` subclass, so
+    # the raw string "BREAKING" == Verdict.BREAKING even though it is not a
+    # Verdict instance. The subset check above (`self.overrides.get(k) != v`)
+    # would silently accept this coincidental equality; only an explicit
+    # `isinstance(v, Verdict)` check catches it. Left unrejected, this value
+    # reaches `resolved_config_to_dict()`'s `verdict.value` access and raises
+    # `AttributeError` there instead of failing loudly at construction.
+    with pytest.raises(
+        TypeError, match=r"pack_overrides values must be Verdict members"
+    ):
+        CompatibilityPolicyConfig(
+            base=_identity("strict_abi"),
+            overrides={"func_removed": Verdict.BREAKING},
+            pack_overrides={"func_removed": "BREAKING"},  # type: ignore[dict-item]
+        )
+
+
 def test_pack_overrides_genuine_subset_constructs() -> None:
     # Negative control: a real, value-equal subset is accepted -- proving
     # the guard isn't just rejecting pack_overrides outright.

@@ -664,11 +664,17 @@ def _release_lib_row(
         return name, verdict, 1, 0, 0
     src = _as_int(lib.get("source_breaks"))
     risk = _as_int(lib.get("risk_changes"))
-    # compatible_additions is the *total* compatible count; quality_issues is the
-    # subset that is not an addition. Fall back to treating all as additions when
-    # the (older) report omits quality_issues.
+    # Codex review, findings-fixes round 10/11: compatible_additions is now
+    # the additions-only count (report schema 4.0's compatible_additions
+    # correction, matching the scalar `compare` report's own
+    # `ReportSummary.compatible_additions` -- see report_summary.py), no
+    # longer the total compatible count minus quality_issues. A release JSON
+    # written by a pre-4.0 build has no field to distinguish this from the
+    # old semantics; there is no reliable way to detect that case from the
+    # payload alone, so this reader assumes the current writer's semantics,
+    # matching `cli_compare_release_pairwise.py`'s own emitted values.
     quality = _as_int(lib.get("quality_issues"))
-    additions = max(_as_int(lib.get("compatible_additions")) - quality, 0)
+    additions = _as_int(lib.get("compatible_additions"))
     pot_err = levels.get("potential_breaking") == "error"
     add_err = levels.get("addition") == "error"
     qual_err = levels.get("quality_issues") == "error"
