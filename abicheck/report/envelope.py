@@ -75,6 +75,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING
 
 from .finding import ReportFinding, build_report_findings
@@ -128,6 +129,14 @@ class ReportEnvelope:
     findings: tuple[ReportFinding, ...]
     #: The severity gate decision, or ``None`` under the legacy scheme.
     gate: GateDecision | None
+    #: The date ``build_report_envelope`` resolved every finding above
+    #: against. A dated ``PolicyFile.reclassify`` rule's expiry is checked
+    #: against *this* date wherever this envelope still needs to resolve a
+    #: finding on demand (:meth:`_resolve`) -- never a fresh ``date.today()``
+    #: read at render time, which could disagree with the findings above if
+    #: the rule expires between construction and render (Codex review,
+    #: fresh evidence).
+    resolved_today: date
     #: Findings for the scoped-only changes a ``--used-by``/
     #: ``--required-symbol`` pass synthesized outside ``result.changes``
     #: (JUnit folds these into its own testcase tree; no other format does).
@@ -191,6 +200,7 @@ class ReportEnvelope:
             policy=self.result.policy,
             kind_sets=self.result._effective_kind_sets(),
             policy_file=self.result.policy_file,
+            today=self.resolved_today,
         )[0]
 
 

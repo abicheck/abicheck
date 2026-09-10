@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import copy
 import importlib
 import inspect
 import json
@@ -36,6 +37,7 @@ from abicheck.model import AbiSnapshot
 from abicheck.policy.disposition_close import finalize_ledger
 from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.policy_file import PolicyFile
+from abicheck.reclassify import ReclassifyRule
 from abicheck.report.build import (
     _snapshot_change,
     build_report_document,
@@ -952,6 +954,89 @@ class TestRendererOrderIndependence:
                 f"{fmt!r} reported a version mutated on the caller's own "
                 "AbiSnapshot after the envelope was already built"
             )
+
+    def test_markdown_severity_groups_reuse_the_envelope_s_finalized_verdicts(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``build_markdown_document`` already
+        passed the envelope's own findings to ``compute_surface_changes``,
+        but ``ReportModel.from_result`` above it still called
+        ``result._effective_verdict_for_change`` fresh to split the severity
+        groups (breaking/source_breaks/risk/compatible), and
+        ``compute_headline_table`` did the identical thing for the headline
+        counts. A dated ``PolicyFile.reclassify`` rule active at envelope-
+        construction time but expired by render time could then move a
+        finding into Breaking Changes in one or both of those sections
+        while ``surface_changes`` (reading the envelope's frozen verdict)
+        still called it compatible.
+
+        Simulates "the rule already expired by render time" directly: the
+        live resolver is mocked to return ``BREAKING`` unconditionally, so a
+        section still reading it fresh would show the finding as breaking.
+        Markdown now reuses the envelope's own already-resolved (still
+        ``COMPATIBLE``) finding for both the severity groups and the
+        headline, so neither section should move.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(to_verdict=Verdict.COMPATIBLE, symbol="_Z3foov")
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(result, old, new)
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch(
+            "abicheck.reclassify.effective_verdict_for_change",
+            return_value=Verdict.BREAKING,
+        ):
+            markdown_out = render_envelope("markdown", envelope)
+
+        assert "Breaking Changes" not in markdown_out
+        assert "| Breaking changes | 0 |" in markdown_out
+        assert "| Compatible changes | 1 |" in markdown_out
+
+    def test_resolve_fallback_reuses_the_envelope_s_frozen_today(self) -> None:
+        """Codex review, fresh evidence: ``ReportEnvelope._resolve`` -- the
+        fallback used for a display-only ``Change`` copy
+        ``_suppress_dangling_correlation_notes`` hands a renderer under
+        ``--show-only`` -- called ``build_report_findings`` with no
+        ``today``, so it read a fresh ``date.today()`` at render time
+        instead of the date the rest of the envelope's findings were
+        resolved against. A dated ``PolicyFile.reclassify`` rule active at
+        construction but expired by render time could then classify the
+        copy differently from every other finding in the same envelope.
+        ``_resolve`` now threads ``resolved_today``, frozen at
+        construction, through explicitly.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        result = _result([removed])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(result, old, new)
+
+        # Stands in for `_suppress_dangling_correlation_notes`'s own
+        # display-only copy: a different object with no entry in the
+        # envelope's identity index, so `findings_for` must fall to
+        # `_resolve`.
+        copy_of_removed = copy.copy(removed)
+
+        with mock.patch(
+            "abicheck.report.envelope.build_report_findings",
+            wraps=_import_attr("abicheck.report.finding.build_report_findings"),
+        ) as spy:
+            envelope.findings_for([copy_of_removed])
+
+        spy.assert_called_once()
+        assert spy.call_args.kwargs["today"] == envelope.resolved_today
 
 
 class TestSarifAndJunitDecisionBoundary:

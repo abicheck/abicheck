@@ -46,6 +46,7 @@ duplication-and-convergence-assessment.md``'s Phase 4 note.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING
 
 from ..checker_types import Change
@@ -457,6 +458,16 @@ def build_report_envelope(
     ``old.functions`` after this call returned would otherwise desynchronize
     exactly those projections from one another (Codex review, fresh
     evidence).
+
+    ``today`` is resolved exactly once here and threaded into every
+    verdict resolution below, including the envelope's own later fallback
+    (:meth:`ReportEnvelope._resolve`, used for a display-only ``Change``
+    copy `report_correlation._suppress_dangling_correlation_notes` hands a
+    renderer under ``--show-only``): a dated ``PolicyFile.reclassify``
+    rule's expiry is checked against ``today``, so a render that happens
+    after the rule expires but reads an envelope built before it must still
+    see the same verdict the rest of that envelope's document was built
+    from -- not a second, later "today" (Codex review, fresh evidence).
     """
     from ..policy.gate_decision import gate_decision_for_result
 
@@ -464,6 +475,7 @@ def build_report_envelope(
     old = _snapshot_abi_snapshot(old)
     new = _snapshot_abi_snapshot(new) if new is not None else None
     opts = options if options is not None else RenderOptions()
+    today = date.today()
     gate = gate_decision_for_result(result, severity_config)
     document = build_report_document(
         result,
@@ -480,6 +492,7 @@ def build_report_envelope(
         policy=result.policy,
         kind_sets=kind_sets,
         policy_file=result.policy_file,
+        today=today,
     )
     scoped_only = tuple(getattr(result, "scoped_only_changes", ()) or ())
     scoped_only_findings = (
@@ -488,6 +501,7 @@ def build_report_envelope(
             policy=result.policy,
             kind_sets=kind_sets,
             policy_file=result.policy_file,
+            today=today,
         )
         if scoped_only
         else ()
@@ -498,6 +512,7 @@ def build_report_envelope(
             policy=result.policy,
             kind_sets=kind_sets,
             policy_file=result.policy_file,
+            today=today,
         )
         if result.suppressed_changes
         else ()
@@ -511,6 +526,7 @@ def build_report_envelope(
         document=document,
         findings=findings,
         gate=gate,
+        resolved_today=today,
         scoped_only_findings=scoped_only_findings,
         suppressed_findings=suppressed_findings,
     )

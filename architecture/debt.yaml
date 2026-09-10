@@ -1292,6 +1292,16 @@
       "review_by": "2026-11-30"
     },
     {
+      "path": "abicheck/report/render_markdown_document.py",
+      "baseline_lines": 819,
+      "target": "report",
+      "rule": "no_growth",
+      "category": "adr061_gap_c_report_convergence",
+      "owner": "abicheck maintainers",
+      "rationale": "First crossing the 800-line production cap: ADR-061 gap C closure package 3's ReportEnvelope convergence (PR: 'one ReportEnvelope per completed evaluation'). Two Codex-review findings on the same PR meant `build_markdown_document`'s severity-group split (via `ReportModel.from_result`'s new `effective_verdicts` parameter) and its headline totals (built with `dataclasses.replace` over `compute_headline_table`'s own object, substituting in counts reclassified through `ReportModel.classify`'s new `verdict_overrides` parameter) both reuse the envelope's own already-resolved verdicts instead of independently calling `result._effective_verdict_for_change` fresh a second/third time -- which could disagree with the envelope's frozen document once a dated `PolicyFile.reclassify` rule expires between envelope construction and render. Kept out of `reporter_markdown.py` (which had no headroom left under its own `no_growth` baseline) and out of `render_markdown.py` (already at its own 800-line cap) since this module already owns `build_markdown_document`, the one call site both fixes touch.",
+      "review_by": "2026-11-30"
+    },
+    {
       "path": "tests/test_abicc_parity_extended.py",
       "baseline_lines": 1279,
       "target": "tests/unit-or-contract ownership matching production migration",

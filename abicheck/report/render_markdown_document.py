@@ -84,7 +84,7 @@ reproducing.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, cast
 
 # ADR-063 T10: static now that `reporter_markdown.py` no longer imports
@@ -541,7 +541,22 @@ def build_markdown_document(
 
     from ..report_model import ReportModel
 
-    model = ReportModel.from_result(result, changes=changes)
+    # ADR-061 gap C: both the severity groups (filtered `changes`) and the
+    # headline totals (the full, unfiltered `result.changes`) reuse the
+    # envelope's own finalized verdicts, rather than `ReportModel.classify`/
+    # `compute_headline_table` each independently calling
+    # `result._effective_verdict_for_change` fresh -- which could disagree
+    # with the envelope once a dated `PolicyFile.reclassify` rule expires
+    # between construction and render (Codex review, fresh evidence).
+    model = ReportModel.from_result(
+        result,
+        changes=changes,
+        effective_verdicts=(
+            [f.verdict for f in envelope.findings_for(changes)]
+            if envelope is not None
+            else None
+        ),
+    )
     breaking, source_breaks, risk, compatible = (
         model.breaking,
         model.source_breaks,
@@ -554,10 +569,31 @@ def build_markdown_document(
     )
     not_evaluated = rm.compute_not_evaluated(model.not_evaluated)
 
+    # The headline's own totals are deliberately over the *full*, unfiltered
+    # `result.changes` (a different population than the severity groups
+    # above), but every one of those changes is already in the envelope's
+    # own `findings` -- reused here instead of letting `compute_headline_
+    # table` independently call `result._effective_verdict_for_change`
+    # fresh a second time, which could disagree with the envelope once a
+    # dated `PolicyFile.reclassify` rule expires (Codex review, evidence).
+    headline_table = rm.compute_headline_table(result, emoji, label)
+    if envelope is not None:
+        ev = envelope.findings
+        overrides = {id(c): f.verdict for c, f in zip(result.changes, ev)}
+        hb, hsb, hr, hc = (
+            len(b)
+            for b in ReportModel.classify(
+                list(result.changes), result, verdict_overrides=overrides
+            )
+        )
+        headline_table = replace(
+            headline_table, breaking=hb, source_breaks=hsb, risk=hr, compatible=hc
+        )
+
     d: dict[str, object] = {
         "report_mode": "full",
         "demangle": demangle,
-        "headline": asdict(rm.compute_headline_table(result, emoji, label)),
+        "headline": asdict(headline_table),
         "rtti_note": _opt_asdict(rm.compute_rtti_note(breaking)),
         "confidence": _opt_asdict(rm.compute_confidence_section(result)),
         "contract_conflicts": _opt_asdict(
