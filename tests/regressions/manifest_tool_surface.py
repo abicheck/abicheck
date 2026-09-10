@@ -143,6 +143,87 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="test_fixture.host_artifact_assumed_capability",
+        invariant=(
+            "A test that needs a real binary artifact must acquire one that "
+            "actually has the property under test, on every platform the "
+            "suite runs, and must fail in *setup* when it cannot -- never "
+            "grab whatever the host happens to have on PATH and let a "
+            "downstream assertion report the mismatch. The two halves of "
+            "this both bite: an artifact's *format* varies by host (the "
+            "same `shutil.which` name is ELF, Mach-O or PE), and so does "
+            "its *capability* (an ELF or Mach-O executable exposes "
+            "symbols; a PE executable has no export directory at all). A "
+            'fixture that conflates "a binary" with "a shared '
+            'library" therefore passes on two platforms and fails on the '
+            "third, and the failure surfaces as the tool refusing the "
+            "input -- which reads as a bug in the tool rather than in the "
+            "fixture. Renaming the artifact does not help and actively "
+            "misleads, because abicheck sniffs content, not extensions: a "
+            "PE file called `libfoo.so` is still a PE file."
+        ),
+        fixed_by=(1188,),
+        seed_tests=("tests/test_compare_no_baseline_cli.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The Windows and macOS halves of the fix are not "
+                    "verified on those platforms from the environment that "
+                    "wrote them. The Windows branch was exercised by "
+                    "forcing `sys.platform`, which proves it builds the "
+                    "expected `System32` paths and skips diagnosably rather "
+                    "than crashing -- not that abicheck dumps "
+                    "`kernel32.dll` and honours `--version` there. The "
+                    "specific defect cannot recur (a real DLL has an export "
+                    "directory), but a different platform-specific failure "
+                    "in the same test would be found by CI, not by this "
+                    "registry entry."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1188",
+            ),
+            KnownGap(
+                description=(
+                    "Nothing detects the *silent fallthrough* shape "
+                    "generally. The first version of this fix checked "
+                    '`Path(ctypes.util.find_library("m")).is_file()` -- '
+                    "false, because that call answers a soname rather than "
+                    "a path -- and fell back to the very executable it was "
+                    "written to replace. It passed on Linux and proved "
+                    "nothing, and only a manual check of which artifact was "
+                    "actually selected caught it. The helper now asserts "
+                    "its chosen candidate is a binary abicheck recognises, "
+                    "which closes that hole for this one helper; no gate "
+                    "checks the other fixtures in this suite for a "
+                    "candidate-list fallback that quietly lands on the "
+                    "wrong element."
+                ),
+                reference="tests/test_compare_no_baseline_cli.py",
+            ),
+            KnownGap(
+                description=(
+                    "The fixture this class's fix *should* use -- a real "
+                    "ELF shared library -- cannot be used yet, so the POSIX "
+                    "branch still copies an executable. Auditing any real "
+                    "ELF library raises an uncaught "
+                    "`NoBaselineInvariantError`, because "
+                    "`diff_platform_elf_dynamic._diff_visibility_leak` is "
+                    "single-sided (`del new`) yet emits its finding with "
+                    "neither candidate-side marker, so ADR-068's partition "
+                    "files it as an identity-diff finding. That is a real "
+                    "open defect on `main`, not a fixture problem, and it is "
+                    "recorded in `docs/contribute/known-gaps.md` with a fix "
+                    "shape (audit every detector that ignores `new`, plus a "
+                    "gate, since neither the marker design nor the "
+                    "`ChangeKind` allowlist it rejected is self-enforcing). "
+                    "This class stays open in that sense: when the crash is "
+                    "fixed the POSIX branch should move to a real library, "
+                    "and nothing here will fail to remind anyone."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="ci.shared_budget_over_heterogeneous_matrix",
         invariant=(
             "A resource budget a CI job declares once -- `timeout-minutes` "

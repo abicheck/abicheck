@@ -450,6 +450,80 @@ def test_a_dump_manifest_is_refused_rather_than_ignored(
     assert "--dump-manifest" in result.output
 
 
+def _a_live_binary_this_host_can_audit(tmp_path: Path) -> Path:
+    """A copy of a live binary artifact `--no-baseline` can actually audit.
+
+    Not "any binary on PATH", which is what this was and why it broke. The
+    original copied `shutil.which("true")` to `libfoo.so`: fine on Linux
+    and macOS, where an ELF or Mach-O executable exposes symbols, and
+    broken on Windows, where `true.exe` is a PE *executable* with no export
+    directory at all -- so abicheck correctly refused it ("has no exports
+    (named or ordinal)") and the test read that refusal as a broken
+    `--version`. The name was misleading too: the operand was called `.so`
+    on every platform while abicheck sniffs *content*, so on Windows it was
+    a PE file wearing an ELF extension. Hence: pick per platform, keep the
+    source's real filename, and assert the choice is a binary abicheck
+    recognises so a bad candidate fails here, in setup, rather than as a
+    puzzling exit code in the assertion.
+
+    **Why POSIX uses an executable and not a real `.so`.** It should use a
+    real shared library, and an earlier version of this helper did --
+    resolving `libm.so.6` through the standard library directories, since
+    `ctypes.util.find_library` answers a soname rather than a path. That
+    fixture immediately hit a *separate, pre-existing* crash: auditing any
+    real ELF library raises an uncaught `NoBaselineInvariantError`, because
+    `diff_platform_elf_dynamic._diff_visibility_leak` is a single-sided
+    detector (`del new  # detector is intentionally old-library-only`) that
+    emits its finding with neither candidate-side marker, so the ADR-068
+    partition files it as an identity-diff finding. It reproduces on `main`
+    from a bare CLI call and is recorded in `docs/contribute/known-gaps.md`
+    -- it is not this test's bug to fix and not this pull request's to
+    widen into. This helper deliberately steps around it rather than
+    silently, and the moment it is fixed the POSIX branch should go back to
+    a real library.
+
+    macOS additionally rules out `.dylib`: since macOS 11 the system
+    libraries live in the dyld shared cache, so the paths `find_library`
+    reports are not files on disk at all.
+    """
+    import os
+    import shutil
+
+    from abicheck.binary_utils import detect_binary_format
+
+    tried: list[str] = []
+    candidates: list[Path] = []
+
+    if sys.platform == "win32":
+        system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        # Real DLLs, i.e. things with an export directory -- the property
+        # the previous fixture lacked on this platform.
+        candidates += [system32 / name for name in ("kernel32.dll", "ws2_32.dll")]
+    else:
+        which_true = shutil.which("true")
+        if which_true:
+            candidates.append(Path(which_true))
+
+    for candidate in candidates:
+        tried.append(str(candidate))
+        if not candidate.is_file():
+            continue
+        # Keep the source's own filename: the operand *is* that artifact, and
+        # a manufactured `.so` name is half of what made the original bug
+        # hard to read.
+        copy = tmp_path / candidate.name
+        copy.write_bytes(candidate.read_bytes())
+        detected = detect_binary_format(copy)
+        assert detected is not None, (
+            f"{candidate} is not a binary abicheck recognises (detected "
+            f"{detected!r}) -- a bad candidate in this helper, not a bug in "
+            "the command under test"
+        )
+        return copy
+
+    pytest.skip(f"no auditable live binary on this host; tried: {tried}")
+
+
 def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) -> None:
     """``--version new=`` was another silently-dropped generated destination.
 
@@ -457,13 +531,7 @@ def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) 
     recorded version on both the one- and two-sided paths -- asserting on the
     snapshot would pass whether or not the option was wired.
     """
-    import shutil
-
-    src = shutil.which("true")
-    if src is None:  # pragma: no cover - every supported CI image has it
-        pytest.skip("no native binary available to label")
-    binary = tmp_path / "libfoo.so"
-    binary.write_bytes(Path(src).read_bytes())
+    binary = _a_live_binary_this_host_can_audit(tmp_path)
     result = invoke_cli(
         "compare",
         "--no-baseline",
