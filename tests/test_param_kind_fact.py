@@ -46,12 +46,16 @@ This is fixed at two levels, both covered here:
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+
 import pytest
 
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.compare.fact_comparison import FactComparability, compare_facts
 from abicheck.dwarf_utils import unwrap_cv_typedef
+from abicheck.extract.headers.castxml.context import CastxmlParserContext
+from abicheck.extract.headers.castxml.type_resolution import top_level_param_kind
 from abicheck.extract.headers.clang.context import qualtype_desugared
 from abicheck.extract.headers.clang.functions import _param_kind
 from abicheck.model import (
@@ -271,3 +275,55 @@ class TestUnwrapCvTypedef:
 
     def test_none_input_returns_none(self) -> None:
         assert unwrap_cv_typedef(None, CU=None) is None
+
+
+def _castxml_ctx(elements: dict[str, ET.Element]) -> CastxmlParserContext:
+    ctx = CastxmlParserContext(ET.Element("GCC_XML"), set(), set())
+    ctx.id_map.update(elements)
+    return ctx
+
+
+class TestCastxmlTopLevelParamKind:
+    """``type_resolution.top_level_param_kind`` -- castxml's structural
+    counterpart to ``_param_kind``, exercised directly (not only through a
+    real castxml dump) to cover its own guard/fallback branches."""
+
+    def test_depth_exceeded_defaults_to_value(self) -> None:
+        ctx = _castxml_ctx({})
+        assert top_level_param_kind(ctx, "x", depth=11) is ParamKind.VALUE
+
+    def test_empty_id_defaults_to_value(self) -> None:
+        ctx = _castxml_ctx({})
+        assert top_level_param_kind(ctx, "") is ParamKind.VALUE
+
+    def test_unresolvable_id_defaults_to_value(self) -> None:
+        ctx = _castxml_ctx({})
+        assert top_level_param_kind(ctx, "missing") is ParamKind.VALUE
+
+    def test_pointer_type(self) -> None:
+        ctx = _castxml_ctx({"p1": ET.Element("PointerType", {"id": "p1"})})
+        assert top_level_param_kind(ctx, "p1") is ParamKind.POINTER
+
+    def test_reference_type(self) -> None:
+        ctx = _castxml_ctx({"r1": ET.Element("ReferenceType", {"id": "r1"})})
+        assert top_level_param_kind(ctx, "r1") is ParamKind.REFERENCE
+
+    def test_rvalue_reference_type(self) -> None:
+        ctx = _castxml_ctx({"rr1": ET.Element("RValueReferenceType", {"id": "rr1"})})
+        assert top_level_param_kind(ctx, "rr1") is ParamKind.RVALUE_REF
+
+    def test_unwraps_cv_qualified_and_typedef_chain(self) -> None:
+        # td1 (Typedef) -> cv1 (CvQualifiedType) -> ref1 (ReferenceType):
+        # both unwrap branches (376-377) in one chain.
+        ctx = _castxml_ctx(
+            {
+                "ref1": ET.Element("ReferenceType", {"id": "ref1"}),
+                "cv1": ET.Element("CvQualifiedType", {"id": "cv1", "type": "ref1"}),
+                "td1": ET.Element("Typedef", {"id": "td1", "type": "cv1"}),
+            }
+        )
+        assert top_level_param_kind(ctx, "td1") is ParamKind.REFERENCE
+
+    def test_unknown_tag_defaults_to_value(self) -> None:
+        ctx = _castxml_ctx({"f1": ET.Element("FundamentalType", {"id": "f1"})})
+        assert top_level_param_kind(ctx, "f1") is ParamKind.VALUE

@@ -117,7 +117,7 @@ from abicheck.model import (
     Variable,
     Visibility,
 )
-from abicheck.model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
+from abicheck.model.dwarf_facts import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
@@ -969,10 +969,21 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
                     # break), which must stay invisible at `--depth binary`.
                     "Private": StructLayout(name="Private", byte_size=private_size),
                 },
+                enums={
+                    # Same public/private split as the structs above, for
+                    # the sibling `dwarf_enum_scope` filtering branch.
+                    "E": EnumInfo(name="E", underlying_byte_size=4),
+                    "PrivateE": EnumInfo(
+                        name="PrivateE",
+                        underlying_byte_size=4,
+                        members={"A": private_size},
+                    ),
+                },
             ),
             types=[RecordType(name="S", kind="struct", size_bits=public_size * 8)]
             if from_headers
             else [],
+            enums=[EnumType(name="E", members=[])] if from_headers else [],
         )
 
     def test_private_dwarf_only_struct_size_drift_is_not_manufactured(self) -> None:
@@ -989,6 +1000,15 @@ class TestProjectPairToDepthPreservesDwarfPublicScope:
         old_p, new_p = project_pair_to_depth(old, new, "binary")
         assert set(old_p.dwarf.structs) == {"S"}
         assert set(new_p.dwarf.structs) == {"S"}
+
+    def test_dwarf_enums_pool_is_scoped_to_public_names(self) -> None:
+        """Sibling of the struct-scoping test above, for the identical
+        ``dwarf_enum_scope`` filtering branch."""
+        old = self._make(from_headers=True, private_size=8)
+        new = self._make(from_headers=False, private_size=16)
+        old_p, new_p = project_pair_to_depth(old, new, "binary")
+        assert set(old_p.dwarf.enums) == {"E"}
+        assert set(new_p.dwarf.enums) == {"E"}
 
     def test_real_public_struct_size_change_still_detected(self) -> None:
         """Negative control: the fix must not blind the detector to a real
