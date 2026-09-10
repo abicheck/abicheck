@@ -23,12 +23,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.vtable_evidence import vtable_transition_is_evidenced
 from .diff_helpers import make_change
 from .model import Fact, Function, RecordType
 from .model.availability import FactStatus
+from .model.change_catalog.kinds import ChangeKind
 
 # The Itanium/MSVC mangled-name scope-component parsers' real home is
 # model/mangled_name.py (ADR-061 D1): pure string decoding with no I/O,

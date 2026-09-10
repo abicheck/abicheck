@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
-from . import deadline, dumper_cache, qualified_name_segments
+from . import deadline, dumper_cache
 from ._compiler_options import (
     effective_driver_mode_is_cl as _effective_driver_mode_is_cl,
     explicit_target_triple as _explicit_target_triple,
@@ -179,6 +179,7 @@ from .extract.header_ast_backend import (
 )
 from .extract.header_ast_fields import parse_header_ast_fields
 from .model import AbiSnapshot, RecordType
+from .storage import closure_identity
 
 log = logging.getLogger(__name__)
 
@@ -1662,7 +1663,7 @@ def _dump_elf(
         **_ast_compile_provenance(list(ast_result.provenance_headers), gcc_options, gcc_option_tokens, sysroot, ast_toolchain=ast_result.ast_toolchain, lang=lang),
     )
     _populate_elf_visibility(snapshot)
-    return qualified_name_segments.renumber_anonymous_closure_identities(snapshot)
+    return closure_identity.renumber_anonymous_closure_identities(snapshot)
 
 
 def _dump_macho(
@@ -1797,7 +1798,7 @@ def _dump_macho(
     _dylib_mtime, _dylib_mtime_epoch = _safe_mtime(dylib_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return qualified_name_segments.renumber_anonymous_closure_identities(AbiSnapshot(
+    return closure_identity.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dylib_path.name,
         version=version,
         source_path=str(dylib_path.resolve()),
@@ -1925,7 +1926,7 @@ def _dump_pe(
     _dll_mtime, _dll_mtime_epoch = _safe_mtime(dll_path)
     _ast_producer = "clang" if isinstance(parser, _ClangAstParser) else "castxml"
     _ast = parse_header_ast_fields(parser, producer=_ast_producer)
-    return qualified_name_segments.renumber_anonymous_closure_identities(AbiSnapshot(
+    return closure_identity.renumber_anonymous_closure_identities(AbiSnapshot(
         library=dll_path.name,
         version=version,
         source_path=str(dll_path.resolve()),

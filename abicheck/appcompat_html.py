@@ -27,10 +27,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 # Shared page chrome (document frame, verdict palette, footer) + the change table.
-from .checker_policy import EvidenceStatus
 from .demangle import demangle_batch, prewarm_demangle_batch
 from .html_report import _abbr_symbol_text, _changes_table
 from .html_template import _VERDICT_STYLE, render_document, render_footer
+from .policy.evidence_status import EvidenceStatus
 
 
 def _missing_symbol_cell(raw: str, demangle: bool = True) -> str:

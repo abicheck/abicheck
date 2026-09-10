@@ -96,7 +96,7 @@ def test_load_only_mutate_globs_reads_the_real_pyproject_toml() -> None:
     only_mutate = gate.load_only_mutate_globs()
     assert only_mutate is not None
     assert "abicheck/diff_symbols.py" in only_mutate
-    assert "abicheck/checker_policy.py" in only_mutate
+    assert "abicheck/policy/classification.py" in only_mutate
 
 
 def test_load_only_mutate_globs_returns_none_when_unreadable(tmp_path: Path) -> None:

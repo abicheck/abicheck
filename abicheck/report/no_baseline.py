@@ -311,7 +311,7 @@ def _coverage_failures(diff: Any) -> tuple[dict[str, Any], ...]:
     was computed from. Empty when no contract context exists, which is every
     run without ``--contract``.
     """
-    from ..contract_coverage_ledger import coverage_failures_for_context
+    from ..policy.coverage_ledger import coverage_failures_for_context
 
     ctx = getattr(diff, "contract_context", None)
     if ctx is None:

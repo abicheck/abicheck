@@ -394,6 +394,16 @@ also_copy = [
     "README.md",
     # Real repository inputs that tests read directly, not just directories.
     "repo_facts.json",
+    # tests/test_adr061_gap_b_facades.py::test_public_root_surfaces_matches_
+    # the_reviewed_exception_set reads the real architecture/modules.yaml
+    # directly (it's checking the reviewed public_root_surfaces exception
+    # set against the actual committed file, not a synthetic tmp_path tree
+    # the way test_architecture_check.py's own fixtures do) -- without this,
+    # the mutants/ copy has no architecture/ directory at all and the test
+    # aborts collection with FileNotFoundError, taking the whole `-x` lane
+    # down before a single mutant is measured. Same "copy-only, generous
+    # rather than minimal" rule as every other entry in this list.
+    "architecture",
     "action",
     "action.yml",
     "actions",
@@ -430,7 +440,17 @@ only_mutate = [
     "abicheck/diff_platform.py",  # ELF/DWARF/PE/Mach-O detectors
     "abicheck/diff_vtable_layout.py",  # G23 B2 vtable-group reconstruction
     "abicheck/diff_filtering.py",  # deduplication and redundancy logic
-    "abicheck/checker_policy.py",  # verdict classification
+    # verdict classification -- moved from abicheck/checker_policy.py to
+    # abicheck/policy/classification.py by ADR-061 gap B; checker_policy.py
+    # is now a re-export facade with no logic of its own, so mutating it
+    # would exercise nothing.
+    "abicheck/policy/classification.py",
+    # per-finding epistemic status / cross-comparison evolution -- moved from
+    # abicheck/checker_policy.py to abicheck/policy/evidence_status.py by the
+    # same ADR-061 gap B split (EvidenceTier.rank, is_cross_source_resolved,
+    # has_binary_evidence: reporting/gate-contribution logic, not covered by
+    # policy/classification.py above).
+    "abicheck/policy/evidence_status.py",
     "abicheck/idioms.py",  # ADR-027 idiom & anti-pattern recognisers
     "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
     "abicheck/surface_graph.py",  # ADR-027 declaration-graph substrate

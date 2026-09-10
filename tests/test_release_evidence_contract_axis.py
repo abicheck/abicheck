@@ -25,12 +25,18 @@ from __future__ import annotations
 
 import pytest
 
+from abicheck.policy.exit_decision import ExitDecision
 from abicheck.policy.exit_decision_precedence import resolve_release_exit_decision
 
 
-def _release_decision(**kwargs: object) -> object:
+def _release_decision(**kwargs: object) -> ExitDecision:
     """`resolve_release_exit_decision` with only its three required kwargs
     defaulted, so a test names exactly the axis it is about.
+
+    Annotated `-> ExitDecision`, not `-> object` (CodeRabbit): every caller
+    reads `ExitDecision` attributes off the result, so `object` was simply
+    wrong -- it happens not to fail today only because the type-check step
+    runs `mypy abicheck/` and does not cover `tests/`.
     """
     return resolve_release_exit_decision(
         not_comparable=bool(kwargs.pop("not_comparable", False)),

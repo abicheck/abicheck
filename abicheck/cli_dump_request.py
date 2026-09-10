@@ -74,8 +74,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from .api_types import DumpRequest
     from .compile_context import CompileContext
+    from .workflows.contracts import DumpRequest
 
 __all__ = ["build_dump_request"]
 
@@ -163,7 +163,8 @@ def build_dump_request(
     existed; this only closes the gap between what the pre-flight check (and
     therefore ``--dry-run``) sees and what execution does.
     """
-    from .api_types import DumpRequest, InputSpec
+    from .workflows.contracts import DumpRequest
+    from .workflows.request_inputs import InputSpec
 
     return DumpRequest(
         input=InputSpec(

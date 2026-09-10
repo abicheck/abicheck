@@ -49,11 +49,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import build_type_map, lookup_matched_type, make_change
 from .model import FactStatus, fact_confirmed_true, resolved_fact_value
+from .model.change_catalog.kinds import ChangeKind
 from .name_classification import STDLIB_TYPE_NAMESPACE_PREFIXES
 
 if TYPE_CHECKING:

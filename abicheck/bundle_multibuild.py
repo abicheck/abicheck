@@ -56,8 +56,8 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .bundle_models import BundleFinding
-from .checker_policy import ChangeKind
 from .model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
+from .model.change_catalog.kinds import ChangeKind
 
 
 def variant_fingerprint(

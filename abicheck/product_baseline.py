@@ -1654,7 +1654,7 @@ def compare_product_directories(
         compare_bundle,
         load_manifest,
     )
-    from .checker_policy import ChangeKind
+    from .model.change_catalog.kinds import ChangeKind
     from .service_compare_pipeline import run_compare
 
     old_root = Path(old_dir)

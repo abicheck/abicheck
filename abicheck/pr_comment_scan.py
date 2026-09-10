@@ -724,7 +724,7 @@ def _scan_crosscheck_findings(
 
     ``CrosscheckResult.to_dict()`` (``report["crosscheck"]``) carries no itemized finding detail (symbol/location) -- only ``counts_by_check`` (``ChangeKind`` value -> count) -- so each kind renders as one aggregate row rather than one row per instance, coarser than compare's own per-symbol findings. Still the difference between an accurate "N cross-check finding(s)" review section and total silence next to a red check. A follow-up review found the aggregate-row count itself leaking into the exact summary total (``len(findings)`` counting "1" for a kind with 7 real occurrences) -- callers must use this function's own returned total, not ``len()`` of the itemized list.
     """
-    from .checker_policy import API_BREAK_KINDS, RISK_KINDS
+    from .policy.classification import API_BREAK_KINDS, RISK_KINDS
 
     crosscheck = report.get("crosscheck")
     counts = crosscheck.get("counts_by_check") if isinstance(crosscheck, dict) else None

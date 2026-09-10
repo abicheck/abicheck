@@ -124,10 +124,11 @@ from .analysis_assurance_layout import (
 )
 from .buildsource.fact_set import check_fact_compatibility
 from .buildsource.model import CoverageStatus, DataLayer
-from .checker_policy import ChangeKind, EvidenceTier
 from .checker_types import DiffResult
 from .evidence_depth import DEPTH_RANK, depth_label_for, weaker_depth
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
+from .policy.evidence_status import EvidenceTier
 
 if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack

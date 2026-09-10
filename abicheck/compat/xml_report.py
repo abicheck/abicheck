@@ -59,7 +59,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from ..checker_policy import HasKind
+from ..model.change_catalog.kinds import HasKind
 from ..report_classifications import (
     ADDED_KINDS,
     BINARY_ONLY_KINDS,

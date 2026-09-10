@@ -56,7 +56,6 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
@@ -72,6 +71,8 @@ from .workflows.artifact.compile_context_gate import (
     resolved_pair_compile_contexts,
 )
 from .workflows.artifact.execute import _resolve_side_snapshot_impl
+from .workflows.contracts import CompareRequest, CompareResult
+from .workflows.request_inputs import InputSpec, required_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -304,8 +305,8 @@ def resolve_compare_request(
     Raises:
         ValidationError: If the request fails :meth:`CompareRequest.validate`
             or names a frontend with no extractor for its evidence. **Not**
-            for an unreached ``depth`` since PR #1195 -- that is ADR-064's
-            exit-7 axis, read off ``DiffResult.evidence_contract_error``.
+            for an unreached ``depth`` since PR #1195 (ADR-064's exit-7 axis,
+            on ``DiffResult.evidence_contract_error``).
         PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
             finds a requested evidence input no resolved collector/backend
             combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
@@ -333,7 +334,7 @@ def resolve_compare_request(
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.
     lang = request.lang.lower()
-    from .api_types import HEADER_AST_FRONTENDS
+    from .model.header_ast_frontends import HEADER_AST_FRONTENDS
 
     frontend_lower = request.frontend.lower()
     header_backend = (
@@ -500,10 +501,9 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: this is the *ceiling*
-    # half, filtering what this classification is allowed to see down to the
-    # requested rung; the floor half is the exit-7 axis recorded below, and
-    # the ceiling applies whether or not it was met.
+    # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
+    # narrowing what this classification may see to the requested rung. The
+    # floor is the exit-7 axis below; the ceiling applies either way.
     # Deliberately a *view*, not a mutation of
     # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
     # `pair` may still be read elsewhere for its unprojected snapshots.
@@ -610,17 +610,10 @@ def classify_compare_pair(
     attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
     abi3_audit.record_abi3_evidence_contract_error(result, _fail)
     # ADR-068 §3 #28 -- `compare`'s only depth-floor mechanism since PR #1195.
-    # Liveness via `input_spec_is_live`, the owner the native CLI uses, not
-    # `pair.old_fmt is not None`: that answers `None` for a GNU ld linker
-    # script this run does follow and parse (Codex review).
-    from .policy.depth_evidence_contract import record_depth_evidence_contract_error
-    from .workflows.input_resolution import input_spec_is_live
+    # The liveness rule it needs lives with the axis, not here.
+    from .workflows import depth_evidence_contract
 
-    record_depth_evidence_contract_error(
-        result, request.depth, old, new,
-        old_is_live=input_spec_is_live(request.old),
-        new_is_live=input_spec_is_live(request.new),
-    )
+    depth_evidence_contract.record_for_compare_request(result, request, old, new)
     # Hash through the full GNU ld linker-script chain to its final resolved
     # target -- resolve_side_snapshot() already followed the identical chain
     # to produce `old`/`new` above -- so a (possibly multi-hop) script vs.
@@ -704,7 +697,9 @@ def classify_compare_pair(
     # workflows.compare_gate_receipt's own docstring for the full account.
     from .workflows.compare_gate_receipt import install_resolved_gate_receipt
 
-    install_resolved_gate_receipt(result, request, gate, pf_before_project_fold, suppression)
+    install_resolved_gate_receipt(
+        result, request, gate, pf_before_project_fold, suppression
+    )
 
     # ADR-055 D2/D4: `suppression` is carried out so a front end applying a
     # post-classification concern (appcompat's `scope_diff_to_app`) reuses the
@@ -925,7 +920,9 @@ def run_compare(
         ),
         pack_internal_namespaces=pack_internal_namespaces,
         project_policy_overrides=(
-            tuple(project_policy_overrides.items()) if project_policy_overrides else None
+            tuple(project_policy_overrides.items())
+            if project_policy_overrides
+            else None
         ),
         depth=depth,
         severity_preset=severity_preset,

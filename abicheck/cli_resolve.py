@@ -603,8 +603,8 @@ def _resolve_compare_snapshots(
     both-sides-shared config statement, unlike ``-H`` (already per-side by
     the time it reaches ``old_h``/``new_h``). ``None``/empty is a no-op.
     """
-    from .api_types import CompareRequest, InputSpec
     from .errors import PlanningError, SnapshotError, ValidationError
+    from .workflows import contracts as _contracts, request_inputs as _request_inputs
 
     def _side_compile(backend_override: str | None) -> CompileContext | None:
         # The per-side --ast-frontend old=/new= rides on that side's own
@@ -627,8 +627,8 @@ def _resolve_compare_snapshots(
     # config key into a usage error for a `--dump-manifest` compare that
     # never asked for it. Only a manifest-less side gets it.
     _config_header_dirs = tuple(config_public_header_dirs or ())
-    request = CompareRequest(
-        old=InputSpec(
+    request = _contracts.CompareRequest(
+        old=_request_inputs.InputSpec(
             path=old_input,
             headers=tuple(old_h),
             includes=tuple(old_inc),
@@ -642,7 +642,7 @@ def _resolve_compare_snapshots(
                 () if old_dump_manifest is not None else _config_header_dirs
             ),
         ),
-        new=InputSpec(
+        new=_request_inputs.InputSpec(
             path=new_input,
             headers=tuple(new_h),
             includes=tuple(new_inc),

@@ -815,8 +815,8 @@ def diff_graph_reconciliation_findings(
     lower-level unit tests do) skips this gate entirely, matching the
     pre-existing behavior.
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
     from ..model.source_graph import EVIDENCE_TIER_L5
 
     kind_by_outcome = {

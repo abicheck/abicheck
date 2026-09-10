@@ -45,8 +45,8 @@ from types import MappingProxyType
 from typing import Any, TypeVar
 
 from .change_registry_types import Verdict
-from .checker_policy import ChangeKind
 from .contract_relevance_types import ContractMode, SelectorLayer
+from .model.change_catalog.kinds import ChangeKind
 from .policy.versioning_policy import (
     VersioningPolicy,
     built_in_default_versioning_policy,

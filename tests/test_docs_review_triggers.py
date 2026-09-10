@@ -175,3 +175,38 @@ def test_main_never_fails_on_diff_error(
     monkeypatch.setattr(rt.sys, "argv", ["check_docs_review_triggers.py"])
     assert rt.main() == 0
     assert "skipping" in capsys.readouterr().out
+
+
+# --- real repo: ADR-061 gap B owners actually trigger their pages ------------
+
+
+@pytest.mark.parametrize(
+    "changed_path, expected_page",
+    [
+        ("abicheck/policy/classification.py", "docs/learn/verdicts.md"),
+        ("abicheck/policy/classification.py", "docs/reference/change-kinds.md"),
+        (
+            "abicheck/policy/coverage_ledger.py",
+            "docs/learn/contract-aware-compatibility.md",
+        ),
+        ("abicheck/policy/evidence_status.py", "docs/learn/verdicts.md"),
+        ("abicheck/policy/reclassify.py", "docs/use/policies.md"),
+        ("abicheck/workflows/contracts.py", "docs/use/python-api.md"),
+        ("abicheck/workflows/request_inputs.py", "docs/use/python-api.md"),
+        ("abicheck/model/header_ast_frontends.py", "docs/use/python-api.md"),
+    ],
+)
+def test_real_repo_gap_b_owner_paths_trigger_their_pages(
+    changed_path: str, expected_page: str
+) -> None:
+    """`checker_policy.py`/`contract_coverage_ledger.py` split their real
+    logic out to `policy`-owned modules (ADR-061 gap B); the pages whose
+    `depends_on` names the old facade must also fire on the real owner, or a
+    future edit to the actual implementation silently stops triggering the
+    review notice — the exact gap a round of automated review caught here.
+    """
+    triggers = rt.find_triggers([changed_path])
+    assert expected_page in triggers, (
+        f"{changed_path} should trigger {expected_page}'s depends_on, "
+        f"got: {sorted(triggers)}"
+    )

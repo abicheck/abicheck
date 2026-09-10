@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .checker import _BREAKING_KINDS, DiffResult
-from .checker_policy import HasKind
+from .model.change_catalog.kinds import HasKind
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -161,11 +161,11 @@ def compatibility_metrics(
     before that (Codex review, fresh evidence).
     """
     if effective_verdicts is not None:
-        from .checker_policy import Verdict as _Verdict
+        from .policy.classification import Verdict as _Verdict
 
         breaking_count = sum(1 for v in effective_verdicts if v == _Verdict.BREAKING)
     elif policy is not None or kind_sets is not None or policy_file is not None:
-        from .checker_policy import Verdict as _Verdict
+        from .policy.classification import Verdict as _Verdict
         from .severity import effective_verdict_for_change
 
         breaking_count = sum(
@@ -216,7 +216,7 @@ def build_summary(
     expires between construction and render (Codex review, fresh evidence).
     ``None`` keeps the prior, independently-resolved behaviour.
     """
-    from .checker_policy import Verdict
+    from .policy.classification import Verdict
     from .severity import IssueCategory, classify_effective_change
 
     evaluated = result._evaluated_changes()

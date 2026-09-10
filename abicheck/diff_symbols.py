@@ -21,7 +21,6 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.constants import constant_index_pair, diff_constants
 from .compare.elf_only_demangle import (
@@ -135,6 +134,7 @@ from .model import (
 # without a forbidden extract -> compare edge. Re-exported by value here
 # for back-compat.
 from .model.cc_attributes import is_cc_attribute as _is_cc_attribute
+from .model.change_catalog.kinds import ChangeKind
 from .name_classification import is_local_rtti_symbol
 
 # Visibility levels that constitute the public ABI surface.

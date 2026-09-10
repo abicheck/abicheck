@@ -88,6 +88,19 @@ class TestPullRequestPathsCoverTheSubsystemsThisLaneExercises:
         paths = _pr_paths()
         assert "abicheck/checker.py" in paths
         assert "abicheck/checker_policy.py" in paths
+        # ADR-061 gap B: the real verdict-classification logic moved to
+        # policy/classification.py; checker_policy.py is now a re-export
+        # facade. Both must stay covered so a PR touching only the moved
+        # logic still triggers this lane.
+        assert "abicheck/policy/classification.py" in paths
+        # checker_policy.py's second owner, plus contract_gating.py's/
+        # contract_coverage_ledger.py's owners -- the "contract_*.py" glob
+        # above only matches the flat facades, not their policy/-nested
+        # owners, and this lane's own real-package --contract step
+        # exercises all three.
+        assert "abicheck/policy/evidence_status.py" in paths
+        assert "abicheck/policy/contract_finding_relevance.py" in paths
+        assert "abicheck/policy/coverage_ledger.py" in paths
 
     def test_the_workflow_file_itself_is_covered(self) -> None:
         # Otherwise a future edit to the paths list itself could silently

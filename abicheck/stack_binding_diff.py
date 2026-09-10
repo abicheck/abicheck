@@ -33,9 +33,9 @@ runtime provider or weak-resolution status changed.
 from __future__ import annotations
 
 from .binder import BindingStatus, SymbolBinding
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
+from .model.change_catalog.kinds import ChangeKind
 from .resolver import DependencyGraph
 
 #: Binding statuses that count as "the symbol resolved to a live provider"

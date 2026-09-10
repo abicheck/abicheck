@@ -65,12 +65,12 @@ from typing import TYPE_CHECKING, Any
 from ..contract_relevance_types import SelectorLayer
 
 if TYPE_CHECKING:
-    from ..api_types import CompareRequest
     from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
     from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
+    from .contracts import CompareRequest
 
 
 def _project_inputs_for_request(

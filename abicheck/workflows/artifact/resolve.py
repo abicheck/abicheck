@@ -60,9 +60,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from pathlib import Path
 
-    from ...api_types import InputSpec
     from ...compile_context import CompileContext
     from ...service_compare_evidence import SideEvidence
+    from ..request_inputs import InputSpec
 
 __all__ = [
     "BaselineReuseContext",

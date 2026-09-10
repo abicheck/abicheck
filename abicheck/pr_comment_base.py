@@ -34,12 +34,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .checker_policy import (
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import (
     ADDITION_KINDS,
     API_BREAK_KINDS,
     BREAKING_KINDS,
     RISK_KINDS,
-    ChangeKind,
 )
 
 # Kind value strings that constitute new public-API surface (the severity

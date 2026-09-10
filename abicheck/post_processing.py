@@ -290,7 +290,7 @@ class AnnotateLayoutUnverifiableCoveredByVtableChanged:
     name = "annotate_layout_unverifiable_covered_by_vtable_changed"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .checker_policy import ChangeKind
+        from .model.change_catalog.kinds import ChangeKind
 
         covered_types = {
             c.qualified_name
@@ -642,8 +642,8 @@ def _build_suppression_overreach_change(change: Change, rule: Suppression) -> Ch
     ADR-044 D4. *rule* is the suppression whose selectors matched *change* but
     whose reachability/``allow_public_break`` gate withheld the match.
     """
-    from .checker_policy import ChangeKind
     from .checker_types import Change
+    from .model.change_catalog.kinds import ChangeKind
 
     # would_withhold() only ever returns True for a *broad* rule (namespace/
     # entity_namespace/cause_namespace/source_location, no primary narrow
@@ -689,8 +689,8 @@ def _build_suppression_unknown_reachability_change(
     ``"proven-unreachable-only"``, but whose graph coverage could not prove
     *change* unreachable (``Change.reachability_state`` is ``UNKNOWN``).
     """
-    from .checker_policy import ChangeKind
     from .checker_types import Change
+    from .model.change_catalog.kinds import ChangeKind
 
     selector = (
         rule.symbol
@@ -923,7 +923,7 @@ class SuppressRenamedPairs:
         changes: list[Change],
     ) -> tuple[dict[str, str], dict[str, str], dict[str, Change]]:
         """Return (renamed_old, renamed_new, rename_changes) from FUNC_LIKELY_RENAMED entries."""
-        from .checker_policy import ChangeKind
+        from .model.change_catalog.kinds import ChangeKind
 
         renamed_old: dict[str, str] = {}  # old_value → new_value
         renamed_new: dict[str, str] = {}  # new_value → old_value
@@ -986,7 +986,7 @@ class SuppressRenamedPairs:
         return True
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .checker_policy import ChangeKind
+        from .model.change_catalog.kinds import ChangeKind
 
         renamed_old, renamed_new, rename_changes = self._build_rename_maps(changes)
         if not renamed_old:
@@ -1046,7 +1046,7 @@ class ClearOrphanedVtableGapCorrelation:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         import dataclasses
 
-        from .checker_policy import ChangeKind
+        from .model.change_catalog.kinds import ChangeKind
 
         surviving_covering_types = {
             c.qualified_name
@@ -1207,7 +1207,7 @@ class DetectCppPatterns:
         Matching uses BOTH exact equality and a guarded substring containment
         (see ``_matches_suppression_key`` for the unambiguity rules).
         """
-        from .checker_policy import ChangeKind
+        from .model.change_catalog.kinds import ChangeKind
 
         to_keep: list[Change] = []
         for ch in changes:
@@ -1377,7 +1377,6 @@ class DemoteUnreachableInternalChurn:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         import fnmatch
 
-        from .checker_policy import ChangeKind
         from .internal_leak import (
             _LEAK_TRIGGERING_KINDS,
             DEFAULT_INTERNAL_NAMESPACES,
@@ -1385,6 +1384,7 @@ class DemoteUnreachableInternalChurn:
             _strip_template_args,
             is_internal_type,
         )
+        from .model.change_catalog.kinds import ChangeKind
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
         namespaces = (
@@ -1464,7 +1464,7 @@ class DetectVersionedSymbolScheme:
     name = "detect_versioned_symbol_scheme"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
-        from .checker_policy import ChangeKind
+        from .model.change_catalog.kinds import ChangeKind
         from .versioned_symbol_scheme import analyze_versioned_scheme
 
         if any(c.kind is ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED for c in changes):

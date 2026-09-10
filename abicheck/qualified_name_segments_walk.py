@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """The generic, payload-exclusion-aware dataclass string walk
-``qualified_name_segments.renumber_anonymous_closure_identities`` builds on.
+``storage.closure_identity.renumber_anonymous_closure_identities`` builds on.
 
 Split out of ``qualified_name_segments.py`` (mechanical extraction, unchanged
 function bodies) once that module crossed the AI-readiness ``file-size``
@@ -21,6 +21,10 @@ gate's 800-line production cap -- the same "move responsibility instead of
 raising the baseline" discipline ``fact_field_readers_scope.py``/
 ``fact_detector_misuse_scope.py`` already establish elsewhere in this
 codebase. Leaf module (stdlib only), same as its former home.
+
+Classified `storage` (ADR-061 gap B) via ``legacy_paths`` -- its only real
+caller is ``storage/closure_identity.py``, the real owner behind the flat
+``qualified_name_segments`` facade's closure-renumbering half.
 """
 
 from __future__ import annotations

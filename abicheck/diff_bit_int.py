@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import re
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .diff_type_spellings import iter_type_slot_changes
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
 
 # Match `_BitInt(<N>)` and capture the width. Whitespace inside the parens is
 # tolerated. The leading boundary avoids matching e.g. `my_BitInt`.

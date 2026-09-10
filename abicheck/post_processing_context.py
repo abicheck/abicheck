@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind
+from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
     from .checker_types import Change

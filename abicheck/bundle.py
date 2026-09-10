@@ -110,9 +110,9 @@ from .bundle_models import (  # noqa: F401  (re-exported for back-compat)
     basename_to_bundle_key,
 )
 from .bundle_soname import hard_link_alias_basenames
-from .checker_policy import Verdict, compute_verdict
 from .checker_types import DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
+from .policy.classification import Verdict, compute_verdict
 
 if TYPE_CHECKING:
     from .policy_file import PolicyFile

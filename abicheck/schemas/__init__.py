@@ -14,6 +14,9 @@
 
 """Versioned JSON Schemas for abicheck machine-readable output.
 
+**ADR-061 gap B: retained, not reclassified** -- ``current()`` reaches
+`report`/`workflows`, which also import this package; same escape hatch
+as ``checker_policy.py``.
 The schemas in this package describe the stable JSON contract that
 automated consumers (CI gates, dashboards, other tooling) can rely on.
 

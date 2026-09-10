@@ -124,7 +124,12 @@ def _compute_release_legacy_exit_code(
     so a real release-global break is never silently dropped just because
     some other library's operational failure happens to rank higher.
     """
-    from ..checker_policy import Verdict
+    # `policy.classification`, not the legacy `checker_policy` facade:
+    # origin/main moved this import to the canonical owner in the same
+    # function, in the commits this branch merged (the conflict git
+    # mis-aligned onto the re-export shim next door). Adopted here rather
+    # than dropped, since the function moved but the change is main's.
+    from .classification import Verdict
     from .severity import legacy_exit_code
 
     worst = 0

@@ -29,11 +29,9 @@ from .checker import (
     Change,
     DiffResult,
 )
-from .checker_policy import (
-    ChangeKind,
-    Verdict,
-)
-from .contract_gating import is_evaluated
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import Verdict
+from .policy.contract_finding_relevance import is_evaluated
 
 if TYPE_CHECKING:
     from datetime import date

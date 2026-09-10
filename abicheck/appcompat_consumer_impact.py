@@ -32,8 +32,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .checker_policy import ReachabilityState
 from .impact.engine import assess_change
+from .policy.evidence_status import ReachabilityState
 
 if TYPE_CHECKING:
     from pathlib import Path

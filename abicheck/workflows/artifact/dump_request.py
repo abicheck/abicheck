@@ -49,9 +49,9 @@ from .dump_execution_options import DumpExecutionOptions
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from ...api_types import DumpRequest
     from ...service_compare_evidence import SideEvidence
     from ...workflows.resolved_execution_context import ResolvedExecutionContext
+    from ..contracts import DumpRequest
 
 __all__ = ["ResolvedDumpRequest"]
 

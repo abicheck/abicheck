@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 if TYPE_CHECKING:
     from .model.bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
-from . import qualified_name_segments
 from .errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .model import (
     AbiSnapshot,
@@ -58,6 +57,7 @@ from .snapshot_platform_blocks import (
     python_ext_from_dict as _python_ext_from_dict,
     sycl_from_dict as _sycl_from_dict,
 )
+from .storage import closure_identity
 from .storage.entity_id_codec import (
     decode_entity_ids,
     decode_sidecar_entity_ids,
@@ -1399,7 +1399,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
 
     backfill_missing_elf_binding(snap)
     normalize_anonymous_type_spellings_on_load(snap)
-    return qualified_name_segments.renumber_anonymous_closure_identities(snap)
+    return closure_identity.renumber_anonymous_closure_identities(snap)
 
 
 def load_snapshot(path: str | Path) -> AbiSnapshot:
