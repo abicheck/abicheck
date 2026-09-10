@@ -32,6 +32,11 @@ on:
       - "abicheck/schemas/*.schema.json"
       - "abicheck/checker.py"
       - "abicheck/checker_policy.py"
+      # ADR-061 gap B: checker_policy.py's real verdict-classification logic
+      # moved to policy/classification.py; checker_policy.py is now a
+      # re-export facade. Kept both so a PR touching only the moved logic
+      # still triggers this lane.
+      - "abicheck/policy/classification.py"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
