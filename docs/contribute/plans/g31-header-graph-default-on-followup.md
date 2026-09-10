@@ -48,13 +48,31 @@ single-library `dump`/`compare` — no flag required. `--header-graph`/
 absent from `--help`), deprecated no-op shims on `compare` and `dump`
 (passing either printed a one-line deprecation note to stderr and otherwise
 changed nothing) — **CLI cleanup H1 has since removed both flags outright**;
-passing either is now a plain usage error. Directory/package (set-input)
-`compare` still does not build the graph (the
-per-library fan-out never routed through the attach step, before or after
-this change); a raw `--old-sources`/`--new-sources`/`--old-build-info`/
-`--new-build-info` tree on `compare` also still does not (the inline-embed
-path reloads from a JSON snapshot that never attaches a graph) — both are
-the same pre-existing structural gaps, just no longer flag-gated. Internally,
+passing either is now a plain usage error.
+
+> **Correction (superseding this paragraph's original claim).** Phase A
+> recorded that "directory/package (set-input) `compare` still does not
+> build the graph (the per-library fan-out never routed through the attach
+> step)". That was true when written and is **no longer true**: the fan-out
+> was later migrated onto `service.run_compare`, so every member pair
+> resolves through `service.run_dump`, whose `_attach_header_graph` step is
+> unconditional (`_HEADER_GRAPH_ENABLED`) whenever headers were parsed and
+> neither `dwarf_only` nor `symbols_only` is set. A directory `compare`
+> given `-H`/`--header` builds the graph per member, with the same nodes
+> that member gets from a single-pair compare. Nothing failed when the claim
+> went stale, because only comments stated it — so it is now pinned by an
+> executed parity test,
+> `tests/test_cli_compare_release_header_graph.py`, and registered as bug
+> class `cli_surface.capability_guard_diverged_from_pipeline` in
+> `tests/regressions/manifest_tool_surface.py`. The mirrored claim in
+> `abicheck/cli_resolve.py`'s `_reject_evidence_flags_for_set_inputs`
+> docstring carries the same correction.
+
+A raw `--old-sources`/`--new-sources`/`--old-build-info`/
+`--new-build-info` tree on `compare` still does not build the graph (the
+inline-embed path reloads from a JSON snapshot that never attaches one) —
+that one is a genuine, still-open structural gap, just no longer
+flag-gated. Internally,
 `service.py` gained module constants `_HEADER_GRAPH_ENABLED = True`/
 `_HEADER_GRAPH_INCLUDES_ENABLED = True`; `service.resolve_input()` and
 `service.run_dump()` no longer accept `header_graph`/`header_graph_includes`
@@ -2366,8 +2384,11 @@ identity layer to exist before it can be defined precisely).
   scope for this plan the same way it was out of scope for ADR-041's
   original addendum; a separate design decision, not a mechanical
   extension of Phases B–D.
-- Directory/package `compare` and the raw `--old-sources`/`--new-sources`
-  inline-embed path gaining the graph — both remain structural gaps
-  Phase A explicitly did not close; closing them would need routing those
-  paths through `service.run_dump`'s attach step (or an equivalent), which
-  is its own scoped follow-up, not implied by anything in Phases B–D above.
+- The raw `--old-sources`/`--new-sources` inline-embed path gaining the
+  graph — still a structural gap Phase A did not close (that path reloads
+  from a JSON snapshot which never attaches one); closing it would need
+  routing it through `service.run_dump`'s attach step (or an equivalent),
+  which is its own scoped follow-up, not implied by anything in Phases B–D
+  above. **Directory/package `compare` is no longer in this bullet**: it
+  does build the graph per member whenever headers are supplied — see the
+  correction on Phase A above, and the executed parity test it names.

@@ -50,6 +50,33 @@ def record_depth_evidence_contract_error(
         record_depth_evidence_contract_error as _record,
     )
 
-    _record(
-        result, depth, old, new, old_is_live=old_is_live, new_is_live=new_is_live
+    _record(result, depth, old, new, old_is_live=old_is_live, new_is_live=new_is_live)
+
+
+def record_for_compare_request(
+    result: Any, request: Any, old: AbiSnapshot, new: AbiSnapshot
+) -> None:
+    """Record the axis for a resolved :class:`CompareRequest`'s own two sides.
+
+    The liveness half lives here rather than at the call site (PR #1195): it
+    is a fact about how *this run* obtained each side, and deriving it needs
+    ``workflows.input_resolution.side_is_live``'s rule, which
+    ``policy`` may not import at all (ADR-061's dependency direction). Doing
+    it here keeps one answer for every caller that has a ``CompareRequest``,
+    instead of each one re-deriving liveness beside its own call.
+
+    Liveness comes from the ``InputSpec``, never from the resolved snapshot's
+    ``old_fmt``/``new_fmt``: `detect_binary_format` answers ``None`` for a GNU
+    ld linker script that this run *does* follow and parse, which would read
+    as "stored" and skip the axis for a genuinely live side (Codex review).
+    """
+    from .input_resolution import input_spec_is_live
+
+    record_depth_evidence_contract_error(
+        result,
+        request.depth,
+        old,
+        new,
+        old_is_live=input_spec_is_live(request.old),
+        new_is_live=input_spec_is_live(request.new),
     )

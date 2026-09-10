@@ -383,12 +383,16 @@ def compare_release_cmd(
     # operand and for a package declaring exactly one variant.
     old_variant: str | None = None,
     new_variant: str | None = None,
-    # D1: `compare`'s directory/package fan-out forwards the one `--depth`
-    # value it can actually honour on this path -- `"binary"` (an explicit
-    # assertion that clears header/build/source evidence, matching a
-    # single-pair `compare --depth binary`) -- resolved ahead of dispatch by
-    # `cli_resolve._reject_depth_for_set_inputs`, which rejects every other
-    # rung outright. `None` (the default) is a true no-op, matching every
+    # `compare`'s directory/package fan-out forwards the run's `--depth` pin
+    # verbatim -- any rung of the public ladder, resolved ahead of dispatch
+    # by `cli_compare_options._resolve_depth_for_set_inputs`. That function
+    # used to reject everything but `"binary"`; it no longer rejects
+    # anything, because each member pair is floor-checked
+    # (`enforce_requested_depth`) and depth-projected
+    # (`project_pair_to_depth`) by the same `service.run_compare` a
+    # single-pair compare uses, so a member short of the requested rung
+    # fails as that member's own `ERROR` result rather than as one whole-run
+    # usage error. `None` (the default) is a true no-op, matching every
     # pre-existing caller.
     depth: str | None = None,
     # Codex review (PR #1154 follow-up): `compare`'s directory/package

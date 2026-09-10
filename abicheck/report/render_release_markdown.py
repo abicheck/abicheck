@@ -43,6 +43,7 @@ __all__ = [
     "_release_md_bundle_findings",
     "_release_md_changed_libraries",
     "_release_md_coverage_warnings",
+    "_release_md_evidence_contract",
     "_release_md_libraries_table",
     "_release_md_matrix_findings",
 ]
@@ -80,6 +81,45 @@ def _release_md_coverage_warnings(
         for w in cast(list[str], lib.get("coverage_warnings") or [])
     ]
     return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
+
+
+def _release_md_evidence_contract(
+    library_results: list[dict[str, object]],
+) -> list[str]:
+    """Members whose pinned ``--depth`` rung their own evidence never reached.
+
+    ADR-064's exit-7 axis, rendered because this document is written *before*
+    the exit is taken: without it a release exiting 7 produced a Markdown
+    report with no mention of why, the same way its JSON said `exit.code: 0`
+    and its JUnit said `errors="0"` before those were fixed (Codex review).
+    Absent when no member recorded the axis, so a run with no ``--depth`` pin
+    is unchanged.
+
+    States the axis's **contribution**, never "this release exits 7": a
+    dominant axis can outrank it, and does -- a `not_comparable` member sends
+    the same release to 16 (`policy.exit_decision_precedence.
+    resolve_release_exit_decision`). Only the canonical `ExitDecision` knows
+    the outcome; this section knows one input to it, and says only that
+    (Codex review). Same phrasing the coverage-warnings section above uses,
+    for the same reason.
+    """
+    affected = [
+        f"- `{lib['library']}`"
+        for lib in library_results
+        if lib.get("evidence_contract_error_contribution")
+    ]
+    if not affected:
+        return []
+    return [
+        "",
+        "## ⚠️ Requested Evidence Depth Not Reached",
+        "",
+        *affected,
+        "",
+        "The pinned `--depth` rung was not met for the members above, so their "
+        "findings rest on shallower evidence than was asked for. Contributes 7 "
+        "to the release exit code (ADR-064 evidence-contract axis).",
+    ]
 
 
 def _release_md_changed_libraries(

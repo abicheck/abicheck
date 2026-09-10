@@ -365,12 +365,23 @@ def _finalize_release_output(
                 err=True,
             )
 
+    # ADR-064's evidence-contract axis (exit 7). The notice is this layer's
+    # own business (the per-member `DiffResult` is gone by now, so the note a
+    # single-pair run renders cannot be); the *decision* is not -- it goes
+    # through `_exit_compare_release` like every other axis, so the process
+    # exit and the persisted `exit` block cannot disagree.
+    from .cli_compare_release_helpers import _release_global_verdict
+
     _exit_compare_release(
         worst_verdict,
         fail_on_removed,
         removed_keys,
         severity_exit_code,
         contract_coverage_exit_contribution=contract_coverage_exit_contribution,
+        # The evidence-contract axis and its stderr notice are both derived
+        # from these, by the one resolver the persisted `exit` block reads.
+        library_results=library_results,
+        release_global_verdict=_release_global_verdict(bundle_result, matrix_result),
         incomplete_scope_exit_contribution=(
             scope_terms.decision.incomplete_scope_exit_contribution
             if scope_terms

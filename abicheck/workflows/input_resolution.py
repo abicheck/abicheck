@@ -220,6 +220,24 @@ def side_is_live(path: Path, *, had_raw_evidence: bool = False) -> bool:
     return had_raw_evidence or not is_stored_snapshot_operand(path)
 
 
+def input_spec_is_live(spec: Any) -> bool:
+    """:func:`side_is_live` for a typed :class:`~abicheck.api_types.InputSpec`.
+
+    The typed API's counterpart to the native CLI's own
+    ``side_is_live(path, had_raw_evidence=_needs_inline_embed(...))`` call --
+    same rule, same owner, so the two front ends cannot answer "did this run
+    extract it?" differently. A stored-snapshot operand handed a raw
+    ``sources``/``build_info`` tree *is* extracted by this run, so the depth
+    floor applies to it even though the operand itself was pre-built.
+
+    Typed loosely (``Any``) rather than importing ``InputSpec``: this module
+    is a ``workflows`` leaf and ``api_types`` is not below it.
+    """
+    return side_is_live(
+        spec.path, had_raw_evidence=bool(spec.sources or spec.build_info)
+    )
+
+
 def _resolve_project_snapshot_directory(path: Path) -> AbiSnapshot:
     """*path* as a directory-backed ADR-062/ADR-063 storage-v2
     `ProjectSnapshot` package (`project_snapshot_legacy
