@@ -36,6 +36,7 @@ from .documents import (  # noqa: F401 -- re-exported: `abicheck.schemas` is the
     load_audit_report_schema as load_audit_report_schema,
     load_compare_report_schema as load_compare_report_schema,
 )
+from .release_schema import RELEASE_SCHEMA_VERSION
 
 #: Artifact names :func:`current` accepts, each mapped to the module-level
 #: constant that already owns its version (ADR-055 D3). Read-only lookup
@@ -1210,21 +1211,10 @@ REPORT_SCHEMA_VERSION = "4.0"  #: 4.0 -- see the comment immediately above.
 SCAN_SCHEMA_VERSION = "1.32"
 
 
-#: SemVer-style (MAJOR.MINOR) version of the directory/package release JSON
-#: envelope (`compare-release`'s per-run document,
-#: ``cli_compare_release_helpers._format_release_json``).
-#:
-#: 1.0 -- introduced (Codex review, findings-fixes round 11): this document
-#:       had no schema-version field at all before this constant, so a
-#:       consumer could not tell a release document predating the
-#:       ``compatible_additions`` correction (report schema 4.0: additions
-#:       only, excluding ``quality_issues``) apart from one written after
-#:       it -- both used the identical field name under two different
-#:       meanings. A document with no ``release_schema_version`` key
-#:       predates this constant and may carry either meaning depending on
-#:       which abicheck version produced it, with no reliable way to tell
-#:       from the payload alone; 1.0+ always carries the corrected value.
-RELEASE_SCHEMA_VERSION = "1.0"
+# The directory/package release envelope's own version and version history
+# live in `release_schema.py` (see that module's docstring for why); the
+# re-export at the top of this file keeps `schemas.RELEASE_SCHEMA_VERSION`
+# and `schemas.current("release")` unchanged.
 
 
 def current(name: str) -> str | int:

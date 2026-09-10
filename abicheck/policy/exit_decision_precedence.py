@@ -128,11 +128,33 @@ def _dominant_decision(
     compatibility contribution of `4`). Fail loudly instead.
     """
     dominant_field = _DOMINANT_FIELD[reason]
-    # Ignored when this *is* the dominant axis; preserved for every other, so
-    # a release that is `not_comparable` *and* short of its pinned rung still
-    # reports the shortfall (Codex review).
-    if dominant_field == "evidence_contract_error_contribution":
-        evidence_contract_error_contribution = 0
+    # One mapping built once, then used for *both* the guard's `preserved`
+    # tuple and the constructed `ExitDecision`, so the two cannot disagree
+    # about which axes this decision carries. Two earlier revisions listed
+    # them separately and a field added to the signature reached neither
+    # (Codex review, twice: `evidence_contract_error_contribution`, then
+    # `removed_required_library_contribution`) -- accepted as a keyword,
+    # silently dropped from the result, and invisible to the guard that is
+    # supposed to catch exactly that. A field added to the signature from
+    # here on has to be added to this mapping to be accepted at all.
+    raw: dict[str, int] = {
+        "compatibility_contribution": compatibility_contribution,
+        "contract_coverage_contribution": contract_coverage_contribution,
+        "analysis_assurance_contribution": analysis_assurance_contribution,
+        "evidence_contract_error_contribution": evidence_contract_error_contribution,
+        "removed_required_library_contribution": (
+            removed_required_library_contribution
+        ),
+        "operational_error_contribution": operational_error_contribution,
+        "incomplete_scope_contribution": incomplete_scope_contribution,
+        "no_comparison_completed_contribution": no_comparison_completed_contribution,
+    }
+    # A field that is *also* the dominant axis is not a preserved value: it
+    # is set to `code` below. Generic, where this was a hand-written special
+    # case for the one field that then applied -- two of the eight are now
+    # both preservable and dominant-capable.
+    if dominant_field in raw:
+        raw[dominant_field] = 0
     preserved: tuple[int, ...]
     if prior is not None:
         preserved = (
@@ -141,19 +163,12 @@ def _dominant_decision(
             prior.analysis_assurance_contribution,
             prior.crosscheck_promotion_contribution,
             prior.operational_error_contribution,
+            prior.removed_required_library_contribution,
             prior.incomplete_scope_contribution,
             prior.no_comparison_completed_contribution,
         )
     else:
-        preserved = (
-            compatibility_contribution,
-            contract_coverage_contribution,
-            analysis_assurance_contribution,
-            evidence_contract_error_contribution,
-            operational_error_contribution,
-            incomplete_scope_contribution,
-            no_comparison_completed_contribution,
-        )
+        preserved = tuple(raw.values())
     if code <= max(preserved, default=0):
         raise ValueError(
             f"{reason.value}'s code ({code}) must strictly exceed every "
@@ -176,20 +191,19 @@ def _dominant_decision(
             no_comparison_completed_contribution=(
                 prior.no_comparison_completed_contribution
             ),
-            **{dominant_field: code},
+            **{
+                # `dominant_field` may name one of the fields above, so this
+                # is a mapping rather than a keyword: passing both would be
+                # a duplicate-keyword TypeError. Dominant assigned last.
+                **{
+                    "removed_required_library_contribution": (
+                        prior.removed_required_library_contribution
+                    )
+                },
+                dominant_field: code,
+            },
         )
-    # One mapping, not explicit keywords: `dominant_field` may name a field
-    # this function also preserves (evidence-contract is both), and passing
-    # both would be a duplicate-keyword TypeError. Dominant assigned last.
-    contributions = {
-        "compatibility_contribution": compatibility_contribution,
-        "contract_coverage_contribution": contract_coverage_contribution,
-        "analysis_assurance_contribution": analysis_assurance_contribution,
-        "evidence_contract_error_contribution": evidence_contract_error_contribution,
-        "operational_error_contribution": operational_error_contribution,
-        "incomplete_scope_contribution": incomplete_scope_contribution,
-        "no_comparison_completed_contribution": no_comparison_completed_contribution,
-    }
+    contributions = dict(raw)
     contributions[dominant_field] = code
     return ExitDecision(code=code, reasons=(reason,), **contributions)
 

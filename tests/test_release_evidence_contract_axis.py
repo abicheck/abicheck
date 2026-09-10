@@ -433,3 +433,97 @@ class TestTheDecoderIsHonestAboutInputItCannotRead:
             ["not-a-dict", None, {"library": "a", "verdict": "BREAKING"}],  # type: ignore[list-item]
         )
         assert decision.code == 4
+
+
+class TestNoContributionPassedToADominantDecisionIsSilentlyDropped:
+    """The bug class behind two separate Codex findings on this PR.
+
+    `_dominant_decision` accepts a contribution keyword, then rebuilds the
+    `ExitDecision` from a hand-listed set of fields. Twice now a field was
+    added to the signature and not to that list -- accepted by the caller,
+    silently absent from the result, and invisible to the guard that exists
+    to catch a decision whose `code` is not `max(contributions)`. The first
+    time it hid a depth shortfall; the second it hid a proven removed
+    library, flipping `run_outcome.gate` to `none`.
+
+    Naming a third field here would repeat the mistake, so this derives the
+    field list from the signature itself: whatever `_dominant_decision`
+    accepts, it must also carry. A field added later is covered without
+    anyone remembering to add a case.
+    """
+
+    @staticmethod
+    def _contribution_keywords() -> list[str]:
+        import inspect
+
+        from abicheck.policy.exit_decision_precedence import _dominant_decision
+
+        return [
+            name
+            for name, param in inspect.signature(_dominant_decision).parameters.items()
+            if name.endswith("_contribution")
+            and param.default is not inspect.Parameter.empty
+        ]
+
+    def test_the_signature_actually_exposes_contribution_keywords(self) -> None:
+        """Guard the guard: an empty list would make the sweep vacuous."""
+        assert len(self._contribution_keywords()) >= 6
+
+    @pytest.mark.parametrize("dominant_code", (5, 9))
+    def test_every_accepted_contribution_survives_into_the_decision(
+        self, dominant_code: int
+    ) -> None:
+        from abicheck.policy.exit_decision import ExitReason
+        from abicheck.policy.exit_decision_precedence import _dominant_decision
+
+        for keyword in self._contribution_keywords():
+            # `NOT_COMPARABLE`'s own field is not among the keywords, so it
+            # is never the dominant axis for any field under test here.
+            decision = _dominant_decision(
+                dominant_code,
+                ExitReason.NOT_COMPARABLE,
+                **{keyword: 1},
+            )
+            assert getattr(decision, keyword) == 1, (
+                f"{keyword} was accepted by _dominant_decision but is absent "
+                f"from the ExitDecision it built (got "
+                f"{getattr(decision, keyword)!r})"
+            )
+            assert decision.code == dominant_code
+
+    def test_a_custom_code_below_a_passed_contribution_is_rejected(self) -> None:
+        """The guard must see every field too, not just the listed ones.
+
+        A contribution missing from the *preserved* tuple is worse than one
+        missing from the result: the `code == max(contributions)` check
+        cannot fire, so an illegal decision is constructed rather than
+        refused.
+        """
+        from abicheck.policy.exit_decision import ExitReason
+        from abicheck.policy.exit_decision_precedence import _dominant_decision
+
+        for keyword in self._contribution_keywords():
+            with pytest.raises(ValueError, match="must strictly exceed"):
+                _dominant_decision(2, ExitReason.NOT_COMPARABLE, **{keyword: 4})
+
+    def test_the_custom_removal_code_case_end_to_end(self) -> None:
+        """Codex's own reproduction, through the public resolver.
+
+        A caller using the documented custom-code support with a removal
+        code *below* the evidence code takes the fallback branch, where the
+        removal contribution was being dropped -- reporting `gate: none`
+        for a release with a proven removed library.
+        """
+        from abicheck.policy.outcome_release import run_outcome_dict_for_release
+
+        decision = _release_decision(
+            removed_required_library=True,
+            severity_scheme_active=True,
+            evidence_contract_error_contribution=7,
+            removed_required_library_code=6,
+        )
+        assert decision.code == 7
+        assert decision.removed_required_library_contribution == 6
+        outcome = run_outcome_dict_for_release("NO_CHANGE", decision.to_dict())
+        assert outcome["gate"] == "abi_breaking"
+        assert outcome["operational"] == "evidence_contract_error"
