@@ -250,6 +250,17 @@ def effective_gate_for_resolved_compare_config(
     caller that genuinely has neither (a bare config-only comparison, as
     ``tests/test_effective_gate.py``'s parity property exercises) is
     unaffected.
+
+    ``on_incomplete_scope``/``fail_on_removed_library`` (Codex review, PR
+    #1192, third follow-up round) are deliberately left at ``EffectiveGate``'s
+    default (``None``, "not applicable") here even though *cfg* itself
+    carries both -- ``cfg.on_incomplete_scope``/``cfg.fail_on_removed_
+    library`` exist on ``ResolvedCompareConfig`` only to be *forwarded* to
+    the directory/package release fan-out if this invocation turns out to
+    dispatch there; they describe that separate, not-yet-decided run's own
+    scope, not this single-pair ``cfg``'s. ``GateOptions.effective_gate``
+    (``policy/release_gate_options.py``) is where those two axes are real at
+    the object's own scope, once resolved for the release fan-out itself.
     """
     return EffectiveGate.from_severity(
         cfg.severity if cfg.severity_active else None,

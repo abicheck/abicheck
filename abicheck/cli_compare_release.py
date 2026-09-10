@@ -712,6 +712,14 @@ def compare_release_cmd(
             # `_compute_release_severity_exit_code`,
             # `_fold_release_global_severity`) now reads the resulting
             # `GateOptions` instead of independently re-deriving it.
+            # Codex review, PR #1192, third follow-up round: `on_incomplete_
+            # scope`/`fail_on_removed` are this run's own already-resolved
+            # ADR-065 release-scope axes (the identical locals `compare_
+            # keys`'s scope-decision resolution and `_exit_compare_release`
+            # read below) -- passed straight through so `GateOptions`/
+            # `EffectiveGate`'s own digest-facing fields cannot silently
+            # disagree with the values that actually govern this run's exit
+            # code.
             gate = resolve_release_gate_options(
                 pack_application,
                 severity_preset=severity_preset,
@@ -719,6 +727,8 @@ def compare_release_cmd(
                 severity_potential_breaking=severity_potential_breaking,
                 severity_quality_issues=severity_quality_issues,
                 severity_addition=severity_addition,
+                on_incomplete_scope=on_incomplete_scope,
+                fail_on_removed_library=fail_on_removed,
             )
             # Resolved before the compare pass (its inputs are plain CLI values, no
             # dependency on compare results) so persisted per-library annotations

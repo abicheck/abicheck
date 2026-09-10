@@ -753,6 +753,7 @@ def _release_summary_effective_config_block(
     pack_application: PackApplication | None = None,
     scope_public_headers: bool = True,
     on_incomplete_scope: str = "",
+    fail_on_removed_library: bool | None = None,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -766,35 +767,29 @@ def _release_summary_effective_config_block(
     ``policy.base``/``policy.reclassify``/``policy.overrides``/
     ``suppressions`` all read empty regardless of the real
     ``--policy``/``--policy-file``/``--suppress`` every library was
-    actually compared under, as if no policy existed at all. Every library
-    shares one such input (the per-library fan-out reloads it once per
-    library), so resolving it once more here the same way
+    actually compared under. Resolving it once more here the same way
     (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
     folding *pack_application* like
     :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
     does) reproduces what any one library's own report shows for these
-    fields. Reloaded rather than threaded down because no per-library
-    ``PolicyFile`` is retained at this scope -- the reload runs inside the
+    fields; reloaded rather than threaded down since no per-library
+    ``PolicyFile`` is retained at this scope (the reload runs inside the
     same ``dedup_validate_overrides_warnings()`` scope ``compare_release_cmd``
-    opens, so it doesn't duplicate a warning already logged per-library.
+    opens, so it doesn't duplicate a per-library warning).
 
-    Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``
-    -- lives here since both callers are at their own ``no_growth`` cap.
+    Called from ``cli_compare_release_helpers``/``cli_compare_release_matrix``/
+    ``frontends.cli.release_summary`` (all three at their own ``no_growth``
+    cap, hence living here).
 
-    *scope_public_headers* (found by a generalized parity test, PR #1016,
-    once the ``policy.base`` fix above showed the class was worth searching
-    for systematically): the same bug shape as ``policy`` above, just for a
-    second field. ``effective_config_fields_from_diff_result`` reads
+    *scope_public_headers* (PR #1016): same bug shape as ``policy`` above,
+    for a second field -- ``effective_config_fields_from_diff_result`` reads
     ``result.scope_to_public_surface``/``.scope_to_public_surface_requested``
-    off whatever it's given; a bare ``SimpleNamespace`` that never sets them
-    falls back to that function's own ``getattr(..., default)`` -- ``False``/
-    ``True`` respectively -- regardless of what ``--scope-public-headers``/
-    ``--no-scope-public-headers`` actually resolved to for this run, exactly
-    as ``policy``/``policy_file`` did before P1. The release fan-out has no
-    ``--post-manifest``/forced-public-symbols concept of its own (unlike a
-    single-pair ``compare``, where ``scope_to_public_surface`` can diverge
-    from ``scope_to_public_surface_requested`` when a forced-public-symbols
-    allowlist is active), so both fields are simply the raw CLI value here.
+    off whatever it's given, so a bare unset ``SimpleNamespace`` would fall
+    back to ``False``/``True`` regardless of what ``--scope-public-headers``
+    actually resolved to. The release fan-out has no ``--post-manifest``/
+    forced-public-symbols concept of its own (unlike single-pair ``compare``,
+    where the two can diverge), so both fields are simply the raw CLI value
+    here.
     """
     from types import SimpleNamespace
 
@@ -822,14 +817,20 @@ def _release_summary_effective_config_block(
         ),
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
-        on_incomplete_scope=on_incomplete_scope,  # ADR-065 D6: warn/block exit differently
         # ADR-068 D4/Phase 5 + §4.1's AUTO rows: modulation, surface metrics and ADR-039 reconciliation are unconditional now (forced on at the Tier-2 chokepoint every library here routes through), so this stand-in must agree rather than default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,
         reconcile_build_context_enabled=True,
     )
-    # No result/require_complete_analysis/scope at this release-summary scope.
-    gate = EffectiveGate.from_severity(severity_config)
+    # No result/require_complete_analysis/scope at this release-summary
+    # scope, but on_incomplete_scope/fail_on_removed_library ARE (Codex
+    # review, PR #1192, fourth round) -- read from `gate.*` below, not the
+    # now-removed `ec_result.on_incomplete_scope` this used to set instead.
+    gate = EffectiveGate.from_severity(
+        severity_config,
+        on_incomplete_scope=on_incomplete_scope or None,
+        fail_on_removed_library=fail_on_removed_library,
+    )
     ec_fields = effective_config_fields(ec_result, gate=gate)
     return effective_config_digest(ec_fields), ec_fields
 

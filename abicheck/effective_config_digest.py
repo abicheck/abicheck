@@ -132,6 +132,7 @@ EFFECTIVE_CONFIG_FIELD_KEYS: tuple[str, ...] = (
     "gate.severity.quality_issues",
     "gate.severity.addition",
     "gate.on_incomplete_scope",
+    "gate.fail_on_removed_library",
     "assurance.require_evidence",
     "suppressions",
     "packs",
@@ -220,14 +221,35 @@ def _builtin_policy_base_str(name: Any) -> str:
         return name_str
 
 
-def _on_incomplete_scope_str(result: Any) -> str:
+def _on_incomplete_scope_str_from_gate(gate: EffectiveGate) -> str:
     """ADR-065 D6's ``--on-incomplete-scope`` policy (``warn``/``block``)
-    for a directory/package release, read off *result*; ``""`` for a
-    scalar comparison, whose one pair is the whole scope and to which the
-    policy does not apply. Two otherwise identical incomplete releases
-    exit ``0`` and ``1`` under the two values, so the digest must tell
-    them apart (Codex review)."""
-    return str(getattr(result, "on_incomplete_scope", "") or "")
+    for a directory/package release, read off *gate*; ``""`` when *gate*
+    carries no such axis (a scalar comparison, whose one pair is the whole
+    scope and to which the policy does not apply). Two otherwise identical
+    incomplete releases exit ``0`` and ``1`` under the two values, so the
+    digest must tell them apart (Codex review).
+
+    Reads ``gate.on_incomplete_scope`` exclusively (Codex review, PR #1192,
+    third follow-up round: this used to read ``result.on_incomplete_scope``
+    directly -- a second, independently-derived projection of the same fact
+    ``EffectiveGate`` is supposed to be the one source for, the identical
+    "wrapper that happens to agree, not the actual source" gap the prior two
+    rounds closed for severity/completeness-analysis/scope)."""
+    return str(gate.on_incomplete_scope or "")
+
+
+def _fail_on_removed_library_str_from_gate(gate: EffectiveGate) -> str:
+    """ADR-065's ``--fail-on-removed-library`` flag, read off *gate*; ``""``
+    when *gate* carries no such axis (a scalar comparison has no removed-
+    library concept of its own). Two otherwise identical releases with a
+    proven-removed library exit ``0``/``8`` under the two values of this
+    flag, so the digest must tell them apart (Codex review, PR #1192, third
+    follow-up round -- the same class of gap as ``on_incomplete_scope``
+    above, for the sibling release-scope axis Codex's finding named
+    directly)."""
+    if gate.fail_on_removed_library is None:
+        return ""
+    return str(bool(gate.fail_on_removed_library))
 
 
 def _gate_scope_str_from_gate(gate: EffectiveGate) -> str:
@@ -496,7 +518,8 @@ def effective_config_fields_from_full_config(
             gate.severity, "quality_issues"
         ),
         "gate.severity.addition": _severity_field(gate.severity, "addition"),
-        "gate.on_incomplete_scope": _on_incomplete_scope_str(result),
+        "gate.on_incomplete_scope": _on_incomplete_scope_str_from_gate(gate),
+        "gate.fail_on_removed_library": _fail_on_removed_library_str_from_gate(gate),
         "assurance.require_evidence": str(
             bool(getattr(assurance, "require_evidence", True))
         ),
@@ -584,7 +607,8 @@ def effective_config_fields_from_diff_result(
             gate.severity, "quality_issues"
         ),
         "gate.severity.addition": _severity_field(gate.severity, "addition"),
-        "gate.on_incomplete_scope": _on_incomplete_scope_str(result),
+        "gate.on_incomplete_scope": _on_incomplete_scope_str_from_gate(gate),
+        "gate.fail_on_removed_library": _fail_on_removed_library_str_from_gate(gate),
         "assurance.require_evidence": "",
         "suppressions": str(getattr(result, "suppression_source_sha256", "") or ""),
         "packs": "",
@@ -663,6 +687,8 @@ def effective_config_fields_from_raw(
     severity_config: SeverityConfig | None,
     exit_code_scheme: str,
     require_complete_analysis: bool = False,
+    on_incomplete_scope: str | None = None,
+    fail_on_removed_library: bool | None = None,
 ) -> dict[str, str]:
     """:func:`effective_config_fields`, for a caller with no already-built
     ``EffectiveGate`` of its own -- exercising the field-computation logic
@@ -692,6 +718,8 @@ def effective_config_fields_from_raw(
         severity_config,
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
+        on_incomplete_scope=on_incomplete_scope,
+        fail_on_removed_library=fail_on_removed_library,
     )
     if exit_code_scheme != gate.exit_code_scheme:
         gate = dataclasses.replace(gate, exit_code_scheme=exit_code_scheme)

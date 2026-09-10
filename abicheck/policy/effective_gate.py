@@ -204,12 +204,29 @@ class EffectiveGate:
     otherwise-identical run's gate outcome on its own, so a caller comparing
     two ``EffectiveGate`` values for "would these gate the same way" must see
     all four fields, not severity alone.
+
+    ``on_incomplete_scope``/``fail_on_removed_library`` (Codex review, PR
+    #1192, third follow-up round) are ADR-065's directory/package release
+    axes: ``on_incomplete_scope`` (``"warn"``/``"block"``) decides whether an
+    incomplete required member raises the exit code at all, and
+    ``fail_on_removed_library`` decides whether a proven removal raises exit
+    ``8`` -- the identical "two otherwise-identical runs exit differently"
+    shape ``require_complete_analysis``/``scope`` already state above, just
+    for the release fan-out's own two knobs rather than a single-pair
+    ``compare``'s. ``None`` means "not applicable at this run's own scope" --
+    a bare single-pair ``compare`` never resolves a scope-completeness
+    policy for itself (see ``workflows.gate.
+    effective_gate_for_resolved_compare_config``'s own docstring), so the
+    field must be able to say "no such axis here" distinctly from a real,
+    resolved ``"warn"``/``False``.
     """
 
     exit_code_scheme: str
     severity: SeverityConfig | None
     require_complete_analysis: bool = False
     scope: ScopedGateSelection | None = None
+    on_incomplete_scope: str | None = None
+    fail_on_removed_library: bool | None = None
 
     @classmethod
     def from_severity(
@@ -218,6 +235,8 @@ class EffectiveGate:
         *,
         require_complete_analysis: bool = False,
         scope: ScopedGateSelection | None = None,
+        on_incomplete_scope: str | None = None,
+        fail_on_removed_library: bool | None = None,
     ) -> EffectiveGate:
         """Build the one derived-scheme ``EffectiveGate`` for *severity*
         (``None`` meaning "no severity setting is in effect") -- the single
@@ -230,4 +249,6 @@ class EffectiveGate:
             severity=severity,
             require_complete_analysis=require_complete_analysis,
             scope=scope,
+            on_incomplete_scope=on_incomplete_scope,
+            fail_on_removed_library=fail_on_removed_library,
         )

@@ -32,9 +32,12 @@ invariant" bug-fix-test-contract expectation.
 from __future__ import annotations
 
 import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 from hypothesis import given, strategies as st
+from test_release_selection import _invoke, _snap, _write_snap
 
 from abicheck.cli_helpers_compare import resolve_compare_config
 from abicheck.pack_application import PackApplication, apply_to_compare_config
@@ -402,3 +405,173 @@ class TestEffectiveGateForResolvedCompareConfigCarriesRealAxes:
         assert gate == EffectiveGate.from_severity(cfg.severity)
         assert gate.require_complete_analysis is False
         assert gate.scope is None
+
+    def test_release_scope_axes_stay_not_applicable_at_this_scope(self) -> None:
+        """Codex review, PR #1192, fourth follow-up round (finding 6): a
+        bare single-pair ``compare`` never resolves ADR-065's scope-
+        completeness policy for itself -- ``cfg.on_incomplete_scope``/
+        ``cfg.fail_on_removed_library`` exist only to be *forwarded* to a
+        release fan-out this run might dispatch to, so this function must
+        not read them onto its own returned ``EffectiveGate`` (see this
+        function's own docstring)."""
+        cfg = resolve_compare_config(
+            None, cli_severity_preset=None, cli_scope_public=None
+        )
+        assert cfg.on_incomplete_scope == "warn"  # cfg itself does carry it
+        gate = effective_gate_for_resolved_compare_config(cfg)
+        assert gate.on_incomplete_scope is None
+        assert gate.fail_on_removed_library is None
+
+
+class TestReleaseScopeAxesOnEffectiveGate:
+    """Codex review, PR #1192, fourth follow-up round (finding 6): the same
+    "EffectiveGate claims completeness it doesn't have" gap findings 1/4/5
+    closed for require_complete_analysis/scope/severity-completeness, for
+    ADR-065's two directory/package release gate axes --
+    ``--on-incomplete-scope`` and ``--fail-on-removed-library``. Two
+    otherwise-identical release runs differing only in one of these exit
+    differently (``0``/``1``, or ``0``/``8``); before this fix
+    ``EffectiveGate`` stayed silent about both, so it could claim two such
+    runs "gate identically" when they provably do not."""
+
+    def test_two_different_on_incomplete_scope_values_differentiate(self) -> None:
+        warn = EffectiveGate.from_severity(None, on_incomplete_scope="warn")
+        block = EffectiveGate.from_severity(None, on_incomplete_scope="block")
+        assert warn != block
+        assert warn.on_incomplete_scope == "warn"
+        assert block.on_incomplete_scope == "block"
+
+    def test_two_different_fail_on_removed_library_values_differentiate(self) -> None:
+        off = EffectiveGate.from_severity(None, fail_on_removed_library=False)
+        on = EffectiveGate.from_severity(None, fail_on_removed_library=True)
+        assert off != on
+        assert off.fail_on_removed_library is False
+        assert on.fail_on_removed_library is True
+
+    def test_unset_release_axes_default_to_not_applicable(self) -> None:
+        gate = EffectiveGate.from_severity(None)
+        assert gate.on_incomplete_scope is None
+        assert gate.fail_on_removed_library is None
+
+    def test_gate_options_effective_gate_carries_release_scope_axes(self) -> None:
+        warn = GateOptions(
+            severity_preset=None, severity=None, on_incomplete_scope="warn"
+        )
+        block = GateOptions(
+            severity_preset=None, severity=None, on_incomplete_scope="block"
+        )
+        assert warn.effective_gate != block.effective_gate
+        assert warn.effective_gate.on_incomplete_scope == "warn"
+        assert block.effective_gate.on_incomplete_scope == "block"
+
+        off = GateOptions(
+            severity_preset=None, severity=None, fail_on_removed_library=False
+        )
+        on = GateOptions(
+            severity_preset=None, severity=None, fail_on_removed_library=True
+        )
+        assert off.effective_gate != on.effective_gate
+        assert off.effective_gate.fail_on_removed_library is False
+        assert on.effective_gate.fail_on_removed_library is True
+
+    def test_resolve_release_gate_options_threads_axes_through(self) -> None:
+        """The real production resolver (``cli_compare_release.py``'s own
+        call site) must pass these through unchanged -- not merely
+        ``GateOptions``'s own constructor accepting them in a test."""
+        opts = resolve_release_gate_options(
+            None,
+            severity_preset=None,
+            severity_abi_breaking=None,
+            severity_potential_breaking=None,
+            severity_quality_issues=None,
+            severity_addition=None,
+            on_incomplete_scope="block",
+            fail_on_removed_library=True,
+        )
+        assert opts.on_incomplete_scope == "block"
+        assert opts.fail_on_removed_library is True
+        assert opts.effective_gate.on_incomplete_scope == "block"
+        assert opts.effective_gate.fail_on_removed_library is True
+
+    def test_resolve_release_gate_options_defaults_stay_not_applicable(self) -> None:
+        """Every pre-existing caller of ``resolve_release_gate_options`` that
+        does not know about these two axes yet gets the identical "not
+        applicable" default it always did -- adding the parameters cannot
+        change behavior for a caller that omits them."""
+        opts = resolve_release_gate_options(
+            None,
+            severity_preset=None,
+            severity_abi_breaking=None,
+            severity_potential_breaking=None,
+            severity_quality_issues=None,
+            severity_addition=None,
+        )
+        assert opts.on_incomplete_scope is None
+        assert opts.fail_on_removed_library is None
+        assert opts.effective_gate.on_incomplete_scope is None
+        assert opts.effective_gate.fail_on_removed_library is None
+
+
+class TestReleaseScopeAxesReachTheRealDigest:
+    """Codex review, PR #1192, fourth follow-up round (finding 6):
+    production-wiring proof, not just the type's own unit tests -- two real
+    ``compare <dir> <dir>`` release-fan-out runs differing only in
+    ``.abicheck.yml``'s ``scope.on_incomplete``/``gate.fail_on_removed_
+    library`` must report a genuinely different ``effective_config_digest``/
+    ``effective_config_fields``, the same way findings 1/4/5 required for
+    ``--require-complete-analysis``/``--used-by``/severity.
+
+    Asymmetric pre-fix status between the two axes, confirmed by stashing
+    the production fix and re-running both: ``gate.fail_on_removed_library``
+    was previously *absent from the digest entirely* (a real ``KeyError``
+    pre-fix) -- the field genuinely did not exist. ``gate.on_incomplete_
+    scope`` already carried the right *value* pre-fix (read off ``result``
+    rather than off ``EffectiveGate``, so its own dedicated unit tests above
+    are what falsify that half of the gap -- the type itself could not
+    distinguish two configs differing only in this axis, even though the
+    digest happened to read the value from elsewhere); this CLI-level test
+    is its non-regression proof that routing the read through ``gate``
+    instead changes nothing observable."""
+
+    @staticmethod
+    def _run(tmp_path: Path, name: str, config_yaml: str) -> dict[str, object]:
+        old_dir, new_dir = tmp_path / f"{name}_old", tmp_path / f"{name}_new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        cfg = tmp_path / f"{name}.abicheck.yml"
+        cfg.write_text(config_yaml, encoding="utf-8")
+        code, out = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--config", str(cfg), "--format", "json",
+        )
+        assert code == 0
+        data: dict[str, object] = json.loads(out)
+        return data
+
+    def test_on_incomplete_scope_changes_the_release_digest(
+        self, tmp_path: Path
+    ) -> None:
+        warn = self._run(tmp_path, "warn", "scope:\n  on_incomplete: warn\n")
+        block = self._run(tmp_path, "block", "scope:\n  on_incomplete: block\n")
+        warn_fields = warn["effective_config_fields"]
+        block_fields = block["effective_config_fields"]
+        assert isinstance(warn_fields, dict) and isinstance(block_fields, dict)
+        assert warn_fields["gate.on_incomplete_scope"] == "warn"
+        assert block_fields["gate.on_incomplete_scope"] == "block"
+        assert warn["effective_config_digest"] != block["effective_config_digest"]
+
+    def test_fail_on_removed_library_changes_the_release_digest(
+        self, tmp_path: Path
+    ) -> None:
+        off = self._run(
+            tmp_path, "off", "gate:\n  fail_on_removed_library: false\n"
+        )
+        on = self._run(tmp_path, "on", "gate:\n  fail_on_removed_library: true\n")
+        off_fields = off["effective_config_fields"]
+        on_fields = on["effective_config_fields"]
+        assert isinstance(off_fields, dict) and isinstance(on_fields, dict)
+        assert off_fields["gate.fail_on_removed_library"] == "False"
+        assert on_fields["gate.fail_on_removed_library"] == "True"
+        assert off["effective_config_digest"] != on["effective_config_digest"]

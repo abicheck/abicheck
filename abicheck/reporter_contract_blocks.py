@@ -197,6 +197,8 @@ def add_effective_config_digest(
     severity_config: SeverityConfig | None = None,
     exit_code_scheme: str | None = None,
     require_complete_analysis: bool = False,
+    on_incomplete_scope: str | None = None,
+    fail_on_removed_library: bool | None = None,
 ) -> None:
     """CLI cleanup phase two, PR B: the effective-configuration digest --
     "one effective configuration ... with the same effective-config digest
@@ -262,6 +264,8 @@ def add_effective_config_digest(
         severity_config,
         require_complete_analysis=require_complete_analysis,
         scope=scoped_gate_selection_from_result(result),
+        on_incomplete_scope=on_incomplete_scope,
+        fail_on_removed_library=fail_on_removed_library,
     )
     scheme = exit_code_scheme or gate.exit_code_scheme
     if scheme != gate.exit_code_scheme:
