@@ -395,12 +395,9 @@ def _classify_outcome(
 ) -> str:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
-    # source_relative encodes file#scope#name — compare just the file prefix
-    # (before the first separator) to ask "did the declaring file change",
-    # after normalizing each side's path (see _project_relative_path).
-    # Falls back to the SOURCE_DECLARES-edge-derived declaring file (see
-    # _declaring_files) when the node carries no def_file/file attr of its
-    # own.
+    # source_relative is file#scope#name; the file prefix says "did the
+    # declaring file change" (falls back to _declaring_files' edge-derived
+    # file when the node carries none of its own).
     old_file = (
         _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
         or old_declaring_file
@@ -409,24 +406,9 @@ def _classify_outcome(
         _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
         or new_declaring_file
     )
-    # A closure/anonymous-tag's qualified-name spelling embeds its own
-    # source coordinates (`(lambda:foo.h:4:37)`) -- an unrelated edit
-    # elsewhere in the same header shifts an otherwise-unchanged closure to
-    # a new line, which literal `old_qn != new_qn` alone reads as a genuine
-    # rename. Comparing the coordinate-free form instead asks the actual
-    # question this outcome cares about: did anything *other* than the
-    # closure's incidental position change? A real declaring-file move is
-    # still caught below via `old_file`/`new_file`, which never derives from
-    # this marker text -- see `closure_location_free_identity`'s own
-    # docstring for why dropping the discriminator here is safe (this pair
-    # was already matched by canonical-id/alias/structural-context evidence
-    # that never consults this comparison; no new merge rides on it).
-    renamed = (
-        bool(old_qn)
-        and bool(new_qn)
-        and closure_location_free_identity(old_qn)
-        != closure_location_free_identity(new_qn)
-    )
+    old_key = closure_location_free_identity(old_qn)
+    new_key = closure_location_free_identity(new_qn)
+    renamed = bool(old_qn) and bool(new_qn) and old_key != new_key
     moved = bool(old_file) and bool(new_file) and old_file != new_file
     if renamed and not moved:
         return OUTCOME_RENAMED
