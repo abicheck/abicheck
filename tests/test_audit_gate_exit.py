@@ -147,3 +147,43 @@ class TestFoldAuditGateExit:
 
     def test_zero_contribution_never_raises(self) -> None:
         assert fold_audit_gate_exit(0, 0) == 0
+
+
+class TestCompareHelpAllDocumentsTheAuditGateAxis:
+    """The CLI help surface must name this axis, not just
+    ``docs/reference/exit-codes.md`` -- a user reading ``compare --help``/
+    ``--help-all`` has no other way to discover that ``--severity-preset``
+    is the sole switch arming it under ``--no-baseline``. Regression test
+    for the gap: the axis landed (``26978b98``..``08c8748e``) with the docs
+    page updated but the CLI's own docstring and ``--no-baseline`` help=
+    text left describing only the legacy/severity/contract-coverage/
+    P0.4 tables."""
+
+    def test_help_all_mentions_audit_gate_exit_code(self) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(main, ["compare", "--help-all"])
+        assert result.exit_code == 0
+        assert str(AUDIT_GATE_EXIT_CODE) in result.output
+        assert "audit" in result.output.lower()
+
+    def test_help_all_names_severity_preset_as_the_arming_switch(self) -> None:
+        """The one fact a reader cannot get from the exit-code tables
+        alone: which flag actually arms this axis."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(main, ["compare", "--help-all"])
+        assert "--severity-preset" in result.output
+        assert SEVERITY_PRESET_DISABLES_AUDIT_GATE in result.output
+
+    def test_help_all_points_to_exit_codes_doc(self) -> None:
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        result = CliRunner().invoke(main, ["compare", "--help-all"])
+        assert "docs/reference/exit-codes.md" in result.output
