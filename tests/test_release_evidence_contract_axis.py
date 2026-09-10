@@ -290,15 +290,16 @@ class TestTheExitAndTheReportComeFromOneResolution:
             for pair in itertools.combinations_with_replacement(member_verdicts, 2)
         ]
         checked = 0
-        for members, severity, (removed, fail_on), coverage, evidence, scope in (
-            itertools.product(
-                member_sets,
-                [None, 0, 2, 4],
-                [([], False), (["libx"], True)],
-                [0, 1],
-                [0, 7],
-                [0, 1],
-            )
+        for members, severity, (
+            removed,
+            fail_on,
+        ), coverage, evidence, scope in itertools.product(
+            member_sets,
+            [None, 0, 2, 4],
+            [([], False), (["libx"], True)],
+            [0, 1],
+            [0, 7],
+            [0, 1],
         ):
             results: list[dict[str, object]] = [
                 {
@@ -372,3 +373,63 @@ class TestTheExitAndTheReportComeFromOneResolution:
         # The removal still decides and is still gated; the shortfall is
         # additionally reported on the orthogonal operational axis.
         assert with_shortfall == (8, "abi_breaking", "evidence_contract_error")
+
+
+class TestTheDecoderIsHonestAboutInputItCannotRead:
+    """The decode's three fallbacks, which a happy-path test never reaches.
+
+    Each one exists so a malformed or sentinel input degrades to "unknown"
+    rather than to a confident wrong answer -- the failure mode this whole
+    PR keeps running into -- so they are worth asserting rather than
+    leaving as uncovered defensive code.
+    """
+
+    def test_an_operational_sentinel_verdict_reports_unknown_compatibility(
+        self,
+    ) -> None:
+        """`ERROR`/`not_comparable` are not `Verdict` members.
+
+        `compatibility: null` is the honest answer: no real comparison
+        verdict was reached. The dishonest alternative is the floor
+        `NO_CHANGE`, which would read as "nothing changed".
+        """
+        from abicheck.policy.outcome_release import run_outcome_dict_for_release
+
+        decision = _release_decision()
+        for sentinel in ("ERROR", "not_comparable", None):
+            outcome = run_outcome_dict_for_release(sentinel, decision.to_dict())
+            assert outcome["compatibility"] is None, sentinel
+
+    def test_a_compatibility_contribution_outside_the_gate_scale_is_dropped(
+        self,
+    ) -> None:
+        """A contribution that is not a gate exit code cannot name a gate.
+
+        Reading it through anyway would invent a `PolicyGateDecision` from a
+        number the gate scale has no meaning for.
+        """
+        from abicheck.policy.outcome_release import run_outcome_dict_for_release
+
+        block = dict(_release_decision().to_dict())
+        block["compatibility_contribution"] = 3  # not a gate code (0/1/2/4)
+        assert run_outcome_dict_for_release("NO_CHANGE", block)["gate"] == "none"
+
+    def test_a_non_mapping_member_entry_is_skipped_not_fatal(self) -> None:
+        """`library_results` is decoded from JSON, so it can hold anything.
+
+        A release must not crash on one malformed member entry while
+        computing its own exit code.
+        """
+        from abicheck.policy.release_exit_decision import (
+            resolve_release_exit_decision_for_report,
+        )
+
+        decision = resolve_release_exit_decision_for_report(
+            "BREAKING",
+            False,
+            [],
+            None,
+            0,
+            ["not-a-dict", None, {"library": "a", "verdict": "BREAKING"}],  # type: ignore[list-item]
+        )
+        assert decision.code == 4
