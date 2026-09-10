@@ -48,6 +48,7 @@ def add_contract_context(
     require_complete_analysis: bool = False,
     severity_config: SeverityConfig | None = None,
     include_exit_decision: bool = True,
+    today: date | None = None,
 ) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
     ``analysis_assurance``/``analysis_assurance_exit_contribution`` and CLI
@@ -60,6 +61,9 @@ def add_contract_context(
     :mod:`abicheck.contract_context_io` to match
     :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
     all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
+    *today*, forwarded to the ``exit`` block's resolver and to
+    :func:`add_annotations`, keeps both agreeing with an already-frozen
+    ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from .analysis_assurance import (
         analysis_assurance_exit_contribution,
@@ -119,8 +123,9 @@ def add_contract_context(
             severity_config,
             scheme,
             require_complete_analysis=require_complete_analysis,
+            today=today,
         ).to_dict()
-    add_annotations(d, result, severity_config=severity_config)
+    add_annotations(d, result, severity_config=severity_config, today=today)
     add_use_case_impact(d, result, displayed)
     # Same `include_exit_decision` gate as the `exit` block above, for the
     # identical reason (Codex review, PR #803, fresh evidence): the digest's
@@ -556,6 +561,7 @@ def add_annotations(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> None:
     """CLI cleanup phase two, PR E: persist ``annotations`` (schema 2.43).
 
@@ -576,5 +582,5 @@ def add_annotations(
     from .annotations import annotation_report_entries
 
     d["annotations"] = annotation_report_entries(
-        result, severity_config=severity_config
+        result, severity_config=severity_config, today=today
     )

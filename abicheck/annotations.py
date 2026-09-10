@@ -36,6 +36,8 @@ from .checker_policy import (
 from .contract_gating import is_evaluated
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .finding_identity import MissingContractFinding
     from .severity import IssueCategory, KindSets, SeverityConfig
 
@@ -163,6 +165,7 @@ def _category_for_change_severity(
     *,
     policy: str | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> IssueCategory:
     """Return the severity-aware :class:`~abicheck.severity.IssueCategory` for *change*.
 
@@ -174,12 +177,14 @@ def _category_for_change_severity(
     override downgrade a frozen-namespace violation below its raw verdict)
     only fires when ``policy_file`` itself is passed to
     ``classify_effective_change`` — omitting it would let this annotation
-    under-report a finding that still fails CI at its raw severity.
+    under-report a finding that still fails CI at its raw severity. *today*,
+    forwarded there too, keeps this agreeing with an already-frozen
+    ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from .severity import classify_effective_change
 
     return classify_effective_change(
-        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file, today=today,
     )
 
 
@@ -337,6 +342,7 @@ def _collect_annotations_detailed(
     *,
     annotate_additions: bool = False,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> list[tuple[int, str, bool]]:
     """Collect (sort_key, line, always_visible) triples for a DiffResult.
 
@@ -426,7 +432,7 @@ def _collect_annotations_detailed(
             continue
         category = _category_for_change_severity(
             change, kind_sets,
-            policy=diff_result.policy, policy_file=diff_result.policy_file,
+            policy=diff_result.policy, policy_file=diff_result.policy_file, today=today,
         )
         if severity_config is not None:
             level = _annotation_level_for_category(
@@ -442,7 +448,7 @@ def _collect_annotations_detailed(
             category=category,
             effective_verdict=effective_verdict_for_change(
                 change, policy=diff_result.policy, kind_sets=kind_sets,
-                policy_file=diff_result.policy_file,
+                policy_file=diff_result.policy_file, today=today,
             ),
         )
         line = _format_annotation(level, change, title, change.description)
@@ -554,6 +560,7 @@ def annotation_report_entries(
     diff_result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> list[dict[str, object]]:
     """Structured, persistable annotation entries for a JSON report.
 
@@ -590,7 +597,7 @@ def annotation_report_entries(
     it. ``always_visible`` is always True for ``error``/``warning``.
     """
     detailed = _collect_annotations_detailed(
-        diff_result, annotate_additions=True, severity_config=severity_config,
+        diff_result, annotate_additions=True, severity_config=severity_config, today=today,
     )
     return [
         {

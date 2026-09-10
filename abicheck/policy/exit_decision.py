@@ -110,8 +110,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from datetime import date
 
     from ..checker_types import DiffResult
+    from ..model.change_catalog.registry import Verdict
     from .severity import SeverityConfig
 
 
@@ -586,6 +588,7 @@ def resolve_compare_exit_decision(
     scheme: str,
     *,
     require_complete_analysis: bool = False,
+    today: date | None = None,
 ) -> ExitDecision:
     """:func:`resolve_exit_decision`, deriving every contribution from
     *result* the same way `cli._exit_with_severity_or_verdict` does today.
@@ -645,7 +648,9 @@ def resolve_compare_exit_decision(
     (`reporter_contract_blocks.add_contract_context`, `cli._exit_with_
     severity_or_verdict`) calls the P3-aware wrapper instead as of that
     change -- this function itself is unchanged, still exactly the ordinary
-    gate/coverage/assurance fold with no knowledge of either axis.
+    gate/coverage/assurance fold with no knowledge of either axis. *today*,
+    forwarded to :func:`~.severity.compute_exit_code`, keeps this agreeing
+    with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
@@ -664,12 +669,60 @@ def resolve_compare_exit_decision(
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
+            today=today,
         )
-    else:
+    elif today is None:
+        # No caller passed a captured date -- every pre-existing invocation
+        # (the real CLI process exit runs synchronously right after
+        # `compare()`) keeps reading the cached verdict exactly as before.
         compatibility_contribution = legacy_exit_code(result.verdict)
+    else:
+        # Codex review, fresh evidence: `result.verdict` was frozen at
+        # `compare()` time. A render happening later under a captured
+        # `today` (an already-frozen `ReportEnvelope`) must agree with the
+        # same today-aware per-finding resolution `_change_to_dict` already
+        # uses for `changes[]`, or a dated `reclassify:` rule's expiry
+        # between `compare()` and render could report a finding as breaking
+        # there while this exit code stayed the stale, pre-expiry verdict's.
+        compatibility_contribution = legacy_exit_code(
+            _worst_effective_verdict(result, today)
+        )
     return resolve_exit_decision(
         compatibility_contribution=compatibility_contribution,
         contract_coverage_contribution=coverage_contribution,
         analysis_assurance_contribution=assurance_contribution,
     )
+
+
+def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
+    """The legacy scheme's own worst-finding verdict, re-derived under
+    *today* instead of trusted from ``result.verdict``.
+
+    Scored over :func:`~.severity.gate_eligible_changes` -- the identical
+    population/exclusions ``compute_exit_code``'s severity branch already
+    uses -- taking the worst per-finding ``effective_verdict_for_change``
+    the same way ``checker_policy.compute_verdict`` folds a raw kind-set
+    category, just per-finding-resolved and today-aware rather than a bare
+    kind lookup. Only called when *today* is given (this function's own
+    caller keeps the cached ``result.verdict`` otherwise), so no
+    pre-existing caller's answer changes.
+    """
+    from ..model.change_catalog.registry import Verdict
+    from ..reclassify import effective_verdict_for_change
+    from .severity import gate_eligible_changes
+
+    eligible = gate_eligible_changes(result.changes)
+    if not eligible:
+        return Verdict.NO_CHANGE
+    verdicts = {
+        effective_verdict_for_change(
+            c, policy=result.policy, kind_sets=result._effective_kind_sets(),
+            policy_file=result.policy_file, today=today,
+        )
+        for c in eligible
+    }
+    for candidate in (Verdict.BREAKING, Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):
+        if candidate in verdicts:
+            return candidate
+    return Verdict.COMPATIBLE
 
