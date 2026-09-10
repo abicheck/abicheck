@@ -65,6 +65,18 @@ _warned_no_demangler = False
 # subprocess pair per row instead of degrading once).
 _cppfilt_binary_confirmed_missing = False
 
+# Set once an `import cxxfilt` inside demangle() raises ImportError -- proof
+# the package itself isn't installed, as distinct from the package being
+# installed but failing (or declining) to demangle one particular symbol.
+# Only *this* flag combined with `_cppfilt_binary_confirmed_missing` means
+# "no demangler available at all"; either backend being merely unable to
+# handle one malformed/foreign-ABI symbol is the normal, expected outcome for
+# plenty of real symbols and must never be conflated with both tools being
+# absent (the bug this flag exists to fix: the user-facing "no cxxfilt
+# package and no c++filt binary" warning used to fire on ANY single-symbol
+# demangle failure, including with a fully working c++filt installed).
+_cxxfilt_import_confirmed_missing = False
+
 
 def _is_itanium_mangled(symbol: str, *, accept_macho_prefix: bool = False) -> bool:
     """True for a plain ELF ``_Z...`` name, or its Mach-O ``__Z...`` spelling
@@ -128,20 +140,30 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
     if symbol in _BATCH_CACHE_FAIL:
         return None
     canonical = _canonical_mangled(symbol)
+    global _cxxfilt_import_confirmed_missing  # noqa: PLW0603
     try:
         import cxxfilt
-
-        out = str(cxxfilt.demangle(canonical))
-        # Some cxxfilt/__cxa_demangle versions return the input unchanged
-        # on failure rather than raising -- for a malformed `__Z...` token
-        # that echo is the canonical single-underscore form, which must be
-        # compared against `canonical`, not treated as a real demangling
-        # (Codex review, fresh evidence -- the batch cxxfilt path already
-        # guards this identically).
-        if out != canonical:
-            return out
-    except Exception:  # noqa: BLE001
-        _log.debug("cxxfilt demangling failed for %s", symbol)
+    except ImportError:
+        _cxxfilt_import_confirmed_missing = True
+    else:
+        try:
+            out = str(cxxfilt.demangle(canonical))
+            # Some cxxfilt/__cxa_demangle versions return the input unchanged
+            # on failure rather than raising -- for a malformed `__Z...` token
+            # that echo is the canonical single-underscore form, which must be
+            # compared against `canonical`, not treated as a real demangling
+            # (Codex review, fresh evidence -- the batch cxxfilt path already
+            # guards this identically).
+            if out != canonical:
+                return out
+        except Exception:  # noqa: BLE001
+            # cxxfilt is installed and imported fine; it just couldn't
+            # demangle *this* symbol (malformed/foreign-ABI mangled name).
+            # That is the normal, expected outcome for plenty of real
+            # symbols -- log at debug level only, never the user-facing
+            # "demangler unavailable" warning below, which is reserved for
+            # both backends being confirmed absent.
+            _log.debug("cxxfilt demangling failed for %s", symbol)
     global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
     if not _cppfilt_binary_confirmed_missing:
         for cmd in _cppfilt_single_commands(canonical):
@@ -168,13 +190,23 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
             except (subprocess.TimeoutExpired, OSError):
                 pass
 
-    global _warned_no_demangler  # noqa: PLW0603
-    if not _warned_no_demangler:
-        _log.warning(
-            "C++ demangling unavailable (no cxxfilt package and no c++filt binary); "
-            "DWARF export matching and appcompat symbol matching may be incomplete"
-        )
-        _warned_no_demangler = True
+    # Only warn "demangler unavailable" when BOTH backends are confirmed
+    # absent from this environment. A working c++filt/cxxfilt that simply
+    # couldn't demangle this one symbol (malformed input, a non-Itanium
+    # mangled-looking token, a foreign ABI) is not "unavailable" and must
+    # stay silent here -- the bug this fixes: the warning used to fire on
+    # ANY per-symbol demangle failure regardless of tool presence, so a
+    # report where c++filt genuinely worked for other symbols could still
+    # falsely claim "no cxxfilt package and no c++filt binary".
+    if _cxxfilt_import_confirmed_missing and _cppfilt_binary_confirmed_missing:
+        global _warned_no_demangler  # noqa: PLW0603
+        if not _warned_no_demangler:
+            _log.warning(
+                "C++ demangling unavailable (no cxxfilt package and no c++filt "
+                "binary); DWARF export matching and appcompat symbol matching "
+                "may be incomplete"
+            )
+            _warned_no_demangler = True
     return None
 
 
@@ -350,9 +382,13 @@ def demangle_batch(
 def _reset_demangle_batch_cache() -> None:
     """Test helper — clear the process-wide cache."""
     global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
+    global _cxxfilt_import_confirmed_missing  # noqa: PLW0603
+    global _warned_no_demangler  # noqa: PLW0603
     _BATCH_CACHE_OK.clear()
     _BATCH_CACHE_FAIL.clear()
     _cppfilt_binary_confirmed_missing = False
+    _cxxfilt_import_confirmed_missing = False
+    _warned_no_demangler = False
 
 
 def strip_signature(demangled: str) -> str:

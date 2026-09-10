@@ -172,16 +172,74 @@ class TestDemangle:
                 result = _mod.demangle("_ZN3foo3barEv")
         assert result is None
 
-    def test_warning_emitted_once(self):
-        """The 'demangling unavailable' warning fires only once."""
-        mock_cxxfilt = MagicMock()
-        mock_cxxfilt.demangle.side_effect = RuntimeError("no")
-        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+    def test_warning_emitted_once_when_both_backends_confirmed_absent(self):
+        """The 'demangling unavailable' warning fires, exactly once, only
+        when the cxxfilt package genuinely fails to import AND the c++filt
+        binary genuinely doesn't exist -- both backends confirmed absent,
+        not merely one symbol failing to demangle."""
+        with patch.dict("sys.modules", {"cxxfilt": None}):
             with patch("subprocess.run", side_effect=FileNotFoundError):
                 _mod.demangle("_ZN3foo3barEv")
                 _mod.demangle.cache_clear()
                 _mod.demangle("_ZN3foo3bazEv")
         assert _mod._warned_no_demangler is True
+
+    def test_no_warning_when_cppfilt_present_but_symbol_fails(self):
+        """Root-cause regression for the false-positive warning: cxxfilt is
+        importable (present, working for other symbols) and the c++filt
+        binary is genuinely installed and runs to completion -- it just
+        can't demangle THIS particular symbol (foreign ABI / malformed
+        mangled name / echoes the input back unchanged, exit 0). That must
+        never be reported as "demangler unavailable": the tool is present
+        and working, this one input just isn't real Itanium mangling."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = RuntimeError("not itanium")
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                # c++filt ran fine (returncode 0) but simply echoed the
+                # input back unchanged -- the canonical "couldn't demangle
+                # this one" outcome, not a missing-tool outcome.
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt", "_ZNOTVALID"],
+                    returncode=0,
+                    stdout="_ZNOTVALID\n",
+                    stderr="",
+                )
+                result = _mod.demangle("_ZNOTVALID")
+        assert result is None
+        assert _mod._warned_no_demangler is False
+
+    @pytest.mark.parametrize(
+        "cxxfilt_effect,cppfilt_returncode,cppfilt_stdout",
+        [
+            (RuntimeError("no"), 1, ""),
+            (RuntimeError("no"), 0, "_ZFAILS\n"),
+            (lambda s: s, 1, ""),
+            (lambda s: s, 0, "_ZFAILS\n"),
+        ],
+    )
+    def test_no_warning_across_present_tool_failure_combinations(
+        self, cxxfilt_effect, cppfilt_returncode, cppfilt_stdout
+    ):
+        """Parametrized over several present-tool/failing-symbol
+        combinations (cxxfilt raising vs. echoing unchanged, c++filt
+        non-zero exit vs. exit-0-echo) -- pins the actual invariant broken
+        by the reported bug (a working c++filt alongside a false
+        "unavailable" warning for some other symbol in the same run), not
+        just the one reported symbol/code path."""
+        mock_cxxfilt = MagicMock()
+        mock_cxxfilt.demangle.side_effect = cxxfilt_effect
+        with patch.dict("sys.modules", {"cxxfilt": mock_cxxfilt}):
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = subprocess.CompletedProcess(
+                    args=["c++filt", "_ZFAILS"],
+                    returncode=cppfilt_returncode,
+                    stdout=cppfilt_stdout,
+                    stderr="",
+                )
+                result = _mod.demangle("_ZFAILS")
+        assert result is None
+        assert _mod._warned_no_demangler is False
 
     def test_macho_double_underscore_prefix_via_cxxfilt(self):
         """Codex review, fresh evidence: clang's own `mangledName` carries the
