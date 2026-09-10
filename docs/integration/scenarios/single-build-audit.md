@@ -19,49 +19,59 @@ recorded in
 window** (ADR-068 D8) once that migration completes, so treat
 `compare --no-baseline` as where this scenario is going.
 
-**It does not get you there yet.** See the section below for the CLI path
-that actually works today, and the
-[known gap](../../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)
-for the exact defect and what closing it requires.
+**It gets you there now.** The two defects that made this section read
+"use `scan` instead" until 2026-09-09 — a stored `.abi.json` candidate
+aborting with an `AssertionError`, and a live binary plus `-H` rendering an
+empty result — are both fixed, and
+`tests/parity/test_no_baseline_audit_corpus_parity.py` pins that
+`compare --no-baseline` reports at least every check `scan` does — counted
+per finding kind, so no capability is lost — across all eleven G20 audit
+fixtures, while manufacturing no comparison of its own. It is a
+no-capability-loss floor, not an assertion that the two produce
+byte-identical reports: `scan`'s per-check coverage rows (status/detail/
+providers) have no audit-report equivalent yet, see
+[`known-gaps.md`](../../contribute/known-gaps.md).
 
-## The working CLI path today: `scan` (no `--against`)
-
-`abicheck scan CANDIDATE` with no `--against` is the way to run a
-single-build audit from the CLI today — it runs the same ADR-035
-cross-source/single-release checks (`CROSS_SOURCE_EVOLUTION_CHECKS`, e.g.
-`exported_not_public`, `private_header_leak`,
-`unversioned_exported_symbol`, `rtti_for_internal_type`,
-`public_not_exported`, `public_to_internal_dependency`, and the rest of the
-registered set) and reports whatever it finds, cleanly, whether the
-candidate is clean or not:
+## The CLI path: `compare --no-baseline`
 
 ```bash
-abicheck scan build/libfoo.so -H include/
+abicheck compare --no-baseline build/libfoo.so -H include/
 ```
 
-**`compare --no-baseline` is verified broken for this scenario, not merely
-incomplete**, in two distinct ways depending on the candidate's shape:
+This runs the same ADR-035 cross-source/single-release checks
+(`CROSS_SOURCE_EVOLUTION_CHECKS`, e.g. `exported_not_public`,
+`private_header_leak`, `unversioned_exported_symbol`,
+`rtti_for_internal_type`, `public_not_exported`,
+`public_to_internal_dependency`, and the rest of the registered set) that
+`scan CANDIDATE` (no `--against`) runs, and reports whatever it finds under
+`findings[]`.
 
-- **A stored `.abi.json` candidate crashes.** All eleven G20 audit fixtures
-  (`catalog/cases/case14{3,4,5,6,7,8,9}_*`, `case15{0,1}_*`, `case181_*`)
-  abort with an unhandled `AssertionError` from
-  `workflows/no_baseline_compare.py`'s `assert not diff.changes` guard
-  instead of rendering the finding, while `scan` reports each one's
-  documented verdict.
-- **A live binary plus `-H` renders an empty result.** Against
-  `examples/workflows/audit-release`'s `libgreet.so`, `scan libgreet.so
-  --header include` reports `exported_not_public`, while
-  `compare --no-baseline libgreet.so --header include --format json` exits 0
-  with `"changes": []` and no cross-source block at all.
+Two things to know about the report shape, both direct consequences of
+ADR-068 D2:
 
-The cause is structural: the audit is implemented as a self-diff that then
-asserts the diff is empty, an invariant the per-side cross-source stages
-`compare()` gained in ADR-068 Phase 2a/2b legitimately violate. This CLI
-slice also doesn't yet accept `--sources`/`--build-info`/`--depth`,
-a secondary `--write`, or `--dry-run` — but the missing findings are the
-reason to avoid it here, not those. Use `scan` (above) until the
-[known gap](../../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings)
-is closed.
+- **`changes[]` is always empty, and `verdict` is always `null`.** An audit
+  reports no addition, no removal, and no compatibility verdict — the
+  candidate-side findings live under `findings[]`. A consumer parsing
+  `changes` off this report is reading the wrong key.
+- **Every finding carries an evolution state**, which with OLD
+  `declared_absent` is always `persistent` (the check fired) or
+  `not_evaluated` (the check's evidence gate closed). `introduced` and
+  `resolved` are unreachable here by construction: both assert something
+  about a baseline this run was told does not exist (ADR-068 D3).
+
+`--header`/`--include`, `--sources`/`--build-info`, `--depth`, `--contract`,
+`--policy`/`--suppress`, `--dry-run` and `-o/--output` all work. `--format`
+accepts `json`, `markdown`, `sarif`, `junit` and `oneline`; `html` and
+`review` are a declared usage error, because both render a *comparison*
+(verdict badge, OLD → NEW counts, release recommendation) and an audit has
+none of those — `oneline` is the closest honest equivalent to a review
+digest. An `old=`-prefixed evidence input (`--sources old=…`) is a usage
+error too: there is no OLD side for it to describe.
+
+Exit codes: hygiene findings are advisory and never gate on their own, so a
+clean run and a run reporting several findings both exit `0`. The three
+orthogonal axes still apply — see
+[exit codes](../../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact).
 
 ## The Action: `mode: scan`, no `against`
 
@@ -106,11 +116,10 @@ for the equivalent one-step `mode: scan` (no `against:`) wiring.
 ## When to move past this scenario
 
 - **You now have something to compare against** → any other scenario; a
-  no-baseline audit (`scan CANDIDATE` with no `--against` on the CLI,
-  `baseline-channel: none` on the Action — see "The working CLI path today"
-  above for why `compare --no-baseline` is not the safe spelling here) is a
-  starting point, not a permanent choice for a project that will eventually
-  publish a release or track `main`.
+  no-baseline audit (`compare --no-baseline CANDIDATE` on the CLI,
+  `baseline-channel: none` on the Action) is a starting point, not a
+  permanent choice for a project that will eventually publish a release or
+  track `main`.
 - **`target-kind: app-consumer`/`plugin-contract`** — not supported with
   `baseline-channel: none`: `scan` has no `--used-by`/`--required-symbol`
   equivalent, so an app-consumer/plugin-contract audit with no baseline has

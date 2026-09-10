@@ -162,3 +162,82 @@ def contract_options(f: F) -> F:
         "(see --pack's own help).",
     )(f)
     return f
+
+
+# ── `--contract` value resolution (ADR-049 D7) ───────────────────────────────
+# These two live here, next to the `--contract` option they resolve, rather
+# than in `cli_options.py`: `compare`'s own one-sided `--no-baseline` dispatch
+# (`frontends/cli/commands/compare_no_baseline.py`) must reach them to activate
+# the evaluator the same way `cli_compare_helpers.run_compare` does, and an
+# import edge from that module to `cli_options` pulls the whole
+# `cli_options -> service_scan -> scan_engine -> cli_scan_baseline ->
+# cli_compare_helpers` CLI-registration SCC in with it -- new members of that
+# cluster are exactly what the AI-readiness `import-cycle-growth` gate rejects
+# (`AGENTS.md` "What NOT to do": fix the direction or move the shared logic to
+# a leaf module; never extend `IMPORT_CYCLE_ALLOWLIST` to unblock it). This
+# module is that leaf -- it imports nothing from `abicheck` at all -- and
+# `cli_options` re-exports both names unchanged, so every existing call site
+# keeps working.
+
+
+def resolve_contract_evaluation(contract_mode: str | None) -> bool:
+    """``--contract VALUE`` is what enables the ADR-049 evaluator on the CLI.
+
+    There used to be a separate ``--contract-evaluation`` switch, and
+    ``--contract`` without it was a hard `UsageError` (exit 64). That was
+    first loosened into an implication (naming a domain is enough to ask for
+    a decision against it), which left two ways to request one thing; the
+    standalone switch is now gone, so the flag *is* the request.
+
+    Deliberately CLI-only. The typed Python API (`api_types.CompareRequest.
+    validation_errors`) and the Tier-2 entry (`service._validate_contract_mode`)
+    keep requiring an explicit `contract_evaluation=True` alongside a
+    *contract_mode* -- both are documented public-API contracts (CLAUDE.md:
+    changing them is a breaking Python API change, coordinated separately from
+    a CLI ergonomics fix) and this resolver runs strictly before either is ever
+    constructed, so the value it derives is indistinguishable from an
+    explicitly-passed one to them.
+
+    The former domain-less evaluation (``--contract-evaluation`` with no
+    ``--contract``, whose domain fell through to the D7 chain below an
+    explicit CLI value) is spelled ``--contract auto``:
+    :func:`resolve_contract_domain` maps it back to ``None``, which is exactly
+    the state that lets `compatibility_evaluation_wiring.
+    resolve_legacy_contract_mode`'s ``--scope-public-headers`` reading, and
+    then `.abicheck.yml`, decide the domain.
+    """
+    return contract_mode is not None
+
+
+def resolve_contract_domain(
+    contract_mode: str | None, ctx: click.Context | None = None
+) -> str | None:
+    """Map ``--contract auto`` back to "no explicit domain stated".
+
+    ``auto`` exists only to separate the two questions the one flag now
+    answers: *evaluate at all* (any value) and *which domain* (a named one).
+    Downstream, "the caller stated no domain" has always been spelled ``None``,
+    and every D7 tier below ``explicit_cli`` keys off that -- so ``auto`` must
+    not reach the resolver as a literal, or it would read as an explicit CLI
+    value outranking the very layers it exists to defer to (and
+    ``contract_relevance_types.coerce_contract_mode`` would raise on it, since
+    ``auto`` is not a real ``ContractMode``).
+
+    Normalizing the local value alone is not enough: the two front ends read
+    the raw parameters differently -- ``compare`` hands
+    ``cli_compare_receipt.resolve_and_apply`` explicit values, but
+    ``cli_scan._resolve_scan_evaluation_config`` rebuilds its inputs from
+    ``ctx.params`` and its typed-parameter set from
+    ``ctx.get_parameter_source``. Given *ctx*, the normalization is applied
+    there too, and the parameter source is demoted from ``COMMANDLINE`` to
+    ``DEFAULT`` -- ``auto`` is precisely the caller declining to state a
+    domain, so recording it as an explicit CLI value would re-create the
+    precedence bug this mapping exists to avoid (Codex review).
+    """
+    if contract_mode != "auto":
+        return contract_mode
+    if ctx is not None:
+        if "contract_mode" in ctx.params:
+            ctx.params["contract_mode"] = None
+        ctx.set_parameter_source("contract_mode", click.core.ParameterSource.DEFAULT)
+    return None

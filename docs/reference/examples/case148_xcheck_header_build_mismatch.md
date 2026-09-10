@@ -18,7 +18,13 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline comparison. abicheck's verdict is `API_BREAK` — the public headers
+baseline comparison. This finding's own kind is classified `API_BREAK` (the severity
+ground-truth row above); the audit itself reports **no** compatibility
+verdict and exits `0` — an audit has no baseline to break against
+(ADR-068 D2), and unlike legacy `scan` it does not turn an
+`API_BREAK`-classified hygiene finding into a gating exit `2`. That
+difference is recorded in
+[`known-gaps.md`](../../contribute/known-gaps.md). The finding: the public headers
 were parsed **without** the build's actual ABI-relevant flags
 (`glibcxx_use_cxx11_abi`, `-DBIG_BUFFERS`), so the layout a context-free
 header parse reports is not the layout the shipped binary actually has. A
@@ -43,30 +49,37 @@ compile context:
 ## abicheck command
 
 ```bash
-abicheck scan snapshot.abi.json
+abicheck compare --no-baseline snapshot.abi.json
 ```
 
-!!! note "Why `scan` and not `compare --no-baseline`"
+!!! note "`compare --no-baseline`, not `scan`"
     [ADR-068](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D2 makes `abicheck compare --no-baseline snapshot.abi.json` the declared
-    spelling for a single-build audit, and retires `scan` outright. This case
-    is **blocked on that migration**: run against this fixture today,
-    `compare --no-baseline` aborts with an unhandled `AssertionError` from
-    `workflows/no_baseline_compare.py`'s `assert not diff.changes` instead of
-    reporting the finding below. The command above is what actually
-    reproduces this case until the
-    [known gap](../../contribute/known-gaps.md) closes.
+    D2 makes this the declared spelling for a single-build audit, and
+    retires `scan`. This case was blocked on that migration until
+    2026-09-09; the audit now reports the finding below directly, and
+    `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
+
+
 
 ## Expected abicheck finding
 
 ```text
-Coverage
-  crosscheck:header_build_context_mismatch present   header context ↔ build flags: 2 ABI flag(s) not reflected in the context-free header parse
+# ABI audit: libdemo.so (no baseline)
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] header_build_context_mismatch: 1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-Verdict: API_BREAK (exit 2)
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `header_build_context_mismatch` | `-` | potential_breaking | present in this build | Public headers were parsed without the build's ABI-relevant context: the build records 2 ABI-affecting flag(s) (define:BIG_BUFFERS, glibcxx_use_cxx11_abi) but the header AST was captured context-free, so the declared API surface may not match the shipped translation units. Re-dump the headers with the build's compile_commands.json. |
 ```
 
 ## Minimum evidence

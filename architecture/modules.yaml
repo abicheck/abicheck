@@ -90,6 +90,7 @@
         "abicheck/buildsource/poi.py",
         "abicheck/buildsource/preprocessor_facts.py",
         "abicheck/buildsource/providers.py",
+        "abicheck/buildsource/raw_evidence.py",
         "abicheck/buildsource/redaction.py",
         "abicheck/buildsource/risk.py",
         "abicheck/buildsource/snapshot_exports.py",

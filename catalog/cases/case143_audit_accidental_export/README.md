@@ -29,31 +29,37 @@ both its ELF export table and its public-header AST baked in:
 ## abicheck command
 
 ```bash
-abicheck scan snapshot.abi.json
+abicheck compare --no-baseline snapshot.abi.json
 ```
 
-!!! note "Why `scan` and not `compare --no-baseline`"
+!!! note "`compare --no-baseline`, not `scan`"
     [ADR-068](../../../docs/contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D2 makes `abicheck compare --no-baseline snapshot.abi.json` the declared
-    spelling for a single-build audit, and retires `scan` outright. This case
-    is **blocked on that migration**: run against this fixture today,
-    `compare --no-baseline` aborts with an unhandled `AssertionError` from
-    `workflows/no_baseline_compare.py`'s `assert not diff.changes` instead of
-    reporting the finding below. The command above is what actually
-    reproduces this case until the
-    [known gap](../../../docs/contribute/known-gaps.md) closes.
+    D2 makes this the declared spelling for a single-build audit, and
+    retires `scan`. This case was blocked on that migration until
+    2026-09-09; the audit now reports the finding below directly, and
+    `tests/parity/test_no_baseline_audit_corpus_parity.py` pins that it
+    reports at least every check `scan` does, counted per finding kind,
+    while manufacturing no comparison of its own (no verdict, no
+    `changes[]` entry).
+
+
 
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE (exit 0)
+# ABI audit: libdemo.so (no baseline)
 
-crosscheck:exported_not_public present   binary exports ↔ public headers: 1 of 2
-  export(s) undocumented (1 accounted as documented API / compiler artifact);
-  by reason: undeclared_export=1
+OLD side: **declared absent** (`--no-baseline`) -- this is an audit of the candidate build alone, not a compatibility comparison. No additions, removals, or compatibility verdict are reported.
 
-ABI-hygiene catalog (intra-version, advisory)
-  [warning] exported_not_public: 1
+- Candidate version: `1.0`
+- Acquisition state (OLD): `declared_absent`
+- Evidence tiers: elf, header
+
+## Candidate-side findings
+
+| Finding | Symbol | Severity | State | Detail |
+| --- | --- | --- | --- | --- |
+| `exported_not_public` | `_Z11debug_dumpv` | potential_breaking | present in this build | Symbol '_Z11debug_dumpv' is exported by the binary but declared in no public header (declared as function 'debug_dump' in a non-public header). It is accidental ABI surface — hide it (visibility/version script) or document it. |
 ```
 
 ## Minimum evidence

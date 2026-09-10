@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_report import REPORT_BUG_CLASSES
 from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
 __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
@@ -1226,16 +1227,52 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
-        id="report.finding_entry_builder_parity",
+        id="invariant.blanket_assertion_over_widened_population",
         invariant=(
-            "Every per-finding entry-builder for a shared `Change` "
-            "(`compare`'s `changes[]`, `scan --against`'s baseline dicts, "
-            "the release fan-out's capped `findings`) must resolve an "
-            "audit field (e.g. `reclassified_by`) via one canonical helper "
-            "-- never a sibling silently omitting a field another computes."
+            'A whole-set assertion ("this collection is always empty") '
+            "is only valid while the collection has exactly one "
+            "population. When a later change adds a second, legitimately "
+            "non-empty population to the same collection, the assertion "
+            "must be split into a scoped invariant per population — never "
+            "left blanket (it then fires on correct behavior) and never "
+            "simply deleted (the original population loses its guard). "
+            "The scoped guard must also survive `python -O`, so it is a "
+            "raised error rather than an `assert`."
         ),
-        fixed_by=(1176,),
-        seed_tests=("tests/test_disposition_reclassification.py",),
+        # #1181-era: `compare --no-baseline`'s `assert not diff.changes`
+        # was correct until ADR-068 Phase 2a/2b moved the eleven
+        # cross-source checks and the pattern/preprocessor pre-scan into
+        # `compare()`, which legitimately emit findings on a self-compare.
+        # All eleven G20 audit fixtures then aborted with an unhandled
+        # AssertionError, and a live candidate rendered an empty document.
+        fixed_by=(1181,),
+        seed_tests=(
+            "tests/test_no_baseline_d3_properties.py",
+            "tests/parity/test_no_baseline_audit_corpus_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "population": ("comparison-finding", "candidate-side-finding"),
+            "evolution_state": (
+                "persistent",
+                "not_evaluated",
+                "introduced",
+                "resolved",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The registry has no mechanical sweep for *other* "
+                    "blanket emptiness assertions over collections a "
+                    "later stage may widen — this entry names the class "
+                    "and carries the one instance's generalized tests, "
+                    "but a second instance elsewhere in the codebase "
+                    "would still be found by hand, not by a gate."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+        ),
     ),
 )
 
@@ -1244,7 +1281,9 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
 #: sibling's own list. An assembly point, the shape `abicheck/
 #: change_registry.py` already uses -- adding a class to a sibling needs no
 #: edit here.
-BUG_CLASSES: tuple[BugClass, ...] = _ANALYSIS_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
+BUG_CLASSES: tuple[BugClass, ...] = (
+    _ANALYSIS_BUG_CLASSES + REPORT_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
+)
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}
 

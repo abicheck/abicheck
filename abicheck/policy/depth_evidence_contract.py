@@ -147,3 +147,40 @@ def record_depth_evidence_contract_error(
         depth, old, new, old_is_live=old_is_live, new_is_live=new_is_live
     ):
         result.evidence_contract_error = True
+
+
+def record_no_baseline_depth_evidence_contract_error(
+    result: Any,
+    depth: str | None,
+    candidate: AbiSnapshot,
+    *,
+    is_live: bool = True,
+) -> None:
+    """The one-sided (``compare --no-baseline``) spelling of the same floor.
+
+    ADR-068 D2's single-build audit has exactly one operand, so "both sides
+    reach the pinned depth" degenerates to "the candidate does". Expressed as
+    its own named entry point rather than leaving each caller to spell the
+    degenerate case itself (``old=candidate, new=candidate,
+    old_is_live=False``) -- that call reads as a bug at every call site,
+    and a reader would have to re-derive that passing the same snapshot
+    twice is harmless here precisely *because* one side is excluded.
+
+    Identical semantics to :func:`record_depth_evidence_contract_error` in
+    every other respect: only a pinned ``build``/``source`` can be outrun,
+    a stored-snapshot candidate this run never extracted is exempt
+    (*is_live*), and the failure is recorded as ADR-064's exit-7 axis
+    (``DiffResult.evidence_contract_error``) rather than raised -- so
+    ``compare --no-baseline NEW --depth build`` with no ``--sources``/
+    ``--build-info`` fails loudly with the same exit ``7`` the two-sided
+    ``compare OLD NEW --depth build`` already does, instead of silently
+    degrading to symbols-only evidence and reporting a clean audit.
+    """
+    record_depth_evidence_contract_error(
+        result,
+        depth,
+        candidate,
+        candidate,
+        old_is_live=False,
+        new_is_live=is_live,
+    )

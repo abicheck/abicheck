@@ -34,10 +34,36 @@ their expected MAJOR component and ignore unknown keys.
 
 from __future__ import annotations
 
-import json
-from functools import cache
-from pathlib import Path
-from typing import Any
+from .documents import (  # noqa: F401 -- re-exported: `abicheck.schemas` is the import site every caller uses
+    AGGREGATE_REPORT_SCHEMA_PATH as AGGREGATE_REPORT_SCHEMA_PATH,
+    AUDIT_REPORT_SCHEMA_PATH as AUDIT_REPORT_SCHEMA_PATH,
+    COMPARE_REPORT_SCHEMA_PATH as COMPARE_REPORT_SCHEMA_PATH,
+    load_aggregate_report_schema as load_aggregate_report_schema,
+    load_audit_report_schema as load_audit_report_schema,
+    load_compare_report_schema as load_compare_report_schema,
+)
+
+#: Artifact names :func:`current` accepts, each mapped to the module-level
+#: constant that already owns its version (ADR-055 D3). Read-only lookup
+#: facade -- adding an entry here never changes that constant's own value or
+#: bump policy. This frozenset itself is built once at import time; it is
+#: :func:`current`'s per-artifact lookups that use function-local imports
+#: (not this set), since some of those modules transitively import this
+#: package themselves (e.g. ``buildsource.run_plan`` -> ``buildsource.
+#: check_report`` -> ``schemas``) and a module-level import here would turn
+#: that into a real import cycle.
+_ARTIFACT_NAMES = frozenset(
+    {
+        "snapshot",
+        "compare",
+        "audit",
+        "scan",
+        "aggregate",
+        "build-output",
+        "run-plan",
+    }
+)
+
 
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
 #: 1.1 — added the optional ``release_recommendation`` object (additive).
@@ -1192,40 +1218,6 @@ REPORT_SCHEMA_VERSION = "3.14"  #: 3.14 -- see the comment immediately above.
 #: 1.31 -- ADR-068 Phase 4's typed-API slice: the typed ``ScanResult``/``ScanSetResult`` envelopes this marker also stamped are **gone**, along with ``run_scan``/``run_scan_set`` and ``scan --artifact-set`` itself (ADR-068's second 2026-09-09 amendment rules ``--artifact-set``/``new-library-set`` (b) -- dropped, pending ADR-065 S3). ``scan_schema_version`` now marks exactly one shape: ``ScanOutcome.to_dict()``, the ``scan --format json`` CLI contract (and the abort envelope ``workflows.scan_abort_result`` builds from the same fields). The ``per_artifact``/``bundle_findings``/``bundle_verdict``/``bundle_incomplete`` aggregate form 1.5 introduced, and the typed ``findings``/``layers``/``confidence``/``estimate``/``report`` envelope, are both unreachable -- a consumer that fed ``abicheck.service.run_scan``/``run_scan_set`` output to ``aggregate`` must run ``abicheck scan --format json`` (or, for a set, one invocation per library) instead. The CLI shape itself is unchanged by this bump. Two ``scan`` inputs also leave the command under the same amendment's (b) rulings: ``--risk-rules`` (and with it the risk-driven ``auto`` depth escalation -- an omitted ``--depth`` now resolves to the fixed ``headers`` rung the amendment names, the same default ``compare`` always used, so the ``level`` block of a pre-1.31 run that left ``--depth`` unset can differ: it read the risk-scored rung when a seed was present and the ``(S5, SOURCE)`` ``--mode`` preset otherwise, where it now always reads ``s0``/``headers``. Pin ``--depth source`` to ask for source evidence) and ``--build-target``.
 SCAN_SCHEMA_VERSION = "1.31"
 
-_SCHEMA_DIR = Path(__file__).resolve().parent
-COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"
-AGGREGATE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "aggregate_report.schema.json"
-
-
-@cache
-def load_compare_report_schema() -> dict[str, Any]:
-    """Return the parsed compare-report JSON Schema as a dict."""
-    with COMPARE_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
-        data: dict[str, Any] = json.load(fh)
-    return data
-
-
-@cache
-def load_aggregate_report_schema() -> dict[str, Any]:
-    """Return the parsed aggregate-report JSON Schema as a dict."""
-    with AGGREGATE_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
-        data: dict[str, Any] = json.load(fh)
-    return data
-
-
-#: Artifact names :func:`current` accepts, each mapped to the module-level
-#: constant that already owns its version (ADR-055 D3). Read-only lookup
-#: facade -- adding an entry here never changes that constant's own value or
-#: bump policy. This frozenset itself is built once at import time; it is
-#: :func:`current`'s per-artifact lookups that use function-local imports
-#: (not this set), since some of those modules transitively import this
-#: package themselves (e.g. ``buildsource.run_plan`` -> ``buildsource.
-#: check_report`` -> ``schemas``) and a module-level import here would turn
-#: that into a real import cycle.
-_ARTIFACT_NAMES = frozenset(
-    {"snapshot", "compare", "scan", "aggregate", "build-output", "run-plan"}
-)
-
 
 def current(name: str) -> str | int:
     """Return the current version abicheck emits for persisted artifact *name*.
@@ -1234,8 +1226,9 @@ def current(name: str) -> str | int:
     own module already owns (ADR-055 D3) -- current-version discovery only;
     this is not a new versioning scheme, and does not add compatibility
     metadata or cross-version lookup. *name* is one of ``"snapshot"``,
-    ``"compare"``, ``"scan"``, ``"aggregate"``, ``"build-output"``, or
-    ``"run-plan"``.
+    ``"compare"``, ``"audit"`` (``compare --no-baseline``, versioned
+    independently of ``"compare"``), ``"scan"``, ``"aggregate"``,
+    ``"build-output"``, or ``"run-plan"``.
 
     A doc generator (or an external integrator) can pull every current
     version number from here instead of a human hand-copying one -- the
@@ -1247,6 +1240,10 @@ def current(name: str) -> str | int:
             f"Unknown schema artifact {name!r}; expected one of "
             f"{sorted(_ARTIFACT_NAMES)}"
         )
+    if name == "audit":
+        from ..report.no_baseline_document import AUDIT_REPORT_SCHEMA_VERSION
+
+        return AUDIT_REPORT_SCHEMA_VERSION
     if name == "snapshot":
         from ..serialization import SCHEMA_VERSION
 
