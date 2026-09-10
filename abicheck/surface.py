@@ -65,9 +65,11 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .demangle import demangle
 from .model import ScopeOrigin
-from .model.mangled_name import itanium_special_name_owner_scope_components
+from .model.mangled_name import (
+    itanium_special_name_owner_identifiers,
+    itanium_special_name_owner_scope_components,
+)
 from .policy.public_surface import PublicSurface as PublicSurface
 from .policy.public_surface_closure import resolve_public_surface
 
@@ -615,29 +617,30 @@ def classify_change_surface(
         # without it would otherwise keep every such finding in-surface
         # regardless of the class's real visibility, while a developer
         # machine with cxxfilt installed correctly demotes it.
+        #
+        # A templated owner (e.g. a libstdc++ container instantiation)
+        # previously fell back to `demangle()` here too, which reintroduced
+        # the exact host-dependent reproducibility defect this whole branch
+        # exists to avoid: on a host with `cxxfilt`/`c++filt` installed, a
+        # templated vtable/RTTI/VTT owner correctly resolved and could be
+        # demoted; on a host without one, it silently stayed "unknown, keep"
+        # -- the same comparison, run identically, produced a different
+        # finding count depending only on which optional tool happened to be
+        # on `PATH` (Codex review, fresh evidence — a real regression traced
+        # to this exact fallback). `itanium_special_name_owner_identifiers`
+        # is the dependency-free counterpart for this shape: every class/
+        # namespace identifier token embedded anywhere in the owner's scope
+        # path AND its template-argument list(s), at any nesting depth --
+        # exactly what `_type_identifiers()` would extract from a fully
+        # demangled spelling, derived structurally instead.
+        owner_identifiers = itanium_special_name_owner_identifiers(sym)
+        if owner_identifiers is not None:
+            return set(owner_identifiers) | _type_identifiers(change.caused_by_type)
         owner_scope = itanium_special_name_owner_scope_components(sym)
-        # Codex review, fresh evidence: the structural parser deliberately
-        # keeps a template owner's *raw encoded* argument list (see
-        # itanium_scope_components's own docstring -- "the raw
-        # template-argument encoding is kept so distinct specializations
-        # stay distinct", e.g. Box<int> -> "BoxIiE") rather than a
-        # canonical spelling like the model's own "Box<int>", so an owner
-        # whose own component carries a template-argument list can never
-        # match `all_types`/`public_types` -- unlike the non-template case
-        # this parser exists for, this is not "unmatched, conservatively
-        # kept" by design; it is a real match failure a demangler would
-        # resolve, on any host where one happens to be installed. Falling
-        # back to `demangle()` only for that specific shape keeps the
-        # dependency-free path for every ordinary (non-template) owner
-        # while not leaving a templated one strictly worse off than before
-        # this parser existed.
-        owner_has_template_args = (
-            owner_scope is not None and (len(owner_scope[0]) - 1) in owner_scope[1]
-        )
-        if owner_scope is not None and not owner_has_template_args:
+        if owner_scope is not None:
             sym_for_types = "::".join(owner_scope[0])
         else:
-            sym_for_types = demangle(sym) or sym
+            sym_for_types = sym
         return _type_identifiers(sym_for_types) | _type_identifiers(
             change.caused_by_type
         )

@@ -135,14 +135,17 @@ class TestMangledVtableSymbolSurfaceClassification:
         # resolution must not depend on the optional cxxfilt/c++filt tool
         # -- a policy-affecting classification (public-surface scoping)
         # would otherwise silently vary by whether that tool happens to be
-        # installed on the host. Patching demangle() to always fail (as it
+        # installed on the host. `surface.py` no longer imports `demangle`
+        # at all for this shape (not even as a fallback -- see the
+        # template-specialization test below), so patching the shared
+        # `abicheck.demangle.demangle()` entry point to always fail (as it
         # already does on a host with neither cxxfilt nor c++filt) proves
-        # the in-process structural parser, not demangle(), is what
-        # resolves this shape.
-        import abicheck.surface as surface_mod
+        # the in-process structural parser is what resolves it, on every
+        # host, unconditionally.
+        import abicheck.demangle as demangle_mod
 
-        original = surface_mod.demangle
-        surface_mod.demangle = lambda *a, **k: None
+        original = demangle_mod.demangle
+        demangle_mod.demangle = lambda *a, **k: None
         try:
             snap = AbiSnapshot(
                 library="l",
@@ -164,23 +167,27 @@ class TestMangledVtableSymbolSurfaceClassification:
             )
             assert classify_change_surface(c_pub, s, s) == (True, None)
         finally:
-            surface_mod.demangle = original
+            demangle_mod.demangle = original
 
     def test_symbol_level_finding_never_computes_type_candidates(self):
         """CodeRabbit review: the demangle-aware `candidates` computation
         used to run unconditionally before the symbol-level early return,
         so an ordinary FUNC_REMOVED that `_classify_symbol_level` resolves
         on its own forked a `c++filt` (via `demangle()`) for a value it
-        never used. Patch `demangle` to raise if called at all, proving a
-        symbol-level finding that `_classify_symbol_level` can resolve
-        never reaches the type-candidate computation."""
-        import abicheck.surface as surface_mod
+        never used. Patch the shared `demangle()` entry point to raise if
+        called at all, proving a symbol-level finding that
+        `_classify_symbol_level` can resolve never reaches the
+        type-candidate computation (which, since the fix for the
+        reproducibility defect above, never calls `demangle()` anyway --
+        this test still pins "never called", not just "never depended
+        on")."""
+        import abicheck.demangle as demangle_mod
 
         def _boom(*a, **k):
             raise AssertionError("demangle() must not be called")
 
-        original = surface_mod.demangle
-        surface_mod.demangle = _boom
+        original = demangle_mod.demangle
+        demangle_mod.demangle = _boom
         try:
             snap = AbiSnapshot(
                 library="l",
@@ -199,27 +206,30 @@ class TestMangledVtableSymbolSurfaceClassification:
             # candidates/demangle().
             assert classify_change_surface(c, s, s) is not None
         finally:
-            surface_mod.demangle = original
+            demangle_mod.demangle = original
 
     def test_mangled_vtable_symbol_of_a_template_specialization_demotes_correctly(
         self,
     ):
-        """Codex review, fresh evidence: the structural parser deliberately
-        keeps a template owner's *raw encoded* argument list (e.g.
-        ``Box<int>`` -> ``"BoxIiE"``, see
-        ``itanium_scope_components``'s own docstring), which can never
-        match the model's own canonical spelling (``"Box<int>"`` /
-        the bare ``"Box"`` token ``_type_identifiers`` extracts from it).
-        Left unhandled, a templated vtable/RTTI owner was silently *worse*
-        off than before this parser existed: not merely "unmatched,
-        conservatively kept" but never even attempted, since the raw
-        structural spelling opaquely mismatches every real type name. The
-        fix falls back to ``demangle()`` specifically when the owner's own
-        component carries a template-argument list.
+        """The structural parser deliberately keeps a template owner's *raw
+        encoded* argument list (e.g. ``Box<int>`` -> ``"BoxIiE"``, see
+        ``itanium_scope_components``'s own docstring) for
+        ``itanium_special_name_owner_scope_components`` (identity), which
+        can never match the model's own canonical spelling. For
+        *type-candidate* resolution specifically (this classification),
+        ``itanium_special_name_owner_identifiers`` instead extracts every
+        raw identifier token from the owner's scope path AND its
+        template-argument list, structurally -- no external demangler
+        involved at all, on any host (this used to fall back to
+        ``demangle()`` for exactly this shape, which is the host-dependent
+        reproducibility defect ``TestTemplatedOwnerHostIndependence`` below
+        pins directly).
 
         Real GCC manglings (verified against a real ``c++filt``):
         ``_ZTV3BoxIiE`` demangles to ``"vtable for Box<int>"``, from which
-        ``_type_identifiers`` extracts the bare ``"Box"`` token.
+        ``_type_identifiers`` extracts the bare ``"Box"`` token --
+        ``itanium_special_name_owner_identifiers`` extracts the identical
+        ``"Box"`` token structurally.
         """
         snap = AbiSnapshot(
             library="l",
@@ -235,8 +245,7 @@ class TestMangledVtableSymbolSurfaceClassification:
         )
         # "Box" is declared (in all_types) but never reachable from a public
         # function/variable -- a real non-public type, correctly demoted
-        # only because the template-argument list forced the demangler
-        # fallback instead of the unmatchable raw structural spelling.
+        # via the structural template-argument identifier extraction.
         assert classify_change_surface(c, s, s) == (False, REASON_NON_PUBLIC_TYPE)
 
         c_pub = Change(
@@ -245,3 +254,83 @@ class TestMangledVtableSymbolSurfaceClassification:
             description="",
         )
         assert classify_change_surface(c_pub, s, s) == (True, None)
+
+
+class TestTemplatedOwnerHostIndependence:
+    """New defect 1 regression: a templated vtable/RTTI/VTT owner's
+    public-surface classification must not vary by whether the optional
+    ``cxxfilt``/``c++filt`` demangler happens to be installed on the host.
+
+    Before the fix, ``surface.py``'s ``_resolve_type_candidates`` fell back
+    to ``demangle()`` specifically for a templated owner (e.g. a libstdc++
+    container instantiation, exactly oneDNN's real-world shape) --
+    host-present, the class correctly demoted out of the public surface;
+    host-absent, the same comparison silently kept it in-surface. This is a
+    *bug-class* regression: it must hold for every representative templated
+    special-name owner, not only the one reported symbol, and under both a
+    present and an absent demangler -- proven here by monkeypatching the
+    shared ``abicheck.demangle.demangle()`` entry point both ways and
+    asserting the classification never changes.
+    """
+
+    def _surf(self, snap):
+        return compute_public_surface(snap)
+
+    #: Representative libstdc++-shaped and user-shaped templated owners
+    #: (mangled symbol, declared type name the owner is *composed of* that
+    #: is present in `types=` but unreachable from any public function --
+    #: i.e. the expected-non-public case).
+    _CASES = [
+        # dnnl::pool::vector<T>-shaped namespaced-internal template (avoids
+        # a bare "impl"/"detail"/"internal" component -- that would trip
+        # surface.py's unrelated anti-hiding rule for internal namespaces,
+        # which always keeps the finding in-surface regardless of this fix).
+        ("_ZTVN4dnnl4pool6vectorIiEE", "vector"),
+        # A libstdc++-style container instantiation over a user type.
+        ("_ZTVSt6vectorIN2ab3BarEE", "Bar"),
+        # Nested template argument (Box<ab::Baz>).
+        ("_ZTIN3BoxIN2ab3BazEEE", "Baz"),
+        # Simple one-level template, no nested namespace.
+        ("_ZTT3BoxIiE", "Box"),
+    ]
+
+    def test_classification_identical_with_and_without_a_demangler(self):
+        import abicheck.demangle as demangle_mod
+
+        for mangled, present_type in self._CASES:
+            snap = AbiSnapshot(
+                library="l",
+                version="1",
+                functions=[_fn("api", ret="Result *")],
+                types=[_rec("Result"), _rec(present_type)],
+            )
+            s = self._surf(snap)
+            change = Change(
+                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+                symbol=mangled,
+                description="",
+            )
+
+            original = demangle_mod.demangle
+            try:
+                demangle_mod.demangle = lambda *a, **k: None  # simulate absent
+                absent_result = classify_change_surface(change, s, s)
+
+                def _boom(*a, **k):
+                    raise AssertionError(
+                        f"demangle() must not be called for {mangled!r}"
+                    )
+
+                demangle_mod.demangle = _boom  # simulate a call that would crash
+                present_result = classify_change_surface(change, s, s)
+            finally:
+                demangle_mod.demangle = original
+
+            assert (
+                absent_result
+                == present_result
+                == (
+                    False,
+                    REASON_NON_PUBLIC_TYPE,
+                )
+            ), (mangled, absent_result, present_result)

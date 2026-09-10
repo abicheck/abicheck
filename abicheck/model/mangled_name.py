@@ -478,6 +478,109 @@ def itanium_scope_components_with_template_positions(
 _SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TT")
 
 
+def _collect_source_names_in_span(s: str, start: int, end: int) -> frozenset[str]:
+    """Every length-prefixed source-name token appearing anywhere in
+    ``s[start:end]``, at any nesting depth.
+
+    Deliberately does not track ``I``/``N``/``E`` balance the way
+    :func:`_skip_template_args` does — *every* length-prefixed name in the
+    span is wanted here, regardless of how deeply nested (a scope
+    component's own name, a directly-nested type's name, and every class/
+    namespace name embedded in a template argument list all matter equally
+    for identifier-token matching; see
+    :func:`itanium_special_name_owner_identifiers`). A ``L<type><value>E``
+    non-type template-argument operand is skipped as a unit (its value
+    digits are not a length prefix and must not be misread as one); every
+    other non-digit byte (substitution codes, builtin type letters,
+    qualifiers, the ``I``/``N``/``E`` structural markers themselves) is
+    simply stepped over. A malformed length prefix stops the scan early
+    (returning what was found so far) rather than raising — mirrors this
+    module's fail-safe convention throughout.
+    """
+    names: set[str] = set()
+    i = start
+    while i < end:
+        c = s[i]
+        if c in _ASCII_DIGITS:
+            name, j = _read_length_prefixed_name(s, i)
+            if name is None:
+                break
+            names.add(name)
+            i = j
+            continue
+        if c == "L":
+            close = s.find("E", i + 1, end)
+            if close == -1:
+                break
+            i = close + 1
+            continue
+        i += 1
+    return frozenset(names)
+
+
+def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | None:
+    """Every raw identifier token in a ``_ZTV``/``_ZTI``/``_ZTT`` special
+    name's owning-class production — its scope path AND every class/
+    namespace name embedded in any template-argument list it carries, at
+    any nesting depth.
+
+    Purely structural (no ``c++filt``/``cxxfilt``), like
+    :func:`itanium_special_name_owner_scope_components`. This function
+    exists specifically so public-surface scoping's *type-candidate*
+    resolution (``surface.py``'s ``_resolve_type_candidates``) can match a
+    **templated** vtable/RTTI/VTT owner (e.g. a libstdc++ container
+    instantiation, or any user template) against the model's own canonical
+    type names without falling back to the optional external demangler for
+    that shape — a policy-affecting classification (public-surface scoping,
+    and anything downstream that depends on it, such as contract-coverage
+    classification) must not silently vary by whether that tool happens to
+    be installed on the host. Compare
+    :func:`itanium_special_name_owner_scope_components`'s own docstring,
+    which established this rule for the non-templated case; this closes the
+    templated case a fallback to :func:`~abicheck.demangle.demangle`
+    previously (and host-dependently) handled.
+
+    Returns ``None`` under the identical conditions
+    :func:`itanium_special_name_owner_scope_components` does (unrecognized
+    special-name code, or a remainder that fails to parse at all). A
+    substitution-encoded template argument (``S_``, ``Sa``, ``St``, …) is a
+    documented, accepted limitation: this parser does not resolve a
+    substitution back to the type it abbreviates, so a name reachable only
+    through one is absent from the result — this can only ever *narrow* the
+    candidate set (never fabricate a wrong one), so a match this parser
+    misses still falls back to the existing conservative "unknown, keep"
+    default the caller already applies, not a new failure mode; deterministic
+    and host-independent either way, which is the property this function
+    exists to guarantee.
+    """
+    if not mangled.startswith("_Z"):
+        return None
+    code, rest = mangled[2:4], mangled[4:]
+    if code not in _SPECIAL_NAME_OWNER_CODES or not rest:
+        return None
+    prefix = _itanium_strip_prefix("_Z" + rest)
+    if prefix is None:
+        return None
+    s, nested = prefix
+    i = 0
+    n = len(s)
+    if s[i : i + 2] == "St":
+        i += 2
+    saw_component = False
+    while i < n:
+        step = _step_next_component(s, i, nested)
+        if step is None:
+            return None
+        label, i, done, _template_attached = step
+        if label is not None:
+            saw_component = True
+        if done:
+            break
+    if not saw_component:
+        return None
+    return _collect_source_names_in_span(s, 0, i)
+
+
 def itanium_special_name_owner_scope_components(
     mangled: str,
 ) -> tuple[list[str], frozenset[int]] | None:
