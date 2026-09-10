@@ -402,27 +402,32 @@ def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
     Mirrors :func:`_snapshot_diff_result`'s own reasoning (a caller
     reassigning ``old.version`` or appending to ``old.functions`` after the
     envelope was built must not reach HTML's/JUnit's own direct reads of
-    ``envelope.old``/``envelope.new``) but *not* its depth: a real
+    ``envelope.old``/``envelope.new``) but *not* its full depth: a real
     ``AbiSnapshot`` carries every ``Function``/``RecordType``/``EnumType``
     the extractor found -- tens of thousands for a large library -- and
     ``copy.deepcopy``ing the whole object graph on every render measurably
     dominates render time on such a library (Codex review, fresh evidence:
     ~6s for a pair of 10k-function snapshots). A shallow copy of the
-    top-level object plus a fresh container for each list/dict field
-    closes the two concrete cases actually reported (reassignment,
-    list-level mutation) at the cost this module already accepts
-    elsewhere for the same tradeoff -- a *field* mutated in place inside
-    one retained ``Function``/``RecordType`` (as opposed to the field
-    ``old.version`` or the container ``old.functions`` itself) is not
-    covered, the same boundary ``_snapshot_change`` does NOT extend to
-    ``old``/``new`` themselves.
+    top-level object, a fresh container for each list/dict field, and one
+    shallow ``copy.copy`` per list *element* closes every case reported so
+    far -- attribute reassignment, list-level mutation, and mutating a
+    top-level attribute of one retained ``Function``/``RecordType`` (e.g.
+    ``old.functions[0].mangled``, which JUnit's own testcase naming reads
+    straight off ``envelope.old`` -- CodeRabbit review, fresh evidence) --
+    at a cost still orders of magnitude below full recursion: a shallow
+    per-element copy is O(1) per element, not O(depth). A field *nested
+    inside* one of those elements (e.g. a ``RecordType.fields`` entry) is
+    still shared -- unlike a ``Change``, which :func:`_snapshot_change`
+    deep-copies in full, an ``AbiSnapshot`` element's own nested structure
+    is deliberately left out of scope here for the size/performance reason
+    stated above.
     """
     import copy
 
     result = copy.copy(snapshot)
     for name, value in vars(snapshot).items():
         if isinstance(value, list):
-            setattr(result, name, list(value))
+            setattr(result, name, [copy.copy(v) for v in value])
         elif isinstance(value, dict):
             setattr(result, name, dict(value))
     return result

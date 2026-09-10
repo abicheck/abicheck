@@ -93,6 +93,8 @@ from .report_classifications import (
 from .report_summary import compatibility_metrics
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .checker import DiffResult
     from .severity import SeverityConfig
 
@@ -363,7 +365,9 @@ def compute_nav_bar(
 # ---------------------------------------------------------------------------
 
 
-def compute_confidence(result: object) -> ConfidenceData | None:
+def compute_confidence(
+    result: object, *, today: date | None = None
+) -> ConfidenceData | None:
     """Collect the confidence/evidence/policy disclosure facts.
 
     ``None`` when the result carries no confidence at all, which renders no
@@ -373,6 +377,9 @@ def compute_confidence(result: object) -> ConfidenceData | None:
     one as though it were would misstate the run (Codex review, mirroring the
     JSON ``policy_reclassify`` disclosure in ``reporter._add_policy_overrides``
     -- the active rule set, not a per-finding "which rule fired" attribution).
+    *today* (ADR-061 gap C): an envelope's own ``resolved_today``, so that
+    expiry check can't drift from the envelope's own finalized verdicts
+    (Codex review, fresh evidence).
     """
     conf = getattr(result, "confidence", None)
     if conf is None:
@@ -388,7 +395,8 @@ def compute_confidence(result: object) -> ConfidenceData | None:
         from .reclassify import active_reclassify_rules
 
         reclassify = tuple(
-            rule.describe() for rule in active_reclassify_rules(policy_file.reclassify)
+            rule.describe()
+            for rule in active_reclassify_rules(policy_file.reclassify, today)
         )
     comparability = getattr(result, "comparability_assurance", None)
     return ConfidenceData(
@@ -644,6 +652,7 @@ def build_html_document(
             policy=result.policy,
             kind_sets=_kind_sets_fn() if _kind_sets_fn is not None else None,
             policy_file=getattr(result, "policy_file", None),
+            today=None if envelope is None else envelope.resolved_today,
         )
         filtered = _suppress_dangling_correlation_notes(filtered)
         display_changes: list[object] = list(filtered)
@@ -823,7 +832,9 @@ def build_html_document(
         else:
             empty_state = {"kind": "no_changes"}
 
-    confidence = compute_confidence(result)
+    confidence = compute_confidence(
+        result, today=None if envelope is None else envelope.resolved_today
+    )
     gate_card = compute_gate_card(result, severity_config, envelope=envelope)
     scoped_verdict = compute_scoped_verdict(result)
     impact = compute_impact(result, display_changes) if show_impact else None

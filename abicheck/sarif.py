@@ -758,22 +758,18 @@ def to_sarif(
     disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, resolved_document(envelope, report_document))  # ADR-061 Phase 2 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
-    # policyReclassify below as though it were still in effect.
+    # policyReclassify below as though it were still in effect. *today*
+    # pins that check to the envelope's own `resolved_today` (Codex, fresh).
+    _resolved_today = None if envelope is None else envelope.resolved_today
     _active_reclassify_rules: list[Any] = []
     if result.policy_file and result.policy_file.reclassify:
         from .reclassify import active_reclassify_rules
 
-        _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify)
+        _active_reclassify_rules = active_reclassify_rules(result.policy_file.reclassify, _resolved_today)
 
     changes = list(result.changes)
     if show_only:
-        changes = apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+        changes = apply_show_only(changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, _resolved_today)
         changes = _suppress_dangling_correlation_notes(changes)
 
     # Collect unique rules used
@@ -797,13 +793,7 @@ def to_sarif(
     # mode, which computes from the filtered set only).
     scoped_only_changes = list(getattr(result, "scoped_only_changes", ()) or ())
     if show_only and scoped_only_changes:
-        scoped_only_changes = apply_show_only(
-            scoped_only_changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+        scoped_only_changes = apply_show_only(scoped_only_changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, _resolved_today)
 
     # G29 Phase 3 slice 5 (ADR-052): --report-mode root-cause adds
     # properties.rootCauseId/rootCause to every result rather than

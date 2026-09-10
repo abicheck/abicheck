@@ -529,6 +529,7 @@ def _build_testsuite(
             policy=result.policy,
             kind_sets=result._effective_kind_sets(),
             policy_file=result.policy_file,
+            today=None if envelope is None else envelope.resolved_today,
         )
         changes = _suppress_dangling_correlation_notes(changes)
 

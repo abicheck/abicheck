@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .bundle_models import BundleDiffResult
     from .policy.severity import GateDecision
     from .report.finding import ReportFinding
@@ -310,6 +312,7 @@ class ShowOnlyFilter:
         policy: str,
         kind_sets: KindSets | None = None,
         policy_file: object | None = None,
+        today: date | None = None,
     ) -> bool:
         """Return True if *change* matches the severity filter.
 
@@ -320,7 +323,8 @@ class ShowOnlyFilter:
         `--show-only` could disagree with the JSON severity field and
         filtered_summary counts for any change whose effective category
         differs from its raw kind's policy bucket (a demoted opaque/PIMPL
-        layout change, or a kind moved by a policy-file override).
+        layout change, or a kind moved by a policy-file override). *today*:
+        an envelope's ``resolved_today`` (ADR-061 gap C, Codex, fresh).
         """
         if not self.severities:
             return True
@@ -331,6 +335,7 @@ class ShowOnlyFilter:
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         # NB: this maps to the CLI --show-only token vocabulary (hyphenated
         # "api-break"), which intentionally differs from the JSON-field
@@ -426,9 +431,10 @@ class ShowOnlyFilter:
         policy: str = "strict_abi",
         kind_sets: KindSets | None = None,
         policy_file: object | None = None,
+        today: date | None = None,
     ) -> bool:
         """Return True if *change* passes this filter."""
-        if not self._check_severity(change, policy, kind_sets, policy_file):
+        if not self._check_severity(change, policy, kind_sets, policy_file, today):
             return False
         if not self._check_element(change.kind.value):
             return False
@@ -489,12 +495,11 @@ def show_only_matches(
     policy: str = "strict_abi",
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> bool:
     """Return True if *change* matches ANY OR'd group of *show_only*."""
     return any(
-        group.matches(
-            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file
-        )
+        group.matches(change, policy, kind_sets, policy_file, today)
         for group in parse_show_only_groups(show_only)
     )
 
@@ -526,6 +531,7 @@ def apply_show_only(
     policy: str = "strict_abi",
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    today: date | None = None,
 ) -> list[Change]:
     """Filter changes according to a --show-only token string.
 
@@ -538,14 +544,13 @@ def apply_show_only(
 
     *show_only* may hold several ``SHOW_ONLY_GROUP_SEP``-joined OR'd groups (see
     :func:`parse_show_only_groups`) -- a change is kept if it matches ANY
-    one of them.
+    one of them. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
+    Codex, fresh).
     """
     return [
         c
         for c in changes
-        if show_only_matches(
-            show_only, c, policy=policy, kind_sets=kind_sets, policy_file=policy_file
-        )
+        if show_only_matches(show_only, c, policy, kind_sets, policy_file, today)
     ]
 
 
@@ -1890,8 +1895,13 @@ def _append_contract_conflicts_section(lines: list[str], result: DiffResult) -> 
     )
 
 
-def compute_policy_section(result: DiffResult) -> _rmd.PolicySection:
-    """The structured intermediate for :func:`_append_policy_section`."""
+def compute_policy_section(
+    result: DiffResult, *, today: date | None = None
+) -> _rmd.PolicySection:
+    """The structured intermediate for :func:`_append_policy_section`.
+
+    *today*: an envelope's ``resolved_today`` (ADR-061 gap C, Codex, fresh).
+    """
     overrides_text = None
     if result.policy_file and result.policy_file.overrides:
         overrides_text = ", ".join(
@@ -1909,7 +1919,7 @@ def compute_policy_section(result: DiffResult) -> _rmd.PolicySection:
         # disclosed as though it were still in effect.
         from .reclassify import active_reclassify_rules
 
-        active = active_reclassify_rules(result.policy_file.reclassify)
+        active = active_reclassify_rules(result.policy_file.reclassify, today)
         if active:
             # CodeRabbit review: code-span-wrap describe()'s raw selector
             # text (e.g. `_ZN6oneapi3dal.*`) -- unescaped, `_`/`*` read as

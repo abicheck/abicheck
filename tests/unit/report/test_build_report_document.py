@@ -27,13 +27,14 @@ import inspect
 import json
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
+from datetime import date, timedelta
 from unittest import mock
 
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, LibraryMetadata, Verdict
 from abicheck.junit_report import to_junit_xml
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Function
 from abicheck.policy.disposition_close import finalize_ledger
 from abicheck.policy.disposition_ledger import DispositionLedger
 from abicheck.policy_file import PolicyFile
@@ -960,22 +961,17 @@ class TestRendererOrderIndependence:
     ) -> None:
         """Codex review, fresh evidence: ``build_markdown_document`` already
         passed the envelope's own findings to ``compute_surface_changes``,
-        but ``ReportModel.from_result`` above it still called
-        ``result._effective_verdict_for_change`` fresh to split the severity
-        groups (breaking/source_breaks/risk/compatible), and
-        ``compute_headline_table`` did the identical thing for the headline
-        counts. A dated ``PolicyFile.reclassify`` rule active at envelope-
-        construction time but expired by render time could then move a
-        finding into Breaking Changes in one or both of those sections
-        while ``surface_changes`` (reading the envelope's frozen verdict)
-        still called it compatible.
+        but ``ReportModel.from_result`` and ``compute_headline_table`` still
+        called ``result._effective_verdict_for_change`` fresh for the
+        severity-group split and headline counts. A dated ``PolicyFile.
+        reclassify`` rule expired by render time could then move a finding
+        into Breaking Changes there while ``surface_changes`` still called
+        it compatible.
 
-        Simulates "the rule already expired by render time" directly: the
-        live resolver is mocked to return ``BREAKING`` unconditionally, so a
-        section still reading it fresh would show the finding as breaking.
-        Markdown now reuses the envelope's own already-resolved (still
-        ``COMPATIBLE``) finding for both the severity groups and the
-        headline, so neither section should move.
+        Simulates "already expired by render time" directly: the live
+        resolver is mocked to return ``BREAKING`` unconditionally. Markdown
+        now reuses the envelope's own (still ``COMPATIBLE``) finding for
+        both, so neither section should move.
         """
         removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         policy_file = PolicyFile(
@@ -1007,16 +1003,12 @@ class TestRendererOrderIndependence:
 
     def test_resolve_fallback_reuses_the_envelope_s_frozen_today(self) -> None:
         """Codex review, fresh evidence: ``ReportEnvelope._resolve`` -- the
-        fallback used for a display-only ``Change`` copy
+        fallback for a display-only ``Change`` copy
         ``_suppress_dangling_correlation_notes`` hands a renderer under
         ``--show-only`` -- called ``build_report_findings`` with no
-        ``today``, so it read a fresh ``date.today()`` at render time
-        instead of the date the rest of the envelope's findings were
-        resolved against. A dated ``PolicyFile.reclassify`` rule active at
-        construction but expired by render time could then classify the
-        copy differently from every other finding in the same envelope.
-        ``_resolve`` now threads ``resolved_today``, frozen at
-        construction, through explicitly.
+        ``today``, reading a fresh ``date.today()`` instead of the date
+        the rest of the envelope's findings were resolved against.
+        ``_resolve`` now threads ``resolved_today`` through explicitly.
         """
         removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
         result = _result([removed])
@@ -1037,6 +1029,83 @@ class TestRendererOrderIndependence:
 
         spy.assert_called_once()
         assert spy.call_args.kwargs["today"] == envelope.resolved_today
+
+    def test_show_only_severity_filter_and_active_reclassify_disclosure_reuse_the_envelope_s_frozen_today(
+        self,
+    ) -> None:
+        """Codex review, fresh evidence: ``apply_show_only``'s severity
+        dimension and ``active_reclassify_rules`` (SARIF/HTML/Markdown's
+        policy disclosures) each defaulted to a fresh ``date.today()`` at
+        render/filter time instead of the envelope's own ``resolved_today``
+        -- so a dated ``reclassify`` rule active as of envelope construction
+        but read as expired later could vanish from a filter or disclosure,
+        disagreeing with the envelope's own frozen verdict. Mocking "time
+        passing" (``policy.selectors.date``, where these all bottom out
+        absent an explicit ``today``) must not move any of them.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=date.today() + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = build_report_envelope(
+            result, old, new, options=RenderOptions(show_only="compatible")
+        )
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        with mock.patch("abicheck.policy.selectors.date") as fake_date:
+            fake_date.today.return_value = date.today() + timedelta(days=2)
+            sarif_out = render_envelope("sarif", envelope)
+            markdown_out = render_envelope("markdown", envelope)
+            html_out = render_envelope("html", envelope)
+
+        assert "_Z3foov" in sarif_out, (
+            "--show-only compatible dropped the reclassified finding once "
+            "the rule read as expired against a fresh 'today'"
+        )
+        assert '"policyReclassify"' in sarif_out, (
+            "SARIF stopped disclosing the still-active-as-of-envelope rule"
+        )
+        assert "reclassify" in markdown_out.lower() or "→" in markdown_out
+        assert "_Z3foov" in html_out
+
+    def test_mutating_a_shared_snapshot_function_s_attribute_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """CodeRabbit review, fresh evidence: ``_snapshot_abi_snapshot``
+        copied only the containers, leaving each element (e.g. one
+        ``Function``) shared with the caller. JUnit's
+        ``_collect_all_symbols`` reads ``Function.mangled`` off
+        ``envelope.old`` for its testcase-classname map.
+        """
+        func = Function(name="foo", mangled="_Z3foov", return_type="void")
+        old = AbiSnapshot(library="libtest.so.1", version="1.0", functions=[func])
+        new = _snapshot("2.0")
+        envelope = self._envelope(_result([]), old, new)
+
+        assert envelope.old.functions[0] is not func, "Function object shared"
+
+        junit_before = render_envelope("junit", envelope)
+        func.mangled = "_Z9renamed_ev"
+        junit_after = render_envelope("junit", envelope)
+
+        assert junit_before == junit_after, "testcase names moved on mutation"
+        assert "_Z3foov" in junit_before
+        assert "_Z9renamed_ev" not in junit_after
 
 
 class TestSarifAndJunitDecisionBoundary:

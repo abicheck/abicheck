@@ -161,7 +161,7 @@ def _opt_asdict(value: Any) -> dict[str, Any] | None:
 
 
 def _resolve_displayed_changes(
-    result: Any, show_only: str | None
+    result: Any, show_only: str | None, *, today: Any = None
 ) -> tuple[list[Any], dict[str, Any] | None]:
     """The changes this render actually displays, plus the ``--show-only``
     filter note describing it when one was applied (``None`` otherwise).
@@ -172,19 +172,14 @@ def _resolve_displayed_changes(
     ``_view_preamble_mapping``), which used to each run their own copy of
     the identical ``apply_show_only`` -> ``_suppress_dangling_correlation_
     notes`` pipeline and independently re-derive the same filter-note shape
-    from it.
+    from it. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
+    Codex, fresh).
     """
     rm = _reporter_markdown()
     changes = list(result.changes)
     show_only_note: dict[str, Any] | None = None
     if show_only:
-        changes = rm.apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+        changes = rm.apply_show_only(changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, today)
         show_only_note = {
             "show_only": show_only,
             "shown": len(changes),
@@ -537,7 +532,10 @@ def build_markdown_document(
     old_meta = getattr(result, "old_metadata", None)
     new_meta = getattr(result, "new_metadata", None)
 
-    changes, show_only_note = _resolve_displayed_changes(result, show_only)
+    resolved_today = None if envelope is None else envelope.resolved_today
+    changes, show_only_note = _resolve_displayed_changes(
+        result, show_only, today=resolved_today
+    )
 
     from ..report_model import ReportModel
 
@@ -599,7 +597,7 @@ def build_markdown_document(
         "contract_conflicts": _opt_asdict(
             rm.compute_contract_conflicts_section(result)
         ),
-        "policy": asdict(rm.compute_policy_section(result)),
+        "policy": asdict(rm.compute_policy_section(result, today=resolved_today)),
         "recommendation": (
             asdict(rm.compute_recommendation_section(result))
             if show_recommendation

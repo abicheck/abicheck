@@ -786,7 +786,7 @@ def test_html_compatibility_metrics_reuse_the_envelope_s_findings() -> None:
         html_out = generate_html_report(result, envelope=envelope)
 
     spy.assert_not_called()
-    assert "100.0%" in html_out or "Binary Compatibility" in html_out
+    assert "100.0%" in html_out
 
 
 def test_html_compat_changes_table_empty_and_populated() -> None:
