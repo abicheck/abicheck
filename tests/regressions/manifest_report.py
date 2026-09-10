@@ -142,8 +142,15 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_no_baseline_report_formats.py",
         ),
         axes={
-            # Only what a seed test really drives.
-            "renderer": ("json", "markdown", "junit"),
+            # Only what a seed test really drives -- and *all* of it. This
+            # tuple omitted `sarif` while
+            # `test_every_format_carries_the_reason_and_source_not_just_the_label`
+            # parametrizes over `NO_BASELINE_SUPPORTED_FORMATS` minus
+            # `oneline`, which includes it. Understating coverage sends a
+            # contributor to write a test that already exists, the mirror of
+            # the overstating case the known gap below describes (Codex
+            # review, P2).
+            "renderer": ("json", "markdown", "sarif", "junit"),
             "record": ("suppression-provenance", "exit-axis"),
         },
         known_gaps=(
@@ -159,9 +166,15 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
-                    "Nothing enforces that an axis declared on a BugClass is "
-                    "actually exercised by an assertion in one of its "
-                    "`seed_tests`. Splitting a test module for a size "
+                    "Nothing enforces that an axis declared on a BugClass "
+                    "matches what its `seed_tests` actually exercise, in "
+                    "either direction -- this entry has now been wrong both "
+                    "ways: a `seed_tests` list pointing at the file the "
+                    "assertions had moved out of, and a `renderer` tuple "
+                    "omitting `sarif` while the seed test parametrized over "
+                    "it. Overstating sends a reader to a test that does not "
+                    "exist; understating sends them to write one that does. "
+                    "Splitting a test module for a size "
                     "violation left this entry naming only the file the "
                     "suppression-provenance assertions had moved *out* of, "
                     "and no gate noticed: the declared record and renderer "
