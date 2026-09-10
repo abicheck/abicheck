@@ -47,6 +47,7 @@ already apply to `ChangeKind`.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_tool_surface import TOOL_SURFACE_BUG_CLASSES
 
 __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 
@@ -57,7 +58,7 @@ __all__ = ["BUG_CLASSES", "BugClass", "KnownGap", "all_ids", "get"]
 #: each. A class entry does not claim its phase is *complete* — see that
 #: plan document for what each phase still has open; this registry only
 #: records what already has a home so a future PR can find it.
-BUG_CLASSES: tuple[BugClass, ...] = (
+_ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
     BugClass(
         id="extraction.ast_wrapper_chain_traversal",
         invariant=(
@@ -469,79 +470,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
-        id="trust_boundary.shell_workflow_injection",
-        invariant=(
-            "Every scalar input to a shell script or composite-Action "
-            "step arrives as exactly one argument with exactly the same "
-            "bytes, and untrusted data cannot create additional commands, "
-            "$GITHUB_OUTPUT records, paths, or side effects."
-        ),
-        fixed_by=(705, 758, 836, 919, 1165),
-        seed_tests=(
-            "tests/test_reusable_workflow_execution.py",
-            "tests/test_check_project_workflow_execution.py",
-            "tests/test_action_run_sh_helpers.py",
-            # PR #1165: `action/validate-inputs.sh`'s own annotation
-            # emitters. Every message there interpolates a
-            # workflow-controlled INPUT_* value into a line-delimited
-            # GitHub annotation, so a value carrying a newline forged an
-            # `::error::`/`::set-output::` command of its own -- a live
-            # defect on the pre-existing `build-info` site, not only on
-            # the tombstones the same PR added. Fixed once in the shared
-            # `_warn`/`_fail` helpers.
-            "tests/test_action_validate_inputs.py",
-        ),
-        public_surfaces=("github-action",),
-        axes={
-            "adversarial-shape": (
-                "path-traversal",
-                "shell-metacharacters",
-                "command-substitution",
-                "spaces",
-                "tab",
-                "leading-dash-flag-shaped",
-                "multiple-flags-shaped",
-                "quotes",
-                "redirects",
-                "newline-record-injection",
-                "non-ascii",
-                "empty-string",
-            )
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "`action/run.sh` emits its own annotations with "
-                    'inline `echo "::error::..."` calls rather than '
-                    "through a shared helper, and several interpolate an "
-                    "INPUT_* value the same way validate-inputs.sh did. "
-                    "PR #1165 fixed validate-inputs.sh at its two "
-                    "emitters (covering every site in that file at once) "
-                    "but deliberately did not widen into run.sh's ~20 "
-                    "inline sites, which need their own pass and their "
-                    "own executing corpus."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-            KnownGap(
-                description=(
-                    "The hostile-input execution corpus (shared via "
-                    "`_workflow_exec.HOSTILE_SCALAR_CORPUS`, Phase 8) now "
-                    "covers two independently-maintained real sanitizer "
-                    "copies (`check-single.yml`/`check-project.yml`) plus "
-                    "`action/run.sh`'s word-splitting-sensitive `add_flag`/"
-                    "`add_sided_flag` helpers — not every scalar input "
-                    "across the repository's other shell scripts and "
-                    "composite-action steps (e.g. the other workflows' "
-                    "`run:` steps enumerated in the plan's own target-"
-                    "script inventory), which is still the full scope "
-                    "Phase 8's invariant is stated over."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-8",
-            ),
-        ),
-    ),
-    BugClass(
         id="registry.kind_completeness",
         invariant=(
             "Every declared ChangeKind/evidence-kind/provider is accounted "
@@ -625,36 +553,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "production fix fails this test)."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md#phase-9",
-            ),
-        ),
-    ),
-    BugClass(
-        id="ci.unrelated_apt_source_gates_the_job",
-        invariant=(
-            "A CI lane never fails because of a package repository none "
-            "of its packages come from. `apt-get update` fails as a whole "
-            "when any configured source fails -- including the "
-            "third-party vendor repositories pre-baked into GitHub's "
-            "runner images -- so its exit status must never gate a step; "
-            "`apt-get install` is the gate, and a post-install check "
-            "confirms the packages are actually present so relaxing the "
-            "first gate cannot turn into a silent false success."
-        ),
-        fixed_by=(1182,),
-        seed_tests=("tests/test_apt_install_hardening.py",),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "The workflow-wide half of the invariant is "
-                    "structural (parsed YAML), not executed: a step's own "
-                    "wiring needs a real GitHub Actions runner. The "
-                    "script's behaviour is executed against a simulated "
-                    "apt; that a given lane calls the script is asserted "
-                    "over the workflow files only. A lane could still "
-                    "install packages through a mechanism this scan does "
-                    "not model (a Makefile, a setup script it invokes)."
-                ),
-                reference="tests/test_apt_install_hardening.py",
             ),
         ),
     ),
@@ -786,47 +684,6 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_param_kind_enum_identity.py",
             "tests/test_str_enum_downcast_walk.py",
-        ),
-    ),
-    BugClass(
-        id="tooling.platform_dependent_path_key",
-        invariant=(
-            "A repo-relative path computed to serve as a lookup/comparison "
-            "key -- an allowlist entry, a cache key, anything compared "
-            "against a hand-written or previously-persisted forward-slash "
-            "string -- must render with `.as_posix()`, never bare "
-            "`str(Path)`. `str()` of a relative `Path` renders with the "
-            "*host's native* separator (backslash on Windows), so a key "
-            "computed that way silently fails to match every "
-            "forward-slash-spelled entry on Windows alone, in both "
-            "directions: an already-reviewed, allowlisted call site reads "
-            "as a fresh, unreviewed violation, and a genuinely live "
-            "allowlist entry reads as stale. Distinct from the "
-            "canonical-identity `environment_taint` shape this registry "
-            "otherwise tracks -- this is a path-*rendering* bug, not an "
-            "identity or environment-capture one, and it fails "
-            "deterministically on every Windows run rather than "
-            "intermittently."
-        ),
-        fixed_by=(995, 1004),
-        seed_tests=("tests/test_fact_bridged_replace_guard.py",),
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "This class's fix and seed test are scoped to the one "
-                    "file CI actually reported as broken "
-                    "(`tests/test_fact_bridged_replace_guard.py`). No "
-                    "repo-wide audit was run against the other AST-scan "
-                    "gates that compute a similar path-shaped lookup key "
-                    "(`scripts/check_ai_readiness.py`, "
-                    "`scripts/fact_detector_misuse.py`/`fact_field_"
-                    "readers.py` and their siblings) to confirm none of "
-                    "them share the identical `str(path.relative_to(...))` "
-                    "spelling -- a real, separate follow-up this class "
-                    "does not yet close."
-                ),
-                reference="https://github.com/abicheck/abicheck/pull/1004",
-            ),
         ),
     ),
     BugClass(
@@ -1213,7 +1070,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "On Darwin, strip a linker-decorated spelling to the pure spelling AT THE POINT "
             'OF ORIGIN: a real Itanium name (`__Z...` -> `_Z...`, unconditional), a genuine extern "C"'
-            "/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`, itself gated `and not (has_asm_label and is_cxx)` in its own Darwin `symbol_candidates` branch -- a single-underscore explicit `asm(\"_foo\")` label is exactly as candidate-matchable as genuine decoration, so without the gate the mangled name stayed preserved but `entity_id_for_function`/`entity_id_for_variable` still took the wrong, signature-free `(\"extern_c\",)` branch instead of `(\"mangled\", \"_foo\")`; gating on `is_cxx` -- the caller's own resolved compile-language mode -- is required because C has no mangling to override, so a genuinely plain-C asm-labeled declaration must stay `(\"extern_c\",)`, matching castxml, or self-comparing an unchanged plain-C header spuriously reports FUNC_LANGUAGE_LINKAGE_CHANGED). Both gate on "
+            '/plain-C bare name (`_foo` -> `foo`, gated on `is_extern_c`, itself gated `and not (has_asm_label and is_cxx)` in its own Darwin `symbol_candidates` branch -- a single-underscore explicit `asm("_foo")` label is exactly as candidate-matchable as genuine decoration, so without the gate the mangled name stayed preserved but `entity_id_for_function`/`entity_id_for_variable` still took the wrong, signature-free `("extern_c",)` branch instead of `("mangled", "_foo")`; gating on `is_cxx` -- the caller\'s own resolved compile-language mode -- is required because C has no mangling to override, so a genuinely plain-C asm-labeled declaration must stay `("extern_c",)`, matching castxml, or self-comparing an unchanged plain-C header spuriously reports FUNC_LANGUAGE_LINKAGE_CHANGED). Both gate on '
             "`is_darwin_target(target_triple)`, always False for a bare `None`/empty triple (never "
             "guess Darwin from host OS there). A `sys.platform` guess for a REAL probe failure lives "
             "one layer up, in `dumper._run_clang`, after `_compiler_options.explicit_target_triple`. "
@@ -1253,12 +1110,12 @@ BUG_CLASSES: tuple[BugClass, ...] = (
                     "driver name (`clang-18`) failing the basename check; a visible target trusted despite a later response file that could override it; that same fix wrongly trusting a preceding one too, since Clang's own driver-mode scan reads the whole arg list up front regardless of position; an exact-basename comparison alone wrongly treating ANY custom rename of the native compiler (e.g. `company-clang`) as a cross-compiler, closed by trying a bare re-probe of the identical binary first; an explicit `--config=<file>` left undetected by the response-file gate, closed by folding both into one shared `_opaque_option_source_tokens` check; that bare re-probe dropping an explicit `--driver-mode=` override too, silently reverting a `clang-cl --driver-mode=g++` re-probe to CL mode; a `--config-{user,system}-dir=<dir>` implicitly loading a `clang.cfg` with no explicit `--config=` at all, left just as undetected as the file form; an explicitly-"
                     "configured `--compiler` wrapper sharing the plain default's basename while not being it, still getting the guess purely on basename evidence; and, once a genuine "
                     'Darwin target IS confirmed, a literal `asm("__Zfake")` label being indistinguishable by shape alone from a real compiler-generated decorated Itanium mangling '
-                    '(both are equally `__Z...`-shaped), closed by `has_explicit_asm_label` detecting clang\'s own distinct `AsmLabelAttr` child node under the declaration\'s `"inner"` '
+                    "(both are equally `__Z...`-shaped), closed by `has_explicit_asm_label` detecting clang's own distinct `AsmLabelAttr` child node under the declaration's `\"inner\"` "
                     "list (verified against a real Clang 18 install) and short-circuiting both stripping branches whenever it is present; and the fifteenth item's bare re-probe being "
                     "confined to the GNU branch only, leaving a target-prefixed CL-style driver (e.g. `aarch64-apple-darwin-clang-cl`) with no fallback once its own explicit-target "
                     "recovery found nothing, even though a real `clang-cl -print-target-triple` reports that same prefixed default (verified against a real Clang 18 "
                     'install), closed by trying the identical bare re-probe under CL mode too; a single-underscore explicit `asm("_foo")` label still tripping `is_extern_c`\'s Darwin '
-                    '`symbol_candidates` fallback even though the twenty-fourth item\'s own fix kept the mangled name preserved -- the resulting entity identity still took the wrong '
+                    "`symbol_candidates` fallback even though the twenty-fourth item's own fix kept the mangled name preserved -- the resulting entity identity still took the wrong "
                     '`("extern_c",)` branch instead of `("mangled", "_foo")` (verified against a real Clang 18 install), closed by gating that fallback `and not has_asm_label`; and that '
                     "very fix then wrongly excluding EVERY asm-labeled declaration, including a genuinely plain-C one -- real Clang emits the identical AST shape for "
                     '`void foo(void) asm("_foo");` whether compiled as C or C++ (verified against a real Clang 18 install: same literal `mangledName`, same `AsmLabelAttr`, no way to tell '
@@ -1325,64 +1182,14 @@ BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1176,),
         seed_tests=("tests/test_disposition_reclassification.py",),
     ),
-    BugClass(
-        id="cli_surface.retired_spelling_in_remediation",
-        invariant=(
-            "Remediation a tool prints must actually work when run: every "
-            "`--flag` token in a user-facing message must be a live option "
-            "of the command being advised, AND any concrete example it "
-            "offers must resolve the condition it is offered for -- so "
-            "following the tool's own advice can never itself be a usage "
-            "error. Flag existence alone is not the invariant: a live flag "
-            "aimed at the wrong operand fails just as hard."
-        ),
-        fixed_by=(1184,),
-        seed_tests=(
-            "tests/test_cli_compare_release_project_snapshot_package.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "error_path": (
-                "ambiguous-variant",
-                "unknown-variant-id",
-                "empty-variant-id",
-                "unknown-both-sides-id",
-                "zero-variants-declared",
-            ),
-            "ambiguous_side": ("old", "new"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "The seed test applies the oracle only to the variant "
-                    "family's own error paths. A repo-wide AST sweep run "
-                    "while fixing this (non-docstring string literals under "
-                    "`abicheck/` containing any spelling in "
-                    "`scripts/retired_surfaces.py`'s RETIRED_SURFACES) "
-                    "reports 44 hits across 25 modules, and several look "
-                    "like the same defect already sitting in the tree -- "
-                    "`pdb_utils.py`'s 'use --pdb-path to override', "
-                    "`reporter_markdown.py`'s 'Unknown --show-only token', "
-                    "`dumper.py`'s '--dwarf-only requested but ...'. They "
-                    "are NOT mechanically decidable: a flag retired from "
-                    "`compare`/`dump` can still be live on `scan` (which "
-                    "kept the whole compile-context and debug-resolution "
-                    "families), and `cli_compare_release.py`'s unregistered "
-                    "release engine legitimately still *defines* several of "
-                    "them, so a sweep-turned-gate would need ~25 "
-                    "hand-judged allowlist entries -- the shape AGENTS.md "
-                    "warns is itself a smell. Each site needs reading "
-                    "against the command that emits it. Deliberately not "
-                    "attempted in PR #1184: it is a separate change from "
-                    "the CLI option audit, and a hasty sweep would ship a "
-                    "large unreviewed allowlist rather than close the class."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-        ),
-    ),
 )
 
+
+#: The whole registry: this module's analysis classes plus each per-axis
+#: sibling's own list. An assembly point, the shape `abicheck/
+#: change_registry.py` already uses -- adding a class to a sibling needs no
+#: edit here.
+BUG_CLASSES: tuple[BugClass, ...] = _ANALYSIS_BUG_CLASSES + TOOL_SURFACE_BUG_CLASSES
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}
 
