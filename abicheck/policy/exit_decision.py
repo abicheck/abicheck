@@ -708,7 +708,7 @@ def _worst_effective_verdict(result: DiffResult, today: date) -> Verdict:
     pre-existing caller's answer changes.
     """
     from ..model.change_catalog.registry import Verdict
-    from ..reclassify import effective_verdict_for_change
+    from .reclassify import effective_verdict_for_change
     from .severity import gate_eligible_changes
 
     eligible = gate_eligible_changes(result.changes)

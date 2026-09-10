@@ -41,7 +41,6 @@ from .checker import (
     LibraryMetadata,
     Verdict,
 )
-from .contract_gating import is_evaluated
 from .finding_identity import missing_contract_kind, report_finding_id
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import (
@@ -49,6 +48,7 @@ from .policy.classification import (
     impact_for,
     policy_kind_sets as _policy_kind_sets,
 )
+from .policy.contract_finding_relevance import is_evaluated
 from .policy.evidence_status import EvidenceStatus
 from .report import contract_conflicts_markdown as _ccm, render_markdown as _rmd
 from .report.cross_source_evolution import (
@@ -1916,7 +1916,7 @@ def compute_policy_section(
         # through active_reclassify_rules so an expired rule -- which
         # ReclassifyRule.matches() would already refuse to apply -- isn't
         # disclosed as though it were still in effect.
-        from .reclassify import active_reclassify_rules
+        from .policy.reclassify import active_reclassify_rules
 
         active = active_reclassify_rules(result.policy_file.reclassify, today)
         if active:

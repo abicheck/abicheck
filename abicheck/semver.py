@@ -258,7 +258,7 @@ def _unresolved_contract_findings(result: DiffResult) -> list[Change]:
     Empty for every run that did not pass ``--contract``: nothing
     carries a relevance, so nothing is unresolved.
     """
-    from .contract_gating import contract_relevance_of
+    from .policy.contract_finding_relevance import contract_relevance_of
 
     return [
         c

@@ -82,6 +82,14 @@ PERF_SENSITIVE_PATTERNS: tuple[str, ...] = (
     # the facade for any caller still routing through it, the real owner so
     # a PR touching only the moved logic isn't invisible to this classifier.
     "abicheck/policy/classification.py",
+    # checker_policy.py's evidence-status half (EvidenceTier.rank,
+    # is_cross_source_resolved, has_binary_evidence) moved to
+    # policy/evidence_status.py alongside classification.py -- checker.py's
+    # own compare() and policy/severity.py's gate path both call
+    # is_cross_source_resolved() per finding, so this module is exactly as
+    # perf-sensitive as its classification.py sibling (Codex review, fresh
+    # evidence).
+    "abicheck/policy/evidence_status.py",
     # checker.compare() calls the registry's ensure_loaded()/run_all() for
     # every comparison this workflow benchmarks -- detector discovery,
     # ordering, and dispatch are exactly as load-bearing as checker.py

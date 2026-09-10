@@ -388,7 +388,7 @@ def compute_confidence(
         overrides = tuple((k.value, v.value) for k, v in policy_file.overrides.items())
     reclassify: tuple[str, ...] = ()
     if policy_file and getattr(policy_file, "reclassify", None):
-        from .reclassify import active_reclassify_rules
+        from .policy.reclassify import active_reclassify_rules
 
         reclassify = tuple(
             rule.describe()
@@ -695,7 +695,7 @@ def build_html_document(
     # effective verdict rendered it under the red "Changed Symbols (1)"
     # heading on a page whose banner reads NO_CHANGE (Codex review). It
     # gets its own section below instead. Empty without `--contract`.
-    from .contract_gating import contract_relevance_of, is_evaluated
+    from .policy.contract_finding_relevance import contract_relevance_of, is_evaluated
 
     not_evaluated = [ch for ch in display_changes if not is_evaluated(ch)]
     scored_changes = [ch for ch in display_changes if is_evaluated(ch)]

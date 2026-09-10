@@ -954,7 +954,7 @@ def _add_show_only_filter(
     finding). ``total_changes`` stays inclusive, matching the main summary's
     own rule: it counts what the filter *displays*, not what gated.
     """
-    from .contract_gating import is_evaluated
+    from .policy.contract_finding_relevance import is_evaluated
 
     d["show_only_filter"] = show_only
     scored = [c for c in changes if is_evaluated(c)]
@@ -1135,7 +1135,7 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult, *, today: da
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
     if result.policy_file and result.policy_file.reclassify:
-        from .reclassify import active_reclassify_rules
+        from .policy.reclassify import active_reclassify_rules
 
         active = active_reclassify_rules(result.policy_file.reclassify, today)
         if active:

@@ -219,7 +219,7 @@ class ContractEvaluationStage:
         recorded decision cannot disagree with the category the gate put the
         finding in.
         """
-        from .contract_gating import is_evaluated
+        from .policy.contract_finding_relevance import is_evaluated
         from .severity import effective_verdict_for_change
 
         for change in changes:
@@ -502,7 +502,7 @@ def evaluated_for_policy(changes: Sequence[Change]) -> list[Change]:
     leaf module deliberately exports the predicate and not a list helper --
     each consumer needs the filter in its own element type.
     """
-    from .contract_gating import is_evaluated
+    from .policy.contract_finding_relevance import is_evaluated
 
     return [c for c in changes if is_evaluated(c)]
 

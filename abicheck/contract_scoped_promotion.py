@@ -189,8 +189,8 @@ def recompute_verdict_after_promotion(
     promoted onto the axis, and for every run that never opted into contract
     evaluation.
     """
-    from .contract_gating import is_evaluated
     from .policy.classification import compute_verdict
+    from .policy.contract_finding_relevance import is_evaluated
     from .policy.reclassify import _VERDICT_ORDER
 
     changes = getattr(result, "changes", None)
@@ -285,7 +285,7 @@ def _record_scoped_compatibility_decisions(
     """
     if not promoted:
         return
-    from .contract_gating import is_evaluated
+    from .policy.contract_finding_relevance import is_evaluated
     from .severity import effective_verdict_for_change
 
     for change in promoted:
