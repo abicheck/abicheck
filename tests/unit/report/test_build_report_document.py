@@ -1296,6 +1296,67 @@ class TestRendererOrderIndependence:
         assert "libfoo.so.1" in md_before
         assert "libmutated.so.1" not in md_after
 
+    def test_json_document_reuses_the_envelope_s_captured_today(self) -> None:
+        """Codex review, fresh evidence: ``build_report_envelope`` resolves
+        ``today`` once and threads it into ``gate_decision_for_result``/
+        ``build_report_findings``, but its own ``build_report_document`` call
+        (which builds the frozen JSON document *during the same
+        construction*) received ``gate`` and nothing else -- ``_add_changes_
+        block``, ``_add_policy_overrides``, and ``_build_severity_json`` (via
+        ``_change_to_dict``/``active_reclassify_rules``/``categorize_changes``)
+        still resolved a fresh ``date.today()``. If construction straddles
+        midnight on a dated ``reclassify`` rule's expiry, the document could
+        report a finding as breaking and omit the still-active rule while
+        ``envelope.findings``/``envelope.gate`` (resolved a moment earlier,
+        against the pre-midnight date) stayed compatible. ``today`` is now
+        threaded through the whole document build so both halves of the same
+        construction call agree.
+        """
+        removed = Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed: foo")
+        captured_today = date.today()
+        policy_file = PolicyFile(
+            reclassify=[
+                ReclassifyRule(
+                    to_verdict=Verdict.COMPATIBLE,
+                    symbol="_Z3foov",
+                    expires=captured_today + timedelta(days=1),
+                )
+            ],
+        )
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[removed],
+            policy="strict_abi",
+            policy_file=policy_file,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+
+        # Simulate construction straddling midnight: `build_report_envelope`'s
+        # own `today = date.today()` captures the date *before* the rule
+        # expires, but every unthreaded `date.today()` reached from inside
+        # `build_report_document`'s own helpers (via `policy.selectors.date`)
+        # resolves *after* it -- the two mocks stand in for the same wall
+        # clock read a moment apart, not two different clocks.
+        with mock.patch("abicheck.report.build.date") as fake_build_date, mock.patch(
+            "abicheck.policy.selectors.date"
+        ) as fake_selectors_date:
+            fake_build_date.today.return_value = captured_today
+            fake_selectors_date.today.return_value = captured_today + timedelta(days=2)
+            envelope = build_report_envelope(
+                result, old, new, severity_config=SeverityConfig()
+            )
+
+        assert envelope.resolved_today == captured_today
+        assert envelope.findings[0].verdict == Verdict.COMPATIBLE
+
+        json_out = json.loads(render_envelope("json", envelope))
+
+        assert json_out["changes"][0]["severity"] == "compatible"
+        assert json_out["policy_reclassify"], "expired rule dropped from disclosure"
+        assert json_out["severity"]["categories"]["abi_breaking"]["count"] == 0
+
 
 class TestSarifAndJunitDecisionBoundary:
     """ADR-061 Phase 2 gap C acceptance test: a guard for SARIF's and

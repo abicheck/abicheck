@@ -71,6 +71,7 @@ def build_report_document(
     include_exit_decision: bool = True,
     contract_evaluation: bool = False,
     gate: GateDecision | None = None,
+    today: date | None = None,
 ) -> ReportDocument:
     """Build the one canonical, format-neutral ``report_mode="full"`` document.
 
@@ -95,6 +96,15 @@ def build_report_document(
     same equivalence is why the fallback below is skipped outright when
     ``severity_config is None``: resolving there could only ever return the
     ``None`` this already holds.
+
+    *today*, when given, is forwarded to every date-sensitive resolution
+    this function's own helpers perform (the severity JSON's category
+    counts, per-change verdict/reclassify/gate-contribution fields, and the
+    active ``policy_reclassify`` rule set) -- without it, a caller building
+    from an already-frozen ``ReportEnvelope`` could still see this document
+    disagree with the envelope's own ``gate``/``findings`` once a dated
+    ``reclassify:`` rule's expiry is crossed between construction and render
+    (Codex review, fresh evidence).
     """
     # Static import of `reporter.py`'s own privately-defined helpers --
     # this is the one direction of the report.build <-> reporter dependency
@@ -155,7 +165,7 @@ def build_report_document(
 
     # Severity-categorized summary when severity config is provided
     if gate is None and severity_config is not None:
-        gate = gate_decision_for_result(result, severity_config)
+        gate = gate_decision_for_result(result, severity_config, today=today)
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
@@ -165,6 +175,7 @@ def build_report_document(
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
+            today=today,
         )
 
     _add_changes_block(
@@ -175,6 +186,7 @@ def build_report_document(
         eff_sets,
         show_only,
         severity_config=severity_config,
+        today=today,
     )
     _add_suppression(d, result)
     _add_disposition_audit(d, result, severity_config)
@@ -193,7 +205,7 @@ def build_report_document(
     )
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
-    _add_policy_overrides(d, result)
+    _add_policy_overrides(d, result, today=today)
     _add_trailing_fields(d, result, show_impact, show_only)
     return build_report_document_with_side_facts(
         d,
@@ -203,6 +215,7 @@ def build_report_document(
         gate=gate,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
+        today=today,
     )
 
 
@@ -515,6 +528,7 @@ def build_report_envelope(
         require_complete_analysis=opts.require_complete_analysis,
         contract_evaluation=opts.contract_evaluation,
         gate=gate,
+        today=today,
     )
     kind_sets = result._effective_kind_sets()
     findings = build_report_findings(
