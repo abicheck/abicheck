@@ -2039,6 +2039,151 @@ class TestRunCompare:
         )
 
 
+class TestCompareRequestAllowBuildQuery:
+    """ADR-068 Phase 4's one absorbed field: ``CompareRequest.allow_build_query``.
+
+    Absorbed from the retired ``ScanRequest.allow_build_query``. Two things
+    have to hold for it to be a real field rather than an inert one (the
+    failure mode ``pack_application.UNAPPLIED_PACK_FIELDS`` exists to reject
+    for pack-assignable fields, applied here to request surface):
+
+    1. It *reaches* the resolution primitive that acts on it, together with
+       the per-side ``InputSpec.build_config`` nothing on this path read
+       before -- an authorization with no config to authorize is inert.
+    2. Its default *changes nothing*: the standing rule is that resolving an
+       input never executes a build system as a side effect, so every
+       pre-existing request must resolve exactly as it did.
+
+    Asserted against ``_resolve_side_snapshot_impl``'s own observed keyword
+    arguments, not against a re-derivation of the gate -- the oracle is
+    "what the primitive was told", which is independent of
+    ``_gated_build_query_inputs``' own logic.
+    """
+
+    def _request(self, tmp_path, **kwargs):
+        from abicheck.api_types import CompareRequest, InputSpec
+
+        old = AbiSnapshot(library="libtest", version="1.0")
+        new = AbiSnapshot(library="libtest", version="2.0")
+        old_p, new_p = tmp_path / "old.json", tmp_path / "new.json"
+        save_snapshot(old, old_p)
+        save_snapshot(new, new_p)
+        cfg = kwargs.pop("build_config", None)
+        return CompareRequest(
+            old=InputSpec.of(old_p, build_config=cfg),
+            new=InputSpec.of(new_p, build_config=cfg),
+            **kwargs,
+        )
+
+    def _spy(self, monkeypatch):
+        import abicheck.service_compare_pipeline as pipeline
+
+        calls: list[dict] = []
+        original = pipeline._resolve_side_snapshot_impl
+
+        def _spied(side, evidence, **kwargs):
+            calls.append(dict(kwargs))
+            return original(side, evidence, **kwargs)
+
+        monkeypatch.setattr(pipeline, "_resolve_side_snapshot_impl", _spied)
+        return calls
+
+    def test_default_is_false_and_forwards_none(self, tmp_path, monkeypatch):
+        from abicheck.service import run_compare_request
+
+        request = self._request(tmp_path)
+        assert request.allow_build_query is False
+        calls = self._spy(monkeypatch)
+        run_compare_request(request)
+        assert calls, "no side was resolved"
+        # `None`, not `False`: the primitive keeps its own documented default
+        # rather than this request restating it.
+        assert all(c["allow_build_query"] is None for c in calls)
+
+    def test_true_reaches_the_resolution_primitive(self, tmp_path, monkeypatch):
+        from abicheck.service import run_compare_request
+
+        calls = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, allow_build_query=True))
+        assert calls, "no side was resolved"
+        assert all(c["allow_build_query"] is True for c in calls)
+
+    def test_the_side_build_config_travels_with_it(self, tmp_path, monkeypatch):
+        """The authorization and the thing it authorizes arrive together.
+
+        `InputSpec.build_config` existed before this slice but nothing on the
+        `compare` path read it, so `allow_build_query` alone would have been
+        an authorization with no config to act on.
+        """
+        from abicheck.service import run_compare_request
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("build:\n  query: \"true\"\n", encoding="utf-8")
+        calls = self._spy(monkeypatch)
+        run_compare_request(
+            self._request(tmp_path, build_config=cfg, allow_build_query=True)
+        )
+        assert calls, "no side was resolved"
+        assert all(c["build_config"] == cfg for c in calls)
+
+    def test_an_unauthorized_config_is_forwarded_and_then_nulled_by_the_gate(
+        self, tmp_path, monkeypatch
+    ):
+        """The *gate* lives in `_gated_build_query_inputs`, not here.
+
+        The request forwards both values unconditionally; deciding what an
+        un-consented config may contribute is the primitive's own job. Asserted
+        through that primitive rather than in prose (Codex review, PR #1186:
+        an earlier revision of this docstring claimed passive settings stayed
+        readable without consent, which is `scan`'s behaviour -- it passes
+        `build_config_locally_trusted` -- not `compare`'s). Under `compare`'s
+        default the *whole* config is nulled, `build.compile_db` included; that
+        is not a narrowing, because nothing on this path read `build_config`
+        before the field existed.
+        """
+        from abicheck.service import run_compare_request
+        from abicheck.workflows.artifact.resolve import _gated_build_query_inputs
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("build:\n  query: \"true\"\n", encoding="utf-8")
+        calls = self._spy(monkeypatch)
+        run_compare_request(self._request(tmp_path, build_config=cfg))
+        assert calls, "no side was resolved"
+        assert all(c["build_config"] == cfg for c in calls)
+        assert all(c["allow_build_query"] is None for c in calls)
+        # What the primitive then does with that pair, both ways -- the real
+        # observable contract, independent of this call site's own wording.
+        assert _gated_build_query_inputs(
+            cfg, None, allow_build_query=False, build_config_locally_trusted=False
+        ) == (None, None)
+        assert _gated_build_query_inputs(
+            cfg, None, allow_build_query=True, build_config_locally_trusted=False
+        ) == (cfg, None)
+
+    def test_the_retired_scan_request_fields_were_not_absorbed(self) -> None:
+        """Every other open `ScanRequest` field is ruled (b) -- dropped, not
+        mirrored onto `CompareRequest` (ADR-068's second 2026-09-09 amendment;
+        ADR-055's amendment carries the per-field ledger). Pinned as a set so
+        a later slice cannot quietly re-add one without restating the ruling.
+        """
+        import dataclasses
+
+        from abicheck.api_types import CompareRequest
+
+        fields = {f.name for f in dataclasses.fields(CompareRequest)}
+        assert not fields & {
+            "risk_rules_path",
+            "bundle_system_providers",
+            "bundle_manifest",
+            "enabled_checks",
+            "severities",
+            "max_findings",
+            "changed_src",
+            "seeded",
+            "mode",
+        }
+
+
 class TestCompareRequestAdr055Evidence:
     """ADR-055 D1: CompareRequest/InputSpec's depth/sources/build_info/compile/
     frontend_context/dump_manifest/public_header_dirs fields, wired into
@@ -4786,168 +4931,6 @@ class TestCliNativeBinaryHeaderWiring:
         with patch("abicheck.service_dump_native._dump_macho", side_effect=SnapshotError("nope")):
             with pytest.raises(click.ClickException, match="nope"):
                 _dump_native_binary(p, "macho", [], [], "1.0", "c++")
-
-
-def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
-    # Fast-lane guard for the scan orchestrator's ownership of the inferred
-    # build-dir cleanup (the real end-to-end check is the integration suite):
-    # service_scan.run_scan must run the deferred cleanup thunks in its finally —
-    # both on success and when run_scan_core raises — so the temp cmake build dir
-    # never outlives the scan. Mirrors the same contract in cli_scan.run_scan.
-    from types import SimpleNamespace
-
-    from abicheck import service_scan as _ss
-
-    ran = {"n": 0}
-
-    def fake_core(**kw):
-        # The orchestrator hands us the cleanup list; register a sentinel thunk the
-        # way collect_inline_pack would for an inferred cmake build dir.
-        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
-        outcome = SimpleNamespace(
-            verdict="COMPATIBLE",
-            exit_code=0,
-            coverage=[],
-            crosscheck={},
-            to_dict=lambda: {},
-        )
-        return SimpleNamespace(outcome=outcome, findings=[])
-
-    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
-
-    req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
-    res = _ss.run_scan(req)
-    assert res.verdict == "COMPATIBLE"
-    assert ran["n"] == 1  # the finally ran the deferred cleanup on success
-
-    # And it still runs when the core raises a budget overflow mid-scan.
-    from abicheck.scan_engine import _BudgetOverflow
-
-    ran["n"] = 0
-
-    def raising_core(**kw):
-        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
-        raise _BudgetOverflow("over budget")
-
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", raising_core)
-    res = _ss.run_scan(req)
-    assert res.exit_code == 5  # budget overflow surfaced
-    assert ran["n"] == 1  # finally still ran the cleanup on the raise path
-
-
-def test_run_scan_rejects_comparison_only_fields_without_baseline():
-    # Codex review on PR #657: ScanRequest's policy/suppression/scope/
-    # force-public/pattern-verdict/env-matrix fields only mean anything for
-    # a baseline comparison (run_scan_core only calls _run_baseline_compare
-    # when baseline is set and mode isn't "audit"). Without a baseline they
-    # must be rejected loudly (mirrors the CLI's identical scan_cmd guard),
-    # not silently accepted and discarded.
-    from abicheck.errors import ValidationError
-    from abicheck.service_scan import ScanRequest, run_scan
-
-    req = ScanRequest(binaries=[Path("libfoo.so")], depth="binary", policy="sdk_vendor")
-    with pytest.raises(ValidationError, match="only take effect with a baseline"):
-        run_scan(req)
-
-
-def test_run_scan_rejects_comparison_only_fields_with_audit_mode_despite_baseline():
-    # Even with a baseline set, an explicit mode="audit" means run_scan_core
-    # never calls _run_baseline_compare either -- the guard must catch that
-    # combination too, not just baseline=None.
-    from abicheck.errors import ValidationError
-    from abicheck.service_scan import ScanRequest, run_scan
-
-    req = ScanRequest(
-        binaries=[Path("libfoo.so")],
-        depth="binary",
-        baseline=Path("old.abi.json"),
-        mode="audit",
-        pattern_verdicts=True,
-    )
-    with pytest.raises(ValidationError, match="only take effect with a baseline"):
-        run_scan(req)
-
-
-def test_run_scan_allows_comparison_fields_with_a_real_baseline(monkeypatch):
-    # The new guard must not fire for the case it's meant to allow: a real
-    # baseline comparison actually using the config surface.
-    from types import SimpleNamespace
-
-    from abicheck import service_scan as _ss
-
-    def fake_core(**kw):
-        outcome = SimpleNamespace(
-            verdict="COMPATIBLE",
-            exit_code=0,
-            coverage=[],
-            crosscheck={},
-            to_dict=lambda: {},
-        )
-        return SimpleNamespace(outcome=outcome, findings=[])
-
-    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
-
-    req = _ss.ScanRequest(
-        binaries=[Path("libfoo.so")],
-        depth="binary",
-        baseline=Path("old.abi.json"),
-        policy="sdk_vendor",
-    )
-    res = _ss.run_scan(req)
-    assert res.verdict == "COMPATIBLE"
-
-
-def test_run_scan_rejects_collapse_versioned_symbols_without_baseline():
-    # Codex review on PR #657: ScanRequest gained collapse_versioned_symbols
-    # (an ICU-style version-suffix transition needs it to demote a rename to
-    # COMPATIBLE_WITH_RISK the same way `compare`'s config-resolved
-    # equivalent does) -- it must be rejected without a baseline like every
-    # other comparison-only field.
-    from abicheck.errors import ValidationError
-    from abicheck.service_scan import ScanRequest, run_scan
-
-    req = ScanRequest(
-        binaries=[Path("libfoo.so")], depth="binary", collapse_versioned_symbols=True
-    )
-    with pytest.raises(ValidationError, match="only take effect with a baseline"):
-        run_scan(req)
-
-
-def test_run_scan_forwards_collapse_versioned_symbols_to_core(monkeypatch):
-    # And, with a real baseline, the value must actually reach
-    # run_scan_core (the Python API's own config-surface parity gap Codex
-    # found -- the CLI threads this but ScanRequest never exposed it).
-    from types import SimpleNamespace
-
-    from abicheck import service_scan as _ss
-
-    captured = {}
-
-    def fake_core(**kw):
-        captured["collapse_versioned_symbols"] = kw.get("collapse_versioned_symbols")
-        outcome = SimpleNamespace(
-            verdict="COMPATIBLE",
-            exit_code=0,
-            coverage=[],
-            crosscheck={},
-            to_dict=lambda: {},
-        )
-        return SimpleNamespace(outcome=outcome, findings=[])
-
-    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
-    monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_core)
-
-    req = _ss.ScanRequest(
-        binaries=[Path("libfoo.so")],
-        depth="binary",
-        baseline=Path("old.abi.json"),
-        collapse_versioned_symbols=True,
-    )
-    _ss.run_scan(req)
-
-    assert captured["collapse_versioned_symbols"] is True
 
 
 # ── _try_attach_numpy_capi_surface() ────────────────────────────────────────

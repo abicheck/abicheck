@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from scan_estimate_helpers import EstimateOperand, estimate
 
 from abicheck.cli import main
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
@@ -37,7 +38,6 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.serialization import snapshot_to_json
-from abicheck.service import Budget, ScanRequest, estimate_scan
 
 
 @pytest.fixture
@@ -81,8 +81,8 @@ def header(tmp_path: Path) -> Path:
 
 
 def test_estimate_pr_mode_layers(snap_path: Path) -> None:
-    req = ScanRequest(binaries=[snap_path], mode="pr")
-    layers = {e.layer for e in estimate_scan(req)}
+    req = EstimateOperand(binaries=[snap_path], mode="pr")
+    layers = {e.layer for e in estimate(req)}
     # pr = source-changed → intrinsic L0-L2 + L3 build + L4 replay + the L5 graph
     # fold and call-graph clang pass (both run for source-changed, so the estimate
     # must price them — Codex review).
@@ -97,14 +97,14 @@ def test_estimate_pr_mode_layers(snap_path: Path) -> None:
 
 
 def test_estimate_baseline_mode_includes_graph(snap_path: Path) -> None:
-    req = ScanRequest(binaries=[snap_path], mode="baseline")
-    layers = {e.layer for e in estimate_scan(req)}
+    req = EstimateOperand(binaries=[snap_path], mode="baseline")
+    layers = {e.layer for e in estimate(req)}
     assert "L5_source_graph" in layers  # graph-full
 
 
 def test_estimate_headers_depth_has_no_source_layers(snap_path: Path) -> None:
-    req = ScanRequest(binaries=[snap_path], depth="headers")
-    layers = {e.layer for e in estimate_scan(req)}
+    req = EstimateOperand(binaries=[snap_path], depth="headers")
+    layers = {e.layer for e in estimate(req)}
     assert layers == {"L0_binary", "L1_debug", "L2_header"}
 
 
@@ -120,8 +120,8 @@ def test_estimate_counts_compile_db_tus(snap_path: Path, tmp_path: Path) -> None
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(binaries=[snap_path], compile_db=cdb, mode="baseline")
-    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    req = EstimateOperand(binaries=[snap_path], compile_db=cdb, mode="baseline")
+    l3 = next(e for e in estimate(req) if e.layer == "L3_build")
     assert l3.tus == 2  # unique files
     assert l3.method == "s1"
 
@@ -141,15 +141,15 @@ def test_estimate_focused_replay_smaller_than_full(
     )
     full = next(
         e
-        for e in estimate_scan(
-            ScanRequest(binaries=[snap_path], compile_db=cdb, mode="baseline")
+        for e in estimate(
+            EstimateOperand(binaries=[snap_path], compile_db=cdb, mode="baseline")
         )
         if e.layer == "L4_source_abi"
     )
     focused = next(
         e
-        for e in estimate_scan(
-            ScanRequest(
+        for e in estimate(
+            EstimateOperand(
                 binaries=[snap_path],
                 compile_db=cdb,
                 mode="pr",
@@ -177,8 +177,8 @@ def test_estimate_resolves_build_info_directory(
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(binaries=[snap_path], build_info=build, mode="baseline")
-    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    req = EstimateOperand(binaries=[snap_path], build_info=build, mode="baseline")
+    l3 = next(e for e in estimate(req) if e.layer == "L3_build")
     assert l3.tus == 7
 
 
@@ -200,8 +200,8 @@ def test_estimate_finds_compile_db_in_nonhint_subdir(
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(binaries=[snap_path], sources=tree, mode="baseline")
-    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    req = EstimateOperand(binaries=[snap_path], sources=tree, mode="baseline")
+    l3 = next(e for e in estimate(req) if e.layer == "L3_build")
     assert l3.tus == 5
 
 
@@ -220,13 +220,13 @@ def test_estimate_header_change_fans_out_to_all_tus(
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(
+    req = EstimateOperand(
         binaries=[snap_path],
         compile_db=cdb,
         mode="pr",
         changed_paths=["include/foo.h"],
     )
-    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    l4 = next(e for e in estimate(req) if e.layer == "L4_source_abi")
     assert l4.tus == 8
 
 
@@ -246,33 +246,57 @@ def test_estimate_counts_collect_pack_tus(snap_path: Path, tmp_path: Path) -> No
     )
     pack_io.write(BuildSourcePack(root=pack_dir, build_evidence=be))
 
-    req = ScanRequest(binaries=[snap_path], build_info=pack_dir, mode="baseline")
-    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    req = EstimateOperand(binaries=[snap_path], build_info=pack_dir, mode="baseline")
+    l3 = next(e for e in estimate(req) if e.layer == "L3_build")
     assert l3.tus == 4
 
 
-def test_estimate_auto_seeded_empty_diff_resolves_to_s0(
+def test_the_unpinned_level_the_dry_run_prices_is_the_one_the_run_executes(
     snap_path: Path, tmp_path: Path
 ) -> None:
-    # A seeded-but-empty diff under --source-method auto must resolve to the s0
-    # floor (no L3/L4), mirroring the real scan — not fall back to the PR preset
-    # (Codex review).
+    """`scan --dry-run` and `scan` resolve an omitted `--depth` identically.
+
+    ADR-068's second 2026-09-09 amendment rules risk-driven `auto` depth
+    selection (b) and names the fixed `headers` rung as the replacement --
+    *not* the `--mode` preset, which is `(S5, SOURCE)` and would price (and
+    run) a full source replay on every unpinned scan.
+
+    `estimate_scan`'s own `mode` argument is a caller's explicit "price this
+    preset" request, so the rule deliberately does not live there; the CLI
+    pre-resolves its level and hands it over as `resolved_level`. That makes
+    `resolve_unpinned_level` the single point the two share, which is what
+    this pins: the projection taken at that level touches only the intrinsic
+    L0-L2 layers, matching what `level_to_collect_mode` gives the real run.
+
+    The seed-independence half is asserted end-to-end on the CLI, in
+    `tests/test_cli_scan.py::test_unpinned_depth_resolves_to_headers_whatever_the_seed`.
+    """
+    from abicheck.model.evidence_depth_levels import (
+        ScanMode,
+        SourceScope,
+        level_to_collect_mode,
+        resolve_unpinned_level,
+    )
+
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(
         json.dumps([{"file": "a.cpp", "command": "c++", "directory": "."}]),
         encoding="utf-8",
     )
-    req = ScanRequest(
-        binaries=[snap_path],
-        compile_db=cdb,
-        source_method="auto",
-        changed_paths=[],
-        seeded=True,
-    )
-    layers = {e.layer for e in estimate_scan(req)}
-    # s0 = off → only intrinsic L0-L2, no source layers.
-    assert "L3_build" not in layers
-    assert "L4_source_abi" not in layers
+    for mode in (ScanMode.PR, ScanMode.AUDIT):
+        method, depth = resolve_unpinned_level(mode)
+        # What the real run would collect at that level: nothing beyond L2.
+        for scope in (SourceScope.CHANGED, SourceScope.TARGET):
+            assert level_to_collect_mode(method, depth, source_scope=scope) == "off"
+        # ... and what the dry run prices for it, through the same pair.
+        priced = {
+            e.layer
+            for e in estimate(
+                EstimateOperand(binaries=[snap_path], compile_db=cdb, mode=mode.value),
+                resolved_level=(method, depth),
+            )
+        }
+        assert priced == {"L0_binary", "L1_debug", "L2_header"}
 
 
 def test_estimate_inline_header_change_fans_out(
@@ -290,13 +314,13 @@ def test_estimate_inline_header_change_fans_out(
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(
+    req = EstimateOperand(
         binaries=[snap_path],
         compile_db=cdb,
         mode="pr",
         changed_paths=["include/foo.inl"],
     )
-    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    l4 = next(e for e in estimate(req) if e.layer == "L4_source_abi")
     assert l4.tus == 6
 
 
@@ -315,8 +339,8 @@ def test_estimate_compile_db_dedup_by_resolved_path(
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(binaries=[snap_path], compile_db=cdb, mode="baseline")
-    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    req = EstimateOperand(binaries=[snap_path], compile_db=cdb, mode="baseline")
+    l3 = next(e for e in estimate(req) if e.layer == "L3_build")
     assert l3.tus == 2
 
 
@@ -331,10 +355,10 @@ def test_estimate_budget_max_tus_caps_replay(snap_path: Path, tmp_path: Path) ->
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(
-        binaries=[snap_path], compile_db=cdb, mode="baseline", budget=Budget(max_tus=5)
+    req = EstimateOperand(
+        binaries=[snap_path], compile_db=cdb, mode="baseline", max_tus=5
     )
-    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    l4 = next(e for e in estimate(req) if e.layer == "L4_source_abi")
     assert l4.tus == 5
 
 
@@ -351,8 +375,8 @@ def test_estimate_l4_uses_cold_realworld_anchor(
         ),
         encoding="utf-8",
     )
-    req = ScanRequest(binaries=[snap_path], compile_db=cdb, mode="baseline")
-    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    req = EstimateOperand(binaries=[snap_path], compile_db=cdb, mode="baseline")
+    l4 = next(e for e in estimate(req) if e.layer == "L4_source_abi")
     assert l4.tus == 4
     assert l4.est_seconds == pytest.approx(30.0)
 
@@ -365,11 +389,23 @@ def test_cli_dry_run_scans_nothing(
 ) -> None:
     # --estimate was folded into the general --dry-run report (CLI
     # simplification); it still reuses service.estimate_scan under the hood, so
-    # the per-layer TU/cost projection (e.g. L4_source_abi) is still printed.
+    # the per-layer TU/cost projection is still printed. An *unpinned* run
+    # prices only the intrinsic L0-L2 rows now (ADR-068's second 2026-09-09
+    # amendment: an omitted --depth resolves to the fixed `headers` rung, not
+    # the `--mode` preset) -- pinning `--depth source` is what asks for the L4
+    # replay row, and is asserted below so this still proves the dry run
+    # projects real source cost when the run would incur it.
     res = runner.invoke(main, ["scan", str(snap_path), "-H", str(header), "--dry-run"])
     assert res.exit_code == 0, res.output
     assert "Dry run only" in res.output
-    assert "L4_source_abi" in res.output
+    assert "L2_header" in res.output
+    assert "L4_source_abi" not in res.output
+    deep = runner.invoke(
+        main,
+        ["scan", str(snap_path), "-H", str(header), "--depth", "source", "--dry-run"],
+    )
+    assert deep.exit_code == 0, deep.output
+    assert "L4_source_abi" in deep.output
 
 
 def test_cli_dry_run_reports_projected_cost(runner: CliRunner, snap_path: Path) -> None:
@@ -426,7 +462,6 @@ def test_estimate_counts_bazel_build_info_tus(snap_path: Path, tmp_path: Path) -
     # A Bazel aquery --build-info is replayed via BazelAdapter by the real scan, so
     # the estimate must count its compile actions instead of routing the JSON object
     # through the compile-DB counter and reporting 0 TUs (Codex review).
-    from abicheck.service_scan import estimate_scan
 
     aquery = tmp_path / "aq.json"
     aquery.write_text(
@@ -454,8 +489,8 @@ def test_estimate_counts_bazel_build_info_tus(snap_path: Path, tmp_path: Path) -
         ),
         encoding="utf-8",
     )
-    est = estimate_scan(
-        ScanRequest(
+    est = estimate(
+        EstimateOperand(
             binaries=[snap_path], build_info=aquery, depth="source", mode="audit"
         )
     )
@@ -470,7 +505,6 @@ def test_estimate_compile_db_overrides_bazel_build_info(
     # When both --compile-db and a Bazel --build-info are given, the real scan uses
     # `req.compile_db or req.build_info` (compile DB wins); the estimate must mirror
     # that and count the compile DB's TUs, not the Bazel action graph (Codex review).
-    from abicheck.service_scan import estimate_scan
 
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(
@@ -504,8 +538,8 @@ def test_estimate_compile_db_overrides_bazel_build_info(
         ),
         encoding="utf-8",
     )
-    est = estimate_scan(
-        ScanRequest(
+    est = estimate(
+        EstimateOperand(
             binaries=[snap_path],
             compile_db=cdb,
             build_info=aq,
@@ -524,10 +558,9 @@ def test_estimate_binary_depth_suppresses_header_cost(
     # The estimate must mirror the real scan: --depth binary suppresses the L2
     # header AST, so the embedded ScanResult.estimate (and any direct caller) must
     # not price an L2_header layer for suppressed headers (Codex review).
-    from abicheck.service_scan import estimate_scan
 
-    binary = estimate_scan(
-        ScanRequest(
+    binary = estimate(
+        EstimateOperand(
             binaries=[snap_path], depth="binary", headers=[header], mode="audit"
         )
     )
@@ -535,8 +568,8 @@ def test_estimate_binary_depth_suppresses_header_cost(
     assert l2.tus == 0
     assert l2.est_seconds == 0.0
     # Control: a --depth headers scan with the same header DOES price the L2 layer.
-    headers_depth = estimate_scan(
-        ScanRequest(
+    headers_depth = estimate(
+        EstimateOperand(
             binaries=[snap_path], depth="headers", headers=[header], mode="audit"
         )
     )
@@ -551,15 +584,14 @@ def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
     # request carries no diff seed (ADR-043 D2/D3: unseeded S5 scopes to TARGET,
     # never silently to a zero-TU "source-changed" default) — Codex review.
     from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
-    from abicheck.service_scan import estimate_scan
 
-    req = ScanRequest(
+    req = EstimateOperand(
         binaries=[snap_path], mode="pr-deep", source_method="s5", depth="graph"
     )
-    reresolved = " ".join(e.note for e in estimate_scan(req))
+    reresolved = " ".join(e.note for e in estimate(req))
     pinned = " ".join(
         e.note
-        for e in estimate_scan(
+        for e in estimate(
             req, resolved_level=(SourceMethod.S5, EvidenceDepth.GRAPH)
         )
     )
@@ -573,7 +605,6 @@ def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None
     # umbrella identically, so `scan --estimate` understated the cost of a large
     # public surface (field-eval P1: ICU/HDF5). The L2 estimate must scale with
     # header size: a big header costs strictly more than a tiny one.
-    from abicheck.service_scan import estimate_scan
 
     tiny = tmp_path / "tiny.h"
     tiny.write_text("void f(void);\n", encoding="utf-8")
@@ -581,8 +612,8 @@ def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None
     big.write_text("void g(void);\n" * 20000, encoding="utf-8")  # ~260 KB
 
     def l2(header: Path) -> float:
-        est = estimate_scan(
-            ScanRequest(
+        est = estimate(
+            EstimateOperand(
                 binaries=[snap_path], depth="headers", headers=[header], mode="audit"
             )
         )
@@ -598,14 +629,13 @@ def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None
 def test_estimate_l2_two_headers_sum_their_sizes(
     snap_path: Path, tmp_path: Path
 ) -> None:
-    from abicheck.service_scan import estimate_scan
 
     d = tmp_path / "inc"
     d.mkdir()
     (d / "a.h").write_text("void a(void);\n" * 4000, encoding="utf-8")
     (d / "b.h").write_text("void b(void);\n" * 4000, encoding="utf-8")
-    est = estimate_scan(
-        ScanRequest(binaries=[snap_path], depth="headers", headers=[d], mode="audit")
+    est = estimate(
+        EstimateOperand(binaries=[snap_path], depth="headers", headers=[d], mode="audit")
     )
     l2 = next(e for e in est if e.layer == "L2_header")
     assert l2.tus == 2  # both headers counted
@@ -680,8 +710,8 @@ def test_estimate_scan_l2_note_flags_high_risk_headers(
     (d / "heavy.h").write_text(
         "".join(f'#include "dep{i}.h"\n' for i in range(20)), encoding="utf-8"
     )
-    est = estimate_scan(
-        ScanRequest(binaries=[snap_path], depth="headers", headers=[d], mode="audit")
+    est = estimate(
+        EstimateOperand(binaries=[snap_path], depth="headers", headers=[d], mode="audit")
     )
     l2 = next(e for e in est if e.layer == "L2_header")
     assert "conservative" in l2.note
@@ -847,242 +877,3 @@ def test_cli_scan_json_carries_scan_schema_version(
     assert res.exit_code == 0
     payload = json.loads(res.output)
     assert payload["scan_schema_version"] == SCAN_SCHEMA_VERSION
-
-
-# --------------------------------------------------------------------------- #
-# run_scan / run_audit typed engine (ADR-035 D10 / Phase 3b tail)
-# --------------------------------------------------------------------------- #
-
-
-def test_run_audit_returns_typed_result_with_findings(snap_path: Path) -> None:
-    from abicheck.schemas import SCAN_SCHEMA_VERSION
-    from abicheck.service import ScanResult, run_audit
-
-    res = run_audit(ScanRequest(binaries=[snap_path]))
-    assert isinstance(res, ScanResult)
-    assert res.exit_code == 0  # RISK-only hygiene findings stay advisory
-    # _Z6secretv is exported but no public header declares it.
-    kinds = {f.kind.value for f in res.findings}
-    assert "exported_not_public" in kinds
-    assert res.layers  # per-layer coverage rows present
-    assert res.estimate  # projected cost folded in
-    d = res.to_dict()
-    assert d["verdict"] == res.verdict
-    assert d["findings"] == len(res.findings)
-    # P1.5: both the service envelope and the nested CLI-facing report carry
-    # the same scan schema version marker.
-    assert d["scan_schema_version"] == SCAN_SCHEMA_VERSION
-    assert d["report"]["scan_schema_version"] == SCAN_SCHEMA_VERSION
-
-
-def test_run_scan_no_baseline_matches_audit_findings(snap_path: Path) -> None:
-    from abicheck.service import run_scan
-
-    # mode=audit with no baseline is the single-release path.
-    res = run_scan(ScanRequest(binaries=[snap_path], mode="audit"))
-    assert res.verdict in ("COMPATIBLE", "API_BREAK")
-    assert any(f.kind.value == "exported_not_public" for f in res.findings)
-
-
-def test_run_scan_rejects_multiple_binaries(snap_path: Path) -> None:
-    from abicheck.service import run_scan
-
-    with pytest.raises(ValueError):
-        run_scan(ScanRequest(binaries=[snap_path, snap_path]))
-
-
-def test_run_scan_confidence_matrix_present(snap_path: Path) -> None:
-    from abicheck.service import run_audit
-
-    res = run_audit(ScanRequest(binaries=[snap_path]))
-    # The provider-agreement matrix is populated for run checks.
-    assert isinstance(res.confidence, dict)
-    assert "exported_not_public" in res.confidence
-
-
-def test_run_scan_pinned_depth_without_evidence_is_contract_error(
-    snap_path: Path,
-) -> None:
-    # ADR-037 D5 auto-strict applies to the programmatic API too: a pinned deep
-    # depth with no source input maps to a failed ScanResult (not a silent shallow
-    # scan), mirroring the CLI (CodeRabbit/Codex review).
-    from abicheck.service import run_scan
-
-    res = run_scan(ScanRequest(binaries=[snap_path], depth="source"))
-    # 7, not the generic ClickException code 1 -- cli_scan.py's dedicated
-    # _EXIT_EVIDENCE_CONTRACT_ERROR (2026-09-03).
-    assert res.exit_code == 7
-    assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
-
-
-def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) -> None:
-    # The unpinned default never trips the contract — best-effort binary scan.
-    from abicheck.service import run_scan
-
-    res = run_scan(ScanRequest(binaries=[snap_path], mode="audit"))
-    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
-
-
-def test_run_scan_forwards_new_scan_request_controls(
-    monkeypatch, snap_path: Path
-) -> None:
-    # P2 regression (Codex review): run_scan() used to silently ignore
-    # abi3_floor/enabled_checks/severities/build_config/allow_build_query
-    # even when a direct Python API caller set them on ScanRequest --
-    # run_scan_set (--artifact-set) already forwarded them, but run_scan
-    # hard-coded build_config=None/allow_build_query=False/all
-    # checks/no severities/no abi3_floor regardless of the request.
-    import abicheck.scan_engine as scan_engine_mod
-    from abicheck.service import ScanRequest, run_scan
-
-    captured: dict[str, object] = {}
-    real_run_scan_core = scan_engine_mod.run_scan_core
-
-    def _spy(*args, **kwargs):
-        captured.update(kwargs)
-        return real_run_scan_core(*args, **kwargs)
-
-    monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
-
-    custom_checks = frozenset({"exported_not_public"})
-    run_scan(
-        ScanRequest(
-            binaries=[snap_path],
-            mode="audit",
-            abi3_floor=(3, 9),
-            enabled_checks=custom_checks,
-            severities={"exported_not_public": "error"},
-            allow_build_query=True,
-        )
-    )
-    assert captured["abi3_floor"] == (3, 9)
-    assert captured["enabled_checks"] == custom_checks
-    assert captured["severities"] == {"exported_not_public": "error"}
-    assert captured["allow_build_query"] is True
-
-
-def test_run_scan_risk_rules_error_is_service_level(
-    tmp_path: Path, snap_path: Path
-) -> None:
-    # P2 regression (CodeRabbit review): cli_scan_baseline._load_risk_rules
-    # raises click.ClickException for unreadable/malformed --risk-rules
-    # YAML -- fine inside a click command, but risk_rules_path is a plain
-    # ScanRequest field a direct Python API caller can set without ever
-    # importing click. run_scan() must not let a click exception escape
-    # its own service/API boundary.
-    from abicheck.service import ScanRequest, run_scan
-
-    bad_yaml = tmp_path / "risk_rules.yml"
-    bad_yaml.write_text("not: [valid, yaml: :", encoding="utf-8")
-
-    with pytest.raises(ValueError) as excinfo:
-        run_scan(
-            ScanRequest(
-                binaries=[snap_path], mode="audit", risk_rules_path=bad_yaml
-            )
-        )
-    import click
-
-    assert not isinstance(excinfo.value, click.ClickException)
-
-
-def test_run_scan_forwards_level_explicit(monkeypatch, snap_path: Path) -> None:
-    # P2 regression (Codex review): run_scan() never computed/forwarded
-    # level_explicit at all, so run_scan_core defaulted it to False and
-    # refused to auto-run a trusted --config's build.query even for an
-    # explicit depth="build"/"source" -- unlike the CLI and run_scan_set,
-    # which both compute this the same way (sm_pin or (sm is None and dp
-    # is not None)).
-    import abicheck.scan_engine as scan_engine_mod
-    from abicheck.service import ScanRequest, run_scan
-
-    captured: dict[str, object] = {}
-    real_run_scan_core = scan_engine_mod.run_scan_core
-
-    def _spy(*args, **kwargs):
-        captured["level_explicit"] = kwargs.get("level_explicit")
-        return real_run_scan_core(*args, **kwargs)
-
-    monkeypatch.setattr(scan_engine_mod, "run_scan_core", _spy)
-
-    run_scan(ScanRequest(binaries=[snap_path], mode="audit", depth="binary"))
-    assert captured["level_explicit"] is True
-
-
-def test_run_scan_binary_depth_suppresses_headers(
-    monkeypatch, snap_path: Path, header: Path
-) -> None:
-    # Codex P2: a programmatic ScanRequest(depth="binary", headers=[...]) must not
-    # parse the L2 header AST — the service mirrors the CLI's `--depth binary`
-    # header suppression so the collected evidence matches the reported depth.
-    # run_scan_core lives in scan_engine.py; service_scan.run_scan imports it
-    # from there, not from cli_scan.
-    import abicheck.scan_engine as cs
-    from abicheck.service import run_scan
-
-    captured: dict[str, object] = {}
-    original = cs.run_scan_core
-
-    def _spy(*args, **kwargs):
-        captured["headers"] = kwargs.get("headers")
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(cs, "run_scan_core", _spy)
-    res = run_scan(
-        ScanRequest(
-            binaries=[snap_path],
-            depth="binary",
-            headers=[header],
-            mode="audit",
-        )
-    )
-    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
-    # Headers were dropped before reaching the core — no L2 header parse.
-    assert captured["headers"] == []
-
-
-def test_run_scan_source_method_overrides_binary_keeps_headers(
-    monkeypatch, snap_path: Path, header: Path
-) -> None:
-    # Service parity with the CLI (Codex review): --source-method wins over --depth,
-    # so source_method="s5" + depth="binary" resolves to a SOURCE scan that keeps
-    # the header AST — suppression keys on the *resolved* depth, not the raw one.
-    # run_scan_core lives in scan_engine.py; service_scan.run_scan imports it
-    # from there, not from cli_scan.
-    import abicheck.scan_engine as cs
-    from abicheck.service import run_scan
-
-    captured: dict[str, object] = {}
-    original = cs.run_scan_core
-
-    def _spy(*args, **kwargs):
-        captured["headers"] = kwargs.get("headers")
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(cs, "run_scan_core", _spy)
-    # s5 with no compile DB → pinned-depth contract error, but run_scan_core still
-    # receives the (un-suppressed) headers.
-    run_scan(
-        ScanRequest(
-            binaries=[snap_path],
-            source_method="s5",
-            depth="binary",
-            headers=[header],
-            mode="audit",
-        )
-    )
-    assert captured["headers"] == [header]
-
-
-def test_service_accepts_symbols_depth_alias(snap_path: Path) -> None:
-    # The deprecated `symbols` depth spelling must not crash the programmatic API
-    # (it's only normalized by the CLI DEPTH_PARAM otherwise) — Codex review.
-    from abicheck.service import run_scan
-    from abicheck.service_scan import estimate_scan
-
-    # estimate_scan + run_scan both construct EvidenceDepth from req.depth.
-    est = estimate_scan(ScanRequest(binaries=[snap_path], depth="symbols"))
-    assert est  # non-empty cost estimate, no ValueError
-    res = run_scan(ScanRequest(binaries=[snap_path], depth="symbols", mode="audit"))
-    # `symbols`→`binary` is L0/L1 only (collect_mode off) → no contract error.
-    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"

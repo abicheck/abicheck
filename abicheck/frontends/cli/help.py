@@ -224,8 +224,10 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
         {
+            # `--risk-rules` left this panel with the flag itself (ADR-068's
+            # second 2026-09-09 amendment, ruling (b)).
             "name": "Modes",
-            "options": ["--crosscheck", "--risk-rules"],
+            "options": ["--crosscheck"],
         },
         {
             "name": "Toolchain (header parsing)",

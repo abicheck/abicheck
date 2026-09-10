@@ -1114,112 +1114,6 @@ class TestBinaryAndMixedInputParity:
         assert _scan_rows(scan["diff"]) == _compare_rows(report)
 
 
-class TestServiceLayerContractValidation:
-    """`ScanRequest`'s own half of the `--contract` rule (ADR-049 Phase 6).
-
-    `service.compare_snapshots` has always rejected the combination at the
-    Tier-2 boundary, so it was never silently accepted -- but reaching that
-    check means a whole scan runs first and then fails, while `scan_cmd`
-    rejects the same request before any work. `run_scan` now applies the
-    identical rule up front (CodeRabbit review).
-    """
-
-    def _request(self, new: Path, old: Path, **kwargs):
-        from abicheck.service_scan import ScanRequest
-
-        return ScanRequest(binaries=[new], baseline=old, **kwargs)
-
-    def test_a_mode_without_evaluation_is_rejected_before_scanning(
-        self, old_snap: Path, new_snap_breaking: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import run_scan
-
-        called: list[object] = []
-        monkeypatch.setattr(
-            "abicheck.scan_engine.run_scan_core",
-            lambda **kw: called.append(kw),
-        )
-        with pytest.raises(ValidationError, match="contract_mode requires"):
-            run_scan(
-                self._request(new_snap_breaking, old_snap, contract_mode="exports")
-            )
-        # The point of moving the check: no scanning happened first.
-        assert called == []
-
-    def test_a_mode_with_evaluation_is_accepted(
-        self, old_snap: Path, new_snap_breaking: Path
-    ) -> None:
-        from abicheck.service_scan import run_scan
-
-        result = run_scan(
-            self._request(
-                new_snap_breaking,
-                old_snap,
-                contract_mode="exports",
-                contract_evaluation=True,
-            )
-        )
-        assert result.exit_code == 4
-
-    def test_the_no_baseline_rejection_still_names_both_fields(
-        self, new_snap_breaking: Path
-    ) -> None:
-        # Without a baseline these configure nothing, so they keep going
-        # through the existing comparison-only guard rather than the new one.
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        with pytest.raises(ValidationError, match="contract_evaluation"):
-            run_scan(
-                ScanRequest(binaries=[new_snap_breaking], contract_evaluation=True)
-            )
-
-    def test_max_findings_is_forwarded_to_run_scan_core(
-        self, old_snap: Path, new_snap_breaking: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Codex review: ScanRequest.max_findings must actually reach
-        # run_scan_core, not just exist as a no-op field on the dataclass.
-        from abicheck.service_scan import run_scan
-
-        called: dict[str, object] = {}
-
-        def fake_run_scan_core(**kw):
-            called.update(kw)
-            raise SystemExit  # short-circuit before any real work
-
-        monkeypatch.setattr("abicheck.scan_engine.run_scan_core", fake_run_scan_core)
-        with pytest.raises(SystemExit):
-            run_scan(self._request(new_snap_breaking, old_snap, max_findings=3))
-        assert called["max_findings"] == 3
-
-    @pytest.mark.parametrize("bad_value", [0, -1])
-    def test_a_non_positive_max_findings_is_rejected_before_scanning(
-        self,
-        old_snap: Path,
-        new_snap_breaking: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        bad_value: int,
-    ) -> None:
-        # Codex review: a bad value used to only surface once _baseline_summary()
-        # built the report (wasting the scan) and as a click.ClickException
-        # leaking through this click-free API. Now rejected up front, as a
-        # plain ValidationError, before any scanning happens.
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import run_scan
-
-        called: list[object] = []
-        monkeypatch.setattr(
-            "abicheck.scan_engine.run_scan_core",
-            lambda **kw: called.append(kw),
-        )
-        with pytest.raises(ValidationError, match="max_findings"):
-            run_scan(
-                self._request(new_snap_breaking, old_snap, max_findings=bad_value)
-            )
-        assert called == []
-
-
 class TestScanResolvesTheSameTypedConfig:
     """Phase 5's other half: "route both direct compare and scan baseline
     compare through the same core **and same typed config**".
@@ -1450,141 +1344,17 @@ class TestScanResolvesTheSameTypedConfig:
         assert "contract_context" not in diff
         assert "contract_coverage_failures" not in diff
 
+class TestScanCliReceiptNamesItsOwnFlags:
+    """`resolve_scan_config`'s one remaining front end names CLI flags.
 
-class TestServiceScanReceipt:
-    """The Python API path resolves a config too (Codex review).
-
-    `run_scan` was left behind when the CLI was wired: its persisted context
-    kept `GateConfig`'s defaults, so the receipt claimed the `severity`
-    scheme while `run_scan` computed its 0/2/4 exit straight from the
-    compatibility verdict.
+    ADR-068 Phase 4's typed-API slice deleted the other one: ``run_scan`` was
+    the only caller that passed ``FrontEnd.API`` here, and
+    ``SCAN_REQUEST_SPELLINGS`` (the per-request-type selector-spelling remap
+    two API namespaces forced) went with it. What this pins is what survived:
+    a ``scan`` receipt still names a command a reader can replay.
     """
 
-    def _result(self, old: Path, new: Path, **kwargs):
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        return run_scan(
-            ScanRequest(
-                binaries=[new], baseline=old, contract_evaluation=True, **kwargs
-            )
-        )
-
-    def test_the_api_receipt_does_not_claim_a_gate_it_never_used(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        old, new = mixed_pair
-        result = self._result(old, new)
-        ctx = result.report["diff"]["contract_context"]
-        gate = ctx["evaluation_context"]["resolved_config"]["gate"]
-        # A scan's exit follows its verdict; nothing selected a severity gate.
-        assert gate["exit_code_scheme"] == "legacy"
-        assert result.exit_code == 4
-
-    def test_a_request_field_is_read_as_stated(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """A typed request has no "unset", so a caller constructing one chose
-        those values -- the same rule `compare_request_inputs` follows."""
-        old, new = mixed_pair
-        result = self._result(old, new, contract_mode="exports")
-        ctx = result.report["diff"]["contract_context"]
-        config = ctx["evaluation_context"]["resolved_config"]
-        assert config["contract"]["mode"] == "exports"
-
-    def test_no_config_is_resolved_without_contract_evaluation(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        from abicheck.service_scan import ScanRequest, run_scan
-
-        old, new = mixed_pair
-        result = run_scan(ScanRequest(binaries=[new], baseline=old))
-        assert "contract_context" not in result.report["diff"]
-
-    def test_the_api_receipt_names_request_fields_not_cli_flags(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """A `ScanRequest` sets `policy`/`scope_to_public_surface` as typed
-        fields; recording them as `--policy`/`--scope-public-headers`
-        describes a command line nobody ran (Codex review)."""
-        from abicheck.compatibility_evaluation_frontend import unstatable_selectors
-        from abicheck.service_scan import ScanRequest, _scan_request_config
-
-        old, new = mixed_pair
-        config = _scan_request_config(
-            ScanRequest(binaries=[new], baseline=old, contract_evaluation=True)
-        )
-        assert unstatable_selectors(config, request_type=ScanRequest) == []
-        hops = {
-            field: [hop.option for hop in prov.selected_by]
-            for field, prov in config.provenance.items()
-        }
-        assert "policy" in hops["policy.base"]
-        # `ScanRequest`'s own field, not `CompareRequest`'s `scope_public`.
-        assert "scope_to_public_surface" in hops["contract.mode"]
-
-    def test_every_remapped_spelling_is_a_real_scan_request_field(self) -> None:
-        """The map is only correct while `ScanRequest` keeps those names, so a
-        rename fails here rather than silently restoring a name nobody can
-        replay."""
-        import dataclasses
-
-        from abicheck.cli_scan_receipt import SCAN_REQUEST_SPELLINGS
-        from abicheck.service_scan import ScanRequest
-
-        fields = {f.name for f in dataclasses.fields(ScanRequest)}
-        assert set(SCAN_REQUEST_SPELLINGS.values()) <= fields
-
-    def test_a_request_with_every_statable_input_names_only_real_fields(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """The narrow case passed even while the receipt named
-        `CompareRequest`'s fields, because those inputs were unset. This
-        states all of them."""
-        from abicheck.compatibility_evaluation_frontend import unstatable_selectors
-        from abicheck.policy_file import PolicyFile
-        from abicheck.service_scan import ScanRequest, _scan_request_config
-
-        old, new = mixed_pair
-        config = _scan_request_config(
-            ScanRequest(
-                binaries=[new],
-                baseline=old,
-                contract_evaluation=True,
-                policy="sdk_vendor",
-                policy_file=PolicyFile(base_policy="plugin_abi"),
-                scope_to_public_surface=False,
-                force_public_symbols={"kept"},
-            )
-        )
-        assert unstatable_selectors(config, request_type=ScanRequest) == []
-
-    def test_the_api_receipt_records_the_api_request_layer(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """`contract.mode`, not `policy.base`: `--policy`/`policy` is D7's
-        legacy alias for the base and resolves at `legacy_alias` on every
-        front end, so it says nothing about which one stated it."""
-        from abicheck.compatibility_evaluation_config import SelectorLayer
-        from abicheck.service_scan import ScanRequest, _scan_request_config
-
-        old, new = mixed_pair
-        config = _scan_request_config(
-            ScanRequest(
-                binaries=[new],
-                baseline=old,
-                contract_evaluation=True,
-                contract_mode="exports",
-            )
-        )
-        prov = config.provenance["contract.mode"]
-        assert prov.layer is SelectorLayer.API_REQUEST
-        assert [hop.option for hop in prov.selected_by] == ["contract_mode"]
-
-    def test_the_cli_scan_still_names_its_own_flags(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """The default front end is unchanged: only `run_scan` opts into API
-        spellings, so the CLI receipt still names a replayable command."""
+    def test_the_cli_scan_still_names_its_own_flags(self) -> None:
         from abicheck.cli_scan_receipt import SCAN_CONFIG_PARAMS, resolve_scan_config
 
         params = dict.fromkeys(SCAN_CONFIG_PARAMS)
@@ -1594,105 +1364,13 @@ class TestServiceScanReceipt:
         hops = [hop.option for hop in config.provenance["policy.base"].selected_by]
         assert "--policy" in hops
 
+    def test_no_api_spellings_remap_survives(self) -> None:
+        """The remap itself is gone, not merely unused -- a second API
+        namespace is exactly what ``cross_front_end_differences()`` could not
+        reconcile, so its absence is the invariant worth pinning."""
+        import abicheck.cli_scan_receipt as receipt
+        import abicheck.workflows.scan_config as scan_config
 
-class TestApiRequestValidationErrors:
-    """A request the resolver rejects must reach the caller as
-    `ValidationError`, which is what every other request-validation failure
-    in `run_scan` raises — not as the resolver's own `ValueError`, which a
-    caller guarding with `except ValidationError` would not catch
-    (CodeRabbit review).
-    """
+        assert not hasattr(receipt, "SCAN_REQUEST_SPELLINGS")
+        assert not hasattr(scan_config, "SCAN_REQUEST_SPELLINGS")
 
-    def _request(self, mixed_pair: tuple[Path, Path], **kwargs):
-        from abicheck.service_scan import ScanRequest
-
-        old, new = mixed_pair
-        return ScanRequest(
-            binaries=[new], baseline=old, contract_evaluation=True, **kwargs
-        )
-
-    def test_an_unknown_policy_is_a_validation_error(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """Unreachable from the CLI, whose `--policy` is a `click.Choice`, but
-        a typed request's `policy` is a free string."""
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import _scan_request_config
-
-        with pytest.raises(ValidationError, match="unknown base policy"):
-            _scan_request_config(self._request(mixed_pair, policy="not_a_policy"))
-
-    def test_run_scan_surfaces_it_rather_than_the_raw_resolver_error(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """End to end: the mapping has to hold through `run_scan`, since that
-        is the entry point a caller actually guards."""
-        from abicheck.errors import ValidationError
-        from abicheck.service_scan import run_scan
-
-        with pytest.raises(ValidationError, match="unknown base policy"):
-            run_scan(self._request(mixed_pair, policy="not_a_policy"))
-
-    def test_a_valid_request_still_resolves(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """The mapping must not swallow a good request: `ValueError` is a wide
-        net, so this pins that the happy path still returns a config."""
-        from abicheck.service_scan import _scan_request_config
-
-        assert _scan_request_config(self._request(mixed_pair)) is not None
-
-
-class TestAnAcceptedRequestIsNotKilledByItsOwnReceipt:
-    """Two inputs the comparison accepts must not fail during resolution.
-
-    Both were already fixed once on the MCP path and reappeared here, which
-    is why the fixes now live on shared helpers
-    (`stated_policy_base`, `SuppressionSource.from_loaded`) rather than in
-    each front end (Codex review).
-    """
-
-    def _config(self, mixed_pair: tuple[Path, Path], **kwargs):
-        from abicheck.service_scan import ScanRequest, _scan_request_config
-
-        old, new = mixed_pair
-        return _scan_request_config(
-            ScanRequest(
-                binaries=[new], baseline=old, contract_evaluation=True, **kwargs
-            )
-        )
-
-    def test_a_policy_file_overrides_an_unknown_policy_name(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """The file takes precedence, so the name chose nothing and naming it
-        would be false either way -- it is dropped, not repaired."""
-        from abicheck.policy_file import PolicyFile
-
-        config = self._config(
-            mixed_pair,
-            policy="not_a_policy",
-            policy_file=PolicyFile(base_policy="sdk_vendor"),
-        )
-        assert config.policy.base.id == "sdk_vendor"
-
-    def test_an_unknown_policy_alone_still_fails_loudly(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """The drop is gated on a file overriding it; with no file the value
-        really was the caller's choice and really is invalid."""
-        from abicheck.errors import ValidationError
-
-        with pytest.raises(ValidationError, match="unknown base policy"):
-            self._config(mixed_pair, policy="not_a_policy")
-
-    def test_an_in_memory_suppression_list_resolves(
-        self, mixed_pair: tuple[Path, Path]
-    ) -> None:
-        """A programmatically built list carries no `source_sha256`; taking
-        `""` there made `SuppressionConfig` reject an otherwise-valid scan."""
-        from abicheck.suppression import SuppressionList
-
-        config = self._config(mixed_pair, suppression=SuppressionList([]))
-        assert config.suppressions is not None
-        assert config.suppressions.sha256

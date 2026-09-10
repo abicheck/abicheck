@@ -153,8 +153,8 @@ raises `ValidationError` for an unrecognised format.
 
 `run_compare`/`run_dump` are convenience shims — keyword arguments in,
 typed result out. Underneath, this Python API resolves through the **same
-typed request objects** the native CLI does: `DumpRequest`, `CompareRequest`,
-and `ScanRequest`. The native `compare` CLI resolves through
+typed request objects** the native CLI does: `DumpRequest` and
+`CompareRequest`. The native `compare` CLI resolves through
 `CompareRequest` too (`cli_resolve.py` assembles it from `compare`'s loose
 arguments and hands it to `resolve_compare_request`); the native `dump` CLI
 is the one exception — it still runs its own `dump_cmd` argument path
@@ -163,9 +163,9 @@ for what that migration still needs). Reaching for the typed request
 directly buys you two things a keyword shim can't:
 
 - **The identical validation *rules*** across every front end that
-  actually builds the typed request — `compare`/`scan` (both CLI and typed
-  API) and the typed API's `run_dump_request` — reject a bad combination of
-  fields the same way regardless of which one built the request. (The
+  actually builds the typed request — the `compare` CLI, `run_compare_request`
+  and `run_dump_request` — reject a bad combination of fields the same way
+  regardless of which one built the request. (The
   native `dump` CLI is the exception noted above: since it doesn't build a
   `DumpRequest`, this shared-validation guarantee doesn't cover it.) How a
   rejection *surfaces* still differs per transport: calling the typed API
@@ -181,7 +181,11 @@ directly buys you two things a keyword shim can't:
 |---|---|---|---|
 | Dump | `run_dump(...)` | `run_dump_request(DumpRequest(...))` | `AbiSnapshot` |
 | Compare | `run_compare(...)` | `run_compare_request(CompareRequest(...))` | `CompareResult` |
-| Scan | *(none — always typed)* | `run_scan(ScanRequest(...))` | `ScanResult` |
+
+`scan` has no typed request of its own. `ScanRequest`/`ScanResult` and
+`run_scan`/`run_scan_set` were removed in ADR-068 Phase 4 — `CompareRequest`
+→ `CompareResult` is the one typed contract now. See
+[Scanning from Python](#scanning-from-python) below.
 
 ### `DumpRequest`
 
@@ -255,22 +259,50 @@ form exists because the native CLI runs its own Click-specific resolution
 (`--pack` application, receipt recording) *between* them; a typed caller
 normally just wants `run_compare_request`.
 
-### `ScanRequest`
+### Scanning from Python
 
-Scan never had an untyped convenience shim — `ScanRequest` is the only way
-in from Python:
+**There is no typed scan request.** `ScanRequest`, `ScanResult` and
+`run_scan`/`run_audit`/`run_scan_set` were removed in
+[ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
+Phase 4: two request/result pairs is what made the "equivalent input,
+equivalent answer, whichever front end" rule impossible to check, and
+`compare`'s own pair covers the capability. Importing any of those names now
+raises `ImportError`.
+
+A baseline comparison — what `run_scan(ScanRequest(baseline=...))` did — is a
+`CompareRequest`:
 
 ```python
 from pathlib import Path
-from abicheck.service import ScanRequest, run_scan
+from abicheck.api_types import CompareRequest, InputSpec
+from abicheck.service import run_compare_request
 
-result = run_scan(ScanRequest(
-    binaries=[Path("build/libfoo.so")],
-    baseline=Path("baseline.json"),
+result = run_compare_request(CompareRequest(
+    old=InputSpec.of(Path("baseline.json")),
+    new=InputSpec.of(Path("build/libfoo.so"), headers=[Path("include/")]),
     depth="headers",
     contract_evaluation=True,
     contract_mode="exports",
 ))
+```
+
+The one-sided audit (`scan` with no `--against`) has **no** Python entry
+point yet: `compare --no-baseline` is the CLI replacement, and ADR-068 D2's
+own note records that it does not yet reproduce every audit finding. Until
+it does, run the `abicheck scan` CLI and read its `--format json` report —
+that command is unchanged and still emits the `scan_schema_version` envelope.
+
+`estimate_scan` — the dry-run per-layer cost projection — survives, but takes
+an `InputSpec` plus the run-scoped level arguments rather than a request:
+
+```python
+from abicheck.api_types import InputSpec
+from abicheck.service import estimate_scan
+
+rows = estimate_scan(
+    InputSpec.of(Path("build/libfoo.so"), headers=[Path("include/")]),
+    depth="source",
+)
 ```
 
 ## CLI / Python parity
@@ -284,7 +316,7 @@ table as "where the capability is reachable today":
 |---|---|---|
 | Depth floor | `dump --depth` → `DumpDepthNotSatisfiedError` | `DumpRequest.depth`/`CompareRequest.depth` → `ValidationError` |
 | Not comparable | exit code `16` | raises `ProfileMismatchError`/`ScopeMismatchError` |
-| Contract evaluation | `--contract {public,exports,all,auto}` | `CompareRequest.contract_evaluation`/`.contract_mode` (same fields on `ScanRequest`; the typed API still needs both, and has no `auto`) |
+| Contract evaluation | `--contract {public,exports,all,auto}` | `CompareRequest.contract_evaluation`/`.contract_mode` (the typed API still needs both, and has no `auto`) |
 | Consumer scoping | `compare --used-by` | `abicheck.appcompat.scope_diff_to_app(...)` — no `CompareRequest` field, a post-classification step |
 
 One asymmetry worth knowing about, not a bug to work around:

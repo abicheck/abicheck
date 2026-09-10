@@ -50,11 +50,15 @@ inputs:
     required: false
   new-library-set:
     description: >
-      scan mode only (ADR-056). Audit a *set* of libraries with no old side,
-      as one operation: a directory (every discoverable shared library in
-      it) or an explicit comma-separated path list. Maps to scan
-      --artifact-set. Mutually exclusive with new-library and with
-      against/abi-baseline (audit-only — no old-side comparison for a set).
+      RETIRED (ADR-068's second 2026-09-09 amendment, ruling (b) — hard
+      removal, no deprecation window). `scan --artifact-set`, which this
+      input mapped to, no longer exists: preserving its per-member
+      manifest/coverage accounting needs ADR-065 S3's package component
+      inventories, and routing it onto `compare --no-baseline DIR` before
+      those land would silently narrow those guarantees. Still declared so a
+      workflow that sets it gets an explicit `::error::` naming that
+      prerequisite instead of a silently-ignored input; run one `scan` per
+      library until ADR-065 S3 lands.
       For a multi-library release comparison against an old side, use
       mode: compare with a directory/package operand instead.
     required: false
@@ -115,22 +119,24 @@ inputs:
       `-H` root is candidate-sided (`new=...`) for a scalar scan with a
       resolved baseline — so it never leaks into the baseline/old side's
       own header parse even when `old-header` is also given — and bare
-      (both-sided) for an audit-only or `--artifact-set` scan, which has no
-      old side to protect. compare has no equivalent flag.
+      (both-sided) for an audit-only scan, which has no old side to
+      protect. compare has no equivalent flag.
     required: false
   build-target:
     description: >
       Explicit build-system root target(s) to scope L3 evidence collection
       to, instead of a workspace-wide query (P0.2; Bazel only so far, e.g.
       `//:math`). Space-separated, repeatable — each root's transitive
-      dependency closure is unioned. Forwarded identically to both dump and
-      scan mode (`--build-target`, same flag and semantics on both); CLI
-      equivalent of `.abicheck.yml`'s `build.targets`, overrides it when
-      both are given. Without this, a multi-package workspace with
-      fixture/test targets alongside the real library is collected in
-      full, which can pollute L3 evidence with unrelated compile units and
-      diverge a `scan --against` a target-scoped `dump` baseline's own
-      evidence (lab report). compare has no equivalent flag.
+      dependency closure is unioned. **dump mode only.** `scan
+      --build-target` is retired (ADR-068's second 2026-09-09 amendment,
+      ruling (b)): it narrowed which build target's evidence collection used
+      when a compile database names several, which is a precision knob, not
+      a correctness floor — omitting it never narrowed what was reported
+      below the ordinary all-targets default. A `mode: scan` step that sets
+      it gets an explicit `::error::` rather than a flag the command no
+      longer has; narrow a multi-target workspace with `mode: dump`, or
+      through `.abicheck.yml`'s `build.targets` once `dump`'s own
+      config-cleanup phase implements it. `compare` has no equivalent.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────
@@ -159,7 +165,7 @@ inputs:
     description: >
       Include directories for old side only. Space-separated. Used by
       `compare` and by `scan --against` (the baseline side); `dump` and
-      scan's audit-only `new-library-set` mode have no old side. In
+      `dump` has no old side. In
       `compare`, replaces `include` for this side rather than adding to
       it (repeat any directory `include` also lists that's still
       needed); in `scan --against`, it is added alongside `include`
@@ -397,10 +403,8 @@ inputs:
       is no longer a per-invocation Action input for either, matching the
       native CLI's own removal of --bundle-system-providers/
       --bundle-cohort). `system_providers:` applies to compare mode
-      (directory/package operands) and scan mode (--artifact-set) alike;
-      `cohorts:` (the SONAME-skew check) applies to compare only — an
-      --artifact-set audit has no old/new release pair to detect a skew
-      between, so the setting has no effect there.
+      (directory/package operands); `cohorts:` (the SONAME-skew check)
+      applies to compare only.
     required: false
   jobs:
     description: >
@@ -442,11 +446,16 @@ inputs:
   depth:
     description: >
       Evidence-depth selector: binary, headers, build, or source. Used by
-      scan and dump modes, and by compare mode (--depth). In scan mode, omit
-      it for 'auto' (risk-driven); --depth source analyses the whole current
-      library target unless since/changed-path seeds a narrower changed
-      scope. Maps to --depth. (The deprecated scan-mode/source-method inputs
-      have been removed; use depth.)
+      scan and dump modes, and by compare mode (--depth). Omitting it means
+      'headers' in scan mode — set it to build or source explicitly to
+      collect those, since scan no longer escalates on its own (through
+      2026-09-09 an omitted depth was risk-scored from the since/changed-path
+      seed; ADR-068's second 2026-09-09 amendment retired that along with
+      risk-rules, so a workflow relying on the escalation must now pin the
+      rung it needs). --depth source analyses the whole current library
+      target unless since/changed-path seeds a narrower changed scope. Maps
+      to --depth. (The deprecated scan-mode/source-method inputs have been
+      removed; use depth.)
     required: false
   since:
     description: >
@@ -519,8 +528,14 @@ inputs:
     required: false
   risk-rules:
     description: >
-      scan mode only. Path to a YAML file overriding the risk_rules profile.
-      Maps to scan --risk-rules.
+      RETIRED (ADR-068's second 2026-09-09 amendment, ruling (b)). `scan
+      --risk-rules` is gone, together with the risk-driven `auto` depth
+      escalation it fed: an omitted `depth` now resolves to the fixed
+      `headers` rung — the same default `compare` has always used — instead
+      of being scored from the changed paths. Set `depth: source` (or
+      `build`) explicitly to pin the level a risk profile used to escalate
+      to. Still declared so a workflow that sets it gets an explicit
+      `::error::` saying so.
     required: false
   # ── Baseline auto-fetch (compare / scan modes) ───────────────────────────────
   abi-baseline:
@@ -748,7 +763,7 @@ inputs:
     description: >
       Post a sticky ABI report comment on the pull request. Supports compare
       mode (including directory/package operands) and scan mode (a single
-      artifact, not scan --artifact-set — that JSON has no single-artifact
+      artifact; the multi-library audit mode is retired — that JSON had no single-artifact
       shape to render), rendering the same verdict/breaking/needs-review
       sections plus a green "Public API additions" table for either mode,
       and a scan-only risk/coverage summary line. The comment is a content
@@ -835,7 +850,7 @@ outputs:
       command's own error message for which one applied. Like
       NOT_COMPARABLE, this fails the step unconditionally and is
       distinct from ERROR, which covers a genuine CLI/config error.
-      For a single ARTIFACT (not --artifact-set), published unconditionally
+      Published unconditionally
       as of 2026-09-03 -- the scan process's own dedicated exit code
       (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`, 7) makes this axis
       unambiguous to `action/run.sh`'s exit-code dispatch regardless of
@@ -850,23 +865,6 @@ outputs:
       `_effective_format`) still decides only whether the sticky PR
       comment and JSON-consuming outputs have structured detail to show,
       not whether this verdict/exit-code publish at all.
-      new-library-set (--artifact-set) scans reach this same dedicated exit
-      code too, as of 2026-09-04: `service_scan._aggregate_scan_set_verdict`
-      reports the set's own top-level verdict/exit as
-      EVIDENCE_CONTRACT_ERROR/7 whenever a member's `_EvidenceContractError`
-      is the *worst* outcome across the set -- unconditionally, independent
-      of `--format`/pr-comment/extra-args, the process's own exit code
-      needing no JSON report to be legible. A sibling library with a real
-      API_BREAK/BREAKING still outranks it (that verdict/exit stays at the
-      set's top level instead, per that function's own docstring), leaving
-      the aborted member's status visible only in the JSON report's own
-      per_artifact list, not in the verdict/exit-code outputs this Action
-      publishes -- so "unconditionally fails the step" holds for a
-      new-library-set scan only when the evidence-contract abort is the
-      set's own worst outcome; when a sibling member's real break outranks
-      it, this Action's fail-on-api-break/fail-on-breaking inputs alone
-      decide the step's outcome, exactly as for an ordinary
-      API_BREAK/BREAKING verdict, with the sibling abort unreported by this
       Action), or ERROR.
       For deps-compare: PASS, WARN, FAIL, or ERROR.
       For deps-tree: PASS, FAIL, or ERROR.
@@ -921,9 +919,7 @@ outputs:
       audit-only scan too, since the underlying precondition checks run
       regardless of whether a baseline comparison follows; this process's
       own dedicated exit code as of 2026-09-03, published unconditionally
-      for a single ARTIFACT, and for --artifact-set too as of 2026-09-04
-      when a member's abort is the set's own worst outcome -- see the
-      verdict output's own description above for the exact condition).
+      -- see the verdict output's own description above).
       deps-compare: 0 (pass), 1 (warn),
       4 (fail). deps-tree: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.
@@ -963,6 +959,10 @@ runs:
         INPUT_BUNDLE_SYSTEM_PROVIDERS: ${{ inputs.bundle-system-providers }}
         INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
+        # Retired scan inputs, rejected in preflight so a workflow that still
+        # sets one fails before Python setup and the toolchain install
+        # (Codex review, PR #1186).
+        INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         INPUT_AGAINST: ${{ inputs.against }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}

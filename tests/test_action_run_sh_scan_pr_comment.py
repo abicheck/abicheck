@@ -34,13 +34,14 @@ from pathlib import Path
 
 RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 _START_MARKER = "_maybe_post_pr_comment() {"
-_END_MARKER = (
-    'echo "abicheck: scan --artifact-set has no single-artifact JSON shape; '
-    'skipping PR comment."\n    return 0\n  fi\n'
-)
+#: The end of the MODE dispatch. Through 2026-09-09 this was the closing
+#: ``fi`` of the ``scan --artifact-set`` skip-with-a-diagnostic guard that
+#: followed it; ADR-068's second amendment retired that mode, so the `case`
+#: block's own ``esac`` is the fragment boundary now.
+_END_MARKER = "  esac\n"
 #: The dry-run/``pr-comment-on: never``/ERROR/BUDGET_OVERFLOW guards that
-#: immediately follow the ``scan --artifact-set`` block, up to (not
-#: including) the pull_request-event check.
+#: immediately follow the MODE dispatch, up to (not including) the
+#: pull_request-event check.
 _VERDICT_GUARDS_END_MARKER = '[[ "$VERDICT" == "BUDGET_OVERFLOW" ]] && return 0\n'
 #: Dependency order matters: `_extra_args_has_dry_run_flag` calls
 #: `_extra_args_options`, which calls `_extra_args_is_value_option`.
@@ -69,18 +70,17 @@ def _extra_args_has_dry_run_flag_source() -> str:
 
 
 def _mode_gate_fragment() -> str:
-    """The MODE dispatch + ``scan --artifact-set`` guard at the top of
-    ``_maybe_post_pr_comment``, extracted verbatim from run.sh — up to (not
-    including) the pull_request-event check, since these tests never reach
-    that far.
+    """The MODE dispatch at the top of ``_maybe_post_pr_comment``, extracted
+    verbatim from run.sh — up to (not including) the pull_request-event
+    check, since these tests never reach that far.
     """
     text = RUN_SH.read_text(encoding="utf-8")
     start = text.index(_START_MARKER)
     end = text.index(_END_MARKER, start) + len(_END_MARKER)
     body = text[start:end]
-    # Close the function (the real one continues past the artifact-set
-    # guard; this fragment stops right after its closing `fi`, a complete,
-    # balanced sub-body) so it parses as a callable function on its own.
+    # Close the function (the real one continues past the MODE dispatch;
+    # this fragment stops right after its `esac`, a complete, balanced
+    # sub-body) so it parses as a callable function on its own.
     # The "GATE_PASSED" echo (CodeRabbit review) is emitted only from
     # *inside* the function, right before its own `return 0` -- unlike the
     # caller's trailing "REACHED" echo (outside the function, always
@@ -171,16 +171,11 @@ def test_dump_mode_is_a_no_op():
     assert "skipping PR comment" not in result.stdout
 
 
-def test_scan_artifact_set_is_skipped_with_a_diagnostic():
-    result = _run("scan", {"SCAN_ARTIFACT_SET": "/some/dir"})
-    assert result.returncode == 0, result.stderr
-    assert "no single-artifact JSON shape" in result.stdout
-    assert "REACHED" in result.stdout
-    assert "GATE_PASSED" not in result.stdout
-
-
-def test_scan_without_artifact_set_is_not_skipped():
-    result = _run("scan", {"SCAN_ARTIFACT_SET": ""})
+def test_scan_mode_has_no_skip_path_left_in_the_mode_gate():
+    """The retired `--artifact-set` skip was the only per-request exception
+    the MODE dispatch carried for `scan` (ADR-068's second amendment, ruling
+    (b)), so every `scan` run reaches the guards past it."""
+    result = _run("scan", {})
     assert result.returncode == 0, result.stderr
     assert "no single-artifact JSON shape" not in result.stdout
     assert "GATE_PASSED" in result.stdout

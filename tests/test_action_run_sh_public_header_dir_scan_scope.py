@@ -142,17 +142,3 @@ class TestScanPublicHeaderDirBaselineScope:
         pairs = _h_pairs(cmd)
         assert "pub" in pairs
         assert "new=pub" not in pairs
-
-    def test_bare_for_artifact_set(self) -> None:
-        # new-library-set is audit-only by construction (ADR-056) -- no old
-        # side to contaminate, so bare -H is correct.
-        cmd = _run_cmd(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_PUBLIC_HEADER_DIR": "pub",
-            }
-        )
-        pairs = _h_pairs(cmd)
-        assert "pub" in pairs
-        assert "new=pub" not in pairs

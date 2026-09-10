@@ -33,9 +33,16 @@ what was skipped.
 **`mode: scan` remains the one to reach for** when this step also needs: a
 single-release audit with no baseline at all (see [Single-release
 audit](#single-release-audit-no-baseline) below — `mode: compare` has no
-no-baseline input yet), `crosscheck`'s `KEY=error` promotion syntax,
-`build-target` scoping, or `new-library-set` (multi-library audit) — none of
-those has a `compare` equivalent at all. A `budget` wall-clock guard is
+no-baseline input yet) or `crosscheck`'s `KEY=error` promotion syntax —
+neither has a `compare` equivalent at all. Three inputs that used to be on
+this list are **retired** rather than translated (ADR-068's second
+2026-09-09 amendment, ruling (b)): `new-library-set` (the multi-library
+audit mode — blocked on ADR-065 S3's component inventories; run one `scan`
+per library meanwhile), `risk-rules` (and with it the risk-driven `auto`
+depth escalation — pin `depth:` explicitly instead) and `build-target` (use
+`mode: dump` to narrow a multi-target workspace). Setting any of them on a
+`mode: scan` step is now an explicit `::error::`, not a silent downgrade. A
+`budget` wall-clock guard is
 different: `compare` itself now has `--budget`, but the Action's `mode:
 compare` input still doesn't read it (a translation gap, not a missing CLI
 capability — see the table below).
@@ -61,10 +68,9 @@ is tracked in
 | Your step sets… | Why it still runs legacy `scan` |
 |---|---|
 | no `against`/`abi-baseline` (audit-only) | `compare --no-baseline` does not reproduce the audit's findings yet |
-| `new-library-set` | no `compare` equivalent for the multi-library audit mode |
 | `budget` | `compare` has its own `--budget` flag now (exit `5` on overflow applies to both commands) — this is an Action-translation gap (`action/run.sh` still forces `INPUT_BUDGET` onto the legacy route), not a missing CLI capability, and closes once that translation is updated |
-| `risk-rules`, `crosscheck`, `build-target` | no `compare` flag equivalent |
-| no `depth` at all | `scan`'s risk-driven `auto` selection has no `compare` equivalent; `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers` — either way, never the risk-scored choice `auto` makes |
+| `crosscheck` | no `compare` flag equivalent; `policy.overrides.<CHANGE_KIND>` in `.abicheck.yml` is the replacement spelling for the `KEY=error` half, and the engine axis behind it is ADR-064 surface a later slice retires |
+| no `depth` at all | `compare` infers a deeper rung from `sources`/`build-info` if either is given, otherwise caps at `headers`; `scan`'s own `auto` now always resolves to `headers` (the risk-driven escalation is retired, ADR-068 (b)), so the two agree except when `sources`/`build-info` is given |
 | `depth: build` or `depth: source` | `compare` now has its own evidence-contract floor (exit `7`), but it's narrower than `scan`'s: `scan`'s floor is unconditional, while `compare`'s is exempted whenever both operands are already-serialized snapshots (see [Evidence Depth](evidence-depth.md)'s "pinned depth is a contract" warning) — routing onto it could silently narrow the guarantee this Action's users rely on, so it stays on the legacy CLI |
 | a shared `header:`/`include:` **and** a side-specific `old-header`/`new-header`/`public-header-dir`/`old-include`/`new-include` | `compare`'s side-aware flags don't cover that combination identically |
 | an `against:` ending `.json`/`.json.gz`/`.json.zst`, or any file content-detected as a JSON snapshot | `compare` and `scan` disagree on snapshot-baseline handling |
@@ -119,7 +125,7 @@ jobs:
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          depth: source   # pin the source-ABI replay -- compare has no risk-driven auto (see below)
+          depth: source   # pin the source-ABI replay -- nothing escalates on its own (see below)
           since: origin/${{ github.base_ref }}   # focus on changed files
           fail-on-api-break: true       # gate on source/API breaks too
 ```
@@ -132,28 +138,31 @@ base ref is available.
 ### Pin the depth
 
 `depth` is the single evidence-depth dial, and `mode: compare` reads the same
-values `mode: scan` does. Pin it for reproducible CI — unlike `scan`,
-`compare` has no risk-driven `auto` rung yet (plan §3 row 13). Omitting
-`depth` is not itself risk-based selection either way: `compare` infers
-`source`/`build` from whichever of `sources`/`build-info` is supplied with no
-`depth` pinned, and only bottoms out at `headers` when neither is given —
-never the risk-scored choice `auto` makes.
+values `mode: scan` does. **Pin it** — neither command escalates on its own
+any more (ADR-068's second 2026-09-09 amendment retired `scan`'s risk-driven
+`auto`, ruling (b), so a `mode: scan` step that relied on it now gets
+`headers` and must pin the rung it needs). Omitting `depth` is not risk-based
+selection either way: `compare` infers `source`/`build` from whichever of
+`sources`/`build-info` is supplied, and bottoms out at `headers` when neither
+is given; `scan` always resolves to `headers`.
 
-**`compare`'s pinned depth is not a contract the way `scan`'s is.** `scan
---depth source` with no `--sources`/`--build-info` given hard-fails before
-comparing (exit 7, "pinned depth 'source' ... needs source evidence, but no
---sources/--build-info was given") — a pinned depth without the evidence to
-back it is an error, not a silent downgrade. `compare --depth source` has no
-such floor: with the same missing evidence it degrades silently to a
-binary-only comparison and can still exit 0 (verified live — see the gap
-table in [`docs/use/evidence-depth.md`](evidence-depth.md)). A copied
-`mode: compare` workflow that stops supplying `sources:`/`build-info:` (or
-never had it) will keep reporting green without ever running the L3-L5
-analysis it asked for, where the equivalent `mode: scan` workflow would fail
-loudly instead. Until `compare` gains its own evidence-floor enforcement,
-treat `sources:`/`build-info:` as load-bearing for any pinned `depth: build`
-or `depth: source` under `mode: compare` — nothing checks that they were
-actually supplied.
+**A pinned depth is a contract on `compare` too.** `scan --depth source`
+with no `--sources`/`--build-info` given hard-fails before comparing (exit 7,
+"pinned depth 'source' ... needs source evidence, but no --sources/--build-info
+was given") — a pinned depth without the evidence to back it is an error, not
+a silent downgrade. `compare --depth build|source` now enforces the same floor
+and reports it through the same axis: an operand this run extracts live that
+cannot reach the pinned rung records `evidence_contract_error` and exits `7`
+(`policy/depth_evidence_contract.py`; the full per-command account is in
+[`docs/use/evidence-depth.md`](evidence-depth.md)).
+
+The one carve-out is a side that is *already* a serialized snapshot
+(`old-library: abi-baseline.json`): that operand was not extracted by this run
+at all, so there is no "reached a shallower rung than requested" failure to
+report for it, and such a pair still exits `0`/`2`/`4` on its own contents.
+So `sources:`/`build-info:` stay load-bearing under `mode: compare` in exactly
+that case — a stored-snapshot operand pinned to `depth: build`/`source` is not
+checked against the pin, while a live one is.
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
@@ -171,7 +180,7 @@ actually supplied.
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
 | Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
-| Risk-driven depth selection (`auto`) | `mode: scan` only — omit `depth` there + set `since:` |
+| Risk-driven depth selection (`auto`) | *Retired* (ADR-068's second 2026-09-09 amendment, ruling (b)). Under `mode: scan` an omitted `depth` now resolves to a fixed `headers`; under `mode: compare` it still infers from `sources`/`build-info` as the table above describes. Either way nothing is risk-scored — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
 | A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: scan` only — `mode: compare` reads no `budget` input yet |
 
 !!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"

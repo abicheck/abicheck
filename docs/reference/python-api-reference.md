@@ -4,18 +4,6 @@
 
 Every name in `abicheck.service.__all__` — the supported Tier-2 public entry point — with its full signature or dataclass field list, generated directly from the live objects. See [Python API](../use/python-api.md) for the narrative walkthrough (comparing libraries, working with snapshots, rendering results); this page is the exhaustive signature list only.
 
-## `Budget`
-
-Optional scan budget — a failure guard, never a scope-shrinker (ADR-035 D3).
-
-*Dataclass.*
-
-| Field | Type | Default |
-|---|---|---|
-| `total_timeout` | `float \| None` | `None` |
-| `max_tus` | `int \| None` | `None` |
-| `partial_ok` | `bool` | `True` |
-
 ## `CompareRequest`
 
 A fully-specified comparison request — the single input to ``run_compare``.
@@ -58,6 +46,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
+| `allow_build_query` | `bool` | `False` |
 
 ## `CompareResult`
 
@@ -156,23 +145,6 @@ One side of a comparison: a binary/snapshot path plus its build context.
 | `compile_db_filter` | `str \| None` | `None` |
 | `build_config` | `Path \| None` | `None` |
 
-## `LayerResult`
-
-Per-layer coverage of an *executed* scan (ADR-035 D10; reuses LayerCoverage).
-
-*Dataclass.*
-
-| Field | Type | Default |
-|---|---|---|
-| `method` | `str \| None` | *(required)* |
-| `layer` | `str` | *(required)* |
-| `status` | `str` | *(required)* |
-| `facts` | `int` | `0` |
-| `elapsed_s` | `float` | `0.0` |
-| `skipped_reason` | `str \| None` | `None` |
-| `detail` | `str` | `''` |
-| `counters` | `dict[str, int]` | `{}` |
-
 ## `OutputSpec`
 
 Where/how a result is rendered — the invocation-level output choice.
@@ -199,95 +171,6 @@ Both sides of a comparison, resolved and ready to classify.
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
 | `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
-
-## `ScanArtifactResult`
-
-One member's :class:`ScanResult`, with the identity that result alone doesn't carry (ADR-056 — neither `ScanResult` nor its nested report carries a binary path or library name anywhere).
-
-*Dataclass.*
-
-| Field | Type | Default |
-|---|---|---|
-| `artifact` | `Path` | *(required)* |
-| `result` | `ScanResult` | *(required)* |
-
-## `ScanRequest`
-
-Typed input to the scan engine (ADR-035 D10). All additive over dump/compare.
-
-*Dataclass.*
-
-| Field | Type | Default |
-|---|---|---|
-| `binaries` | `list[Path]` | `[]` |
-| `headers` | `list[Path]` | `[]` |
-| `includes` | `list[Path]` | `[]` |
-| `public_header_dirs` | `list[Path]` | `[]` |
-| `sources` | `Path \| None` | `None` |
-| `compile_db` | `Path \| None` | `None` |
-| `build_info` | `Path \| None` | `None` |
-| `baseline` | `str \| Path \| None` | `None` |
-| `mode` | `str` | `'pr'` |
-| `source_method` | `str \| None` | `None` |
-| `depth` | `str \| None` | `None` |
-| `changed_paths` | `list[str]` | `[]` |
-| `seeded` | `bool` | `False` |
-| `budget` | `Budget` | `Budget(total_timeout=None, max_tus=None, partial_ok=True)` |
-| `lang` | `str` | `'c++'` |
-| `compile` | `CompileContext` | `CompileContext(gcc_path=None, gcc_prefix=None, gcc_options=None, gcc_option_tokens=(), sysroot=None, nostdinc=False, frontend='auto', frontend_context='host')` |
-| `suppression` | `SuppressionList \| None` | `None` |
-| `policy` | `str` | `'strict_abi'` |
-| `policy_file` | `PolicyFile \| None` | `None` |
-| `scope_to_public_surface` | `bool` | `True` |
-| `force_public_symbols` | `set[str] \| None` | `None` |
-| `pattern_verdicts` | `bool` | `False` |
-| `env_matrix` | `EnvironmentMatrix \| None` | `None` |
-| `collapse_versioned_symbols` | `bool` | `False` |
-| `contract_evaluation` | `bool` | `False` |
-| `contract_mode` | `str \| None` | `None` |
-| `abi3_floor` | `tuple[int, int] \| None` | `None` |
-| `enabled_checks` | `frozenset[str] \| None` | `None` |
-| `severities` | `dict[str, str]` | `{}` |
-| `build_config` | `Path \| None` | `None` |
-| `allow_build_query` | `bool` | `False` |
-| `risk_rules_path` | `Path \| None` | `None` |
-| `bundle_system_providers` | `tuple[str, ...]` | `()` |
-| `changed_src` | `str` | `'run_scan_set'` |
-| `max_findings` | `int \| None` | `None` |
-| `build_targets` | `tuple[str, ...]` | `()` |
-| `severity_preset` | `str \| None` | `None` |
-| `bundle_manifest` | `InstantiationManifest \| None` | `None` |
-
-## `ScanResult`
-
-Typed result of an executed scan (ADR-035 D10) — the one object the CLI and library callers consume. ``findings`` are the raw cross-source :class:`Change` objects; ``layers`` is the per-layer coverage; ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the projected per-layer cost for comparison against the actual run.
-
-*Dataclass.*
-
-| Field | Type | Default |
-|---|---|---|
-| `verdict` | `str` | *(required)* |
-| `exit_code` | `int` | *(required)* |
-| `findings` | `list[Any]` | `[]` |
-| `layers` | `list[LayerResult]` | `[]` |
-| `confidence` | `dict[str, list[str]]` | `{}` |
-| `estimate` | `list[CostEstimate]` | `[]` |
-| `report` | `dict[str, Any]` | `{}` |
-
-## `ScanSetResult`
-
-Result of :func:`run_scan_set` — the ``--artifact-set`` sibling of :class:`ScanResult` (ADR-056). Not a change to what `run_scan`/ `ScanResult` return for the single-binary path.
-
-*Dataclass.*
-
-| Field | Type | Default |
-|---|---|---|
-| `verdict` | `str` | *(required)* |
-| `exit_code` | `int` | *(required)* |
-| `per_artifact` | `list[ScanArtifactResult]` | `[]` |
-| `bundle_findings` | `list[Any]` | `[]` |
-| `bundle_verdict` | `str \| None` | `None` |
-| `bundle_incomplete` | `bool` | `False` |
 
 ## `classify_compare_pair`
 
@@ -347,12 +230,19 @@ Detect binary format from magic bytes.
 
 ## `estimate_scan`
 
-Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10). Probes the project (TU count, header fan-out, collect mode) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
+Dry-run: projected per-layer cost of one comparison operand for this project (ADR-035 D10). Probes the project (TU count, header fan-out, collect mode) and returns one :class:`CostEstimate` per L-layer the level would touch -- **without running any compiler or parsing any binary**. Coarse anchors (see ``_COST_PER_*``): ranks layers for a depth/budget pick, not a precise wall-clock prediction.
 
 | Parameter | Type | Default |
 |---|---|---|
-| `req` | `ScanRequest` | *(required)* |
+| `side` | `InputSpec` | *(required)* |
 | *(keyword-only below)* | | |
+| `mode` | `str` | `'pr'` |
+| `source_method` | `str \| None` | `None` |
+| `depth` | `str \| None` | `None` |
+| `changed_paths` | `Sequence[str]` | `()` |
+| `seeded` | `bool` | `False` |
+| `max_tus` | `int \| None` | `None` |
+| `compile_db` | `Path \| None` | `None` |
 | `resolved_level` | `tuple[SourceMethod, EvidenceDepth] \| None` | `None` |
 
 **Returns:** `list[CostEstimate]`
@@ -450,16 +340,6 @@ Auto-detect input type and return an ABI snapshot.
 | `public_include_search_dirs` | `list[Path] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
-
-## `run_audit`
-
-Single-release hygiene audit — :func:`run_scan` with the AUDIT mode (no baseline, ADR-035 D8). A thin convenience wrapper so callers can name intent.
-
-| Parameter | Type | Default |
-|---|---|---|
-| `req` | `ScanRequest` | *(required)* |
-
-**Returns:** `ScanResult`
 
 ## `run_compare`
 
@@ -560,48 +440,6 @@ Resolve *request* into one :class:`~abicheck.model.AbiSnapshot`.
 | `notify` | `Callable[[str], None] \| None` | `None` |
 
 **Returns:** `AbiSnapshot`
-
-## `run_scan`
-
-Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10). The single engine entry point behind the ``scan`` CLI and the MCP scan tool: resolves the deterministic level from *req* (as :func:`estimate_scan` does), drives the shared orchestration core (``scan_engine.run_scan_core``), and folds the projected ``estimate_scan`` cost in for projected-vs-actual comparison. ``--budget`` overflow surfaces as ``exit_code`` 5 (never shrinks scope).
-
-| Parameter | Type | Default |
-|---|---|---|
-| `req` | `ScanRequest` | *(required)* |
-
-**Returns:** `ScanResult`
-
-## `run_scan_set`
-
-Execute an audit-mode, no-old-side scan over a *set* of artifacts (ADR-056, ``scan --artifact-set``). The plural sibling of :func:`run_scan`, sharing `ScanRequest` but never touching `run_scan`'s own code path -- `req.binaries` must have 2+ entries. `req.baseline` must be ``None``: a service-layer guard so a directly-constructed `ScanRequest(binaries= [...], baseline=old)` can't silently compare every member against the same baseline (ADR-056 D2 scopes `--artifact-set` to audit-only).
-
-| Parameter | Type | Default |
-|---|---|---|
-| `req` | `ScanRequest` | *(required)* |
-
-**Returns:** `ScanSetResult`
-
-## `run_scan_set_subprocess`
-
-Run :func:`run_scan_set` in a killable child process (ADR-056).
-
-| Parameter | Type | Default |
-|---|---|---|
-| `req` | `ScanRequest` | *(required)* |
-| `timeout` | `float` | *(required)* |
-
-**Returns:** `dict[str, Any]`
-
-## `run_scan_subprocess`
-
-Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()``.
-
-| Parameter | Type | Default |
-|---|---|---|
-| `req` | `ScanRequest` | *(required)* |
-| `timeout` | `float` | *(required)* |
-
-**Returns:** `dict[str, Any]`
 
 ## `sniff_text_format`
 

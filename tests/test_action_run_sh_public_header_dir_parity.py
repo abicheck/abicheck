@@ -149,10 +149,12 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         assert "new=include" in h_pairs, cmd
 
     def test_forced_legacy_scan_still_forwards_both_flags(self) -> None:
-        # The same inputs, plus `--risk-rules` -- a still-open,
+        # The same inputs, plus `crosscheck` -- a still-open,
         # `compare`-flag-equivalent-free capability gap (ADR-068 amendment,
         # `docs/contribute/known-gaps.md`) that keeps this request on the
         # legacy `scan` CLI regardless of the cross-source-authority fix.
+        # (It used to be `risk-rules`; that input is retired outright now,
+        # ruling (b), so it rejects the step instead of routing it.)
         # The legacy branch's own forwarding is unchanged by that fix: it
         # still forwards `--public-header-dir` unconditionally *and* folds
         # it into `-H` (both flags) -- see
@@ -165,7 +167,7 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
                 "INPUT_DEPTH": "headers",
-                "INPUT_RISK_RULES": "rules.yaml",
+                "INPUT_CROSSCHECK": "odr_type_variant=error",
             }
         )
         assert "scan" in cmd
@@ -186,23 +188,6 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         assert "--public-header-dir" not in cmd
         h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
         assert not any(cmd[j + 1] == "" for j in h_indices)
-
-    def test_artifact_set_branch_also_forwards_both_flags(self) -> None:
-        # The artifact-set branch composes -H separately from the sided
-        # branch above (no old side to be sided about) -- confirm the
-        # public-header-dir -> -H fold applies there too, since it sits
-        # after both branches and runs unconditionally.
-        cmd = _run_cmd(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY_SET": "a.so,b.so",
-                "INPUT_PUBLIC_HEADER_DIR": "include",
-            }
-        )
-        i = cmd.index("--public-header-dir")
-        assert cmd[i + 1] == "include"
-        h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
-        assert any(cmd[j + 1] == "include" for j in h_indices), cmd
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")

@@ -39,13 +39,6 @@ migration item in
 [`plans/one-comparison-product.md`](../contribute/plans/one-comparison-product.md)
 §3 rather than something `compare` silently covers:
 
-- **Risk-driven `auto` depth.** Omitting `--depth` on `compare`/`dump` is
-  *not* itself risk-based selection: with no `--since` seed and no
-  `--sources`/`--build-info`, it bottoms out at `headers`, but the choice
-  never scores the risk of what changed the way `scan`'s dedicated `auto`
-  rung does — `scan`'s risk-scored `auto` rung has no `compare`/`dump`
-  equivalent (§3 row 13) — see [Let risk pick the
-  depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now).
 - **The single-build audit.** `compare --no-baseline` (ADR-068 D2) exists
   but does not yet reproduce the audit's findings — see [Single-build
   audit](#single-build-audit-no-baseline) below and
@@ -60,9 +53,13 @@ warning below for the one remaining difference between the three commands
 
 `--budget` no longer belongs on that list: `compare` gained its own
 `--budget` wall-clock guard (ADR-068 §3 #19) — exit `5` on overflow applies
-to both commands now. `--crosscheck KEY=error` promotion syntax and
-`--build-target` scoping still have no `compare` equivalent (`dump` does
-carry its own `--build-target`; `compare` does not).
+to both commands now. Neither does risk-driven `auto` depth, which was
+**retired** rather than mirrored (ADR-068's second 2026-09-09 amendment,
+ruling (b)): omitting `--depth` on `scan` now resolves to the fixed
+`headers` rung, exactly the default omitting it on `compare` always gave.
+`scan --build-target` is retired the same way (`dump --build-target` is
+unchanged). `--crosscheck KEY=error` promotion syntax is the one item
+left with no `compare` equivalent.
 
 `abicheck scan ARTIFACT [OPTIONS]` takes the scanned binary/snapshot as a
 **positional** argument (not a flag); `--against OLD` is the previous
@@ -96,11 +93,9 @@ have to close, not just one of the two.
   and always resolves to `source-target` internally, collecting everything
   the supplied evidence reaches. Pin `--depth` explicitly whenever you want a
   specific rung regardless of what other inputs are present, rather than
-  relying on this inference. (Legacy
-  `scan` instead defaults to a risk-driven `auto`; that rung has no
-  `compare`/`dump` equivalent — see [Let risk pick the
-  depth](#let-risk-pick-the-depth-auto-localdev-only-scan-only-for-now)
-  below.)
+  relying on this inference. (Legacy `scan`'s own unpinned default resolves
+  to the fixed `headers` rung; it used to score the risk of the changed
+  paths and sometimes escalate, which ADR-068's second amendment retired.)
 - **When `--depth source` actually replays source, it always analyses
   *something* real, never a zero-TU no-op** (ADR-043 D3): with a
   `--since`/`--changed-path` seed it replays the *changed* TUs; without one
@@ -462,13 +457,13 @@ abicheck compare artifacts/libfoo-main.abi.json build/libfoo.so \
   --sources new=. --since origin/main --depth source
 ```
 
-- **Depth:** pinned explicitly here (`--depth source`) since `compare` has
-  no risk-driven `auto` selection — omitting `--depth` never picks a rung by
-  risk, but with `--sources new=.` already given (as above) it would still
-  infer `source-target` from that input, not `headers`; the pin exists for
+- **Depth:** pinned explicitly here (`--depth source`). Omitting `--depth`
+  never picks a rung by risk on either command any more, but with
+  `--sources new=.` already given (as above) `compare` would still infer
+  `source-target` from that input rather than `headers`; the pin exists for
   reproducibility, not because omitting it would fall back to `headers`
-  here. On `scan`, by contrast, omitting `--depth` with a diff seed present
-  resolves to `auto`'s risk-driven `source`.
+  here. On `scan`, omitting `--depth` *does* now mean `headers` — it infers
+  nothing from `--sources`, and no longer escalates from a diff seed.
 - **Exit code (legacy scheme):** `0` compatible, `2` source/API break, `4` ABI
   break. `--budget` overflow (exit `5`) applies to both `compare` and `scan`
   — see [Exit Codes](../reference/exit-codes.md).
@@ -608,24 +603,36 @@ abicheck compare artifacts/libfoo-1.0.abi.json build/libfoo.so -H include/ \
   --sources new=. --depth source --format json -o artifacts/libfoo-1.0-report.json
 ```
 
-### Let risk pick the depth — `auto` (local/dev only, `scan` only for now)
+### Omitting `--depth` — `auto`, and why it is not risk-driven any more
 
-Omit `--depth` on `scan` and, when a diff seed is present, `auto` reads the
-risk of the changed paths and picks a depth. It is `scan`'s default and
-**never** overrides a pinned depth — keep CI on a fixed `--depth` for
-reproducibility.
+Omitting `--depth` on `scan` resolves `auto` to the fixed `headers` rung —
+the same default `compare` has always used. Through 2026-09-09 it read a
+*risk score* over the changed paths and escalated on its own; ADR-068's
+second amendment retired that (ruling (b)), along with the `--risk-rules`
+profile that configured it.
+
+> **This can hide findings a previous run reported.** A seeded scan whose
+> changed paths scored high used to escalate to `build`/`source` by itself,
+> so an unpinned run could report build- or source-only findings. It no
+> longer does. If a `scan` step relied on that escalation, **pin
+> `--depth source` (or `build`) explicitly** — that was always the advice for
+> a reproducible CI depth, and it is now the only way to ask for those
+> layers. This is the documented breaking change the amendment accepted: a
+> depth that is fixed and legible beats one that silently varied with the
+> diff.
 
 ```bash
-abicheck scan new.so -H include/ --since origin/main
+abicheck scan new.so -H include/ --depth source --since origin/main
 ```
 
-**`compare --depth` has no risk-driven `auto` rung yet** (plan §3 row 13, not
-yet landed). Omitting `--depth` is never a risk-based choice on `compare`:
-with `--sources`/`--build-info` given it infers `source`/`build` from them
-(see [above](#what-input-each-depth-needs-and-how-to-get-it)); only with
-neither does it bottom out at `headers`. For a fixed, reproducible CI depth
-regardless of what other inputs are present, pin it explicitly on `compare`
-the same way you would on `scan`.
+Omitting `--depth` is likewise never a risk-based choice on `compare`: with
+`--sources`/`--build-info` given it infers `source`/`build` from them (see
+[above](#what-input-each-depth-needs-and-how-to-get-it)); only with neither
+does it bottom out at `headers`.
+
+The `--since`/`--changed-path` seed still matters, on both commands, for a
+different axis: it scopes a `--depth source` replay to the changed TUs
+instead of the whole current library target (ADR-043 D3).
 
 ### Reading the coverage block
 

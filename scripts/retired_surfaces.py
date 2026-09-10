@@ -595,6 +595,63 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        # ADR-068's second 2026-09-09 amendment, applied in Phase 4's
+        # typed-API slice: three `scan`-only inputs ruled (b) -- dropped, no
+        # `compare` equivalent and none coming. `--artifact-set`'s capability
+        # is preserved (plan §3 #16 retires the *mode*); it returns through
+        # `compare --no-baseline DIR` once ADR-065 S3's component inventories
+        # land, which is why this row names no replacement spelling for it.
+        "scan --artifact-set/--manifest (the mode is retired; ADR-065 S3's"
+        " package component inventories are the prerequisite for"
+        " `compare --no-baseline DIR` to preserve its member-selection and"
+        " coverage accounting), scan --risk-rules (and with it the"
+        " risk-driven `auto` depth escalation -- pin `--depth` instead), and"
+        " scan --build-target (`dump --build-target` is unchanged)",
+        # Deliberately only the two spellings that are dead *everywhere*.
+        # `--manifest` and `--build-target` are not listed: `aggregate
+        # --manifest` and `dump --build-target` remain live flags, so a bare
+        # pattern for either would flag every correct mention of those
+        # commands. The cost is that a stale `scan --manifest`/`scan
+        # --build-target` line in prose passes this sweep; a command-scoped
+        # pattern language is what would close it, and this registry has none.
+        ("--artifact-set", "--risk-rules"),
+        frozenset(
+            {
+                "AGENTS.md",
+                # The retirement's own plan and ADRs: each names these in its
+                # own historical-record / ruling-table capacity.
+                "contribute/plans/one-comparison-product.md",
+                "contribute/plans/g35-multi-artifact-scan.md",
+                "contribute/plans/g19-pr-source-intelligence.md",
+                "contribute/adr/035-pr-tier-source-intelligence-and-crosscheck.md",
+                "contribute/adr/037-cli-interface-contract.md",
+                "contribute/adr/043-cli-pre-1.0-surface-reset.md",
+                "contribute/adr/047-github-actions-integration-model.md",
+                "contribute/adr/055-typed-request-result-completeness-and-schema-registry.md",
+                "contribute/adr/056-multi-artifact-library-set-scan.md",
+                "contribute/adr/063-one-semantic-pipeline.md",
+                "contribute/adr/065-comparison-scope-selection-and-completeness.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "contribute/known-gaps.md",
+                "contribute/config-key-review.md",
+                # Migration guidance: each names the retired spelling once, in
+                # its own "formerly ..." sentence, to point a reader coming
+                # from an old invocation at what to do instead.
+                "use/multi-binary.md",
+                "use/github-action.md",
+                "use/github-action-source-scans.md",
+                "use/evidence-depth.md",
+                # Names `--risk-rules` once, in the "it is *not* risk-driven"
+                # paragraph explaining what an omitted `--depth` resolves to
+                # now and what it used to do -- the retirement is the point of
+                # the sentence, not a live instruction.
+                "learn/evidence-and-detectability.md",
+                "reference/exit-codes.md",
+                "reference/config-file.md",
+            }
+        ),
+    ),
+    (
         # one-comparison-product.md Phase 7j: variant selection stays a
         # per-run operand (ADR-065) -- what retired is the *spelling*. It was
         # the last two-sided `compare` input still represented by two flags

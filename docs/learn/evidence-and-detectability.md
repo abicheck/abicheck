@@ -359,11 +359,16 @@ for the full removal list and migration mapping.
   translation units and report clean by omission. That gap is closed — an
   unseeded `--depth source` scan now always replays *something*.
 
-**Omit `--depth` for `auto`** (on `scan`) — the default. `auto` is risk-driven
-when a `--since`/`--changed-path` diff seed is present (it reads the numeric
-risk of the changed paths and picks a rung), and falls back to a sensible
-preset otherwise. `auto` **never** fires for a pinned depth — a rung you pin
-always produces the same scan for the same inputs, which is what CI wants.
+**Omit `--depth` for `auto`** (on `scan`) — the default. `auto` names the
+state "you didn't pin a rung"; it resolves to the fixed **`headers`** rung,
+the same default `compare` has always used. It is *not* risk-driven: through
+2026-09-09 an omitted depth was scored from the `--since`/`--changed-path`
+seed and could escalate to `build`/`source` on a high-risk diff, but
+ADR-068's second 2026-09-09 amendment retired that along with `--risk-rules`.
+**Nothing escalates on your behalf any more** — a run that needs L3-L5
+evidence must pin `--depth build` or `--depth source` explicitly, or it will
+not collect it. A seed (`--since`/`--changed-path`) now only *scopes* a rung
+you pinned; it no longer selects one.
 `scan` without `--against` is already a one-build audit/hygiene/source
 consistency scan — that's not a separate `--audit` flag (there isn't one
 anymore), it's simply what omitting `--against` means; passing `--against`
@@ -372,9 +377,12 @@ additionally compares `ARTIFACT` against it.
 !!! warning "A pinned deep depth is a contract (fail-loud)"
     Pinning `--depth build|source` with **no source input**
     (`--sources`/`--build-info`) is an error, not a silent shallow scan: there
-    is nothing to collect L3/L4/L5 from. Pass the evidence, or use the default
-    `auto` for a best-effort binary scan (on `scan`; `dump`/`compare` degrade
-    the same way without erroring, since they have no `auto`).
+    is nothing to collect L3/L4/L5 from. Pass the evidence, or pin
+    `--depth binary`/`--depth headers` for a shallower run that is honest
+    about its rung. Omitting `--depth` on `scan` is *not* the way to ask for a
+    best-effort binary scan any more: since ADR-068's second 2026-09-09
+    amendment it resolves to a fixed `headers`, not to whatever the inputs
+    happen to support.
 
 `scan` is a front-end over `dump`/`compare`: the resolved depth selects an
 internal collection mode, which decides which L-layers get collected and at

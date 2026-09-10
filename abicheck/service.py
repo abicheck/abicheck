@@ -202,37 +202,26 @@ from .service_render import (  # noqa: E402,F401
     render_output,
 )
 
-# ── Scan service (ADR-035 D10 typed engine: ScanRequest → ScanResult /
-# [CostEstimate]) extracted to leaf module service_scan, same size-cap/re-
-# export/non-circular-import rationale as service_render above. ────────────
+# ── Dry-run cost model (ADR-035 D10's `[CostEstimate]`) extracted to the leaf
+# module service_scan, same size-cap/re-export/non-circular-import rationale
+# as service_render above. ADR-068's Phase 4 typed-API slice retired that
+# module's own `ScanRequest`/`ScanResult` (and their `--artifact-set`
+# siblings) along with `run_scan`/`run_scan_set`: `CompareRequest` ->
+# `CompareResult` is the one typed contract now. ────────────────────────────
 from .service_scan import (  # noqa: E402,F401
     _HEADER_EXTS,
-    Budget,
     CompileContext,
     CostEstimate,
-    LayerResult,
-    ScanArtifactResult,
-    ScanRequest,
-    ScanResult,
-    ScanSetResult,
     _count_compile_db_tus,
     _count_pack_tus,
     _count_source_tus,
     _discover_compile_db,
     _is_header_path,
     _is_source_tu_path,
-    _kill_process_tree,
-    _layers_from_coverage,
     _scan_imports,
-    _scan_subprocess_worker,
     estimate_scan,
     expand_header_inputs,
     pair_wide_cxx20_std_override,
-    run_audit,
-    run_scan,
-    run_scan_set,
-    run_scan_set_subprocess,
-    run_scan_subprocess,
 )
 
 # ── Comparison: policy-parameterised (ADR-061 Phase 4). `compare_snapshots`/
@@ -259,20 +248,14 @@ from .workflows.compare_policy import (  # noqa: E402,F401
 # to the leaf module ``service_scan`` but its public names must still resolve as
 # ``from abicheck.service import ...``.
 __all__ = [
-    "Budget",
     "CompareRequest",
     "CompareResult",
     "CompileContext",
     "CostEstimate",
     "DumpRequest",
     "InputSpec",
-    "LayerResult",
     "OutputSpec",
-    "ScanArtifactResult",
-    "ScanRequest",
-    "ScanResult",
     "ResolvedComparePair",
-    "ScanSetResult",
     "classify_compare_pair",
     "collect_metadata",
     "compare_snapshots",
@@ -283,14 +266,9 @@ __all__ = [
     "render_output",
     "resolve_compare_request",
     "resolve_input",
-    "run_audit",
     "run_compare",
     "run_compare_request",
     "run_dump",
     "run_dump_request",
-    "run_scan",
-    "run_scan_set",
-    "run_scan_set_subprocess",
-    "run_scan_subprocess",
     "sniff_text_format",
 ]

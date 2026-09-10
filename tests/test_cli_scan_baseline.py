@@ -12,11 +12,9 @@ import json
 import types
 from pathlib import Path
 
-import click
 import pytest
 
 from abicheck import cli_scan_baseline as csb, cli_scan_helpers as csh
-from abicheck.buildsource.risk import RiskRules
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.model.evidence_depth_levels import EvidenceDepth, SourceMethod
@@ -569,22 +567,6 @@ class TestExpandPublicHeaders:
         monkeypatch.setattr(service, "expand_header_inputs", boom)
         # best-effort: on failure it returns the raw paths as strings
         assert csb._expand_public_headers([Path("x.h")]) == ["x.h"]
-
-
-class TestLoadRiskRules:
-    def test_none_returns_default(self) -> None:
-        assert isinstance(csb._load_risk_rules(None), RiskRules)
-
-    def test_valid_yaml_block(self, tmp_path: Path) -> None:
-        p = tmp_path / "rules.yaml"
-        p.write_text("risk_rules: {}\n", encoding="utf-8")
-        assert isinstance(csb._load_risk_rules(p), RiskRules)
-
-    def test_malformed_yaml_raises_clickexception(self, tmp_path: Path) -> None:
-        p = tmp_path / "bad.yaml"
-        p.write_text("risk_rules: [unbalanced\n", encoding="utf-8")
-        with pytest.raises(click.ClickException):
-            csb._load_risk_rules(p)
 
 
 class TestBaselineIsNativeLibrary:

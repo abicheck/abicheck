@@ -511,6 +511,61 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="evidence.tier_shortcut_without_substitute",
+        invariant=(
+            "A cost shortcut that skips one evidence source because "
+            "another is expected to supply the same facts may only be "
+            "taken when that substitute source is actually present. With "
+            "the substitute absent, the shortcut leaves the run with "
+            "neither, and the loss is silent: the report still names the "
+            "tier that was requested. Two corollaries, each independently "
+            "falsified during review: an input that *names* the substitute "
+            "without feeding it to the consumer is not the substitute "
+            "(`--public-header-dir` is a provenance boundary, not an AST "
+            "input); and the question is per operand, since one shared "
+            "answer does not equalise two sides' evidence tiers, it only "
+            "decides which side gets starved."
+        ),
+        fixed_by=(1186,),
+        seed_tests=(
+            "tests/test_scan_depth_evidence_shortcut.py",
+            "tests/test_scan_compare_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "depth": ("headers", "auto"),
+            "change": ("record", "enum", "symbol"),
+            "header_input": ("none", "provenance_only", "baseline_only"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the DWARF-vs-header-AST shortcut "
+                    "(`cli_scan_helpers._uses_debug_presence_only`) is "
+                    "covered. The same shape exists wherever one "
+                    "extractor is skipped on the expectation that a "
+                    "richer one runs; none of the L3/L4/L5 collect-mode "
+                    "decisions has an equivalent 'the substitute is "
+                    "actually present' guard or generalized test yet."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "`--depth binary` is excluded from the seed test's "
+                    "scan-vs-compare matrix: the two genuinely diverge "
+                    "there (`scan` extracts symbols only, "
+                    "`compare --depth binary` still reads DWARF and "
+                    "reports `type_size_changed`), which is a question "
+                    "about whether `compare`'s binary rung honours its "
+                    "own pin rather than about this shortcut. Predates "
+                    "ADR-068 Phase 4 on both sides and is untested."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="evidence.silent_degradation_to_clean_verdict",
         invariant=(
             "Missing, rejected, ignored, or malformed evidence can never "

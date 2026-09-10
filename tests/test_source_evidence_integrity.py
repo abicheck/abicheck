@@ -31,7 +31,6 @@ from abicheck.buildsource.source_abi import (
 from abicheck.buildsource.source_link import link_source_abi
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot
-from abicheck.service_scan import _layers_from_coverage
 
 
 def _public_fn(name: str, mangled: str) -> SourceEntity:
@@ -125,29 +124,37 @@ def _degraded_surface_snapshot() -> AbiSnapshot:
     )
 
 
+def _odr_row(coverage: list[dict]) -> dict:
+    """The ODR check's own coverage row, as `scan --format json` publishes it.
+
+    ADR-068 Phase 4 retired the typed `ScanResult`/`LayerResult` pair these
+    assertions used to go through; the coverage rows themselves are unchanged
+    and are what `ScanOutcome.to_dict()` has always emitted, so the same
+    §3.3 plumbing is now checked one layer closer to the shipped shape.
+    """
+    return next(
+        row
+        for row in coverage
+        if row.get("layer") == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
+    )
+
+
 def test_integrity_counters_surface_on_rendered_scan_layers():
     # The §3.3 plumbing: the L4 boundary integrity counters must reach the
-    # rendered ScanResult layer (via _layers_from_coverage), not just the internal
-    # source_link object — so a degraded link is named even when ODR runs clean.
+    # published coverage row, not just the internal source_link object — so a
+    # degraded link is named even when ODR runs clean.
     snap = _degraded_surface_snapshot()
     res = run_crosschecks(snap)
-    layers = _layers_from_coverage(res.coverage)
-    odr = next(
-        layer
-        for layer in layers
-        if layer.layer == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
-    )
+    odr = _odr_row(res.coverage)
     # ODR itself ran clean (no conflicts) ...
-    assert odr.status == "present"
+    assert odr["status"] == "present"
     assert [c for c in res.findings if c.kind == ChangeKind.ODR_TYPE_VARIANT] == []
     # ... yet the rendered layer names the degraded boundary: zero exports matched
     # a source decl, all three unmatched.
-    assert odr.counters["exported_symbols"] == 3
-    assert odr.counters["matched_symbols"] == 0
-    assert odr.counters["unmatched_symbols"] == 3
-    assert odr.facts == 1  # one parsed declaration anchored the row
-    # The counters round-trip through the serialized report payload.
-    assert odr.to_dict()["counters"]["matched_symbols"] == 0
+    assert odr["counters"]["exported_symbols"] == 3
+    assert odr["counters"]["matched_symbols"] == 0
+    assert odr["counters"]["unmatched_symbols"] == 3
+    assert odr["facts"] == 1  # one parsed declaration anchored the row
 
 
 def test_healthy_link_records_matched_counters_not_zero():
@@ -164,13 +171,9 @@ def test_healthy_link_records_matched_counters_not_zero():
         library="libfoo.so", version="1.0", from_headers=True,
         build_source=BuildSourcePack(root="", source_abi=surface),
     )
-    odr = next(
-        layer
-        for layer in _layers_from_coverage(run_crosschecks(snap).coverage)
-        if layer.layer == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
-    )
-    assert odr.counters["matched_symbols"] == 1
-    assert odr.counters["unmatched_symbols"] == 0
+    odr = _odr_row(run_crosschecks(snap).coverage)
+    assert odr["counters"]["matched_symbols"] == 1
+    assert odr["counters"]["unmatched_symbols"] == 0
 
 
 def test_empty_l4_skip_row_still_names_the_degraded_boundary():
@@ -187,30 +190,8 @@ def test_empty_l4_skip_row_still_names_the_degraded_boundary():
         build_source=BuildSourcePack(root="", source_abi=surface),
     )
     res = run_crosschecks(snap)
-    odr = next(
-        layer
-        for layer in _layers_from_coverage(res.coverage)
-        if layer.layer == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
-    )
-    assert odr.status == "skipped"  # no parsed TUs to audit ...
-    assert odr.counters["exported_symbols"] == 3  # ... but the link is named
-    assert odr.counters["matched_symbols"] == 0
-    assert odr.counters["unmatched_symbols"] == 3
-
-
-def test_layers_from_coverage_tolerates_non_numeric_counters():
-    # A hand-edited / forward-compat coverage row with a non-numeric counter or
-    # facts value must not abort the render — the bad value is dropped.
-    rows = [
-        {
-            "layer": "crosscheck:odr_type_variant",
-            "status": "present",
-            "detail": "",
-            "facts": "not-a-number",
-            "counters": {"matched_symbols": "oops", "exported_symbols": 2},
-        }
-    ]
-    layers = _layers_from_coverage(rows)
-    assert len(layers) == 1
-    assert layers[0].facts == 0  # bad facts coerced to 0
-    assert layers[0].counters == {"exported_symbols": 2}  # bad entry dropped, good kept
+    odr = _odr_row(res.coverage)
+    assert odr["status"] == "skipped"  # no parsed TUs to audit ...
+    assert odr["counters"]["exported_symbols"] == 3  # ... but the link is named
+    assert odr["counters"]["matched_symbols"] == 0
+    assert odr["counters"]["unmatched_symbols"] == 3

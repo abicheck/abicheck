@@ -25,7 +25,8 @@ problem, so moving them (rather than the execution logic that *constructs*
 without ``workflows`` importing back up into the flat ``service_`` family)
 is the safe half of this split. Mirrors the precedent set when
 ``service_scan.py`` split ``_descendant_pgids``/``_kill_process_tree`` out
-to ``workflows/scan_subprocess.py`` for the identical reason (see
+to a ``workflows/scan_subprocess.py`` for the identical reason (that module
+went with ``run_scan_subprocess`` in ADR-068 Phase 4; see
 ``docs/contribute/plans/one-semantic-pipeline.md``'s "Closed in a later
 session" note on that split) -- a genuine one-directional move, since
 neither class here calls back into ``service_dump_pipeline``.
