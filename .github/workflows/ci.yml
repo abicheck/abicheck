@@ -230,7 +230,19 @@ jobs:
     # budget on a required check, for a cost this comment's own evidence
     # only ever measured on Windows. The other legs keep the 45m this
     # comment's prior bumps established.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 65 || 45 }}
+    #
+    # 65 turned out to be too tight on its own first re-run: PR #1197's
+    # own windows-latest/3.13 job (run 34458364910, job 102810016338)
+    # was killed at exactly 65m14s -- 14 seconds past the just-raised
+    # budget, with every test up to that point (99% of the suite) still
+    # passing. A ~1.5x multiplier that worked for three prior bumps
+    # (20->30, 45->65 from ~29m/~49m observed) left essentially zero
+    # headroom this time, since normal runner-to-runner variance on
+    # Windows is itself worth several minutes. 90 restores real margin
+    # (not just matching-the-multiplier margin) over the ~65m14s+
+    # observed here -- the run was still executing when killed, so the
+    # true completion time is unknown and at least this high.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 45 }}
     permissions:
       contents: read
       id-token: write
