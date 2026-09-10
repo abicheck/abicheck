@@ -664,8 +664,24 @@ def compare_release_cmd(
             # future normalization/selection rule added to
             # `resolve_release_scope_plan` changes which pairs actually run,
             # not merely how the post-execution record describes them.
+            #
+            # Codex review (PR #1192, second follow-up finding): an explicit
+            # `--select`/`--select-required` selection is folded into
+            # `matched_keys` *before* `resolve_release_scope_plan` runs, not
+            # as a separate filter applied to `compare_keys` afterward (see
+            # the now-removed second filter below) -- so `scope_plan` itself,
+            # not a step downstream of it, is what narrows what executes.
+            # The direct-pair sentinel is exempt: `DIRECT_PAIR_KEY` names no
+            # real declared library for a selection to match against.
+            plan_matched_keys = matched_keys
+            if release_selection is not None and list(matched_keys) != [
+                DIRECT_PAIR_KEY
+            ]:
+                plan_matched_keys = [
+                    k for k in matched_keys if k in release_selection
+                ]
             scope_plan = resolve_release_scope_plan(
-                old_map, new_map, matched_keys, inventory_evidence
+                old_map, new_map, plan_matched_keys, inventory_evidence
             )
             old_map, new_map, matched_keys = (
                 dict(scope_plan.old_map),
@@ -744,10 +760,10 @@ def compare_release_cmd(
             # caller did not declare is never run through the (expensive)
             # per-library dump/compare pass at all -- it is reported
             # `OUT_OF_SCOPE` on the scope record below, not silently
-            # compared anyway.
+            # compared anyway. `matched_keys` is already selection-narrowed
+            # (folded into `scope_plan` above), so no second filter is
+            # needed here.
             compare_keys = [k for k in matched_keys if k not in degraded_matched]
-            if release_selection is not None:
-                compare_keys = [k for k in compare_keys if k in release_selection]
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 compare_keys,
                 old_map,

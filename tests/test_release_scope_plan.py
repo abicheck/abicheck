@@ -325,3 +325,65 @@ class TestScopePlanIsExecutionAuthoritative:
         # execution still read the raw `matched_keys` local instead of
         # `scope_plan.matched_keys`, libbar would still appear here.
         assert compared_names == {"libfoo.json"}
+
+
+class TestExplicitSelectionFoldedIntoScopePlan:
+    """Codex review (PR #1192, third follow-up finding): the same class of
+    bug ``TestScopePlanIsExecutionAuthoritative`` fixed for the discovery
+    path, for the ``--select``/``--select-required`` path instead --
+    ``ReleaseScopePlan.matched_keys`` must already be narrowed to the
+    declared selection, not merely used unfiltered while a separate,
+    post-hoc filter on ``compare_keys`` narrows what actually executes.
+    Before the fix, ``resolve_release_scope_plan`` was called with every
+    discovered key and only ``compare_keys`` was narrowed afterward, so the
+    real ``ReleaseScopePlan`` object execution reads from -- and
+    ``ReleaseScopeResult.plan`` reports -- still claimed the excluded
+    member was matched."""
+
+    def test_select_narrows_the_resolved_plan_itself(self, tmp_path: Path) -> None:
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        _write_snap(old_dir / "libbar.json", _snap("libbar.so"))
+        _write_snap(new_dir / "libbar.json", _snap("libbar.so"))
+
+        calls: list[ReleaseScopePlan] = []
+        real = resolve_release_scope_plan
+
+        def _spy(old_map, new_map, matched_keys, evidence):
+            plan = real(old_map, new_map, matched_keys, evidence)
+            calls.append(plan)
+            return plan
+
+        with patch(
+            "abicheck.cli_compare_release.resolve_release_scope_plan",
+            side_effect=_spy,
+        ):
+            code, out = _invoke(
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--select",
+                "libfoo.json",
+                "--format",
+                "json",
+            )
+
+        assert code == 0
+        # The real production call happened exactly once.
+        assert len(calls) == 1
+        plan = calls[0]
+        # The bug: pre-fix, `resolve_release_scope_plan` was called with
+        # every discovered key, so the resolved `ReleaseScopePlan` itself
+        # (not merely a later `compare_keys` local) still claimed libbar
+        # was matched even though it is out of the declared selection.
+        assert "libbar.json" not in plan.matched_keys
+        assert "libfoo.json" in plan.matched_keys
+
+        # Execution and the reported scope record agree with the plan.
+        data = json.loads(out)
+        assert [lib["library"] for lib in data["libraries"]] == ["libfoo.json"]
+        by_member = {m["member"]: m for m in data["comparison_scope"]["members"]}
+        assert by_member["libbar.json"]["state"] == "out_of_scope"
