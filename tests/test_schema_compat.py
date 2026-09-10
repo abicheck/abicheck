@@ -327,17 +327,29 @@ class TestReserialization:
         False flag would warn about "reduced coverage" a hybrid snapshot's
         regeneration could never actually restore, since no detector reads
         either flag for that producer regardless of schema version (Codex
-        review, PR #720)."""
+        review, PR #720).
+
+        This same fixture also degrades ``param_kind_facts_reliable`` (< the
+        eleventh batch's own threshold, header-derived) -- unlike the two
+        flags above, that one IS consulted for every producer (diff_symbols.
+        _params_differ's compare_facts() gate has no producer restriction),
+        so the warning fires legitimately for it while staying silent for
+        the two hybrid-exempt flags this test is actually about."""
         d = _load_fixture("v4.json")
         d["schema_version"] = 22  # < both _MIN_SCHEMA_VERSION_FOR_CLANG_VA_LIST_FACTS
         # and _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS thresholds
         d["from_headers"] = True
         d["ast_producer"] = "hybrid"
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             snap = snapshot_from_dict(d)
         assert snap.clang_va_list_facts_reliable is False
         assert snap.castxml_var_access_facts_reliable is False
+        assert snap.param_kind_facts_reliable is False
+        messages = [str(w.message) for w in caught if w.category is UserWarning]
+        assert any("param_kind_facts_reliable" in m for m in messages)
+        assert not any("clang_va_list_facts_reliable" in m for m in messages)
+        assert not any("castxml_var_access_facts_reliable" in m for m in messages)
 
     def test_older_version_warns_for_clang_producer_va_list_flag(self):
         """The producer filter above must not over-filter: a genuine

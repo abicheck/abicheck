@@ -41,23 +41,36 @@ function's ``Tier`` axis (L0-L3) is finer than the public ``EvidenceDepth``
 ladder (``binary``/``headers``/``build``/``source``, ``BINARY`` covering both
 L0 and L1: "no L2 AST", not "no debug info"); this module maps onto the
 coarser public ladder a caller actually requests through ``--depth``,
-picking L0 or L1 **per snapshot** (not fixed to L1) based on whether *that*
-snapshot's structural facts are genuinely DWARF/symbol-sourced — see
-:func:`_structural_facts_are_dwarf_confirmed` — so a headers-derived
-snapshot strips down to L0 (no structural facts survive at all) exactly the
-way the reference implementation's own L0 branch does, while a genuinely
-DWARF/symbols-only one keeps layout/signatures at ``binary`` the way a real
-DWARF-informed binary dump would (Codex review, PR #1020: an earlier
-version of this module fixed every ``binary``-rung projection to the
-reference implementation's L1 branch unconditionally, so a purely
-header-derived snapshot with no DWARF at all still carried full
-``types``/``enums``/function-signature data through a ``binary``-depth
-projection and could still emit e.g. ``type_field_type_changed``; a later
-version kept a *header-derived* ``RecordType`` wholesale whenever DWARF
-merely confirmed a struct by *name*, still letting an uncorroborated
-header-only field-type change through — see
-:func:`_structural_facts_are_dwarf_confirmed`'s own docstring for why
-``from_headers`` is now part of the gate, not just ``dwarf.has_dwarf``).
+picking L0 or L1 based on whether the structural facts in play are
+genuinely DWARF/symbol-sourced — see :func:`_structural_facts_are_dwarf_
+confirmed` — so a headers-derived snapshot strips down to L0 (no structural
+facts survive at all) exactly the way the reference implementation's own L0
+branch does, while a genuinely DWARF/symbols-only one keeps layout/
+signatures at ``binary`` the way a real DWARF-informed binary dump would
+(Codex review, PR #1020: an earlier version of this module fixed every
+``binary``-rung projection to the reference implementation's L1 branch
+unconditionally, so a purely header-derived snapshot with no DWARF at all
+still carried full ``types``/``enums``/function-signature data through a
+``binary``-depth projection and could still emit e.g.
+``type_field_type_changed``; a later version kept a *header-derived*
+``RecordType`` wholesale whenever DWARF merely confirmed a struct by
+*name*, still letting an uncorroborated header-only field-type change
+through — see :func:`_structural_facts_are_dwarf_confirmed`'s own docstring
+for why ``from_headers`` is now part of the gate, not just
+``dwarf.has_dwarf``).
+
+**This decision is made once per COMPARISON, not once per snapshot** (a
+later fix — see :func:`project_pair_to_depth`'s own docstring for the
+false-positive class an earlier, purely-per-snapshot version of this
+module manufactured by picking L0 for one side and L1 for the other).
+:func:`project_snapshot_to_depth` still defaults to deciding per snapshot
+when called on its own (the only sensible answer with no comparison
+partner — e.g. ``dump --depth``'s single-snapshot ceiling), but
+:func:`project_pair_to_depth` — every two-sided ``compare_snapshots()``
+call site's entry point — computes ONE joint answer for both sides first
+and passes it to each side's own projection explicitly, via the
+``dwarf_sourced`` keyword both :func:`project_snapshot_to_depth` and the
+internal :func:`_strip_header_and_above_evidence` now accept.
 
 **Deliberately in scope** (the same fields the tier-accuracy gate's
 validated ``project()`` degrades, plus the ``BuildSourcePack`` L3-L5 split
@@ -67,11 +80,16 @@ rounds found this module itself needed to close — see below):
 — non-exported — declaration is dropped entirely, and a declaration with
 no confirmed export-table entry is dropped too, not promoted to
 ``ELF_ONLY``: see :func:`_strip_header_and_above_evidence`'s own
-docstring), ``types``/``enums``/``typedefs`` (kept wholesale only when
-:func:`_structural_facts_are_dwarf_confirmed`, else fully cleared —
-genuine DWARF-visible struct/enum layout changes on a header-derived
-snapshot are still caught independently through the untouched
-``snap.dwarf`` fields, never through these), ``constants``, ``python_api``,
+docstring), ``types``/``enums``/``typedefs`` plus their own
+``typedefs_qualified``/``typedef_entity_ids`` identity sidecars (kept
+wholesale only when :func:`_structural_facts_are_dwarf_confirmed`, else
+fully cleared together — a sidecar left standing after its partner dict was
+cleared read as a residual, fully-manufactured TYPEDEF_REMOVED/
+TYPEDEF_ADDED all on its own; genuine DWARF-visible struct/enum layout
+changes on a header-derived snapshot are still caught independently through
+the untouched ``snap.dwarf`` fields, never through these), ``constants``
+plus its own ``constant_entity_ids`` sidecar (cleared together
+unconditionally, same reasoning), ``python_api``,
 ``from_headers``, ``semantic_ir`` and ``surface_graph`` (both L2+
 header-AST/header-graph facts, gated the same as ``from_headers`` —
 ``_attach_header_graph``'s own docstring: "the header-only (L2) semantic
@@ -196,14 +214,30 @@ def _exported_symbol_names(snap: AbiSnapshot) -> frozenset[str] | None:
     return default_versioned_names(index)
 
 
-def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
+def _strip_header_and_above_evidence(
+    snap: AbiSnapshot, *, dwarf_sourced: bool | None = None
+) -> None:
     """Blank every L2+ (header-AST) fact on *snap*, in place.
 
     ``types``/``enums``/``typedefs`` and function/variable *signatures*
-    (return type, params, value) survive wholesale only when
-    :func:`_structural_facts_are_dwarf_confirmed` — see that function's own
+    (return type, params, value) survive wholesale only when *dwarf_sourced*
+    (defaulting to :func:`_structural_facts_are_dwarf_confirmed` applied to
+    *snap* alone when not given explicitly) — see that function's own
     docstring for exactly why ``dwarf.has_dwarf`` alone is not enough.
     Otherwise every one of those is fully cleared, not merely re-scoped.
+
+    **Why a caller ever passes *dwarf_sourced* explicitly:**
+    :func:`project_pair_to_depth` computes ONE joint answer for both sides
+    of a comparison rather than calling this per snapshot independently —
+    see that function's own docstring for the false-positive class doing so
+    per-side manufactured (a header-derived OLD stripped to L0 compared
+    against a DWARF-derived NEW kept at L1, or vice versa, reads every real
+    structural fact as an addition/removal purely from which side happened
+    to carry richer evidence, not from any real change between them).
+    :func:`project_snapshot_to_depth` — used standalone, e.g. by ``dump
+    --depth`` or a single-snapshot caller with no comparison partner — still
+    defaults to the per-snapshot answer, which is the only question that
+    makes sense with no other side to agree with.
 
     A function/variable with ``Visibility.HIDDEN`` (a real, non-exported
     header-only declaration, never a fact a binary-only view could see at
@@ -224,7 +258,8 @@ def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
     no platform block populated keeps its prior, looser behavior rather
     than being stripped to nothing.
     """
-    dwarf_sourced = _structural_facts_are_dwarf_confirmed(snap)
+    if dwarf_sourced is None:
+        dwarf_sourced = _structural_facts_are_dwarf_confirmed(snap)
 
     snap.functions = [f for f in snap.functions if f.visibility != Visibility.HIDDEN]
     snap.variables = [v for v in snap.variables if v.visibility != Visibility.HIDDEN]
@@ -248,8 +283,25 @@ def _strip_header_and_above_evidence(snap: AbiSnapshot) -> None:
         snap.types = []
         snap.enums = []
         snap.typedefs = {}
+        # Sidecars keyed exactly like `typedefs` (model/snapshot.py's own
+        # `typedefs_qualified`/`typedef_entity_ids` docstring) -- clearing
+        # only `typedefs` left them standing, so a projected, non-DWARF-
+        # sourced snapshot's typedef *identity* facts survived on one side
+        # of a comparison the sibling entries above were specifically
+        # stripped to make symmetric, manufacturing a residual
+        # TYPEDEF_REMOVED/TYPEDEF_ADDED finding `diff_types._diff_typedefs`
+        # derives from these two dicts independently of `typedefs` itself
+        # (found via project_pair_to_depth's own joint-floor fix, which made
+        # the params/return_type asymmetry these two sidecars had been
+        # masking finally visible).
+        snap.typedefs_qualified = {}
+        snap.typedef_entity_ids = {}
 
     snap.constants = {}
+    # Sidecar keyed exactly like `constants` (same docstring as above) --
+    # cleared unconditionally alongside it, not gated on `dwarf_sourced`,
+    # matching `constants`' own unconditional clear two lines up.
+    snap.constant_entity_ids = {}
     snap.from_headers = False
     snap.python_api = None
     snap.semantic_ir = None
@@ -341,7 +393,9 @@ def _project_build_source_pack(
     return pack
 
 
-def project_snapshot_to_depth(snap: AbiSnapshot, depth: str | None) -> AbiSnapshot:
+def project_snapshot_to_depth(
+    snap: AbiSnapshot, depth: str | None, *, dwarf_sourced: bool | None = None
+) -> AbiSnapshot:
     """Return a copy of *snap* capped to what an explicit ``--depth`` requested.
 
     A no-op (returns *snap* itself, not a copy) when *depth* is ``None`` —
@@ -358,6 +412,13 @@ def project_snapshot_to_depth(snap: AbiSnapshot, depth: str | None) -> AbiSnapsh
     so a caller that also persists or reuses the original, un-projected
     snapshot (a ``dump`` artifact meant for a later, deeper comparison) is
     unaffected.
+
+    *dwarf_sourced*, when given, overrides :func:`_structural_facts_are_dwarf_
+    confirmed`'s own per-snapshot answer for *snap* alone — see
+    :func:`project_pair_to_depth`'s docstring for why a comparison needs a
+    JOINT answer instead. ``None`` (the default) keeps this function's own
+    long-standing single-snapshot behavior, correct for a caller with no
+    comparison partner to agree with.
     """
     if depth is None:
         return snap
@@ -371,7 +432,7 @@ def project_snapshot_to_depth(snap: AbiSnapshot, depth: str | None) -> AbiSnapsh
 
     out = copy.deepcopy(snap)
     if rank < headers_rank:
-        _strip_header_and_above_evidence(out)
+        _strip_header_and_above_evidence(out, dwarf_sourced=dwarf_sourced)
     if rank < build_rank:
         out.build_mode = None
     if out.build_source is not None:
@@ -414,10 +475,45 @@ def project_build_source_pack_to_depth(
 def project_pair_to_depth(
     old: AbiSnapshot, new: AbiSnapshot, depth: str | None
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
-    """:func:`project_snapshot_to_depth` applied to both sides of a comparison.
+    """:func:`project_snapshot_to_depth` applied to both sides of a comparison,
+    under one JOINT structural-evidence floor rather than two independent ones.
 
-    The one-line convenience every ``compare_snapshots()`` call site with two
-    resolved sides and an optional ``depth`` needs, so each keeps its own
-    call site to a single statement rather than two.
+    Calling :func:`project_snapshot_to_depth` on each side separately (this
+    function's own original shape) let ``_strip_header_and_above_evidence``
+    pick :func:`_structural_facts_are_dwarf_confirmed` **per side** — so a
+    header-derived OLD (stripped to L0: ``params=[]``, ``return_type="?"``,
+    no ``types``/``enums``) compared against a DWARF-derived NEW of the
+    IDENTICAL, unchanged library (kept at L1: real params, real return type,
+    real types) read every one of NEW's real structural facts as a
+    fabricated addition — worse than not projecting at all, since an
+    unprojected comparison of the same two snapshots has no such asymmetry
+    to manufacture. Self-comparisons (old vs. old, new vs. new) stayed clean
+    because there was no asymmetry to trigger; only MIXING the two evidence
+    families did.
+
+    The fix is symmetry, not a smarter per-side heuristic: both sides fall
+    to L0 together unless BOTH independently qualify as DWARF/symbols-only
+    (never header-derived) — the lower of the two sides' achievable rungs,
+    applied to both, so a comparison can never read one side's richer
+    evidence as a change the other side never happened to reach.
+
+    The joint answer is computed only when it can actually matter — *depth*
+    recognized and below the ``headers`` rung, the one case
+    :func:`_strip_header_and_above_evidence` ever runs for — mirroring
+    :func:`project_snapshot_to_depth`'s own no-op contract for ``None``/an
+    unrecognized rung exactly, so a caller with ``depth=None`` (the
+    overwhelmingly common case: no explicit ``--depth`` given) never pays
+    for, or risks failing on, a `.dwarf`/`.from_headers` read this call
+    would otherwise never need at all.
     """
-    return project_snapshot_to_depth(old, depth), project_snapshot_to_depth(new, depth)
+    dwarf_sourced: bool | None = None
+    if depth is not None:
+        lowered = depth.lower()
+        if lowered in DEPTH_RANK and DEPTH_RANK[lowered] < DEPTH_RANK["headers"]:
+            dwarf_sourced = _structural_facts_are_dwarf_confirmed(
+                old
+            ) and _structural_facts_are_dwarf_confirmed(new)
+    return (
+        project_snapshot_to_depth(old, depth, dwarf_sourced=dwarf_sourced),
+        project_snapshot_to_depth(new, depth, dwarf_sourced=dwarf_sourced),
+    )

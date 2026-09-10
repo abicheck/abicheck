@@ -77,6 +77,7 @@ from .storage.fact_codec import (
     encode_fact_fields,
     evidenced_producers,
 )
+from .storage.fact_schema_versions import _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
 from .storage.sectioned_document import (
     from_sectioned_document,
     is_sectioned_document,
@@ -352,7 +353,7 @@ from .workflows.snapshot_load import backfill_python_ext_from_evidence
 # doesn't hit any producer-specific threshold above stays silent, since every
 # CI baseline is *always* some number of versions behind and warning
 # regardless of relevance would just be noise.
-SCHEMA_VERSION: int = 44  # v44: AbiSnapshot.header_only persisted (workstream F "Header-only comparison" S1) -- the explicit marker for a snapshot built by the binary-less header-AST dump path; missing on a pre-v44 snapshot loads as False, matching every prior snapshot's implicit "this has a binary, or is a pre-existing source-only dump" status; v43: Variable.is_static persisted (PR #1024 review fix -- closes the plain-C/extern-"C" same-named static-vs-external variable identity collision `tu_merge._variable_key`'s own docstring long documented as a known, accepted limitation; missing on a pre-v43 snapshot loads as False, matching every prior reader's implicit assumption since the field did not exist); v42: ADR-062/063 Phase 8 (redesign) -- the on-disk wire format itself changed (snapshot_to_json() now writes storage.sectioned_document's single-file sectioned envelope instead of a flat document), not just a field. Bumped specifically so a pre-Phase-8 reader (whose own SCHEMA_VERSION was already 41) hits the ">SCHEMA_VERSION and >=_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION" hard-rejection path below instead of silently reading every top-level field as absent/empty -- a same-numbered envelope change would have given that reader no signal at all (Codex review, fresh evidence). This build itself reads the envelope transparently regardless of version, per snapshot_from_dict's own is_sectioned_document check; v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
+SCHEMA_VERSION: int = 45  # v45: Param.kind_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's eleventh batch, closing the last case-(a) field the "field-by-field conversion complete" v41 note missed: Param.kind was never flagged as availability-ambiguous (neither header-AST backend had ever set it to anything but the dataclass's own resting ParamKind.VALUE, so nothing about it looked wrong by inspection until diff_symbols._params_differ's raw kind comparison was found to fabricate FUNC_PARAMS_CHANGED whenever a header-derived snapshot was compared against a DWARF-derived one of the identical library). Guarded by AbiSnapshot.param_kind_facts_reliable; v44: AbiSnapshot.header_only persisted (workstream F "Header-only comparison" S1) -- the explicit marker for a snapshot built by the binary-less header-AST dump path; missing on a pre-v44 snapshot loads as False, matching every prior snapshot's implicit "this has a binary, or is a pre-existing source-only dump" status; v43: Variable.is_static persisted (PR #1024 review fix -- closes the plain-C/extern-"C" same-named static-vs-external variable identity collision `tu_merge._variable_key`'s own docstring long documented as a known, accepted limitation; missing on a pre-v43 snapshot loads as False, matching every prior reader's implicit assumption since the field did not exist); v42: ADR-062/063 Phase 8 (redesign) -- the on-disk wire format itself changed (snapshot_to_json() now writes storage.sectioned_document's single-file sectioned envelope instead of a flat document), not just a field. Bumped specifically so a pre-Phase-8 reader (whose own SCHEMA_VERSION was already 41) hits the ">SCHEMA_VERSION and >=_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION" hard-rejection path below instead of silently reading every top-level field as absent/empty -- a same-numbered envelope change would have given that reader no signal at all (Codex review, fresh evidence). This build itself reads the envelope transparently regardless of version, per snapshot_from_dict's own is_sectioned_document check; v41: Param.is_restrict_fact and Variable.access_fact persisted (storage/fact_codec.py) -- ADR-063 Phase 5's field-by-field conversion complete; v40: Function/Variable/RecordType/EnumType.deprecated_fact and EnumType.is_scoped_fact persisted (storage/fact_codec.py); v39: TypeField.is_const_fact/is_volatile_fact/is_mutable_fact persisted (storage/fact_codec.py); v38: AbiSnapshot.semantic_ir + semantic_ir_conflicts persisted (storage/semantic_ir_codec.py); v37: ElfMetadata.dynamic_flags_fact/has_init_fact/has_fini_fact, PeMetadata.delay_imports_fact, MachoMetadata.rpaths_fact persisted (snapshot_platform_blocks.py/storage/fact_codec.py); v36: AbiSnapshot.ast_resolved_standard_fact persisted (storage/fact_codec.py); v35: Function.contract_attributes_fact/is_explicit_fact/is_hidden_friend_fact/source_header_fact/is_variadic_fact/exception_spec_fact/is_override_fact/hidden_friend_owner_fact/elf_binding_fact/is_compiler_generated_fact persisted (storage/fact_codec.py); v34: Variable.source_header_fact/alignment_bits_fact/elf_binding_fact persisted (storage/fact_codec.py); v33: EnumType.qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v32: RecordType.is_abstract_fact/data_size_bits_fact/is_standard_layout_fact/is_trivially_copyable_fact/qualified_name_fact/source_header_fact persisted (storage/fact_codec.py); v31: typedef/constant entity_id sidecars persisted (storage/entity_id_codec.py); v30: RecordType.is_final_fact persisted (storage/fact_codec.py); v29: AbiSnapshot.surface_graph persisted (storage/surface_graph_codec.py); v28: entity_id carrier persisted (storage/entity_id_codec.py).
 
 # Schema version at which CastXML field CV facts became reliable (see v9 above).
 _MIN_SCHEMA_VERSION_FOR_CV_FACTS = 9
@@ -1064,6 +1065,21 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             or _schema_version >= _MIN_SCHEMA_VERSION_FOR_CASTXML_VAR_ACCESS_FACTS
         )
 
+    if "param_kind_facts_reliable" in d:
+        # Same explicit-marker-wins reasoning as the flags above.
+        param_kind_facts_reliable_value = bool(d["param_kind_facts_reliable"])
+    else:
+        # Both header-AST backends are affected equally (unlike the
+        # producer-specific flags above) -- neither ever determined a
+        # parameter's indirection kind before schema v45, so there is no
+        # `ast_producer_value == "..."` disjunct narrowing this to one
+        # producer family. A non-header (or already-v45+) document is
+        # unaffected either way.
+        param_kind_facts_reliable_value = (
+            not from_headers
+            or _schema_version >= _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
+        )
+
     # ADR-063 Phase 0 (schema v26) and Phase 5's own case-(a) batches: see
     # storage/fact_codec.py. One call, not one per converted field -- every
     # rule it applies is "a document predating this field's own Fact[T]
@@ -1097,6 +1113,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         clang_deprecation_facts_reliable_value=clang_deprecation_facts_reliable_value,
         clang_restrict_facts_reliable_value=clang_restrict_facts_reliable_value,
         castxml_var_access_facts_reliable_value=castxml_var_access_facts_reliable_value,
+        param_kind_facts_reliable_value=param_kind_facts_reliable_value,
         # T9 / ADR-063 Phase 6 item 4 (legacy-hybrid backfill blocker): the
         # raw per-declaration provenance map, same source as the
         # `AbiSnapshot.fact_provenance` field constructed further below --
@@ -1225,6 +1242,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # prefers an explicit dict key, falling back to a schema_version +
         # producer derivation scoped to the "castxml" producer specifically.
         castxml_var_access_facts_reliable=castxml_var_access_facts_reliable_value,
+        # See param_kind_facts_reliable_value's computation above: prefers an
+        # explicit dict key, falling back to a schema_version + from_headers
+        # derivation covering both header-AST backends alike.
+        param_kind_facts_reliable=param_kind_facts_reliable_value,
         # G28 Phase 3 — per-fact provenance map for a hybrid (castxml+clang
         # merged) snapshot. Absent on every non-hybrid / pre-Phase-3 snapshot,
         # loads as the empty dict (same "unknown" default as a fresh snapshot).
@@ -1366,6 +1387,16 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
                 "castxml_var_access_facts_reliable",
                 castxml_var_access_facts_reliable_value,
                 _header_confirmed and ast_producer_value == "castxml",
+            ),
+            # Like header_cv_facts_reliable/clang_vtable_facts_reliable
+            # above: diff_symbols._params_differ's compare_facts() gate
+            # consults Param.kind_fact for every matched parameter pair
+            # regardless of header-confirmation status on either side, so
+            # this is always consulted, not gated on _header_confirmed.
+            (
+                "param_kind_facts_reliable",
+                param_kind_facts_reliable_value,
+                True,
             ),
         )
         if not reliable and consulted

@@ -31,13 +31,13 @@ compatibility rules, and its top-level structure.
 ## Schema version
 
 Every snapshot carries a top-level **`schema_version`** field — a single
-**integer** (not `MAJOR.MINOR`). The current value is **`44`** (see
+**integer** (not `MAJOR.MINOR`). The current value is **`45`** (see
 `abicheck/serialization.py`'s `SCHEMA_VERSION` for the authoritative,
 up-to-date value and the full per-version history comment).
 
 ```json
 {
-  "schema_version": 44,
+  "schema_version": 45,
   "library": "libfoo.so.1",
   "version": "1.2.3"
 }
@@ -189,12 +189,18 @@ itself reads the envelope transparently regardless of version, per
 static-vs-external variable identity collision `tu_merge._variable_key`'s own
 docstring long documented as a known, accepted limitation; missing on a pre-v43
 snapshot loads as `False`, matching every prior reader's implicit assumption
-since the field did not exist. Finally (v44) `AbiSnapshot.header_only`
+since the field did not exist. Then (v44) `AbiSnapshot.header_only`
 persisted — the explicit marker for a snapshot built by the binary-less
 header-AST dump path (workstream F S1, "Header-only comparison"; no
 `SO_PATH`, no `--sources`/`--build-info`); missing on a pre-v44 snapshot
 loads as `False`, matching every prior snapshot's implicit "this has a
-binary, or is a pre-existing source-only dump" status.
+binary, or is a pre-existing source-only dump" status. Finally (v45)
+`Param.kind_fact` persisted — closes the last case-(a) field ADR-063 Phase
+5's "field-by-field conversion complete" note missed: neither header-AST
+backend had ever determined a parameter's indirection kind
+(value/pointer/reference/rvalue-reference) before this version, so a
+pre-v45 header-derived snapshot's blanket `"value"` is a placeholder, not
+a confirmed reading — `AbiSnapshot.param_kind_facts_reliable` marks it.
 
 ### Forward / backward compatibility
 
@@ -205,7 +211,7 @@ is determined entirely by comparing the file's `schema_version` against the
 | File `schema_version` | Behavior on load |
 |-----------------------|------------------|
 | **Missing** | Treated as `1` (the pre-versioning format) and loaded normally. |
-| **Older or equal** to this build (`<= 44`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
+| **Older or equal** to this build (`<= 45`) | Loaded cleanly. Fields introduced by newer versions are absent and fall back to their defaults (`None`, empty, or a tri-state `None` that suppresses the detectors depending on that evidence). No warning. |
 | **Newer** than this build, **and** `< 14` | Loaded **best-effort** with a `UserWarning` ("Data may be incomplete or misinterpreted. Upgrade abicheck…"). The load is **not** aborted — unrecognised keys are ignored and recognised keys are read. |
 | **Newer** than this build, **and** `>= 14` | **Hard-rejected** — `IncompatibleSnapshotSchemaError` — instead of warn-and-continue. |
 
@@ -284,7 +290,7 @@ serializer (`abicheck/serialization.py`) from the `AbiSnapshot` model
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `schema_version` | int | Snapshot format version (currently `44`). |
+| `schema_version` | int | Snapshot format version (currently `45`). |
 | `library` | string | Library identity, e.g. `libfoo.so.1`. |
 | `version` | string | Library version string, e.g. `1.2.3`. |
 | `source_path` | string \| null | Original path the snapshot was taken from. |
@@ -419,7 +425,7 @@ files:
 | | Snapshot (`dump`) | Comparison report (`compare --format json`) |
 |-|-------------------|---------------------------------------------|
 | **Version field** | `schema_version` | `report_schema_version` |
-| **Type** | integer (currently `44`) | string `MAJOR.MINOR` (e.g. `1.0`) |
+| **Type** | integer (currently `45`) | string `MAJOR.MINOR` (e.g. `1.0`) |
 | **Describes** | one library's ABI surface | the diff between two snapshots |
 
 A snapshot has no `report_schema_version`, and a report has no

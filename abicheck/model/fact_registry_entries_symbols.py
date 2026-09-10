@@ -372,9 +372,31 @@ SYMBOL_FACTS: list[FactDefinition] = [
         notes=(
             "Whether the parameter is a restrict-qualified pointer. Case "
             "(a): a plain bool whose False cannot distinguish "
-            "\"not restrict\" from \"never determined\" -- a pre-v22 clang "
+            '"not restrict" from "never determined" -- a pre-v22 clang '
             "snapshot reported False for every parameter, which "
             "AbiSnapshot.clang_restrict_facts_reliable is what marks."
+        ),
+    ),
+    _E(
+        owner="Param",
+        field="kind",
+        value_type="ParamKind",
+        producing_backends=("castxml", "clang", "dwarf"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.PERSISTED,
+        notes=(
+            "value/pointer/reference/rvalue-reference. Case (a), like "
+            "Variable.access below: ParamKind.VALUE is both this field's "
+            "resting value and a real answer. dwarf_snapshot.py has always "
+            "been a real producer (DW_TAG_reference_type/"
+            "DW_TAG_rvalue_reference_type); neither header-AST backend "
+            "determined this at all before schema v45, so a pre-v45 "
+            "header-derived snapshot's blanket VALUE is a placeholder, "
+            "which AbiSnapshot.param_kind_facts_reliable marks."
         ),
     ),
     _E(

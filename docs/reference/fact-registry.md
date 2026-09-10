@@ -45,6 +45,7 @@ Phase 5 section for the design this page's data comes from.
 | `MachoMetadata.rpaths` | `list[str] \| None` | macho | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_restrict` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Param.is_va_list` | `bool` | clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Param.kind` | `ParamKind` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `PeMetadata.delay_imports` | `dict[str, list[str]] \| None` | pe | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.bases` | `list[str]` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `RecordType.data_size_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
@@ -85,6 +86,7 @@ is the authoritative source for each row.
 | `clang_va_list_facts_reliable` | `Param.is_va_list` |
 | `clang_vtable_facts_reliable` | `RecordType.vtable`, `RecordType.vptr_offset_bits` |
 | `header_cv_facts_reliable` | `TypeField.is_const`, `TypeField.is_volatile`, `TypeField.is_mutable` |
+| `param_kind_facts_reliable` | `Param.kind` |
 
 ## Eligible but not yet converted
 

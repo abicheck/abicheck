@@ -263,6 +263,7 @@ REFERENCE_FLAG_COVERAGE: dict[str, tuple[tuple[str, str], ...]] = {
     "clang_restrict_facts_reliable": (("Param", "is_restrict"),),
     "clang_va_list_facts_reliable": (("Param", "is_va_list"),),
     "castxml_var_access_facts_reliable": (("Variable", "access"),),
+    "param_kind_facts_reliable": (("Param", "kind"),),
 }
 
 

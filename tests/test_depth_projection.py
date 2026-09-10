@@ -73,6 +73,22 @@ Six real, review-caught gaps are pinned by name here so they don't recur:
    ``pack.manifest.coverage`` still claiming ``PRESENT``/``PARTIAL``, so a
    report could still claim source-ABI/source-graph evidence backed a
    comparison the depth ceiling actually excluded it from.
+10. ``project_pair_to_depth`` picked :func:`_structural_facts_are_dwarf_
+    confirmed` **per side**, independently -- so a header-derived OLD
+    (stripped to L0: no params, no return type, no types/enums/typedefs)
+    compared against a DWARF-derived NEW of the IDENTICAL, unchanged
+    library (kept at L1: real params, real return type, real structural
+    facts) read every one of NEW's real facts as a fabricated addition —
+    worse than not projecting at all, since an unprojected comparison of
+    the same two snapshots has no such asymmetry to manufacture. Fixed by
+    computing ONE joint floor for both sides (the lower of the two
+    achievable rungs) rather than each side picking its own. A sibling
+    fix in the same round: ``typedefs_qualified``/``typedef_entity_ids``/
+    ``constant_entity_ids`` -- identity sidecars keyed exactly like
+    ``typedefs``/``constants`` -- were never cleared alongside their
+    partner dicts at all, so even a solo, correctly-symmetric projection
+    left a residual, fully-manufactured ``TYPEDEF_REMOVED``/
+    ``TYPEDEF_ADDED`` standing.
 """
 
 from __future__ import annotations
@@ -92,6 +108,8 @@ from abicheck.model import (
     EnumMember,
     EnumType,
     Function,
+    Param,
+    ParamKind,
     RecordType,
     ScopeOrigin,
     TypeField,
@@ -104,6 +122,7 @@ from abicheck.model.extraction_contract import ExtractionContract
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.policy.depth_projection import (
     project_build_source_pack_to_depth,
+    project_pair_to_depth,
     project_snapshot_to_depth,
 )
 from abicheck.serialization import save_snapshot
@@ -791,3 +810,127 @@ class TestOutOfBandPackCapping:
         )
         assert code != 0
         assert "public_macro_value_changed" in out.lower()
+
+
+class TestProjectPairToDepthJointFloor:
+    """Pinned gap 10: ``project_pair_to_depth`` must pick ONE structural-
+    evidence floor for both sides, not one independently per side."""
+
+    def _header_derived(self) -> AbiSnapshot:
+        """OLD: header-derived, no DWARF -- ``kind`` is never determined
+        by a pre-fix header backend (the resting ``ParamKind.VALUE``)."""
+        return AbiSnapshot(
+            library="lib",
+            version="1",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="take_ptr",
+                    mangled="_Z8take_ptrP1S",
+                    return_type="void",
+                    params=[Param(name="s", type="S*", pointer_depth=1)],
+                    visibility=Visibility.PUBLIC,
+                    origin=ScopeOrigin.PUBLIC_HEADER,
+                )
+            ],
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+            typedefs={"my_int": "int"},
+            typedefs_qualified={"S::my_int": "int"},
+            typedef_entity_ids={},
+            constants={"FOO": "1"},
+            constant_entity_ids={},
+        )
+
+    def _dwarf_derived(self) -> AbiSnapshot:
+        """NEW: the SAME declarations, DWARF-derived -- ``dwarf_snapshot.py``
+        has always been a real ``kind`` producer."""
+        return AbiSnapshot(
+            library="lib",
+            version="2",
+            from_headers=False,
+            dwarf=DwarfMetadata(has_dwarf=True),
+            functions=[
+                Function(
+                    name="take_ptr",
+                    mangled="_Z8take_ptrP1S",
+                    return_type="void",
+                    params=[
+                        Param(
+                            name="s",
+                            type="S *",
+                            kind=ParamKind.POINTER,
+                            pointer_depth=1,
+                        )
+                    ],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[RecordType(name="S", kind="struct", size_bits=32)],
+        )
+
+    def test_mixed_family_binary_depth_is_no_change(self) -> None:
+        """The exact false-positive class this fix closes: mixing a
+        header-derived side (stripped to L0) with a DWARF-derived side
+        (kept at L1) of the IDENTICAL library must not manufacture a
+        change purely from which side happened to carry richer evidence."""
+        old, new = project_pair_to_depth(
+            self._header_derived(), self._dwarf_derived(), "binary"
+        )
+        result = checker.compare(old, new)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+        assert result.changes == []
+
+    def test_both_sides_reduced_to_l0_symmetrically(self) -> None:
+        old, new = project_pair_to_depth(
+            self._header_derived(), self._dwarf_derived(), "binary"
+        )
+        assert old.functions[0].params == []
+        assert old.functions[0].return_type == "?"
+        assert new.functions[0].params == []
+        assert new.functions[0].return_type == "?"
+        assert old.types == new.types == []
+
+    def test_typedef_and_constant_identity_sidecars_cleared_symmetrically(
+        self,
+    ) -> None:
+        """The sibling fix: ``typedefs_qualified``/``typedef_entity_ids``/
+        ``constant_entity_ids`` must clear alongside their partner dicts, or
+        a solo, correctly-symmetric ``typedefs``/``constants`` projection
+        still leaves a residual, fully-manufactured TYPEDEF_REMOVED."""
+        old, new = project_pair_to_depth(
+            self._header_derived(), self._dwarf_derived(), "binary"
+        )
+        assert old.typedefs == {}
+        assert old.typedefs_qualified == {}
+        assert old.typedef_entity_ids == {}
+        assert old.constants == {}
+        assert old.constant_entity_ids == {}
+        result = checker.compare(old, new)
+        assert result.verdict == checker.Verdict.NO_CHANGE
+
+    def test_self_comparisons_stay_clean_both_sides(self) -> None:
+        """Neither self-comparison should be affected by the joint-floor
+        computation -- only MIXING the two evidence families should be."""
+        headers = self._header_derived()
+        dwarf = self._dwarf_derived()
+        old_h, new_h = project_pair_to_depth(headers, headers, "binary")
+        assert checker.compare(old_h, new_h).verdict == checker.Verdict.NO_CHANGE
+        old_d, new_d = project_pair_to_depth(dwarf, dwarf, "binary")
+        assert checker.compare(old_d, new_d).verdict == checker.Verdict.NO_CHANGE
+
+    def test_both_sides_genuinely_dwarf_sourced_keeps_structural_facts(self) -> None:
+        """The joint floor must not over-collapse to L0 when BOTH sides
+        really do qualify for L1 -- only a MISMATCH forces the lower rung."""
+        dwarf = self._dwarf_derived()
+        old, new = project_pair_to_depth(dwarf, dwarf, "binary")
+        assert old.functions[0].params[0].kind is ParamKind.POINTER
+        assert old.types != []
+
+    def test_project_snapshot_to_depth_solo_default_is_unchanged(self) -> None:
+        """``project_snapshot_to_depth`` called on its own (no comparison
+        partner) still defaults to the per-snapshot answer -- only
+        ``project_pair_to_depth`` computes a joint one."""
+        projected = project_snapshot_to_depth(self._header_derived(), "binary")
+        assert projected.functions[0].params == []
+        dwarf_projected = project_snapshot_to_depth(self._dwarf_derived(), "binary")
+        assert dwarf_projected.functions[0].params[0].kind is ParamKind.POINTER

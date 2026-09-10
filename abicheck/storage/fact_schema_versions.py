@@ -93,3 +93,13 @@ _MIN_SCHEMA_VERSION_FOR_DEPRECATION_FACTS = 40
 # guarded by clang_restrict_facts_reliable and
 # castxml_var_access_facts_reliable respectively.
 _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS = 41
+
+# ADR-063 Phase 5 (eleventh batch): the schema_version Param.kind_fact
+# started being persisted at -- Param.kind was not part of the "Phase 5's
+# field-by-field conversion is complete" claim fact_registry_schema.py's own
+# _CASE_A_UNCONVERTED comment made, because it was never flagged as
+# availability-ambiguous in the first place (no header backend had ever set
+# it to anything but the dataclass's own resting ParamKind.VALUE, so nothing
+# about it looked wrong by inspection). Guarded by
+# AbiSnapshot.param_kind_facts_reliable.
+_MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT = 45

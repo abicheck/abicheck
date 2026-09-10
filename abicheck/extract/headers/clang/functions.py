@@ -89,6 +89,7 @@ from .context import (
     symbol_candidates as _symbol_candidates,
     visibility as _visibility,
 )
+from .param_kind import param_kind as _param_kind
 from .return_type import return_type as _return_type
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -564,6 +565,7 @@ def parse_functions(
             Param(
                 name=str(p.get("name", "")),
                 type=_qualtype(p),
+                kind=_param_kind(_qualtype(p)),
                 pointer_depth=_pointer_depth(_qualtype(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                 is_restrict=_clang_param_is_restrict(p),

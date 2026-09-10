@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from ..model import AccessLevel, Fact, FactStatus, SymbolBinding
+from ..model import AccessLevel, Fact, FactStatus, ParamKind, SymbolBinding
 
 # ADR-061's 800-line production ceiling: the case-(a) legacy-load
 # corrections live in ``fact_backfill.py`` and are re-exported here, so
@@ -49,6 +49,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_FUNCTION_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_IS_FINAL_FACT,
     _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS,
+    _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT,
     _MIN_SCHEMA_VERSION_FOR_RECORDTYPE_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_SNAPSHOT_CASE_B_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
@@ -160,6 +161,8 @@ _ELF_FACT_KEYS = (
 _PARAM_FACT_KEYS = (
     "is_va_list_fact",
     "is_restrict_fact",
+    # ADR-063 Phase 5 (eleventh batch): kind_fact.
+    "kind_fact",
 )
 
 _PE_FACT_KEYS = ("delay_imports_fact",)
@@ -548,12 +551,25 @@ def decode_param_facts(p: dict[str, Any], schema_version: int) -> dict[str, Any]
     ``decode_fact`` call in ``serialization.py`` until Phase 5's tenth
     batch gave ``Param`` a second sibling; both live here now, so this
     owner's decode wiring is one place rather than two.
+
+    ``kind_fact`` (eleventh batch) needs the same non-JSON-native
+    value-type reconstruction ``decode_variable_facts``'s own
+    ``access_fact`` does: ``ParamKind`` is a str-Enum, so a decoded value is
+    a bare ``str`` until it is rebuilt here, and ``bridge_legacy_and_fact``
+    then carries this same real ``ParamKind`` member back into the legacy
+    ``kind`` field too.
     """
+    kind_fact = decode_fact_with_legacy_presence(
+        p, "kind", schema_version, _MIN_SCHEMA_VERSION_FOR_PARAM_KIND_FACT
+    )
+    if kind_fact is not None and kind_fact.value is not None:
+        kind_fact = replace(kind_fact, value=ParamKind(kind_fact.value))
     return {
         "is_va_list_fact": decode_fact(p.get("is_va_list_fact"), schema_version),
         "is_restrict_fact": decode_fact_with_legacy_presence(
             p, "is_restrict", schema_version, _MIN_SCHEMA_VERSION_FOR_LAST_CASE_A_FACTS
         ),
+        "kind_fact": kind_fact,
     }
 
 
