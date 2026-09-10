@@ -45,6 +45,7 @@ from .model import (
     Visibility,
 )
 from .model.semantic_ir_legacy_adapter import assert_snapshot_semantic_ir_consistent
+from .model.snapshot_reliability import degraded_reliability_facts
 from .snapshot_platform_blocks import (
     dwarf_advanced_from_dict as _dwarf_advanced_from_dict,
     dwarf_from_dict as _dwarf_from_dict,
@@ -1353,54 +1354,17 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # clang_vtable_facts_reliable are the two exceptions: their consumers
     # (variable/field cv checks, layout/vtable diffing) apply to any
     # snapshot carrying the underlying fact, header-confirmed or not.
-    _header_confirmed = from_headers and not from_headers_inferred
-    _degraded_facts = sorted(
-        name
-        for name, reliable, consulted in (
-            ("header_cv_facts_reliable", header_cv_facts_reliable_value, True),
-            (
-                "clang_deprecation_facts_reliable",
-                clang_deprecation_facts_reliable_value,
-                _header_confirmed,
-            ),
-            (
-                "clang_field_initializer_facts_reliable",
-                clang_field_initializer_facts_reliable_value,
-                _header_confirmed,
-            ),
-            (
-                "clang_vtable_facts_reliable",
-                clang_vtable_facts_reliable_value,
-                True,
-            ),
-            (
-                "clang_restrict_facts_reliable",
-                clang_restrict_facts_reliable_value,
-                _header_confirmed,
-            ),
-            (
-                "clang_va_list_facts_reliable",
-                clang_va_list_facts_reliable_value,
-                _header_confirmed and ast_producer_value == "clang",
-            ),
-            (
-                "castxml_var_access_facts_reliable",
-                castxml_var_access_facts_reliable_value,
-                _header_confirmed and ast_producer_value == "castxml",
-            ),
-            # Like header_cv_facts_reliable/clang_vtable_facts_reliable
-            # above: diff_symbols._params_differ's compare_facts() gate
-            # consults Param.kind_fact for every matched parameter pair
-            # regardless of header-confirmation status on either side, so
-            # this is always consulted, not gated on _header_confirmed.
-            (
-                "param_kind_facts_reliable",
-                param_kind_facts_reliable_value,
-                True,
-            ),
-        )
-        if not reliable and consulted
-    )
+    # The table itself (which flag, whether it's actually consulted given
+    # this snapshot's own ast_producer/header-confirmation shape) lives in
+    # `model.snapshot_reliability` -- by construction time every one of
+    # `snap`'s `*_facts_reliable` fields, plus `from_headers`/
+    # `from_headers_inferred`/`ast_producer`, already carries the exact
+    # `*_value` this function computed above, so reading it back off `snap`
+    # rather than the locals is the same computation. Shared with
+    # `analysis_assurance.compute_analysis_assurance` so the load-time
+    # warning below and the reported `analysis_assurance` status can never
+    # independently drift on what counts as "degraded".
+    _degraded_facts = degraded_reliability_facts(snap)
     if _degraded_facts:
         import warnings
 
