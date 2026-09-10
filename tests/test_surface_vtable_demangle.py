@@ -33,6 +33,8 @@ type-level finding kind about the same class.
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.model import (
@@ -51,6 +53,25 @@ from abicheck.surface import (
     REASON_NON_PUBLIC_TYPE,
     classify_change_surface,
     compute_public_surface,
+)
+
+
+def _no_demangler() -> bool:
+    """True when no working C++ demangler (cxxfilt / c++filt) is available --
+    some CI runners (e.g. macOS) have neither. Mirrors ``test_source_abi.py``'s
+    identically-named helper/marker pair for the same reason: a test that
+    asserts the demangler-*present* behavior must be skipped, not failed,
+    on a host with none installed."""
+    from abicheck.demangle import demangle
+
+    return demangle("_ZN6WidgetC1Ev") is None
+
+
+#: Skip marker for a test asserting the demangler-*present* half of
+#: TestDemanglerFallbackForUnparseableShapes -- the demangler-*absent* half
+#: is simulated via monkeypatching and needs no real tool.
+needs_demangler = pytest.mark.skipif(
+    _no_demangler(), reason="no C++ demangler (cxxfilt/c++filt) available"
 )
 
 
@@ -468,6 +489,7 @@ class TestDemanglerFallbackForUnparseableShapes:
             assert itanium_special_name_owner_scope_components(mangled) is None
             assert itanium_special_name_owner_identifiers(mangled) is None
 
+    @needs_demangler
     def test_demangler_present_resolves_and_demotes(self):
         for mangled, present_type in self._CASES:
             snap = AbiSnapshot(
@@ -521,6 +543,7 @@ class TestDemanglerFallbackForUnparseableShapes:
             finally:
                 surface_mod.demangle = original
 
+    @needs_demangler
     def test_classification_may_legitimately_differ_by_host_for_these_shapes(self):
         # Explicit converse of TestTemplatedOwnerHostIndependence: for a
         # shape the structural parser can't handle at all, presence vs.

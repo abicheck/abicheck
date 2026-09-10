@@ -26,51 +26,37 @@ side is already a resolved, stored snapshot rather than a live directory.
 
 This module is the thin CLI adapter that closes that gap without touching
 either capped file: :func:`dispatch` is called directly from
-``compare.compare_cmd`` (a sibling in this same package, which has headroom)
-*before* the ordinary ``run_compare``/``_dispatch_release_compare`` machinery
-ever runs, whenever OLD_INPUT classifies as a stored BundleFacts document
-(``workflows/bundle_compare_operand.py`` -- PR I replaced the former
-``--old-bundle-facts`` flag with automatic operand classification). It
-resolves the small,
-purpose-built option subset ``compare_release_against_bundle_facts`` actually
-needs from the same parsed ``compare`` kwargs (already normalized by
-``normalize_sided_options``), calls it, and renders the resulting
-:class:`~abicheck.bundle_models.BundleDiffResult` as its own
-``mode: "bundle_facts"`` JSON/markdown envelope -- deliberately not the full
-release-summary shape (exit-decision object, severity/contract blocks) that
-``cli_compare_release_helpers._format_release_json`` builds for the live
-directory/package fan-out, since this is a narrower, newly-exposed surface,
-not a drop-in replacement for it.
+``compare.compare_cmd`` *before* the ordinary ``run_compare``/
+``_dispatch_release_compare`` machinery ever runs, whenever OLD_INPUT
+classifies as a stored BundleFacts document
+(``workflows/bundle_compare_operand.py``). It resolves the small,
+purpose-built option subset ``compare_release_against_bundle_facts`` needs
+from the same parsed ``compare`` kwargs, calls it, and renders the result as
+its own ``mode: "bundle_facts"`` JSON/markdown envelope -- deliberately not
+the full release-summary shape the live directory/package fan-out builds,
+since this is a narrower surface, not a drop-in replacement for it.
 
 Lives under ``frontends/cli/commands/`` (ADR-061), not as a flat
 ``cli_compare_bundle_facts.py`` root sibling: the ``cli_`` root prefix family
-is frozen (``architecture/modules.yaml``'s ``frozen-root-family`` gate) --
-new CLI dispatch code belongs in the migrated ``frontends`` responsibility
-package instead.
+is frozen (``architecture/modules.yaml``'s ``frozen-root-family`` gate).
 
 Library-removal accounting (``--fail-on-removed-library``) is out of scope
-here (rejected explicitly, not silently ignored): computing it would mean
+here (rejected explicitly, not silently ignored) -- computing it would mean
 re-scanning ``old_facts_path`` a second time only to read back
-``per_library_snapshots.keys()``, defeating the entire point of a caller
-handing in an already-loaded, potentially huge (SYCL/DPC++-scale) facts
-document just to avoid re-parsing it.
+``per_library_snapshots.keys()``, defeating the point of a caller handing in
+an already-loaded, potentially huge facts document to avoid re-parsing it.
 
 NEW_INPUT is extracted with the same ``_extract_if_package`` primitive the
-live release fan-out uses when it is a package (wheel/deb/rpm/tar), not just
-a directory -- the option's own help text promises "a live release
-directory/package", so a package operand is a supported input, not an
-afterthought. ``--devel-pkg new=...`` is honored the same way.
+live release fan-out uses for a package (wheel/deb/rpm/tar), not just a
+directory. ``--devel-pkg new=...`` is honored the same way.
 
 **Every other flag `dispatch()` doesn't explicitly wire through is rejected
-outright (``click.UsageError``, exit 64) rather than silently ignored** --
-``compare_bundle_facts_rejections.reject_unsupported_options()``, a sibling
-module split out purely to keep this file under the architecture no-growth
-800-line cap as that guard list grew round over round; see that module's own
-docstring for the full list and reasoning. A zero-match comparison (nothing
-in NEW_INPUT's canonical library keys overlaps OLD_FACTS's
-``per_library_snapshots``) is a ``ClickException``, not a ``NO_CHANGE``
-verdict -- exit 0 must mean a real comparison found nothing broken, not that
-nothing was compared at all.
+outright (``click.UsageError``, exit 64)** --
+``compare_bundle_facts_rejections.reject_unsupported_options()``, split out
+purely to keep this file under its own no-growth cap; see that module's own
+docstring. A zero-match comparison is a ``ClickException``, not a
+``NO_CHANGE`` verdict -- exit 0 must mean a real comparison found nothing
+broken, not that nothing was compared at all.
 """
 
 from __future__ import annotations
@@ -92,13 +78,9 @@ from .compare_bundle_facts_scope import (
 def _resolve_new_side_headers_includes(
     kwargs: dict[str, Any],
 ) -> tuple[list[Path], list[Path]]:
-    """NEW-side headers/includes: the side-scoped override, else the uniform value.
-
-    Mirrors how every other ``compare`` dispatch path reads the post-
-    ``normalize_sided_options`` kwargs (ADR-040 Lever 1) -- the OLD side has
-    no headers/includes of its own here (it is already a resolved, stored
-    snapshot), so only the ``new=``-scoped/uniform value is ever consulted.
-    """
+    """NEW-side headers/includes: the side-scoped override, else the uniform
+    value. The OLD side has none of its own here (already a resolved,
+    stored snapshot)."""
     headers = list(kwargs.get("new_headers_only") or ()) or list(
         kwargs.get("headers") or ()
     )
@@ -393,6 +375,23 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
     suppression, policy_file = _load_suppression_and_policy(
         kwargs.get("suppress"), kwargs["policy"], kwargs.get("policy_file_path")
     )
+    # Round 9: this dispatcher bypasses run_compare entirely (module
+    # docstring), so it never picked up the PROJECT_CONFIG-tier
+    # `.abicheck.yml` `policy.overrides` fold every other route now
+    # applies -- `_early_cfg` already carries that field. No `--pack` fold
+    # to order against here (this command has none).
+    from ....errors import PolicyError
+    from ....workflows.policy_file import merge_project_config_policy_overrides
+
+    try:
+        policy_file = merge_project_config_policy_overrides(
+            policy_file,
+            base_policy=kwargs["policy"],
+            project_cfg=_early_cfg,
+            project_path=_early_cfg_path,
+        )
+    except PolicyError as exc:
+        raise click.BadParameter(str(exc), param_hint="--config") from exc
 
     # PR J: bundle: replaces --bundle-system-providers/--bundle-cohort.
     # kwargs["config"] is already resolved (explicit/auto-discovered) by

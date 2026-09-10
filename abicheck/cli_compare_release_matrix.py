@@ -46,7 +46,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -115,6 +115,7 @@ def _collect_matrix_result(
     old_version: str = "",
     new_version: str = "",
     pack_application: PackApplication | None = None,
+    project_policy_overrides: Any = None,
 ) -> tuple[DiffResult | None, str]:
     """Load probe-matrix snapshots, run them through the compare pipeline, fold.
 
@@ -139,7 +140,15 @@ def _collect_matrix_result(
     ``PolicyFile`` too -- these matrix findings go through the same
     ``--policy-file`` per-kind overrides every other library does, so a
     pack overriding e.g. ``cxx_standard_floor_raised`` must apply here
-    identically, not only to the per-library comparisons.
+    identically, not only to the per-library comparisons. *project_policy_
+    overrides* (round 9 finding) is the analogous ``.abicheck.yml``
+    ``policy.overrides`` fold at the weaker PROJECT_CONFIG tier -- this
+    function used to build its own ``PolicyFile`` by hand
+    (``_load_suppression_and_policy`` + a manual pack fold) instead of
+    calling :func:`~abicheck.pack_application.resolve_bundle_policy_file`,
+    the shared resolver its own sibling bundle-result call already uses,
+    which is why the matrix path alone never picked up a project override
+    the bundle path already honored.
     """
     from .frontends.cli.runtime import _load_probe_matrix_changes
 
@@ -148,13 +157,17 @@ def _collect_matrix_result(
         return None, worst_verdict
 
     from .model import AbiSnapshot
+    from .pack_application import resolve_bundle_policy_file
     from .service import compare_snapshots
 
-    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
-    if pack_application is not None:
-        from .pack_application import policy_file_with_packs
-
-        pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
+    suppression, _ = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    pf = resolve_bundle_policy_file(
+        suppress,
+        policy,
+        policy_file_path,
+        pack_application,
+        project_policy_overrides,
+    )
     # Empty snapshots contribute no per-binary changes; the matrix findings
     # ride in as extra_changes and inherit the full post-processing pipeline.
     name = "<build-config matrix>"

@@ -1132,6 +1132,7 @@ def compare_release_cmd(
                 old_version=old_version,
                 new_version=new_version,
                 pack_application=pack_application,
+                project_policy_overrides=project_policy_overrides,
             )
 
             # Fold release-global bundle/matrix findings into the severity exit so a
