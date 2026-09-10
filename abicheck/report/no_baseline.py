@@ -52,6 +52,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ..policy.audit_gate_exit import (
+    audit_gate_enabled_for_severity_preset as audit_gate_enabled_for_severity_preset,
+)
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, RunOutcome
 from ..policy.scope_completeness import resolve_scope_decision
 from .comparison_scope import build_comparison_scope_section
@@ -94,6 +97,7 @@ __all__ = [
     "NO_BASELINE_SUPPORTED_FORMATS",
     "NO_BASELINE_UNSUPPORTED_FORMATS",
     "NoBaselineDocument",
+    "audit_gate_enabled_for_severity_preset",
     "compute_no_baseline_document",
     "no_baseline_exit_code",
     "no_baseline_json_report",
@@ -149,7 +153,9 @@ def _operational_status(result: NoBaselineCompareResult) -> OperationalStatus:
 #: Markdown report that stated only the coverage axis exited 7 on a missed
 #: evidence contract while saying nothing about why (Codex review, P2).
 def _no_baseline_exit_axes(
-    result: NoBaselineCompareResult, require_complete_analysis: bool
+    result: NoBaselineCompareResult,
+    require_complete_analysis: bool,
+    audit_gate_enabled: bool = False,
 ) -> dict[str, int]:
     """Every orthogonal axis's own contribution, keyed as in
     :data:`NO_BASELINE_EXIT_AXIS_NOTICES`.
@@ -161,11 +167,28 @@ def _no_baseline_exit_axes(
     ADR-068 D2 gives an audit none.
     """
     from ..analysis_assurance import analysis_assurance_exit_contribution
+    from ..policy.audit_gate_exit import audit_gate_exit_contribution
     from ..policy.contract_coverage_exit import coverage_exit_floor
     from ..policy.exit_decision_precedence import EXIT_EVIDENCE_CONTRACT_ERROR
 
     scope_decision = _scope_decision(result)
     return {
+        # ADR-068 2026-09-10 amendment: the audit-gate axis, opt-in via
+        # --severity-preset (never active unless the run asked for it).
+        # Ordered first so it reads alongside the other content axes rather
+        # than after the evidence/scope ones below, which is purely a
+        # presentation choice -- `max` does not care about dict order.
+        #
+        # Resolved through `_finding_resolver` (the same policy-effective
+        # verdict every renderer reads), never the raw `result.findings`
+        # `Change` tuple -- gating on a finding's raw `ChangeKind` category
+        # would silently miss a `--policy` override/`reclassify:` rule that
+        # promotes it to breaking (Codex security review, P1; see
+        # `policy.audit_gate_exit`'s own module docstring).
+        "audit_gate": audit_gate_exit_contribution(
+            _finding_resolver(result.diff)(result.findings),
+            enabled=audit_gate_enabled,
+        ),
         "contract_coverage": coverage_exit_floor(result.diff),
         "analysis_assurance": analysis_assurance_exit_contribution(
             result.diff, require_complete=require_complete_analysis
@@ -183,7 +206,10 @@ def _no_baseline_exit_axes(
 
 
 def no_baseline_exit_code(
-    result: NoBaselineCompareResult, *, require_complete_analysis: bool = False
+    result: NoBaselineCompareResult,
+    *,
+    require_complete_analysis: bool = False,
+    audit_gate_enabled: bool = False,
 ) -> int:
     """The whole exit-code contribution of a ``--no-baseline`` run.
 
@@ -204,8 +230,16 @@ def no_baseline_exit_code(
     -- the same reason every other axis above is folded here. It is a plain
     ``max`` member like the rest: exit ``7`` is a *failed evidence
     contract*, orthogonal to how much coverage the run had.
+
+    ``audit_gate_enabled`` (default ``False``, ADR-068 2026-09-10
+    amendment) is the opt-in audit-gate axis: ``False`` for every
+    pre-existing caller, so no existing invocation's exit code changes.
     """
-    return max(_no_baseline_exit_axes(result, require_complete_analysis).values())
+    return max(
+        _no_baseline_exit_axes(
+            result, require_complete_analysis, audit_gate_enabled
+        ).values()
+    )
 
 
 def _finding_resolver(
@@ -232,7 +266,10 @@ def _finding_resolver(
 
 
 def compute_no_baseline_document(
-    result: NoBaselineCompareResult, *, require_complete_analysis: bool = False
+    result: NoBaselineCompareResult,
+    *,
+    require_complete_analysis: bool = False,
+    audit_gate_enabled: bool = False,
 ) -> NoBaselineDocument:
     """Resolve *result* into the one document every format below projects."""
     from ..policy.contract_coverage_exit import coverage_exit_floor
@@ -257,9 +294,13 @@ def compute_no_baseline_document(
         coverage_failures=_coverage_failures(diff),
         contract_selected=getattr(diff, "contract_context", None) is not None,
         exit_code=no_baseline_exit_code(
-            result, require_complete_analysis=require_complete_analysis
+            result,
+            require_complete_analysis=require_complete_analysis,
+            audit_gate_enabled=audit_gate_enabled,
         ),
-        exit_axes=_no_baseline_exit_axes(result, require_complete_analysis),
+        exit_axes=_no_baseline_exit_axes(
+            result, require_complete_analysis, audit_gate_enabled
+        ),
     )
 
 
@@ -618,6 +659,7 @@ def render_no_baseline(
     fmt: str,
     *,
     require_complete_analysis: bool = False,
+    audit_gate_enabled: bool = False,
 ) -> tuple[str, int]:
     """Render a ``--no-baseline`` audit in *fmt*; return ``(text, exit_code)``.
 
@@ -627,6 +669,11 @@ def render_no_baseline(
     :data:`NO_BASELINE_SUPPORTED_FORMATS` -- the CLI rejects anything else
     as a usage error before reaching here, so an unknown value is an
     internal error, not a user one.
+
+    *audit_gate_enabled* (default ``False``, ADR-068 2026-09-10 amendment)
+    threads the opt-in audit-gate axis through to the exit code -- see
+    :func:`abicheck.policy.audit_gate_exit.audit_gate_enabled_for_severity_preset`
+    for how the CLI derives it from ``--severity-preset``.
     """
     import json as _json
 
@@ -636,7 +683,9 @@ def render_no_baseline(
     )
 
     doc = compute_no_baseline_document(
-        result, require_complete_analysis=require_complete_analysis
+        result,
+        require_complete_analysis=require_complete_analysis,
+        audit_gate_enabled=audit_gate_enabled,
     )
     if fmt == "json":
         return (

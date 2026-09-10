@@ -809,6 +809,20 @@ section's *actual* state, not the target it originally described:
   `compare --no-baseline` and their "blocked on this gap" annotations
   removed.
 
+  **The exit-code gating gap is also closed (2026-09-10 ADR-068
+  amendment).** `docs/contribute/known-gaps.md`'s "no way to gate a CI job
+  on an audit finding" entry — legacy `scan`'s audit mode gates at exit `2`
+  on an `API_BREAK`-classified hygiene finding, which `compare
+  --no-baseline` could not reproduce without violating D2 — is closed by a
+  new orthogonal audit-gate axis (`policy/audit_gate_exit.py`, exit code
+  `3`, opt-in via `--severity-preset`). This closes the one named blocker
+  that gap put on this phase's retirement work; it does **not** by itself
+  retire `scan` or move any deletion-order item below forward — the typed
+  API still carries no `--no-baseline` support and the Action still routes
+  audit-only `mode: scan` to the legacy CLI (a separate, already-tracked
+  gap), both of which remain open prerequisites of their own before Phase 6
+  can proceed past what is recorded here.
+
 ### Phase 5 — Presentation/analysis separation — **done**
 
 - `--explain-patterns` stops implying `--pattern-verdicts`; modulation

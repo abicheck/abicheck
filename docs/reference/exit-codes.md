@@ -183,11 +183,12 @@ below fires. Every finding carries its ADR-068 D3 evolution state, which
 with a `declared_absent` OLD is always `persistent` or `not_evaluated`,
 never `introduced`.
 
-Three orthogonal axes still apply exactly as they would for a two-sided
+Four orthogonal axes still apply exactly as they would for a two-sided
 run, folded with the same `max` discipline:
 
 | Axis | Contributes | When |
 |---|---|---|
+| Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
 | Analysis assurance (P0.4) | `1` | `--require-complete-analysis` and `analysis_assurance.status` is not `complete` |
 | Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
@@ -212,10 +213,28 @@ it cannot have fallen short of a pinned depth.
 `compare --no-baseline` never emits `2`/`4`: an audit reports no
 compatibility verdict (ADR-068 D2), so the compatibility family contributes
 nothing and only the orthogonal axes above can raise its exit code.
-`--severity-preset` is a usage error (`64`) there rather than a no-op.
-Legacy `scan`'s audit mode *did* gate at `2` on an `API_BREAK`-classified
-hygiene finding; that difference, and what closing it would take, is
-recorded in [`known-gaps.md`](../contribute/known-gaps.md).
+
+**The audit-gate axis (ADR-068 2026-09-10 amendment).** Legacy `scan`'s
+audit mode derived a *verdict* from its own findings and gated at `2` on a
+hygiene finding whose kind is `BREAKING`/`API_BREAK`-classified.
+`compare --no-baseline` cannot reproduce that at `2`/`4` (D2 forbids it),
+so it reproduces the same partition through its own code, `3`, and the
+axis is **opt-in**: every invocation that omits `--severity-preset` stays
+exactly as it always was (exit `0` for a hygiene finding, unaffected by
+this axis's existence). Passing `--severity-preset default` (or `strict`)
+opts the run into gating; `--severity-preset info-only` is the explicit
+"don't gate" request and stays `0`. A `scan`-based gating CI job migrating
+to `compare --no-baseline` needs exactly one addition to keep gating:
+`--severity-preset default`. The axis's own rule reads
+`BREAKING_KINDS`/`API_BREAK_KINDS` membership directly (the same sets
+`checker_policy.py`'s registry derives), not `--severity-preset`'s own
+per-category severity mapping — that mapping's `potential_breaking` bucket
+merges `API_BREAK_KINDS` with `RISK_KINDS`, which would gate an advisory-
+only `RISK` finding the same as an `API_BREAK` one; the preset only
+activates the axis, it does not decide which findings gate. See
+`policy/audit_gate_exit.py` and
+[ADR-068's amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)
+for the full account.
 
 **On `compare --no-baseline` only**, `--dry-run` reports the same condition
 ahead of any analysis: against a *live* candidate, a pinned `--depth build`/

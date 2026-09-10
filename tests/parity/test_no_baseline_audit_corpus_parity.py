@@ -179,23 +179,177 @@ def test_no_baseline_exit_code_is_clean_without_a_contract(
 ) -> None:
     """An audit's hygiene findings never gate on their own (ADR-028 D3 /
     ADR-035 D1: they stay advisory), and without ``--contract`` there is no
-    coverage axis either -- so every fixture exits 0. This is what makes the
-    exit-1 contract case below a real signal rather than noise.
-
-    This is a *deliberate* difference from legacy ``scan``, not an
-    unexamined baseline: ``scan`` derives a verdict from the same findings
-    and exits ``2`` on the two fixtures whose finding kind is
-    ``API_BREAK``-classified (case148, case149). ADR-068 D2 forbids an audit
-    reporting a compatibility verdict, and ``2`` is that family's own code,
-    so the audit cannot emit it. The consequence -- there is no way to gate
-    a CI job on an audit finding yet -- is recorded in
-    ``docs/contribute/known-gaps.md`` as an open ADR-068 amendment, and this
-    assertion is what would fail first if an audit-gate axis ever landed
-    without that decision being made.
+    coverage axis either -- so every fixture exits 0 *without*
+    ``--severity-preset`` (the audit-gate axis's opt-in). This is what makes
+    the exit-3 audit-gate case below a real signal rather than noise.
     """
     path = _fixture_path(case_name, filename)
     result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
     assert result.exit_code == 0, result.output
+
+
+#: The two fixtures whose finding kind is ``API_BREAK``-classified -- the
+#: ones legacy ``scan``'s own verdict computation gated at exit ``2`` on
+#: these committed snapshots (verified live, per the ADR-068 2026-09-09
+#: amendment and its 2026-09-10 audit-gate follow-up). Everything else in
+#: the corpus, including ``case143`` (``RISK``-classified), must not gate.
+_AUDIT_GATE_SHOULD_FIRE = frozenset(
+    {"case148_xcheck_header_build_mismatch", "case149_xcheck_odr_variant"}
+)
+
+
+@pytest.mark.parametrize(("case_name", "filename"), G20_AUDIT_FIXTURES)
+def test_audit_gate_axis_matches_legacy_scan_gating(
+    case_name: str, filename: str
+) -> None:
+    """ADR-068's 2026-09-10 amendment: with ``--severity-preset default``
+    (the opt-in), the audit-gate axis must reproduce exactly which fixtures
+    legacy ``scan`` gated on -- case148/case149 (``API_BREAK``-classified),
+    never case143 (``RISK``-classified) or any other fixture in the corpus.
+    The gated exit code is always ``3`` (never ``2``/``4``, which stay
+    reserved for a real compatibility verdict an audit cannot produce, per
+    ADR-068 D2).
+    """
+    path = _fixture_path(case_name, filename)
+    result = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(path),
+        "--format",
+        "json",
+        "--severity-preset",
+        "default",
+    )
+    report = json.loads(result.stdout)
+    if case_name in _AUDIT_GATE_SHOULD_FIRE:
+        assert result.exit_code == 3, (
+            f"{case_name}/{filename}: expected the audit-gate axis to fire "
+            f"(exit 3), got {result.exit_code}:\n{result.output}"
+        )
+        assert report["exit_axes"]["audit_gate"] == 3
+    else:
+        assert result.exit_code == 0, (
+            f"{case_name}/{filename}: audit-gate axis fired unexpectedly "
+            f"(exit {result.exit_code}), but this fixture's findings are not "
+            f"BREAKING/API_BREAK-classified:\n{result.output}"
+        )
+        assert report["exit_axes"]["audit_gate"] == 0
+    # Verdict/changes/compatibility stay exactly as ADR-068 D2 requires,
+    # opt-in gating included -- the axis never manufactures a compatibility
+    # signal, it only raises the process exit code.
+    assert report["verdict"] is None
+    assert report["changes"] == []
+
+
+def test_audit_gate_axis_requires_opt_in() -> None:
+    """Without ``--severity-preset``, case148/case149 stay exit 0 -- the
+    axis is opt-in (ADR-068 2026-09-10 amendment), so every pre-existing
+    ``compare --no-baseline`` invocation is unaffected by its existence.
+    """
+    for case_name in _AUDIT_GATE_SHOULD_FIRE:
+        path = _fixture_path(case_name, "snapshot.abi.json")
+        result = invoke_cli("compare", "--no-baseline", str(path), "--format", "json")
+        assert result.exit_code == 0, (
+            f"{case_name}: audit-gate axis fired without --severity-preset "
+            f"(exit {result.exit_code}); it must be opt-in:\n{result.output}"
+        )
+
+
+def test_audit_gate_axis_disabled_by_info_only_preset() -> None:
+    """``--severity-preset info-only`` stays the explicit no-gate request --
+    the one preset value :data:`abicheck.policy.audit_gate_exit.
+    SEVERITY_PRESET_DISABLES_AUDIT_GATE` names.
+    """
+    for case_name in _AUDIT_GATE_SHOULD_FIRE:
+        path = _fixture_path(case_name, "snapshot.abi.json")
+        result = invoke_cli(
+            "compare",
+            "--no-baseline",
+            str(path),
+            "--format",
+            "json",
+            "--severity-preset",
+            "info-only",
+        )
+        assert result.exit_code == 0, (
+            f"{case_name}: --severity-preset info-only must not gate "
+            f"(exit {result.exit_code}):\n{result.output}"
+        )
+
+
+def test_scan_baseline_exit_codes_documented_for_the_gated_fixtures() -> None:
+    """Pins the legacy ``scan`` exit codes this whole corpus is measured
+    against, on the committed snapshots, so a drift in the fixtures (not
+    just in ``compare --no-baseline``) is caught here rather than only in
+    prose. Verified live per the module docstring and ADR-068's amendments.
+    """
+    for case_name in _AUDIT_GATE_SHOULD_FIRE:
+        path = _fixture_path(case_name, "snapshot.abi.json")
+        result = invoke_cli("scan", str(path), "--format", "json")
+        assert result.exit_code == 2, (
+            f"{case_name}: expected legacy `scan` to gate at exit 2 on its "
+            f"committed snapshot, got {result.exit_code}:\n{result.output}"
+        )
+    path = _fixture_path("case143_audit_accidental_export", "snapshot.abi.json")
+    result = invoke_cli("scan", str(path), "--format", "json")
+    assert result.exit_code == 0, (
+        "case143: expected legacy `scan` to stay exit 0 (RISK-classified "
+        f"finding), got {result.exit_code}:\n{result.output}"
+    )
+
+
+def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> None:
+    """Regression for a Codex security review finding (P1) on this axis's
+    first revision: it read a finding's *raw* ``ChangeKind`` category
+    (``BREAKING_KINDS``/``API_BREAK_KINDS`` membership) instead of its
+    *effective*, policy-resolved verdict, so an explicitly-selected,
+    trusted ``--policy`` document promoting a normally-RISK finding to
+    BREAKING was silently invisible to the gate -- an untrusted candidate
+    artifact could pass a CI job that had explicitly asked to gate on
+    exactly that promotion. ``case143``'s ``exported_not_public`` finding is
+    RISK-classified by default (does not gate, per
+    ``_AUDIT_GATE_SHOULD_FIRE`` above); this pins that an ``overrides:``
+    policy promoting it to ``break`` (``Verdict.BREAKING``) flips the axis
+    to fire, exit 3, even though the raw finding kind never changed.
+    """
+    policy_path = tmp_path / "promote_exported_not_public.yml"
+    policy_path.write_text("overrides:\n  exported_not_public: break\n")
+    path = _fixture_path("case143_audit_accidental_export", "snapshot.abi.json")
+
+    # Baseline: case143 does not gate under the built-in default policy.
+    baseline = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(path),
+        "--format",
+        "json",
+        "--severity-preset",
+        "default",
+    )
+    assert baseline.exit_code == 0, baseline.output
+    assert json.loads(baseline.stdout)["exit_axes"]["audit_gate"] == 0
+
+    # With the override in effect, the same fixture's same finding must gate.
+    promoted = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(path),
+        "--format",
+        "json",
+        "--severity-preset",
+        "default",
+        "--policy",
+        str(policy_path),
+    )
+    report = json.loads(promoted.stdout)
+    assert promoted.exit_code == 3, (
+        f"a --policy override promoting case143's finding to BREAKING must "
+        f"gate the audit (exit 3), got {promoted.exit_code}:\n{promoted.output}"
+    )
+    assert report["exit_axes"]["audit_gate"] == 3
+    assert {f["kind"] for f in report["findings"]} == {"exported_not_public"}, (
+        "the override must not change which finding is reported, only whether it gates"
+    )
 
 
 def test_scan_and_no_baseline_agree_on_the_whole_corpus() -> None:

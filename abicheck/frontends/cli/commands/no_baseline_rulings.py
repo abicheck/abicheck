@@ -293,11 +293,6 @@ _UNSUPPORTED_OPTIONS: dict[str, tuple[str, str]] = {
         "--budget",
         "the wall-clock guard is not wired to this path yet",
     ),
-    "severity_preset": (
-        "--severity-preset",
-        "an audit's findings are advisory and never gate, so a severity "
-        "preset has nothing to act on yet",
-    ),
     "pack_paths": (
         "--pack",
         "pack application is not wired to this path yet",
