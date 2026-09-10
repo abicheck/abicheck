@@ -48,7 +48,6 @@ from abicheck.policy.classification import (
     policy_for,
 )
 from abicheck.policy.evidence_status import EvidenceStatus, ReachabilityState
-from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.document import ReportDocument
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate

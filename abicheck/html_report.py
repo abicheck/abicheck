@@ -45,7 +45,6 @@ from .html_template import _CSS as _CSS
 from .model.change_catalog.kinds import HasKind
 from .policy.classification import evidence_status_for_result, impact_for
 from .policy.evidence_status import EvidenceStatus
-from .policy.gate_decision import gate_decision_for_result
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
