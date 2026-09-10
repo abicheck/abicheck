@@ -129,7 +129,8 @@ from .frontends.cli.commands import (  # noqa: E402
 )
 from .frontends.cli.commands.compare import compare_cmd  # noqa: E402
 
-# ADR-062 A1.7: --old-variant/--new-variant, applied to the already-
+# ADR-062 A1.7: --variant (side-scoped; --old-variant/--new-variant
+# until plan Phase 7j), applied to the already-
 # registered `compare` command from here (not compare.py itself, capped at
 # 800 lines) -- click.option() appends directly to compare_cmd.params
 # (click.decorators._param_memo's isinstance(f, Command) branch), the same

@@ -1529,11 +1529,11 @@ _extra_args_is_value_option() {
     --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
     --frontend-context | --header | --include | --instantiation-manifest | \
     --lang | --ld-library-path | --manifest | --max-findings | \
-    --new-variant | --old-variant | --output | --output-dir | --pack | \
+    --output | --output-dir | --pack | \
     --pdb-path | --policy | --post-manifest | --probe-matrix | \
     --public-header-dir | --required-symbol | --risk-rules | \
     --search-path | --severity-preset | --since | --sources | \
-    --suppress | --sysroot | --use-cases | --used-by | --version | --view | \
+    --suppress | --sysroot | --use-cases | --used-by | --variant | --version | --view | \
     --write | -H | -I | -o)
       return 0
       ;;
@@ -1871,7 +1871,7 @@ _extra_args_has_scan_only_flag() {
     --surface-metrics | --used-by | --used-by-manifest | --required-symbol | \
       --diagnostic-comparison | --report-mode | --show-only | --show-filtered | \
       --select | --select-required | --support-promise | --use-cases | \
-      --new-variant | --old-variant | --no-baseline | --no-bundle-analysis | \
+      --variant | --no-baseline | --no-bundle-analysis | \
       --bundle-facts-out | --bundle-facts-library-manifest | --follow-deps | \
       --debug-info | --debug-root | --pdb-path | --probe-matrix | \
       --include-system-declarations | \

@@ -1249,7 +1249,10 @@ restated one line at a time where the reason is shared:
   written rationale in `abicheck/frontends/cli/options/inventory.py`'s
   `COMPARE_FLAG_BUDGET_RAISES` ledger, which is the executable half of this
   ruling — `tests/test_config_rebalance.py` fails if an entry names a flag
-  that is no longer visible.
+  that is no longer visible. (**Fifteen of forty-eight** is the point Phase
+  7k acts on: that ledger covered only the flags added *since* an opaque
+  base count, so the other two-thirds of the surface had no written ruling
+  anywhere in code, and `dump` had none at all. See 7k below.)
 - **One MERGE candidate examined and declined: `--old-variant`/
   `--new-variant` → a side-scoped `--variant old=`/`new=`.** It would be a
   net −1 and would match every other two-sided input's spelling. Not done
@@ -1264,7 +1267,7 @@ rather than read off §4.5:**
 
 | Command | Before | After | Target | Residual, itemized |
 |---|---|---|---|---|
-| `compare` | 56 | **50** | ≤40 | `--scope-public-headers`, `--post-manifest` (Phase 9) · `--env-matrix`, `--require-complete-analysis` (`scan`, Phase 6) · `--instantiation-manifest`, `--use-cases` (prerequisite) · `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--old-variant`/`--new-variant` merge (−1, declined) = 10 |
+| `compare` | 56 | **50** | ≤40 | `--scope-public-headers`, `--post-manifest` (Phase 9) · `--env-matrix`, `--require-complete-analysis` (`scan`, Phase 6) · `--instantiation-manifest`, `--use-cases` (prerequisite) · `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--old-variant`/`--new-variant` merge (−1, declined here; **done in 7j**) = 10. Re-derived after `--budget` landed and 7j merged the variant pair: **50** again, with `--budget` replacing the merged pair in the residual set |
 | `dump` | 24 | **21** | ≤16 | `--follow-deps`, `--search-path`, `--ld-library-path` (measured keep) · `--compression`, `--build-target` (Action input) = 5 |
 
 `compare` reaches **40** and `dump` reaches **16** exactly once those two
@@ -1276,6 +1279,194 @@ reading of §4.5's numbers is that they were set before Phase 2 added five
 flags to `compare` and before the dependency-walk measurement existed;
 they are recorded here as still-useful pressure, not as arithmetic that
 survives contact with the per-flag rulings above.
+
+**7j: `--old-variant`/`--new-variant` → one side-scoped `--variant`.**
+7i examined this MERGE and *declined* it, on the grounds that it is "a
+rename of a user-visible pair with no analysis consequence, which makes it
+the lowest-value change in this list and the one most likely to churn
+unrelated tests in a PR that is already changing the meaning of six flags",
+and left it as a standalone follow-up. That decline is reversed here, for
+two reasons the original ruling did not weigh:
+
+1. **Its stated rationale is an effort argument, which AGENTS.md's own
+   decision-making principles rule out of technical decisions** ("Don't
+   scope, simplify, defer, or pick an implementation approach because it's
+   faster or quicker to ship"). "Churns unrelated tests in a PR already
+   doing six things" is a reason to make it *its own* PR — which is what
+   7i itself proposed and what this slice is — not a reason not to do it.
+2. **"No analysis consequence" understates what the pair costs.** Every
+   other two-sided input on `compare` — `--header`, `--include`,
+   `--version`, `--sources`, `--build-info`, `--debug-info`, `--devel-pkg`,
+   `--debug-root`, `--probe-matrix`, `--dump-manifest` — is one option
+   carrying an `old=`/`new=` prefix, a convention ADR-040 Lever 1
+   established by retiring exactly this shape of pair (`--old-header`/
+   `--new-header`, `--old-version`/`--new-version`). The variant pair was
+   the last two-sided input still spelled the old way, so it was not a
+   neutral naming difference but a live exception to a convention a user
+   has already had to learn: one concept represented twice, which is D5's
+   guard 2 as literally as the surface has left.
+
+Ruled a **per-run operand throughout** — variant selection is comparison
+scope (ADR-065), not a project property, so nothing here moves to
+`.abicheck.yml`. What retires is the spelling: `--variant
+[old=|new=]VARIANT_ID` (`SIDED_STR_PARAM`, repeatable, bare value applies
+to both sides, last-one-wins per bucket). Both old spellings exit `64` with
+no alias and no deprecation window; both are registered in
+`scripts/retired_surfaces.py`. The *unregistered* release engine
+(`cli_compare_release.py`) keeps its own per-side `--old-variant`/
+`--new-variant`, exactly as it kept per-side `--old-version`/`--new-version`
+through ADR-040 Lever 1 — that engine is not public CLI surface and is not
+what this workstream's counts measure.
+
+Two details worth not rediscovering. First, an **empty variant id**
+(`--variant old=`, or a bare `--variant ""`) is now a usage error rather
+than a silently-`None` selection: the pair's old `default=None` made "flag
+absent" and "flag given an empty value" indistinguishable, so a package
+declaring several variants would have failed much later with a message
+naming neither the empty value nor the flag that supplied it. This follows
+7f's `--provenance` precedent — validate the grammar eagerly in the Click
+callback, exit 64 before any extraction runs. Second, the resolution rule
+lives in a standalone `_resolve_sided_variant` with a **property-test
+class** (`TestResolveSidedVariantProperties`) stating its contract as
+invariants — last-writer-wins per bucket, a later `both=` re-basing both
+sides, a per-side override surviving an earlier base, the two buckets
+independent under any interleaving, and unset staying `None` rather than
+gaining a synthesized per-side default the way `--version` has. The oracle
+is an independently-stated "last token addressing this side" rule, not the
+implementation's own loop, and the enumeration is exhaustive over every
+token sequence up to length three. AGENTS.md requires this for a reusable
+ordering primitive, and the repo's own `_paired_stable_indices` history is
+why: order-dependence in a small merge helper is exactly the defect class a
+fixed-example test cannot reach.
+
+Front-end parity in the same PR: `action/run.sh`'s two hand-maintained flag
+tables (the `extra-args` value-option tokenizer and the scan-only-flag
+routing predicate) both move to `--variant`. No typed-API change exists to
+make — `variant_options` has always used `expose_value=False`, stashing the
+resolved per-side values on `ctx.meta` for the release fan-out alone, so
+`CompareRequest`/`run_compare` never carried a variant parameter. No schema
+changes: nothing machine-readable moved.
+
+**Count after 7j: `compare` 50** (from 51 — 7i's own table recorded 50, but
+Phase 4 commit 2's `--budget` landed between that slice and this one).
+`dump` is untouched at **21**.
+
+**7k: every surviving option ruled in *code*, exhaustively — and the budget
+mechanism that let one slip through.** 7d and 7i ruled flags in this
+document. This slice makes the whole surface's rulings executable, because
+the prose ruling and the machine check had drifted apart in a way neither
+noticed.
+
+**The defect, measured.** ADR-037 D10.5's ledger derived `compare`'s ceiling
+as `COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)`, and
+`tests/test_config_rebalance.py` asserted `visible <= budget`. Its own
+docstring claimed the consequence: "a new visible flag *cannot* be slipped in
+by silently consuming slack — the only way to raise the ceiling is to add a
+documented ledger entry." That claim was false. `BASE` was lowered in bulk by
+some removals and not others, and a removed flag's `RAISES` entry was
+sometimes deleted while `BASE` stayed put; each mismatch became permanent
+slack. Introspected on this branch before the fix: **`visible=48`,
+`BASE=41`, `len(RAISES)=16`, budget `57` — nine flags of slack**, and
+`--budget` (Phase 4 commit 2) had in fact landed as a visible option with no
+ledger entry at all. `BASE` being an opaque *count* rather than a list is the
+second half of the problem: it named none of the flags it covered, so "which
+flags are ruled?" had no answer at all — 16 of 48 `compare` options carried a
+written rationale in code, and `dump` carried **zero**, despite ADR-037 D8.1
+requiring the two commands' shared families not to drift.
+
+This is the repo's own named bug class — a check that passes identically
+before and after the regression it exists to catch — so the replacement's
+test does not merely pin `--budget`. `test_the_superseded_budget_shape_
+would_have_missed_an_unruled_flag` reconstructs the retired `visible <= BASE
++ len(RAISES)` comparison over a surface carrying an unruled flag, shows it
+*passing*, and shows the bijection check failing on the same input. The shape
+of the check was the bug, so the shape is what is asserted.
+
+**The replacement.** `abicheck/frontends/cli/options/rulings.py` carries one
+`OptionRuling` per visible option on **both** commands — 48 + 19 — each
+stating which of D5's three guards lets it stay. The ceiling is now exactly
+`len(rulings)`, and the test asserts an **exact bijection in both
+directions**: an option with no ruling fails, and a ruling naming a
+non-existent option fails. There is no slack left to consume. A ruling is
+either `per_run_operand` (clears all three guards, stays) or `deferred`
+(judged demotable/removable, blocked by a *named* prerequisite) — and
+`blocker` is mandatory for the latter and rejected for the former, enforced
+in `__post_init__`, so a deferral cannot quietly become a permanent keep by
+nobody re-reading it, and a keep cannot be written as though it were pending
+someone else's work. `dump` gains its first ruling table; a shared option's
+`dump` entry points at `compare`'s rather than restating it, so ADR-037
+D8.1's no-drift requirement is visible in the data.
+
+**Two fresh rulings this audit produced**, beyond transcribing 7d/7i:
+
+- **`--search-path` and `--ld-library-path` audited for a merge and ruled
+  *distinct*, with the measurement.** They look like two spellings of "extra
+  places to look for libraries", which would be guard 2. They are not:
+  `resolver._candidate_dirs` inserts `--ld-library-path`'s directories at
+  **loader step 2**, ahead of `DT_RUNPATH` and the defaults, and appends
+  `--search-path`'s at **step 4**, after them — and the two record different
+  `resolution_reason` values on the resolved node. Collapsing them would
+  silently change *which library a run resolves*, which is an analysis
+  consequence, not a spelling change. This is the 7g precedent applied to a
+  merge rather than a demotion: look at what the code actually does, then
+  let it decide.
+- **`dump --compression` ruled a keep, rejecting §4.2's AUTO row.** That row
+  ("inferred from the `-o` suffix; `auto` is already the default and already
+  correct") assumes the suffix always encodes the intent. 7i recorded the
+  counter-argument without resolving it; this audit resolves it against the
+  row. `-o build/abi.json --compression zstd` — a CI job publishing a fixed
+  artifact name — is a real case suffix inference cannot express, so removing
+  the flag would remove a capability rather than derive it. Which encoding
+  this artifact is published in is a property of the publishing job. Its
+  Action input (`snapshot-compression`) therefore stays with something real
+  to drive, which also dissolves the "blocked by an Action input" framing for
+  this one.
+
+**Three MERGE candidates examined and declined, each recorded rather than
+left unmentioned** — `--write` against `--format`/`-o` (the most plausible
+one left, since `--write markdown=r.md` and `--format markdown -o r.md` do
+coincide: declined because `--format` with no `-o` renders to *stdout*,
+which `--write`'s PATH-requiring grammar cannot express, and inventing a
+path-less `--write` value to recover it would be one flag carrying two
+grammars to save one option); `--select` against `--select-required` (the
+second declares a completeness *obligation* feeding ADR-065 D6's scope exit
+axis, a distinction that would otherwise need an invented `KEY:required`
+grammar); and `--used-by-manifest` against a `--used-by @FILE` form on
+Phase 7h's `--required-symbols` precedent (declined because that precedent
+does not transfer: `--required-symbols FILE` fed the *identical* contract as
+an inline symbol, whereas a manifest carries digest/platform/profile
+provenance and an advisory-vs-required distinction a bare consumer path
+cannot express, so collapsing them would either drop that content or
+overload one flag with two value grammars).
+
+**One deferral's blocker re-attributed.** 7i recorded `dump --build-target`
+as "blocked by an Action input, pending an ADR-047 input-lifecycle decision".
+Re-verified here, that is not the blocker. Removing an Action input alongside
+its flag is ordinary front-end parity, done in the same PR — no lifecycle
+decision needed. What actually blocks it is that `--build-target` is a live
+`scan` option *and* is listed in `action/run.sh`'s
+`_extra_args_has_scan_only_flag`, so the shared `build-target` input still
+drives a real flag on a command this workstream may not touch before Phase 6.
+The ruling itself is unchanged and is the strongest remaining CONFIG case on
+either command — the flag's own help text calls it "CLI equivalent of
+`.abicheck.yml` build.targets", which is guard 2 stated by the option itself,
+against a key that already exists. Its blocker is now `scan`'s lifetime, and
+it is recorded as `deferred`, not as a keep.
+
+**Two 7i deferrals re-verified rather than copied.** `--env-matrix` and
+`--require-complete-analysis` are still blocked by `scan`: both were checked
+against `action/run.sh`'s routing predicate for this audit, and neither
+appears in `_extra_args_has_scan_only_flag`, so a `mode: scan` caller passing
+either through `extra-args` is translated onto `compare` today and removing
+it from `compare` alone would silently break that translation. Unchanged, and
+now recorded where the check runs.
+
+**Nothing else moved.** No option was added, removed, hidden, or renamed by
+7k; no verdict, gate, exit code, coverage contribution or assurance value
+changes; no machine contract changes, so no schema bump. It is a
+documentation-and-enforcement slice whose whole product is that the surface
+can no longer grow unruled. **Counts after 7k: `compare` 50, `dump` 21**
+(unchanged from 7j).
 
 Only now, with one analysis path: the CONFIG/AUTO/MERGE/REMOVE rows of §4,
 in small PRs grouped by concept —
@@ -1290,7 +1481,14 @@ PR J; **done**, including the explicit four-flag ruling above) ·
 7i the whole-surface per-flag audit (**done**, see above) — every surviving
 `compare` and `dump` option ruled against D5's three guards, with
 `--reconcile-build-context`, `--pdb-path`, `--support-promise` and
-`dump --compile-db-filter` removed and every keep or deferral named.
+`dump --compile-db-filter` removed and every keep or deferral named ·
+7j the `--variant` merge (**done**, see above) — 7i's own declined
+follow-up, reversed on the grounds that its stated rationale was an effort
+argument · 7k the exhaustive per-option ruling registry (**done**, see
+above) — every visible `compare` *and* `dump` option ruled in code, the
+D10.5 budget's nine-flag slack hole closed, and two fresh rulings
+(`--search-path`/`--ld-library-path` measured distinct, `dump
+--compression` keeping against its own AUTO row).
 
 Every PR in this phase meets the merge criteria recorded in
 `cli-cleanup-phase-two.md` — old spelling exits

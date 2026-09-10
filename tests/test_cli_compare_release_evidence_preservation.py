@@ -179,9 +179,7 @@ class TestEmbeddedInstantiationManifest:
         new_pkg = tmp_path / "new_pkg"
         _write_directory(new_pkg, new_libs)
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
         # CodeRabbit review: a bare non-empty check can pass on an unrelated
@@ -650,7 +648,13 @@ class TestReleasePackageResolutionCatchesKeyError:
             return dest
 
         with pytest.raises(click.UsageError):
-            _resolve_release_package_side(pkg, None, make_temp_dir)
+            # `side` is a *required* keyword (PR #1184, Codex second
+            # round): a call site that does not state which operand it is
+            # resolving cannot render correct `--variant old=`/`new=`
+            # remediation, so the signature refuses to let one omit it
+            # rather than defaulting to a side that would be wrong half
+            # the time.
+            _resolve_release_package_side(pkg, None, make_temp_dir, side="old")
 
 
 class TestEmbeddedManifestForEmptyVariant:
@@ -691,9 +695,7 @@ class TestEmbeddedManifestForEmptyVariant:
         new_pkg = tmp_path / "new_pkg"
         _write_directory(new_pkg, new_libs)
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
         matching = [
@@ -838,9 +840,7 @@ class TestBothSidesEmptyVariantsStillEnforceManifests:
         )
         write_project_manifest(new_pkg, new_manifest)
 
-        ec, out = _invoke(
-            "compare", str(old_pkg), str(new_pkg), "--format", "json"
-        )
+        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "--format", "json")
         doc = json.loads(out)
         bundle_findings = doc.get("bundle_findings") or []
         matching = [

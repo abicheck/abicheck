@@ -212,9 +212,10 @@ facade re-export (`frontends -> workflows -> storage`, ADR-061's layering):
   a live/live run over the equivalent loose directories would, per-library
   bundle analysis (`bundle.build_bundle_snapshot_mixed`) included.
 
-  `--old-variant`/`--new-variant` (`cli_options.variant_options`) select
-  which of a multi-variant package's `VariantRef`s to compare when a
-  package declares more than one; omitted, a package must declare exactly
+  `--variant` (`cli_options.variant_options`) selects which of a
+  multi-variant package's `VariantRef`s to compare when a package declares
+  more than one — side-scoped like every other two-sided `compare` input
+  (`--variant old=v1 --variant new=v2`; a bare value applies to both); omitted, a package must declare exactly
   one variant or the CLI raises a usage error (exit 64) naming the
   ambiguity, the same "no silent first match" discipline
   `SymbolIdentityIndex.unique_alias_match` already establishes elsewhere in

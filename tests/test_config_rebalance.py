@@ -20,6 +20,7 @@ and the exit-code scheme move to `.abicheck.yml`; the CLI keeps coarse overrides
 Precedence is **CLI > config > built-in default**, resolved once. The exit-code
 scheme is explicit (D12): passing `--severity-*` no longer silently flips it.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,10 +35,12 @@ from abicheck.cli import main
 from abicheck.cli_helpers_compare import resolve_compare_config
 from abicheck.cli_options import (
     COMPARE_FLAG_BUDGET,
-    COMPARE_FLAG_BUDGET_BASE,
-    COMPARE_FLAG_BUDGET_RAISES,
+    DUMP_FLAG_BUDGET,
+    RULINGS_BY_COMMAND,
     count_visible_options,
 )
+from abicheck.frontends.cli.options.inventory import _HELP_META_OPTION_NAMES
+from abicheck.frontends.cli.options.rulings import OptionRuling
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.serialization import snapshot_to_json
 from abicheck.severity import SeverityLevel
@@ -50,26 +53,46 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
 
 def _api_break_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
     """Drop a default argument: an API_BREAK (recompile) but not a binary break."""
-    old = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True, functions=[
-        Function(name="foo", mangled="_Z3foov", return_type="int",
-                 params=[Param(name="x", type="int", default="0")],
-                 visibility=Visibility.PUBLIC),
-    ])
-    new = AbiSnapshot(library="libfoo.so", version="2.0", from_headers=True, functions=[
-        Function(name="foo", mangled="_Z3foov", return_type="int",
-                 params=[Param(name="x", type="int")],
-                 visibility=Visibility.PUBLIC),
-    ])
+    old = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                params=[Param(name="x", type="int", default="0")],
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+    )
+    new = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[
+            Function(
+                name="foo",
+                mangled="_Z3foov",
+                return_type="int",
+                params=[Param(name="x", type="int")],
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+    )
     return old, new
 
 
 # ── precedence: CLI > config > default ─────────────────────────────────────────
 
+
 class TestConfigPrecedence:
     def test_default_when_nothing_set(self) -> None:
         r = resolve_compare_config(
             None,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.severity.abi_breaking == SeverityLevel.ERROR  # preset default
         assert r.scope_public is True
@@ -88,7 +111,8 @@ class TestConfigPrecedence:
         )
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.severity.abi_breaking == SeverityLevel.WARNING
         assert r.scope_public is False
@@ -113,7 +137,7 @@ class TestConfigPrecedence:
         r = resolve_compare_config(
             cfg,
             cli_severity_preset=None,
-            cli_scope_public=True,               # CLI override
+            cli_scope_public=True,  # CLI override
         )
         assert r.scope_public is True
         assert r.severity.abi_breaking == SeverityLevel.WARNING
@@ -125,7 +149,9 @@ class TestConfigPrecedence:
         # the only source, so there is no CLI half left to merge.
         cfg = BuildConfig(public_symbols=["_Z3foov"])
         r = resolve_compare_config(
-            cfg, cli_severity_preset=None, cli_scope_public=None,
+            cfg,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert set(r.public_symbols) == {"_Z3foov"}
 
@@ -140,14 +166,16 @@ class TestConfigPrecedence:
         cfg = BuildConfig()  # no exit_code_scheme field exists to set
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset="strict", cli_scope_public=None,
+            cli_severity_preset="strict",
+            cli_scope_public=None,
         )
         assert r.exit_code_scheme == "severity"
 
     def test_debug_and_show_redundant_default(self) -> None:
         r = resolve_compare_config(
             None,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.debug_format is None
         assert r.dwarf_only is False
@@ -158,12 +186,16 @@ class TestConfigPrecedence:
     def test_debug_and_show_redundant_config_beats_default(self) -> None:
         # ADR-040 Lever 2: the demoted knobs come from the debug:/scope: blocks.
         cfg = BuildConfig(
-            debug_format="dwarf", debug_dwarf_only=True, debug_debuginfod=True,
-            debug_debuginfod_url="https://dbginfo.example", scope_show_redundant=True,
+            debug_format="dwarf",
+            debug_dwarf_only=True,
+            debug_debuginfod=True,
+            debug_debuginfod_url="https://dbginfo.example",
+            scope_show_redundant=True,
         )
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.debug_format == "dwarf"
         assert r.dwarf_only is True
@@ -193,7 +225,9 @@ class TestConfigPrecedence:
 
         params = inspect.signature(resolve_compare_config).parameters
         for removed in (
-            "cli_debug_format", "cli_dwarf_only", "cli_debuginfod",
+            "cli_debug_format",
+            "cli_dwarf_only",
+            "cli_debuginfod",
             "cli_debuginfod_url",
         ):
             assert removed not in params, (
@@ -201,7 +235,9 @@ class TestConfigPrecedence:
                 "Phase 7 override was supposed to be deleted, not just hidden"
             )
         cfg = BuildConfig(
-            debug_format="dwarf", debug_dwarf_only=True, scope_show_redundant=True,
+            debug_format="dwarf",
+            debug_dwarf_only=True,
+            scope_show_redundant=True,
         )
         r = resolve_compare_config(cfg, cli_severity_preset=None, cli_scope_public=None)
         assert r.debug_format == "dwarf"
@@ -214,7 +250,8 @@ class TestConfigPrecedence:
         unset."""
         r = resolve_compare_config(
             None,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.on_incomplete_scope == "warn"
         assert r.fail_on_removed_library is False
@@ -234,7 +271,8 @@ class TestConfigPrecedence:
         )
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.on_incomplete_scope == "block"
         assert r.fail_on_removed_library is True
@@ -250,8 +288,10 @@ class TestConfigPrecedence:
 
         params = inspect.signature(resolve_compare_config).parameters
         for removed in (
-            "cli_dso_only", "cli_fail_on_removed_library",
-            "cli_on_incomplete_scope", "cli_include_private_dso",
+            "cli_dso_only",
+            "cli_fail_on_removed_library",
+            "cli_on_incomplete_scope",
+            "cli_include_private_dso",
         ):
             assert removed not in params, (
                 f"resolve_compare_config still accepts {removed!r} -- the "
@@ -264,7 +304,8 @@ class TestConfigPrecedence:
         `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`."""
         r = resolve_compare_config(
             None,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.resource_limits_max_bundle_facts_decode_nodes is None
 
@@ -275,7 +316,8 @@ class TestConfigPrecedence:
         cfg = BuildConfig(resource_limits_max_bundle_facts_decode_nodes=5_000_000)
         r = resolve_compare_config(
             cfg,
-            cli_severity_preset=None, cli_scope_public=None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
         )
         assert r.resource_limits_max_bundle_facts_decode_nodes == 5_000_000
 
@@ -291,19 +333,31 @@ class TestConfigPrecedence:
 
 # ── round-trip ─────────────────────────────────────────────────────────────────
 
+
 class TestConfigRoundtrip:
     def test_dataclass_roundtrip(self) -> None:
         cfg = BuildConfig(
-            system="cmake", query="cmake -S . -B build", compile_db="build/x.json",
-            public_headers=["include"], exclude=["internal"], graph_detail="full",
-            severity_preset="strict", severity_abi_breaking="error",
-            severity_potential_breaking="warning", severity_quality_issues="info",
-            severity_addition="info", scope_public=False,
-            collapse_versioned_symbols=True, public_symbols=["_Z3foov"],
+            system="cmake",
+            query="cmake -S . -B build",
+            compile_db="build/x.json",
+            public_headers=["include"],
+            exclude=["internal"],
+            graph_detail="full",
+            severity_preset="strict",
+            severity_abi_breaking="error",
+            severity_potential_breaking="warning",
+            severity_quality_issues="info",
+            severity_addition="info",
+            scope_public=False,
+            collapse_versioned_symbols=True,
+            public_symbols=["_Z3foov"],
             scope_show_redundant=True,
-            suppression_strict=True, suppression_require_justification=False,
+            suppression_strict=True,
+            suppression_require_justification=False,
             source_method="s5",
-            debug_format="dwarf", debug_dwarf_only=True, debug_debuginfod=True,
+            debug_format="dwarf",
+            debug_dwarf_only=True,
+            debug_debuginfod=True,
             debug_debuginfod_url="https://dbginfo.example",
             version=2,
         )
@@ -314,13 +368,17 @@ class TestConfigRoundtrip:
             BuildConfig.from_dict({"debug": {"format": "elf"}})
 
     def test_debug_block_parses_and_roundtrips(self) -> None:
-        cfg = BuildConfig.from_dict({
-            "debug": {
-                "format": "btf", "dwarf_only": True,
-                "debuginfod": True, "debuginfod_url": "https://x.example",
-            },
-            "scope": {"show_redundant": True},
-        })
+        cfg = BuildConfig.from_dict(
+            {
+                "debug": {
+                    "format": "btf",
+                    "dwarf_only": True,
+                    "debuginfod": True,
+                    "debuginfod_url": "https://x.example",
+                },
+                "scope": {"show_redundant": True},
+            }
+        )
         assert cfg.debug_format == "btf"
         assert cfg.debug_dwarf_only is True
         assert cfg.debug_debuginfod is True
@@ -329,7 +387,9 @@ class TestConfigRoundtrip:
         assert BuildConfig.from_dict(cfg.to_dict()) == cfg
 
     def test_resource_limits_block_invalid_type_rejected(self) -> None:
-        with pytest.raises(ValueError, match="resource_limits.max_bundle_facts_decode_nodes"):
+        with pytest.raises(
+            ValueError, match="resource_limits.max_bundle_facts_decode_nodes"
+        ):
             BuildConfig.from_dict(
                 {"resource_limits": {"max_bundle_facts_decode_nodes": "lots"}}
             )
@@ -343,8 +403,10 @@ class TestConfigRoundtrip:
 
     def test_yaml_file_roundtrip(self, tmp_path: Path) -> None:
         cfg = BuildConfig(
-            severity_preset="strict", scope_public=False,
-            suppression_strict=True, version=1,
+            severity_preset="strict",
+            scope_public=False,
+            suppression_strict=True,
+            version=1,
         )
         p = tmp_path / ".abicheck.yml"
         p.write_text(yaml.safe_dump(cfg.to_dict()), encoding="utf-8")
@@ -370,64 +432,122 @@ class TestConfigRoundtrip:
 
 # ── flag budget (D10.5) ────────────────────────────────────────────────────────
 
+
 class TestFlagBudget:
-    def test_compare_under_budget(self) -> None:
-        visible = count_visible_options(main.commands["compare"])
-        assert visible <= COMPARE_FLAG_BUDGET, (
-            f"compare exposes {visible} visible flags (> {COMPARE_FLAG_BUDGET}); "
-            "demote stable project settings to .abicheck.yml (ADR-037 D4), or — if "
-            "the flag is a genuine per-run analysis input — add a documented entry "
-            "to COMPARE_FLAG_BUDGET_RAISES in cli_options.py."
+    """ADR-068 D5 / plan Phase 7k: an *exact bijection* between each
+    command's visible options and its written rulings.
+
+    This replaces the superseded ``BASE + len(RAISES)`` budget, whose own
+    docstring claimed "a new visible flag cannot be slipped in by silently
+    consuming slack" while the assertion was ``visible <= budget``. Because
+    ``BASE`` was never lowered for every removed flag, the two diverged:
+    measured at replacement time, ``visible=48`` against a budget of ``57``
+    -- nine flags of slack, one of which (``--budget``) had already landed
+    with no ledger entry at all. ``test_the_superseded_budget_shape_would_
+    have_missed_an_unruled_flag`` below is the executable statement of that
+    bug class rather than a prose note: it constructs the old comparison
+    over a surface with an unruled flag and shows it passing.
+    """
+
+    @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
+    def test_every_visible_option_carries_a_ruling(self, command: str) -> None:
+        rulings = RULINGS_BY_COMMAND[command]
+        missing = sorted(_visible_canonical_flags(command) - rulings.keys())
+        assert not missing, (
+            f"{command} exposes {missing} with no ADR-068 D5 ruling. Add an "
+            "entry to frontends/cli/options/rulings.py saying which of D5's "
+            "three guards lets the option in -- a per-run operand, not a "
+            "duplicate spelling, not an analysis-disabling hatch -- or "
+            "demote the setting to .abicheck.yml."
         )
 
-    def test_budget_is_derived_from_ledger(self) -> None:
-        """The ceiling must equal BASE + the documented raises, never a bare number.
-
-        This is the guard that closes the ``--post-manifest`` gap: because the
-        only way to raise the budget is to add a rationale-carrying ledger entry,
-        a new visible flag can no longer be slipped in by silently consuming
-        slack between a hand-set number and the real count.
-        """
-        assert (
-            COMPARE_FLAG_BUDGET
-            == COMPARE_FLAG_BUDGET_BASE + len(COMPARE_FLAG_BUDGET_RAISES)
+    @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
+    def test_no_ruling_outlives_its_option(self, command: str) -> None:
+        rulings = RULINGS_BY_COMMAND[command]
+        stale = sorted(rulings.keys() - _visible_canonical_flags(command))
+        assert not stale, (
+            f"{command} rulings name {stale}, which are no longer visible "
+            "options -- drop the entries so the table cannot accumulate "
+            "justifications for surface that no longer exists."
         )
 
-    def test_every_ledger_flag_is_visible_and_documented(self) -> None:
-        """Each ledger key must be a currently-visible compare flag with a reason.
+    @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
+    def test_the_budget_is_exactly_the_ruled_set(self, command: str) -> None:
+        """No slack, by construction: the ceiling *is* the ruled set's size."""
+        budget = {"compare": COMPARE_FLAG_BUDGET, "dump": DUMP_FLAG_BUDGET}[command]
+        assert budget == len(RULINGS_BY_COMMAND[command])
+        assert count_visible_options(main.commands[command]) == budget
 
-        Keeps the ledger honest: a flag later demoted to hidden/config (or removed)
-        must have its entry dropped, so the ledger cannot accumulate stale
-        justifications for flags the surface no longer exposes.
-        """
-        cmd = main.commands["compare"]
-        visible = {
-            opt
-            for p in cmd.params
-            if getattr(p, "param_type_name", None) == "option"
-            and not getattr(p, "hidden", False)
-            for opt in p.opts
-        }
-        for flag, rationale in COMPARE_FLAG_BUDGET_RAISES.items():
-            assert flag in visible, (
-                f"{flag} is in COMPARE_FLAG_BUDGET_RAISES but is not a visible "
-                "compare flag — drop its ledger entry (and adjust BASE if needed)."
+    @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
+    def test_every_ruling_is_substantive(self, command: str) -> None:
+        for flag, ruling in RULINGS_BY_COMMAND[command].items():
+            assert ruling.rationale.strip(), f"{flag} has an empty rationale"
+            assert len(ruling.rationale) >= 60, (
+                f"{flag}'s rationale is too short to be a ruling -- state "
+                "which guard it clears and why, the way 7d/7i did."
             )
-            assert rationale.strip(), f"{flag} ledger entry has an empty rationale"
 
-    def test_no_undocumented_visible_flag_beyond_base(self) -> None:
-        """Visible count above BASE must be fully covered by ledger entries.
+    @pytest.mark.parametrize("command", sorted(RULINGS_BY_COMMAND))
+    def test_a_deferral_names_its_blocker(self, command: str) -> None:
+        """A deferral without an owner silently becomes a permanent keep."""
+        for flag, ruling in RULINGS_BY_COMMAND[command].items():
+            if ruling.disposition == "deferred":
+                assert ruling.blocker, f"{flag} is deferred with no blocker"
+            else:
+                assert ruling.blocker is None, (
+                    f"{flag} is a keep but names a blocker -- a keep pending "
+                    "someone else's work is a deferral, say so."
+                )
 
-        Equivalent to ``visible <= budget`` today, but stated in ledger terms so
-        the failure message points a future author straight at the fix: any flag
-        pushing the count past BASE needs a COMPARE_FLAG_BUDGET_RAISES rationale.
+    def test_a_deferral_and_a_keep_are_structurally_distinguishable(self) -> None:
+        """The dataclass rejects the two ways this table could lie: a
+        deferral with nobody on the hook, and a keep dressed as one."""
+        with pytest.raises(ValueError):
+            OptionRuling("deferred", "x" * 80)
+        with pytest.raises(ValueError):
+            OptionRuling("per_run_operand", "x" * 80, blocker="someday")
+
+    def test_the_superseded_budget_shape_would_have_missed_an_unruled_flag(
+        self,
+    ) -> None:
+        """The bug class, executed rather than described.
+
+        Reconstructs the retired ``visible <= BASE + len(RAISES)`` check over
+        a surface carrying one flag that appears in neither, and shows it
+        passing -- then shows the bijection check failing on the same input.
+        A regression test pinned to ``--budget`` alone would only foreclose
+        that one flag; what actually failed was the *shape* of the check, so
+        that is what is asserted here.
         """
-        visible = count_visible_options(main.commands["compare"])
-        assert visible - COMPARE_FLAG_BUDGET_BASE <= len(COMPARE_FLAG_BUDGET_RAISES), (
-            f"compare has {visible} visible flags; BASE is "
-            f"{COMPARE_FLAG_BUDGET_BASE} and only {len(COMPARE_FLAG_BUDGET_RAISES)} "
-            "raises are documented — add a ledger entry for the new flag."
-        )
+        base, raises = 41, {f"--ruled-{i}": "why" for i in range(16)}
+        visible_with_an_unruled_flag = 48
+
+        assert visible_with_an_unruled_flag <= base + len(raises)
+
+        rulings = {flag: _keep_stub() for flag in raises}
+        live = set(raises) | {"--slipped-in-unruled"}
+        assert sorted(live - rulings.keys()) == ["--slipped-in-unruled"]
+
+
+def _keep_stub() -> OptionRuling:
+    return OptionRuling("per_run_operand", "stub rationale, long enough to pass")
+
+
+def _visible_canonical_flags(command: str) -> set[str]:
+    """Each visible option's canonical (longest) spelling, help meta aside."""
+    return {
+        max(p.opts, key=len)
+        for p in main.commands[command].params
+        if getattr(p, "param_type_name", None) == "option"
+        and not getattr(p, "hidden", False)
+        and getattr(p, "name", None) not in _HELP_META_OPTION_NAMES
+    }
+
+
+class TestRemovedConfigDuplicates:
+    """Split out of ``TestFlagBudget`` when Phase 7k replaced that class's
+    budget assertions: these pin *absence* of the removed hidden/config
+    duplicates, which is a separate contract from the ruling bijection."""
 
     #: The hidden-flag families that became *removed* families. A hidden flag
     #: is still a flag: it parses, it takes precedence over the config key it
@@ -438,25 +558,38 @@ class TestFlagBudget:
     #: made before, and the reason they are not simply deleted alongside the
     #: flags: "hidden" is exactly the state a re-introduction would land in.
     REMOVED_CONFIG_DUPLICATES = (
-        "--severity-abi-breaking", "--severity-potential-breaking",
-        "--severity-quality-issues", "--severity-addition",
-        "--strict-suppressions", "--require-justification",
-        "--collapse-versioned-symbols", "--public-symbol",
-        "--public-symbols-list", "--show-redundant", "--no-show-redundant",
+        "--severity-abi-breaking",
+        "--severity-potential-breaking",
+        "--severity-quality-issues",
+        "--severity-addition",
+        "--strict-suppressions",
+        "--require-justification",
+        "--collapse-versioned-symbols",
+        "--public-symbol",
+        "--public-symbols-list",
+        "--show-redundant",
+        "--no-show-redundant",
         # ADR-068 D5 / Phase 7a (one-comparison-product.md §6 Phase 7 item
         # 7a): the debug-resolution knobs joined this list too -- previously
         # the one family D5 exempted (hidden-but-kept, see the now-removed
         # test_debug_resolution_family_stays_hidden), but "hidden but
         # accepted still counts as public surface" (ADR-068 D5) applies to
         # them exactly the same as every other entry above.
-        "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
-        "--no-debuginfod", "--no-dwarf-only",
+        "--debug-format",
+        "--debuginfod",
+        "--debuginfod-url",
+        "--dwarf-only",
+        "--no-debuginfod",
+        "--no-dwarf-only",
         # Phase 7d (one-comparison-product.md §4.1): the release/bundle
         # topology knobs joined this list too -- gate.fail_on_removed_library/
         # release.dso_only/release.include_private_dso/scope.on_incomplete
         # in .abicheck.yml are their only source now, no CLI escape hatch.
-        "--dso-only", "--fail-on-removed-library", "--no-fail-on-removed-library",
-        "--include-private-dso", "--on-incomplete-scope",
+        "--dso-only",
+        "--fail-on-removed-library",
+        "--no-fail-on-removed-library",
+        "--include-private-dso",
+        "--on-incomplete-scope",
     )
 
     @staticmethod
@@ -490,8 +623,12 @@ class TestFlagBudget:
         hidden = self._option_spellings(cmd, hidden_only=True)
         visible = self._option_spellings(cmd, hidden_only=False)
         for flag in (
-            "--debug-format", "--debuginfod", "--debuginfod-url", "--dwarf-only",
-            "--no-debuginfod", "--no-dwarf-only",
+            "--debug-format",
+            "--debuginfod",
+            "--debuginfod-url",
+            "--dwarf-only",
+            "--no-debuginfod",
+            "--no-dwarf-only",
         ):
             assert flag not in hidden, f"{flag} should be deleted outright, not hidden"
             assert flag not in visible, f"{flag} should be deleted outright"
@@ -499,8 +636,14 @@ class TestFlagBudget:
 
     @pytest.mark.parametrize(
         "flag",
-        ["--dwarf-only", "--no-dwarf-only", "--debuginfod", "--no-debuginfod",
-         "--debuginfod-url", "--debug-format"],
+        [
+            "--dwarf-only",
+            "--no-dwarf-only",
+            "--debuginfod",
+            "--no-debuginfod",
+            "--debuginfod-url",
+            "--debug-format",
+        ],
     )
     def test_removed_debug_flags_exit_usage_error_on_compare(
         self, tmp_path: Path, flag: str
@@ -518,7 +661,8 @@ class TestFlagBudget:
         # take none.
         extra = ["x"] if flag in ("--debuginfod-url", "--debug-format") else []
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), flag, *extra],
+            main,
+            ["compare", str(old), str(new), flag, *extra],
         )
         assert result.exit_code == 64, result.output
         assert "No such option" in result.output
@@ -526,8 +670,13 @@ class TestFlagBudget:
 
     @pytest.mark.parametrize(
         "flag",
-        ["--dso-only", "--fail-on-removed-library", "--no-fail-on-removed-library",
-         "--include-private-dso", "--on-incomplete-scope"],
+        [
+            "--dso-only",
+            "--fail-on-removed-library",
+            "--no-fail-on-removed-library",
+            "--include-private-dso",
+            "--on-incomplete-scope",
+        ],
     )
     def test_removed_release_topology_flags_exit_usage_error_on_compare(
         self, tmp_path: Path, flag: str
@@ -545,7 +694,8 @@ class TestFlagBudget:
         # *next* token; the boolean flags take none.
         extra = ["warn"] if flag == "--on-incomplete-scope" else []
         result = CliRunner().invoke(
-            main, ["compare", str(old), str(new), flag, *extra],
+            main,
+            ["compare", str(old), str(new), flag, *extra],
         )
         assert result.exit_code == 64, result.output
         assert "No such option" in result.output
@@ -563,11 +713,15 @@ class TestFlagBudget:
         # one-comparison-product.md Phase 5 removed --show-filtered (the
         # ledger it echoed is unconditional; `--view filtered` renders it),
         # so `--view` is the coarse rendering override that stays visible.
-        for flag in ("--severity-preset", "--view", "--depth",
-                     "--scope-public-headers",
-                     # ADR-040 Lever 2 carve-out: the coarse debug-root
-                     # override stays visible.
-                     "--debug-root"):
+        for flag in (
+            "--severity-preset",
+            "--view",
+            "--depth",
+            "--scope-public-headers",
+            # ADR-040 Lever 2 carve-out: the coarse debug-root
+            # override stays visible.
+            "--debug-root",
+        ):
             assert flag in visible, f"{flag} must remain a visible coarse override (D4)"
         # Phase 7 (one-comparison-product.md §4.1): the toolchain family
         # (--compiler/--compiler-prefix/--compiler-option/--sysroot/
@@ -581,6 +735,7 @@ class TestFlagBudget:
 
 
 # ── exit-code scheme is fully automatic (CLI cleanup phase two PR G2) ──────────
+
 
 class TestExitSchemeExplicit:
     """Before PR G2 (ADR-037 D12), an explicit ``--exit-code-scheme``/
@@ -606,8 +761,15 @@ class TestExitSchemeExplicit:
         # legacy verdict (API_BREAK -> 2) instead -- the flag itself is gone.
         removed_flag = CliRunner().invoke(
             main,
-            ["compare", str(old_f), str(new_f),
-             "--severity-preset", "default", "--exit-code-scheme", "legacy"],
+            [
+                "compare",
+                str(old_f),
+                str(new_f),
+                "--severity-preset",
+                "default",
+                "--exit-code-scheme",
+                "legacy",
+            ],
         )
         assert removed_flag.exit_code == 64
         assert "No such option" in removed_flag.output
@@ -620,8 +782,15 @@ class TestExitSchemeExplicit:
         cfg.write_text(yaml.safe_dump({"exit_code_scheme": "legacy"}), encoding="utf-8")
         res = CliRunner().invoke(
             main,
-            ["compare", str(old_f), str(new_f), "--config", str(cfg),
-             "--severity-preset", "default"],
+            [
+                "compare",
+                str(old_f),
+                str(new_f),
+                "--config",
+                str(cfg),
+                "--severity-preset",
+                "default",
+            ],
         )
         # The unrecognized `exit_code_scheme:` key is a hard error, same as
         # any other unknown `.abicheck.yml` top-level key
@@ -640,13 +809,38 @@ class TestExitSchemeExplicit:
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
-        old = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True, functions=[
-            Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
-            Function(name="bar", mangled="_Z3barv", return_type="void", visibility=Visibility.PUBLIC),
-        ])
-        new = AbiSnapshot(library="libfoo.so", version="2.0", from_headers=True, functions=[
-            Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
-        ])
+        old = AbiSnapshot(
+            library="libfoo.so",
+            version="1.0",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(
+                    name="bar",
+                    mangled="_Z3barv",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
+        new = AbiSnapshot(
+            library="libfoo.so",
+            version="2.0",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="_Z3foov",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+        )
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         cfg = tmp_path / ".abicheck.yml"
@@ -659,14 +853,29 @@ class TestExitSchemeExplicit:
         empty_cfg.write_text(yaml.safe_dump({}), encoding="utf-8")
         baseline = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--config", str(empty_cfg),
-             "--format", "json"],
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--config",
+                str(empty_cfg),
+                "--format",
+                "json",
+            ],
         )
         assert baseline.exit_code == 4
         # With config downgrading abi_breaking, the fan-out no longer errors.
         res = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"],
+            [
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--config",
+                str(cfg),
+                "--format",
+                "json",
+            ],
         )
         assert res.exit_code == 0
 
@@ -713,7 +922,9 @@ class TestConfigStrictness:
                 {"sources": {"public_headers": ["api.h"], "nonsense": 1}}
             )
 
-    def test_known_config_does_not_raise(self, recwarn: pytest.WarningsRecorder) -> None:
+    def test_known_config_does_not_raise(
+        self, recwarn: pytest.WarningsRecorder
+    ) -> None:
         BuildConfig.from_dict(
             {
                 "version": 1,
