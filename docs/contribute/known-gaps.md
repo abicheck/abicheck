@@ -6796,18 +6796,45 @@ committed snapshots exits `2`, while `case143`'s `RISK`-classified finding
 exits `0`. `compare --no-baseline` exits `0` for all of them: ADR-068 D2 says
 an audit reports no compatibility verdict, and `2` is the compatibility
 family's own source-break code, so emitting it would be manufacturing
-exactly the signal D2 forbids. The CLI is at least loud rather than silently
-ignoring the request — `--severity-preset` with `--no-baseline` is a usage
-error (exit `64`) naming this reason, not a no-op.
+exactly the signal D2 forbids. The CLI was at least loud rather than
+silently ignoring the request — `--severity-preset` with `--no-baseline`
+used to be a usage error (exit `64`) naming this reason, not a no-op.
 
-The gap is that there is then **no** way to gate a CI job on an audit finding
-today, which a `scan` user migrating a gating job needs. Closing it means an
-orthogonal audit-gate axis (its own exit code, folded with `max` like the
-coverage and evidence-contract axes, never `2`/`4`), plus deciding whether it
-is on by default or opt-in — an ADR-068 amendment, not a bug fix, which is
-why this PR records it rather than inventing the semantics. Until then
-`scan` must stay reachable for a gating audit job, and its retirement (§3 of
-`docs/contribute/plans/one-comparison-product.md`) is blocked on this.
+**Closed (2026-09-10 ADR-068 amendment).** `policy/audit_gate_exit.py` adds
+the orthogonal audit-gate axis this entry called for: its own exit code
+(`3` — surveyed against every code `compare`/`scan --against` already use,
+the one small integer none of them claims), folded with `max` exactly like
+the coverage and evidence-contract axes, so it can raise a clean `0` and can
+never lower or be mistaken for a `2`/`4`. It is **opt-in**, not on by
+default (every pre-existing `compare --no-baseline` invocation's exit code
+is unchanged), activated by passing `--severity-preset` (any value except
+`info-only`) — that option is no longer a usage error under
+`--no-baseline`; passing it is now the declaration. The axis's own gating
+rule reproduces legacy `scan`'s exact partition — `BREAKING_KINDS |
+API_BREAK_KINDS` gates, `RISK_KINDS`/`COMPATIBLE_KINDS` does not — read
+directly off `checker_policy.py`'s registry-derived sets, deliberately
+*not* routed through `severity.py`'s own four-bucket category model (that
+model's `potential_breaking` bucket is `API_BREAK_KINDS ∪ RISK_KINDS`,
+merged by design, which would have gated `case143`'s `RISK`-classified
+finding the same as `case148`/`case149`'s `API_BREAK`-classified ones —
+see the ADR amendment for the full reasoning this entry's fix rejected).
+Verified against the exact reproduction this entry asked for:
+`tests/parity/test_no_baseline_audit_corpus_parity.py`'s
+`test_audit_gate_axis_matches_legacy_scan_gating` runs the whole G20 corpus
+with `--severity-preset default` and asserts `case148`/`case149` exit `3`
+while every other fixture, `case143` included, stays `0` — the same split
+`test_scan_baseline_exit_codes_documented_for_the_gated_fixtures` pins for
+legacy `scan` itself on the same committed snapshots. The typed Python API
+carries no `--no-baseline` support at all yet, so there is no
+`CompareResult`-shaped consumer to extend today; the composite Action does
+not invoke `compare --no-baseline` for `mode: scan` either (the 2026-09-09
+amendment above already records that gap as separately blocked), so there
+is no live `action/run.sh` call site to translate onto today — both are
+recorded as the amendment's own residual scope, not silently dropped. See
+[ADR-068's 2026-09-10 amendment](adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)
+for the full account. `scan`'s retirement (§3 of
+`docs/contribute/plans/one-comparison-product.md`) is no longer blocked on
+this gap specifically; the plan's own tracking is updated to match.
 
 **An audit's contract-coverage ledger still names an `old` side.** Now that
 `compare --no-baseline --contract public` publishes

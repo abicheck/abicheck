@@ -470,6 +470,148 @@ steps), since audit-only `mode: scan` still needs the legacy CLI until that
 closes. Only the two (c) items (`--budget`, the depth evidence-contract
 floor) are implemented in this commit, on `compare` itself.
 
+## Amendment (2026-09-10): the audit-gate exit axis
+
+`docs/contribute/known-gaps.md`'s "no way to gate a CI job on an audit
+finding" entry (added by the 2026-09-09 amendment above) named a real,
+user-facing regression the D2/D3 migration introduces on its own: legacy
+`scan`'s audit mode derives a *verdict* from its own candidate-side
+findings and exits `2` when one is `API_BREAK`-classified — verified live,
+`scan` on `case148_xcheck_header_build_mismatch`'s and
+`case149_xcheck_odr_variant`'s committed snapshots exits `2`, while
+`case143_audit_accidental_export`'s `RISK`-classified finding exits `0`.
+`compare --no-baseline` exits `0` for all three, correctly, per D2 — an
+audit reports no compatibility verdict, and `2` is that family's own
+source-break code. The consequence is that a `scan`-based gating CI job has
+no `compare --no-baseline` equivalent it can migrate to. This amendment
+closes that gap without reopening D2: no `--no-baseline` run may ever emit
+`2` or `4`.
+
+### Decision: a new orthogonal axis, exit code `3`, opt-in via `--severity-preset`
+
+**The axis.** `policy/audit_gate_exit.py`'s
+`audit_gate_exit_contribution` reproduces legacy `scan`'s own partition —
+`BREAKING_KINDS | API_BREAK_KINDS` gates, `RISK_KINDS`/`COMPATIBLE_KINDS`
+does not — over the audit's already-computed `findings[]`, and contributes
+exactly one new code, `3`, folded with `max` exactly like every other
+orthogonal axis this codebase already has (`contract_coverage_exit.py`,
+`depth_evidence_contract.py`, `analysis_assurance.py`): it can raise a
+clean `0`, and it can never lower, or be mistaken for, a `2`/`4` — D2's
+invariant, unchanged.
+
+**Why `3`.** Surveyed against every code `compare`/`scan --against`
+currently emit (`docs/reference/exit-codes.md`, `severity.py`'s
+`_CATEGORY_EXIT_CODES`, `contract_coverage_exit.py`,
+`depth_evidence_contract.py`/`exit_decision_precedence.py`,
+ADR-065's completeness axis): `0` (clean), `1` (severity-aware error /
+contract-coverage / analysis-assurance / incomplete-scope), `2`
+(compatibility source-break — reserved, per D2, never emitted by an
+audit), `4` (compatibility ABI-break — reserved, same reason), `5`
+(budget overflow), `6` (not-comparable, legacy scheme), `7` (evidence
+contract), `8` (removed required library), `64` (usage error). `3` is the
+one small integer in that family no axis currently uses.
+
+**Opt-in, not on by default — and reusing `--severity-preset` rather than a
+new flag.** Two designs were weighed:
+
+- *(a) default-on.* Every existing `compare --no-baseline` invocation's
+  exit code would change the moment this axis has anything to say, with no
+  action from the caller. This repository's own contract ("don't change a
+  public interface without an ADR and migration") forbids exactly this
+  unless the ADR explicitly accepts the cost, and there is no offsetting
+  benefit: a CI job that was never told to gate on audit findings should
+  not silently start failing.
+- *(b) opt-in.* The axis contributes `0` unless the invocation explicitly
+  asked for it, so every pre-existing invocation is bit-for-bit unchanged.
+  The cost is the mirror image of (a): a `scan`-to-`compare --no-baseline`
+  migration that forgets to opt in gets a *silently non-gating* job where
+  `scan` used to gate — exactly the "record before disposing" risk
+  `vision.md` warns about, except on the *exit code* rather than a
+  finding. This is mitigated, not eliminated, by making the opt-in the
+  same flag a `scan`-based gating job already had reason to reach for:
+
+Adopted: **(b), opt-in, activated by passing `--severity-preset`** (any
+value except `info-only`) to `compare --no-baseline`. Before this
+amendment, `--severity-preset` under `--no-baseline` was a hard usage
+error (exit `64`) naming this exact gap
+(`no_baseline_rulings._UNSUPPORTED_OPTIONS["severity_preset"]`); it is now
+legal there, and passing it is the declaration. This was chosen over a
+bespoke `--audit-gate` boolean for two reasons: it reuses a flag every
+`scan`-migrating CI author already reaches for to express "I want this run
+to gate" on a two-sided `compare`, rather than teaching a second spelling
+of the same intent; and it gives the migration guidance a single, concrete
+sentence — *"a `scan`-based gating job must add `--severity-preset
+default` (or `strict`) to its `compare --no-baseline` invocation to keep
+gating on a hygiene finding; a non-gating job needs no change."*
+`info-only` (`SeverityLevel.INFO` on every category, the same "don't gate
+anything" request it is on a two-sided `compare`) is the one preset value
+that does **not** enable the axis — `audit_gate_enabled_for_severity_preset`
+is the single function this decision is read from, so the CLI and any
+future typed-API caller cannot drift on what "opted in" means.
+
+**Why the axis does not route through `severity.py`'s category model,
+even though `--severity-preset` activates it.** `severity.py`'s own
+`IssueCategory`/`SeverityConfig` split findings into four buckets, and by
+that module's own docstring `potential_breaking` is **`API_BREAK_KINDS ∪
+RISK_KINDS`** — deliberately merged, because a severity preset answers "how
+strict should review-worthy findings be", not "does this specific finding
+require recompilation". Routing this axis's own gating rule through that
+bucket (option (a) named in the module map's own task description) would
+have gated `case143`'s `RISK`-classified finding identically to
+`case148`/`case149`'s `API_BREAK`-classified ones the moment
+`potential_breaking` reached `error` — reintroducing, under a different
+name, the exact over-gating regression the reproduction requirement this
+amendment was written against forbids. So `--severity-preset`'s *value* is
+read only as the activation signal (`info-only` or not); the axis's own
+gating rule reads `BREAKING_KINDS`/`API_BREAK_KINDS` membership directly,
+unchanged from what legacy `scan` computed. This reuses the registry-
+derived classification sets `checker_policy.py` already exports, per this
+file's own "Adding a new ChangeKind" procedure — it does not invent a
+second taxonomy.
+
+**What is, and is not, wired.** The axis is folded into
+`report/no_baseline.py`'s `no_baseline_exit_code`/
+`compute_no_baseline_document` (every format — `json`, `markdown`, `sarif`,
+`junit`, `oneline` — reads the same resolved `exit_axes`/`exit_code`), and
+the native `compare --no-baseline` CLI
+(`frontends/cli/commands/compare_no_baseline.py`) derives the opt-in from
+the resolved `--severity-preset` value. The typed Python API does not carry
+`--no-baseline` at all yet (`CompareRequest`/`CompareResult` have no
+`declared_absent`/audit-mode field — verified, no reference anywhere under
+`service*.py`/`checker_types.py`), so there is no `CompareResult`-shaped
+consumer to extend today; this stays true to "read, don't re-derive" by
+having exactly one axis owner (`policy/audit_gate_exit.py`) ready for that
+front end the day it exists, rather than duplicating the rule into a second
+module now. The composite GitHub Action does not invoke
+`compare --no-baseline` for `mode: scan`'s audit-only path either — the
+2026-09-09 amendment above records that audit-only `mode: scan` still
+routes to the legacy `scan` CLI unconditionally, pending a separate,
+already-tracked gap (`compare --no-baseline` gaining parity on
+`--sources`/`--build-info`/`--depth`/cross-toolchain flags and `--dry-run`
+honored there). There is therefore no live `action/run.sh` call site to
+translate `mode: scan`'s existing gating behavior onto today; when that
+migration lands, translating a gating `mode: scan` job means passing
+`--severity-preset` through to the `compare --no-baseline` invocation it
+assembles, and labelling exit `3` in the Action's own verdict vocabulary
+(a new `AUDIT_GATE` verdict, alongside `COVERAGE_INCOMPLETE`/
+`SEVERITY_ERROR`) rather than folding it into the generic `ERROR` arm.
+
+**Verification.** `tests/parity/test_no_baseline_audit_corpus_parity.py`
+extends the G20 corpus with `test_audit_gate_axis_matches_legacy_scan_
+gating` (every one of the eleven fixtures, with `--severity-preset
+default`: `case148`/`case149` exit `3`, every other fixture — `case143`
+included — exits `0`), `test_audit_gate_axis_requires_opt_in` (no flag,
+every fixture stays `0`), `test_audit_gate_axis_disabled_by_info_only_
+preset`, and `test_scan_baseline_exit_codes_documented_for_the_gated_
+fixtures` (pins the legacy `scan` exit codes this whole amendment is
+measured against, on the same committed snapshots). Unit tests
+(`tests/test_audit_gate_exit.py`) and a property test
+(`tests/test_audit_gate_exit_properties.py`, generated combinations of this
+axis alongside the other `max`-folded axes) cover the module directly.
+
+**Status.** Implemented. `docs/contribute/known-gaps.md`'s matching entry
+is updated to record this as closed.
+
 ## Alternatives considered
 
 **Keep `scan`, make `compare` call into it.** Rejected: it preserves two
