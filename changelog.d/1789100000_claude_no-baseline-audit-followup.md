@@ -24,9 +24,12 @@
   reviewer needs to decide whether it still applies. Every projection now
   carries the run's own disposition-ledger record (rule id, source file,
   reason, label, expiry) as `suppression_provenance`, joined by object
-  identity through the same `rule_for` lookup the two-sided report uses;
-  the Markdown suppression table gains reason/source/expiry columns.
-  `suppression_rule` is unchanged for existing consumers.
+  identity through the same `rule_for` lookup the two-sided report uses.
+  Every projection carries it: the Markdown suppression table gains
+  reason/source/expiry columns, the SARIF suppression's `justification`
+  states the reason with the full record beside it in `properties`, and the
+  JUnit `<skipped>` message and body do the same. `suppression_rule` is
+  unchanged for existing consumers.
 - **A gated audit's JUnit output names the axis that fired.** The suite
   carried only the total exit code and the contract-coverage contribution,
   and the failure text listed every axis that *might* have gated — so a

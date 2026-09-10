@@ -785,23 +785,39 @@ def test_every_suppressed_finding_keeps_its_full_rule_provenance(
         assert row["suppression_provenance"]["source_file"] == "waivers.yaml"
 
 
-def test_the_markdown_suppression_table_shows_reason_and_source() -> None:
-    """The same record, in the projection a human actually reads.
+@pytest.mark.parametrize("fmt", sorted(NO_BASELINE_SUPPORTED_FORMATS - {"oneline"}))
+def test_every_format_carries_the_reason_and_source_not_just_the_label(
+    fmt: str,
+) -> None:
+    """The provenance reaches *every* projection, not the two wired first.
 
-    A machine-readable field a person never sees does not close this: the
-    Markdown audit is the "which waivers are still justified?" view, so the
-    reason and the file to edit belong in its table.
+    JSON and Markdown gained it first; SARIF and JUnit kept reading the
+    display label, so a consumer of either structured CI format still could
+    not tell why or where a finding was suppressed (Codex review, P2). A
+    fact one format publishes while its siblings drop it leaves a reader of
+    the quiet format unable to act on the run they were handed.
+
+    Parametrized over the supported set rather than naming today's four, so
+    a format added later is held to this without anyone remembering to.
+    `oneline` is excluded deliberately: it is one sentence by contract and
+    carries no per-finding detail at all.
     """
     result = _result(
         "case143_audit_accidental_export", suppression=_labelled_and_reasoned()
     )
-    text = render_no_baseline(result, "markdown")[0]
+    assert compute_no_baseline_document(result).suppressed
+    text = render_no_baseline(result, fmt)[0]
 
-    assert "audit-waiver-17" in text
+    assert "audit-waiver-17" in text, f"{fmt} must name the rule"
     assert "temporary vendor debug hook" in text, (
-        "the reason is what tells a reviewer whether the waiver still applies"
+        f"{fmt} must carry the reason — it is what tells a reviewer whether "
+        "the waiver still applies, and the display label drops it whenever "
+        "the rule also states a label"
     )
-    assert "waivers.yaml" in text, "and the file is where they would edit it"
+    assert "waivers.yaml" in text, (
+        f"{fmt} must carry the source file — it is where a reviewer would "
+        "edit or remove the waiver"
+    )
 
 
 def test_a_run_without_a_ledger_reports_no_provenance_rather_than_faking_one() -> None:
