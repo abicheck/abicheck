@@ -7047,6 +7047,19 @@ of them are again the same class this entry is about, and one is that class
   `SnapshotError` -> exit 1 mapping `cli_resolve`'s own `run_dump` wrapper
   uses.
 
+One self-inflicted defect worth recording, since it is the same discipline
+failure the entries above are about: splitting the SARIF/JUnit renderers out
+to keep `report/no_baseline.py` under the 800-line cap created a real import
+cycle (`no_baseline -> no_baseline_render -> no_baseline`, via the
+renderer's `NoBaselineDocument` annotation -- the AI-readiness scan counts
+``TYPE_CHECKING`` imports too). It reached CI because after that last change
+`check_architecture` was re-run and `check_ai_readiness` was not; only one of
+the two catches this. Fixed by giving the shared contract its own leaf,
+`report/no_baseline_document.py`, which both halves depend on and neither
+depends back through -- this package's own `document.py`-versus-`render_*`
+pattern, and the remedy `AGENTS.md` prescribes ("move the shared logic to a
+leaf module", never extend `IMPORT_CYCLE_ALLOWLIST`).
+
 Each has a regression test in `tests/test_compare_no_baseline_cli.py`, and
 the exhaustiveness rule itself gained
 `test_every_generated_destination_is_wired_or_declared` -- the half the

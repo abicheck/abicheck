@@ -39,7 +39,7 @@ from .cross_source_evolution import change_cross_source_evolution_field
 
 if TYPE_CHECKING:
     from .finding import ReportFinding
-    from .no_baseline import NoBaselineDocument
+    from .no_baseline_document import NoBaselineDocument
 
 __all__ = ["render_no_baseline_junit", "render_no_baseline_sarif"]
 

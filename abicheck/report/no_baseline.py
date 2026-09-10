@@ -50,7 +50,6 @@ is tracked.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, RunOutcome
@@ -62,6 +61,12 @@ from .cross_source_evolution import (
     render_cross_source_evolution_json,
 )
 from .finding import build_report_findings
+from .no_baseline_document import (
+    NO_BASELINE_REPORT_SCHEMA_VERSION as NO_BASELINE_REPORT_SCHEMA_VERSION,
+    NO_BASELINE_SUPPORTED_FORMATS as NO_BASELINE_SUPPORTED_FORMATS,
+    NO_BASELINE_UNSUPPORTED_FORMATS as NO_BASELINE_UNSUPPORTED_FORMATS,
+    NoBaselineDocument as NoBaselineDocument,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -69,7 +74,6 @@ if TYPE_CHECKING:
     from ..checker_types import Change
     from ..policy.scope_completeness import ScopeDecision
     from ..workflows.no_baseline_compare import NoBaselineCompareResult
-    from .cross_source_evolution import CrossSourceEvolutionSummary
     from .finding import ReportFinding
 
 __all__ = [
@@ -85,92 +89,6 @@ __all__ = [
     "render_no_baseline_markdown",
     "render_no_baseline_oneline",
 ]
-
-#: Independent of ``reporter.REPORT_SCHEMA_VERSION`` (the two-sided report's
-#: own schema) -- this report carries a different shape (no ``old_version``,
-#: no ``verdict``, no addition/removal summary), so it gets its own counter
-#: rather than borrowing one that promises a shape this report doesn't have.
-#:
-#: ``2.0``: the audit's cross-source/candidate-side findings reach the
-#: document (``findings``, ``suppressed_findings``, ``suppressed_count``,
-#: ``cross_source_evolution``, ``pattern_preprocessor_scan``). ``1.0``
-#: always emitted ``"changes": []``, which was the gap, not the schema's
-#: intent. ``suppressed_findings`` landed in the same unreleased ``2.0``
-#: rather than as a ``2.1``: a suppressed finding disappearing entirely was
-#: a defect in this shape, not a later addition to a shipped one, and
-#: version numbers exist to warn consumers of a *published* change.
-NO_BASELINE_REPORT_SCHEMA_VERSION = "2.0"
-
-#: Formats a ``--no-baseline`` audit renders one-sided.
-#:
-#: ``json``/``markdown`` are the audit's own native shapes. ``sarif`` and
-#: ``junit`` were added once the audit had a real finding set to carry:
-#: both are *findings* formats with no verdict slot to leave empty (a SARIF
-#: run is a list of results with rule ids and levels; a JUnit suite is a
-#: list of test cases), which is exactly what a single-build audit
-#: produces, and both are how a CI job consumes one -- code scanning upload
-#: and test-report annotation respectively. ``oneline`` is the "just tell
-#: me" flow and needs one sentence.
-NO_BASELINE_SUPPORTED_FORMATS = frozenset(
-    {"json", "markdown", "sarif", "junit", "oneline"}
-)
-
-#: Formats that stay a declared usage error, and why (ADR-068 D2 ruling,
-#: 2026-09-09 -- recorded here rather than left undated in a plan).
-#:
-#: Both are *narrative* renderings built around a compatibility comparison,
-#: not projections of a finding list:
-#:
-#: * ``html`` -- the HTML report's whole information architecture is a
-#:   verdict badge, an OLD -> NEW version headline, and
-#:   addition/removal/modification tables. A single-build audit has no
-#:   verdict (D2 forbids one), no OLD version, and no additions or
-#:   removals, so a one-sided HTML page is a *new page design* rather than
-#:   a projection of the document below -- genuinely different work from
-#:   the four formats above, none of which needed a layout decision.
-#: * ``review`` -- a compact GitHub-facing digest whose content is
-#:   literally "what changed between these two releases, and should you
-#:   ship it": verdict, counts by direction, release recommendation,
-#:   manual-review banner. With no baseline there is no change to review
-#:   and no release to recommend; the honest digest is ``oneline``, which
-#:   is supported.
-#:
-#: Tracked in ``docs/contribute/plans/one-comparison-product.md`` (Phase 2e
-#: follow-up) and ``docs/contribute/known-gaps.md``. Not a silent omission:
-#: the CLI's usage error names this ruling.
-NO_BASELINE_UNSUPPORTED_FORMATS = frozenset({"html", "review"})
-
-
-@dataclass(frozen=True)
-class NoBaselineDocument:
-    """The one frozen, plain-value audit document every format projects.
-
-    Holds resolved values only -- no ``DiffResult``, no live policy
-    objects -- so a renderer cannot re-derive a verdict or reach past what
-    the compute half decided.
-    """
-
-    library: str
-    new_version: str
-    #: OLD's acquisition state, always ``"declared_absent"`` today.
-    old_acquisition_state: str
-    evidence_tiers: tuple[str, ...]
-    #: One entry per candidate-side finding, in emission order.
-    findings: tuple[ReportFinding, ...]
-    #: The findings a ``--suppress`` rule matched, same resolution, kept
-    #: alongside rather than dropped: ``vision.md``'s "Record before
-    #: disposing" rule requires "detected, then suppressed by rule X" to
-    #: stay visible on a passing run, never to read as "nothing found".
-    suppressed: tuple[ReportFinding, ...]
-    evolution: CrossSourceEvolutionSummary | None
-    pattern_preprocessor_scan: dict[str, Any] | None
-    run_outcome: dict[str, Any]
-    comparison_scope: dict[str, Any]
-    #: ADR-049 Phase 7's orthogonal coverage contribution, and the total
-    #: exit code this run reports. Both resolved compute-side so no
-    #: renderer computes an exit code of its own.
-    coverage_exit_contribution: int
-    exit_code: int
 
 
 def _scope_decision(result: NoBaselineCompareResult) -> ScopeDecision:
