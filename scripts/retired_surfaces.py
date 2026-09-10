@@ -607,6 +607,13 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " coverage accounting), scan --risk-rules (and with it the"
         " risk-driven `auto` depth escalation -- pin `--depth` instead), and"
         " scan --build-target (`dump --build-target` is unchanged)",
+        # Deliberately only the two spellings that are dead *everywhere*.
+        # `--manifest` and `--build-target` are not listed: `aggregate
+        # --manifest` and `dump --build-target` remain live flags, so a bare
+        # pattern for either would flag every correct mention of those
+        # commands. The cost is that a stale `scan --manifest`/`scan
+        # --build-target` line in prose passes this sweep; a command-scoped
+        # pattern language is what would close it, and this registry has none.
         ("--artifact-set", "--risk-rules"),
         frozenset(
             {

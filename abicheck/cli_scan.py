@@ -1028,8 +1028,8 @@ def scan_cmd(
 
     One orchestrator over `dump`/`compare`: classifies the PR's changed paths,
     runs the always-on compiler-free pattern pre-scan and the intra-version
-    cross-source checks, then runs the pinned evidence level (the `--depth`
-    dial, or `auto` when omitted) and — when `--against` is given — compares
+    cross-source checks, then runs the evidence level `--depth` names
+    (omitting it means `headers`) and — when `--against` is given — compares
     ARTIFACT against it. Emits one coverage-annotated report. Absence of
     `--against` already means a one-build audit; it is not a separate mode flag.
 

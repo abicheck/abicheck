@@ -1827,8 +1827,12 @@ def test_unpinned_depth_resolves_to_headers_whatever_the_seed(
         res = runner.invoke(
             main, ["scan", str(new_snap_compatible), "--format", "json", *extra]
         )
-        if res.exit_code != 0 or "seed failed" in res.output:
+        if "seed failed" in res.output:
             pytest.skip("git unavailable / not a repo in this environment")
+        # Any *other* nonzero exit is a real CLI regression, not an
+        # environment gap -- skipping on it would let this contract test go
+        # green-by-skipping for the exact class of break it exists to catch.
+        assert res.exit_code == 0, res.output
         return _payload(res)["level"]
 
     explicit_headers = _level("--depth", "headers")

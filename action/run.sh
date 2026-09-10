@@ -2660,21 +2660,25 @@ fi
 # to catch (Codex review P1, PR #1160, verified live against
 # `catalog/cases/case143_audit_accidental_export`). Every one of this
 # Action's own required audit-only combinations (a bare scan,
-# `estimate`/dry-run, `new-library-set`) needs at least one of those
-# unsupported inputs anyway. So is `--artifact-set` (plan §3 #16/#17, P5
-# "not started"), `--budget` (plan §3 #19, P3 "compare does not emit [exit
-# 5] yet"), `--risk-rules` (plan §3 #14, "Phase 7"), `--crosscheck`'s
-# KEY=error promotion syntax (plan §3 #23, "MERGE into policy"),
-# `--build-target` (no `compare` equivalent at all yet, baseline or not --
-# `tests/test_action_run_contract.py::test_action_flags_are_real_cli_options`
-# pins this), `--max-findings` (the scan JSON summary's own truncation
-# cap), `--show-suppressed`, `--public-header-dir` (via `extra-args` --
-# the dedicated Action input is already handled below), and `--manifest`
-# (renamed away on `compare`, CLI cleanup phase two PR J). All of the
-# latter are also checked when requested through the general `extra-args`
-# passthrough instead of their dedicated Action input
+# `estimate`/dry-run) needs at least one of those unsupported inputs
+# anyway. So is `--budget` (plan §3 #19, P3 "compare does not emit [exit
+# 5] yet"), `--crosscheck`'s KEY=error promotion syntax (plan §3 #23,
+# "MERGE into policy"), `--max-findings` (the scan JSON summary's own
+# truncation cap), `--show-suppressed`, `--public-header-dir` (via
+# `extra-args` -- the dedicated Action input is already handled below),
+# and `--manifest` (renamed away on `compare`, CLI cleanup phase two PR
+# J). All of the latter are also checked when requested through the
+# general `extra-args` passthrough instead of their dedicated Action input
 # (`_extra_args_has_scan_only_flag`, Codex review P2, PR #1160, three
 # rounds), since `compare --help-all` has none of them either.
+#
+# `--artifact-set`, `--risk-rules` and scan's `--build-target` left this
+# list entirely: ADR-068's second 2026-09-09 amendment retired all three
+# (ruling (b)), so their inputs are rejected in preflight rather than
+# routed to either CLI. `dump --build-target` is a different, still-live
+# flag of its own, which is why
+# `tests/test_action_run_contract.py::test_action_flags_are_real_cli_options`
+# still accepts that spelling.
 #
 # A baseline scan with no explicit `--depth` also stays on the legacy CLI
 # (Codex review P1, PR #1160): omitting it is `scan`'s own risk-driven
@@ -2775,9 +2779,7 @@ if [[ "$MODE" == "scan" ]]; then
   # guard as the lowercase spelling, not silently route onto `compare`.
   _depth_lc_route=$(printf '%s' "${INPUT_DEPTH:-}" | tr '[:upper:]' '[:lower:]')
   if [[ "$_SCAN_HAS_BASELINE" != "true" ]] \
-     || [[ -n "${INPUT_NEW_LIBRARY_SET:-}" || -n "${INPUT_BUDGET:-}" \
-           || -n "${INPUT_RISK_RULES:-}" || -n "${INPUT_CROSSCHECK:-}" \
-           || -n "${INPUT_BUILD_TARGET:-}" ]] \
+     || [[ -n "${INPUT_BUDGET:-}" || -n "${INPUT_CROSSCHECK:-}" ]] \
      || [[ -z "${INPUT_DEPTH:-}" ]] \
      || [[ "$_depth_lc_route" == "build" || "$_depth_lc_route" == "source" ]] \
      || [[ ( -n "${INPUT_HEADER:-}" && ( -n "${INPUT_OLD_HEADER:-}" || -n "${INPUT_NEW_HEADER:-}" || -n "${INPUT_PUBLIC_HEADER_DIR:-}" ) ) \
@@ -3325,10 +3327,9 @@ elif [[ "$MODE" == "scan" && "$_SCAN_NEEDS_LEGACY_CLI" == "true" ]]; then
   # subsumes --public-header-dir's scope-establishing role, so the two
   # forwards are redundant for scope (harmless) and now agree on extraction
   # too. Bare (unsided) ONLY when there is no old side to contaminate --
-  # new-library-set audits (no old side at all, ADR-056) and a plain
-  # audit-only scalar scan (no --against resolved) both describe a single
-  # library's public surface, matching --header's own bare/unsided
-  # forwarding just above for those same shapes.
+  # i.e. a plain audit-only scalar scan (no --against resolved), which
+  # describes a single library's public surface, matching --header's own
+  # bare/unsided forwarding just above for that same shape.
   #
   # For a scalar scan with a resolved baseline, forward it sided as
   # `-H new=...` instead (lab report, fresh evidence, Codex review):
@@ -3538,13 +3539,13 @@ elif [[ "$MODE" == "scan" ]]; then
   # comparison, never the directory/package release fan-out -- scan never
   # accepted a directory/package operand either, see the rejection below).
   CMD+=(compare)
-  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode, unless new-library-set is given}"
+  SCAN_ARTIFACT="${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}"
   # scan has no per-library fan-out (unlike compare) — a directory/package
   # is normally caught early by action/validate-inputs.sh, before any
   # dependency install; re-checked here for anyone invoking run.sh directly
   # (e.g. tests) without that step, same message as before this migration.
   if _is_release_style_operand "$SCAN_ARTIFACT"; then
-    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use new-library-set to audit a set with no old side, or mode: compare against a directory/package for a multi-library binary comparison instead."
+    echo "::error::mode: scan does not accept a directory or package for new-library ('$SCAN_ARTIFACT') — scan analyses exactly one artifact. Use mode: compare against a directory/package for a multi-library binary comparison instead."
     exit 1
   fi
 
@@ -5321,15 +5322,10 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Old root | \`${INPUT_OLD_ROOT:-}\` |"
       echo "| New root | \`${INPUT_NEW_ROOT:-}\` |"
     elif [[ "$MODE" == "scan" ]]; then
-      # new-library-set (ADR-056, --artifact-set) has no INPUT_NEW_LIBRARY
-      # value at all -- render the set operand instead so the summary
-      # doesn't show an empty Binary row for every artifact-set run
-      # (Codex review).
-      if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
-        echo "| Artifact set | \`${INPUT_NEW_LIBRARY_SET}\` |"
-      else
-        echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
-      fi
+      # `new-library-set` used to render its own row here (it had no
+      # INPUT_NEW_LIBRARY at all); that input is retired and rejected in
+      # preflight now, so a scan summary always has a single binary.
+      echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
       if [[ -n "${INPUT_AGAINST:-}" ]]; then
         echo "| Against | \`${INPUT_AGAINST}\` |"
       fi
