@@ -38,6 +38,7 @@ import click
 from ....report.no_baseline import (
     NO_BASELINE_SUPPORTED_FORMATS,
     NO_BASELINE_UNSUPPORTED_FORMATS,
+    audit_gate_enabled_for_severity_preset,
     render_no_baseline,
 )
 from ....workflows.no_baseline_compare import (
@@ -83,6 +84,11 @@ class _OutputPlan:
     dry_run: bool
     secondary_writes: tuple[tuple[str, Path], ...]
     require_complete_analysis: bool
+    #: ADR-068 2026-09-10 amendment: whether ``--severity-preset`` opted this
+    #: audit into the audit-gate exit axis. ``False`` for every invocation
+    #: that omits the flag, which is what keeps every pre-existing
+    #: ``--no-baseline`` invocation's exit code unchanged.
+    audit_gate_enabled: bool
 
 
 @dataclass(frozen=True)
@@ -355,6 +361,9 @@ def _resolve_no_baseline_invocation(
             require_complete_analysis=bool(
                 kwargs.get("require_complete_analysis", False)
             ),
+            audit_gate_enabled=audit_gate_enabled_for_severity_preset(
+                kwargs.get("severity_preset")
+            ),
         ),
         headers=_HeaderInputs(
             headers=headers,
@@ -401,6 +410,7 @@ def _emit_no_baseline_report(
         result,
         inv.output.fmt,
         require_complete_analysis=inv.output.require_complete_analysis,
+        audit_gate_enabled=inv.output.audit_gate_enabled,
     )
     _write_or_echo(inv.output.output, text)
     for write_fmt, write_path in inv.output.secondary_writes:
@@ -416,6 +426,7 @@ def _emit_no_baseline_report(
             result,
             write_fmt,
             require_complete_analysis=inv.output.require_complete_analysis,
+            audit_gate_enabled=inv.output.audit_gate_enabled,
         )
         _safe_write_output(write_path, rendered)
     if exit_code != 0:

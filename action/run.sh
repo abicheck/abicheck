@@ -2688,6 +2688,22 @@ fi
 # `headers`, never deeper). Routing that case onto `compare` would silently
 # cap a high-risk change that should have reached source replay at L2.
 #
+# ADR-068's 2026-09-10 amendment closed the one exit-code capability gap
+# that a `compare --no-baseline` migration for a *gating* audit-only job
+# would otherwise hit (legacy `scan`'s audit mode gates at exit 2 on an
+# `API_BREAK`-classified hygiene finding; `compare --no-baseline` now
+# reproduces that at its own orthogonal exit 3, opt-in via
+# `--severity-preset`, see `policy/audit_gate_exit.py`). This does **not**
+# by itself change the routing above -- audit-only `mode: scan` stays on
+# the legacy CLI unconditionally until the other gaps this comment block
+# names (`--sources`/`--build-info`/`--depth`/cross-toolchain flags,
+# secondary `--write`, `--dry-run`) also close. When that migration lands,
+# translating a gating audit-only `mode: scan` job means passing
+# `--severity-preset` through to the assembled `compare --no-baseline`
+# invocation and mapping its exit `3` to a new `AUDIT_GATE` verdict here,
+# alongside `COVERAGE_INCOMPLETE`/`SEVERITY_ERROR` below -- not folding it
+# into the generic `ERROR` arm.
+#
 # `_CLI_MODE` (this section's own output) is the actual underlying CLI verb
 # this run dispatches -- "scan" or "compare" -- and is what every
 # downstream exit-code/PR-comment/output section below keys off from here

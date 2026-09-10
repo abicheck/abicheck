@@ -171,6 +171,7 @@ NO_BASELINE_UNSUPPORTED_FORMATS = frozenset({"html", "review"})
 #: `[exit 7]` with no word about the missed evidence contract (Codex review,
 #: P2). :func:`render_no_baseline_oneline` asserts the two tables agree.
 NO_BASELINE_EXIT_AXIS_LABELS: dict[str, str] = {
+    "audit_gate": "audit-gate finding",
     "contract_coverage": "contract coverage incomplete",
     "analysis_assurance": "analysis assurance incomplete",
     "evidence_contract": "evidence contract not met",
@@ -179,6 +180,12 @@ NO_BASELINE_EXIT_AXIS_LABELS: dict[str, str] = {
 }
 
 NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
+    "audit_gate": (
+        "**Audit-gate finding** -- `--severity-preset` opted this audit into "
+        "gating, and at least one candidate-side finding is classified "
+        "`BREAKING`/`API_BREAK` (ADR-068 2026-09-10 amendment). This is "
+        "orthogonal to the compatibility family: an audit never emits `2`/`4`."
+    ),
     "contract_coverage": (
         "**Contract coverage incomplete** -- the selected `--contract` domain's "
         "required evidence was not fully available on this candidate "
