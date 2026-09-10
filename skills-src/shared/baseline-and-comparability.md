@@ -39,15 +39,15 @@ Ways to obtain a baseline side:
 - the released binary itself: `abicheck compare old/libfoo.so new/libfoo.so`
 - no baseline at all yet — an audit of the candidate build alone (never an
   addition/removal/verdict). `compare --no-baseline libfoo.so` (ADR-068 D2)
-  is the declared spelling and the flag exists, but it does **not** report
-  the audit's cross-source hygiene findings yet: against a stored snapshot
-  it crashes, and against a live binary it renders an empty result. Use the
-  legacy `abicheck scan libfoo.so -H include/` (no `--against`) until that
-  closes — see
-  [Scenario S5](../../docs/integration/scenarios/single-build-audit.md) and
-  the [known gap](../../docs/contribute/known-gaps.md). `scan` itself is
-  retired by ADR-068 D8 with no deprecation window, so do not recommend it
-  for anything else.
+  is the declared spelling: it reports the audit's cross-source hygiene
+  findings under `findings[]`, with `changes[]`/`verdict` staying empty, and
+  by default a hygiene finding never gates CI (exit `0`). To reproduce a
+  `scan`-based gating job, add `--severity-preset default` (or `strict`) —
+  that opts into the orthogonal audit-gate axis and exits `3` (never `2`/`4`)
+  on a `BREAKING`/`API_BREAK`-classified finding; a non-gating job needs no
+  change. `scan` itself is retired by ADR-068 D8 with no deprecation window
+  — do not recommend it. See
+  [Scenario S5](../../docs/integration/scenarios/single-build-audit.md).
 
 Baseline storage, refresh cadence, and CI publication are owned by
 [the baseline management page](../../docs/use/baseline-management.md).

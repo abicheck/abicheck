@@ -69,8 +69,15 @@ digest. An `old=`-prefixed evidence input (`--sources old=…`) is a usage
 error too: there is no OLD side for it to describe.
 
 Exit codes: hygiene findings are advisory and never gate on their own, so a
-clean run and a run reporting several findings both exit `0`. The three
-orthogonal axes still apply — see
+clean run and a run reporting several findings both exit `0` **by default**.
+Gating on a hygiene finding is opt-in, via the audit-gate axis
+([ADR-068's 2026-09-10 amendment](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-10-the-audit-gate-exit-axis)):
+a `scan`-based gating job migrating to `compare --no-baseline` needs exactly
+one addition to keep gating on a `BREAKING`/`API_BREAK`-classified finding —
+add `--severity-preset default` (or `strict`) — which then exits `3`, never
+`2`, so the hygiene gate can never be mistaken for a real compatibility
+break; a non-gating job needs no change. The four orthogonal axes still
+apply — see
 [exit codes](../../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact).
 
 ## The Action: `mode: scan`, no `against`

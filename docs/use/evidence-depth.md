@@ -504,7 +504,11 @@ below by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
 
 `--sources`/`--build-info`/`--depth` work on the `--no-baseline` path too,
 so the L3/L4-dependent checks further down this section no longer need
-`scan`. See
+`scan`. By default a hygiene finding never gates CI; migrating a
+`scan`-based **gating** job needs exactly one addition —
+`--severity-preset default` (or `strict`) — to keep gating on a
+`BREAKING`/`API_BREAK`-classified finding (exit `3`, the orthogonal
+audit-gate axis, never `2`/`4`); a non-gating job needs no change. See
 [Scenario S5](../integration/scenarios/single-build-audit.md) for the full
 CLI account.
 
