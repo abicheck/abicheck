@@ -154,22 +154,31 @@ def is_stored_snapshot_operand(path: Path) -> bool:
     ``detect_binary_format(path) is not None`` instead -- "is this a native
     binary?" -- which is a *narrower* question with a different answer for
     every operand that is neither: a ``Module.symvers`` manifest, a bare
-    BTF/CTF blob, an ABICC Perl dump. `resolve_input` parses each of those
-    into a brand-new snapshot that structurally cannot carry L3-L5 build or
-    source evidence, yet all three read as "stored" and were exempted, so
+    BTF/CTF blob. `resolve_input` derives a brand-new snapshot from each of
+    those, yet both read as "stored" and were exempted, so
     ``compare --no-baseline Module.symvers --depth source`` reported a clean
     audit with *no evidence tiers at all* and exit 0 (Codex review, P1 --
     and the two-sided ``compare a.symvers b.symvers --depth source`` did the
     same, so this is the shared cause, not one path's copy of it).
 
-    Only a real serialized snapshot is exempt, because only a real serialized
-    snapshot can *already carry* the pinned evidence -- and when it does not,
+    The line is **an already-serialized ABI description** (whoever wrote it)
+    versus **raw evidence this run derives a description from**. Only the
+    former can *already carry* the pinned evidence -- and when it does not,
     that is the separately-recorded ceiling question ("``--depth`` is a floor
     for live extraction, not a ceiling for a pre-built snapshot"), not a
-    floor failure. Covers both shapes `resolve_input` accepts: a single
+    floor failure. Covers the three shapes `resolve_input` accepts: a single
     ``.abi.json`` file (including the gzip/zstd-compressed spellings, via
-    :func:`sniff_text_format`'s bounded decoded prefix) and a directory-backed
-    storage-v2 ``ProjectSnapshot`` package.
+    :func:`sniff_text_format`'s bounded decoded prefix), a directory-backed
+    storage-v2 ``ProjectSnapshot`` package, and an ABICC Perl dump.
+
+    That last one was classified as raw evidence in this function's first
+    form, which made ``--depth source`` exit 7 on a saved ABICC dump and 0 on
+    the equivalent ``.abi.json`` (Codex review, P2). Both are pre-built,
+    tool-produced ABI descriptions that this run parses rather than extracts;
+    for a tool that advertises itself as an ABICC drop-in, splitting them on
+    serialization format alone is arbitrary. A ``Module.symvers`` manifest and
+    a bare BTF/CTF blob stay on the raw-evidence side: they are inputs an ABI
+    description is *derived* from, not one that was already written down.
 
     Errs toward "not stored" on an unreadable path, matching the callers'
     own fail-loud direction: resolution raises a real, specific error moments
@@ -186,7 +195,7 @@ def is_stored_snapshot_operand(path: Path) -> bool:
             # package's own `manifest.json` content rather than its
             # filename, which a `BuildSourcePack` shares.
             return is_project_snapshot_package_dir(path)
-        return sniff_text_format(path) == "json"
+        return sniff_text_format(path) in {"json", "perl"}
     except OSError:
         return False
 

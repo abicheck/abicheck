@@ -1669,6 +1669,7 @@
         "gate.severity.quality_issues",
         "gate.severity.addition",
         "gate.on_incomplete_scope",
+        "gate.fail_on_removed_library",
         "assurance.require_evidence",
         "suppressions",
         "packs"
@@ -1702,6 +1703,7 @@
         "gate.severity.quality_issues": { "type": "string" },
         "gate.severity.addition": { "type": "string" },
         "gate.on_incomplete_scope": { "type": "string", "description": "ADR-065 D6 (schema 2.50): the scope.on_incomplete policy (warn/block) a directory/package release resolved, empty for a scalar comparison, to which the policy does not apply. Two otherwise identical incomplete releases exit 0 and 1 under the two values, so the digest tells them apart." },
+        "gate.fail_on_removed_library": { "type": "string", "description": "ADR-065 (schema 3.15): the gate.fail_on_removed_library setting a directory/package release resolved ('True'/'False'), empty for a scalar comparison, to which it does not apply. Two otherwise identical releases with a proven removed library exit 0 and 8 under the two values, so the digest tells them apart." },
         "assurance.require_evidence": { "type": "string" },
         "suppressions": { "type": "string" },
         "packs": { "type": "string" }

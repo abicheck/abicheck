@@ -63,7 +63,12 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_markdown_cell.py",
             "tests/test_no_baseline_report_formats.py",
         ),
-        public_surfaces=("cli",),
+        # `()` and not `("cli",)`: both seed tests call the renderers and the
+        # escaper directly, never through Click or `abicheck.service`. A
+        # claimed surface a seed test does not reach conceals exactly the
+        # missing cross-surface coverage this registry exists to surface
+        # (CodeRabbit review; the same rule Codex established in PR #885).
+        public_surfaces=(),
         axes={
             "hostile_character": (
                 "pipe",
@@ -72,7 +77,11 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 "newline",
                 "control",
             ),
-            "renderer": ("comparison-scope-table", "audit-findings-table"),
+            # Only what a seed test really renders. The scope table shares
+            # the escaper but no seed test drives a hostile value through
+            # it, so listing it here would overstate coverage -- recorded as
+            # a known gap below instead (CodeRabbit review).
+            "renderer": ("audit-findings-table",),
         },
         known_gaps=(
             KnownGap(
@@ -86,6 +95,16 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md",
             ),
+            KnownGap(
+                description=(
+                    "`report/comparison_scope.py`'s scope tables route "
+                    "through the same shared escaper, but no seed test "
+                    "renders a hostile value through that table -- the "
+                    "escaper's own contract is covered, the scope table's "
+                    "use of it is covered only by construction."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
         ),
     ),
     BugClass(
@@ -93,11 +112,100 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "Every per-finding entry-builder for a shared `Change` "
             "(`compare`'s `changes[]`, `scan --against`'s baseline dicts, "
-            "the release fan-out's capped `findings`) must resolve an "
-            "audit field (e.g. `reclassified_by`) via one canonical helper "
-            "-- never a sibling silently omitting a field another computes."
+            "the release fan-out's capped `findings`, `compare "
+            "--no-baseline`'s audit rows) must resolve an audit field (e.g. "
+            "`reclassified_by`, a suppression's rule provenance) via one "
+            "canonical helper -- never a sibling silently omitting a field "
+            "another computes. The same rule holds *between formats* of one "
+            "report: a fact one projection publishes and its siblings drop "
+            "leaves a consumer of the quiet format unable to act on the run "
+            "it was handed."
         ),
-        fixed_by=(1176,),
-        seed_tests=("tests/test_disposition_reclassification.py",),
+        # #1185-era follow-up, two instances of the same shape. The audit's
+        # suppressed rows read `Change.suppression_rule` -- the `label or
+        # reason` display collapse -- while `reporter.py`'s sibling already
+        # resolved the full ADR-067 record through
+        # `DispositionLedger.rule_for`, so a waiver stating both lost its
+        # reason and source file. And the JUnit projection published only
+        # the total exit code where JSON/Markdown/oneline/SARIF all named
+        # the orthogonal axis that fired.
+        fixed_by=(1176, 1185),
+        seed_tests=(
+            "tests/test_disposition_reclassification.py",
+            # The audit's own suppression-provenance suite moved here when
+            # `test_no_baseline_report_formats.py` crossed its module-size
+            # cap. That module still carries the exit-axis half of this
+            # class; naming only it left the `suppression-provenance` record
+            # and renderer axes declared below unbacked by any seed test
+            # (Codex review, P2).
+            "tests/test_no_baseline_suppression_provenance.py",
+            "tests/test_no_baseline_report_formats.py",
+        ),
+        axes={
+            # Only what a seed test really drives -- and *all* of it. This
+            # tuple omitted `sarif` while
+            # `test_every_format_carries_the_reason_and_source_not_just_the_label`
+            # parametrizes over `NO_BASELINE_SUPPORTED_FORMATS` minus
+            # `oneline`, which includes it. Understating coverage sends a
+            # contributor to write a test that already exists, the mirror of
+            # the overstating case the known gap below describes (Codex
+            # review, P2).
+            "renderer": ("json", "markdown", "sarif", "junit"),
+            "record": ("suppression-provenance", "exit-axis"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The between-formats half is asserted for the audit "
+                    "document's suppression provenance and exit axes only. "
+                    "No gate enumerates a report's semantic fields and "
+                    "checks every projection carries each one, so a new "
+                    "field added to one renderer alone is still possible."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+            KnownGap(
+                description=(
+                    "Nothing enforces that an axis declared on a BugClass "
+                    "matches what its `seed_tests` actually exercise, in "
+                    "either direction -- this entry has now been wrong both "
+                    "ways: a `seed_tests` list pointing at the file the "
+                    "assertions had moved out of, and a `renderer` tuple "
+                    "omitting `sarif` while the seed test parametrized over "
+                    "it. Overstating sends a reader to a test that does not "
+                    "exist; understating sends them to write one that does. "
+                    "Splitting a test module for a size "
+                    "violation left this entry naming only the file the "
+                    "suppression-provenance assertions had moved *out* of, "
+                    "and no gate noticed: the declared record and renderer "
+                    "axes stood with nothing behind them, and a contributor "
+                    "following AGENTS.md's 'check BUG_CLASSES first' advice "
+                    "would have been sent to the wrong file (Codex review, "
+                    "P2). Fixed by hand here; the class of error is open."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md",
+            ),
+            KnownGap(
+                description=(
+                    "Two open instances of this class outside the audit "
+                    "path, found by grepping every `suppression_rule` reader "
+                    "after the audit's own two were fixed -- recorded rather "
+                    "than fixed here, since neither is in the scope the PR "
+                    "that found them was opened for. (1) `sarif.py`'s "
+                    "two-sided suppression `justification` reads only "
+                    "`Change.suppression_rule`, the `label or reason` "
+                    "display collapse, while the same run's JSON already "
+                    "publishes the full ADR-067 record via "
+                    "`reporter.py`'s `_suppressed_change_entry` -- the same "
+                    "between-formats split the audit's SARIF had. (2) "
+                    "`cli_scan_baseline.py`'s baseline `findings[]` entries "
+                    "carry the display label only, with no provenance field "
+                    "at all. Fixing either means routing "
+                    "`DispositionLedger.rule_for` to that builder, exactly "
+                    "as the audit now does."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
     ),
 )

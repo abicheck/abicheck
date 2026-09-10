@@ -7540,3 +7540,123 @@ deciding what `compare --depth binary` should do, which is a separate
 change with its own blast radius. Registered as a `KnownGap` on the
 `evidence.tier_shortcut_without_substitute` entry in
 `tests/regressions/manifest.py`.
+
+## Suppression provenance stops at the display label outside the audit path
+
+ADR-067 D3 says a disposition keeps the rule that made it — rule id, source
+file, reason, label, expiry. `Change.suppression_rule` is not that record: it
+is `SuppressionOutcome.rule_label()`'s deliberate `label or reason` collapse,
+so a waiver stating both publishes one and silently drops the other, along
+with the file it lives in and when it lapses — exactly what a reviewer needs
+to decide whether the waiver still applies.
+
+`compare --no-baseline` had this in all four of its projections and was fixed
+in PR #1188: each suppressed entry now carries the run's own
+`DispositionLedger.rule_for` record, and the regression test is parametrized
+over `NO_BASELINE_SUPPORTED_FORMATS` so a format added later is held to it.
+Two-sided `compare`'s **JSON** was already correct before that
+(`reporter.py`'s `_suppressed_change_entry` emits `rule.to_dict()`).
+
+Two readers are still on the display label alone. Both were found by grepping
+every `suppression_rule` reader once the audit's own were fixed, and both are
+outside the scope PR #1188 was opened for, so they are recorded here rather
+than folded into it:
+
+1. **`sarif.py`** (two-sided `compare`) — the suppression's `justification`
+   interpolates `change.suppression_rule` only. Since the same run's JSON
+   already publishes the full record, this is a *between-formats* split of one
+   report: a SARIF consumer sees strictly less than a JSON consumer of the
+   identical run.
+2. **`cli_scan_baseline.py`** (`scan --against`) — each suppressed
+   `findings[]` entry sets `entry["suppression_rule"]` and carries no
+   provenance field at all.
+
+Fixing either is the same shape as the audit's fix: route the run's
+`DispositionLedger` to that entry builder and read `rule_for(change)`, rather
+than re-evaluating the rule set (which can name a different rule than the one
+that actually fired, since a finding's fields may have been enriched after the
+match). Neither needs a new mechanism — only the existing one wired to one
+more builder.
+
+Registered as open residuals on the `report.finding_entry_builder_parity`
+bug class in `tests/regressions/manifest.py`'s report sibling
+(`tests/regressions/manifest_report.py`), so the next person to touch that
+class sees them without re-deriving the grep.
+
+## `compare --no-baseline` crashes on any real ELF shared library
+
+Auditing a real ELF shared library raises an **uncaught**
+`NoBaselineInvariantError` — a Python traceback, not a diagnostic — from a
+bare CLI call:
+
+```console
+$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 --format json
+abicheck.policy.no_baseline_findings.NoBaselineInvariantError: a snapshot
+compared against itself must never produce a comparison finding -- if this
+fires, a detector is reading non-identity state. Offending findings:
+visibility_leak(<visibility>)
+```
+
+Reproduced on `main` at `f5df70dd` as well as on the branch that found it,
+so it is not a regression from any in-flight work. It was found only because
+a test fixture in `tests/test_compare_no_baseline_cli.py` was made more
+realistic (see that file's `_a_live_binary_this_host_can_audit`); every
+committed G20 fixture is a stored snapshot, so no existing test audits a
+real live library at all — which is why a crash on the command's most
+obvious input survived.
+
+**The invariant's own message misdiagnoses it.** Nothing is reading
+non-identity state. `diff_platform_elf_dynamic._diff_visibility_leak` is
+deliberately single-sided — its body opens `del new  # detector is
+intentionally old-library-only` — and reports internal-looking symbols
+exported from one snapshot under `elf_only_mode`. That is candidate-side
+hygiene, exactly the category `policy/no_baseline_findings.
+is_one_sided_finding` exists to recognise. But the detector emits a plain
+`make_change(...)` carrying **neither** marker that predicate looks for
+(`cross_source_evolution`, `candidate_side_enrichment`), so
+`partition_no_baseline_findings` files it under `identity`, and
+`check_no_baseline_partition` raises.
+
+There is an irony worth recording, because it is the actual lesson:
+`is_one_sided_finding`'s docstring argues at length against a `ChangeKind`
+allowlist on the grounds that it "would drift out of sync with the detector
+registry." The marker-based design it chose instead has drifted the *other*
+way — a genuinely one-sided detector that never got a marker. Neither
+mechanism is self-enforcing; the missing piece is a check that a detector
+ignoring its `new` argument emits marked findings.
+
+**Why it was not fixed where it was found.** The obvious patch — set
+`candidate_side_enrichment` on the finding — is not local. That marker is
+read on the ordinary two-sided `compare` path too, where this detector also
+runs and reports leaks in the OLD library, so setting it relabels a finding
+in the main command. And `_diff_visibility_leak` is unlikely to be alone:
+any detector that `del`s or ignores `new` is in the same position, so the
+real fix is an audit of that whole set plus a gate, not a one-line change
+to the one instance a traceback happened to name. That is a change with its
+own review surface, and it was out of scope for the pull request (#1188)
+that found it — which touches neither file.
+
+**Fix shape, for whoever takes it:**
+
+1. Enumerate every detector under `abicheck/diff_*.py` whose body ignores
+   its `new` snapshot argument (`del new`, or never referencing it). That
+   set is the population, not `visibility_leak` alone.
+2. Decide per detector whether it is candidate-side hygiene (mark it) or a
+   genuine comparison detector that happens not to need `new` yet.
+3. Mark the hygiene ones, and check what that does to two-sided `compare`'s
+   reports and gating before assuming it is inert there.
+4. Add the missing self-enforcement: a gate — the AI-readiness script is
+   the natural home, alongside `fact-detector-misuse` — asserting that a
+   detector which ignores `new` emits only marked findings. Without it the
+   next single-sided detector reintroduces this exact crash.
+5. Add a test that audits a **real live shared library**, not a stored
+   snapshot. Its absence is why this shipped;
+   `tests/test_compare_no_baseline_cli.py`'s helper documents the platform
+   traps (a soname is not a path; macOS keeps system libraries in the dyld
+   shared cache; a PE executable has no export directory).
+
+Registered as `test_fixture.host_artifact_assumed_capability` in
+`tests/regressions/manifest_report.py`'s sibling
+`tests/regressions/manifest_tool_surface.py` for the fixture half; the
+detector half above has no registry entry yet, deliberately — it is a real
+open defect, not a closed class.

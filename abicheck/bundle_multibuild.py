@@ -55,9 +55,9 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
-from .bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 from .bundle_models import BundleFinding
 from .checker_policy import ChangeKind
+from .model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 
 
 def variant_fingerprint(

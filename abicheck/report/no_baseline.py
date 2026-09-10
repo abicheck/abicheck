@@ -71,10 +71,17 @@ from .no_baseline_document import (
     NO_BASELINE_SUPPORTED_FORMATS as NO_BASELINE_SUPPORTED_FORMATS,
     NO_BASELINE_UNSUPPORTED_FORMATS as NO_BASELINE_UNSUPPORTED_FORMATS,
     NoBaselineDocument as NoBaselineDocument,
+    # Deliberately not re-exported (`X as X`) like the names above: those are
+    # this module's published surface, while this one is an internal detail
+    # of how `suppressed` is shaped. A consumer wanting the type imports it
+    # from `no_baseline_document`, which owns it.
+    SuppressedFinding,
+    suppression_provenance_of,
+    suppression_rule_label,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from ..checker_types import Change
     from ..policy.scope_completeness import ScopeDecision
@@ -239,7 +246,7 @@ def compute_no_baseline_document(
         old_acquisition_state=result.acquisition.members[0].state.value,
         evidence_tiers=tuple(diff.evidence_tiers),
         findings=resolve(result.findings),
-        suppressed=resolve(result.suppressed_findings),
+        suppressed=_suppressed_entries(diff, resolve(result.suppressed_findings)),
         evolution=compute_cross_source_evolution_summary(result.findings),
         pattern_preprocessor_scan=_candidate_side_scan(
             compute_pattern_preprocessor_scan_json(diff)
@@ -254,6 +261,44 @@ def compute_no_baseline_document(
         ),
         exit_axes=_no_baseline_exit_axes(result, require_complete_analysis),
     )
+
+
+def _suppressed_entries(
+    diff: Any, findings: Sequence[ReportFinding]
+) -> tuple[SuppressedFinding, ...]:
+    """Pair each suppressed finding with ADR-067 D3's full rule provenance.
+
+    Joined off the run's own ``disposition_ledger`` by object identity
+    (``DispositionLedger.rule_for``) -- the same lookup ``reporter.py``'s
+    two-sided ``suppression.suppressed_changes`` block uses, so the audit and
+    the comparison report name the same rule from one owner rather than two.
+    Deliberately not ``Change.suppression_rule``: that is
+    ``SuppressionOutcome.rule_label()``'s ``label or reason`` collapse, so a
+    rule carrying both dropped its reason, source file and expiry from every
+    audit projection (Codex review, P1).
+
+    ``None`` per entry, never a fabricated row, when the ledger holds no
+    record for that finding -- a ``DiffResult`` rebuilt from JSON has no
+    ledger at all, and inventing provenance there would be worse than
+    reporting none.
+    """
+    ledger = getattr(diff, "disposition_ledger", None)
+    return tuple(
+        SuppressedFinding(
+            change=finding.change,
+            verdict=finding.verdict,
+            category=finding.category,
+            provenance=_provenance_row(ledger, finding.change),
+        )
+        for finding in findings
+    )
+
+
+def _provenance_row(ledger: Any, change: Any) -> Mapping[str, Any] | None:
+    if ledger is None:
+        return None
+    rule = ledger.rule_for(change)
+    return None if rule is None else rule.to_dict()
 
 
 def _coverage_failures(diff: Any) -> tuple[dict[str, Any], ...]:
@@ -325,17 +370,28 @@ def _finding_json(finding: ReportFinding) -> dict[str, Any]:
     return row
 
 
-def _suppressed_json(finding: ReportFinding) -> dict[str, Any]:
+def _suppressed_json(entry: SuppressedFinding) -> dict[str, Any]:
     """One suppressed finding's JSON row: the finding, plus what hid it.
 
-    ``suppression_rule`` is the reason text the matching rule carried, so a
-    reader can answer "which rule, and why" without re-running with the
-    suppression file removed -- ADR-067's disposition-audit principle
-    applied to this report's own shape.
+    Two fields, because they answer different questions and one cannot stand
+    in for the other:
+
+    * ``suppression_rule`` -- the rule's short display label
+      (``SuppressionOutcome.rule_label()``'s ``label or reason``), kept
+      unchanged so an existing consumer reading it is unaffected.
+    * ``suppression_provenance`` -- ADR-067 D3's full record: rule id,
+      source file, reason, label, expiry. The display label collapses
+      ``label`` and ``reason`` into one string, so a rule stating both
+      published its label and silently dropped the reason and the file it
+      came from -- exactly the identify-and-review information the
+      disposition audit exists to preserve (Codex review, P1). ``null``
+      when the run kept no ledger entry for this finding.
     """
-    row = _finding_json(finding)
+    row = _finding_json(entry)
     row["disposition"] = "suppressed"
-    row["suppression_rule"] = getattr(finding.change, "suppression_rule", None)
+    row["suppression_rule"] = getattr(entry.change, "suppression_rule", None)
+    provenance = suppression_provenance_of(entry)
+    row["suppression_provenance"] = dict(provenance) if provenance else None
     return row
 
 
@@ -362,7 +418,7 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         # suppressed" must not look the same to a consumer checking whether
         # policy hid anything (the same convention `contract_coverage_
         # failures` follows -- `[]` rather than omitted).
-        "suppressed_findings": [_suppressed_json(f) for f in doc.suppressed],
+        "suppressed_findings": [_suppressed_json(entry) for entry in doc.suppressed],
         "suppressed_count": len(doc.suppressed),
         "cross_source_evolution": render_cross_source_evolution_json(doc.evolution),
         "pattern_preprocessor_scan": doc.pattern_preprocessor_scan,
@@ -472,15 +528,34 @@ def render_no_baseline_markdown(doc: NoBaselineDocument) -> str:
             "a *disposition*, not an absence -- a passing audit must still show "
             "what policy hid, and which rule hid it.",
             "",
-            "| Finding | Symbol | Severity | Suppressed by |",
-            "| --- | --- | --- | --- |",
+            "| Finding | Symbol | Severity | Suppressed by | Reason | Source | Expires |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
-        for finding in doc.suppressed:
-            change = finding.change
-            rule = getattr(change, "suppression_rule", None) or "(rule gave no reason)"
+        for entry in doc.suppressed:
+            finding = entry
+            change = entry.change
+            # A reader deciding whether the waiver still applies needs the
+            # reason it was written for, the file it lives in, and when it
+            # lapses -- so those get their own columns beside the label.
+            #
+            # The label comes from the shared resolver, never from
+            # `Change.suppression_rule` directly: that field is
+            # `label or reason`, so reading it here printed a reason-only
+            # rule's reason twice, once under a heading claiming it was a
+            # separate rule label (Codex review, P2).
+            entry_provenance = suppression_provenance_of(entry)
+            rule = suppression_rule_label(change, entry_provenance) or (
+                "(rule gave no label)"
+            )
+            prov = entry_provenance or {}
+            reason = prov.get("reason") or "(none stated)"
+            source = prov.get("source_file") or "(not recorded)"
+            expires = prov.get("expires") or "(never)"
             lines.append(
                 f"| `{md_cell(change.kind.value)}` | `{md_cell(change.symbol or '-')}` | "
-                f"{md_cell(finding.category.value)} | {md_cell(rule)} |"
+                f"{md_cell(finding.category.value)} | {md_cell(rule)} | "
+                f"{md_cell(str(reason))} | `{md_cell(str(source))}` | "
+                f"{md_cell(str(expires))} |"
             )
     lines += _exit_axis_notice_lines(doc)
     return "\n".join(lines) + "\n"

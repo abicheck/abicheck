@@ -391,14 +391,20 @@ def _reject_context_stashed_options(ctx: click.Context) -> None:
     silently dropped: ``compare --no-baseline snap.abi.json --variant v1``
     ran a normal audit and exited 0.
 
-    It is rejected rather than wired because there is nothing on this path
-    for it to select. ``--variant`` chooses among the ``VariantRef``s a
-    stored ``ProjectSnapshot`` *package* operand declares, and this dispatch
-    refuses a directory/package operand outright (see
-    ``maybe_dispatch_no_baseline_compare``); for a single artifact the flag
-    is a no-op by its own documented contract. Wiring it becomes real work
-    when ``--no-baseline`` grows a package operand (plan row F-23), and the
-    usage error is what makes that a visible gap rather than a silent one.
+    It is rejected rather than wired because this path implements no variant
+    *selection*. ``--variant`` chooses among the ``VariantRef``s a stored
+    ``ProjectSnapshot`` package declares; the audit resolves a package
+    operand through ``resolve_no_baseline_candidate``, which takes the
+    package's own single artifact and never consults a variant selector at
+    all. So the flag would name a selection nothing performs.
+
+    (This reason was originally "the dispatch refuses a package operand
+    outright", which stopped being true when a one-artifact
+    ``ProjectSnapshot`` package directory was accepted -- CodeRabbit review.
+    The rejection survives that narrowing; only its justification changed.)
+    Wiring it becomes real work when ``--no-baseline`` grows multi-variant
+    package support (plan row F-23), and the usage error is what makes that
+    a visible gap rather than a silent one.
     """
     from ..options.release import variant_kwargs_from_context
 
@@ -406,7 +412,8 @@ def _reject_context_stashed_options(ctx: click.Context) -> None:
         raise click.UsageError(
             "--variant is not available with --no-baseline: it selects among "
             "the variants a stored ProjectSnapshot package declares, and this "
-            "path accepts a single artifact only (ADR-068 D2). It is rejected "
+            "path performs no variant selection -- a package operand is "
+            "audited through its single artifact (ADR-068 D2). It is rejected "
             "rather than silently ignored so a CI job never believes it took "
             "effect."
         )

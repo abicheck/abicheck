@@ -450,6 +450,80 @@ def test_a_dump_manifest_is_refused_rather_than_ignored(
     assert "--dump-manifest" in result.output
 
 
+def _a_live_binary_this_host_can_audit(tmp_path: Path) -> Path:
+    """A copy of a live binary artifact `--no-baseline` can actually audit.
+
+    Not "any binary on PATH", which is what this was and why it broke. The
+    original copied `shutil.which("true")` to `libfoo.so`: fine on Linux
+    and macOS, where an ELF or Mach-O executable exposes symbols, and
+    broken on Windows, where `true.exe` is a PE *executable* with no export
+    directory at all -- so abicheck correctly refused it ("has no exports
+    (named or ordinal)") and the test read that refusal as a broken
+    `--version`. The name was misleading too: the operand was called `.so`
+    on every platform while abicheck sniffs *content*, so on Windows it was
+    a PE file wearing an ELF extension. Hence: pick per platform, keep the
+    source's real filename, and assert the choice is a binary abicheck
+    recognises so a bad candidate fails here, in setup, rather than as a
+    puzzling exit code in the assertion.
+
+    **Why POSIX uses an executable and not a real `.so`.** It should use a
+    real shared library, and an earlier version of this helper did --
+    resolving `libm.so.6` through the standard library directories, since
+    `ctypes.util.find_library` answers a soname rather than a path. That
+    fixture immediately hit a *separate, pre-existing* crash: auditing any
+    real ELF library raises an uncaught `NoBaselineInvariantError`, because
+    `diff_platform_elf_dynamic._diff_visibility_leak` is a single-sided
+    detector (`del new  # detector is intentionally old-library-only`) that
+    emits its finding with neither candidate-side marker, so the ADR-068
+    partition files it as an identity-diff finding. It reproduces on `main`
+    from a bare CLI call and is recorded in `docs/contribute/known-gaps.md`
+    -- it is not this test's bug to fix and not this pull request's to
+    widen into. This helper deliberately steps around it rather than
+    silently, and the moment it is fixed the POSIX branch should go back to
+    a real library.
+
+    macOS additionally rules out `.dylib`: since macOS 11 the system
+    libraries live in the dyld shared cache, so the paths `find_library`
+    reports are not files on disk at all.
+    """
+    import os
+    import shutil
+
+    from abicheck.binary_utils import detect_binary_format
+
+    tried: list[str] = []
+    candidates: list[Path] = []
+
+    if sys.platform == "win32":
+        system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        # Real DLLs, i.e. things with an export directory -- the property
+        # the previous fixture lacked on this platform.
+        candidates += [system32 / name for name in ("kernel32.dll", "ws2_32.dll")]
+    else:
+        which_true = shutil.which("true")
+        if which_true:
+            candidates.append(Path(which_true))
+
+    for candidate in candidates:
+        tried.append(str(candidate))
+        if not candidate.is_file():
+            continue
+        # Keep the source's own filename: the operand *is* that artifact, and
+        # a manufactured `.so` name is half of what made the original bug
+        # hard to read.
+        copy = tmp_path / candidate.name
+        copy.write_bytes(candidate.read_bytes())
+        detected = detect_binary_format(copy)
+        assert detected is not None, (
+            f"{candidate} is not a binary abicheck recognises (detected "
+            f"{detected!r}) -- a bad candidate in this helper, not a bug in "
+            "the command under test"
+        )
+        return copy
+
+    pytest.skip(f"no auditable live binary on this host; tried: {tried}")
+
+
 def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) -> None:
     """``--version new=`` was another silently-dropped generated destination.
 
@@ -457,13 +531,7 @@ def test_a_candidate_version_label_is_honoured(candidate: Path, tmp_path: Path) 
     recorded version on both the one- and two-sided paths -- asserting on the
     snapshot would pass whether or not the option was wired.
     """
-    import shutil
-
-    src = shutil.which("true")
-    if src is None:  # pragma: no cover - every supported CI image has it
-        pytest.skip("no native binary available to label")
-    binary = tmp_path / "libfoo.so"
-    binary.write_bytes(Path(src).read_bytes())
+    binary = _a_live_binary_this_host_can_audit(tmp_path)
     result = invoke_cli(
         "compare",
         "--no-baseline",
@@ -608,7 +676,7 @@ def _project_snapshot_package(tmp_path: Path, case: str) -> Path:
 
 @pytest.mark.parametrize(
     "operand",
-    ["symvers", "perl_dump", "unknown_text"],
+    ["symvers", "unknown_text"],
 )
 def test_an_operand_this_run_parses_is_held_to_the_pinned_depth(
     tmp_path: Path, operand: str
@@ -617,23 +685,23 @@ def test_an_operand_this_run_parses_is_held_to_the_pinned_depth(
 
     The carve-out asked ``detect_binary_format(path) is not None`` — "is this
     a native binary?" — which is a narrower question with a different answer
-    for every operand that is neither a binary nor a snapshot. Each of those
-    is parsed into a brand-new snapshot that structurally cannot carry L3-L5
-    evidence, so a pinned ``--depth source`` was silently unsatisfiable:
-    ``Module.symvers --depth source`` reported no evidence tiers at all and
-    exit 0 (Codex review, P1).
+    for every operand that is neither a binary nor a serialized ABI
+    description. Each of those has an ABI description *derived* from it by
+    this run and structurally cannot carry L3-L5 evidence, so a pinned
+    ``--depth source`` was silently unsatisfiable: ``Module.symvers --depth
+    source`` reported no evidence tiers at all and exit 0 (Codex review, P1).
 
     Parametrized over the *class* rather than the reported input: the shared
-    property of all three is "not a binary, not a snapshot", and a fix keyed
-    to symvers alone would leave the siblings exempt. The oracle is the
-    predicate's own contract — anything not stored is live — checked here
-    against operands chosen to be exactly the ones that used to slip through.
+    property is "raw evidence, not an ABI description someone already wrote
+    down", and a fix keyed to symvers alone would leave the siblings exempt.
+    The oracle is the predicate's own contract — anything not already an ABI
+    description is live — checked here against operands chosen to be exactly
+    the ones that used to slip through.
     """
     from abicheck.workflows.no_baseline_compare import candidate_is_live_artifact
 
     bodies = {
         "symvers": "0x00000000\tvfs_read\tvmlinux\tEXPORT_SYMBOL\n",
-        "perl_dump": "$VAR1 = {\n  'ABI' => {}\n};\n",
         "unknown_text": "not a snapshot, not a binary\n",
     }
     path = tmp_path / operand
@@ -644,16 +712,16 @@ def test_an_operand_this_run_parses_is_held_to_the_pinned_depth(
     )
 
 
-def test_a_serialized_snapshot_stays_exempt_in_both_of_its_shapes(
+def test_a_serialized_description_stays_exempt_in_every_one_of_its_shapes(
     tmp_path: Path,
 ) -> None:
     """The complement, so the fix above cannot be 'gate everything'.
 
-    Both shapes `resolve_input` accepts as a stored snapshot are exempt — a
-    single ``.abi.json`` file and a directory-backed `ProjectSnapshot`
-    package — because only a serialized snapshot can already *carry* the
-    pinned evidence. A plain directory of libraries is neither, and must not
-    be swept into the exemption.
+    Every shape `resolve_input` accepts as an already-serialized ABI
+    description is exempt — a single ``.abi.json`` file, a directory-backed
+    `ProjectSnapshot` package, and an ABICC Perl dump — because only such a
+    description can already *carry* the pinned evidence. A plain directory of
+    libraries is none of them, and must not be swept into the exemption.
     """
     from abicheck.workflows.no_baseline_compare import candidate_is_live_artifact
 
@@ -662,6 +730,8 @@ def test_a_serialized_snapshot_stays_exempt_in_both_of_its_shapes(
         / "snapshot.abi.json"
     )
     package = _project_snapshot_package(tmp_path, "case143_audit_accidental_export")
+    perl_dump = tmp_path / "saved.dump"
+    perl_dump.write_text("$VAR1 = {\n  'ABI' => {}\n};\n")
     plain = tmp_path / "release"
     plain.mkdir()
     (plain / "libfoo.so").write_bytes(b"\x7fELF\x02\x01\x01\x00" + bytes(56))
@@ -670,6 +740,12 @@ def test_a_serialized_snapshot_stays_exempt_in_both_of_its_shapes(
     assert candidate_is_live_artifact(package) is False, (
         "a ProjectSnapshot package is the repository's own storage-v2 form of "
         "the same stored snapshot, so it carries the same exemption"
+    )
+    assert candidate_is_live_artifact(perl_dump) is False, (
+        "an ABICC Perl dump is a pre-built, tool-produced ABI description "
+        "this run parses rather than extracts, exactly like an .abi.json; "
+        "splitting the two on serialization format alone made --depth source "
+        "exit 7 on one and 0 on the other (Codex review, P2)"
     )
     assert candidate_is_live_artifact(plain) is True, (
         "a plain directory of libraries is not a stored snapshot; exempting "
@@ -808,8 +884,14 @@ def test_the_audit_sarif_names_why_it_exited(tmp_path: Path) -> None:
         run_no_baseline_compare,
     )
 
+    # `case145` under `--contract public` is short of evidence and really
+    # gates; `case143` closes the domain cleanly, so pointing this test at
+    # it and guarding on `if exit_code:` left the whole gated assertion
+    # unreachable (CodeRabbit review). The gate is asserted first, so the
+    # test fails loudly if the fixture ever stops gating instead of
+    # quietly passing on nothing.
     snapshot = (
-        example_catalog.case_dir("case143_audit_accidental_export")
+        example_catalog.case_dir("case145_audit_unversioned_export")
         / "snapshot.abi.json"
     )
     result = run_no_baseline_compare(
@@ -821,13 +903,103 @@ def test_the_audit_sarif_names_why_it_exited(tmp_path: Path) -> None:
     run = json.loads(payload)["runs"][0]
     invocation = run["invocations"][0]
 
-    if exit_code:
-        assert "contract coverage incomplete" in invocation["exitCodeDescription"]
-        notifications = invocation.get("toolExecutionNotifications") or []
-        assert notifications, "a gated audit must say which provider fell short"
-        assert any("provider" in n["message"]["text"] for n in notifications)
-        assert run["properties"]["contractCoverageFailures"]
+    assert exit_code != 0, "the gated fixture must actually gate"
+    assert "contract coverage incomplete" in invocation["exitCodeDescription"]
+    notifications = invocation.get("toolExecutionNotifications") or []
+    assert notifications, "a gated audit must say which provider fell short"
+    assert any("provider" in n["message"]["text"] for n in notifications)
+    assert run["properties"]["contractCoverageFailures"]
     assert invocation["executionSuccessful"] is True, (
         "SARIF's executionSuccessful means the tool ran to completion, not "
         "that it found nothing"
+    )
+
+
+@pytest.mark.parametrize(
+    ("config_text", "suppression_text"),
+    [
+        pytest.param(
+            "suppression:\n  require_justification: true\n",
+            'version: 1\nsuppressions:\n  - symbol_pattern: ".*"\n',
+            id="require_justification",
+        ),
+        pytest.param(
+            "suppression:\n  strict: true\n",
+            (
+                "version: 1\n"
+                "suppressions:\n"
+                '  - symbol_pattern: ".*"\n'
+                '    reason: "audited"\n'
+                '    expires: "2020-01-01"\n'
+            ),
+            id="strict_expiry",
+        ),
+    ],
+)
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_a_configs_suppression_acceptance_rules_bind_the_audit_too(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    config_text: str,
+    suppression_text: str,
+    dry_run: bool,
+) -> None:
+    """`.abicheck.yml`'s `suppression:` acceptance settings gate the audit.
+
+    These two settings decide whether a suppression *document* may be used at
+    all, not which findings it matches. The audit resolved the project config
+    but never read them, so a reasonless (or long-expired) rule that ordinary
+    `compare` rejects was accepted here — and then suppressed the finding and
+    exited 0, which is the worst possible direction for the failure to run in
+    (Codex review, P1).
+
+    Both settings are exercised, since honoring one would satisfy a
+    single-row test, and `--dry-run` is exercised alongside the real run: a
+    preview that accepts a document the run rejects approves a run that
+    cannot start. The oracle is the two-sided command's own exit code on the
+    same directory and the same document — not a hard-coded number — so the
+    two paths cannot drift apart again.
+    """
+    work, snapshot = _in_dir(tmp_path, config_text)
+    suppress = work / "sup.yaml"
+    suppress.write_text(suppression_text)
+    monkeypatch.chdir(work)
+
+    real_audit = invoke_cli(
+        "compare", "--no-baseline", str(snapshot), "--suppress", str(suppress)
+    )
+    two_sided = invoke_cli(
+        "compare", str(snapshot), str(snapshot), "--suppress", str(suppress)
+    )
+    assert two_sided.exit_code != 0, (
+        "the two-sided command is this test's oracle; if it stopped "
+        "rejecting the document there is nothing left to compare against"
+    )
+    assert real_audit.exit_code == two_sided.exit_code, (
+        f"audit exited {real_audit.exit_code}, two-sided "
+        f"{two_sided.exit_code} on the same rejected suppression document"
+    )
+
+    if not dry_run:
+        return
+
+    # `--dry-run`'s oracle is the audit's own real run, not the two-sided
+    # command's preview: two-sided `--dry-run` does not load the suppression
+    # document at all, while this path deliberately does, so that a preview
+    # cannot approve a run that then cannot start (an earlier Codex P2 on
+    # this same command). Comparing against the looser preview would pin the
+    # weaker behaviour, so the invariant asserted here is the one this path
+    # actually promises.
+    preview = invoke_cli(
+        "compare",
+        "--no-baseline",
+        str(snapshot),
+        "--suppress",
+        str(suppress),
+        "--dry-run",
+    )
+    assert preview.exit_code == real_audit.exit_code, (
+        f"the preview exited {preview.exit_code} where the real audit exits "
+        f"{real_audit.exit_code}; a preview that accepts a document the run "
+        "rejects approves a run that cannot start"
     )

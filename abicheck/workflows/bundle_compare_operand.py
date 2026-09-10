@@ -591,7 +591,7 @@ def _marker_lookup_at_window(path: Path, n: int) -> tuple[bool | None, bool]:
     # escapes intact) -- decode it the same way json.loads() would rather
     # than comparing escaped bytes to an unescaped constant, so a
     # (technically valid, if unnecessary) escaped spelling still matches.
-    from ..bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
+    from ..model.bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE
 
     decoded_value = decode_json_string_token(value)
     # *definitive* is propagated as-is, not hardcoded True (Codex review,

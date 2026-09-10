@@ -77,10 +77,8 @@ from .compatibility_evaluation_wiring import (
     load_selected_packs,
 )
 from .errors import PackManifestError
-from .policy.gate_pack_fold import (
-    GATE_SEVERITY_CATEGORIES,
-    fold_gate_pack_severity,
-)
+from .policy.effective_gate import GateSeverityState
+from .policy.gate_pack_fold import GATE_SEVERITY_CATEGORIES
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .policy_file import PolicyFile
@@ -555,22 +553,25 @@ def apply_to_compare_config(resolved_cfg: Any, application: PackApplication) -> 
     :func:`~abicheck.policy.gate_pack_fold.fold_gate_pack_severity`, the one
     shared implementation the directory/package release fan-out's
     ``policy.release_gate_options.apply_release_gate_pack`` also calls
-    (duplication-and-convergence-assessment T6). The two differ only in what
+    (duplication-and-convergence-assessment T6), through the identical
+    :class:`~abicheck.policy.effective_gate.GateSeverityState` value type
+    that function now builds too (P0's follow-on: one shared fold-time
+    shape, not just one shared fold function). The two differ only in what
     they fold *onto* -- an already-resolved ``SeverityConfig`` here, four raw
-    optional strings there -- which is why the shared function is written
+    optional strings there -- which is why ``GateSeverityState`` is written
     over a plain per-category mapping rather than either runtime shape.
     """
     if not application.severity_levels:
         return resolved_cfg
-    folded = fold_gate_pack_severity(
-        {
+    state = GateSeverityState(
+        levels={
             category: getattr(resolved_cfg.severity, category)
             for category in GATE_SEVERITY_CATEGORIES
         },
-        application.severity_levels,
-    )
-    severity = replace(resolved_cfg.severity, **folded)
-    return replace(resolved_cfg, severity=severity, severity_active=True)
+        active=resolved_cfg.severity_active,
+    ).folded(application.severity_levels)
+    severity = replace(resolved_cfg.severity, **state.levels)
+    return replace(resolved_cfg, severity=severity, severity_active=state.active)
 
 
 #: Pack fields whose engine consumer only runs under contract evaluation,

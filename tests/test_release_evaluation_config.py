@@ -55,7 +55,7 @@ from abicheck.compatibility_evaluation_config import (
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.effective_config_digest import (
     effective_config_digest,
-    effective_config_fields,
+    effective_config_fields_from_raw,
 )
 
 
@@ -194,7 +194,7 @@ class TestReleaseFanOutStampsResolvedConfig:
         attribute got set."""
         result = _result()
         result.evaluation_config = _minimal_evaluation_config()
-        fields = effective_config_fields(
+        fields = effective_config_fields_from_raw(
             result, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields["_tier"] == "contract"
@@ -224,10 +224,10 @@ class TestReleaseFanOutStampsResolvedConfig:
         result1, result2 = _result(), _result()
         result1.evaluation_config = rev1
         result2.evaluation_config = rev2
-        fields1 = effective_config_fields(
+        fields1 = effective_config_fields_from_raw(
             result1, severity_config=None, exit_code_scheme="legacy"
         )
-        fields2 = effective_config_fields(
+        fields2 = effective_config_fields_from_raw(
             result2, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields1["_tier"] == fields2["_tier"] == "contract"
@@ -382,7 +382,7 @@ class TestReleaseFanOutMergesContractContext:
 
         record_release_resolved_config(diff, pack_config)
 
-        fields = effective_config_fields(
+        fields = effective_config_fields_from_raw(
             diff, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields["_tier"] == "contract"
@@ -587,7 +587,9 @@ class TestReleaseFanOutPreservesObservedSuppressions:
 
         merged_config = diff.contract_context.evaluation_context.resolved_config
         assert merged_config.suppressions is observed_suppressions
-        assert merged_config.provenance["suppressions"] is observed_suppression_provenance
+        assert (
+            merged_config.provenance["suppressions"] is observed_suppression_provenance
+        )
 
 
 def _release_pack(tmp_path: Path, name: str, body: str) -> Path:

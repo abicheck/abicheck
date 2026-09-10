@@ -46,6 +46,11 @@ same rule as every other name here).
 the one gate-algorithm derivation and the one gate-pack severity fold, owned
 by ``policy/gate_pack_fold.py`` and re-exported here for the same
 ``frontends -> policy`` reason as the release-gate names above.
+``EffectiveGate``/``GateSeverityState``/``ScopedGateSelection`` (that plan's
+P0 "Effective configuration and pack application" target) are the one
+resolved gate-configuration shape and its shared fold-time value type, owned
+by ``policy/effective_gate.py`` and re-exported here for the identical
+reason.
 
 ``note_if_same_binary_compared`` (Codex review) is not an exit-code axis, but
 it belongs here rather than in ``extraction.py`` for the same reason as the
@@ -57,7 +62,7 @@ operation performed on an input before extraction -- which is exactly what
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..analysis_assurance import (
     analysis_assurance_exit_contribution,
@@ -76,6 +81,12 @@ from ..policy.contract_coverage_exit import (
     coverage_exit_floor,
     coverage_exit_for_context,
     fold_coverage_exit,
+)
+from ..policy.effective_gate import (
+    EffectiveGate,
+    GateSeverityState,
+    ScopedGateSelection,
+    scoped_gate_selection_from_result,
 )
 from ..policy.exit_decision import (
     ExitDecision,
@@ -129,15 +140,18 @@ if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 __all__ = [
+    "EffectiveGate",
     "ExitDecision",
     "GATE_SEVERITY_CATEGORIES",
     "GateDecision",
     "GateOptions",
+    "GateSeverityState",
     "INCOMPLETE_SCOPE_POLICIES",
     "IssueCategory",
     "PRESET_DEFAULT",
     "ScopeCompleteness",
     "ScopeDecision",
+    "ScopedGateSelection",
     "SeverityConfig",
     "SeverityLevel",
     "analysis_assurance_exit_contribution",
@@ -153,6 +167,7 @@ __all__ = [
     "coverage_diagnostic_from_summary",
     "coverage_exit_floor",
     "coverage_exit_for_context",
+    "effective_gate_for_resolved_compare_config",
     "fold_analysis_assurance_exit",
     "fold_coverage_exit",
     "fold_gate_pack_severity",
@@ -173,6 +188,7 @@ __all__ = [
     "resolve_scope_decision",
     "resolve_severity_config",
     "scope_completeness_for_record",
+    "scoped_gate_selection_from_result",
     "snapshot_identity_digest",
     "validate_incomplete_scope_policy",
 ]
@@ -193,3 +209,61 @@ def snapshot_identity_digest(snap: AbiSnapshot) -> str:
     from ..serialization import snapshot_content_digest
 
     return snapshot_content_digest(snap)
+
+
+def effective_gate_for_resolved_compare_config(
+    cfg: Any,
+    *,
+    result: Any = None,
+    require_complete_analysis: bool = False,
+) -> EffectiveGate:
+    """*cfg* (a ``cli_helpers_compare.ResolvedCompareConfig``, taken as
+    ``Any`` rather than imported -- that module is ``frontends``-classified,
+    and ``workflows -> frontends`` is exactly the reverse of the permitted
+    direction), projected onto the plan's shared ``EffectiveGate`` shape
+    (duplication-and-convergence-assessment P0's "Effective configuration
+    and pack application" target). ``policy.release_gate_options.
+    GateOptions.effective_gate`` exposes the identical shape for the
+    directory/package release fan-out, so a caller holding either object can
+    ask the same question.
+
+    ``severity`` on the returned object is ``None`` exactly when
+    ``cfg.severity_active`` is ``False`` -- unlike *cfg*'s own ``severity``
+    field, which is always a concrete, defaulted ``SeverityConfig`` -- so the
+    two objects' ``effective_gate.severity`` agree under the legacy scheme
+    too, closing the one deliberate asymmetry
+    ``tests/test_release_gate_pack_fold_parity.py`` documents between the
+    two raw objects.
+
+    *require_complete_analysis*/*result* carry the two other gate-changing
+    axes ``cfg`` alone cannot (Codex review, PR #1192: leaving these at their
+    default regardless of the real run made two invocations that genuinely
+    gate differently -- e.g. differing only in ``--require-complete-
+    analysis`` or ``--required-symbol`` -- produce an *equal* ``EffectiveGate``,
+    defeating the type's purpose). *require_complete_analysis* is the
+    identically-named CLI/API flag, known before any comparison runs.
+    *result* is the completed comparison's ``DiffResult`` (or ``None`` when
+    called before one exists, e.g. resolution-only/dry-run code); the scoped-
+    gate selection (``--used-by``/``--required-symbol``) it may have recorded
+    is read via :func:`~abicheck.policy.effective_gate.
+    scoped_gate_selection_from_result`. Both default to "no effect" so a
+    caller that genuinely has neither (a bare config-only comparison, as
+    ``tests/test_effective_gate.py``'s parity property exercises) is
+    unaffected.
+
+    ``on_incomplete_scope``/``fail_on_removed_library`` (Codex review, PR
+    #1192, third follow-up round) are deliberately left at ``EffectiveGate``'s
+    default (``None``, "not applicable") here even though *cfg* itself
+    carries both -- ``cfg.on_incomplete_scope``/``cfg.fail_on_removed_
+    library`` exist on ``ResolvedCompareConfig`` only to be *forwarded* to
+    the directory/package release fan-out if this invocation turns out to
+    dispatch there; they describe that separate, not-yet-decided run's own
+    scope, not this single-pair ``cfg``'s. ``GateOptions.effective_gate``
+    (``policy/release_gate_options.py``) is where those two axes are real at
+    the object's own scope, once resolved for the release fan-out itself.
+    """
+    return EffectiveGate.from_severity(
+        cfg.severity if cfg.severity_active else None,
+        require_complete_analysis=require_complete_analysis,
+        scope=scoped_gate_selection_from_result(result),
+    )
