@@ -42,12 +42,14 @@ import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from abicheck.report.no_baseline import (
+    AUDIT_REPORT_SCHEMA_VERSION,
     NO_BASELINE_EXIT_AXIS_LABELS,
     NO_BASELINE_EXIT_AXIS_NOTICES,
     NO_BASELINE_SUPPORTED_FORMATS,
     compute_no_baseline_document,
     render_no_baseline,
 )
+from abicheck.schemas import AUDIT_REPORT_SCHEMA_PATH
 from abicheck.suppression import Suppression, SuppressionList
 from abicheck.workflows.no_baseline_compare import (
     resolve_no_baseline_candidate,
@@ -577,7 +579,7 @@ def test_a_coverage_gated_audit_publishes_the_ledger_that_gated_it() -> None:
         doc = compute_no_baseline_document(result)
 
     assert doc.contract_selected, "the contract path must actually have run"
-    payload, exit_code = render_no_baseline(result, "json")
+    payload, _exit_code = render_no_baseline(result, "json")
     body = json.loads(payload)
     assert "contract_coverage_failures" in body, (
         "the ledger is emitted whenever a contract domain was selected — `[]` "
@@ -586,11 +588,29 @@ def test_a_coverage_gated_audit_publishes_the_ledger_that_gated_it() -> None:
     assert body["contract_coverage_failures"] == [
         dict(f) for f in doc.coverage_failures
     ]
-    if exit_code:
-        assert body["contract_coverage_failures"], (
-            "a run gated on the coverage axis must list what fell short; "
-            "publishing only the contribution is the defect this closes"
-        )
+    # The half above proves a *closed* domain still publishes the ledger
+    # (`[]`). The gated half needs a fixture that really is short of
+    # evidence -- `case143` closes `public` cleanly, so guarding this on
+    # `if exit_code:` made the assertion unreachable and it never ran
+    # (CodeRabbit review). Assert the gate fires first, then what it must
+    # publish.
+    gated = run_no_baseline_compare(
+        resolve_no_baseline_candidate(
+            example_catalog.case_dir("case145_audit_unversioned_export")
+            / "snapshot.abi.json"
+        ),
+        contract_evaluation=True,
+        contract_mode="public",
+    )
+    gated_payload, gated_exit = render_no_baseline(gated, "json")
+    assert gated_exit != 0, (
+        "case145 under `--contract public` is this suite's gated fixture; "
+        "if it stopped gating, this test proves nothing"
+    )
+    assert json.loads(gated_payload)["contract_coverage_failures"], (
+        "a run gated on the coverage axis must list what fell short; "
+        "publishing only the contribution is the defect this closes"
+    )
 
 
 def test_a_run_without_a_contract_omits_the_ledger_entirely() -> None:
@@ -687,11 +707,156 @@ def test_the_audit_json_validates_against_its_own_published_schema() -> None:
     assert "report_schema_version" not in doc, (
         "the compare report's identity field must not appear on an audit"
     )
-    assert doc["audit_report_schema_version"], "the audit carries its own version"
+    assert doc["audit_report_schema_version"] == AUDIT_REPORT_SCHEMA_VERSION, (
+        "the emitted version must be the constant, not a literal that can drift from it"
+    )
     compare_errors = list(
         jsonschema.Draft202012Validator(load_compare_report_schema()).iter_errors(doc)
     )
     assert compare_errors, (
         "an audit must not validate as a compare report — the two documents "
         "mean different things by a null verdict"
+    )
+
+
+def test_junit_names_the_axis_that_gated_not_every_axis_that_could_have() -> None:
+    """JUnit must say *which* orthogonal axis fired.
+
+    The suite carried only the total exit code and the contract-coverage
+    contribution, and the failure text listed every axis that might have
+    fired — so a consumer gated by the evidence contract learned nothing
+    (Codex review, P2). JSON, Markdown, oneline and SARIF all name it; JUnit
+    is now held to the same statement.
+
+    The oracle is `doc.exit_axes` — the same resolved mapping the other four
+    projections read — so the formats cannot drift apart, and each axis is
+    checked in both directions: a contributing axis must be named, a cleared
+    one must be published as `0` rather than omitted.
+    """
+    result = run_no_baseline_compare(
+        resolve_no_baseline_candidate(
+            example_catalog.case_dir("case145_audit_unversioned_export")
+            / "snapshot.abi.json"
+        ),
+        contract_evaluation=True,
+        contract_mode="public",
+    )
+    doc = compute_no_baseline_document(result)
+    payload, exit_code = render_no_baseline(result, "junit")
+    assert exit_code != 0, "the gated fixture must actually gate"
+
+    suite = ET.fromstring(payload)
+    props = {p.attrib["name"]: p.attrib["value"] for p in suite.iter("property")}
+    for axis, contribution in doc.exit_axes.items():
+        assert props[f"exit_axis.{axis}"] == str(contribution), (
+            f"axis {axis} must be published with its own contribution; a "
+            "cleared axis is a real '0', not an absent key"
+        )
+
+    failure = suite.find(".//failure")
+    assert failure is not None and failure.text
+    contributing = [a for a, c in doc.exit_axes.items() if c]
+    assert contributing, "this fixture must contribute on some axis"
+    for axis in contributing:
+        assert NO_BASELINE_EXIT_AXIS_LABELS[axis] in failure.text, (
+            f"the failure text must name the contributing axis {axis}"
+        )
+    for axis, contribution in doc.exit_axes.items():
+        if contribution:
+            continue
+        assert NO_BASELINE_EXIT_AXIS_LABELS[axis] not in failure.text, (
+            f"axis {axis} did not fire, so naming it in the failure text is "
+            "the same 'here is every axis that might have' non-answer this "
+            "test exists to forbid"
+        )
+
+    assert doc.coverage_failures, "this fixture gates on the coverage axis"
+    for failed in doc.coverage_failures:
+        assert str(failed["provider"]) in failure.text, (
+            "the coverage axis can name a specific provider; the bare "
+            "contribution number cannot"
+        )
+
+
+def test_the_published_audit_schema_copy_matches_the_packaged_one() -> None:
+    """The two copies of this schema stay byte-identical.
+
+    `scripts/publish_schemas.py` keeps `docs/reference/schemas/v1/` in sync
+    with the packaged copy, and `compare_report.schema.json` has had this
+    guard since its own docs mirror silently drifted (PR #595 -> #611).
+    The audit schema shipped without the equivalent, so its two copies were
+    hand-edited in step and nothing checked that they stayed that way —
+    `jsonschema`'s `additionalProperties` tolerance will not flag a stale
+    published copy, which is exactly how the first drift went unnoticed.
+    """
+    published = (
+        AUDIT_REPORT_SCHEMA_PATH.parent.parent.parent
+        / "docs"
+        / "reference"
+        / "schemas"
+        / "v1"
+        / "audit_report.schema.json"
+    )
+    assert published.is_file(), "the audit schema must be published, not packaged only"
+    assert published.read_text(encoding="utf-8") == AUDIT_REPORT_SCHEMA_PATH.read_text(
+        encoding="utf-8"
+    ), (
+        "the published audit schema has drifted from the packaged one; "
+        "run scripts/publish_schemas.py (or mirror the edit) so a consumer "
+        "reading the documented schema sees what the tool actually emits"
+    )
+
+
+#: The audit schema's root ``required`` list, pinned.
+#:
+#: Growing this set is a *narrowing* of the validation contract, not an
+#: addition: a document that validated without the new entry stops
+#: validating. On a published schema version that is a MAJOR bump, or
+#: grounds for leaving the field optional -- MINOR is not available for it
+#: (see `AUDIT_REPORT_SCHEMA_VERSION`'s own note). The rule was prose only
+#: until a review pointed out that `1.1` had quietly grown this list while
+#: the comment beside it called the change "additive" (Codex review, P2);
+#: prose is what let that through, so the rule is executable here instead.
+#:
+#: Updating this set is therefore a deliberate act with a version decision
+#: attached. Do not edit it to make a failure go away.
+#: Read off the schema, not recalled: a first draft of this set was written
+#: from memory, named a `candidate` field the schema does not have, and
+#: omitted three it does. The test caught it, which is the point -- but it
+#: is worth recording that even the pin wanted checking against the source.
+_EXPECTED_AUDIT_ROOT_REQUIRED = frozenset(
+    {
+        "audit_report_schema_version",
+        "changes",
+        "exit_code",
+        "findings",
+        "library",
+        "no_baseline",
+        "old_acquisition_state",
+        "verdict",
+    }
+)
+
+
+def test_the_audit_schemas_required_list_is_pinned() -> None:
+    """A `required` entry may not appear without a version decision.
+
+    Deliberately asserts set *equality*, not `>=`: a one-directional check
+    would catch a removal while letting the tightening this test exists for
+    slip through, which is the direction that actually happened.
+    """
+    schema = json.loads(AUDIT_REPORT_SCHEMA_PATH.read_text(encoding="utf-8"))
+    actual = frozenset(schema["required"])
+    added = actual - _EXPECTED_AUDIT_ROOT_REQUIRED
+    removed = _EXPECTED_AUDIT_ROOT_REQUIRED - actual
+    assert not added, (
+        f"the audit schema's root `required` list grew by {sorted(added)}. That "
+        "narrows the contract: a document valid without those fields is now "
+        "rejected. If the schema version has been released, this needs a MAJOR "
+        "bump or the field left optional -- see AUDIT_REPORT_SCHEMA_VERSION's "
+        "note. Update this set only with that decision made."
+    )
+    assert not removed, (
+        f"the audit schema's root `required` list lost {sorted(removed)}; a "
+        "removal is a MAJOR change in the other direction"
     )

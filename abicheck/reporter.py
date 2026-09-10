@@ -23,6 +23,8 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .severity import GateDecision, KindSets, SeverityConfig
 from . import reporter_contract_blocks as _reporter_contract_blocks
 from .checker import Change, DiffResult, Verdict
@@ -1108,7 +1110,7 @@ def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
         d["comparability_assurance"] = dict(result.comparability_assurance)
 
 
-def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
+def _add_policy_overrides(d: dict[str, object], result: DiffResult, *, today: date | None = None) -> None:
     """Add policy file overrides/reclassify rules (custom re-classifications)
     when present.
 
@@ -1121,7 +1123,9 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
     ``abicheck/schemas/__init__.py``'s 2.31 history entry). Each rule's dict
     here comes from ``ReclassifyRule.to_report_dict()`` -- shared with
     ``sarif.py``'s ``policyReclassify`` so the two can't drift on field
-    set/spelling.
+    set/spelling. *today*, forwarded to :func:`active_reclassify_rules`, keeps
+    the active-rule set consistent with an already-frozen ``ReportEnvelope``
+    (Codex review, fresh evidence).
     """
     if result.policy_file and result.policy_file.overrides:
         d["policy_overrides"] = {
@@ -1133,7 +1137,7 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
     if result.policy_file and result.policy_file.reclassify:
         from .reclassify import active_reclassify_rules
 
-        active = active_reclassify_rules(result.policy_file.reclassify)
+        active = active_reclassify_rules(result.policy_file.reclassify, today)
         if active:
             d["policy_reclassify"] = [rule.to_report_dict() for rule in active]
             if result.policy_file.source_path:
@@ -1141,13 +1145,8 @@ def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
 
 
 def _add_changes_block(
-    d: dict[str, object],
-    result: DiffResult,
-    changes: list[Change],
-    effective_policy: str,
-    eff_sets: KindSets | None,
-    show_only: str | None = None,
-    severity_config: SeverityConfig | None = None,
+    d: dict[str, object], result: DiffResult, changes: list[Change], effective_policy: str, eff_sets: KindSets | None,
+    show_only: str | None = None, severity_config: SeverityConfig | None = None, today: date | None = None,
 ) -> None:
     """Add changes list and optional redundant-count / pattern-modulations fields.
 
@@ -1159,6 +1158,9 @@ def _add_changes_block(
     (G29 Phase 6, Codex review) gets the same treatment via
     :func:`~abicheck.root_cause_evidence.scoped_only_evidence_lookup`, correlating against the real
     scoped-only ``Change`` objects rather than just their ``caused_by_type``.
+    *today*, forwarded to :func:`_change_to_dict` for every entry, keeps this
+    agreeing with an already-frozen ``ReportEnvelope`` (Codex review, fresh
+    evidence).
     """
     _rc_lookup = root_cause_lookup_for_changes(
         changes, extra_causes=_scoped_only_extra_causes(result, show_only)
@@ -1174,6 +1176,7 @@ def _add_changes_block(
             root_cause_evidence=_rc_evidence.get(_finding_id(c)),
             evidence_tiers=result.evidence_tiers,
             severity_config=severity_config,
+            today=today,
         )
         for c in changes
     ]
@@ -1248,11 +1251,7 @@ _VERDICT_TO_RECOMMENDED_ACTION: dict[Verdict, str] = {
 
 
 def _recommended_action_for_change(
-    c: object,
-    *,
-    policy: str | None,
-    kind_sets: KindSets | None,
-    policy_file: object | None,
+    c: object, *, policy: str | None, kind_sets: KindSets | None, policy_file: object | None, today: date | None = None,
 ) -> str:
     """Return a structured, machine-readable next step for *c* (schema 2.4).
 
@@ -1277,6 +1276,7 @@ def _recommended_action_for_change(
         policy=policy,
         kind_sets=kind_sets,
         policy_file=policy_file,
+        today=today,
     )
     action = _VERDICT_TO_RECOMMENDED_ACTION.get(verdict)
     if action is not None:
@@ -1289,6 +1289,7 @@ def _recommended_action_for_change(
         policy=policy,
         kind_sets=kind_sets,
         policy_file=policy_file,
+        today=today,
     )
     return (
         "no_action_required"
@@ -1313,11 +1314,7 @@ _DEFAULT_ADDITION_REVIEWER_ACTION = "confirm_public_api_intent"
 
 
 def _reviewer_action_for_change(
-    c: object,
-    *,
-    policy: str | None,
-    kind_sets: KindSets | None,
-    policy_file: object | None,
+    c: object, *, policy: str | None, kind_sets: KindSets | None, policy_file: object | None, today: date | None = None,
 ) -> str | None:
     """Finer-grained reviewer guidance for a COMPATIBLE addition (additive).
 
@@ -1338,6 +1335,7 @@ def _reviewer_action_for_change(
         policy=policy,
         kind_sets=kind_sets,
         policy_file=policy_file,
+        today=today,
     )
     if category != IssueCategory.ADDITION:
         return None
@@ -1382,17 +1380,19 @@ def _change_reachability_fields(c: Any) -> dict[str, Any]:
     return out
 
 
-def _reclassified_by_for_change(c: object, policy_file: object | None) -> str | None:
+def _reclassified_by_for_change(c: object, policy_file: object | None, *, today: date | None = None) -> str | None:
     """``reclassified_by`` audit value for *c*, or ``None`` -- shared by
     :func:`_change_to_dict` and leaf mode's ``_leaf_entry`` (Codex review)
     so the two entry builders can't drift on this field. Falls back to
     ``rule.to_verdict.value`` rather than ``rule.to``, since a directly-
     constructed ``ReclassifyRule`` could leave the latter empty/mismatched
     -- see ``severity.reclassify_rule_for_change`` for the full precedence.
+    *today*, forwarded there, keeps this agreeing with an already-frozen
+    ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from .severity import reclassify_rule_for_change
 
-    rule = reclassify_rule_for_change(cast(HasKind, c), policy_file)
+    rule = reclassify_rule_for_change(cast(HasKind, c), policy_file, today)
     if rule is None:
         return None
     return cast(str, rule.label or rule.reason or rule.to_verdict.value)
@@ -1465,6 +1465,7 @@ def _change_to_dict(
     root_cause_evidence: dict[str, object] | None = None,
     evidence_tiers: Sequence[str] = (),
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> dict[str, object]:
     """Convert a Change to a JSON-serializable dict with impact and metadata.
 
@@ -1496,6 +1497,11 @@ def _change_to_dict(
     one — it decides ADR-049's per-finding ``gate_contribution`` (see the call
     to :func:`~abicheck.severity.gate_contribution_for_change` below). ``None``
     means the legacy verdict-based scheme, not "no gate".
+
+    ``today``, forwarded to every date-sensitive resolution below (verdict,
+    reclassify attribution, recommended/reviewer action, gate contribution),
+    keeps this agreeing with an already-frozen ``ReportEnvelope`` (Codex
+    review, fresh evidence).
     """
     kind = getattr(c, "kind", None)
     reclassified_by: str | None = None
@@ -1507,11 +1513,12 @@ def _change_to_dict(
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         severity = _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
         # Per-change reclassify: disclosure (Codex review) -- see
         # _reclassified_by_for_change's own docstring.
-        reclassified_by = _reclassified_by_for_change(c, policy_file)
+        reclassified_by = _reclassified_by_for_change(c, policy_file, today=today)
     elif kind:
         severity = _kind_to_severity(kind, policy)
     else:
@@ -1551,12 +1558,14 @@ def _change_to_dict(
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         reviewer_action = _reviewer_action_for_change(
             c,
             policy=policy,
             kind_sets=kind_sets,
             policy_file=policy_file,
+            today=today,
         )
         if reviewer_action is not None:
             d["reviewer_action"] = reviewer_action
@@ -1604,6 +1613,7 @@ def _change_to_dict(
                 policy=policy,
                 kind_sets=kind_sets,
                 policy_file=policy_file,
+                today=today,
             )
             if isinstance(kind, ChangeKind)
             else 0
@@ -1613,13 +1623,9 @@ def _change_to_dict(
 
 
 def _build_severity_json(
-    changes: list[Change],
-    severity_config: SeverityConfig,
-    *,
-    gate: GateDecision,
-    policy: str | None = None,
-    kind_sets: KindSets | None = None,
-    policy_file: object | None = None,
+    changes: list[Change], severity_config: SeverityConfig, *, gate: GateDecision,
+    policy: str | None = None, kind_sets: KindSets | None = None, policy_file: object | None = None,
+    today: date | None = None,
 ) -> dict[str, object]:
     """Build severity information for JSON output.
 
@@ -1629,6 +1635,8 @@ def _build_severity_json(
     one) -- always derived from the *unfiltered* change set, so
     ``--show-only`` does not affect the exit code it reports. *kind_sets*
     from ``DiffResult._effective_kind_sets()`` includes PolicyFile overrides.
+    *today*, forwarded to :func:`categorize_changes`, keeps this agreeing
+    with an already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from .severity import SeverityLevel, categorize_changes
 
@@ -1637,6 +1645,7 @@ def _build_severity_json(
         policy=policy,
         kind_sets=kind_sets,
         policy_file=policy_file,
+        today=today,
     )
 
     config_dict: dict[str, str] = {}

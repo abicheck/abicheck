@@ -33,6 +33,7 @@ from .report.render_json import render_json
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import date
 
     from .checker_types import Change, DiffResult
     from .report.scoped_gate import ScopedGateChangeHelpers
@@ -47,6 +48,7 @@ def add_contract_context(
     require_complete_analysis: bool = False,
     severity_config: SeverityConfig | None = None,
     include_exit_decision: bool = True,
+    today: date | None = None,
 ) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
     ``analysis_assurance``/``analysis_assurance_exit_contribution`` and CLI
@@ -59,6 +61,9 @@ def add_contract_context(
     :mod:`abicheck.contract_context_io` to match
     :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
     all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
+    *today*, forwarded to the ``exit`` block's resolver and to
+    :func:`add_annotations`, keeps both agreeing with an already-frozen
+    ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from .analysis_assurance import (
         analysis_assurance_exit_contribution,
@@ -118,8 +123,9 @@ def add_contract_context(
             severity_config,
             scheme,
             require_complete_analysis=require_complete_analysis,
+            today=today,
         ).to_dict()
-    add_annotations(d, result, severity_config=severity_config)
+    add_annotations(d, result, severity_config=severity_config, today=today)
     add_use_case_impact(d, result, displayed)
     # Same `include_exit_decision` gate as the `exit` block above, for the
     # identical reason (Codex review, PR #803, fresh evidence): the digest's
@@ -506,6 +512,7 @@ def build_report_document_with_side_facts(
     gate: GateDecision | None = None,
     show_only: str | None = None,
     contract_evaluation: bool = False,
+    today: date | None = None,
 ) -> ReportDocument:
     """Fold in the shared side facts and freeze *d* as a :class:`ReportDocument`.
 
@@ -515,7 +522,10 @@ def build_report_document_with_side_facts(
     wants the *document* -- to project it into a non-JSON format, or to build
     it once and render it several times -- does not have to render to a JSON
     string and parse it back. ``render_json_with_side_facts`` itself is now a
-    thin ``build -> render`` wrapper kept for its existing callers.
+    thin ``build -> render`` wrapper kept for its existing callers. *today*,
+    forwarded to :func:`~abicheck.report.scoped_gate.apply_scoped_gate`, keeps
+    a scoped-only finding agreeing with an already-frozen ``ReportEnvelope``
+    (Codex review, fresh evidence).
     """
     from .report.cross_source_evolution import (
         compute_cross_source_evolution_summary,
@@ -541,6 +551,7 @@ def build_report_document_with_side_facts(
         severity_config=severity_config,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
+        today=today,
     )
     return ReportDocument.from_mapping(d)
 
@@ -550,6 +561,7 @@ def add_annotations(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> None:
     """CLI cleanup phase two, PR E: persist ``annotations`` (schema 2.43).
 
@@ -570,5 +582,5 @@ def add_annotations(
     from .annotations import annotation_report_entries
 
     d["annotations"] = annotation_report_entries(
-        result, severity_config=severity_config
+        result, severity_config=severity_config, today=today
     )

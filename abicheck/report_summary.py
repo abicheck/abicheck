@@ -24,6 +24,8 @@ from .checker import _BREAKING_KINDS, DiffResult
 from .model.change_catalog.kinds import HasKind
 
 if TYPE_CHECKING:
+    from .checker_types import Change
+    from .report.finding import ReportFinding
     from .severity import KindSets
 
 # Re-exported under its historical name; the implementation (and the prefix
@@ -105,26 +107,45 @@ def compatibility_metrics(
     policy: str | None = None,
     kind_sets: KindSets | None = None,
     policy_file: object | None = None,
+    effective_verdicts: Sequence[object] | None = None,
 ) -> CompatibilityMetrics:
     """Compute canonical ABICC-style binary compatibility counters/percentages.
 
-    Without *policy*/*kind_sets*/*policy_file*, ``breaking_count`` counts raw
-    ``ChangeKind`` membership in the canonical ``_BREAKING_KINDS`` set —
-    which disagrees with a policy-demoted finding's *effective* verdict. A
-    removal a policy file demotes to ``COMPATIBLE`` still carries its raw
-    ``FUNC_REMOVED`` kind, so the canonical-kind count would report it as
-    breaking (e.g. "0.0% binary compatibility") on the same page whose
-    verdict banner reads ``COMPATIBLE`` (computed from the *effective*
-    verdict) — a direct, visible contradiction. Passing *kind_sets* (from
-    ``DiffResult._effective_kind_sets()``) and/or *policy_file* makes this
-    metric agree with the verdict by counting each change's effective
-    verdict instead of its raw kind. A named *policy* alone (e.g.
-    ``plugin_abi``, with no ``kind_sets``/``policy_file``) must also take
-    this path — ``effective_verdict_for_change`` resolves its own kind sets
-    from *policy* when *kind_sets* is ``None`` (Codex review on #549) — or a
+    Without *policy*/*kind_sets*/*policy_file*/*effective_verdicts*,
+    ``breaking_count`` counts raw ``ChangeKind`` membership in the canonical
+    ``_BREAKING_KINDS`` set — which disagrees with a policy-demoted
+    finding's *effective* verdict. A removal a policy file demotes to
+    ``COMPATIBLE`` still carries its raw ``FUNC_REMOVED`` kind, so the
+    canonical-kind count would report it as breaking (e.g. "0.0% binary
+    compatibility") on the same page whose verdict banner reads
+    ``COMPATIBLE`` (computed from the *effective* verdict) — a direct,
+    visible contradiction. Passing *kind_sets* (from ``DiffResult.
+    _effective_kind_sets()``) and/or *policy_file* makes this metric agree
+    with the verdict by counting each change's effective verdict instead of
+    its raw kind. A named *policy* alone (e.g. ``plugin_abi``, with no
+    ``kind_sets``/``policy_file``) must also take this path --
+    ``effective_verdict_for_change`` resolves its own kind sets from
+    *policy* when *kind_sets* is ``None`` (Codex review on #549) — or a
     policy-downgraded kind would still be counted as breaking here.
+
+    *effective_verdicts*, when given, is a pre-resolved verdict per entry
+    in *changes* (same order, same length) -- this metric then counts
+    breaking membership from those instead of calling
+    ``effective_verdict_for_change`` itself, and *policy*/*kind_sets*/
+    *policy_file* are ignored. An ADR-061 gap C caller with an already-
+    completed ``ReportEnvelope`` passes ``[f.verdict for f in envelope.
+    findings_for(changes)]`` here: a dated ``PolicyFile.reclassify`` rule's
+    expiry is resolved against *today*, so recomputing from raw policy
+    inputs every render (rather than reading the envelope's own,
+    already-resolved verdict) could change this page's percentage after
+    the rule expires even though the envelope's shared document was frozen
+    before that (Codex review, fresh evidence).
     """
-    if policy is not None or kind_sets is not None or policy_file is not None:
+    if effective_verdicts is not None:
+        from .policy.classification import Verdict as _Verdict
+
+        breaking_count = sum(1 for v in effective_verdicts if v == _Verdict.BREAKING)
+    elif policy is not None or kind_sets is not None or policy_file is not None:
         from .policy.classification import Verdict as _Verdict
         from .severity import effective_verdict_for_change
 
@@ -159,58 +180,87 @@ def compatibility_metrics(
     )
 
 
-def build_summary(result: DiffResult) -> ReportSummary:
-    # ADR-049 D1: the percentages are the compatibility axis, so they read the
-    # same evaluated subset the four buckets below do. Passing every change
-    # here let a run report `verdict: NO_CHANGE` and `breaking: 0` beside
-    # `binary_compatibility_pct: 0.0` and `affected_pct: 100.0`, because the
-    # metrics still counted a finding contract evaluation had excluded (Codex
-    # review, confirmed with a proven-out-of-contract layout change).
-    # `total_changes` deliberately stays over *all* changes: it is a count of
-    # what the report shows, not of what scored, and an excluded finding is
-    # still shown.
-    metrics = compatibility_metrics(
-        result._evaluated_changes(),
-        result.old_symbol_count,
-        policy=result.policy,
-        kind_sets=result._effective_kind_sets(),
-        policy_file=result.policy_file,
+def build_summary(
+    result: DiffResult, *, findings: Sequence[ReportFinding] | None = None
+) -> ReportSummary:
+    """Build the canonical per-run summary counts.
+
+    *findings* (ADR-061 gap C), when given, is an envelope's own already-
+    resolved ``ReportFinding`` sequence (one per ``result.changes``) --
+    every count below is then read from it instead of independently
+    recomputing via ``result.breaking``/``.compatible``/
+    ``classify_effective_change``, which could disagree with the envelope's
+    frozen verdicts/categories once a dated ``PolicyFile.reclassify`` rule
+    expires between construction and render (Codex review, fresh evidence).
+    ``None`` keeps the prior, independently-resolved behaviour.
+    """
+    from .policy.classification import Verdict
+    from .severity import IssueCategory, classify_effective_change
+
+    evaluated = result._evaluated_changes()
+    finding_by_id: dict[int, ReportFinding] = (
+        {id(f.change): f for f in findings} if findings is not None else {}
     )
-    compatible = result.compatible
+
+    def verdict_of(c: Change) -> Verdict:
+        if findings is not None:
+            return finding_by_id[id(c)].verdict
+        return result._effective_verdict_for_change(c)
+
+    breaking = [c for c in evaluated if verdict_of(c) == Verdict.BREAKING]
+    source_breaks = [c for c in evaluated if verdict_of(c) == Verdict.API_BREAK]
+    risk = [c for c in evaluated if verdict_of(c) == Verdict.COMPATIBLE_WITH_RISK]
+    compatible = [c for c in evaluated if verdict_of(c) == Verdict.COMPATIBLE]
+
     # Codex review, fresh evidence: a bare `c.kind not in ADDITION_KINDS`
     # test reads the finding's *raw* kind, not its *effective* category --
     # a per-finding modulation (a `reclassify:` rule, or an
     # `effective_verdict` override) can move a finding into `compatible`
     # (COMPATIBLE effective verdict) whose raw kind disagrees with what
-    # that modulation actually decided. `classify_effective_change` is the
-    # canonical per-finding category resolver (`policy/severity.py`,
-    # already the source `report.finding`'s own ADDITION/QUALITY_ISSUES
-    # split goes through) -- reusing it here keeps this summary count and
-    # the severity/gate categorization agreeing on every finding, not just
-    # the common case a static kind-set membership test happens to get
-    # right. `verdict=Verdict.COMPATIBLE` is passed through since every `c`
-    # here already satisfied that exact check to land in `compatible`,
-    # avoiding a second `effective_verdict_for_change` resolution per
-    # finding (`classify_effective_change`'s own optimization parameter).
-    from .policy.classification import Verdict
-    from .severity import IssueCategory, classify_effective_change
-
-    quality_issues = sum(
-        1
-        for c in compatible
-        if classify_effective_change(
-            c,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-            verdict=Verdict.COMPATIBLE,
+    # that modulation actually decided. With *findings* given, its own
+    # already-resolved ``category`` is reused instead of a second
+    # ``classify_effective_change`` call.
+    if findings is not None:
+        quality_issues = sum(
+            1 for c in compatible if finding_by_id[id(c)].category == IssueCategory.QUALITY_ISSUES
         )
-        == IssueCategory.QUALITY_ISSUES
+    else:
+        quality_issues = sum(
+            1
+            for c in compatible
+            if classify_effective_change(
+                c,
+                policy=result.policy,
+                kind_sets=result._effective_kind_sets(),
+                policy_file=result.policy_file,
+                verdict=Verdict.COMPATIBLE,
+            )
+            == IssueCategory.QUALITY_ISSUES
+        )
+
+    # ADR-049 D1: the percentages are the compatibility axis, so they read
+    # the same evaluated subset the four buckets above do. Passing every
+    # change here let a run report `verdict: NO_CHANGE` and `breaking: 0`
+    # beside `binary_compatibility_pct: 0.0` and `affected_pct: 100.0`,
+    # because the metrics still counted a finding contract evaluation had
+    # excluded (Codex review, confirmed with a proven-out-of-contract
+    # layout change). `total_changes` deliberately stays over *all*
+    # changes: it is a count of what the report shows, not of what scored,
+    # and an excluded finding is still shown.
+    metrics = compatibility_metrics(
+        evaluated,
+        result.old_symbol_count,
+        policy=result.policy,
+        kind_sets=result._effective_kind_sets(),
+        policy_file=result.policy_file,
+        effective_verdicts=(
+            [verdict_of(c) for c in evaluated] if findings is not None else None
+        ),
     )
     return ReportSummary(
-        breaking=len(result.breaking),
-        source_breaks=len(result.source_breaks),
-        risk_count=len(result.risk),
+        breaking=len(breaking),
+        source_breaks=len(source_breaks),
+        risk_count=len(risk),
         compatible_additions=len(compatible),
         quality_issues=quality_issues,
         total_changes=len(result.changes),

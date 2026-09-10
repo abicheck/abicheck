@@ -36,9 +36,15 @@ import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 
 from .cross_source_evolution import change_cross_source_evolution_field
-from .no_baseline_document import NO_BASELINE_EXIT_AXIS_LABELS
+from .no_baseline_document import (
+    NO_BASELINE_EXIT_AXIS_LABELS,
+    suppression_provenance_of,
+    suppression_rule_label,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .finding import ReportFinding
     from .no_baseline_document import NoBaselineDocument
 
@@ -53,14 +59,54 @@ _SARIF_SCHEMA_URL = (
 )
 
 
+def _suppression_justification(
+    change: Any, provenance: Mapping[str, Any] | None
+) -> str:
+    """The human-readable half of a suppression, best information first.
+
+    ``label: reason`` when the rule states both, otherwise whichever single
+    field it states, otherwise a generic fallback.
+
+    The two sources are read separately and never mixed, which is the whole
+    point. ``Change.suppression_rule`` is ``label or reason`` -- one string
+    that does not say *which* it holds -- so treating it as a label whenever
+    provenance lacked one rendered a reason-only rule as
+    ``"<reason>: <reason>"``, presenting the reason as a separate rule label
+    (Codex review, P2). That is the shape ``suppression.require_justification``
+    actively encourages, so it is the common case, not an edge one.
+    The collapsed field is therefore consulted *only* when there is no
+    provenance at all -- the case where nothing better is knowable -- and
+    then stands alone rather than being paired with anything.
+    """
+    label = suppression_rule_label(change, provenance)
+    reason = (provenance or {}).get("reason")
+    if reason and label:
+        return f"{label}: {reason}"
+    if reason or label:
+        return str(reason or label)
+    return "suppressed by an abicheck --suppress rule"
+
+
 def _sarif_result(
-    finding: ReportFinding, *, rule_id: str, suppressed: bool
+    finding: ReportFinding,
+    *,
+    rule_id: str,
+    suppressed: bool,
+    provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One SARIF ``result`` for a candidate-side finding.
 
     Split out of :func:`render_no_baseline_sarif` so the envelope there reads
     as the run it describes, and the per-finding shape sits next to its JUnit
     counterpart (:func:`_junit_finding_case`) rather than buried in a loop.
+
+    *provenance* is the suppressing rule's full ADR-067 D3 record. It is
+    carried into the SARIF suppression rather than only the display label,
+    which is `label or reason` and so drops whichever the rule stated
+    second (Codex review, P2 -- the JSON and Markdown projections gained
+    this first, and a fact one format publishes while its siblings drop it
+    leaves a consumer of the quiet format unable to act on the run it was
+    handed).
     """
     from ..sarif import _parse_source_location
 
@@ -79,13 +125,20 @@ def _sarif_result(
         },
     }
     if suppressed:
-        entry["suppressions"] = [
-            {
-                "kind": "external",
-                "justification": getattr(change, "suppression_rule", None)
-                or "suppressed by an abicheck --suppress rule",
-            }
-        ]
+        suppression: dict[str, Any] = {
+            "kind": "external",
+            # SARIF's `justification` is free text, so it carries the reason
+            # a human wrote when the rule states one -- that is the field's
+            # actual purpose -- and falls back to the label only when there
+            # is no reason to give.
+            "justification": _suppression_justification(change, provenance),
+        }
+        if provenance:
+            # The structured record too: `justification` is one string, and a
+            # consumer deciding whether a waiver still applies needs the
+            # source file and expiry as data, not prose.
+            suppression["properties"] = dict(provenance)
+        entry["suppressions"] = [suppression]
     if change.source_location:
         uri, line, column = _parse_source_location(change.source_location)
         region: dict[str, Any] = {}
@@ -175,13 +228,18 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
     # dispositioned" -- rather than dropped. A code-scanning consumer then
     # shows it as suppressed instead of never learning it existed
     # (``vision.md``'s "Record before disposing"; Codex review, P1).
-    for finding, suppressed in [(f, False) for f in doc.findings] + [
-        (f, True) for f in doc.suppressed
+    for finding, suppressed, provenance in [(f, False, None) for f in doc.findings] + [
+        (entry, True, suppression_provenance_of(entry)) for entry in doc.suppressed
     ]:
         rule = _rule_for(finding.change.kind)
         rules.setdefault(rule["id"], rule)
         results.append(
-            _sarif_result(finding, rule_id=rule["id"], suppressed=suppressed)
+            _sarif_result(
+                finding,
+                rule_id=rule["id"],
+                suppressed=suppressed,
+                provenance=provenance,
+            )
         )
     return {
         "$schema": _SARIF_SCHEMA_URL,
@@ -293,14 +351,33 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
     ):
         ET.SubElement(props, "property", {"name": name, "value": value or ""})
 
+    # One property per orthogonal exit axis, carrying its own contribution.
+    # Without these the suite published only the total and the coverage
+    # contribution, so a JUnit consumer gated by (say) the evidence contract
+    # could not tell *which* axis fired -- the failure text merely listed
+    # every axis that might have (Codex review, P2). Every axis the run
+    # resolved is emitted, contributing or not, so a `0` is a real "this axis
+    # was evaluated and cleared" rather than an absent key.
+    for axis, contribution in doc.exit_axes.items():
+        ET.SubElement(
+            props,
+            "property",
+            {"name": f"exit_axis.{axis}", "value": str(contribution)},
+        )
+
     for finding in doc.findings:
         _junit_finding_case(suite, finding, suppressed=False)
-    for finding in doc.suppressed:
+    for entry in doc.suppressed:
         # `<skipped>`, not a silent omission and not a failure: SARIF has a
         # `suppressions` array for this and JUnit's nearest honest
         # equivalent is a skipped case -- the finding is reported, and its
         # disposition is legible, without claiming it broke anything.
-        _junit_finding_case(suite, finding, suppressed=True)
+        _junit_finding_case(
+            suite,
+            entry,
+            suppressed=True,
+            provenance=suppression_provenance_of(entry),
+        )
 
     gate = ET.SubElement(
         suite,
@@ -316,13 +393,55 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
                 "message": f"audit exited {doc.exit_code}",
             },
         )
-        failure.text = (
-            f"exit code: {doc.exit_code}\n"
-            f"contract coverage contribution: {doc.coverage_exit_contribution}\n"
+        # Name the axes that actually fired, and what each one means -- the
+        # same resolved `exit_axes` the JSON, Markdown, oneline and SARIF
+        # projections read, so no format explains an exit the others cannot
+        # (Codex review, P2). Listing every possible axis instead, as this
+        # used to, tells a gated consumer nothing.
+        contributing = [
+            axis for axis, contribution in doc.exit_axes.items() if contribution
+        ]
+        detail = [
+            f"exit code: {doc.exit_code}",
+            f"contract coverage contribution: {doc.coverage_exit_contribution}",
             "note: a candidate-side hygiene finding never gates on its own "
-            "(ADR-028 D3 / ADR-035 D1); this is one of the orthogonal axes "
-            "(contract coverage, analysis assurance, evidence contract)."
-        )
+            "(ADR-028 D3 / ADR-035 D1); an audit's exit code is a max over "
+            "orthogonal axes.",
+        ]
+        if contributing:
+            detail.append("")
+            detail.append("contributing axes:")
+            detail += [
+                f"- {NO_BASELINE_EXIT_AXIS_LABELS.get(axis, axis)} "
+                f"(contributed {doc.exit_axes[axis]})"
+                for axis in contributing
+            ]
+        else:
+            # A document this package builds cannot reach here: its exit
+            # code is `max(exit_axes.values())`, so a nonzero one always has
+            # a nonzero axis behind it. A *hand-built* document can, since
+            # `exit_axes` defaults to empty -- and the honest answer is to
+            # say the record is missing rather than to leave a gated
+            # consumer with a bare number, which is the very failure the
+            # comment above names. Inventing an axis would be worse than
+            # silence; saying nothing was recorded is neither.
+            detail.append("")
+            detail.append(
+                "contributing axes: none recorded -- this document carries an "
+                "exit code with no per-axis breakdown, so which axis gated "
+                "cannot be answered from it."
+            )
+        # The coverage ledger itself, for the one axis that can name a
+        # specific provider -- the number alone says nothing about which
+        # provider on which side fell short.
+        if doc.coverage_failures:
+            detail.append("")
+            detail.append("contract coverage failures:")
+            detail += [
+                "- " + ", ".join(f"{k}={v}" for k, v in sorted(f.items()))
+                for f in doc.coverage_failures
+            ]
+        failure.text = "\n".join(detail)
     ET.indent(suite, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
         suite, encoding="unicode"
@@ -330,7 +449,11 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
 
 
 def _junit_finding_case(
-    suite: ET.Element, finding: ReportFinding, *, suppressed: bool
+    suite: ET.Element,
+    finding: ReportFinding,
+    *,
+    suppressed: bool,
+    provenance: Mapping[str, Any] | None = None,
 ) -> None:
     """One passing (or skipped) ``<testcase>`` for a candidate-side finding."""
     change = finding.change
@@ -352,12 +475,35 @@ def _junit_finding_case(
         "and a hygiene finding is advisory -- it does not gate."
     )
     if suppressed:
-        rule = getattr(change, "suppression_rule", None)
+        # The message carries the reason where the rule states one, not just
+        # the display label (`label or reason`, which drops whichever the
+        # rule stated second) -- the same statement the JSON, Markdown and
+        # SARIF projections make (Codex review, P2).
         skipped = ET.SubElement(
             case,
             "skipped",
-            {"message": f"suppressed: {rule or 'a --suppress rule matched'}"},
+            {
+                "message": f"suppressed: {_suppression_justification(change, provenance)}"
+            },
         )
-        skipped.text = detail
+        # The structured record below the message, so a consumer can read the
+        # source file and expiry as data rather than parsing prose out of an
+        # attribute.
+        skipped.text = "\n".join([detail, *_provenance_detail_lines(provenance)])
     else:
         ET.SubElement(case, "system-out").text = detail
+
+
+def _provenance_detail_lines(provenance: Mapping[str, Any] | None) -> list[str]:
+    """The suppressing rule's ADR-067 record, as plain ``key: value`` lines.
+
+    Empty when the run kept no ledger entry -- never a fabricated row, which
+    would look like a real record while carrying strictly less.
+    """
+    if not provenance:
+        return []
+    return [
+        "",
+        "suppression rule:",
+        *[f"  {key}: {value}" for key, value in sorted(provenance.items())],
+    ]

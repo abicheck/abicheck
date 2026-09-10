@@ -60,6 +60,8 @@ from ..policy.disposition_ledger import (
 from .document import ReportDocument
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from datetime import date
+
     from ..checker_types import DiffResult
 
 
@@ -225,7 +227,7 @@ def _additions_review_dict(result: DiffResult) -> dict[str, object] | None:
 
 
 def compute_disposition_audit(
-    result: DiffResult, severity_config: object | None = None
+    result: DiffResult, severity_config: object | None = None, *, today: date | None = None
 ) -> DispositionAudit:
     """Resolve *result*'s audit facts. Decides nothing; reads the ledger.
 
@@ -234,9 +236,12 @@ def compute_disposition_audit(
     class — ``checker.compare()`` never sees the resolved severity
     configuration (ADR-064 resolves it in the front end, strictly later). It
     is applied to the run's one shared ledger, so passing it in one
-    projection and not another cannot make two views disagree.
+    projection and not another cannot make two views disagree. *today*,
+    forwarded to :func:`~abicheck.policy.disposition_close.ledger_for`, keeps
+    this agreeing with an already-frozen ``ReportEnvelope`` (Codex review,
+    fresh evidence).
     """
-    ledger = ledger_for(result, severity_config)
+    ledger = ledger_for(result, severity_config, today=today)
     counts = ledger.counts()
     return DispositionAudit(
         detected_total=ledger.detected_total,
@@ -392,17 +397,23 @@ def fold_disposition_audits(audits: Iterable[DispositionAudit]) -> DispositionAu
 
 
 def add_disposition_audit(
-    d: dict[str, object], result: DiffResult, severity_config: object | None = None
+    d: dict[str, object],
+    result: DiffResult,
+    severity_config: object | None = None,
+    *,
+    today: date | None = None,
 ) -> None:
     """Attach the ``disposition_audit`` block to a JSON report (schema 2.51).
 
     Unconditional and unsuppressible by construction: it is derived from the
     conserved ledger rather than from the post-disposition ``changes`` list,
     so a rule cannot remove its own audit record (the same structural pattern
-    ADR-049 Phase 5's coverage ledger uses).
+    ADR-049 Phase 5's coverage ledger uses). *today*, forwarded to
+    :func:`compute_disposition_audit`, keeps this agreeing with an
+    already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     d["disposition_audit"] = compute_disposition_audit(
-        result, severity_config
+        result, severity_config, today=today
     ).to_dict()
 
 

@@ -81,7 +81,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from datetime import date
 
 
 @dataclass(frozen=True)
@@ -143,6 +146,7 @@ def apply_scoped_gate(
     severity_config: Any = None,
     show_only: str | None = None,
     contract_evaluation: bool = False,
+    today: date | None = None,
 ) -> None:
     """Fold ``--used-by``/``--required-symbol(s)`` *enrichment* into *payload*.
 
@@ -159,7 +163,9 @@ def apply_scoped_gate(
     ``consumer_scope`` block naming what the consumer-scoped assessment would
     have concluded on its own, and any scoped-only findings folded into
     ``changes``/``summary`` as additional, non-gating facts (see
-    :func:`_fold_findings_into_changes` and its ``--stat`` sibling).
+    :func:`_fold_findings_into_changes` and its ``--stat`` sibling). *today*,
+    forwarded to both, keeps a scoped-only finding's verdict agreeing with an
+    already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     used_by = getattr(result, "used_by", None)
     required_symbols = getattr(result, "required_symbols", None)
@@ -199,6 +205,7 @@ def apply_scoped_gate(
             severity_config=severity_config,
             show_only=show_only,
             contract_evaluation=contract_evaluation,
+            today=today,
         )
     elif isinstance(summary, dict):
         _fold_findings_into_stat_summary(
@@ -208,6 +215,7 @@ def apply_scoped_gate(
             helpers=helpers,
             severity_config=severity_config,
             show_only=show_only,
+            today=today,
         )
 
 
@@ -250,6 +258,7 @@ def _fold_findings_into_changes(
     severity_config: Any,
     show_only: str | None,
     contract_evaluation: bool,
+    today: date | None = None,
 ) -> None:
     """Append the scoped gate's own findings to the ``changes`` array.
 
@@ -345,6 +354,7 @@ def _fold_findings_into_changes(
             # deliberately complete, unlike this per-finding field.
             root_cause=root_cause_for_change(c, referenced_causes=referenced_causes),
             root_cause_evidence=rc_evidence.get(_finding_id(c)),
+            today=today,
         )
         changes_list.append(entry)
         key, root_display = _root_cause_key_and_display(
@@ -472,6 +482,7 @@ def _fold_findings_into_stat_summary(
     helpers: ScopedGateChangeHelpers,
     severity_config: Any,
     show_only: str | None,
+    today: date | None = None,
 ) -> None:
     """Add a supplied consumer's own scoped-only findings to a ``--stat`` summary.
 
@@ -506,6 +517,7 @@ def _fold_findings_into_stat_summary(
                 policy_file=result.policy_file,
                 severity_config=severity_config,
                 evidence_status_override=EvidenceStatus.CONSUMER_PROVEN,
+                today=today,
             )
             severity = entry.get("severity")
             bucket = (

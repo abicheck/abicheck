@@ -5,16 +5,19 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE` — the ABI hasn't broken — but
-the audit flags an advisory finding: the public function `make_widget()`
-returns `detail::WidgetImpl*`, and `detail::WidgetImpl` is a type defined
-only in a **private, non-installed header**. Consumers linking against the
-public headers cannot legally name `detail::WidgetImpl` (they'd have to
-reach into a header the library never installs), yet the pointer type is
-already part of the exported signature. The maintainer never reasoned about
-this as public API surface, but it already is one — the day the private
-header's layout changes, every caller holding a `detail::WidgetImpl*` is
-silently exposed to a layout mismatch with no compiler warning to catch it.
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
+D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+COMPATIBLE classification above describes the case, not the command's output:
+the ABI hasn't broken.) But the audit flags an advisory finding: the public
+function `make_widget()` returns `detail::WidgetImpl*`, and
+`detail::WidgetImpl` is a type defined only in a **private, non-installed
+header**. Consumers linking against the public headers cannot legally name
+`detail::WidgetImpl` (they'd have to reach into a header the library never
+installs), yet the pointer type is already part of the exported signature. The
+maintainer never reasoned about this as public API surface, but it already is
+one — the day the private header's layout changes, every caller holding a
+`detail::WidgetImpl*` is silently exposed to a layout mismatch with no
+compiler warning to catch it.
 
 ## What this snapshot contains
 

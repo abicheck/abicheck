@@ -143,6 +143,165 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="test_fixture.host_artifact_assumed_capability",
+        invariant=(
+            "A test that needs a real binary artifact must acquire one that "
+            "actually has the property under test, on every platform the "
+            "suite runs, and must fail in *setup* when it cannot -- never "
+            "grab whatever the host happens to have on PATH and let a "
+            "downstream assertion report the mismatch. The two halves of "
+            "this both bite: an artifact's *format* varies by host (the "
+            "same `shutil.which` name is ELF, Mach-O or PE), and so does "
+            "its *capability* (an ELF or Mach-O executable exposes "
+            "symbols; a PE executable has no export directory at all). A "
+            'fixture that conflates "a binary" with "a shared '
+            'library" therefore passes on two platforms and fails on the '
+            "third, and the failure surfaces as the tool refusing the "
+            "input -- which reads as a bug in the tool rather than in the "
+            "fixture. Renaming the artifact does not help and actively "
+            "misleads, because abicheck sniffs content, not extensions: a "
+            "PE file called `libfoo.so` is still a PE file."
+        ),
+        # 1197 fixed the instance on `main` independently and in the same
+        # shape (Windows -> a real System32 DLL, POSIX -> the executable),
+        # which is corroboration of the class rather than a competing
+        # claim: two sessions hit it separately and converged. This entry
+        # and its seed test are what `main` still lacks -- the fix landed
+        # there with no registry entry, so the class was closed without
+        # being named.
+        fixed_by=(1188, 1197),
+        seed_tests=("tests/test_compare_no_baseline_cli.py",),
+        # A real Click invocation: the seed test drives `compare
+        # --no-baseline` through `CliRunner().invoke(abicheck_main, ...)`,
+        # which is exactly what this field's rule asks for (CodeRabbit).
+        public_surfaces=("cli",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The Windows and macOS halves of the fix are not "
+                    "verified on those platforms from the environment that "
+                    "wrote them. The Windows branch was exercised by "
+                    "forcing `sys.platform`, which proves it builds the "
+                    "expected `System32` paths and skips diagnosably rather "
+                    "than crashing -- not that abicheck dumps "
+                    "`kernel32.dll` and honours `--version` there. The "
+                    "specific defect cannot recur (a real DLL has an export "
+                    "directory), but a different platform-specific failure "
+                    "in the same test would be found by CI, not by this "
+                    "registry entry."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1188",
+            ),
+            KnownGap(
+                description=(
+                    "Nothing detects the *silent fallthrough* shape "
+                    "generally. The first version of this fix checked "
+                    '`Path(ctypes.util.find_library("m")).is_file()` -- '
+                    "false, because that call answers a soname rather than "
+                    "a path -- and fell back to the very executable it was "
+                    "written to replace. It passed on Linux and proved "
+                    "nothing, and only a manual check of which artifact was "
+                    "actually selected caught it. The helper now asserts "
+                    "its chosen candidate is a binary abicheck recognises, "
+                    "which closes that hole for this one helper; no gate "
+                    "checks the other fixtures in this suite for a "
+                    "candidate-list fallback that quietly lands on the "
+                    "wrong element."
+                ),
+                reference="tests/test_compare_no_baseline_cli.py",
+            ),
+            KnownGap(
+                description=(
+                    "The fixture this class's fix *should* use -- a real "
+                    "ELF shared library -- cannot be used yet, so the POSIX "
+                    "branch still copies an executable. Auditing any real "
+                    "ELF library raises an uncaught "
+                    "`NoBaselineInvariantError`, because "
+                    "`diff_platform_elf_dynamic._diff_visibility_leak` is "
+                    "single-sided (`del new`) yet emits its finding with "
+                    "neither candidate-side marker, so ADR-068's partition "
+                    "files it as an identity-diff finding. That is a real "
+                    "open defect on `main`, not a fixture problem, and it is "
+                    "recorded in `docs/contribute/known-gaps.md` with a fix "
+                    "shape (audit every detector that ignores `new`, plus a "
+                    "gate, since neither the marker design nor the "
+                    "`ChangeKind` allowlist it rejected is self-enforcing). "
+                    "This class stays open in that sense: when the crash is "
+                    "fixed the POSIX branch should move to a real library, "
+                    "and nothing here will fail to remind anyone."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="ci.shared_budget_over_heterogeneous_matrix",
+        invariant=(
+            "A resource budget a CI job declares once -- `timeout-minutes` "
+            "above all -- must resolve per matrix leg whenever the legs' "
+            "real costs differ by more than the budget's own headroom. One "
+            "shared number over a heterogeneous matrix has no correct "
+            "value: sized for the slowest leg it discards the gate on every "
+            "faster one, and sized for the faster ones it cancels the "
+            "slowest leg's healthy runs. The failure is silent in the worst "
+            "way -- a job-level timeout reports `cancelled`, which reads as "
+            "a superseded run or a reclaimed runner rather than as a "
+            "failure, so it can recur for days on `main` without being "
+            "diagnosed. Raising the shared number is not a fix but a "
+            "deferral: the budget's headroom decays as the suite grows, so "
+            "the same cancellation returns once the slowest leg catches up "
+            "again."
+        ),
+        # 1197 landed the same per-leg expression on `main` independently,
+        # for the same stated reason (a job-level `timeout-minutes` hands
+        # every other matrix cell the slow leg's budget). Convergent design,
+        # differing only in the number; `main`'s 90 is better-evidenced than
+        # this branch's original 75 and is what the merge took.
+        fixed_by=(1188, 1197),
+        seed_tests=("tests/test_verify_profiles.py",),
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The invariant's *quantitative* half is only partly "
+                    "executable. Whether a leg's budget clears its real "
+                    "cost needs wall-clock measurements from completed CI "
+                    "runs, which this repository does not ingest, so the "
+                    "seed test pins hand-read figures as a literal oracle "
+                    "(40.4/41.3/45.2/49.4/65.2 minutes). That rejects a "
+                    "budget at or below the worst figure, but two holes "
+                    "remain. (1) It cannot encode *margin*: the 65m14s "
+                    "entry is a run that was KILLED, not completed, so its "
+                    "true cost is unknown and only bounded below -- a "
+                    "max-of-observed check therefore accepts 75, which "
+                    "PR #1197 judged insufficient when it chose 90 over "
+                    '65. Encoding "enough headroom for a length nobody has '
+                    'seen" would need an arbitrary multiplier, which is a '
+                    "guess dressed as a gate. (2) Nothing detects the decay "
+                    "recurring above the pinned set: when the Windows leg "
+                    "reaches 90 the test still passes against its stale "
+                    "65.2. Closing both needs per-leg durations published "
+                    "as a queryable artifact -- the canonical lane emits "
+                    "`test-durations.json` for individual tests, but no "
+                    "lane records its own total against its budget."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1188",
+            ),
+            KnownGap(
+                description=(
+                    "Scoped to `unit-tests`, the one job observed "
+                    "cancelling. No audit was run over this repository's "
+                    "other matrix jobs (`integration-tests`, the PE/Mach-O "
+                    "and packaging lanes, `check-project.yml`'s own "
+                    "`plan`/`check`/`aggregate`) to find which of them also "
+                    "share one budget across legs of materially different "
+                    "cost -- the same defect, unlooked-for, in every job "
+                    "this fix did not touch."
+                ),
+                reference="https://github.com/abicheck/abicheck/pull/1188",
+            ),
+        ),
+    ),
+    BugClass(
         id="tooling.platform_dependent_path_key",
         invariant=(
             "A repo-relative path computed to serve as a lookup/comparison "

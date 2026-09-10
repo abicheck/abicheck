@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..severity import SeverityConfig
     from .document import ReportDocument
+    from .envelope import ReportEnvelope
 
 
 def to_markdown(
@@ -66,12 +67,14 @@ def to_markdown(
     demangle: bool = False,
     contract_evaluation: bool = False,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """See :func:`~abicheck.report.render_markdown_document.
-    build_markdown_document`'s own docstring for *report_document* (ADR-061
-    gap C) -- forwarded unchanged to the full-mode (``report_mode="full"``)
-    document build only; ``--stat`` and the ``leaf``/``root-cause`` alternate
-    views ignore it, since those stay their own separate documents."""
+    build_markdown_document`'s own docstring for *report_document*/*envelope*
+    (ADR-061 gap C) -- forwarded unchanged to the full-mode
+    (``report_mode="full"``) document build only; ``--stat`` and the
+    ``leaf``/``root-cause`` alternate views ignore both, since those stay
+    their own separate documents."""
 
     # Human-facing only: optionally demangle Itanium C++ symbols in the rendered
     # output. Machine formats (JSON/SARIF/JUnit) keep the raw mangled symbols.
@@ -114,6 +117,7 @@ def to_markdown(
             show_recommendation=show_recommendation,
             demangle=demangle,
             report_document=report_document,
+            envelope=envelope,
         )
     )
 
@@ -234,6 +238,7 @@ def to_review_digest(
     *,
     severity_config: SeverityConfig | None = None,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """Compact GitHub-facing review digest (Markdown).
 
@@ -252,7 +257,10 @@ def to_review_digest(
     ``report_mode="full"`` document ``service_render.render_output``'s
     ``review`` branch builds once via ``report.build.build_report_document``
     and forwards here -- see ``build_review_digest_document``'s own
-    docstring for exactly what it is reused for.
+    docstring for exactly what it is reused for. *envelope* is the completed
+    ``ReportEnvelope`` that document belongs to; it additionally supplies the
+    digest's per-finding verdicts, so its "impacted symbols" list reads the
+    same resolution every other format does instead of making its own.
     """
     from .render_markdown_document import (
         build_review_digest_document,
@@ -264,5 +272,6 @@ def to_review_digest(
             result,
             severity_config=severity_config,
             report_document=report_document,
+            envelope=envelope,
         )
     )
