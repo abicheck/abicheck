@@ -195,7 +195,15 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "aimed at the wrong operand fails just as hard."
         ),
         fixed_by=(1184,),
-        seed_tests=("tests/test_cli_compare_release_project_snapshot_package.py",),
+        # PR #1187: these tests moved out of
+        # `test_cli_compare_release_project_snapshot_package.py` when that
+        # module was split at the architecture contract's test-size limit.
+        # Pointing this at the old module still passed the registry's
+        # integrity check -- it only verifies the named file *exists*, not
+        # that it exercises the invariant -- while sending a future
+        # bug-class audit to a module with zero coverage of it (Codex
+        # review).
+        seed_tests=("tests/test_cli_compare_variant_selection.py",),
         public_surfaces=("cli",),
         axes={
             "error_path": (
