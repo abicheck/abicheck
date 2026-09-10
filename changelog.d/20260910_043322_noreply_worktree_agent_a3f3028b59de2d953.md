@@ -38,4 +38,9 @@ A new changelog fragment. See changelog.d/README.md for the workflow.
   source moved. A bare single-pair `compare` still reports both as
   `""`/not-applicable, matching its existing behavior. No other
   CLI-visible behavior change.
+- **`REPORT_SCHEMA_VERSION`/`SCAN_SCHEMA_VERSION` bumped to `3.15`/`1.32`**
+  for the new `gate.fail_on_removed_library` digest field above —
+  `compare_report.schema.json` (and its published copy under
+  `docs/reference/schemas/v1/`) now declares it in both `required` and
+  `properties`, matching the sibling `gate.on_incomplete_scope` entry.
 
