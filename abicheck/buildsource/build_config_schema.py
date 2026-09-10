@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``BuildConfig``'s (``.abicheck.yml``) strict-schema subkey-type tables.
+"""``BuildConfig``'s (``.abicheck.yml``) strict-schema subkey-type tables
+*and* the type-dispatch logic that checks a value against them.
 
 Split out of ``inline.py`` (which sits at the AI-readiness 2000-line hard
 cap) purely to keep it under that cap — this module has no other reason to
@@ -28,6 +29,17 @@ string/list field) must be rejected outright rather than silently
 dropped/coerced. Keep these tables in sync with ``BuildConfig.from_dict``'s
 helper calls when a new subkey is added — nothing enforces that
 automatically.
+
+``subkey_findings()`` (new defect-3-fix review round) is the single
+consolidated dispatch every subkey type family goes through --
+``BuildConfig._subkey_findings`` used to hold this dispatch chain itself
+(bool/str inline, ``int``/dict-of-str via a split-out helper each), which
+meant every new subkey *family* (not just every new subkey) cost that
+capped file a fresh dispatch branch. Consolidating the whole chain here
+means a new family costs `build_config.py` nothing beyond the one new
+table + the one new call site its own field/from_dict/to_dict triplet
+already needs -- see ``architecture/debt.yaml``'s entry for that file for
+the concrete accounting.
 """
 
 from __future__ import annotations
@@ -51,15 +63,6 @@ def opt_int(d: dict[str, object], key: str) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
 
-def int_subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
-    """Type findings for one ``<block>.<subkey>`` entry registered in
-    `INT_SUBKEYS` -- split out so `BuildConfig._subkey_findings` (already
-    at its own line-count cap) only pays one call-site line for this."""
-    if sub in INT_SUBKEYS.get(key, ()) and (
-        not isinstance(sub_value, int) or isinstance(sub_value, bool)
-    ):
-        return [f"{key}.{sub} must be an integer, got {type(sub_value).__name__}: {sub_value!r}"]
-    return []
 BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     "scope": frozenset({"public", "collapse_versioned_symbols", "show_redundant"}),
     "suppression": frozenset({"strict", "require_justification"}),
@@ -96,6 +99,16 @@ STR_SUBKEYS: dict[str, frozenset[str]] = {
     # rather than coercing it into a version spelling).
     "python": frozenset({"abi3_floor"}),
 }
+#: New defect 3 (ADR-068 §3 #23's documented `.abicheck.yml` `policy:`
+#: project-config policy-override mechanism, distinct from the still-live
+#: `scan --crosscheck KEY=LEVEL` flag): a flat ``str ->
+#: str`` mapping subkey, unlike every other subkey table above (a fixed key
+#: set). Deep content validation (real `ChangeKind` slugs, real severity
+#: spellings) is `policy_file._parse_overrides`'s job once this is folded
+#: into a `PolicyFile`; this table only gates the block's own shape.
+DICT_STR_STR_SUBKEYS: dict[str, frozenset[str]] = {
+    "policy": frozenset({"overrides"}),
+}
 # `_strs()` accepts either a list of strings or a single bare string (folded
 # to a 1-element list), so both shapes are valid here — anything else isn't.
 LIST_SUBKEYS: dict[str, frozenset[str]] = {
@@ -116,3 +129,75 @@ LIST_SUBKEYS: dict[str, frozenset[str]] = {
 # keeps working unchanged against an empty set.
 TOP_LEVEL_STR_KEYS: frozenset[str] = frozenset()
 TOP_LEVEL_INT_KEYS: frozenset[str] = frozenset({"version"})
+
+
+def subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
+    """Type findings for one ``<block>.<subkey>`` entry -- the single
+    dispatch every subkey type family (bool/str/int/dict-of-str/list) goes
+    through, checked in that order. ``BuildConfig._subkey_findings`` is a
+    thin delegator to this function (see module docstring for why the
+    whole chain, not just the int/dict-of-str branches, lives here now).
+    """
+    if sub in BOOL_SUBKEYS.get(key, ()) and not isinstance(sub_value, bool):
+        return [
+            f"{key}.{sub} must be a boolean, got "
+            f"{type(sub_value).__name__}: {sub_value!r}"
+        ]
+    if sub in STR_SUBKEYS.get(key, ()) and not isinstance(sub_value, str):
+        return [
+            f"{key}.{sub} must be a string, got "
+            f"{type(sub_value).__name__}: {sub_value!r}"
+        ]
+    if sub in INT_SUBKEYS.get(key, ()) and (
+        not isinstance(sub_value, int) or isinstance(sub_value, bool)
+    ):
+        return [
+            f"{key}.{sub} must be an integer, got "
+            f"{type(sub_value).__name__}: {sub_value!r}"
+        ]
+    if sub in DICT_STR_STR_SUBKEYS.get(key, ()):
+        if not isinstance(sub_value, dict):
+            return [
+                f"{key}.{sub} must be a mapping of string to string, got "
+                f"{type(sub_value).__name__}: {sub_value!r}"
+            ]
+        bad_pairs = [
+            (k, v)
+            for k, v in sub_value.items()
+            if not isinstance(k, str) or not isinstance(v, str)
+        ]
+        if bad_pairs:
+            return [
+                f"{key}.{sub} must be a mapping of string to string, got "
+                f"non-string key/value pair(s): {bad_pairs!r}"
+            ]
+        return []
+    if sub not in LIST_SUBKEYS.get(key, ()):
+        return []
+    if not isinstance(sub_value, (list, str)):
+        return [
+            f"{key}.{sub} must be a string or list of strings, "
+            f"got {type(sub_value).__name__}: {sub_value!r}"
+        ]
+    # `_strs()` accepts a list container but a non-string element must be
+    # rejected outright, not coerced via `str(x)`.
+    bad = (
+        [x for x in sub_value if not isinstance(x, str)]
+        if isinstance(sub_value, list)
+        else []
+    )
+    if bad:
+        return [
+            f"{key}.{sub} must be a list of strings, got non-string element(s): {bad!r}"
+        ]
+    return []
+
+
+def parse_policy_overrides(policy_block: dict[str, object]) -> dict[str, str]:
+    """``policy.overrides`` -> a raw ``str -> str`` mapping (unvalidated
+    beyond shape, which `subkey_findings()` above already enforced by the
+    time `BuildConfig.from_dict()` reaches this call; real `ChangeKind`
+    slug/severity validation is `policy_file._parse_overrides`'s job once
+    this is folded into a `PolicyFile` for the run)."""
+    raw = policy_block.get("overrides")
+    return dict(raw) if isinstance(raw, dict) else {}

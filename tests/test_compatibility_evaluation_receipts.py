@@ -230,6 +230,74 @@ class TestOverridesContributors:
         assert options == {"--policy", "--pack"}
 
 
+class TestProjectConfigOverridesContributeToTheReceipt:
+    """Findings-analysis-fixes review round 3, finding 1: `.abicheck.yml`'s
+    `policy.overrides` (ADR-068 §3 #23) used to reach only the scoring
+    `PolicyFile`, applied out-of-band *after* this whole resolver already
+    ran -- so `resolved_config.policy.overrides`/`effective_config_fields
+    ["policy.overrides"]` stayed empty (or missing the project's own
+    contribution) even when a project override genuinely changed the run's
+    verdict. This class pins that the canonical resolver itself now folds
+    the project's contribution in, at the weakest (`project_config`) D7
+    tier, with real provenance naming it."""
+
+    def test_a_project_only_override_reaches_the_resolved_value(self):
+        cfg = _resolve(
+            project=ProjectCompatibilityInputs(
+                path=".abicheck.yml", policy_overrides={"func_removed": "ignore"}
+            )
+        )
+        assert cfg.policy.overrides["func_removed"] is Verdict.COMPATIBLE
+        prov = cfg.provenance[POLICY_OVERRIDES_FIELD]
+        assert prov.layer is SelectorLayer.PROJECT_CONFIG
+        options = {e.option for e in prov.selected_by}
+        assert options == {"policy.overrides"}
+        paths = {e.path for e in prov.selected_by}
+        assert paths == {".abicheck.yml"}
+
+    def test_an_explicit_policy_file_still_wins_for_the_same_kind(self, tmp_path):
+        pf = _policy_file(
+            tmp_path,
+            """\
+            overrides:
+              func_removed: risk
+            """,
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(policy_file=pf),
+            project=ProjectCompatibilityInputs(
+                path=".abicheck.yml", policy_overrides={"func_removed": "ignore"}
+            ),
+        )
+        # The explicit `--policy <file>` value wins -- D7 ranks project_config
+        # strictly below every explicit selection.
+        assert cfg.policy.overrides["func_removed"] is Verdict.COMPATIBLE_WITH_RISK
+        options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
+        assert options == {"--policy"}
+
+    def test_project_and_pack_each_contribute_a_different_kind(self, tmp_path):
+        pack = _write_pack(
+            tmp_path / "p.yml",
+            pack_id="p",
+            kind="policy",
+            assignments="func_added: warn\n",
+        )
+        cfg = _resolve(
+            explicit=ExplicitCompatibilityInputs(pack_paths=(str(pack),)),
+            project=ProjectCompatibilityInputs(
+                path=".abicheck.yml", policy_overrides={"func_removed": "ignore"}
+            ),
+        )
+        assert cfg.policy.overrides["func_added"] is Verdict.API_BREAK
+        assert cfg.policy.overrides["func_removed"] is Verdict.COMPATIBLE
+        options = {e.option for e in cfg.provenance[POLICY_OVERRIDES_FIELD].selected_by}
+        assert options == {"--pack", "policy.overrides"}
+
+    def test_no_project_config_is_unaffected(self):
+        cfg = _resolve(explicit=ExplicitCompatibilityInputs())
+        assert cfg.provenance[POLICY_OVERRIDES_FIELD].layer is SelectorLayer.BUILT_IN_DEFAULT
+
+
 class TestPathInputsAreNotSilentlyIgnored:
     """A path an invocation named must reach the resolved configuration."""
 

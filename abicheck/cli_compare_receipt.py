@@ -38,17 +38,14 @@ those are the values a receipt must report, and they are written through
 canonical resolver re-derives the same two from the same inputs and is used
 for their *provenance*. The two agreeing is a real, checkable claim rather
 than an assumption: ``tests/test_cli_compare_config_receipt.py`` asserts it
-across the input matrix, so a divergence surfaces as a failing parity test
-instead of a receipt that quietly describes a different run.
+across the input matrix.
 
 Split out of :mod:`abicheck.cli_compare_helpers` when that file reached the
-2000-line hard cap -- a cohesive unit (one concern, one caller) rather than
-an arbitrary cut. Deliberately a **leaf**: it imports nothing from its
-caller, so no cycle forms. "Which parameters did the user actually type" is
-the caller's question to answer (it holds the Click context), so the answers
-arrive here as data (*typed*) rather than this module reaching back for them,
-and ``resolved_cfg``/``project_cfg`` stay ``Any`` for the same reason --
-typing them would import the very module this one is split out of.
+2000-line hard cap -- a cohesive unit (one concern, one caller), not an
+arbitrary cut. Deliberately a **leaf**: it imports nothing from its caller,
+so no cycle forms; answers arrive here as data (*typed*), and
+``resolved_cfg``/``project_cfg`` stay ``Any`` since typing them would
+import the very module this one is split out of.
 """
 
 from __future__ import annotations
@@ -110,14 +107,12 @@ def typed_parameter_names() -> tuple[str, ...]:
 def _suppression_source(suppression: Any, path: Any) -> Any:
     """The already-loaded ``--suppress`` list, as a resolver input.
 
-    Built from the list the run really used rather than re-reading *path*:
-    a second read could pair one content's digest with another's rules, the
-    trap :meth:`SuppressionSource.from_file` documents for its own single
-    read. A list with no ``source_sha256`` (``merge()`` drops it, and the
-    ABICC front end constructs several without one) still selected a source,
-    so it is reported as one -- the same absent-vs-empty rule
-    ``contract_context.suppression_config_for`` follows.
-    """
+    Built from the list the run really used rather than re-reading *path*
+    (a second read could pair one content's digest with another's rules,
+    the trap :meth:`SuppressionSource.from_file` documents). A list with no
+    ``source_sha256`` still selected a source, so it is reported as one --
+    the same absent-vs-empty rule ``contract_context.
+    suppression_config_for`` follows."""
     if suppression is None:
         return None
     from .compatibility_evaluation_frontend import SuppressionSource
@@ -147,13 +142,11 @@ def resolve_cli_config(
     """Resolve one :class:`CompatibilityEvaluationConfig` for this invocation.
 
     *policy_option* names the flag that selected ``policy`` when it was not
-    ``--policy`` -- ``--required-symbol``, whose
-    contract switches an untouched ``--policy`` to ``plugin_abi``, with
-    *policy_path*/*policy_sha256* identifying the ``@FILE`` form's list file
-    when that is the form used. *project_sha256* is the digest of the
-    ``.abicheck.yml`` bytes
-    *project_cfg* was parsed from, so a project-supplied value names a
-    revision rather than only a path.
+    ``--policy`` -- ``--required-symbol``, whose contract switches an
+    untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
+    *policy_sha256* identifying the ``@FILE`` form's list file when used.
+    *project_sha256* is the digest of the ``.abicheck.yml`` bytes
+    *project_cfg* was parsed from, naming a revision, not only a path.
 
     Raises whatever the canonical resolver raises (a D7 same-tier conflict, a
     D8 pack conflict, a malformed pack manifest); mapping those onto an exit
@@ -381,38 +374,31 @@ def resolve_release_pack_application(
 ) -> Any:
     """Resolve ``--pack`` contributions for the directory/package release fan-out.
 
-    Returns a :class:`~abicheck.pack_application.PackApplication` (``None``
-    when no ``--pack`` was given), whose ``policy_overrides``/
-    ``internal_namespaces`` the caller threads into every library's own
-    ``CompareRequest.pack_policy_overrides``/``pack_internal_namespaces`` --
-    :func:`~abicheck.service_compare_pipeline.classify_compare_pair` folds
-    them against each library's freshly-loaded ``PolicyFile``.
+    Returns a :class:`~abicheck.pack_application.PackApplication` -- never
+    ``None`` (finding 1, round 4): with no ``--pack`` this is still where a
+    project-backed ``.abicheck.yml`` ``policy.overrides`` reaches a real
+    ``resolved_config`` (:func:`record_release_resolved_config`), via an
+    *inert* application. ``policy_overrides``/``internal_namespaces`` thread
+    into each library's own ``CompareRequest`` fields the same way, folded
+    per library by :func:`~abicheck.service_compare_pipeline.classify_compare_pair`.
 
     Distinct from :func:`resolve_and_apply`, which also merges the packs into
-    *one* ``PolicyFile`` object and *one* ``ResolvedCompareConfig``. That fits
-    a single-pair ``compare``'s single ambient policy file, but the release
-    fan-out reloads its own ``PolicyFile`` fresh per library (``policy_file_
-    path`` is a filesystem path, not an object shared across the run) -- so
-    this returns the pack's *contribution* for the caller to fold in later,
-    once per library, rather than one merged object upfront.
+    *one* ``PolicyFile``/``ResolvedCompareConfig`` -- fits a single-pair
+    ``compare``'s single ambient policy file, but the release fan-out
+    reloads its own ``PolicyFile`` fresh per library, so this returns the
+    pack's *contribution* for the caller to fold in once per library.
 
     **Accepts a ``kind: gate`` pack (CLI cleanup phase two, "PR B" slice 2).**
     Folds ``PackApplication``'s ``severity_levels`` (no ``exit_code_scheme``
-    any more -- PR G2 deleted the manual selector, so a pack can no longer
-    assign one at all) into the release fan-out's own resolved
-    :class:`~abicheck.policy.release_gate_options.GateOptions`
-    (``resolve_release_gate_options``, ADR-064, landed 2026-09-02) via
-    ``cli_compare_release_helpers.apply_release_gate_pack`` -- which, since
-    duplication-and-convergence-assessment T6, shares the *one*
+    any more -- PR G2 deleted the manual selector) into the release fan-out's
+    own resolved :class:`~abicheck.policy.release_gate_options.GateOptions`
+    (``resolve_release_gate_options``, ADR-064) via ``cli_compare_release_
+    helpers.apply_release_gate_pack`` -- which shares the *one*
     :func:`~abicheck.policy.gate_pack_fold.fold_gate_pack_severity` with
     :func:`~abicheck.pack_application.apply_to_compare_config` instead of
-    mirroring its logic, leaving only the two call sites' genuinely
-    different fold targets (raw strings here, a resolved ``SeverityConfig``
-    there) separate. Historical account of that residual: ADR-063 Track 4's
-    7B ledger entry, ``docs/_meta/one-semantic-pipeline-status.yaml``.
-    ``scan --against`` accepts a ``kind: gate`` pack too (a later "PR B"
-    slice): unlike the release fan-out, it already has a real
-    ``ResolvedCompareConfig`` to fold into directly via
+    mirroring its logic. ``scan --against`` accepts a ``kind: gate`` pack
+    too (a later "PR B" slice): unlike the release fan-out, it already has a
+    real ``ResolvedCompareConfig`` to fold into directly via
     ``apply_to_compare_config`` -- see
     ``cli_scan._resolve_scan_evaluation_config``.
 
@@ -453,14 +439,16 @@ def resolve_release_pack_application(
     unresolved-only pack); mapping those onto exit 64 is the caller's job.
     """
     pack_paths = tuple(params.get("pack_paths") or ())
-    if not pack_paths:
-        return None
+    # Runs regardless of `pack_paths` (finding 1) -- see docstring above.
     config = resolve_cli_config(params, **kwargs)
     from .pack_application import (
+        PackApplication,
         check_resolved_config_applies_packs,
         pack_application,
     )
 
+    if not pack_paths:
+        return PackApplication(policy_overrides={}, resolved_config=config)
     check_resolved_config_applies_packs(
         config,
         # `gate_supported` defaults to True: since CLI cleanup phase two "PR
@@ -499,20 +487,16 @@ def resolve_release_pack_application_from_ctx(
     policy_sha256: str | None,
 ) -> Any:
     """``resolve_release_pack_application``, but reading "was this typed?"
-    (and a best-effort ``--policy-file`` pre-read) off the real Click
-    *ctx* itself, the way ``_resolve_evaluation_config`` does for the
-    single-pair path -- split out so the caller (``cli_compare_helpers.
-    run_compare``, already at the AI-readiness file-size cap) stays a single
-    call rather than this whole resolution inlined at the call site.
+    (and a best-effort ``--policy-file`` pre-read) off the real Click *ctx*
+    itself, the way ``_resolve_evaluation_config`` does for the single-pair
+    path -- split out so the caller stays a single call rather than this
+    whole resolution inlined at the call site.
 
-    ``None`` when *pack_paths* is empty -- no Click/file access at all in
-    that case, matching ``resolve_release_pack_application``'s own contract.
-    Raises ``click.UsageError`` directly (mapping a D7 same-tier conflict, a
-    D8 pack conflict, or an inapplicable/gate-only pack) rather than the raw
-    resolver exceptions, so the caller does not need its own except clause.
+    Resolved even when *pack_paths* is empty (finding 1, round 4) -- see
+    ``resolve_release_pack_application``'s own docstring. Raises
+    ``click.UsageError`` rather than the raw resolver exceptions, so the
+    caller needs no except.
     """
-    if not pack_paths:
-        return None
     import click
     import yaml
 
@@ -757,17 +741,21 @@ def _release_summary_effective_config_block(
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
-    alike) -- narrower than a per-library sidecar's own digest, since no
-    ``CompatibilityEvaluationConfig`` exists at release-summary scope at
-    all, so this always resolves the *baseline* tier (see
-    ``effective_config_digest.py``'s own docstring for the two tiers).
+    alike) -- narrower than a per-library sidecar's own digest: this always
+    resolves the *baseline* tier's field *shape* (see
+    ``effective_config_digest.py``'s docstring for the two tiers), even
+    though ``pack_application.resolved_config`` is a real config since round
+    4's fix -- ``policy.overrides`` reads straight from it (round 6 finding
+    1) rather than switching the whole receipt to the rich tier, which would
+    move every other field and the pinned ``_tier`` for no reason this needs.
 
     P1 (CLI-audit): this used to compute the baseline tier from a bare,
     empty ``SimpleNamespace()`` -- carrying only *severity_config* -- so
     ``policy.base``/``policy.reclassify``/``policy.overrides``/
     ``suppressions`` all read empty regardless of the real
     ``--policy``/``--policy-file``/``--suppress`` every library was
-    actually compared under. Resolving it once more here the same way
+    actually compared under. Every library shares one such input, so
+    resolving it once more here the same way
     (:func:`~abicheck.frontends.cli.options.params._load_suppression_and_policy`,
     folding *pack_application* like
     :func:`~abicheck.cli_compare_release_matrix._collect_matrix_result`
@@ -803,9 +791,21 @@ def _release_summary_effective_config_block(
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if pack_application is not None:
+        from dataclasses import replace as _replace
+
         from .pack_application import policy_file_with_packs
+        from .workflows.policy_file import PolicyFile
 
         pf = policy_file_with_packs(pf, pack_application, base_policy=policy)
+        # Round 6 finding 1: fold above carries only the pack's own overrides -- resolved_config.policy.overrides is the one canonical D7 merge (file+pack+project); read it directly.
+        rc = getattr(pack_application.resolved_config, "policy", None)
+        rc_overrides = getattr(rc, "overrides", None)
+        if rc_overrides is not None:
+            pf = (
+                _replace(pf, overrides=dict(rc_overrides))
+                if pf
+                else PolicyFile(base_policy=policy, overrides=dict(rc_overrides))
+            )
     suppression_config = suppression_config_for(suppression)
     # `pf.base_policy`, not the raw `policy` argument, when a `--policy-file` resolved one (Codex review, PR #1016): `checker.compare`'s own `effective_policy = policy_file.base_policy if policy_file is not None else policy` is what a real per-library report's `policy.base` field reflects, so a policy document naming a non-default `base_policy:` (e.g. `sdk_vendor`) produced a release-summary digest still reading the CLI default (`strict_abi`) while every per-library report agreed on the real base -- this stand-in must resolve the identical way.
     effective_policy = pf.base_policy if pf is not None else policy

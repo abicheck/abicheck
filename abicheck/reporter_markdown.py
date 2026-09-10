@@ -1756,14 +1756,13 @@ def compute_review_digest(
         breaking_count=summary.breaking,
         source_breaks_count=summary.source_breaks,
         risk_count=summary.risk_count,
-        # Codex review: additions_count/quality_issues_count are two rows
-        # in the same rendered table, so they must not overlap -- unlike
-        # the JSON summary (where compatible_additions stays the
-        # historical whole-bucket total by design), the digest's own
-        # "Additions" row means *only* genuine additions here, mirroring
-        # pr_comment.py's identical `max(compatible_additions - quality, 0)`
-        # derivation for the release path.
-        additions_count=max(summary.compatible_additions - summary.quality_issues, 0),
+        # additions_count/quality_issues_count are two rows in the same
+        # table, so they must not overlap. `summary.compatible_additions`
+        # (report_schema_version 4.0) already counts only genuine additions
+        # -- use it directly, no second `quality_issues` subtraction (that
+        # is `pr_comment.py`'s own release-field derivation, a separate,
+        # differently-scoped field -- `cli_compare_release_pairwise.py`).
+        additions_count=summary.compatible_additions,
         quality_issues_count=summary.quality_issues,
         scoped=bool(scoped),
         out_of_surface_count=result.out_of_surface_count,

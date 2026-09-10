@@ -46,8 +46,14 @@ overrides:
 
     pf = PolicyFile.load(p)
 
-    assert pf.compute_verdict([_change(ChangeKind.ENUM_MEMBER_RENAMED)]) == Verdict.COMPATIBLE
-    assert pf.compute_verdict([_change(ChangeKind.CALLING_CONVENTION_CHANGED)]) == Verdict.API_BREAK
+    assert (
+        pf.compute_verdict([_change(ChangeKind.ENUM_MEMBER_RENAMED)])
+        == Verdict.COMPATIBLE
+    )
+    assert (
+        pf.compute_verdict([_change(ChangeKind.CALLING_CONVENTION_CHANGED)])
+        == Verdict.API_BREAK
+    )
 
 
 def test_policy_file_unknown_base_policy_rejected(tmp_path: Path) -> None:
@@ -194,7 +200,137 @@ overrides:
     assert "also_not_real" in str(exc_info.value)
 
 
-def test_policy_file_risk_severity_produces_compatible_with_risk(tmp_path: Path) -> None:
+def test_policy_file_unknown_top_level_key_raises(tmp_path: Path) -> None:
+    """New defect 2: a typo'd/misspelled top-level key (e.g. ``suppress:``
+    where the real key is ``overrides:``/``reclassify:``) must be a hard
+    load error, not a silent no-op -- symmetric with the pre-existing
+    unknown-``ChangeKind``-slug-inside-``overrides:`` precedent
+    (ADR-049 D8) tested just above."""
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "unknown_top_level.yaml"
+    p.write_text(
+        """
+suppress:
+  exported_not_public: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError, match="suppress"):
+        PolicyFile.load(p)
+
+
+def test_policy_file_multiple_unknown_top_level_keys_all_reported(
+    tmp_path: Path,
+) -> None:
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "unknown_top_level_multi.yaml"
+    p.write_text(
+        """
+suppress:
+  exported_not_public: ignore
+overide:
+  func_removed: warn
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError) as exc_info:
+        PolicyFile.load(p)
+    assert "suppress" in str(exc_info.value)
+    assert "overide" in str(exc_info.value)
+
+
+def test_policy_file_non_string_top_level_key_raises_policy_error(
+    tmp_path: Path,
+) -> None:
+    """Finding #5 (second review round): YAML happily parses a non-string
+    mapping key (``1: foo``) at any level -- a document mixing one alongside
+    an ordinary unknown *string* key (e.g. ``suppress:``) previously reached
+    ``_reject_unknown_keys``'s bare ``sorted(unknown)`` call, which raised an
+    uncaught ``TypeError`` (``int``/``str`` aren't orderable) instead of the
+    intended ``PolicyError`` -- an operational failure instead of a clean
+    usage error. Covers the general primitive (`policy_file_versioning.
+    _reject_unknown_keys`), not just this one caller: the identical mixed-key
+    document is exercised again below through the ``versioning:`` namespace,
+    a second caller of the same shared helper."""
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "non_string_top_level.yaml"
+    p.write_text(
+        """
+1: foo
+suppress:
+  exported_not_public: ignore
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError) as exc_info:
+        PolicyFile.load(p)
+    message = str(exc_info.value)
+    assert "suppress" in message
+    assert "1" in message
+
+
+def test_policy_file_versioning_non_string_key_raises_policy_error(
+    tmp_path: Path,
+) -> None:
+    """Same bug class as the top-level-key test above, exercised through
+    the ``versioning:`` namespace -- the other real caller of the shared
+    ``_reject_unknown_keys`` primitive this fix lives in."""
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "non_string_versioning_key.yaml"
+    p.write_text(
+        """
+versioning:
+  1: foo
+  bogus_key: bar
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyError) as exc_info:
+        PolicyFile.load(p)
+    message = str(exc_info.value)
+    assert "bogus_key" in message
+    assert "1" in message
+
+
+@pytest.mark.parametrize(
+    "known_key,value",
+    [
+        ("base_policy", "strict_abi"),
+        ("overrides", {}),
+        ("reclassify", []),
+        ("frozen_namespaces", []),
+        ("internal_namespaces", []),
+        ("evidence_policy", {}),
+        ("versioning", {"scheme": "strict_semver"}),
+        ("acknowledgment", {}),
+    ],
+)
+def test_policy_file_every_documented_top_level_key_still_accepted(
+    tmp_path: Path, known_key: str, value: object
+) -> None:
+    """Every top-level key `PolicyFile.load` actually parses must stay
+    accepted by the new unknown-key rejection -- a regression here would
+    make a real, valid policy document fail to load."""
+    import yaml
+
+    p = tmp_path / f"{known_key}.yaml"
+    p.write_text(yaml.safe_dump({known_key: value}), encoding="utf-8")
+
+    pf = PolicyFile.load(p)
+    assert pf is not None
+
+
+def test_policy_file_risk_severity_produces_compatible_with_risk(
+    tmp_path: Path,
+) -> None:
     """severity: risk in YAML policy file → COMPATIBLE_WITH_RISK verdict."""
     p = tmp_path / "policy.yaml"
     p.write_text(
@@ -213,7 +349,9 @@ overrides:
     )
 
 
-def test_policy_file_symbol_version_required_added_is_risk_by_default(tmp_path: Path) -> None:
+def test_policy_file_symbol_version_required_added_is_risk_by_default(
+    tmp_path: Path,
+) -> None:
     """SYMBOL_VERSION_REQUIRED_ADDED must produce COMPATIBLE_WITH_RISK with default policy."""
     p = tmp_path / "policy.yaml"
     p.write_text("base_policy: strict_abi", encoding="utf-8")
@@ -226,6 +364,7 @@ def test_policy_file_symbol_version_required_added_is_risk_by_default(tmp_path: 
 
 
 # ── Built-in shipped policies (G12) ───────────────────────────────────────
+
 
 def test_builtin_security_policy_resolves_by_name() -> None:
     """`--policy security` resolves to the packaged security.yaml."""
@@ -259,19 +398,23 @@ def test_builtin_security_policy_gates_hardening_to_break() -> None:
 
 def test_unknown_builtin_policy_name_returns_none() -> None:
     from abicheck.policy_file import builtin_policy_path
+
     assert builtin_policy_path("does-not-exist") is None
 
 
 # ── cli_params.PolicyFileParam (Click type) ───────────────────────────────
 
+
 def test_policy_file_param_accepts_builtin_name() -> None:
     from abicheck.frontends.cli.options.params import POLICY_FILE_PARAM
+
     out = POLICY_FILE_PARAM.convert("security", None, None)
     assert Path(out).name == "security.yaml"
 
 
 def test_policy_file_param_accepts_existing_path(tmp_path: Path) -> None:
     from abicheck.frontends.cli.options.params import POLICY_FILE_PARAM
+
     p = tmp_path / "my.yaml"
     p.write_text("base_policy: strict_abi\n", encoding="utf-8")
     out = POLICY_FILE_PARAM.convert(str(p), None, None)
@@ -282,6 +425,7 @@ def test_policy_file_param_rejects_unknown_name() -> None:
     import click
 
     from abicheck.frontends.cli.options.params import POLICY_FILE_PARAM
+
     with pytest.raises(click.BadParameter):
         POLICY_FILE_PARAM.convert("does-not-exist.yaml", None, None)
 
@@ -302,7 +446,9 @@ def test_builtin_policy_name_not_shadowed_by_file(tmp_path: Path, monkeypatch) -
     assert pf.compute_verdict([_change(ChangeKind.PIE_DISABLED)]) == Verdict.BREAKING
 
 
-def test_builtin_policy_name_not_shadowed_by_directory(tmp_path: Path, monkeypatch) -> None:
+def test_builtin_policy_name_not_shadowed_by_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A directory named like a builtin (e.g. ``security/``) in CWD must not
     shadow the shipped policy and cause IsADirectoryError (Codex P2)."""
     (tmp_path / "security").mkdir()

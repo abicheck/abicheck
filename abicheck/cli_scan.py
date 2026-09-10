@@ -1318,6 +1318,59 @@ def scan_cmd(
         symbols_list=_symbols_list,
         resolved_cfg=resolved_cfg,
     )
+    # Findings-analysis-fixes review round 3, finding 2: `.abicheck.yml`'s
+    # `policy.overrides` block (ADR-068 §3 #23's documented project-config
+    # policy-override mechanism, distinct from the still-live `--crosscheck
+    # KEY=LEVEL` flag) reached the native
+    # `compare` command and the directory/package release fan-out, but was
+    # silently ignored here -- `scan --against` never read it at all, not
+    # even when the same project config's `policy.overrides.func_removed:
+    # ignore` made an identical snapshot pair exit 0 under `compare`. Folded
+    # in at the same `PROJECT_CONFIG` precedence tier `compare` uses
+    # (weaker than an explicit `--policy <file>` or `--pack`), and only
+    # here -- strictly after `_resolve_scan_evaluation_config`'s own
+    # `--pack` fold above, per `apply_lower_precedence_overrides`'s own
+    # caller contract, so a `--pack`'s explicit override for a kind still
+    # outranks a project-config one for the same kind.
+    from .errors import PolicyError
+    from .workflows.policy_file import (
+        merge_project_config_policy_overrides,
+        project_config_policy_downgrade_warnings,
+    )
+
+    _policy_file_before_project_fold = policy_file
+    try:
+        policy_file = merge_project_config_policy_overrides(
+            policy_file,
+            base_policy=policy,
+            project_cfg=project_cfg,
+            project_path=cfg_path,
+        )
+    except PolicyError as exc:
+        # Findings-analysis-fixes review round 4, finding 2: an
+        # auto-discovered project config's malformed override (e.g. an
+        # unrecognized `ChangeKind` slug) previously raised `PolicyError`
+        # uncaught here -- for a plain `scan ARTIFACT --against BASELINE`
+        # with neither `--contract` nor `--pack`,
+        # `_resolve_scan_evaluation_config` returns early and this fold is
+        # the first deep validation of the project config, so the CLI
+        # exited 1 on an uncaught exception instead of the clean exit-64
+        # `BadParameter` both scalar and directory/package `compare` already
+        # produce for the identical malformed input. Translated the same
+        # way every other malformed-policy path in this codebase already
+        # is, so all three commands agree.
+        raise click.BadParameter(str(exc), param_hint="--policy") from exc
+    # Round 9/10 (Codex review, fresh evidence): a HIGH-RISK downgrade this
+    # project-config fold introduces gets the identical `Warning: ...`
+    # diagnostic an explicit `--policy <file>` downgrade already gets --
+    # `_load_suppression_and_policy`'s own warning surfacing only covers
+    # what it loaded, before this fold ran. Scoped to exactly the kinds
+    # this fold added -- see `project_config_policy_downgrade_warnings`'s
+    # docstring for why a whole-file re-check is wrong here.
+    for warning in project_config_policy_downgrade_warnings(
+        _policy_file_before_project_fold, policy_file, project_path=cfg_path
+    ):
+        click.echo(f"Warning: {warning}", err=True)
     # A selected gate pack may have just moved `resolved_cfg`'s severity/
     # exit-code-scheme (CLI cleanup phase two, "PR B") -- re-derive the
     # values `run_scan_core` below actually gates on from the (possibly

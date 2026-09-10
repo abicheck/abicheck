@@ -139,10 +139,10 @@ from .model import (
 )
 from .model.identity import EntityId, EntityKind, with_mangled_name
 from .model.mangled_name import (
-    _skip_template_args,
     itanium_scope_components,
     strip_macho_itanium_decoration,
 )
+from .model.mangled_name_template_args import skip_template_args as _skip_template_args
 from .model.occurrence import OccurrenceId
 from .model.semantic_ir import CanonicalEntity, SemanticIR, semantic_ir_conflict_key
 from .name_classification import canonicalize_type_name

@@ -62,6 +62,7 @@ from .reporter_markdown import (
     release_bundle_findings_for_view,
     release_matrix_changes_for_view,
 )
+from .schemas import RELEASE_SCHEMA_VERSION
 from .workflows.contract_conflicts import (
     # E-S3 case 3: does a package's declared contract match its own
     # contained binary. Needs `elf_metadata` (`extract`, forbidden directly
@@ -1383,20 +1384,19 @@ def _format_release_json(
     scope_terms: ComparisonScopeTerms | None = None,
     show_only: str | None = None,
 ) -> str:
-    """Render the release summary as a JSON document. ``unmatched_old``/
-    ``unmatched_new`` name the members with no counterpart, read off the
-    acquisition record (ADR-065 D2/S4); *removed_keys*/*added_keys* are the
-    **proven** sets ``exit`` reads.
+    """Render the release summary as a JSON document (``release_schema_
+    version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
+    ``unmatched_old``/``unmatched_new`` name the members with no counterpart;
+    *removed_keys*/*added_keys* are the **proven** sets ``exit`` reads.
 
     *show_only* (Codex review, PR #1154 second follow-up) is applied here,
     at render time, to three independent things -- never by mutating
     *library_results* itself, so this function's own caller can also use it
     unfiltered (a secondary ``--write`` passes ``show_only=None``): the
     embedded per-library ``"findings"`` (via
-    :func:`_release_findings_for_render`, which swaps in the already-
-    computed filtered view), and the release-global ``bundle_findings``/
-    ``matrix_findings`` lists below (filtered directly, since those are not
-    per-library and carry no pre-computed view of their own).
+    :func:`_release_findings_for_render`), and the release-global
+    ``bundle_findings``/``matrix_findings`` lists below (filtered directly,
+    since those carry no pre-computed view of their own).
 
     When *show_only* is active, the document also records the selector
     itself (``show_only_filter``, the identical field name/shape scalar
@@ -1405,15 +1405,12 @@ def _format_release_json(
     aggregated across every library plus the bundle/matrix sections above,
     using each library's real uncapped count rather than its display-capped
     ``findings`` list) -- Codex review, fresh evidence, three rounds: (1)
-    without either field at all, a filtered-to-empty ``findings`` list next
-    to ``verdict: BREAKING`` was indistinguishable from missing or
-    truncated detail, the exact ambiguity scalar ``compare`` JSON's own
-    ``show_only_filter``/``filtered_summary`` fields have always avoided;
-    (2) the counts must live under a *new* name (``release_filtered_
+    without either field, a filtered-to-empty ``findings`` list next to
+    ``verdict: BREAKING`` was indistinguishable from missing/truncated
+    detail; (2) the counts live under a *new* name (``release_filtered_
     summary``, not ``filtered_summary``) since the release-level aggregate
-    has no per-severity-bucket breakdown to offer the way one scalar
-    ``DiffResult`` does, and reusing the scalar field's name for an
-    incompatible shape would silently break a consumer reading
+    has no per-severity-bucket breakdown, and reusing the scalar field's
+    name for an incompatible shape would silently break a consumer reading
     ``filtered_summary.breaking``; (3) the counts must come from each
     library's real, uncapped total (``findings_total_count``/
     ``findings_total_count_view``, stashed by ``_strip_diff_results_and_
@@ -1439,6 +1436,9 @@ def _format_release_json(
     ).to_dict()
     record = terms.record
     summary: dict[str, object] = {
+        # No version field existed here before (Codex review); see
+        # RELEASE_SCHEMA_VERSION's own docstring.
+        "release_schema_version": RELEASE_SCHEMA_VERSION,
         "verdict": worst_verdict,
         "old_dir": str(old_dir),
         "new_dir": str(new_dir),

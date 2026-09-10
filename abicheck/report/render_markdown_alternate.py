@@ -365,7 +365,12 @@ def render_leaf_document(doc: ReportDocument) -> str:
     if d["show_impact"]:
         lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
     lines += render_footer()
-    return "\n".join(lines)
+    # New defect 5 fix: every Markdown report format must end with a
+    # trailing newline (POSIX text-file convention), matching
+    # `render_markdown_document.render_markdown_document`'s identical fix
+    # and `render_markdown.render_review_digest`'s pre-existing
+    # `.rstrip() + "\n"` pattern.
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -515,4 +520,9 @@ def render_root_cause_document(doc: ReportDocument) -> str:
     if d["show_impact"]:
         lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
     lines += render_footer()
-    return "\n".join(lines)
+    # New defect 5 fix: every Markdown report format must end with a
+    # trailing newline (POSIX text-file convention), matching
+    # `render_markdown_document.render_markdown_document`'s identical fix
+    # and `render_markdown.render_review_digest`'s pre-existing
+    # `.rstrip() + "\n"` pattern.
+    return "\n".join(lines).rstrip() + "\n"

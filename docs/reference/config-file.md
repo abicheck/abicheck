@@ -126,8 +126,9 @@ an unknown-key error.
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
-`resource_limits:`, `version:`, `risk_rules:`, `crosschecks:`, `targets:`,
-`bundles:`, `profiles:`, and `baseline:` are the recognized top-level keys.
+`resource_limits:`, `policy:`, `version:`, `risk_rules:`, `crosschecks:`,
+`targets:`, `bundles:`, `profiles:`, and `baseline:` are the recognized
+top-level keys.
 See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
@@ -364,6 +365,27 @@ more**:
 - `include_private_dso:` (default `false`) — the former `compare
   --include-private-dso`: include private (non-public) shared objects from
   non-standard paths.
+
+---
+
+### `policy:`
+
+ADR-068 §3 #23's documented project-config policy override mechanism. One key today: `overrides:`, a `ChangeKind` slug ->
+severity mapping (`break`/`warn`/`risk`/`ignore`) — the identical vocabulary
+and validation `--policy <file>`'s own `overrides:` block uses (an unknown
+slug or severity spelling is a hard load error, not a silently-skipped
+entry). Folds into the run's effective policy at the `project_config`
+precedence tier: an explicit `--policy <file>` that also states an override
+for the same kind always wins; a kind only the project config states is
+otherwise applied as-is. A project with no `--policy <file>` given at all
+still gets its `policy.overrides` applied.
+
+```yaml
+policy:
+  overrides:
+    exported_not_public: ignore
+    func_removed: warn
+```
 
 ---
 

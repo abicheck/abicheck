@@ -291,6 +291,12 @@ class CompareRequest:
     pack_policy_overrides: tuple[tuple[ChangeKind, Verdict], ...] | None = field(
         default=None, kw_only=True
     )
+    #: A resolved ``.abicheck.yml`` ``policy.overrides`` contribution
+    #: (ADR-068 §3 #23), weaker than an explicit ``--policy``/pack entry --
+    #: see ``policy.policy_file_project_overrides``. ``None``/empty: no-op.
+    project_policy_overrides: tuple[tuple[ChangeKind, Verdict], ...] | None = field(
+        default=None, kw_only=True
+    )
     #: ``surface.internal_namespaces`` when a pack supplied it — see
     #: ``pack_policy_overrides`` above for why this field exists and how it
     #: is applied. ``None`` means "no pack stated this"; distinct from an
@@ -462,6 +468,16 @@ class CompareRequest:
                 f"budget_s must be a finite, non-negative number of seconds "
                 f"or None; got {self.budget_s!r}"
             )
+        # Round 7: moved from classify_compare_pair (ran after extraction).
+        for field_name, overrides in (
+            ("pack_policy_overrides", self.pack_policy_overrides),
+            ("project_policy_overrides", self.project_policy_overrides),
+        ):
+            for kind, verdict in overrides or ():
+                if verdict is Verdict.NO_CHANGE:
+                    errors.append(
+                        f"{field_name} kind {kind.value!r} may not target Verdict.NO_CHANGE"
+                    )
         for label, side in (("old", self.old), ("new", self.new)):
             errors += _path_required_errors(label, side, source_only_allowed=False)
             errors += _side_errors(label, side)

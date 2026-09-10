@@ -575,6 +575,25 @@ class TestDirVsDir:
         assert data["verdict"] == "NO_CHANGE"
         assert len(data["libraries"]) == 2
 
+    def test_json_output_carries_release_schema_version(self, tmp_path: Path) -> None:
+        """Codex review, findings-fixes round 11: the release JSON envelope
+        previously had no schema-version field at all, so a consumer could
+        not distinguish a document predating the `compatible_additions`
+        semantic correction from one written after it. A present, non-empty
+        `release_schema_version` closes that gap."""
+        from abicheck.schemas import RELEASE_SCHEMA_VERSION
+
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 0
+        data = json.loads(out)
+        assert data["release_schema_version"] == RELEASE_SCHEMA_VERSION
+
     def test_json_output_embeds_findings_not_just_counts(self, tmp_path: Path) -> None:
         """A breaking library entry must embed which symbols broke, not just
         a bare count — verified defect: release JSON was count-centric

@@ -56,6 +56,12 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 |---|---|
 | `fail_on_removed_library` | bool |
 
+### `policy:`
+
+| Sub-key | Type |
+|---|---|
+| `overrides` | mapping[str, str] |
+
 ### `python:`
 
 | Sub-key | Type |

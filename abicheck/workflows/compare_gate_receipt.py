@@ -66,10 +66,60 @@ from ..contract_relevance_types import SelectorLayer
 
 if TYPE_CHECKING:
     from ..compatibility_evaluation_config import CompatibilityEvaluationConfig
+    from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
     from ..policy.release_gate_options import GateOptions
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
     from .contracts import CompareRequest
+
+
+def _project_inputs_for_request(
+    request: CompareRequest,
+) -> ProjectCompatibilityInputs | None:
+    """*request*'s ``project_policy_overrides`` (already-parsed ``ChangeKind
+    -> Verdict`` pairs) reprojected as a :class:`ProjectCompatibilityInputs`,
+    so it reaches this receipt at the same ``PROJECT_CONFIG`` precedence
+    tier a real ``.abicheck.yml`` does.
+
+    Findings-analysis-fixes review round 5, finding 3 (Codex review, fresh
+    evidence): ``classify_compare_pair`` folds ``request.project_policy_
+    overrides`` into the *scoring* ``PolicyFile`` (see
+    ``service_compare_pipeline.py``), but this receipt-building function
+    previously built its ``CompatibilityEvaluationConfig`` with no ``project=``
+    input at all -- so a direct ``run_compare_request()`` call using this
+    field recorded its own override's provenance as ``API_REQUEST`` (from
+    ``policy_file_path``) rather than the ``PROJECT_CONFIG`` layer D7
+    actually places it at, disagreeing with what the same fold already did
+    for the CLI's identical ``.abicheck.yml`` route
+    (``compatibility_evaluation_frontend.compare_request_inputs``'s own
+    ``project`` parameter). Threaded through the canonical resolver's
+    existing ``project`` channel rather than a third parallel provenance
+    patch, closing the same bug class round 3 finding 1 (the native CLI) and
+    round 4 finding 1 (the release fan-out) already fixed for their own
+    entry points.
+
+    Values round-trip through :func:`~abicheck.policy_file.
+    severity_value_for_verdict` back to raw severity spellings
+    (``ProjectCompatibilityInputs.policy_overrides`` is always re-validated
+    as raw strings via ``_parse_overrides``, the identical parser a real
+    ``.abicheck.yml`` goes through) -- one severity vocabulary for both a
+    raw file and an already-typed request field. Returns ``None`` when the
+    request states no project overrides, so an unaffected request builds
+    the identical config it always has.
+    """
+    if not request.project_policy_overrides:
+        return None
+    from ..compatibility_evaluation_frontend import ProjectCompatibilityInputs
+    from ..policy_file import severity_value_for_verdict
+
+    overrides = {
+        kind.value: severity
+        for kind, verdict in request.project_policy_overrides
+        if (severity := severity_value_for_verdict(verdict)) is not None
+    }
+    if not overrides:
+        return None
+    return ProjectCompatibilityInputs(policy_overrides=overrides)
 
 
 def install_resolved_gate_receipt(
@@ -112,6 +162,7 @@ def install_resolved_gate_receipt(
         request,
         policy_file=policy_file,
         suppression=SuppressionSource.from_loaded(suppression, path=request.suppress),
+        project=_project_inputs_for_request(request),
     )
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         config = _with_pack_forwarded_provenance(config, request)

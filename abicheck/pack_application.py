@@ -285,18 +285,28 @@ def pack_application(config: Any, *, policy_file: PolicyFile | None) -> PackAppl
     """The pack-supplied half of *config*, in the shapes the engine takes.
 
     *policy_file* is the ``--policy-file`` the run really loaded (``None``
-    when none was given). Its own overrides are subtracted from the resolved
-    ``policy.overrides``, which the resolver deliberately returns *merged*
-    (explicit re-applied last, so it is the final value rather than a delta):
-    keeping only the difference is what makes the result "what the packs
-    added", so folding it back onto that same policy file cannot silently
-    restate — or, on a future shape change, contradict — a value the file
-    already owns.
+    when none was given), used only to re-exclude its own explicit kinds as
+    a defensive second check (`CompatibilityPolicyConfig.pack_overrides`
+    already excludes them at the source).
+
+    CodeRabbit review, round 8: this used to derive "pack-contributed" by
+    subtracting *policy_file*'s own kinds from the fully **merged**
+    ``config.policy.overrides`` -- which also contains any
+    ``project_config``-tier (``.abicheck.yml``) contribution, so a project
+    kind neither the explicit file nor a pack claims survived that
+    subtraction and was misreported as pack-sourced (leaking into
+    ``PackApplication.policy_overrides``, ``is_empty()``, and the
+    pack-manifest receipt provenance). Reading ``config.policy.
+    pack_overrides`` instead -- the resolver's own pre-project-fold,
+    pack-only partition -- is the "read, don't re-derive" fix; see that
+    field's own docstring for the full account.
     """
     explicit_kinds = set((policy_file.overrides if policy_file else {}) or {})
-    resolved_overrides = getattr(getattr(config, "policy", None), "overrides", {}) or {}
+    resolved_pack_overrides = (
+        getattr(getattr(config, "policy", None), "pack_overrides", {}) or {}
+    )
     pack_overrides: dict[ChangeKind, Verdict] = {}
-    for slug, verdict in resolved_overrides.items():
+    for slug, verdict in resolved_pack_overrides.items():
         kind = slug if isinstance(slug, ChangeKind) else ChangeKind(slug)
         if kind not in explicit_kinds:
             pack_overrides[kind] = verdict
@@ -382,11 +392,74 @@ def policy_file_with_packs(
     return updated
 
 
+def resolve_release_project_policy_overrides(
+    project_cfg: Any, project_path: Path | None
+) -> dict[ChangeKind, Verdict] | None:
+    """A discovered ``.abicheck.yml``'s ``policy.overrides``, resolved once
+    for the directory/package release fan-out (finding #4, second review
+    round) and forwarded as a plain value -- the same internal-parameter
+    shape ``compile_context``/``public_header_dirs``/``pack_application``
+    already use for this fan-out. Wraps
+    ``policy.policy_file_project_overrides.resolve_project_config_policy_overrides``,
+    converting a malformed override (an unknown ``ChangeKind`` slug or
+    severity spelling) into the same ``click.BadParameter`` the scalar
+    `compare` path already raises for the identical document, rather than
+    letting a raw :class:`~abicheck.errors.PolicyError` escape uncaught.
+    Returns ``None`` (not an empty dict) when nothing was stated, matching
+    ``project_policy_overrides``'s own "``None``/empty is a no-op" contract.
+    """
+    import click
+
+    from .errors import PolicyError
+    from .policy.policy_file_project_overrides import (
+        resolve_project_config_policy_overrides,
+    )
+
+    try:
+        overrides = resolve_project_config_policy_overrides(project_cfg, project_path)
+    except PolicyError as e:
+        raise click.BadParameter(str(e), param_hint="--policy") from e
+    return overrides or None
+
+
+def preflight_validate_project_policy_overrides(
+    project_cfg: Any, project_path: Path | None
+) -> None:
+    """Validate a discovered ``.abicheck.yml``'s ``policy.overrides`` block
+    *before* a ``compare --dry-run`` exit, not only when the real comparison
+    later folds it into a ``PolicyFile``.
+
+    Findings-analysis-fixes review round 5, finding 1 (Codex review, fresh
+    evidence): the scalar path's fold
+    (``workflows.policy_file.merge_project_config_policy_overrides``) and
+    the directory/package fan-out's own
+    (:func:`resolve_release_project_policy_overrides`, called from inside
+    ``_dispatch_release_compare``'s own dispatch block) both run *after*
+    ``cli_compare_helpers.run_compare``'s ``--dry-run`` emit
+    (``dry_run.emit_dry_run`` raises ``SystemExit`` before either fold is
+    ever reached) -- so a malformed override (an unknown ``ChangeKind``
+    slug, or an unrecognized severity spelling) previously produced a
+    successful, exit-0 dry run for the identical invocation the real
+    comparison rejects as a usage error (exit 64), for *either* operand
+    shape. Calling :func:`resolve_release_project_policy_overrides` here,
+    ahead of both the dry-run emit and the dispatch block, reuses the exact
+    same canonical validator both later folds already trust
+    (``policy.policy_file_project_overrides.
+    resolve_project_config_policy_overrides``) and its existing
+    ``click.BadParameter`` translation, so a malformed document is rejected
+    identically under ``--dry-run`` and under a real run -- discarding the
+    parsed mapping here, since only the validation (not the merge) belongs
+    this early.
+    """
+    resolve_release_project_policy_overrides(project_cfg, project_path)
+
+
 def resolve_bundle_policy_file(
     suppress: Path | None,
     policy: str,
     policy_file_path: Path | None,
     application: PackApplication | None,
+    project_policy_overrides: Any = None,
 ) -> PolicyFile | None:
     """Resolve the ``PolicyFile`` a ``compare-release`` bundle analysis
     should score against (G38 Phase 16), mirroring the per-library/matrix
@@ -397,12 +470,55 @@ def resolve_bundle_policy_file(
     ``cli_compare_release_helpers.py`` because that module -- and its
     sibling ``cli_compare_release.py`` -- are pinned at a no-growth line-
     count baseline (``architecture/debt.yaml``, ADR-061); this module isn't.
+
+    *project_policy_overrides* (ADR-068 §3 #23 / ADR-049 D7, second review
+    round) is an already-resolved ``.abicheck.yml`` ``policy.overrides``
+    mapping (``ChangeKind -> Verdict``), folded in **after** the pack fold
+    above at the weaker PROJECT_CONFIG precedence tier -- see
+    ``policy.policy_file_project_overrides.apply_lower_precedence_overrides``
+    for why the ordering matters. ``None``/empty is a no-op, matching every
+    pre-existing caller.
+
+    A HIGH-RISK downgrade the project fold introduces gets the identical
+    ``Warning: ...`` diagnostic an explicit ``--policy <file>``'s own
+    downgrade already gets (round 9/10, Codex review, fresh evidence):
+    ``_load_suppression_and_policy`` above only ever surfaces
+    ``validate_overrides()`` warnings for what it itself loaded, before this
+    function's project-config fold runs, so a project-sourced downgrade
+    silently took effect with no diagnostic at all. Routed through the same
+    ``pending_validate_overrides_warnings`` dedup helper that call uses, so
+    a warning already surfaced for this same policy document within one
+    ``dedup_validate_overrides_warnings()`` scope (e.g. the whole
+    ``compare-release`` run) is not repeated per library/matrix cell.
     """
     from .frontends.cli.options.params import _load_suppression_and_policy
 
     _, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     if application is not None:
         pf = policy_file_with_packs(pf, application, base_policy=policy)
+    if project_policy_overrides:
+        from .policy.policy_file_project_overrides import (
+            apply_lower_precedence_overrides,
+            project_config_policy_downgrade_warnings,
+        )
+
+        _pf_before_project_fold = pf
+        pf = apply_lower_precedence_overrides(
+            pf, dict(project_policy_overrides), base_policy=policy
+        )
+        # Scoped to exactly the kinds this fold added -- never re-warns
+        # about a kind an explicit `--policy <file>`/`--pack` already
+        # claimed and already got its own warning for (see
+        # `project_config_policy_downgrade_warnings`'s docstring: a
+        # whole-file re-check here previously broke a real pre-existing
+        # `--pack`-only test by re-warning about a pack-sourced override
+        # with no project config involved at all).
+        import click
+
+        for warning in project_config_policy_downgrade_warnings(
+            _pf_before_project_fold, pf, project_path=None
+        ):
+            click.echo(f"Warning: {warning}", err=True)
     return pf
 
 

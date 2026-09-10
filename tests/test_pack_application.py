@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -1247,40 +1248,40 @@ class TestOnlyAppliedFieldsAreAccepted:
     # Homed in that sibling module instead of grown here, per this file's
     # own no_growth debt-ledger entry (architecture/debt.yaml).
 
-    def test_release_pack_resolution_direct_call_with_no_packs_is_a_no_op(
-        self,
-    ) -> None:
+    def test_release_pack_resolution_direct_call_with_no_packs_is_a_no_op(self) -> None:
         """Direct-call contract for the two release-pack resolvers: no
-        `--pack` means no Click/file access at all, and a bare `None` back --
-        the same "inert without a pack" property `TestNoPackChangesNothing`
-        asserts for the single-pair resolver."""
+        `--pack` still gets an *inert* `PackApplication` back (`is_empty()`
+        True, but a real `resolved_config`) -- not the pre-fix bare `None`
+        (finding 1, round 4; project-override end-to-end coverage lives in
+        `test_release_evaluation_config.py`'s own
+        `TestReleaseNoPackStillResolvesProjectBackedConfig`)."""
         from abicheck.cli_compare_receipt import (
             resolve_release_pack_application,
             resolve_release_pack_application_from_ctx,
         )
 
-        assert resolve_release_pack_application({"pack_paths": ()}) is None
-        assert (
-            resolve_release_pack_application_from_ctx(
-                ctx=None,
-                contract_mode=None,
-                scope_public_headers=True,
-                policy="strict_abi",
-                policy_file_path=None,
-                suppress=None,
-                require_justification=False,
-                severity_preset=None,
-                pack_paths=(),
-                contract_evaluation=False,
-                project_cfg=None,
-                project_path=None,
-                project_sha256=None,
-                policy_option=None,
-                policy_path=None,
-                policy_sha256=None,
-            )
-            is None
+        params = {
+            "contract_mode": None, "scope_public_headers": True,
+            "policy": "strict_abi", "policy_file_path": None, "suppress": None,
+            "require_justification": False, "severity_preset": None,
+            "pack_paths": (),
+        }
+        application = resolve_release_pack_application(
+            params, typed=set(), project_cfg=None, project_path=None
         )
+        assert application is not None and application.is_empty()
+        assert application.resolved_config is not None
+
+        from_ctx = resolve_release_pack_application_from_ctx(
+            ctx=click.Context(click.Command("noop")),
+            contract_mode=None, scope_public_headers=True, policy="strict_abi",
+            policy_file_path=None, suppress=None, require_justification=False,
+            severity_preset=None, pack_paths=(), contract_evaluation=False,
+            project_cfg=None, project_path=None, project_sha256=None,
+            policy_option=None, policy_path=None, policy_sha256=None,
+        )
+        assert from_ctx is not None and from_ctx.is_empty()
+        assert from_ctx.resolved_config is not None
 
     def test_broken_policy_document_is_a_clean_usage_error_on_release(
         self, tmp_path: Path, ignore_removals: Path
