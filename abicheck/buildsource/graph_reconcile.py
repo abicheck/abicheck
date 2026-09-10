@@ -104,6 +104,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from ..model.graph_identity import closure_location_free_identity
 from .entity_identity import (
     IDENTITY_TIER_CANONICAL,
     CanonicalIdentity,
@@ -394,12 +395,9 @@ def _classify_outcome(
 ) -> str:
     old_qn = old_identity.qualified_name
     new_qn = new_identity.qualified_name
-    # source_relative encodes file#scope#name — compare just the file prefix
-    # (before the first separator) to ask "did the declaring file change",
-    # after normalizing each side's path (see _project_relative_path).
-    # Falls back to the SOURCE_DECLARES-edge-derived declaring file (see
-    # _declaring_files) when the node carries no def_file/file attr of its
-    # own.
+    # source_relative is file#scope#name; the file prefix says "did the
+    # declaring file change" (falls back to _declaring_files' edge-derived
+    # file when the node carries none of its own).
     old_file = (
         _project_relative_path(old_identity.source_relative.split("\x1f", 1)[0])
         or old_declaring_file
@@ -408,7 +406,9 @@ def _classify_outcome(
         _project_relative_path(new_identity.source_relative.split("\x1f", 1)[0])
         or new_declaring_file
     )
-    renamed = bool(old_qn) and bool(new_qn) and old_qn != new_qn
+    old_key = closure_location_free_identity(old_qn)
+    new_key = closure_location_free_identity(new_qn)
+    renamed = bool(old_qn) and bool(new_qn) and old_key != new_key
     moved = bool(old_file) and bool(new_file) and old_file != new_file
     if renamed and not moved:
         return OUTCOME_RENAMED

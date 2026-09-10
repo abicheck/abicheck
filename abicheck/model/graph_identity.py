@@ -329,3 +329,85 @@ def _decl_node_id(identity: str) -> str:
 
 def _type_node_id(identity: str) -> str:
     return f"type://{_normalize_graph_identity(identity)}"
+
+
+#: Matches the ``<marker>:<basename>:<line>:<col>`` shape
+#: :func:`_normalize_graph_identity` already produces (both the
+#: parenthesized and bare closure/anonymous-tag spellings converge on this
+#: one form once normalized -- see its own docstring), capturing just the
+#: marker so a substitution can drop the trailing basename/coordinates
+#: entirely rather than merely relocating them. Deliberately runs on
+#: *already-normalized* text rather than duplicating the quote/timestamp-
+#: aware machinery `_normalize_graph_identity`'s own regexes already carry.
+_NORMALIZED_CLOSURE_DISCRIMINATOR_RE = re.compile(
+    r"\b(lambda|unnamed\s+\w+|anonymous\s+\w+):[^():\"]*:\d+:\d+\b"
+)
+
+
+def closure_location_free_identity(identity: str) -> str:
+    """*identity*, with every closure/anonymous-tag marker's basename and
+    ``:<line>:<col>`` discriminator dropped entirely, leaving just the bare
+    marker (``"(lambda at /a/foo.h:4:37)"`` /
+    ``"lambda at /a/foo.h:4:37"`` -> ``"(lambda)"`` / ``"lambda"``).
+
+    :func:`_normalize_graph_identity` (used for a node's own id/label, and
+    for identity ATTRS a rename/move candidate is matched *against*)
+    deliberately *keeps* the basename+``:line:col`` discriminator --
+    dropping it there would let two unrelated lambdas declared in the same
+    header collide onto one node id, silently merging two distinct
+    declarations (see that function's own docstring, and
+    ``strip_anonymous_type_location``'s: "there is no location-based
+    discriminator that is simultaneously stable under unrelated line
+    movement AND distinguishing between two declarations in one header").
+
+    This function is for a *different*, narrower job where that collision
+    risk does not apply: :func:`~abicheck.buildsource.graph_reconcile.
+    _classify_outcome` decides whether an *already-matched* pair (matched
+    by :mod:`~abicheck.buildsource.graph_reconcile`'s canonical-id/alias/
+    structural-context tiers -- none of which use this function, so no new
+    merge is ever made on its evidence) should be labeled a genuine
+    "rename" or not. A pure coordinate shift on an otherwise-identical
+    closure/anonymous-tag spelling -- the common case when an unrelated
+    edit elsewhere in the same header moves an unchanged lambda to a new
+    line -- is not, in any user-meaningful sense, a "declaration renamed":
+    it is source churn the closure's own identity has no way to be stable
+    against (a lambda has no user-given name to begin with). Reporting it
+    as ``declaration_renamed`` anyway is misleading noise, observed at real
+    scale in a template/lambda-heavy corpus (oneTBB) where an unrelated
+    header edit shifts dozens of otherwise-unchanged closures at once.
+
+    Dropping the basename here too (not just ``:line:col``) is deliberate
+    and still safe: a lambda that genuinely moved to a different declaring
+    FILE is separately caught by :func:`~abicheck.buildsource.
+    graph_reconcile._classify_outcome`'s own file-based ``moved`` check
+    (real declaring-file evidence, never derived from this marker text) --
+    so collapsing the basename here only changes such a pair's outcome from
+    the misleading ``declaration_renamed`` to the more accurate
+    ``declaration_moved``, never hides the file change itself.
+
+    A no-op for any identity carrying no closure/anonymous-tag marker at
+    all (ordinary qualified names are returned unchanged), and idempotent
+    (re-applying to an already-stripped identity is a no-op).
+
+    A match inside a ``"..."`` quoted literal is left untouched, mirroring
+    :func:`_strip_bare_anonymous_type_location`'s own guard (CodeRabbit
+    review): ``_normalize_graph_identity`` already protects quoted spans, so
+    marker-shaped *content* -- a C++20 fixed-string NTTP argument like
+    ``Tag<"lambda:foo.h:1:2">`` -- can reach here verbatim. Without this
+    guard, two distinct specializations quoting different literal text would
+    collapse onto the same coordinate-free identity, silently reconciling a
+    genuine ``declaration_renamed`` as unchanged.
+    """
+    if "at" not in identity and ":" not in identity:
+        return identity
+    normalized = _normalize_graph_identity(identity)
+    if ":" not in normalized:
+        return normalized
+    quoted_spans = _quoted_spans(normalized)
+
+    def _replace(match: re.Match[str]) -> str:
+        if any(start <= match.start() < end for start, end in quoted_spans):
+            return match.group(0)
+        return match.group(1)
+
+    return _NORMALIZED_CLOSURE_DISCRIMINATOR_RE.sub(_replace, normalized)
