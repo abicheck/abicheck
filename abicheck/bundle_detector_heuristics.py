@@ -49,8 +49,8 @@ from .bundle_manifest import (
     _expand_instantiations,
 )
 from .bundle_models import BundleFinding, BundleSnapshot, ConsumerEntry, ProviderEntry
-from .checker_policy import ChangeKind
 from .elf_metadata import ElfMetadata
+from .model.change_catalog.kinds import ChangeKind
 
 if TYPE_CHECKING:
     from .diff_cpp_patterns import BundleMember

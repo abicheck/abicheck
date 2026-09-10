@@ -67,6 +67,14 @@ SURFACE_ROOTS: tuple[Path, ...] = (
     Path("abicheck/schemas"),
     Path("abicheck/change_registry.py"),
     Path("abicheck/checker_policy.py"),
+    # ADR-061 gap B: checker_policy.py's real verdict-classification logic
+    # (what docs/reference/detector-spec.json is generated from) moved to
+    # policy/classification.py; checker_policy.py is now a re-export facade.
+    Path("abicheck/policy/classification.py"),
+    # checker_policy.py's evidence-status half (evidence_status_for_result,
+    # among others detector-spec generation and reporting both read) moved
+    # to policy/evidence_status.py alongside classification.py.
+    Path("abicheck/policy/evidence_status.py"),
 )
 
 

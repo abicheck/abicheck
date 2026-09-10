@@ -89,11 +89,12 @@ from pathlib import Path
 from typing import Literal
 
 from ..checker import compare
-from ..checker_policy import ChangeKind, Confidence, FindingEvolution
 from ..checker_types import Change, DiffResult
 from ..finding_identity import report_finding_id
+from ..model.change_catalog.kinds import ChangeKind
 from ..model.identity import EntityId
 from ..model.snapshot import AbiSnapshot
+from ..policy.evidence_status import Confidence, FindingEvolution
 from ..policy.finding_evolution import apply_finding_evolution
 from ..policy.versioning_policy import VersioningPolicy
 from ..serialization import load_snapshot

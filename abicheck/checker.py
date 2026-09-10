@@ -25,17 +25,6 @@ from . import (
     diff_char8t,  # noqa: F401 — triggers detector registration
     diff_integer_model,  # noqa: F401 — triggers detector registration
 )
-from .checker_policy import (
-    API_BREAK_KINDS as _API_BREAK_KINDS,
-    BREAKING_KINDS as _BREAKING_KINDS,
-    COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
-    RISK_KINDS as _RISK_KINDS,
-    ChangeKind,
-    EvidenceTier,
-    Verdict,
-    compute_verdict,
-    is_cross_source_resolved,
-)
 from .checker_types import (  # noqa: F401
     Change,
     DetectorSpec,
@@ -134,11 +123,21 @@ from .dwarf_advanced import (
     diff_advanced_dwarf,  # noqa: F401 — re-export for monkeypatching
 )
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import (
+    API_BREAK_KINDS as _API_BREAK_KINDS,
+    BREAKING_KINDS as _BREAKING_KINDS,
+    COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
+    RISK_KINDS as _RISK_KINDS,
+    Verdict,
+    compute_verdict,
+)
 from .policy.disposition_close import finalize_ledger
 from .policy.disposition_ledger import (
     DispositionLedger,
     record_suppressed_change,
 )
+from .policy.evidence_status import EvidenceTier, is_cross_source_resolved
 from .policy_file import PolicyFile
 
 if TYPE_CHECKING:

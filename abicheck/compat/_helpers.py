@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 import click
 
 from ..checker import ChangeKind
-from ..checker_policy import (
+from ..policy.classification import (
     API_BREAK_KINDS as _POLICY_API_BREAK_KINDS,
     compute_verdict as _compute_verdict,
 )
@@ -262,7 +262,7 @@ def _apply_strict(result: DiffResult, *, mode: str = "full") -> DiffResult:
     from dataclasses import replace  # noqa: PLC0415
 
     from ..checker import Verdict  # noqa: PLC0415
-    from ..checker_policy import ChangeKind  # noqa: PLC0415
+    from ..model.change_catalog.kinds import ChangeKind
 
     # ABICC semantics: pure additions remain COMPATIBLE even under -strict.
     # Only incompatible changes (removals, type changes, etc.) are promoted.
@@ -308,7 +308,7 @@ def _is_widening_return_type_change(change: object) -> bool:
     source-compatible — callers can accept a wider return type without
     code changes.
     """
-    from ..checker_policy import ChangeKind  # noqa: PLC0415
+    from ..model.change_catalog.kinds import ChangeKind
 
     if getattr(change, "kind", None) != ChangeKind.FUNC_RETURN_CHANGED:
         return False

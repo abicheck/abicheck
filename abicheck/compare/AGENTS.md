@@ -46,6 +46,13 @@ severity, or a CLI flag is in the wrong layer.
   (Codex review, PR #1033) — that function's own evidence-reliability gate
   (a snapshot-level question, not a raw change) stays in
   `diff_param_qualifiers.py` as a thin facade.
+- `qualified_name_normalization.py` (ADR-061 gap B): the diffing-decision
+  half of the flat `qualified_name_segments` facade — `segments`/
+  `version_strip_segments`/`strip_inline_abi_namespaces`/`raw_segments`,
+  used by `diff_namespaces.py`/`diff_helpers.py` to recognize two
+  differently-spelled qualified names as one declaration. The snapshot-
+  normalization half moved to `storage/closure_identity.py` instead.
+
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.

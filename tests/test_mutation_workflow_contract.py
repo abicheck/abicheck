@@ -496,13 +496,14 @@ def _reached_mutated_modules(path: Path, mutated: set[str]) -> frozenset[str]:
 _ACCEPTED_KILL_LOSS = {
     # Drives `actions/check-target/run.sh`, which re-enters the mutated tree
     # from a subprocess that has no mutmut config, so the import of any
-    # mutated module raises there. Reaches checker_policy via
-    # abicheck.aggregate.
+    # mutated module raises there. Reaches policy.classification via
+    # abicheck.aggregate -> abicheck.checker_policy's own facade import.
     # Drives `actions/collect-facts`'s scripts the same way, and hits the same
     # subprocess re-entry.
     "tests/test_action_collect_facts.py": frozenset(
         {
-            "abicheck.checker_policy",
+            "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
@@ -510,7 +511,8 @@ _ACCEPTED_KILL_LOSS = {
     ),
     "tests/test_action_check_target.py": frozenset(
         {
-            "abicheck.checker_policy",
+            "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.finding_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
@@ -563,14 +565,14 @@ _ACCEPTED_KILL_LOSS = {
     # longer reach diff_symbols now that the `BundleFacts` chain is gone.
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
-            "abicheck.checker_policy",
+            "abicheck.policy.classification",
+            "abicheck.policy.evidence_status",
             "abicheck.finding_identity",
             "abicheck.name_classification",
             "abicheck.policy.selectors",
             "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
-            "abicheck.suppression",
         }
     ),
 }
@@ -586,8 +588,8 @@ def test_no_ignored_test_file_can_kill_a_detector_mutant() -> None:
     before a mutant is measured, so skipping them is not optional.
 
     Reachability is transitive, not direct: a test importing
-    `abicheck.aggregate` can kill a `checker_policy` mutant it never names,
-    and a direct-import check called exactly that exclusion free.
+    `abicheck.aggregate` can kill a `policy.classification` mutant it never
+    names, and a direct-import check called exactly that exclusion free.
     """
     mutated_modules = {p.replace("/", ".").removesuffix(".py") for p in _only_mutate()}
     offenders = {}

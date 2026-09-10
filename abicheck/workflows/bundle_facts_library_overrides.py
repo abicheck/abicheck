@@ -618,8 +618,8 @@ def _build_compile_context(
     # for --dump-manifest's own frontend_context field. Reused, not
     # reimplemented, so this manifest's accepted values can't drift from the
     # CLI's.
-    from ..api_types import HEADER_AST_FRONTENDS
     from ..dump_manifest import _SUPPORTED_FRONTEND_CONTEXTS
+    from ..model.header_ast_frontends import HEADER_AST_FRONTENDS
 
     if frontend not in HEADER_AST_FRONTENDS:
         raise BundleFactsLibraryOverridesError(

@@ -5,6 +5,17 @@ audience:
 level: intermediate
 canonical_for:
   - python-api
+depends_on:
+  - abicheck/service.py
+  - abicheck/api_types.py
+  - abicheck/workflows/contracts.py
+  - abicheck/workflows/request_inputs.py
+  - abicheck/model/header_ast_frontends.py
+  - abicheck/service_dump_pipeline.py
+  - abicheck/service_compare_pipeline.py
+  - abicheck/service_scan.py
+  - abicheck/deadline.py
+  - abicheck/policy/depth_evidence_contract.py
 lifecycle: active
 generated: false
 ---

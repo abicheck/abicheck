@@ -68,9 +68,9 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
 from .errors import SnapshotError, ValidationError
 
 if TYPE_CHECKING:
-    from .api_types import DumpRequest
     from .model import AbiSnapshot
     from .service_dump_pipeline import ResolvedDumpRequest
+    from .workflows.contracts import DumpRequest
 
 
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────

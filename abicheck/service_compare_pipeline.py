@@ -56,7 +56,6 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .api_types import CompareRequest, CompareResult, InputSpec, required_path
 from .compile_context import CompileContext
 from .confidence import note_if_same_binary_compared
 from .dependency_info import populate_pair_dependency_info
@@ -75,6 +74,8 @@ from .workflows.artifact.execute import (
     _resolve_side_snapshot_impl,
     enforce_requested_depth,
 )
+from .workflows.contracts import CompareRequest, CompareResult
+from .workflows.request_inputs import InputSpec, required_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -335,7 +336,7 @@ def resolve_compare_request(
     # case-sensitive `lang == "c"` checks, so normalise here. `android` (no
     # header-AST path) falls back to "auto" for the binary dump.
     lang = request.lang.lower()
-    from .api_types import HEADER_AST_FRONTENDS
+    from .model.header_ast_frontends import HEADER_AST_FRONTENDS
 
     frontend_lower = request.frontend.lower()
     header_backend = (

@@ -30,9 +30,9 @@ from pathlib import Path
 
 from .binder import BindingStatus, SymbolBinding, compute_bindings
 from .checker import DiffResult
-from .checker_policy import BREAKING_KINDS
 from .checker_types import Change
 from .errors import ProfileMismatchError, ScopeMismatchError, UnsupportedArtifactError
+from .policy.classification import BREAKING_KINDS
 from .policy.exit_decision import ExitDecision, resolve_exit_decision
 from .resolver import DependencyGraph, resolve_dependencies
 from .stack_binding_diff import diff_runtime_bindings

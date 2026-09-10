@@ -373,7 +373,7 @@ def _reclassify_str(rules: Any) -> str:
     swapped -- can select a different rule for an overlapping finding and
     therefore a different verdict, while a sorted encoding would collapse
     them to the identical digest."""
-    from .reclassify import active_reclassify_rules
+    from .policy.reclassify import active_reclassify_rules
 
     active = active_reclassify_rules(list(rules or ()))
     encoded = [

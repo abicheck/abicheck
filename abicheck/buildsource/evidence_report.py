@@ -297,8 +297,8 @@ def detect_coverage_asymmetry(
     the base had). A target that is *richer* than the base does not undermine
     the comparison, so it is not flagged here.
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     old_present = layer_presence(old_snap, old_pack)
     new_present = layer_presence(new_snap, new_pack)

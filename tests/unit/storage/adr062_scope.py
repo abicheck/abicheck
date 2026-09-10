@@ -73,6 +73,11 @@ import pathlib
 #: `native_identity_aliases` just below: `BundleFacts`-adjacent storage
 #: helpers, not one of the Phase 0 identity/availability/versioning/package
 #: primitives this scope tracks.
+#: `closure_identity` is an eighth, the same class as `snapshot_load_
+#: normalization` above: ADR-061 gap B's real owner behind the flat
+#: `qualified_name_segments` facade's anonymous/lambda-closure ordinal-
+#: identity renumbering -- snapshot string normalization, not a Phase 0
+#: identity/availability/versioning/package primitive.
 NON_ADR062_MODULES = frozenset(
     {
         "bounded_read",
@@ -98,6 +103,7 @@ NON_ADR062_MODULES = frozenset(
         "graph_section_codec",
         "sparse_section_codec",
         "snapshot_load_normalization",
+        "closure_identity",
     }
 )
 

@@ -16,11 +16,11 @@
 """G23 Phase D1 — Linux kernel kABI (``Module.symvers``) diff detector."""
 from __future__ import annotations
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
 
 
 def _is_gpl(export_type: str) -> bool:

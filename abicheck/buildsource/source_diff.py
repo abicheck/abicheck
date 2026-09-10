@@ -31,8 +31,8 @@ from __future__ import annotations
 
 import re
 
-from ..checker_policy import ChangeKind
 from ..checker_types import Change
+from ..model.change_catalog.kinds import ChangeKind
 from .fact_set import FactCompatibility, check_fact_compatibility, incomplete_families
 from .source_abi import (
     COVERAGE_STATES,

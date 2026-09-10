@@ -29,11 +29,11 @@ from __future__ import annotations
 
 import re
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, Function, Visibility
+from .model.change_catalog.kinds import ChangeKind
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
 # e.g. 'B5cxx11' -> tag 'cxx11'. Tags may repeat (a name can carry several).

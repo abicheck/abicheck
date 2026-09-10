@@ -26,7 +26,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .diff_helpers import make_change
 from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
@@ -34,6 +33,7 @@ from .diff_versioning import (  # noqa: F401 — re-exported for existing caller
     _parse_abi_version_tag as _parse_abi_version_tag,
 )
 from .model import AbiSnapshot, stdlib_namespaces_excluded
+from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolBinding, SymbolType
 from .model.identity import EntityId
 from .name_classification import is_stdlib_local_name_symbol

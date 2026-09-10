@@ -53,13 +53,13 @@ stylistic:
 
 from __future__ import annotations
 
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.fact_comparison import compare_facts
 from .compare.va_list_diff import diff_va_list_params
 from .diff_helpers import make_change
 from .finding_identity_ctor_dtor import iter_matched_function_pairs
 from .model import Function
+from .model.change_catalog.kinds import ChangeKind
 
 
 def param_restrict_changes(

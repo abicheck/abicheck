@@ -83,7 +83,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Protocol
 
-from ..checker_policy import ChangeKind
+from ..model.change_catalog.kinds import ChangeKind
 from ..model.elf_facts import SymbolBinding
 from .selectors_namespace_glob import (
     _compile_glob,

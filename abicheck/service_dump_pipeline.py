@@ -74,10 +74,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from .api_types import DumpRequest
     from .compile_context import CompileContext
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
+    from .workflows.contracts import DumpRequest
     from .workflows.resolved_execution_context import ResolvedExecutionContext
 
 __all__ = [
@@ -263,8 +263,8 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
             combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
     """
     from . import service, service_compare_evidence as _sce
-    from .api_types import HEADER_AST_FRONTENDS
     from .header_utils import split_public_header_inputs
+    from .model.header_ast_frontends import HEADER_AST_FRONTENDS
     from .workflows.plan import AnalysisPlanner
 
     request.validate()

@@ -66,9 +66,10 @@ from .bundle_resolution_reachability import (
     reachable_intra_libraries as _reachable_intra_libraries,
 )
 from .bundle_soname import soname_matches_providers
-from .checker_policy import ChangeKind, Verdict, policy_kind_sets
 from .checker_types import DiffResult
 from .elf_metadata import ElfSymbol, SymbolBinding
+from .model.change_catalog.kinds import ChangeKind
+from .policy.classification import Verdict, policy_kind_sets
 
 if TYPE_CHECKING:
     from .bundle_manifest import InstantiationManifest

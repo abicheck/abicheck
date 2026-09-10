@@ -42,7 +42,6 @@ from .binary_fingerprint import (
     FunctionFingerprint,
     match_renamed_functions,
 )
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .compare.namespace_move import (  # noqa: F401  (public-surface re-exports)
     emit_namespace_move_batches as emit_namespace_move_batches,
@@ -54,6 +53,7 @@ from .detector_registry import registry
 from .diff_helpers import make_change
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot, Function, is_cxx_runtime_library
+from .model.change_catalog.kinds import ChangeKind
 from .model.elf_facts import SymbolType
 
 _log = logging.getLogger(__name__)

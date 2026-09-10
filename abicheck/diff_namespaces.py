@@ -44,13 +44,13 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from .checker_policy import ChangeKind, ReachabilityState
 from .checker_types import Change
-from .diff_helpers import make_change
-from .diff_templates import _strip_param_signature
-from .qualified_name_segments import (
+from .compare.qualified_name_normalization import (
     segments as _segments,
     version_strip_segments as _version_strip_segments,
     version_suffix as _version_suffix,  # noqa: F401  (public-surface re-export)
 )
+from .diff_helpers import make_change
+from .diff_templates import _strip_param_signature
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType, ScopeOrigin

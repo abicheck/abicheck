@@ -44,11 +44,11 @@ when either snapshot lacks extension metadata.
 from __future__ import annotations
 
 from . import stable_abi
-from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot
+from .model.change_catalog.kinds import ChangeKind
 from .model.python_facts import PythonExtMetadata
 from .stable_abi import StableAbiStatus
 

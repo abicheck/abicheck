@@ -963,8 +963,8 @@ def _mapping_drift_findings(
     boundary: str,
 ) -> list[Change]:
     """Source↔binary mapping drift for declarations present in both graphs."""
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     old_map, new_map = _decl_to_symbol(old), _decl_to_symbol(new)
@@ -1041,8 +1041,8 @@ def _public_reachability_findings(
     genuinely risk-worthy signal here is an *existing* declaration crossing
     the public/private boundary unexpectedly.
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     # Only when both sides have a closure — an empty baseline would otherwise
@@ -1103,8 +1103,8 @@ def _generated_public_closure_findings(
     boundary: str,
 ) -> list[Change]:
     """Generated files that newly entered the public declaration closure."""
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     newly_generated = _generated_in_public_closure(new) - _generated_in_public_closure(
@@ -1145,8 +1145,8 @@ def _call_reachability_findings(
     restricted to ``DECL_CALLS_DECL``) into a newly-reachable (or, if none was
     added, a newly-unreachable) callee, not just the before/after counts.
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     # Needs Clang call edges. Quality signal only — reported for entries
@@ -1287,8 +1287,8 @@ def _include_graph_drift_findings(
     coverage gap (mirrors ``_common_dependency_edge_kinds``'s
     ``narrowed_confirmed`` branch).
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     # Needs COMPILE_UNIT_INCLUDES_FILE edges from a depfile/-M include extractor.
@@ -1337,8 +1337,8 @@ def _build_option_reach_findings(
     boundary: str,
 ) -> list[Change]:
     """A changed ABI-relevant build option that now reaches a public symbol."""
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     # Added BUILD_OPTION_AFFECTS_SYMBOL edges, grouped by option.
@@ -1441,8 +1441,8 @@ def _internal_dependency_findings(
     internal Y" into one finding instead of two disjoint ones a reader has to
     connect manually.
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     own_changes = _public_decl_source_changes(source_diff_changes)
     findings: list[Change] = []
@@ -1577,8 +1577,8 @@ def _target_dependency_findings(
     boundary: str,
 ) -> list[Change]:
     """A new inter-target build/link dependency (added TARGET_DEPENDS_ON edge)."""
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     added_target_deps = _target_dependency_edges(new) - _target_dependency_edges(old)
@@ -1679,8 +1679,8 @@ def _symbol_owner_findings(
     on hand, so it uses that as ``source_location`` instead of the generic
     ``boundary`` evidence-tier tag every other family falls back to.
     """
-    from ..checker_policy import ChangeKind
     from ..checker_types import Change
+    from ..model.change_catalog.kinds import ChangeKind
 
     findings: list[Change] = []
     # The symbol's public declaration relocated to a different header / source

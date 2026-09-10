@@ -115,9 +115,9 @@ from .bundle_models import (
     basename_to_bundle_key,
 )
 from .bundle_resolution_reachability import reachable_intra_libraries
-from .checker_policy import ChangeKind
 from .checker_types import DiffResult
 from .model import AbiSnapshot, Visibility
+from .model.change_catalog.kinds import ChangeKind
 
 #: G38 stabilization: this used to be a locally-duplicated frozenset
 #: (comment preserved below for the history of why each kind is or isn't

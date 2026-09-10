@@ -84,7 +84,7 @@ def add_contract_evaluation_fields(
     # compatibility policy never ran, which is a different statement from any
     # verdict -- including COMPATIBLE -- that a renderer might be tempted to
     # fill in.
-    from ..contract_gating import evaluation_status_of
+    from ..policy.contract_finding_relevance import evaluation_status_of
 
     status = evaluation_status_of(c)
     if status is not None:

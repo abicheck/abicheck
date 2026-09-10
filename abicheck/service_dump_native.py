@@ -46,7 +46,6 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import qualified_name_segments
 from .clang_layout_tool import attach_clang_layout
 from .dumper_scoping import wrap_run_dump_with_dependency_scope
 from .errors import (
@@ -68,6 +67,7 @@ from .service_metadata_attach import (
     _try_attach_python_ext_metadata,
     _try_attach_sycl_metadata,
 )
+from .storage import closure_identity
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -294,7 +294,7 @@ def _run_dump_uncached(
         # closure. Suppressed here, renumbered once on the merged result.
         with (
             dumper_cache.ast_memoize_scope(),
-            qualified_name_segments.defer_closure_identity_renumbering(),
+            closure_identity.defer_closure_identity_renumbering(),
         ):
             castxml_snap = run_dump(
                 path,
@@ -310,7 +310,7 @@ def _run_dump_uncached(
                 compile=_forced_compile("clang"),
                 **common_kwargs,
             )
-        merged = qualified_name_segments.renumber_anonymous_closure_identities(
+        merged = closure_identity.renumber_anonymous_closure_identities(
             merge_snapshots(castxml_snap, clang_snap)
         )
         # No attach_clang_layout call here: clang_snap's own recursive call
@@ -353,7 +353,7 @@ def _run_dump_uncached(
             dumper_cache.ast_memoize_scope()
             if _headers and not _skip_header_graph_attach and not dwarf_only and not symbols_only
             else nullcontext()
-        ), qualified_name_segments.defer_closure_identity_renumbering():
+        ), closure_identity.defer_closure_identity_renumbering():
             snap = _dump_elf(
                 path,
                 _headers,
@@ -413,13 +413,13 @@ def _run_dump_uncached(
         snap = attach_clang_layout(
             snap, _headers, _includes, lang=lang, compile=compile
         )
-        return qualified_name_segments.renumber_anonymous_closure_identities(snap)
+        return closure_identity.renumber_anonymous_closure_identities(snap)
     if binary_fmt == "pe":
         # See the ELF branch's comment above -- same base_offsets/bases
         # spelling mismatch, since _dump_pe already renumbers too early.
         with (
             dumper_cache.ast_memoize_scope(),
-            qualified_name_segments.defer_closure_identity_renumbering(),
+            closure_identity.defer_closure_identity_renumbering(),
         ):
             snap = _dump_pe(
                 path,
@@ -452,7 +452,7 @@ def _run_dump_uncached(
         # See the ELF/PE branches' own comments above -- same mismatch.
         with (
             dumper_cache.ast_memoize_scope(),
-            qualified_name_segments.defer_closure_identity_renumbering(),
+            closure_identity.defer_closure_identity_renumbering(),
         ):
             snap = _dump_macho(
                 path,
@@ -509,7 +509,7 @@ def _finish_native_snapshot(
     SYCL metadata and honors ``dwarf_only``, neither of which applies here.
 
     Callers are expected to have produced *snap* under
-    :func:`qualified_name_segments.defer_closure_identity_renumbering` --
+    :func:`closure_identity.defer_closure_identity_renumbering` --
     renumbered here exactly once, after ``attach_clang_layout``, so a base's
     offset lands under the same ordinal ``bases`` gets, not disagreeing.
 
@@ -546,7 +546,7 @@ def _finish_native_snapshot(
         include_search_dirs=_public_dirs,
     )
     snap = attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
-    return qualified_name_segments.renumber_anonymous_closure_identities(snap)
+    return closure_identity.renumber_anonymous_closure_identities(snap)
 
 
 @functools.wraps(_run_dump_uncached)  # name lookup below so patching sticks

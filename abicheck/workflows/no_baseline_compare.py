@@ -162,9 +162,9 @@ def resolve_no_baseline_candidate(
     ADR-064's exit-7 axis on the result rather than raised during
     resolution, mirroring exactly what the two-sided native CLI path does.
     """
-    from ..api_types import InputSpec
     from ..service_compare_evidence import collect_mode_for, resolve_side_evidence
     from .artifact.execute import resolve_side_snapshot
+    from .request_inputs import InputSpec
 
     side = InputSpec.of(
         path,
