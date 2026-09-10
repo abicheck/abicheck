@@ -212,25 +212,37 @@ jobs:
     # 27-29m; the per-platform cost of the stored-package path is a
     # separate, unowned investigation, not something a test budget fixes.
     #
-    # ...and it drifted to zero again, on schedule. On 2026-09-09 the
-    # Windows leg's main-suite step measured 40m24s and 41m18s on two
-    # consecutive `main` runs (34405326160, 34407360410) -- 92-94% of the
-    # 45-minute job budget set days earlier against a 27-29m observation --
-    # and on 2026-09-10 run 34435814307, on `main` itself with no pull
-    # request in flight, was cancelled at 45m14s. So the budget is now
-    # per-leg rather than one number the slowest platform shares with legs
-    # that comfortably fit: the canonical Linux leg's own worst observation
-    # is 31m30s and macOS's is 18m, both of which 45 still covers with real
-    # headroom, so loosening them to accommodate Windows would discard a
-    # working gate to fix an unrelated one. The Windows figure is ~1.8x its
-    # own last-measured cost, deliberately more slack than the 45/29 ~= 1.55
-    # the previous bump chose, because the thing this comment keeps
-    # re-learning is that a multiple picked tight against today's
-    # measurement expires in days. This is still a budget, not a fix: the
-    # underlying question is why this suite costs 41 minutes on Windows and
-    # 20 on Linux under coverage, which remains the separate unowned
-    # investigation the paragraph above already names.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 75 || 45 }}
+    # The drift repeated on the *Windows* leg again: on 2026-09-10, run
+    # 11381's windows-latest/3.13 job (github.com/abicheck/abicheck/actions/
+    # runs/34435814307/job/102752838266) was killed by the job-level
+    # timeout at 49m21s -- past the 45m budget above -- with every test
+    # that had run so far passing and the suite at 99% completion (mid
+    # tests/test_cli_compare_release_project_snapshot_package.py, the same
+    # stored-package test module PR #1079's own overrun was in). Same
+    # class of failure as 2026-09-05's: a job-level timeout racing an
+    # otherwise-green run, not a real test failure. 65 restores headroom
+    # over the ~49m21s observed here, matching the ~1.5x-of-observed
+    # pattern each prior bump in this comment already followed.
+    #
+    # Scoped to the windows-latest leg only (Codex review, PR #1197):
+    # `timeout-minutes` is a job-level setting, so a flat 65 would also
+    # hand every ubuntu/macos matrix cell 20 extra minutes of runaway-hang
+    # budget on a required check, for a cost this comment's own evidence
+    # only ever measured on Windows. The other legs keep the 45m this
+    # comment's prior bumps established.
+    #
+    # 65 turned out to be too tight on its own first re-run: PR #1197's
+    # own windows-latest/3.13 job (run 34458364910, job 102810016338)
+    # was killed at exactly 65m14s -- 14 seconds past the just-raised
+    # budget, with every test up to that point (99% of the suite) still
+    # passing. A ~1.5x multiplier that worked for three prior bumps
+    # (20->30, 45->65 from ~29m/~49m observed) left essentially zero
+    # headroom this time, since normal runner-to-runner variance on
+    # Windows is itself worth several minutes. 90 restores real margin
+    # (not just matching-the-multiplier margin) over the ~65m14s+
+    # observed here -- the run was still executing when killed, so the
+    # true completion time is unknown and at least this high.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 90 || 45 }}
     permissions:
       contents: read
       id-token: write

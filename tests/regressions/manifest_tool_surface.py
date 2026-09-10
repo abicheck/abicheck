@@ -162,7 +162,14 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "misleads, because abicheck sniffs content, not extensions: a "
             "PE file called `libfoo.so` is still a PE file."
         ),
-        fixed_by=(1188,),
+        # 1197 fixed the instance on `main` independently and in the same
+        # shape (Windows -> a real System32 DLL, POSIX -> the executable),
+        # which is corroboration of the class rather than a competing
+        # claim: two sessions hit it separately and converged. This entry
+        # and its seed test are what `main` still lacks -- the fix landed
+        # there with no registry entry, so the class was closed without
+        # being named.
+        fixed_by=(1188, 1197),
         seed_tests=("tests/test_compare_no_baseline_cli.py",),
         # A real Click invocation: the seed test drives `compare
         # --no-baseline` through `CliRunner().invoke(abicheck_main, ...)`,
@@ -245,27 +252,37 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             "the same cancellation returns once the slowest leg catches up "
             "again."
         ),
-        fixed_by=(1188,),
+        # 1197 landed the same per-leg expression on `main` independently,
+        # for the same stated reason (a job-level `timeout-minutes` hands
+        # every other matrix cell the slow leg's budget). Convergent design,
+        # differing only in the number; `main`'s 90 is better-evidenced than
+        # this branch's original 75 and is what the merge took.
+        fixed_by=(1188, 1197),
         seed_tests=("tests/test_verify_profiles.py",),
         known_gaps=(
             KnownGap(
                 description=(
-                    "The invariant's *quantitative* half is not executable "
-                    "here. Whether a leg's budget still clears its real "
-                    "cost can only be answered by wall-clock measurements "
-                    "from completed CI runs, which this repository does not "
-                    "ingest -- so the seed test pins the three figures read "
-                    "off `main` by hand (40.4/41.3/45.2 minutes) as a "
-                    "literal oracle. That catches a budget lowered below "
-                    "what was already observed, but nothing detects the "
-                    "decay this class names as the recurring shape: when "
-                    "the Windows leg reaches 75 minutes the test will still "
-                    "pass against its stale 45.2. Closing it needs the "
-                    "per-leg durations published as a queryable artifact "
-                    "(the canonical lane already emits `test-durations.json` "
-                    "for individual tests, but no lane records its own total "
-                    "against its budget) -- a real follow-up, not something "
-                    "a structural YAML scan can reach."
+                    "The invariant's *quantitative* half is only partly "
+                    "executable. Whether a leg's budget clears its real "
+                    "cost needs wall-clock measurements from completed CI "
+                    "runs, which this repository does not ingest, so the "
+                    "seed test pins hand-read figures as a literal oracle "
+                    "(40.4/41.3/45.2/49.4/65.2 minutes). That rejects a "
+                    "budget at or below the worst figure, but two holes "
+                    "remain. (1) It cannot encode *margin*: the 65m14s "
+                    "entry is a run that was KILLED, not completed, so its "
+                    "true cost is unknown and only bounded below -- a "
+                    "max-of-observed check therefore accepts 75, which "
+                    "PR #1197 judged insufficient when it chose 90 over "
+                    '65. Encoding "enough headroom for a length nobody has '
+                    'seen" would need an arbitrary multiplier, which is a '
+                    "guess dressed as a gate. (2) Nothing detects the decay "
+                    "recurring above the pinned set: when the Windows leg "
+                    "reaches 90 the test still passes against its stale "
+                    "65.2. Closing both needs per-leg durations published "
+                    "as a queryable artifact -- the canonical lane emits "
+                    "`test-durations.json` for individual tests, but no "
+                    "lane records its own total against its budget."
                 ),
                 reference="https://github.com/abicheck/abicheck/pull/1188",
             ),

@@ -765,9 +765,29 @@ class TestUnitTestsPerPlatformTimeout:
 
     def test_the_slow_legs_budget_clears_the_observed_cost_on_main(self) -> None:
         """Oracle independent of the workflow: the wall-clock figures below
-        were read off `main`'s own completed runs (see this class's
-        docstring), not derived from the budget the workflow declares."""
-        observed_windows_minutes_on_main = (40.4, 41.3, 45.2)
+        were read off `main`'s own completed runs and its `ci.yml` comment,
+        not derived from the budget the workflow declares.
+
+        The last two entries are the load-bearing ones, and they did not
+        come from this branch. PR #1197 raised the Windows leg to 65 and
+        its *own* re-run was then killed at 65m14s with 99% of the suite
+        passing, so it went to 90. Including 65.2 is what gives this
+        assertion teeth: it rejects any Windows budget at or below 65,
+        which is precisely the mistake #1197 made once and had to correct,
+        and which the three figures this branch measured for itself
+        (40.4, 41.3, 45.2) would have accepted.
+
+        What it does **not** do, stated because the tempting claim is
+        wrong: it does not reject 75, the value this branch originally
+        proposed. 75 exceeds every figure here, since the 65m14s run was
+        *killed* rather than completed -- its true cost is unknown and only
+        bounded below. A max-of-observed oracle can encode "clears what we
+        have measured"; it cannot encode "leaves enough margin for a run
+        whose length nobody has seen", which is the judgement #1197 made in
+        choosing 90 over 65. Recorded as a gap on the registry entry rather
+        than faked with an arbitrary multiplier here.
+        """
+        observed_windows_minutes_on_main = (40.4, 41.3, 45.2, 49.4, 65.2)
         match = self._TERNARY.match(
             str(self._unit_tests_job()["timeout-minutes"]).strip()
         )
