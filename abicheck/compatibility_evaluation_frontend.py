@@ -122,9 +122,9 @@ from .policy.versioning_policy import (
 from .severity import SEVERITY_PRESETS, SeverityConfig, SeverityLevel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .api_types import CompareRequest
     from .buildsource.build_config import BuildConfig
     from .policy_file import PolicyFile
+    from .workflows.contracts import CompareRequest
 
 # Field names double as provenance-receipt keys. Declared once so the receipt
 # a consumer reads and the pack-route table in
@@ -1007,9 +1007,8 @@ def resolve_compatibility_evaluation_config(
     # (Codex review, fresh evidence). One expression decides this and the
     # `default_is_stated` gate below, so the exemption and the precedence it
     # anticipates cannot drift apart.
-    preset_stated = (
-        explicit.severity_preset is not None
-        or (project is not None and project.severity_preset is not None)
+    preset_stated = explicit.severity_preset is not None or (
+        project is not None and project.severity_preset is not None
     )
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
         if (
@@ -1433,9 +1432,8 @@ def _severity_active(
     that assigns a category, since a pack-supplied severity is no less "in
     effect" than a config-supplied one.
     """
-    if (
-        explicit.severity_preset is not None
-        or (project is not None and project.severity_preset is not None)
+    if explicit.severity_preset is not None or (
+        project is not None and project.severity_preset is not None
     ):
         return True
     for category, field_name in SEVERITY_CATEGORY_FIELDS.items():
@@ -1695,7 +1693,15 @@ def compatibility_config_from_compare_request(
 # Phase 1's gate, as an executable comparison.
 # --------------------------------------------------------------------------
 
-_SECTIONS = ("contract", "evidence", "surface", "assurance", "policy", "gate", "versioning")
+_SECTIONS = (
+    "contract",
+    "evidence",
+    "surface",
+    "assurance",
+    "policy",
+    "gate",
+    "versioning",
+)
 
 
 def _normalized_provenance(prov: ValueProvenance) -> tuple[Any, ...]:

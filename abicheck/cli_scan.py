@@ -492,13 +492,16 @@ def _emit_scan_abort_report(
         return
     from .report.not_comparable import run_outcome_dict_for_scan
     from .workflows.scan_abort_result import scan_abort_result_fields
+
     fields = scan_abort_result_fields(axis, prior_decision=prior_decision)
     payload = {
         "scan_schema_version": fields["report"]["scan_schema_version"],
         "verdict": fields["verdict"],
         "exit_code": fields["exit_code"],
         "diff": {"exit": fields["report"]["exit"]},
-        "run_outcome": run_outcome_dict_for_scan(fields["verdict"], fields["exit_code"], report=fields["report"]),
+        "run_outcome": run_outcome_dict_for_scan(
+            fields["verdict"], fields["exit_code"], report=fields["report"]
+        ),
     }
     text = json.dumps(payload, indent=2)
     if fmt == "json":
@@ -565,10 +568,17 @@ def _reject_comparison_only_flags(*, no_baseline_reason: str) -> None:
 
 def _resolve_scan_evaluation_config(
     *,
-    against: Path | None, contract_evaluation: bool, pack_paths: tuple[Path, ...],
-    policy: str, policy_file: Any,
-    project_cfg: Any, cfg_path: Path | None, project_sha256: str | None,
-    suppression: Any, suppress: Path | None, symbols_list: Any,
+    against: Path | None,
+    contract_evaluation: bool,
+    pack_paths: tuple[Path, ...],
+    policy: str,
+    policy_file: Any,
+    project_cfg: Any,
+    cfg_path: Path | None,
+    project_sha256: str | None,
+    suppression: Any,
+    suppress: Path | None,
+    symbols_list: Any,
     resolved_cfg: Any = None,
 ) -> tuple[Any, Any, Any]:
     """Resolve this scan's ADR-049 configuration and fold in any ``--pack``.
@@ -664,7 +674,9 @@ def _resolve_scan_evaluation_config(
             )
             application = pack_application(resolved_config, policy_file=policy_file)
             policy_file = policy_file_with_packs(
-                policy_file, application, base_policy=policy,
+                policy_file,
+                application,
+                base_policy=policy,
             )
             # Same fold `compare`'s own `resolve_and_apply` applies to its
             # `ResolvedCompareConfig` -- a no-op unless a gate pack actually
@@ -691,8 +703,12 @@ def _resolve_scan_evaluation_config(
 
 
 def _discover_scan_project_config(
-    build_config: Path | None, sources: Path | None, against: Path | None,
-    *, allow_cwd_discovery: bool = False, require_parseable: bool = False
+    build_config: Path | None,
+    sources: Path | None,
+    against: Path | None,
+    *,
+    allow_cwd_discovery: bool = False,
+    require_parseable: bool = False,
 ) -> tuple[Path | None, Any, str | None]:
     """Resolve the project config for this scan, with the digest that parsed it.
 
@@ -711,7 +727,11 @@ def _discover_scan_project_config(
 
     explicit_config = build_config is not None
     cfg_path = build_config if explicit_config else discover_build_config(sources)
-    if cfg_path is None and not explicit_config and (against is not None or allow_cwd_discovery):
+    if (
+        cfg_path is None
+        and not explicit_config
+        and (against is not None or allow_cwd_discovery)
+    ):
         from .cli_helpers_compare import discover_project_config
 
         cfg_path = discover_project_config()
@@ -862,8 +882,10 @@ def _discover_scan_project_config(
     "still report a kind -> count breakdown of what was cut.",
 )
 @click.option(
-    "--require-complete-analysis", "require_complete_analysis",
-    is_flag=True, default=False,
+    "--require-complete-analysis",
+    "require_complete_analysis",
+    is_flag=True,
+    default=False,
     help="With --against: fail the build when analysis_assurance.status is "
     "not 'complete', independent of the compatibility verdict. Contributes "
     "exit 1, folded with max the same way the --contract coverage axis is "
@@ -1076,7 +1098,9 @@ def scan_cmd(
     _setup_verbosity(verbose)
 
     _reject_incoherent_secondary_output(
-        dry_run=dry_run, output=output, secondary_fmt=secondary_fmt,
+        dry_run=dry_run,
+        output=output,
+        secondary_fmt=secondary_fmt,
         secondary_output=secondary_output,
     )
     reject_dry_run_with_output(dry_run, output)
@@ -1263,9 +1287,7 @@ def scan_cmd(
     # in this function. The Tier-2 entry's (`service._validate_contract_mode`)
     # explicit-only contract stays untouched for direct Python API callers.
     contract_evaluation = resolve_contract_evaluation(contract_mode)
-    contract_mode = resolve_contract_domain(
-        contract_mode, click.get_current_context()
-    )
+    contract_mode = resolve_contract_domain(contract_mode, click.get_current_context())
 
     from .errors import AbicheckError, PlanningError
     from .service import load_env_matrix
@@ -1283,11 +1305,17 @@ def scan_cmd(
     # Resolved here because this is where the Click context is: which flags
     # the user actually typed is a question only the front end can answer.
     resolved_config, policy_file, resolved_cfg = _resolve_scan_evaluation_config(
-        against=against, contract_evaluation=contract_evaluation,
-        pack_paths=pack_paths, policy=policy, policy_file=policy_file,
-        project_cfg=project_cfg, cfg_path=cfg_path,
+        against=against,
+        contract_evaluation=contract_evaluation,
+        pack_paths=pack_paths,
+        policy=policy,
+        policy_file=policy_file,
+        project_cfg=project_cfg,
+        cfg_path=cfg_path,
         project_sha256=_project_sha256,
-        suppression=suppression, suppress=suppress, symbols_list=_symbols_list,
+        suppression=suppression,
+        suppress=suppress,
+        symbols_list=_symbols_list,
         resolved_cfg=resolved_cfg,
     )
     # A selected gate pack may have just moved `resolved_cfg`'s severity/
@@ -1366,7 +1394,11 @@ def scan_cmd(
         source_scope=SourceScope.CHANGED if seeded else SourceScope.TARGET,
     )
     headers, baseline_header, sources, build_info = _normalize_depth_inputs(
-        eff_depth_enum, headers, baseline_header, sources, build_info,
+        eff_depth_enum,
+        headers,
+        baseline_header,
+        sources,
+        build_info,
     )
     effective_build_info = build_info
 
@@ -1391,10 +1423,10 @@ def scan_cmd(
         raise click.UsageError(str(_bf))
 
     if dry_run:
-        from .api_types import InputSpec
         from .dry_run import emit_dry_run
         from .frontends.cli.scan_dry_run import render_scan_dry_run
         from .service_scan import estimate_scan
+        from .workflows.request_inputs import InputSpec
 
         # Computed here, not inside render_scan_dry_run: that module is a
         # canonical frontends/cli/ file, which must not import service_scan

@@ -51,7 +51,6 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .api_types import CompareResult
 from .bundle_models import BundleSignatureEvidence
 from .checker import DiffResult
 from .cli import _normalize_binary_input, _safe_write_output
@@ -65,6 +64,7 @@ from .errors import (
 )
 from .model import AbiSnapshot
 from .reporter import to_json
+from .workflows.contracts import CompareResult
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext

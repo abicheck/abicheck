@@ -55,8 +55,9 @@ from .workflows.changed_paths import localized_collect_mode
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from .api_types import CompareRequest, DumpRequest, InputSpec
     from .dump_manifest import DumpManifest
+    from .workflows.contracts import CompareRequest, DumpRequest
+    from .workflows.request_inputs import InputSpec
 
 __all__ = [
     "SideEvidence",
@@ -388,7 +389,8 @@ def _compile_context(
         elif not has_explicit_std(base.gcc_options, base.gcc_option_tokens):
             base = dataclasses.replace(
                 base,
-                gcc_option_tokens=base.gcc_option_tokens + pair_compile.gcc_option_tokens,
+                gcc_option_tokens=base.gcc_option_tokens
+                + pair_compile.gcc_option_tokens,
             )
     if base is None:
         return (
@@ -644,6 +646,4 @@ def reject_debug_format_for_non_elf(
     A JSON-snapshot or dump input has ``fmt is None`` and is unaffected, same
     as on the CLI side.
     """
-    reject_debug_format_for_binaries(
-        debug_format, (("old", old_fmt), ("new", new_fmt))
-    )
+    reject_debug_format_for_binaries(debug_format, (("old", old_fmt), ("new", new_fmt)))

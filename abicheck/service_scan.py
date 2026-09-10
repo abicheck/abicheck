@@ -54,8 +54,8 @@ from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 
 if TYPE_CHECKING:
-    from .api_types import InputSpec
     from .model.evidence_depth_levels import EvidenceDepth, SourceMethod
+    from .workflows.request_inputs import InputSpec
 
 _logger = logging.getLogger(__name__)
 

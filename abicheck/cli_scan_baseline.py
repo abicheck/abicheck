@@ -111,9 +111,9 @@ def _emit_estimate(
     # Imported lazily (not at module top) so importing cli_scan_baseline never
     # forces cli's module-load tail — which imports cli_scan, which imports back
     # from here — to run before this module finishes (partial-init cycle).
-    from .api_types import InputSpec
     from .cli import _safe_write_output
     from .service import estimate_scan
+    from .workflows.request_inputs import InputSpec
 
     side = InputSpec.of(
         binary,
@@ -1142,7 +1142,6 @@ def _run_baseline_compare(
     *diff* is stamped and ``analysis_assurance`` recomputed below so the
     requested-vs-effective gate has something real to check.
     """
-    from .api_types import InputSpec
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
     from .service import collect_metadata, compare_snapshots
@@ -1151,6 +1150,7 @@ def _run_baseline_compare(
 
     # note_if_same_binary_compared lives in workflows.gate, not workflows.extraction (Codex review) -- see that module's own docstring for why a post-comparison coverage warning belongs there.
     from .workflows.gate import note_if_same_binary_compared
+    from .workflows.request_inputs import InputSpec
 
     bl_headers, bl_includes, bl_public_headers, bl_public_dirs = (
         _resolve_baseline_header_scope(

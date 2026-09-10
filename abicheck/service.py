@@ -27,13 +27,6 @@ from __future__ import annotations
 import importlib as _importlib
 from typing import TYPE_CHECKING
 
-from .api_types import (
-    CompareRequest,
-    CompareResult,
-    DumpRequest,
-    InputSpec,
-    OutputSpec,
-)
 from .model import AbiSnapshot
 
 # `_attach_header_graph` moved to `service_header_graph_attach.py`, purely to
@@ -50,6 +43,12 @@ from .model import AbiSnapshot
 # _attach_header_graph` keep resolving unchanged for the many existing
 # tests that patch/import it this way.
 from .service_header_graph_attach import _attach_header_graph as _attach_header_graph
+from .workflows.contracts import (
+    CompareRequest,
+    CompareResult,
+    DumpRequest,
+    OutputSpec,
+)
 
 # ── Input resolution (ADR-061 Phase 4): moved to
 # ``workflows.input_resolution`` -- the one slice of this module with zero
@@ -81,6 +80,7 @@ from .workflows.input_resolution import (
     resolve_input,
     sniff_text_format,
 )
+from .workflows.request_inputs import InputSpec
 
 # PE/Mach-O header-scoped dump lives in the sibling module service_header_scoped
 # (service.py is at the file-size cap). Bound via importlib rather than a static
