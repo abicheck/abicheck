@@ -41,6 +41,7 @@ Extracts the full mode-branch region of ``run.sh`` verbatim -- the same
 sets the relevant ``INPUT_*`` env vars, capturing the resulting ``CMD``
 array.
 """
+
 from __future__ import annotations
 
 import os
@@ -83,12 +84,13 @@ def _bash_executable() -> str:
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     """Source the real mode-branch region with *env_extra* set, return CMD."""
-    script = (
-        _mode_branches_region()
-        + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
-    )
+    script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
@@ -97,7 +99,10 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -115,16 +120,16 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         self,
     ) -> None:
         # A baseline (against), an explicit --depth headers, and no other
-        # still-legacy-only capability requested: this now routes through
-        # the `compare` translation (ADR-068's 2026-09-09 amendment closed
-        # the baseline cross-source-authority divergence that used to keep
-        # every baseline scan on the legacy CLI unconditionally -- see the
-        # routing comment above `_SCAN_NEEDS_LEGACY_CLI` in run.sh). The
-        # `compare`-translation branch has no `--public-header-dir` flag at
-        # all (`compare` derives provenance and extraction scope from `-H`
-        # alone), so this only forwards it as a sided `-H new=` root; see
-        # `TestScanForcedLegacyPublicHeaderDirStillForwardsBothFlags` below
-        # for the still-reachable legacy-CLI shape of this same input.
+        # input: this routes through the `compare` translation
+        # unconditionally now (ADR-068's second 2026-09-09 amendment
+        # collapsed the routing predicate down to one surviving condition --
+        # see `_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`'s own comment in run.sh).
+        # The `compare`-translation branch has no `--public-header-dir` flag
+        # at all (`compare` derives provenance and extraction scope from
+        # `-H` alone), so this only forwards it as a sided `-H new=` root
+        # (via `_add_unioned_sided_flag`); see
+        # `test_audit_only_legacy_scan_still_forwards_both_flags` below for
+        # the still-reachable legacy-CLI shape of this same input.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
@@ -132,14 +137,6 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
                 "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
                 "INPUT_DEPTH": "headers",
-                # Codex review, PR #1172, round 17: a default baseline scan
-                # (no --pattern-verdicts) now stays on the legacy CLI (see
-                # TestPatternVerdictsDefaultStaysOnLegacyCli in
-                # test_action_run_sh_scan_routing_edge_cases.py) -- this
-                # test is about -H/--public-header-dir forwarding, not that
-                # axis, so opt in explicitly to keep exercising the
-                # compare-translation branch.
-                "INPUT_EXTRA_ARGS": "--pattern-verdicts",
             }
         )
         assert "compare" in cmd
@@ -148,26 +145,25 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
         assert "new=include" in h_pairs, cmd
 
-    def test_forced_legacy_scan_still_forwards_both_flags(self) -> None:
-        # The same inputs, plus `crosscheck` -- a still-open,
-        # `compare`-flag-equivalent-free capability gap (ADR-068 amendment,
-        # `docs/contribute/known-gaps.md`) that keeps this request on the
-        # legacy `scan` CLI regardless of the cross-source-authority fix.
-        # (It used to be `risk-rules`; that input is retired outright now,
-        # ruling (b), so it rejects the step instead of routing it.)
-        # The legacy branch's own forwarding is unchanged by that fix: it
-        # still forwards `--public-header-dir` unconditionally *and* folds
-        # it into `-H` (both flags) -- see
-        # `test_action_compile_context_parity.py`'s own marker note for
-        # that still-unconditional, still-both-flags behavior.
+    def test_audit_only_legacy_scan_still_forwards_both_flags(self) -> None:
+        # Audit-only (no baseline) is the one surviving condition that
+        # routes to the legacy `scan` CLI now (ADR-068's second 2026-09-09
+        # amendment) -- there is no longer any baseline+legacy-CLI
+        # combination reachable through this Action's own routing at all
+        # (a real baseline always routes to `compare`; `crosscheck`, which
+        # used to force legacy here, is now a rejected retired input
+        # instead, see `test_action_run_contract.py`'s own crosscheck
+        # rejection coverage). The legacy branch's own forwarding for this
+        # audit-only shape is unchanged: it still forwards
+        # `--public-header-dir` unconditionally *and* folds it into a bare
+        # (unsided) `-H` root -- see `test_action_compile_context_parity.py`
+        # for that still-unconditional forwarding.
         cmd = _run_cmd(
             {
                 "INPUT_MODE": "scan",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.so",
                 "INPUT_PUBLIC_HEADER_DIR": "include",
                 "INPUT_DEPTH": "headers",
-                "INPUT_CROSSCHECK": "odr_type_variant=error",
             }
         )
         assert "scan" in cmd
@@ -175,7 +171,7 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         i = cmd.index("--public-header-dir")
         assert cmd[i + 1] == "include"
         h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
-        assert "new=include" in h_pairs, cmd
+        assert "include" in h_pairs, cmd
 
     def test_public_header_dir_absent_forwards_neither(self) -> None:
         cmd = _run_cmd(
@@ -188,6 +184,99 @@ class TestScanPublicHeaderDirAlsoForwardedAsDashH:
         assert "--public-header-dir" not in cmd
         h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
         assert not any(cmd[j + 1] == "" for j in h_indices)
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestHeaderIncludeUnionOnCompareTranslation:
+    """`_add_unioned_sided_flag` (defined near `add_sided_flag` in
+    `run.sh`): now that routing to `compare` is unconditional for every
+    baseline scan (ADR-068's second 2026-09-09 amendment), a shared
+    `header`/`include` root combined with a side-specific override reaches
+    the translated `compare AGAINST ARTIFACT` command too -- but `compare`'s
+    own per-side resolution OVERRIDES a bare shared root with a
+    side-specific one instead of unioning them the way `scan`'s own
+    `action.yml`-documented handling does. This re-adds the bare root as an
+    explicit same-sided entry for whichever side has an override, closing
+    that gap at the Action level."""
+
+    def test_bare_header_plus_new_header_unions_onto_both_sides(self) -> None:
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_AGAINST": "baseline.so",
+                "INPUT_DEPTH": "headers",
+                "INPUT_HEADER": "shared_inc",
+                "INPUT_NEW_HEADER": "new_only_inc",
+            }
+        )
+        assert "compare" in cmd
+        h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
+        # The untouched (old) side still effectively carries the bare root,
+        # via its own sided entry -- not a bare, unprefixed one.
+        assert "old=shared_inc" in h_pairs, cmd
+        # The overridden (new) side carries BOTH the bare root and its own
+        # override, never just the override alone (that would silently drop
+        # the shared root for this side, the bug this helper exists to fix).
+        assert "new=shared_inc" in h_pairs, cmd
+        assert "new=new_only_inc" in h_pairs, cmd
+        # No bare, unprefixed -H token at all once any override exists.
+        h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
+        assert not any(cmd[j + 1] == "shared_inc" for j in h_indices), cmd
+
+    def test_bare_header_plus_old_header_unions_onto_both_sides(self) -> None:
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_AGAINST": "baseline.so",
+                "INPUT_DEPTH": "headers",
+                "INPUT_HEADER": "shared_inc",
+                "INPUT_OLD_HEADER": "old_only_inc",
+            }
+        )
+        assert "compare" in cmd
+        h_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-H"]
+        assert "old=shared_inc" in h_pairs, cmd
+        assert "old=old_only_inc" in h_pairs, cmd
+        assert "new=shared_inc" in h_pairs, cmd
+
+    def test_bare_include_plus_new_include_unions_onto_both_sides(self) -> None:
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_AGAINST": "baseline.so",
+                "INPUT_DEPTH": "headers",
+                "INPUT_INCLUDE": "shared_inc",
+                "INPUT_NEW_INCLUDE": "new_only_inc",
+            }
+        )
+        assert "compare" in cmd
+        i_pairs = [cmd[j + 1] for j, v in enumerate(cmd) if v == "-I"]
+        assert "old=shared_inc" in i_pairs, cmd
+        assert "new=shared_inc" in i_pairs, cmd
+        assert "new=new_only_inc" in i_pairs, cmd
+        i_indices = [j for j, v in enumerate(cmd) if v == "-I"]
+        assert not any(cmd[j + 1] == "shared_inc" for j in i_indices), cmd
+
+    def test_bare_header_with_no_override_is_byte_identical_to_before(self) -> None:
+        # No old-header/new-header/public-header-dir override at all: this
+        # must stay a single bare, unprefixed -H entry -- no side prefix
+        # introduced -- exactly matching pre-fix behavior for this shape.
+        cmd = _run_cmd(
+            {
+                "INPUT_MODE": "scan",
+                "INPUT_NEW_LIBRARY": "lib.so",
+                "INPUT_AGAINST": "baseline.so",
+                "INPUT_DEPTH": "headers",
+                "INPUT_HEADER": "shared_inc",
+            }
+        )
+        assert "compare" in cmd
+        h_indices = [j for j, v in enumerate(cmd) if v == "-H"]
+        h_values = [cmd[j + 1] for j in h_indices]
+        assert h_values == ["shared_inc"], cmd
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")

@@ -261,9 +261,16 @@ class TestScanRejectsDirectoryOrPackage:
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
 class TestScanRetiredInputsFailPreflight:
-    """ADR-068's second 2026-09-09 amendment, ruling (b): three `scan` inputs
+    """ADR-068's second 2026-09-09 amendment, ruling (b): four `scan` inputs
     are retired, and preflight -- not just `run.sh` -- is where a workflow
-    that still sets one must find out.
+    that still sets one must find out. Three are a hard removal with no
+    replacement (`new-library-set`/`risk-rules`/`build-target`); the fourth,
+    `crosscheck`, is dropped as *superseded* -- its `KEY=error` promotion
+    syntax is gone, but every cross-source check it used to gate already
+    reaches `compare` as an ordinary `ChangeKind`, so
+    `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` is the
+    replacement (`action/run.sh`'s routing-predicate comment has the fuller
+    account of what closed and what didn't).
 
     `validate-inputs.sh` runs *before* Python setup, the pixi/toolchain
     provision and the abicheck install; `run.sh` runs after all three. Codex
@@ -280,13 +287,15 @@ class TestScanRetiredInputsFailPreflight:
             ({"INPUT_NEW_LIBRARY_SET": "release/lib"}, "new-library-set"),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "risk-rules"),
             ({"INPUT_BUILD_TARGET": "//:math"}, "build-target"),
+            ({"INPUT_CROSSCHECK": "odr_type_variant=error"}, "crosscheck"),
         ],
     )
     def test_rejected_with_a_message_naming_the_input(
         self, env: dict[str, str], expected: str
     ) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so",
-                                **env})
+        result = _run_validate(
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so", **env}
+        )
         assert result.returncode == 1, result.stdout + result.stderr
         assert "::error::" in result.stdout
         assert expected in result.stdout
@@ -298,6 +307,10 @@ class TestScanRetiredInputsFailPreflight:
             ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "ADR-065 S3"),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "depth: source"),
             ({"INPUT_BUILD_TARGET": "//:math"}, "mode: dump"),
+            (
+                {"INPUT_CROSSCHECK": "odr_type_variant=error"},
+                "policy.overrides.<CHANGE_KIND>",
+            ),
         ):
             result = _run_validate(
                 {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so", **env}
@@ -319,6 +332,17 @@ class TestScanRetiredInputsFailPreflight:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" in result.stdout
         assert "new-library-set" in result.stdout
+
+    def test_warns_crosscheck_outside_scan(self) -> None:
+        """Same shape as `new-library-set` above: `crosscheck` was always
+        scan-only and is now retired, so it stays a warning -- not a hard
+        failure -- on any other mode."""
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_CROSSCHECK": "odr_type_variant=error"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+        assert "crosscheck" in result.stdout
 
 
 class TestRemovedInputTombstones:
@@ -903,7 +927,7 @@ class TestModeScopedInputWarnings:
         [
             "INPUT_DSO_ONLY",
             "INPUT_INCLUDE_PRIVATE_DSO",
-                    "INPUT_FAIL_ON_REMOVED_LIBRARY",
+            "INPUT_FAIL_ON_REMOVED_LIBRARY",
         ],
     )
     def test_bool_input_warns_when_true_on_non_compare_mode(
@@ -918,7 +942,7 @@ class TestModeScopedInputWarnings:
         [
             "INPUT_DSO_ONLY",
             "INPUT_INCLUDE_PRIVATE_DSO",
-                    "INPUT_FAIL_ON_REMOVED_LIBRARY",
+            "INPUT_FAIL_ON_REMOVED_LIBRARY",
         ],
     )
     def test_bool_input_silent_when_false_default(self, env_name: str) -> None:

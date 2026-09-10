@@ -522,9 +522,16 @@ inputs:
     default: 'false'
   crosscheck:
     description: >
-      scan mode only. Per-check severity overrides KEY=LEVEL
-      (off|info|warning|error), space-separated. Maps to repeated
-      scan --crosscheck. Promote a check to =error to gate CI on it.
+      RETIRED (ADR-068's second 2026-09-09 amendment, ruling (b) — dropped,
+      superseded, not a hard removal with nothing to replace it). `scan
+      --crosscheck`'s KEY=LEVEL promotion syntax, which this input mapped
+      to, no longer exists: every cross-source check it used to gate already
+      reaches `compare` as an ordinary `ChangeKind`, so `policy` /
+      `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` already lets
+      you control any one check's severity — only the KEY=LEVEL syntax
+      itself doesn't survive. Still declared so a workflow that sets it gets
+      an explicit `::error::` naming that replacement instead of a
+      silently-ignored input.
     required: false
   risk-rules:
     description: >
@@ -963,6 +970,7 @@ runs:
         # sets one fails before Python setup and the toolchain install
         # (Codex review, PR #1186).
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
+        INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_AGAINST: ${{ inputs.against }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
