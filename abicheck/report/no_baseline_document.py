@@ -306,6 +306,24 @@ class NoBaselineDocument:
     #: a second, positionally-aligned tuple: a pairing invariant a renderer
     #: has to honor is one a renderer can break, and the finding and the
     #: rule that hid it are one fact.
+    #: Typed as :class:`SuppressedFinding`, deliberately, even though
+    #: :func:`suppression_provenance_of` lets every renderer tolerate a plain
+    #: :class:`~abicheck.report.finding.ReportFinding` at runtime. Those two
+    #: facts are not in conflict: the tolerance is defensive robustness for a
+    #: hand-built document (an ``AttributeError`` from inside a renderer is a
+    #: terrible failure), while the annotation states what this package
+    #: *produces* and what a consumer may therefore rely on.
+    #:
+    #: Widening it to ``ReportFinding`` was considered and rejected on
+    #: measurement, not taste (Codex review, P2): under that annotation mypy
+    #: reports ``"ReportFinding" has no attribute "provenance"`` for the one
+    #: consumer this whole feature exists to serve -- code reading a
+    #: suppression's rule record off a computed document -- and breaks this
+    #: package's own ``mypy abicheck/`` cleanliness at ``_suppressed_json``.
+    #: A union does not help either: ``ReportFinding | SuppressedFinding``
+    #: collapses to ``ReportFinding``, since the latter is a subclass. So the
+    #: choice is binary, and it favours the real consumer over a hypothetical
+    #: caller hand-constructing a fourteen-field document.
     suppressed: tuple[SuppressedFinding, ...]
     evolution: CrossSourceEvolutionSummary | None
     pattern_preprocessor_scan: dict[str, Any] | None
