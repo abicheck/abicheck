@@ -194,11 +194,20 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
                     # be misread as a real demangling (Codex review).
                     if out and out != canonical:
                         return out
+                    _log.debug(
+                        "c++filt echoed %s back unchanged (or empty) for %s",
+                        cmd[0],
+                        symbol,
+                    )
+                else:
+                    _log.debug(
+                        "c++filt exited %d demangling %s", result.returncode, symbol
+                    )
             except FileNotFoundError:
                 _cppfilt_binary_confirmed_missing = True
                 break
-            except (subprocess.TimeoutExpired, OSError):
-                pass
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                _log.debug("c++filt failed demangling %s: %s", symbol, exc)
 
     # Only warn "demangler unavailable" when BOTH backends are confirmed
     # absent from this environment. A working c++filt/cxxfilt that simply
