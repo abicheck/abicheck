@@ -666,9 +666,16 @@ def build_html_document(
 
         # ADR-061 gap C: the envelope resolved these once for the whole
         # render (over the same `result.changes`); resolve them here only for
-        # a direct caller that supplied none.
+        # a direct caller that supplied none. Read through `findings_for`
+        # rather than the bare `.findings` tuple: `display_changes` can hold
+        # `_suppress_dangling_correlation_notes`' own shallow `Change` copies
+        # (a `--show-only` render with a dangling `correlated_change_kind`),
+        # which have no entry in an id-keyed index built from `.findings`
+        # alone -- `findings_for` is exactly the primitive that resolves
+        # those through the same policy inputs instead of raising `KeyError`
+        # (CodeRabbit review).
         if envelope is not None:
-            _resolved_findings = envelope.findings
+            _resolved_findings = envelope.findings_for(display_changes)  # type: ignore[arg-type]
         else:
             _resolved_findings = report_findings_for(result)  # type: ignore[arg-type]
         _findings_by_id = findings_by_change_id(_resolved_findings)

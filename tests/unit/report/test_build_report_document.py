@@ -41,6 +41,7 @@ from abicheck.report.render_json import render_json
 from abicheck.reporter import to_json
 from abicheck.sarif import to_sarif, to_sarif_str
 from abicheck.service_render import render_envelope, render_output
+from abicheck.severity import SeverityConfig, SeverityLevel
 
 
 def _import_attr(dotted: str) -> object:
@@ -359,12 +360,20 @@ class TestRendererOrderIndependence:
     #: ``wraps=`` the real callable, so a projection that still calls one
     #: renders correctly and is *counted* rather than broken -- the test
     #: fails on the count, not on a mangled render.
+    #: ``build.py``/``envelope.py`` each do ``from .finding import
+    #: build_report_findings`` -- that binds a name in *their own* module
+    #: namespace at import time, so patching
+    #: ``abicheck.report.finding.build_report_findings`` alone never sees a
+    #: call issued through either bound reference; the patch must target the
+    #: name each consumer actually calls (CodeRabbit review).
     _DECISION_SITES = (
         "abicheck.report.build.build_report_document",
         "abicheck.policy.gate_decision.gate_decision_for_result",
         "abicheck.report.finding.build_report_findings",
         "abicheck.report.finding.report_findings_for",
         "abicheck.report.surface_changes.build_report_findings",
+        "abicheck.report.build.build_report_findings",
+        "abicheck.report.envelope.build_report_findings",
     )
 
     @staticmethod
@@ -588,6 +597,81 @@ class TestRendererOrderIndependence:
                 f"{fmt!r} reported a change mutated on the caller's own "
                 "Change object after the envelope was already built"
             )
+
+    def test_mutating_a_shared_dict_attribute_after_construction_cannot_reach_the_envelope(
+        self,
+    ) -> None:
+        """The dict-attribute sibling of the two mutation tests above.
+
+        ``DiffResult.comparability_assurance`` (and ``evidence_metrics``) are
+        mutable ``dict``s read straight off ``envelope.result`` by Markdown's/
+        HTML's confidence sections (CodeRabbit review). Reassigning or
+        mutating one after the envelope was already built must not reach
+        those sections either.
+        """
+        assurance = {"abi": "high"}
+        result = DiffResult(
+            old_version="1.0",
+            new_version="2.0",
+            library="libtest.so.1",
+            changes=[],
+            policy="strict_abi",
+            comparability_assurance=assurance,
+        )
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        envelope = self._envelope(result, old, new)
+
+        assert envelope.result.comparability_assurance is not assurance, (
+            "the envelope shared the caller's own comparability_assurance dict"
+        )
+
+        assurance["abi"] = "low"
+        assurance["injected_dimension"] = "unexpected"
+
+        assert envelope.result.comparability_assurance == {"abi": "high"}, (
+            "the envelope's own dict mutated when the caller's did"
+        )
+
+        rendered = self._render_all_from(self._FORMATS, envelope)
+        for fmt in self._FORMATS:
+            assert "injected_dimension" not in rendered[fmt], (
+                f"{fmt!r} reported a key injected into the caller's own dict "
+                "after the envelope was already built"
+            )
+
+    def test_review_digest_merge_effect_reuses_the_envelope_s_gate(self) -> None:
+        """CodeRabbit review: the review digest's merge-effect phrase called
+        ``compute_exit_code`` independently even when an envelope had already
+        resolved a ``GateDecision`` -- a second, redundant severity
+        evaluation that happened to agree, not a projection of the one the
+        envelope already made. A ``FUNC_ADDED`` configured ``severity.
+        addition: error`` is ``COMPATIBLE`` but gate-blocking: the digest's
+        phrase must say so, and must do it by reading ``envelope.gate``, not
+        by re-deriving one.
+        """
+        addition = Change(ChangeKind.FUNC_ADDED, "_Z3newv", "new public function")
+        result = _result([addition])
+        old, new = _snapshot("1.0"), _snapshot("2.0")
+        severity_config = SeverityConfig(addition=SeverityLevel.ERROR)
+        envelope = build_report_envelope(
+            result, old, new, severity_config=severity_config
+        )
+        assert envelope.gate is not None
+        assert envelope.gate.blocking
+
+        # `_severity_merge_effect` does `from .severity import
+        # compute_exit_code` as a function-local (call-time) import, so the
+        # name it resolves is `abicheck.severity`'s own re-export -- not
+        # `abicheck.policy.severity`'s origin function, which `abicheck.
+        # severity` already copied a static reference to at its own import
+        # time (patching the origin wouldn't touch that copy).
+        with mock.patch(
+            "abicheck.severity.compute_exit_code"
+        ) as compute_exit_code_spy:
+            digest = render_envelope("review", envelope)
+
+        compute_exit_code_spy.assert_not_called()
+        assert "blocked by severity policy" in digest
 
 
 class TestSarifAndJunitDecisionBoundary:

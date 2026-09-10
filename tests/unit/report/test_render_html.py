@@ -67,10 +67,13 @@ from abicheck.html_report import (
     compute_summary_table,
     generate_html_report,
 )
+from abicheck.model import AbiSnapshot
 from abicheck.policy.gate_decision import gate_decision_for_result
 from abicheck.policy_file import PolicyFile
 from abicheck.reclassify import ReclassifyRule
+from abicheck.report.build import build_report_envelope
 from abicheck.report.document import ReportDocument
+from abicheck.report.envelope import RenderOptions
 from abicheck.report.render_html_document import render_html_document
 from abicheck.severity import SeverityConfig, SeverityLevel
 
@@ -721,6 +724,31 @@ def test_html_show_only_filter_excluding_everything() -> None:
     assert "No changes match the current filter" in html_out
     assert "--view show=enums" in html_out
     assert "1 change(s) exist but are excluded by the filter" in html_out
+
+
+def test_html_envelope_show_only_dropping_a_correlated_target_does_not_crash() -> None:
+    """CodeRabbit review: an envelope-driven render's ``_lookup_verdict``
+    indexed only ``envelope.findings`` (keyed by ``result.changes``'
+    identity), but ``--show-only`` can hand the renderer
+    ``_suppress_dangling_correlation_notes``'s own shallow ``Change`` copies
+    (made whenever a change's ``correlated_change_kind`` names a target
+    ``--show-only`` just filtered out) -- those copies have no entry in that
+    index, so bucketing them raised ``KeyError``. ``_result()``'s own
+    ``removed`` finding already names a ``type_vtable_changed`` target no
+    fixture change carries, so filtering to ``functions`` (dropping the
+    unrelated ``TYPE_SIZE_CHANGED`` ``root`` finding, keeping ``removed``)
+    reproduces the copy path without needing a bespoke fixture.
+    """
+    result = _result()
+    old = AbiSnapshot(library="libfoo.so", version="1.0")
+    new = AbiSnapshot(library="libfoo.so", version="2.0")
+    envelope = build_report_envelope(
+        result, old, new, options=RenderOptions(show_only="functions")
+    )
+
+    html_out = generate_html_report(result, show_only="functions", envelope=envelope)
+
+    assert "_ZN3foo6removeEv" in html_out
 
 
 def test_html_compat_changes_table_empty_and_populated() -> None:

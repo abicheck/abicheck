@@ -262,7 +262,10 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
     ``coverage_warnings``' plain strings need no copy of their own). A
     tuple-valued attribute (e.g. ``scoped_only_changes``) is already immune
     to in-place *container* mutation, but still needs its own ``Change``
-    elements replaced the same way.
+    elements replaced the same way. A dict-valued attribute (e.g.
+    ``comparability_assurance``, read straight off ``envelope.result`` by
+    HTML's/Markdown's comparability section -- CodeRabbit review) gets a
+    fresh dict for the same reason a list does.
     """
     import copy
 
@@ -282,6 +285,8 @@ def _snapshot_diff_result(result: DiffResult) -> DiffResult:
                     _snapshot_change(v) if isinstance(v, Change) else v for v in value
                 ),
             )
+        elif isinstance(value, dict):
+            setattr(snapshot, name, dict(value))
     return snapshot
 
 

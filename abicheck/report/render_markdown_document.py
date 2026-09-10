@@ -224,7 +224,9 @@ def build_review_digest_document(
     already-resolved per-finding verdicts the digest's "impacted symbols"
     list used to re-resolve through its own ``report_findings_for`` call --
     the same canonical primitive, but a second resolution of a decision this
-    render had already made.
+    render had already made -- and its already-resolved ``GateDecision``,
+    which the merge-effect phrase now projects instead of a second
+    ``compute_exit_code`` call of its own (CodeRabbit review).
     """
     shared_document = resolved_document(envelope, report_document)
     shared_disposition_audit = (
@@ -239,6 +241,7 @@ def build_review_digest_document(
         severity_config=severity_config,
         disposition_audit=shared_disposition_audit,
         findings=None if envelope is None else envelope.findings,
+        gate=None if envelope is None else envelope.gate,
     )
     d: dict[str, object] = {
         "library": digest.library,

@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .bundle_models import BundleDiffResult
+    from .policy.severity import GateDecision
     from .report.finding import ReportFinding
     from .severity import KindSets, SeverityConfig
 
@@ -1608,6 +1609,13 @@ _VERDICT_MERGE_EFFECT = {
 }
 
 
+def _merge_effect_from_exit_code(exit_code: int) -> str:
+    """The two merge-effect phrases, keyed by the resolved severity exit code."""
+    if exit_code == 0:
+        return "no error-level findings under the configured severity policy — safe to merge"
+    return "blocked by severity policy — review required before merge"
+
+
 def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) -> str:
     """Merge-effect phrase reflecting the actual severity-aware gate.
 
@@ -1618,6 +1626,13 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
     ``error`` does not. The hard-coded ``_VERDICT_MERGE_EFFECT`` phrases would
     misreport both cases, so this asks the severity gate directly instead of
     inferring "safe to merge" from the verdict alone.
+
+    Only called for a direct caller with no already-resolved
+    :class:`~abicheck.policy.severity.GateDecision` -- an envelope-driven
+    render passes one to :func:`compute_review_digest` instead (ADR-061 gap
+    C; CodeRabbit review) so this digest's merge-effect phrase reads the same
+    gate SARIF's/HTML's gate blocks do, rather than a second, independent
+    ``compute_exit_code`` call that happens to agree.
     """
     from .severity import compute_exit_code
 
@@ -1629,9 +1644,7 @@ def _severity_merge_effect(result: DiffResult, severity_config: SeverityConfig) 
         kind_sets=eff_sets,
         policy_file=result.policy_file,
     )
-    if exit_code == 0:
-        return "no error-level findings under the configured severity policy — safe to merge"
-    return "blocked by severity policy — review required before merge"
+    return _merge_effect_from_exit_code(exit_code)
 
 
 def compute_review_digest(
@@ -1640,6 +1653,7 @@ def compute_review_digest(
     severity_config: SeverityConfig | None = None,
     disposition_audit: DispositionAudit | None = None,
     findings: Sequence[ReportFinding] | None = None,
+    gate: GateDecision | None = None,
 ) -> _rmd.ReviewDigest:
     """The structured intermediate for :func:`to_review_digest`.
 
@@ -1647,6 +1661,15 @@ def compute_review_digest(
     actual severity-aware CI gate instead of the raw compatibility verdict —
     compatibility and "blocks CI" are independent decisions once severity
     configuration is in play (see :func:`_severity_merge_effect`).
+
+    *gate*, when given, is the already-resolved
+    :class:`~abicheck.policy.severity.GateDecision` the merge-effect phrase
+    reads instead of a second, independent ``compute_exit_code`` call --
+    the ADR-061 gap C caller (``report/render_markdown_document.
+    build_review_digest_document``) passes the ``ReportEnvelope``'s own gate
+    (CodeRabbit review), the same decision SARIF's/HTML's gate blocks
+    project. A direct caller with no envelope (``severity_config`` given,
+    ``gate`` not) keeps the prior behaviour via :func:`_severity_merge_effect`.
 
     *disposition_audit*, when given, is used verbatim instead of resolving a
     fresh one from *result*/*severity_config* -- the ADR-061 gap C caller
@@ -1665,11 +1688,12 @@ def compute_review_digest(
     v = result.verdict
     emoji = _VERDICT_EMOJI.get(v, "?")
     label = _VERDICT_LABEL.get(v, v.value)
-    effect = (
-        _severity_merge_effect(result, severity_config)
-        if severity_config is not None
-        else _VERDICT_MERGE_EFFECT.get(v, "")
-    )
+    if gate is not None:
+        effect = _merge_effect_from_exit_code(gate.exit_code)
+    elif severity_config is not None:
+        effect = _severity_merge_effect(result, severity_config)
+    else:
+        effect = _VERDICT_MERGE_EFFECT.get(v, "")
 
     # Manual-review banner: scoping requested but the public surface could not
     # be confirmed, so compatibility is unconfirmed (don't overclaim).
