@@ -19,36 +19,27 @@ Phase 4's gate is "byte/order-independent round-trip decisions and explicit
 mixed-version failure behavior." This module is the round-trip half:
 :func:`persisted_context_to_dict` writes a
 :class:`~abicheck.contract_evidence.PersistedContractContext` to plain
-JSON-safe data, :func:`persisted_context_from_dict` reads one back, and the
-two compose to the identity function on every field that participates in a
-decision.
+JSON-safe data, :func:`persisted_context_from_dict` reads one back, and
+the two compose to the identity function on every decision-relevant field.
 
 Three properties the implementation holds deliberately:
 
 *Order independence.* Every collection is written sorted, and every block's
-own ``__post_init__`` re-canonicalizes on read, so a context built by two
-different traversal orders serializes to identical bytes and decodes to an
-equal object. The gate says *byte*-independent for a reason: comparing the
-decoded objects is not enough if the bytes differ, since a consumer
-diffing two persisted reports would see spurious churn.
+own ``__post_init__`` re-canonicalizes on read, so two different traversal
+orders serialize to identical bytes -- a diffing consumer would see churn
+otherwise.
 
-*Version fields survive verbatim.* A block's version counters are written and
-read as-is rather than re-stamped with this build's current constants --
-re-stamping would erase exactly the mixed-version evidence D6 requires the
-reader to fail closed on. Reading does **not** itself enforce the ceiling;
+*Version fields survive verbatim.* A block's version counters are written
+and read as-is, never re-stamped with this build's current constants --
+that would erase the mixed-version evidence D6 requires failing closed on.
+Reading does **not** itself enforce the ceiling;
 :func:`~abicheck.contract_evidence.check_persisted_context_versions_supported`
-does, and :mod:`abicheck.contract_replay` calls it before using a decoded
-context. Keeping the two separate is what lets a tool *inspect* a
-newer-than-supported block (to report the version mismatch) without being
-forced to first accept it as evaluable.
+does, letting a tool *inspect* a newer block without first accepting it.
 
 *No lossy defaults on read.* An absent optional key decodes to ``None``/the
-empty collection, never to a plausible-looking substitute. A decoded
-``suppressions: None`` means "no suppression source was selected", which is
-a different fact from an empty rule list -- the same distinction
-:class:`~abicheck.compatibility_evaluation_config.SuppressionConfig` exists
-to preserve.
-"""
+empty collection, never a substitute for a *present* value -- a decoded
+``suppressions: None`` means "no suppression source selected", distinct
+from an empty rule list, and present-but-``null`` is a load error."""
 
 from __future__ import annotations
 
@@ -125,18 +116,15 @@ def _sequence_field(
     m: Mapping[str, Any], key: str, *, what: str, required: bool = False
 ) -> Sequence[Any]:
     """Decode an optional JSON array field, honoring the same absent-vs-
-    required distinction :func:`_bool` draws (Codex review, fresh evidence,
-    fourth round: a version-2 ``gate.scope`` object with its own ``targets``
-    key absent hit the identical "legitimate default vs. truncated payload"
-    ambiguity :func:`_bool` was fixed for, one level down).
+    required distinction :func:`_bool` draws (Codex review: a version-2
+    ``gate.scope`` object with its own ``targets`` key absent hit the
+    identical "legitimate default vs. truncated payload" ambiguity, one
+    level down).
 
-    Unlike :func:`_sequence`, which most call sites in this module use for a
-    genuinely optional collection with no version-conditional strictness,
-    this variant takes the mapping and key so *required* can reject absence
-    -- and, when required, a present ``null`` too (this build's writer never
-    emits ``null`` for a list field, only a real, possibly-empty array;
-    accepting ``null`` as "empty" here would reopen the same gap
-    :func:`_bool`'s ``required`` mode closes for a present ``null``).
+    Unlike :func:`_sequence`, this variant takes the mapping and key so
+    *required* can reject absence -- and, when required, a present ``null``
+    too (this build's writer never emits ``null`` for a list field, only a
+    real, possibly-empty array).
     """
     if key not in m:
         if required:
@@ -154,26 +142,23 @@ def _sequence_field(
 
 _GATE_SCOPE_FIELDS_SCHEMA_VERSION = 2
 """The ``evaluation_context.schema_version`` at which ``gate.require_complete_
-analysis``/``gate.scope`` were introduced (dedup-and-convergence plan, Phase 2
-item 1) -- matches ``contract_relevance_types.EVALUATION_CONTEXT_SCHEMA_
-VERSION``'s own bump for the same change, but is its own constant rather than
-a reference to that live ceiling: the ceiling moves on any future,
-unrelated bump to that block's shape, while this one names a fixed
-historical fact (the version these two specific keys started being
-unconditionally emitted) and must not drift with it.
+analysis``/``gate.scope`` were introduced -- its own constant (not a live
+reference to ``contract_relevance_types.EVALUATION_CONTEXT_SCHEMA_VERSION``)
+since that ceiling moves on any future, unrelated bump, while this one names
+a fixed historical fact that must not drift with it.
 
-Every writer at or above this version (this build's ``resolved_config_to_
-dict`` included) always emits both keys, so a payload declaring
-``schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION`` with either key
-missing is not a legitimate older-writer omission -- it is truncated or
-hand-crafted, and ``resolved_config_from_dict`` rejects it outright rather
-than silently defaulting (Codex review, fresh evidence, third round: the
-first two rounds closed "wrong type" and "explicit null", but neither
-covered a version-2-labeled payload simply missing the key). A payload
-declaring an older ``schema_version`` degrades to the field's documented
-default, per this module's own "no lossy defaults on read" rule -- that
-degrade is the *legitimate* forward-compatibility case, not the malformed
-one this constant exists to catch."""
+Every writer at or above this version always emits both keys, so a payload
+declaring ``schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION`` with either
+key missing is truncated or hand-crafted, and ``resolved_config_from_dict``
+rejects it outright rather than silently defaulting (Codex review). An older
+``schema_version`` legitimately degrades to the field's documented default,
+per this module's "no lossy defaults on read" rule."""
+
+_PACK_OVERRIDES_SCHEMA_VERSION = 4
+"""``schema_version`` at which ``policy.pack_overrides`` was introduced --
+same rule as :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION` above. At/above this
+version an omitted key is truncated/hand-crafted and rejected outright; an
+older version degrades to empty (Codex review)."""
 
 
 def _bool(
@@ -182,28 +167,21 @@ def _bool(
     """Decode an optional JSON boolean field, rejecting anything merely truthy.
 
     A bare ``bool(value)`` accepts any JSON value at all -- including the
-    string ``"false"``, a non-empty string that is truthy in Python despite
-    spelling the opposite of what it decodes to -- silently coercing it to
-    ``True`` rather than rejecting the malformed payload the way every other
-    strict decoder in this module does (Codex review, PR #817: this is
-    exactly the check ``GateConfig.__post_init__`` itself already performs
-    on construction, which a loose coercion here would bypass).
+    string ``"false"``, truthy in Python despite spelling the opposite of
+    what it decodes to -- silently coercing it to ``True`` (Codex review:
+    this is exactly the check ``GateConfig.__post_init__`` performs on
+    construction, which a loose coercion here would bypass).
 
     Takes the mapping and key, not a pre-fetched ``m.get(key)`` value, so it
-    can tell a genuinely *absent* key (a legacy payload written before this
-    field existed -- degrades to *default*, unless *required*) apart from a
-    *present* JSON ``null`` (an explicit, malformed "no value" that must
-    always be rejected -- ``bool`` has no legitimate null encoding, unlike
-    an ``Optional`` field): a pre-fetched value collapses both to Python
-    ``None``, which is exactly the gap a second round of review found in
-    this decoder's first cut (Codex review, fresh evidence).
+    can tell a genuinely *absent* key (degrades to *default*, unless
+    *required*) apart from a *present* JSON ``null`` (always rejected --
+    ``bool`` has no legitimate null encoding): a pre-fetched value collapses
+    both to Python ``None`` (Codex review, fresh evidence).
 
     *required* rejects absence too, for a payload whose own declared
     ``evaluation_context.schema_version`` is new enough that this build's
     own writer always emits the key -- see
-    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`'s docstring for why a
-    version-gated caller, not a blanket default, decides this (third round
-    of review, fresh evidence).
+    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`'s docstring.
     """
     if key not in m:
         if required:
@@ -239,11 +217,10 @@ def _gate_scope_from_dict(
     present with value ``null``" the same way.
 
     *required* also propagates one level down to a present, non-``None``
-    scope object's own ``targets`` key (via :func:`_sequence_field`): this
-    build's writer always emits ``targets`` (a real, possibly-empty array)
-    whenever it emits a scope object at all, so a required scope missing
-    its own ``targets`` key is the same truncated-payload signal as the
-    outer key being absent (Codex review, fresh evidence, fourth round).
+    scope object's own ``targets`` key: this build's writer always emits
+    ``targets`` whenever it emits a scope object at all, so a required
+    scope missing that key is the same truncated-payload signal as the
+    outer key being absent (Codex review).
     """
     if key not in m:
         if required:
@@ -409,6 +386,12 @@ def resolved_config_to_dict(config: CompatibilityEvaluationConfig) -> dict[str, 
                 kind: verdict.value
                 for kind, verdict in sorted(config.policy.overrides.items())
             },
+            # Round 9/10: previously omitted, dropping pack-provenance on
+            # round-trip -- see `resolved_config_from_dict`'s own comment.
+            "pack_overrides": {
+                kind: verdict.value
+                for kind, verdict in sorted(config.policy.pack_overrides.items())
+            },
         },
         "gate": {
             "exit_code_scheme": config.gate.exit_code_scheme,
@@ -462,15 +445,18 @@ def resolved_config_from_dict(
     *gate_schema_version* is the enclosing ``evaluation_context.schema_
     version`` this ``resolved_config`` was persisted under, when the caller
     has one (:func:`evaluation_context_from_dict` always does) -- ``None``
-    (the default, for a caller with no enclosing context to be strict
-    against, e.g. a bare unit test) means "unknown version", which degrades
-    to this function's original, lenient behavior: an absent ``gate.require_
-    complete_analysis``/``gate.scope`` key defaults rather than raising. See
-    :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`.
+    (the default, for a caller with no enclosing context, e.g. a bare unit
+    test) means "unknown version", which degrades to this function's
+    original, lenient behavior. See :data:`_GATE_SCOPE_FIELDS_SCHEMA_VERSION`
+    and :data:`_PACK_OVERRIDES_SCHEMA_VERSION`.
     """
     _require_gate_scope_fields = (
         gate_schema_version is not None
         and gate_schema_version >= _GATE_SCOPE_FIELDS_SCHEMA_VERSION
+    )
+    _require_pack_overrides = (
+        gate_schema_version is not None
+        and gate_schema_version >= _PACK_OVERRIDES_SCHEMA_VERSION
     )
     m = _require_mapping(d, what="resolved_config")
     contract = _require_mapping(
@@ -556,6 +542,23 @@ def resolved_config_from_dict(
                 kind: Verdict(verdict)
                 for kind, verdict in _require_mapping(
                     policy.get("overrides") or {}, what="policy.overrides"
+                ).items()
+            },
+            # Round 9/10/11: below schema 4, absent defaults to "nothing
+            # pack-contributed"; `.get(..., {})`, not `... or {}`, so a
+            # *present* `null` still raises (CodeRabbit review). At/above
+            # schema 4 the key is required (_PACK_OVERRIDES_SCHEMA_VERSION).
+            pack_overrides={
+                kind: Verdict(verdict)
+                for kind, verdict in _require_mapping(
+                    (
+                        _required(
+                            policy, "pack_overrides", what="resolved_config.policy"
+                        )
+                        if _require_pack_overrides
+                        else policy.get("pack_overrides", {})
+                    ),
+                    what="policy.pack_overrides",
                 ).items()
             },
         ),
@@ -839,13 +842,10 @@ def persisted_context_from_dict(d: object) -> PersistedContractContext:
         evaluation_context=evaluation_context_from_dict(
             _required(m, "evaluation_context", what="a persisted contract context")
         ),
-        # Required, like its two siblings: the report schema always writes
-        # this block, so an absent one means a truncated or hand-edited
-        # payload -- and defaulting it to an empty version-1 receipt made
-        # `replay_original_decisions` return `{}`, which is indistinguishable
-        # from a comparison that genuinely recorded no decisions (Codex
-        # review). Failing closed is the same rule the version ceiling
-        # follows: never reinterpret missing audit data as a real answer.
+        # Required, like its two siblings: an absent block means a truncated
+        # payload -- defaulting it to an empty receipt made
+        # `replay_original_decisions` return `{}`, indistinguishable from a
+        # comparison that genuinely recorded no decisions (Codex review).
         decision_receipt=decision_receipt_from_dict(
             _required(m, "decision_receipt", what="a persisted contract context")
         ),

@@ -147,6 +147,25 @@ class _ScopeChoices:
 
 
 @dataclass(frozen=True)
+class _SuppressionChecks:
+    """The two `.abicheck.yml` `suppression:` settings that decide whether a
+    suppression *document* is acceptable at all, as opposed to which findings
+    it matches.
+
+    Carried on the resolved invocation rather than read at the load site
+    because both loads -- `--dry-run`'s validation-only one and the real
+    run's -- must apply them, and a preview that accepts a document the run
+    rejects approves a run that cannot start. They were dropped entirely
+    here until now, so `suppression.require_justification: true` was
+    enforced by two-sided `compare` and silently ignored by the audit, which
+    then suppressed the finding and exited 0 (Codex review, P1).
+    """
+
+    strict_suppressions: bool
+    require_justification: bool
+
+
+@dataclass(frozen=True)
 class _ResolvedInvocation:
     """One ``--no-baseline`` invocation, already validated and resolved.
 
@@ -169,6 +188,7 @@ class _ResolvedInvocation:
     compile: _CompileChoices
     contract: _ContractChoices
     scope: _ScopeChoices
+    suppression: _SuppressionChecks
 
 
 def maybe_dispatch_no_baseline_compare(
@@ -366,6 +386,10 @@ def _resolve_no_baseline_invocation(
             mode=resolve_contract_domain(contract_mode_raw, ctx),
             evaluation=resolve_contract_evaluation(contract_mode_raw),
         ),
+        suppression=_SuppressionChecks(
+            strict_suppressions=bool(resolved_cfg.strict_suppressions),
+            require_justification=bool(resolved_cfg.require_justification),
+        ),
     )
 
 
@@ -465,6 +489,8 @@ def _run_no_baseline_compare_cmd(
             kwargs.get("suppress"),
             kwargs.get("policy") or "strict_abi",
             kwargs.get("policy_file_path"),
+            strict_suppressions=inv.suppression.strict_suppressions,
+            require_justification=inv.suppression.require_justification,
         )
         emit_dry_run(
             build_no_baseline_dry_run_result(
@@ -494,6 +520,8 @@ def _run_no_baseline_compare_cmd(
         kwargs.get("suppress"),
         kwargs.get("policy") or "strict_abi",
         kwargs.get("policy_file_path"),
+        strict_suppressions=inv.suppression.strict_suppressions,
+        require_justification=inv.suppression.require_justification,
     )
 
     result = run_no_baseline_compare(

@@ -55,7 +55,7 @@ from abicheck.compatibility_evaluation_config import (
 from abicheck.contract_relevance_types import ContractMode, SelectorLayer
 from abicheck.effective_config_digest import (
     effective_config_digest,
-    effective_config_fields,
+    effective_config_fields_from_raw,
 )
 
 
@@ -194,7 +194,7 @@ class TestReleaseFanOutStampsResolvedConfig:
         attribute got set."""
         result = _result()
         result.evaluation_config = _minimal_evaluation_config()
-        fields = effective_config_fields(
+        fields = effective_config_fields_from_raw(
             result, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields["_tier"] == "contract"
@@ -224,10 +224,10 @@ class TestReleaseFanOutStampsResolvedConfig:
         result1, result2 = _result(), _result()
         result1.evaluation_config = rev1
         result2.evaluation_config = rev2
-        fields1 = effective_config_fields(
+        fields1 = effective_config_fields_from_raw(
             result1, severity_config=None, exit_code_scheme="legacy"
         )
-        fields2 = effective_config_fields(
+        fields2 = effective_config_fields_from_raw(
             result2, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields1["_tier"] == fields2["_tier"] == "contract"
@@ -244,6 +244,89 @@ class TestReleaseFanOutStampsResolvedConfig:
         config = _minimal_evaluation_config()
         application = pack_application(config, policy_file=None)
         assert application.resolved_config is config
+
+
+class TestReleaseNoPackStillResolvesProjectBackedConfig:
+    """Findings-analysis-fixes review round 4, finding 1: a directory/
+    package release run with no ``--pack`` still needs a real, receipt-
+    shaped ``resolved_config`` when the project's own ``.abicheck.yml``
+    ``policy.overrides`` genuinely scored the run -- ``resolve_release_pack_
+    application(_from_ctx)`` used to return bare ``None`` whenever
+    *pack_paths* was empty, which ``_run_compare_pair`` then forwarded
+    straight through to ``record_release_resolved_config`` as
+    ``getattr(None, "resolved_config", None)``, leaving every library's own
+    ``DiffResult.evaluation_config`` unset even though the project override
+    demonstrably changed that library's verdict."""
+
+    @staticmethod
+    def _project_cfg(policy_overrides: dict[str, str]):
+        from abicheck.buildsource.build_config import BuildConfig
+
+        return BuildConfig.from_dict({"policy": {"overrides": policy_overrides}})
+
+    def test_no_pack_release_still_resolves_a_real_config(self) -> None:
+        from abicheck.cli_compare_receipt import resolve_release_pack_application
+
+        params = {
+            "contract_mode": None,
+            "scope_public_headers": True,
+            "policy": "strict_abi",
+            "policy_file_path": None,
+            "suppress": None,
+            "require_justification": False,
+            "severity_preset": None,
+            "pack_paths": (),
+        }
+        application = resolve_release_pack_application(
+            params,
+            typed=set(),
+            project_cfg=self._project_cfg({"func_removed": "ignore"}),
+            project_path=".abicheck.yml",
+        )
+        assert application is not None
+        # Inert as a pack contribution (no pack was selected)...
+        assert application.is_empty()
+        # ...but the project-backed config is real, not the pre-fix `None`.
+        config = application.resolved_config
+        assert config is not None
+        assert config.policy.overrides["func_removed"].name == "COMPATIBLE"
+        from abicheck.contract_relevance_types import SelectorLayer
+
+        assert (
+            config.provenance["policy.overrides"].layer is SelectorLayer.PROJECT_CONFIG
+        )
+
+    def test_no_pack_release_stamps_the_per_library_diff_result(
+        self, tmp_path: Path
+    ) -> None:
+        """End to end through `_run_compare_pair`, the way a real release
+        library comparison reaches it -- not just the resolver in
+        isolation."""
+        from abicheck.cli_compare_receipt import resolve_release_pack_application
+
+        params = {
+            "contract_mode": None,
+            "scope_public_headers": True,
+            "policy": "strict_abi",
+            "policy_file_path": None,
+            "suppress": None,
+            "require_justification": False,
+            "severity_preset": None,
+            "pack_paths": (),
+        }
+        application = resolve_release_pack_application(
+            params,
+            typed=set(),
+            project_cfg=self._project_cfg({"func_removed": "ignore"}),
+            project_path=".abicheck.yml",
+        )
+        diff = TestReleaseFanOutStampsResolvedConfig()._run_compare_pair_with(
+            application, tmp_path
+        )
+        assert diff.evaluation_config is not None
+        assert diff.evaluation_config.policy.overrides["func_removed"].name == (
+            "COMPATIBLE"
+        )
 
 
 class TestReleaseFanOutMergesContractContext:
@@ -299,7 +382,7 @@ class TestReleaseFanOutMergesContractContext:
 
         record_release_resolved_config(diff, pack_config)
 
-        fields = effective_config_fields(
+        fields = effective_config_fields_from_raw(
             diff, severity_config=None, exit_code_scheme="legacy"
         )
         assert fields["_tier"] == "contract"
@@ -504,7 +587,9 @@ class TestReleaseFanOutPreservesObservedSuppressions:
 
         merged_config = diff.contract_context.evaluation_context.resolved_config
         assert merged_config.suppressions is observed_suppressions
-        assert merged_config.provenance["suppressions"] is observed_suppression_provenance
+        assert (
+            merged_config.provenance["suppressions"] is observed_suppression_provenance
+        )
 
 
 def _release_pack(tmp_path: Path, name: str, body: str) -> Path:

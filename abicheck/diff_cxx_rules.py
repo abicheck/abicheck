@@ -41,12 +41,17 @@ from .model.mangled_name import (
     _itanium_strip_prefix as _itanium_strip_prefix,
     _parse_ctor_dtor_component as _parse_ctor_dtor_component,
     _parse_source_name_component as _parse_source_name_component,
-    _skip_template_args as _skip_template_args,
     itanium_scope_components as itanium_scope_components,
     itanium_scope_components_with_template_positions as itanium_scope_components_with_template_positions,
     msvc_scope_components as msvc_scope_components,
 )
 
+# `_skip_template_args` was previously re-exported here too, but nothing in
+# this module or elsewhere actually used this file's own copy of it -- its
+# real home moved to `model/mangled_name_template_args.py` (findings-
+# analysis-fixes review round 3, finding 4's file-size split), and this
+# unused re-export was dropped rather than carried forward for a name
+# nothing outside `mangled_name.py`/`mangled_name_template_args.py` reads.
 # `model/namespace_spelling.py`'s real home is documented on that module
 # itself (ADR-063 Track 2, 5B closure): pure string matching over an
 # already-spelled identity, needed here (`virtual_method_addition`'s own
@@ -154,7 +159,9 @@ def itanium_ctor_dtor_marker_span(mangled: str) -> tuple[int, int] | None:
         if c == "E":
             return None  # nested name closed with no ctor/dtor component found
         if c in _ASCII_DIGITS:
-            _name, new_i, _template_attached = _parse_source_name_component(s, i)
+            _name, new_i, _template_attached, _bare_name = _parse_source_name_component(
+                s, i
+            )
             if new_i == i:
                 return None  # malformed source name
             i = new_i

@@ -2384,8 +2384,11 @@ identity layer to exist before it can be defined precisely).
   scope for this plan the same way it was out of scope for ADR-041's
   original addendum; a separate design decision, not a mechanical
   extension of Phases B–D.
-- Directory/package `compare` and the raw `--old-sources`/`--new-sources`
-  inline-embed path gaining the graph — both remain structural gaps
-  Phase A explicitly did not close; closing them would need routing those
-  paths through `service.run_dump`'s attach step (or an equivalent), which
-  is its own scoped follow-up, not implied by anything in Phases B–D above.
+- The raw `--old-sources`/`--new-sources` inline-embed path gaining the
+  graph — still a structural gap Phase A did not close (that path reloads
+  from a JSON snapshot which never attaches one); closing it would need
+  routing it through `service.run_dump`'s attach step (or an equivalent),
+  which is its own scoped follow-up, not implied by anything in Phases B–D
+  above. **Directory/package `compare` is no longer in this bullet**: it
+  does build the graph per member whenever headers are supplied — see the
+  correction on Phase A above, and the executed parity test it names.

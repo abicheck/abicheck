@@ -35,7 +35,31 @@ later than the rest of this module (the Itanium half moved first) --
 
 from __future__ import annotations
 
+import re
+
+from .mangled_name_template_args import (
+    collect_type_candidate_identifiers as _collect_type_candidate_identifiers,
+    read_length_prefixed_name as _read_length_prefixed_name,
+    skip_template_args as _skip_template_args,
+)
+
 _ASCII_DIGITS = "0123456789"
+
+# Matches the `[abi:tag]` suffix `_parse_source_name_component` (and
+# `mangled_name_template_args._collect_nested_name_candidates`) attach to a
+# GNU-ABI-tagged (`__attribute__((abi_tag(...)))`) name's own bare spelling.
+# Only `itanium_special_name_owner_identifiers` strips this back off (see its
+# own docstring) -- `itanium_special_name_owner_scope_components` and every
+# other identity-oriented caller of the shared component parser must keep the
+# tag, so this pattern is deliberately not applied inside the parser itself.
+_ABI_TAG_SUFFIX_RE = re.compile(r"\[abi:[^\]]*\]")
+
+
+def _strip_abi_tag_suffixes(name: str) -> str:
+    """Remove every ``[abi:tag]`` marker from *name*, e.g. turning
+    ``"C[abi:tag]"`` back into the model's own untagged spelling ``"C"``."""
+    return _ABI_TAG_SUFFIX_RE.sub("", name)
+
 
 # Fixed Itanium operator-function codes (a leaf, like a source-name). Used so
 # operator overloads group (e.g. `operator[](int)` / `operator[](long)` both
@@ -93,68 +117,6 @@ _ITANIUM_OPERATORS = frozenset(
         "aw",
     }
 )
-
-
-def _read_length_prefixed_name(s: str, i: int) -> tuple[str | None, int]:
-    """Read a ``<len><identifier>`` source-name at ``s[i]``.
-
-    Returns ``(name, next_index)`` or ``(None, i)`` if malformed. Only ASCII
-    digits count as the length prefix — Python's ``str.isdigit()`` also accepts
-    Unicode digits (e.g. ``²``) that ``int()`` then rejects. Accumulates
-    digit-by-digit, capped at ``len(s)`` (mirrors ``source_link.
-    _consume_source_name``), so an untrusted symbol can't trip Python's
-    integer-conversion digit limit (Codex review, PR #930)."""
-    j, n = i, 0
-    while j < len(s) and s[j] in _ASCII_DIGITS:
-        n = n * 10 + (ord(s[j]) - ord("0"))
-        if n > len(s):
-            return None, i
-        j += 1
-    name = s[j : j + n]
-    return (None, i) if j == i or len(name) != n else (name, j + n)
-
-
-def _skip_template_args(s: str, i: int) -> int | None:
-    """``s[i] == 'I'``: return the index past the matching ``E``, or ``None``.
-
-    Tracks nested template-argument (``I``) and nested-name (``N``) openers so
-    the inner ``E`` of e.g. ``Box<ns::T>`` does not close the outer list early,
-    skips length-prefixed names so their literal ``I``/``N``/``E`` letters are
-    not miscounted, and consumes ``L<type><value>E`` literal operands as a unit
-    (non-type template args, e.g. ``Array<4>`` → ``ILi4EE``) so their value
-    digits aren't read as a length and their closing ``E`` isn't counted.
-    Pathological encodings (e.g. substitutions whose base-36 index contains
-    ``E``) may mis-balance; the caller treats ``None`` as "unparseable" and falls
-    back, so a wrong guess never produces a finding.
-    """
-    depth = 0
-    n = len(s)
-    while i < n:
-        c = s[i]
-        if c in _ASCII_DIGITS:
-            name, i = _read_length_prefixed_name(s, i)
-            if name is None:
-                return None
-            continue
-        if c == "L":
-            # Literal operand `L <type> <value> E` — consume through its own
-            # terminating E (literal values never contain an uppercase E).
-            close = s.find("E", i + 1)
-            if close == -1:
-                return None
-            i = close + 1
-            continue
-        if c in ("I", "N"):
-            depth += 1
-            i += 1
-        elif c == "E":
-            depth -= 1
-            i += 1
-            if depth == 0:
-                return i
-        else:
-            i += 1  # builtin type, qualifier, or substitution character
-    return None
 
 
 def strip_macho_itanium_decoration(mangled: str) -> str:
@@ -216,28 +178,39 @@ def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
     return s, nested
 
 
-def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int, bool]:
+def _parse_source_name_component(
+    s: str, i: int
+) -> tuple[str | None, int, bool, str | None]:
     """Parse a length-prefixed source-name component (with optional template args
     and GNU ABI tags) starting at ``s[i]``.
 
-    Returns ``(name, next_index, template_attached)`` where *name* includes
-    any directly-attached ``I…E`` template-argument list and ``B<tag>`` GNU
-    ABI tags, and *template_attached* is ``True`` exactly when a template-
-    argument list was consumed -- tracked structurally here, at the one
-    place that ever attaches one, rather than left for a caller to guess
-    back out of the assembled *name* text. Guessing from text is unsound:
-    ``component_embeds_template_args()``'s own text-based heuristic (kept
-    for the qualified-name/header-tier-fallback shape, which has no parser
-    to ask) misreads an ordinary identifier like ``"ICE"`` or ``"IWidgetE"``
-    as a balanced ``I...E`` template block purely by coincidental spelling
-    (Codex review, fresh evidence) -- a real false positive this structural
-    flag exists to avoid for the one shape (a real Itanium mangling) that
-    has a parser available to answer the question exactly. Returns
-    ``(None, i, False)`` on any parse failure.
+    Returns ``(name, next_index, template_attached, bare_name)`` where *name*
+    includes any directly-attached ``I…E`` template-argument list and
+    ``B<tag>`` GNU ABI tags, and *template_attached* is ``True`` exactly when
+    a template-argument list was consumed -- tracked structurally here, at
+    the one place that ever attaches one, rather than left for a caller to
+    guess back out of the assembled *name* text. Guessing from text is
+    unsound: ``component_embeds_template_args()``'s own text-based heuristic
+    (kept for the qualified-name/header-tier-fallback shape, which has no
+    parser to ask) misreads an ordinary identifier like ``"ICE"`` or
+    ``"IWidgetE"`` as a balanced ``I...E`` template block purely by
+    coincidental spelling (Codex review, fresh evidence) -- a real false
+    positive this structural flag exists to avoid for the one shape (a real
+    Itanium mangling) that has a parser available to answer the question
+    exactly. *bare_name* is *name* with any directly-attached template-arg
+    text stripped back off (identical to *name* when *template_attached* is
+    ``False``) -- added so a caller building a *type* candidate (as opposed
+    to a signature-identity string, which wants the raw template text kept
+    distinct) can recover the component's own plain spelling without
+    re-guessing the split point from the assembled text (surface.py's
+    ``itanium_special_name_owner_identifiers`` review: a namespace-path
+    component's own bare name must never be conflated with names embedded in
+    a *different* component's template-argument list). Returns
+    ``(None, i, False, None)`` on any parse failure.
     """
     name, i = _read_length_prefixed_name(s, i)
     if name is None:
-        return None, i, False
+        return None, i, False, None
     n = len(s)
     # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag, or a
     # user `__attribute__((abi_tag(...)))`) attach to the unqualified name
@@ -270,14 +243,15 @@ def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int, bool]
         i = j
     # A directly-attached template-argument list belongs to this
     # component; keep it raw so Box<int> and Box<float> stay distinct.
+    bare_name = name
     if i < n and s[i] == "I":
         end = _skip_template_args(s, i)
         if end is None:
-            return None, i, False
+            return None, i, False, None
         name = name + s[i:end]
         i = end
-        return name, i, True
-    return name, i, False
+        return name, i, True, bare_name
+    return name, i, False, bare_name
 
 
 def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
@@ -379,10 +353,11 @@ def _parse_non_source_name_component(s: str, i: int) -> tuple[str | None, int]:
 
 def _step_next_component(
     s: str, i: int, nested: bool
-) -> tuple[str | None, int, bool, bool] | None:
+) -> tuple[str | None, int, bool, bool, str | None] | None:
     """Advance one component in the Itanium nested-name body ``s`` at position ``i``.
 
-    Returns ``(label, next_i, done, template_attached)`` on success:
+    Returns ``(label, next_i, done, template_attached, bare_name)`` on
+    success:
 
     - *label* is the parsed component string, or ``None`` when the position
       holds the nested-name ``E`` terminator (no component to append, just stop).
@@ -394,20 +369,25 @@ def _step_next_component(
       a source-name component (see :func:`_parse_source_name_component`);
       always ``False`` for a ctor/dtor/operator component, none of which can
       carry one.
+    - *bare_name* is *label* with any directly-attached template-arg text
+      stripped back off (equal to *label* when *template_attached* is
+      ``False``) -- see :func:`_parse_source_name_component`'s own docstring
+      for why a caller building type candidates wants this separately from
+      the raw, template-inclusive *label*.
 
-    Returns ``None`` (not a 4-tuple) when the component cannot be parsed at all
+    Returns ``None`` (not a 5-tuple) when the component cannot be parsed at all
     (an unrecognized/vendor operator, substitution, truncated source name) so
     the caller propagates failure by returning ``None`` from its own scope.
     """
     c = s[i]
     if nested and c == "E":
         # Normal terminator of the ``N…E`` nested-name wrapper; no component.
-        return None, i + 1, True, False
+        return None, i + 1, True, False, None
     if c in _ASCII_DIGITS:
-        name, new_i, template_attached = _parse_source_name_component(s, i)
+        name, new_i, template_attached, bare_name = _parse_source_name_component(s, i)
         if name is None:
             return None  # malformed source name — propagate failure
-        return name, new_i, not nested, template_attached
+        return name, new_i, not nested, template_attached, bare_name
     label, new_i = _parse_non_source_name_component(s, i)
     if label is None:
         return None  # conversion operator / substitution / vendor — not modelled
@@ -416,8 +396,8 @@ def _step_next_component(
         # target type follows immediately and is deliberately not parsed
         # (see _parse_operator_component) so stop right here regardless of
         # nesting, rather than attempt to step into that unparsed type.
-        return label, new_i, True, False
-    return label, new_i, not nested, False
+        return label, new_i, True, False, label
+    return label, new_i, not nested, False, label
 
 
 def itanium_scope_components_with_template_positions(
@@ -456,7 +436,7 @@ def itanium_scope_components_with_template_positions(
         step = _step_next_component(s, i, nested)
         if step is None:
             return None  # unmodelled or malformed component
-        label, i, done, template_attached = step
+        label, i, done, template_attached, _bare_name = step
         if label is not None:
             if template_attached:
                 template_positions.add(len(components))
@@ -476,6 +456,177 @@ def itanium_scope_components_with_template_positions(
 #: already uses, so rewriting the code away and re-parsing through the
 #: existing structural parser needs no new grammar.
 _SPECIAL_NAME_OWNER_CODES = ("TV", "TI", "TT")
+
+#: Itanium ABI Section 5.9 "Abbreviations" -- the six standard substitutions
+#: that abbreviate a complete standard-library *type* (unlike ``St``, which
+#: abbreviates only the ``std::`` scope *prefix* and can have further
+#: components appended -- see ``itanium_scope_components``'s own docstring).
+#: Maps each 2-character code to the scope-path a fully-spelled owner would
+#: produce, so a bare-substitution owner (e.g. ``_ZTVSs``, a vtable for
+#: ``std::string``) resolves exactly like the fully-spelled equivalent would
+#: through the general parser below -- never through the optional external
+#: ``demangle()`` fallback.
+#:
+#: Round 9/10 finding (Codex review, fresh evidence, macOS CI): before this,
+#: a bare-substitution owner fell all the way through to ``surface.py``'s
+#: ``demangle()`` fallback, and that fallback's output text is demangler-
+#: implementation-dependent for exactly these six codes -- GNU's demangler
+#: (the ``cxxfilt`` PyPI package's ``__cxa_demangle`` binding, or binutils
+#: ``c++filt``) renders ``Ss`` as the fully-spelled
+#: ``std::basic_string<char, std::char_traits<char>, std::allocator<char> >``,
+#: while LLVM's demangler (macOS's system ``c++filt``, the only backend
+#: reachable there once the libstdc++-only ``cxxfilt`` binding fails to
+#: load) renders the identical substitution using a shorthand alias instead.
+#: The *same* comparison, run on two demangler-equipped hosts, therefore
+#: produced two different type-candidate identifier sets purely from that
+#: spelling difference -- on the LLVM-demangled host the (still valid,
+#: demangler-equipped) spelling shared no identifier with a model record
+#: named ``basic_string``, silently falling through to "unknown, keep" as
+#: if no demangler were installed at all, which is exactly the
+#: reproducibility defect this whole structural-parser family exists to
+#: avoid for every *other* shape. Resolving these six codes structurally
+#: closes the gap the same way ``St`` already closes it for the scope-prefix
+#: case.
+_STANDARD_SUBSTITUTION_OWNER_SCOPE: dict[str, tuple[str, ...]] = {
+    "Sa": ("std", "allocator"),
+    "Sb": ("std", "basic_string"),
+    "Ss": ("std", "basic_string"),
+    "Si": ("std", "basic_istream"),
+    "So": ("std", "basic_ostream"),
+    "Sd": ("std", "basic_iostream"),
+}
+
+
+def itanium_special_name_owner_identifiers(mangled: str) -> frozenset[str] | None:
+    """Type-candidate identifiers for a ``_ZTV``/``_ZTI``/``_ZTT`` special
+    name's owning-class production: the fully-qualified owner name, its own
+    bare (rightmost) component, and every class/namespace name embedded in
+    any template-argument list the owner's path carries, at any nesting
+    depth.
+
+    Purely structural (no ``c++filt``/``cxxfilt``), like
+    :func:`itanium_special_name_owner_scope_components`. This function
+    exists specifically so public-surface scoping's *type-candidate*
+    resolution (``surface.py``'s ``_resolve_type_candidates``) can match a
+    **templated** vtable/RTTI/VTT owner (e.g. a libstdc++ container
+    instantiation, or any user template) against the model's own canonical
+    type names without falling back to the optional external demangler for
+    that shape — a policy-affecting classification (public-surface scoping,
+    and anything downstream that depends on it, such as contract-coverage
+    classification) must not silently vary by whether that tool happens to
+    be installed on the host. Compare
+    :func:`itanium_special_name_owner_scope_components`'s own docstring,
+    which established this rule for the non-templated case; this closes the
+    templated case a fallback to :func:`~abicheck.demangle.demangle`
+    previously (and host-dependently) handled.
+
+    Deliberately **does not** return a bare *namespace-path* component (the
+    ``"ns"`` in ``ns::Wrapper<int>``) as its own standalone candidate (Codex
+    review, fresh evidence): an earlier version of this function flattened
+    every length-prefixed name anywhere in the owner's scope path and its
+    template-argument lists into one undifferentiated set, so
+    ``_ZTVN2ns7WrapperIiEE`` produced ``{"ns", "Wrapper"}`` with "ns" fully
+    interchangeable with the real owner "Wrapper". Since
+    ``surface.py``'s ``_classify_type_level`` demotes a finding when *every*
+    resolvable candidate is confidently private/unreachable, an unrelated
+    modeled type that happens to share the bare namespace's own name (e.g. a
+    record literally named ``ns`` with no ``ns::Wrapper<int>`` reachable)
+    could stand in for the real, unresolvable owner and wrongly demote a
+    genuine break. The fix mirrors how ``surface.py``'s own
+    ``_type_identifiers`` already treats an ordinary (non-mangled) qualified
+    type string — a namespace qualifier is only ever part of the fused
+    qualified token or its own trailing ``::`` segment, never emitted
+    standalone — by building the qualified owner name and its bare tail from
+    each component's own *bare* (template-stripped) spelling
+    (:func:`_step_next_component`'s ``bare_name``) rather than from every
+    length-prefixed name found anywhere in the owner's whole span, and
+    collecting template-argument identifiers only from the exact substring
+    each component's own directly-attached ``I…E`` block occupies.
+
+    Returns ``None`` under the identical conditions
+    :func:`itanium_special_name_owner_scope_components` does (unrecognized
+    special-name code, or a remainder that fails to parse at all). A
+    substitution-encoded template argument (``S_``, ``Sa``, ``St``, …) is a
+    documented, accepted limitation: this parser does not resolve a
+    substitution back to the type it abbreviates, so a name reachable only
+    through one is absent from the result — this can only ever *narrow* the
+    candidate set (never fabricate a wrong one), so a match this parser
+    misses still falls back to the existing conservative "unknown, keep"
+    default the caller already applies, not a new failure mode; deterministic
+    and host-independent either way, which is the property this function
+    exists to guarantee.
+    """
+    if not mangled.startswith("_Z"):
+        return None
+    code, rest = mangled[2:4], mangled[4:]
+    if code not in _SPECIAL_NAME_OWNER_CODES or not rest:
+        return None
+    std_scope = _STANDARD_SUBSTITUTION_OWNER_SCOPE.get(rest)
+    if std_scope is not None:
+        return frozenset({"::".join(std_scope), std_scope[-1]})
+    prefix = _itanium_strip_prefix("_Z" + rest)
+    if prefix is None:
+        return None
+    s, nested = prefix
+    i = 0
+    n = len(s)
+    bare_components: list[str] = []
+    template_identifiers: set[str] = set()
+    if s[i : i + 2] == "St":
+        # The canonical Itanium `St` substitution for the `std::` scope
+        # prefix (see `itanium_scope_components`'s own docstring for the
+        # empirically-confirmed encoding). Codex review, fresh evidence,
+        # findings-analysis-fixes review round 4, finding 3: this branch
+        # used to advance `i` past `St` without ever appending `"std"` to
+        # `bare_components`, so `_ZTVSt6vectorIiE` (`std::vector<int>`)
+        # produced only `{"vector"}` -- never `{"std::vector", "vector"}`
+        # the way the ordinary, fully-spelled `_ZTVN3std6vectorIiEE` form
+        # already does (`itanium_scope_components_with_template_positions`
+        # appends `"std"` explicitly for that shape). A snapshot modeling an
+        # internal `std::vector` record but no bare `vector` would then read
+        # this owner as unknown and keep its vtable churn in-surface instead
+        # of demoting it, purely because of which of the two equivalent
+        # mangled spellings the compiler happened to emit.
+        bare_components.append("std")
+        i += 2
+    while i < n:
+        step = _step_next_component(s, i, nested)
+        if step is None:
+            return None
+        label, i, done, template_attached, bare_name = step
+        if label is not None and bare_name is not None:
+            bare_components.append(bare_name)
+            if template_attached:
+                # `label` is `bare_name` followed by the raw, directly-
+                # attached `I...E` template-argument text verbatim (see
+                # `_parse_source_name_component`'s own docstring), so the
+                # suffix after `bare_name` is exactly that template span --
+                # every length-prefixed name inside it is genuinely
+                # "embedded in a template-argument list", never a
+                # namespace-path component of an *enclosing* scope.
+                template_identifiers |= _collect_type_candidate_identifiers(
+                    label, len(bare_name), len(label)
+                )
+        if done:
+            break
+    if not bare_components:
+        return None
+    # GNU ABI tags (see `_parse_source_name_component`) are stripped from
+    # every candidate here -- but nowhere upstream -- because this function
+    # feeds `surface.py`'s *type-candidate* matching against the model's own
+    # (untagged) record names specifically; `itanium_special_name_owner_scope_components`
+    # and the shared parser above keep tags intact for identity purposes.
+    # Codex review, fresh evidence, findings-analysis-fixes review round 5,
+    # finding 2: an ABI-tagged internal class (`_ZTV1CB3tag`, i.e.
+    # `C[[gnu::abi_tag("tag")]]`) previously produced only the tagged
+    # candidate `"C[abi:tag]"`, which could never match the model's own
+    # untagged record name `"C"` -- so a tagged internal class's vtable/RTTI
+    # churn was conservatively kept in the public surface instead of being
+    # demoted, purely because of the tag.
+    result = {_strip_abi_tag_suffixes(x) for x in template_identifiers}
+    result.add(_strip_abi_tag_suffixes("::".join(bare_components)))
+    result.add(_strip_abi_tag_suffixes(bare_components[-1]))
+    return frozenset(result)
 
 
 def itanium_special_name_owner_scope_components(
@@ -499,6 +650,9 @@ def itanium_special_name_owner_scope_components(
     code, rest = mangled[2:4], mangled[4:]
     if code not in _SPECIAL_NAME_OWNER_CODES or not rest:
         return None
+    std_scope = _STANDARD_SUBSTITUTION_OWNER_SCOPE.get(rest)
+    if std_scope is not None:
+        return list(std_scope), frozenset()
     return itanium_scope_components_with_template_positions("_Z" + rest)
 
 

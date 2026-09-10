@@ -940,7 +940,8 @@ class TestFindingIdSuppressionSelector:
 
     def test_standalone_selector_satisfies_at_least_one_requirement(self):
         # Must not raise -- finding_id alone is a valid, sufficient selector.
-        Suppression(finding_id="0123456789abcdef", reason="ok")
+        rule = Suppression(finding_id="0123456789abcdef", reason="ok")
+        assert rule.finding_id == "0123456789abcdef"
 
     def test_no_selector_at_all_still_rejected(self):
         with pytest.raises(ValueError, match="finding_id"):

@@ -5,20 +5,22 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE` — the ABI hasn't broken — but
-the audit flags an advisory finding: the public, header-declared
-`json_parse()` calls straight into `validate_utf8()`, a helper declared
-only in `src/json_internal.cc`, a private implementation file with no
-public declaration anywhere. Nothing about `json_parse()`'s own signature
-says this — the dependency is only visible by walking the L5 source
-graph's `DECL_CALLS_DECL` edge from the public declaration to the internal
-one. If `validate_utf8()`'s behavior changes next release, `json_parse()`'s
-contract silently shifts with it, with no signal in a public-header diff
-at all. This is the intra-version counterpart to case150's
-`exported_not_public`/`public_not_exported` pair: that pair catches a
-mismatch between *what's exported* and *what's declared*; this one catches
-a mismatch **inside** a single public entry point — its behavior depends
-on an entity consumers cannot see, version, or reason about independently.
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
+D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+COMPATIBLE classification above describes the case, not the command's output:
+the ABI hasn't broken.) But the audit flags an advisory finding: the public,
+header-declared `json_parse()` calls straight into `validate_utf8()`, a helper
+declared only in `src/json_internal.cc`, a private implementation file with no
+public declaration anywhere. Nothing about `json_parse()`'s own signature says
+this — the dependency is only visible by walking the L5 source graph's
+`DECL_CALLS_DECL` edge from the public declaration to the internal one. If
+`validate_utf8()`'s behavior changes next release, `json_parse()`'s contract
+silently shifts with it, with no signal in a public-header diff at all. This
+is the intra-version counterpart to case150's
+`exported_not_public`/`public_not_exported` pair: that pair catches a mismatch
+between *what's exported* and *what's declared*; this one catches a mismatch
+**inside** a single public entry point — its behavior depends on an entity
+consumers cannot see, version, or reason about independently.
 
 ## What this snapshot contains
 

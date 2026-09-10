@@ -15,15 +15,15 @@
 
 """Orchestration body for the ``compare`` command (size-split from cli.py).
 
-The click-decorated ``compare`` wrapper in :mod:`abicheck.cli` parses options and
-delegates to :func:`run_compare` here, keeping cli.py under the AI-readiness
-file-size cap. This is *not* the leaf helper module ``cli_helpers_compare`` (plain,
-cli-independent utilities): ``run_compare`` drives the full single-pair compare
-flow and reuses the option-parsing/render/exit helpers that still live in
-:mod:`abicheck.cli` (imported back below — the by-design sibling cycle, allow-listed
-in ``check_ai_readiness``). Verdict routing stays through the Tier-2 service
-(``service.compare_snapshots``), never a direct ``checker.compare`` call
-(cli-contract, ADR-037 D10.1).
+The click-decorated ``compare`` wrapper in :mod:`abicheck.cli` parses options
+and delegates to :func:`run_compare` here, keeping cli.py under the
+AI-readiness file-size cap. Not the leaf helper module ``cli_helpers_compare``
+(plain, cli-independent utilities): ``run_compare`` drives the full
+single-pair compare flow and reuses the option-parsing/render/exit helpers
+still in :mod:`abicheck.cli` (imported back below -- the by-design sibling
+cycle, allow-listed in ``check_ai_readiness``). Verdict routing stays through
+the Tier-2 service (``service.compare_snapshots``), never a direct
+``checker.compare`` call (cli-contract, ADR-037 D10.1).
 """
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ from .cli_resolve import (
     resolve_directory_compile_context,
 )
 from .contract_scoped_promotion import stamp_scoped_result_findings
-from .errors import AbicheckError, ProfileMismatchError, ScopeMismatchError
+from .errors import AbicheckError, PolicyError, ProfileMismatchError, ScopeMismatchError
 from .frontends.cli import compare_enrichment as _enrichment
 from .frontends.cli.compare_use_cases import reject_use_cases_without_carrying_output
 from .frontends.cli.options import reject_incoherent_secondary_writes
@@ -755,6 +755,9 @@ def _resolve_evaluation_config(
         # A D7 same-tier conflict / D8 pack conflict / inapplicable manifest
         # is a usage error, the exit code the resolver leaves to its front end.
         raise click.UsageError(str(exc)) from exc
+    except PolicyError as exc:
+        # A malformed `.abicheck.yml` `policy.overrides` entry (finding 1).
+        raise click.BadParameter(str(exc), param_hint="--policy") from exc
     return evaluation_config, pf, resolved_cfg
 
 
@@ -933,12 +936,9 @@ def _reject_flags_unsupported_for_set_inputs(
     compare``'s own rejection of a second one), so it is simply forwarded.
 
     Returns the ``--depth`` value the caller should forward to the fan-out
-    -- any rung of the public ladder, or ``None`` when none was typed.
-    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs` used
-    to reject every rung but ``"binary"``; it no longer rejects any, because
-    the floor those rejections stood in for is enforced per member by the
-    same ``enforce_requested_depth`` a single-pair compare runs (see that
-    function's docstring).
+    -- any rung of the public ladder, or ``None``. No rung is rejected; a
+    shortfall is ADR-064's exit-7 axis, per member (see
+    :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`).
     """
     _reject_set_input_flags(
         env_matrix_path,
@@ -1357,11 +1357,8 @@ def run_compare(
         ctx, project_cfg if isinstance(project_cfg, _BuildConfig) else None
     )
 
-    # P1.1 (Codex review): resolved ahead of the inline-embed block below (not
-    # just before _resolve_compare_snapshots, where this used to live) so a raw
-    # --old/new-sources tree's inline `dump` invocation also gets the per-side
-    # debug roots — otherwise --debug-root + --old-sources together silently
-    # dumped the inline side without detached DWARF.
+    # P1.1 (Codex review): resolved ahead of the inline-embed block below so a
+    # raw --old/new-sources tree's inline `dump` also gets per-side debug roots.
     resolved_old_debug, resolved_new_debug = _resolve_debug_roots(
         debug_roots, debug_roots_old, debug_roots_new
     )
@@ -1417,20 +1414,23 @@ def run_compare(
             report_mode,
             show_filtered=show_filtered,
         )
-        if pack_paths:
-            from .cli_compare_receipt import resolve_release_pack_application_from_ctx
+        # Resolved unconditionally, not only under `--pack` (finding 1,
+        # round 4): a no-pack run's own project-backed `.abicheck.yml`
+        # `policy.overrides` still needs to reach a real config for
+        # `record_release_resolved_config` -- see that resolver's docstring.
+        from .cli_compare_receipt import resolve_release_pack_application_from_ctx
 
-            release_pack_application = resolve_release_pack_application_from_ctx(
-                ctx,
-                contract_mode=contract_mode, scope_public_headers=scope_public_headers,
-                policy=policy, policy_file_path=policy_file_path, suppress=suppress,
-                require_justification=require_justification,
-                severity_preset=severity_preset,
-                pack_paths=pack_paths, contract_evaluation=contract_evaluation,
-                project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
-                policy_option=policy_selected_by, policy_path=policy_selected_path,
-                policy_sha256=policy_selected_sha,
-            )
+        release_pack_application = resolve_release_pack_application_from_ctx(
+            ctx,
+            contract_mode=contract_mode, scope_public_headers=scope_public_headers,
+            policy=policy, policy_file_path=policy_file_path, suppress=suppress,
+            require_justification=require_justification,
+            severity_preset=severity_preset,
+            pack_paths=pack_paths, contract_evaluation=contract_evaluation,
+            project_cfg=project_cfg, project_path=cfg_path, project_sha256=cfg_sha,
+            policy_option=policy_selected_by, policy_path=policy_selected_path,
+            policy_sha256=policy_selected_sha,
+        )
 
     # Parsed here, in the preflight, not only at the post-comparison
     # attribution call: --dry-run returns before that call, so a malformed
@@ -1479,6 +1479,9 @@ def run_compare(
     )
     from .cli_compare_receipt import dry_run_scheme_label
 
+    # Round 5 finding 1: validate policy.overrides before --dry-run exits.
+    from .pack_application import preflight_validate_project_policy_overrides
+    preflight_validate_project_policy_overrides(project_cfg, cfg_path)
     if dry_run:
         from .dry_run import emit_dry_run
         from .frontends.cli.compare_dry_run import build_compare_dry_run_result
@@ -1521,24 +1524,27 @@ def run_compare(
             build_config=cfg_path, frontend_context=frontend_context,
             compiler_path=compiler_path, compiler_prefix=compiler_prefix,
             compiler_option_tokens=compiler_option_tokens,
-            # `cfg_path` above is `config` (explicit --config) OR the
-            # cwd-upward auto-discovered .abicheck.yml -- NOT necessarily
-            # the raw explicit CLI value merge_compile_config's own
-            # `build_config is not None` inference expects. Without this,
-            # an auto-discovered config's `compile.compiler` would bypass
-            # the untrusted-executable-selection gate entirely (Codex
-            # review, fresh evidence -- real finding on PR #1154).
+            # `cfg_path` is explicit --config OR an auto-discovered
+            # .abicheck.yml, not the raw CLI value merge_compile_config's
+            # `build_config is not None` inference expects -- without this
+            # an auto-discovered `compile.compiler` bypasses the untrusted-
+            # executable-selection gate (Codex review, PR #1154).
             config_explicit=(config is not None),
         )
         # Dirs the config appended past the CLI -I roots (mirrors the single-pair
         # `config_includes` split below): must survive a per-library-pair
         # `--old/new-include` override, which otherwise replaces `includes`.
         directory_config_includes = tuple(directory_includes[len(includes) :])
-        # Off the owner, never via ``abicheck.cli`` (see install_facade_guard).
+        # Off the owner, never via ``abicheck.cli`` (install_facade_guard);
+        # ADR-068 §3 #23: also thread policy.overrides to the release fan-out.
         from .frontends.cli.commands.compare import _dispatch_release_compare
+        from .pack_application import resolve_release_project_policy_overrides
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
+            project_policy_overrides=resolve_release_project_policy_overrides(
+                project_cfg, cfg_path
+            ),
             headers=headers, includes=directory_includes,
             old_headers_only=old_headers_only, new_headers_only=new_headers_only,
             old_includes_only=old_includes_only, new_includes_only=new_includes_only,
@@ -1833,6 +1839,22 @@ def run_compare(
         policy_selected_path=policy_selected_path,
         policy_selected_sha=policy_selected_sha,
     )
+    # ADR-068 §3 #23 / ADR-049 D7: fold `.abicheck.yml`'s `policy.overrides`
+    # in at PROJECT_CONFIG tier, after the pack fold above (see
+    # `apply_lower_precedence_overrides`'s docstring for why ordering matters).
+    from .workflows import policy_file as _policy_file_mod
+
+    _pf0 = pf
+    try:
+        pf = _policy_file_mod.merge_project_config_policy_overrides(
+            pf, base_policy=policy, project_cfg=project_cfg, project_path=cfg_path
+        )
+    except PolicyError as e:
+        raise click.BadParameter(str(e), param_hint="--policy") from e
+    for w in _policy_file_mod.project_config_policy_downgrade_warnings(  # round 9/10
+        _pf0, pf, project_path=cfg_path
+    ):
+        click.echo(f"Warning: {w}", err=True)
     # A gate pack may have moved a severity level; later consumers read it
     # off here, so re-derive rather than keep the pre-pack value.
     sev_config = resolved_cfg.severity

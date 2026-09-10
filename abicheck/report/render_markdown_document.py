@@ -84,7 +84,7 @@ reproducing.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any, cast
 
 # ADR-063 T10: static now that `reporter_markdown.py` no longer imports
@@ -106,6 +106,7 @@ from .disposition_audit import (
     render_disposition_audit_section,
 )
 from .document import ReportDocument
+from .envelope import ReportEnvelope, resolved_document
 from .render_markdown import (
     ConfidenceSection,
     EnvironmentDriftEntry,
@@ -160,7 +161,7 @@ def _opt_asdict(value: Any) -> dict[str, Any] | None:
 
 
 def _resolve_displayed_changes(
-    result: Any, show_only: str | None
+    result: Any, show_only: str | None, *, today: Any = None
 ) -> tuple[list[Any], dict[str, Any] | None]:
     """The changes this render actually displays, plus the ``--show-only``
     filter note describing it when one was applied (``None`` otherwise).
@@ -171,19 +172,14 @@ def _resolve_displayed_changes(
     ``_view_preamble_mapping``), which used to each run their own copy of
     the identical ``apply_show_only`` -> ``_suppress_dangling_correlation_
     notes`` pipeline and independently re-derive the same filter-note shape
-    from it.
+    from it. *today*: an envelope's ``resolved_today`` (ADR-061 gap C,
+    Codex, fresh).
     """
     rm = _reporter_markdown()
     changes = list(result.changes)
     show_only_note: dict[str, Any] | None = None
     if show_only:
-        changes = rm.apply_show_only(
-            changes,
-            show_only,
-            policy=result.policy,
-            kind_sets=result._effective_kind_sets(),
-            policy_file=result.policy_file,
-        )
+        changes = rm.apply_show_only(changes, show_only, result.policy, result._effective_kind_sets(), result.policy_file, today)
         show_only_note = {
             "show_only": show_only,
             "shown": len(changes),
@@ -198,6 +194,7 @@ def build_review_digest_document(
     *,
     severity_config: Any = None,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """The ``--format review`` digest as a ``ReportDocument``.
 
@@ -216,18 +213,30 @@ def build_review_digest_document(
     choke point is the point of this closure, not just its safety). A direct
     caller with no such document (an existing Tier-2/test call site) keeps
     the prior behaviour by passing nothing.
+
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
+    document belongs to. Beyond supplying the document, it carries the
+    already-resolved per-finding verdicts the digest's "impacted symbols"
+    list used to re-resolve through its own ``report_findings_for`` call --
+    the same canonical primitive, but a second resolution of a decision this
+    render had already made -- and its already-resolved ``GateDecision``,
+    which the merge-effect phrase now projects instead of a second
+    ``compute_exit_code`` call of its own (CodeRabbit review).
     """
+    shared_document = resolved_document(envelope, report_document)
     shared_disposition_audit = (
         DispositionAudit.from_dict(
-            cast("Mapping[str, Any]", report_document.to_mapping()["disposition_audit"])
+            cast("Mapping[str, Any]", shared_document.to_mapping()["disposition_audit"])
         )
-        if report_document is not None
+        if shared_document is not None
         else None
     )
     digest = _reporter_markdown().compute_review_digest(
         result,
         severity_config=severity_config,
         disposition_audit=shared_disposition_audit,
+        findings=None if envelope is None else envelope.findings,
+        gate=None if envelope is None else envelope.gate,
     )
     d: dict[str, object] = {
         "library": digest.library,
@@ -255,9 +264,7 @@ def build_review_digest_document(
             else digest.disposition_audit.to_dict()
         ),
         "surface_changes": (
-            None
-            if digest.surface_changes is None
-            else digest.surface_changes.to_dict()
+            None if digest.surface_changes is None else digest.surface_changes.to_dict()
         ),
     }
     return ReportDocument.from_mapping(d)
@@ -484,6 +491,7 @@ def build_markdown_document(
     show_recommendation: bool = False,
     demangle: bool = False,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """The full-mode (``to_markdown`` default view) report as a
     ``ReportDocument``. See this module's own docstring for scope.
@@ -499,11 +507,20 @@ def build_markdown_document(
     independently-resolved call to ``compute_disposition_audit`` over the
     same ledger. A direct caller with no such document (an existing
     Tier-2/test call site) keeps the prior behaviour by passing nothing.
+
+    *envelope* (ADR-061 gap C) is the completed ``ReportEnvelope`` that
+    document belongs to, and supersedes it: besides the document, it carries
+    the per-finding verdict/category set the ``surface_changes`` section
+    below used to resolve for itself. The severity groups, headline table and
+    per-change rows this function assembles stay Markdown's own presentation
+    -- an arrangement of already-decided findings, not a second opinion about
+    them.
     """
     rm = _reporter_markdown()
+    shared_document = resolved_document(envelope, report_document)
     shared_disposition_audit = (
-        report_document.to_mapping()["disposition_audit"]
-        if report_document is not None
+        shared_document.to_mapping()["disposition_audit"]
+        if shared_document is not None
         else None
     )
     verdict = result.verdict
@@ -513,11 +530,29 @@ def build_markdown_document(
     old_meta = getattr(result, "old_metadata", None)
     new_meta = getattr(result, "new_metadata", None)
 
-    changes, show_only_note = _resolve_displayed_changes(result, show_only)
+    resolved_today = None if envelope is None else envelope.resolved_today
+    changes, show_only_note = _resolve_displayed_changes(
+        result, show_only, today=resolved_today
+    )
 
     from ..report_model import ReportModel
 
-    model = ReportModel.from_result(result, changes=changes)
+    # ADR-061 gap C: both the severity groups (filtered `changes`) and the
+    # headline totals (the full, unfiltered `result.changes`) reuse the
+    # envelope's own finalized verdicts, rather than `ReportModel.classify`/
+    # `compute_headline_table` each independently calling
+    # `result._effective_verdict_for_change` fresh -- which could disagree
+    # with the envelope once a dated `PolicyFile.reclassify` rule expires
+    # between construction and render (Codex review, fresh evidence).
+    model = ReportModel.from_result(
+        result,
+        changes=changes,
+        effective_verdicts=(
+            [f.verdict for f in envelope.findings_for(changes)]
+            if envelope is not None
+            else None
+        ),
+    )
     breaking, source_breaks, risk, compatible = (
         model.breaking,
         model.source_breaks,
@@ -530,16 +565,37 @@ def build_markdown_document(
     )
     not_evaluated = rm.compute_not_evaluated(model.not_evaluated)
 
+    # The headline's own totals are deliberately over the *full*, unfiltered
+    # `result.changes` (a different population than the severity groups
+    # above), but every one of those changes is already in the envelope's
+    # own `findings` -- reused here instead of letting `compute_headline_
+    # table` independently call `result._effective_verdict_for_change`
+    # fresh a second time, which could disagree with the envelope once a
+    # dated `PolicyFile.reclassify` rule expires (Codex review, evidence).
+    headline_table = rm.compute_headline_table(result, emoji, label)
+    if envelope is not None:
+        ev = envelope.findings
+        overrides = {id(c): f.verdict for c, f in zip(result.changes, ev)}
+        hb, hsb, hr, hc = (
+            len(b)
+            for b in ReportModel.classify(
+                list(result.changes), result, verdict_overrides=overrides
+            )
+        )
+        headline_table = replace(
+            headline_table, breaking=hb, source_breaks=hsb, risk=hr, compatible=hc
+        )
+
     d: dict[str, object] = {
         "report_mode": "full",
         "demangle": demangle,
-        "headline": asdict(rm.compute_headline_table(result, emoji, label)),
+        "headline": asdict(headline_table),
         "rtti_note": _opt_asdict(rm.compute_rtti_note(breaking)),
         "confidence": _opt_asdict(rm.compute_confidence_section(result)),
         "contract_conflicts": _opt_asdict(
             rm.compute_contract_conflicts_section(result)
         ),
-        "policy": asdict(rm.compute_policy_section(result)),
+        "policy": asdict(rm.compute_policy_section(result, today=resolved_today)),
         "recommendation": (
             asdict(rm.compute_recommendation_section(result))
             if show_recommendation
@@ -554,6 +610,7 @@ def build_markdown_document(
                     policy=result.policy,
                     kind_sets=result._effective_kind_sets(),
                     policy_file=result.policy_file,
+                    today=resolved_today,
                 )
             )
             if severity_config is not None
@@ -600,7 +657,13 @@ def build_markdown_document(
         # already-resolved findings the severity groups above use, projected
         # as additions/removals/modifications so a compatible run still
         # itemizes what it added.
-        "surface_changes": compute_surface_changes(result, changes=changes).to_dict(),
+        # ADR-061 gap C: the envelope already resolved a verdict/category per
+        # change; grouping them is presentation, resolving them again is not.
+        "surface_changes": compute_surface_changes(
+            result,
+            None if envelope is None else envelope.findings_for(changes),
+            changes=changes,
+        ).to_dict(),
         "redundancy_note": _opt_asdict(rm.compute_redundancy_note(result)),
         "suppression_note": _opt_asdict(rm.compute_suppression_note(result)),
         "out_of_surface_note": _opt_asdict(rm.compute_out_of_surface_note(result)),
@@ -745,7 +808,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append("")
         lines += render_impact_table(_impact_table_from_mapping(d["impact_table"]))
     lines += render_footer()
-    text = "\n".join(lines)
+    # Every Markdown report format ends with a trailing newline (POSIX
+    # convention; a bare `"\n".join(lines)` never carried one).
+    text = "\n".join(lines).rstrip() + "\n"
     if d["demangle"]:
         from ..demangle import demangle_text
 

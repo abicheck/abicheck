@@ -49,7 +49,6 @@ from .checker_policy import (
 # directly -- those moved into ``report/render_html.py`` alongside the rest
 # of this module's formatting responsibility (ADR-061 Phase 2 item 1).
 from .html_template import _CSS as _CSS
-from .policy.gate_decision import gate_decision_for_result
 
 # ADR-061 Phase 2 item 1: the pure HTML projection half of this module.
 # Every ``compute_*`` below returns one of these frozen structs (or, for the
@@ -62,6 +61,7 @@ from .policy.gate_decision import gate_decision_for_result
 # aliases unchanged.
 from .report.disposition_audit import DispositionAudit, compute_disposition_audit
 from .report.document import ReportDocument
+from .report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from .report.render_html import (
     ChangeRow,
     ConfidenceData,
@@ -93,6 +93,8 @@ from .report_classifications import (
 from .report_summary import compatibility_metrics
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from .checker import DiffResult
     from .severity import SeverityConfig
 
@@ -363,7 +365,9 @@ def compute_nav_bar(
 # ---------------------------------------------------------------------------
 
 
-def compute_confidence(result: object) -> ConfidenceData | None:
+def compute_confidence(
+    result: object, *, today: date | None = None
+) -> ConfidenceData | None:
     """Collect the confidence/evidence/policy disclosure facts.
 
     ``None`` when the result carries no confidence at all, which renders no
@@ -373,6 +377,9 @@ def compute_confidence(result: object) -> ConfidenceData | None:
     one as though it were would misstate the run (Codex review, mirroring the
     JSON ``policy_reclassify`` disclosure in ``reporter._add_policy_overrides``
     -- the active rule set, not a per-finding "which rule fired" attribution).
+    *today* (ADR-061 gap C): an envelope's own ``resolved_today``, so that
+    expiry check can't drift from the envelope's own finalized verdicts
+    (Codex review, fresh evidence).
     """
     conf = getattr(result, "confidence", None)
     if conf is None:
@@ -388,7 +395,8 @@ def compute_confidence(result: object) -> ConfidenceData | None:
         from .reclassify import active_reclassify_rules
 
         reclassify = tuple(
-            rule.describe() for rule in active_reclassify_rules(policy_file.reclassify)
+            rule.describe()
+            for rule in active_reclassify_rules(policy_file.reclassify, today)
         )
     comparability = getattr(result, "comparability_assurance", None)
     return ConfidenceData(
@@ -443,7 +451,9 @@ def compute_impact(
     return ImpactData(entries=tuple(entries))
 
 
-def compute_gate_card(result: DiffResult, severity_config: Any) -> GateCardData | None:
+def compute_gate_card(
+    result: DiffResult, severity_config: Any, *, envelope: ReportEnvelope | None = None
+) -> GateCardData | None:
     """Collect the CI-gate card's facts, or ``None`` when no severity gate is
     configured.
 
@@ -461,7 +471,9 @@ def compute_gate_card(result: DiffResult, severity_config: Any) -> GateCardData 
     consumer's own assessment is surfaced separately, see
     :func:`compute_scoped_verdict`.
     """
-    full_gate = gate_decision_for_result(result, severity_config)
+    # ADR-061 gap C: read the gate the render already resolved when this is a
+    # projection of a `ReportEnvelope`; resolve one only for a direct caller.
+    full_gate = resolved_gate(envelope, result, severity_config)
     if full_gate is None:
         return None
     return GateCardData(
@@ -569,6 +581,7 @@ def build_html_document(
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> ReportDocument:
     """Resolve every fact the HTML report needs into one JSON-shaped
     :class:`~abicheck.report.document.ReportDocument` -- the compute half of
@@ -597,15 +610,24 @@ def build_html_document(
     C status note for why those remain HTML-specific computation for now. A
     direct caller with no such document (an existing Tier-2/test call site)
     keeps the prior, independent-build behaviour.
+
+    *envelope* (ADR-061 gap C) supersedes it: the completed
+    :class:`~abicheck.report.envelope.ReportEnvelope` this render projects
+    carries that same shared document *plus* the two facts HTML used to
+    resolve for itself -- the severity gate behind its CI-gate card, and one
+    already-resolved verdict/category per change behind its section rows. The
+    bucketing and row layout above stay HTML's own presentation; what a row
+    *says* about a finding no longer is.
     """
+    shared_document = resolved_document(envelope, report_document)
     shared_disposition_audit = (
         DispositionAudit.from_dict(
             cast(
                 "Mapping[str, Any]",
-                report_document.to_mapping()["disposition_audit"],
+                shared_document.to_mapping()["disposition_audit"],
             )
         )
-        if report_document is not None
+        if shared_document is not None
         else compute_disposition_audit(result, severity_config)
     )
 
@@ -630,6 +652,7 @@ def build_html_document(
             policy=result.policy,
             kind_sets=_kind_sets_fn() if _kind_sets_fn is not None else None,
             policy_file=getattr(result, "policy_file", None),
+            today=None if envelope is None else envelope.resolved_today,
         )
         filtered = _suppress_dangling_correlation_notes(filtered)
         display_changes: list[object] = list(filtered)
@@ -650,7 +673,21 @@ def build_html_document(
     if _effective_verdict_fn is not None and hasattr(result, "_effective_kind_sets"):
         from .report.finding import findings_by_change_id, report_findings_for
 
-        _findings_by_id = findings_by_change_id(report_findings_for(result))  # type: ignore[arg-type]
+        # ADR-061 gap C: the envelope resolved these once for the whole
+        # render (over the same `result.changes`); resolve them here only for
+        # a direct caller that supplied none. Read through `findings_for`
+        # rather than the bare `.findings` tuple: `display_changes` can hold
+        # `_suppress_dangling_correlation_notes`' own shallow `Change` copies
+        # (a `--show-only` render with a dangling `correlated_change_kind`),
+        # which have no entry in an id-keyed index built from `.findings`
+        # alone -- `findings_for` is exactly the primitive that resolves
+        # those through the same policy inputs instead of raising `KeyError`
+        # (CodeRabbit review).
+        if envelope is not None:
+            _resolved_findings = envelope.findings_for(display_changes)  # type: ignore[arg-type]
+        else:
+            _resolved_findings = report_findings_for(result)  # type: ignore[arg-type]
+        _findings_by_id = findings_by_change_id(_resolved_findings)
 
         def _lookup_verdict(change: object) -> object:
             return _findings_by_id[id(change)].verdict
@@ -690,12 +727,24 @@ def build_html_document(
     # guards against. Filtered via the shared predicate rather than
     # `result._evaluated_changes()` since a stub result need not expose it.
     _eff_kind_sets_fn = getattr(result, "_effective_kind_sets", None)
+    _metrics_changes = [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)]
+    # ADR-061 gap C: an envelope has already resolved every change's verdict
+    # once, at construction -- reading it here instead of calling
+    # effective_verdict_for_change again keeps this percentage from moving
+    # if a dated PolicyFile.reclassify rule expires between construction and
+    # render (Codex review, fresh evidence: `policy`/`kind_sets`/
+    # `policy_file` alone re-resolve against *today* on every call).
     metrics = compatibility_metrics(
-        [c for c in cast(list[HasKind], all_changes) if is_evaluated(c)],
+        _metrics_changes,
         old_symbol_count,
         policy=getattr(result, "policy", None),
         kind_sets=_eff_kind_sets_fn() if callable(_eff_kind_sets_fn) else None,
         policy_file=getattr(result, "policy_file", None),
+        effective_verdicts=(
+            [f.verdict for f in envelope.findings_for(_metrics_changes)]  # type: ignore[arg-type]
+            if envelope is not None
+            else None
+        ),
     )
     breaking_count = metrics.breaking_count
     bc_pct = metrics.binary_compatibility_pct
@@ -783,8 +832,10 @@ def build_html_document(
         else:
             empty_state = {"kind": "no_changes"}
 
-    confidence = compute_confidence(result)
-    gate_card = compute_gate_card(result, severity_config)
+    confidence = compute_confidence(
+        result, today=None if envelope is None else envelope.resolved_today
+    )
+    gate_card = compute_gate_card(result, severity_config, envelope=envelope)
     scoped_verdict = compute_scoped_verdict(result)
     impact = compute_impact(result, display_changes) if show_impact else None
 
@@ -843,6 +894,7 @@ def generate_html_report(
     severity_config: SeverityConfig | None = None,
     demangle: bool = True,
     report_document: ReportDocument | None = None,
+    envelope: ReportEnvelope | None = None,
 ) -> str:
     """Generate a standalone ABICC-compatible HTML ABI report.
 
@@ -865,6 +917,8 @@ def generate_html_report(
             Compatibility verdict itself reads COMPATIBLE.
         report_document: See :func:`build_html_document`'s own docstring
             (ADR-061 Phase 2 gap C) -- forwarded unchanged.
+        envelope: The completed ``ReportEnvelope`` this render projects (ADR-061
+            gap C) -- forwarded unchanged; see :func:`build_html_document`.
 
     Returns:
         Complete self-contained HTML document as a string.
@@ -883,6 +937,7 @@ def generate_html_report(
         severity_config=severity_config,
         demangle=demangle,
         report_document=report_document,
+        envelope=envelope,
     )
     return render_html_document(document)
 

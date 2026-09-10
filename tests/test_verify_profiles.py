@@ -663,3 +663,141 @@ def test_agent_skills_drift_gate_runs_in_ci():
     """ADR-058's generated trees are committed; without a CI-reachable drift
     gate, a stale publication tree merges silently."""
     assert "agent-skills-generated" in _ci_only_step_names()
+
+
+# --- ci.yml's unit-tests job budget ---------------------------------------
+
+
+class TestUnitTestsPerPlatformTimeout:
+    """The `unit-tests` matrix job's `timeout-minutes` must be resolved *per
+    leg*, not shared as one number.
+
+    Bug class this closes: a single job-level budget makes every matrix leg
+    pay the slowest platform's needs, or -- the direction that actually bit
+    -- forces the slowest leg to live inside a budget sized for the fast
+    ones. ci.yml's own comment history records the same drift three times
+    (15 -> 20 -> 30 for the canonical Linux leg, then -> 45 once Windows
+    reached it), each time by raising the shared number, which loosens the
+    gate on legs that already fit. On 2026-09-09 the Windows leg measured
+    40m24s and 41m18s on consecutive `main` runs against that shared 45,
+    and on 2026-09-10 run 34435814307 -- `main` itself, no pull request in
+    flight -- was cancelled at 45m14s, while the canonical Linux leg on the
+    same runs finished in 31m30s and macOS in 18m.
+
+    These assertions are structural: they enumerate the matrix legs ci.yml
+    actually declares and check that each one resolves to a budget, and that
+    the leg the expression singles out is the one that gets *more*. That
+    catches a leg added to the matrix with no budget of its own, and catches
+    the two branches being transposed -- neither of which a hardcoded
+    ``timeout-minutes: 45`` assertion could see.
+    """
+
+    _TERNARY = re.compile(
+        r"^\$\{\{\s*matrix\.os\s*==\s*'(?P<os>[^']+)'\s*"
+        r"&&\s*(?P<then>\d+)\s*\|\|\s*(?P<otherwise>\d+)\s*\}\}$"
+    )
+
+    @staticmethod
+    def _unit_tests_job() -> dict[str, Any]:
+        yaml = pytest.importorskip("yaml")
+        data = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())
+        return dict(data["jobs"]["unit-tests"])
+
+    @classmethod
+    def _matrix_operating_systems(cls) -> set[str]:
+        """Every OS the matrix really runs, base rows plus `include:` rows."""
+        matrix = cls._unit_tests_job()["strategy"]["matrix"]
+        systems = set(matrix["os"])
+        for extra in matrix.get("include", []):
+            systems.add(extra["os"])
+        return systems
+
+    def test_the_budget_is_an_os_keyed_expression(self) -> None:
+        budget = self._unit_tests_job()["timeout-minutes"]
+        assert isinstance(budget, str), (
+            "unit-tests' timeout-minutes is a bare number again, so every "
+            f"matrix leg shares one budget: {budget!r}"
+        )
+        assert self._TERNARY.match(budget.strip()), (
+            f"could not read a per-OS budget out of {budget!r}"
+        )
+
+    def test_the_singled_out_os_is_one_the_matrix_runs(self) -> None:
+        """A budget keyed on an OS absent from the matrix is dead
+        configuration: every leg would silently take the fallback."""
+        match = self._TERNARY.match(
+            str(self._unit_tests_job()["timeout-minutes"]).strip()
+        )
+        assert match
+        assert match.group("os") in self._matrix_operating_systems()
+
+    def test_every_matrix_leg_resolves_to_a_positive_budget(self) -> None:
+        """Enumerate the real legs rather than asserting two literals -- an
+        OS added to the matrix must still land on a budget."""
+        match = self._TERNARY.match(
+            str(self._unit_tests_job()["timeout-minutes"]).strip()
+        )
+        assert match
+        singled_out, then, otherwise = (
+            match.group("os"),
+            int(match.group("then")),
+            int(match.group("otherwise")),
+        )
+        resolved = {
+            operating_system: then if operating_system == singled_out else otherwise
+            for operating_system in self._matrix_operating_systems()
+        }
+        assert resolved, "the unit-tests matrix declares no operating system"
+        assert all(minutes > 0 for minutes in resolved.values()), resolved
+
+    def test_the_singled_out_leg_gets_strictly_more_headroom(self) -> None:
+        """The whole point of splitting the budget. If the two branches are
+        ever transposed, the slow leg gets the fast legs' budget -- exactly
+        the failure being fixed, now silent."""
+        match = self._TERNARY.match(
+            str(self._unit_tests_job()["timeout-minutes"]).strip()
+        )
+        assert match
+        assert int(match.group("then")) > int(match.group("otherwise")), (
+            "the OS singled out for its own budget must get more minutes than "
+            "the fallback, not fewer"
+        )
+
+    def test_the_slow_legs_budget_clears_the_observed_cost_on_main(self) -> None:
+        """Oracle independent of the workflow: the wall-clock figures below
+        were read off `main`'s own completed runs and its `ci.yml` comment,
+        not derived from the budget the workflow declares.
+
+        The last two entries are the load-bearing ones, and they did not
+        come from this branch. PR #1197 raised the Windows leg to 65 and
+        its *own* re-run was then killed at 65m14s with 99% of the suite
+        passing, so it went to 90. Including 65.2 is what gives this
+        assertion teeth: it rejects any Windows budget at or below 65,
+        which is precisely the mistake #1197 made once and had to correct,
+        and which the three figures this branch measured for itself
+        (40.4, 41.3, 45.2) would have accepted.
+
+        What it does **not** do, stated because the tempting claim is
+        wrong: it does not reject 75, the value this branch originally
+        proposed. 75 exceeds every figure here, since the 65m14s run was
+        *killed* rather than completed -- its true cost is unknown and only
+        bounded below. A max-of-observed oracle can encode "clears what we
+        have measured"; it cannot encode "leaves enough margin for a run
+        whose length nobody has seen", which is the judgement #1197 made in
+        choosing 90 over 65. Recorded as a gap on the registry entry rather
+        than faked with an arbitrary multiplier here.
+        """
+        observed_windows_minutes_on_main = (40.4, 41.3, 45.2, 49.4, 65.2)
+        match = self._TERNARY.match(
+            str(self._unit_tests_job()["timeout-minutes"]).strip()
+        )
+        assert match
+        assert match.group("os") == "windows-latest", (
+            "the observations below are Windows measurements; if another leg "
+            "is now the singled-out one, re-measure rather than reusing these"
+        )
+        assert int(match.group("then")) > max(observed_windows_minutes_on_main), (
+            "the Windows budget must exceed every cost already observed on "
+            f"main ({observed_windows_minutes_on_main}), or it will keep "
+            "cancelling healthy runs"
+        )

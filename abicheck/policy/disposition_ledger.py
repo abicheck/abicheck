@@ -65,6 +65,7 @@ from ..model.change_catalog.registry import Verdict
 from .disposition_gate import (
     _GateContext as _GateContext,
     _kept_disposition as _kept_disposition,
+    _reset_dated_overlays as _reset_dated_overlays,
 )
 from .disposition_types import (
     Disposition as Disposition,
@@ -76,6 +77,8 @@ from .rule_provenance import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from datetime import date
+
     from ..checker_types import Change, DiffResult
     from ..suppression import Suppression
 
@@ -280,9 +283,7 @@ class DispositionLedger:
             counts[record.disposition.value] += 1
         return counts
 
-    def with_gate(
-        self, result: DiffResult, severity_config: object
-    ) -> DispositionLedger:
+    def with_gate(self, result: DiffResult, severity_config: object, *, today: date | None = None) -> DispositionLedger:
         """A copy of this ledger re-labelled against the *resolved* gate.
 
         A copy, not an in-place relabel: a report projection must not mutate
@@ -301,15 +302,12 @@ class DispositionLedger:
         Under a **severity configuration** the acting gate is
         ``policy.gate_decision.gate_decision_for_result``, which scores
         ``result.changes`` and nothing else -- so membership in that list is
-        re-read here rather than trusted from recording time. Several later
-        passes move findings into it (``scope.show_redundant`` restores
-        redundant and opaque-downgraded rows; a scoped run folds its own),
-        and a record frozen at recording time then reported ``0 gating``
-        beside a real exit ``4``. One membership rule covers every such row,
-        whatever bucket it came from, which is what retired the narrower
+        re-read here rather than trusted from recording time (several later
+        passes move findings into it, e.g. ``scope.show_redundant`` restoring
+        redundant/opaque-downgraded rows), which is what retired the narrower
         ``legacy_gate_only`` flag this replaced.
         """
-        gate = _GateContext.of(result)
+        gate = _GateContext.of(result, today=today)
         # The severity gate's own input, resolved once for the whole pass.
         severity_input = {id(c) for c in getattr(result, "changes", None) or ()}
         gated = DispositionLedger()
@@ -321,6 +319,9 @@ class DispositionLedger:
             self._regated(record, change, result, severity_config, gate, severity_input)
             for record, change in zip(self._records, self._anchors)
         ]
+        gated._records = _reset_dated_overlays(gated._records)
+        gated.resolve_reclassifications(result, today=today)
+        gated.resolve_verdict_classes(result, today=today)
         return gated
 
     def with_suppressed(
@@ -469,7 +470,7 @@ class DispositionLedger:
             gate_excluded=False,
         )
 
-    def resolve_verdict_classes(self, result: DiffResult) -> None:
+    def resolve_verdict_classes(self, result: DiffResult, *, today: date | None = None) -> None:
         """Fill in the verdict class of every *suppressed* record that had none.
 
         Scoped to the suppressed ones because they are the only records whose
@@ -500,7 +501,7 @@ class DispositionLedger:
         # The same function ``DiffResult._effective_verdict_for_change``
         # delegates to, with the kind sets resolved once for the whole pass
         # instead of re-derived per finding (see ``_GateContext``).
-        gate = _GateContext.of(result)
+        gate = _GateContext.of(result, today=today)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
             if record.disposition is not Disposition.SUPPRESSED:
                 continue
@@ -540,11 +541,11 @@ class DispositionLedger:
                     change,  # type: ignore[arg-type]
                     policy=gate.policy,
                     kind_sets=gate.kind_sets,  # type: ignore[arg-type]
-                    policy_file=gate.policy_file,
+                    policy_file=gate.policy_file, today=gate.today,
                 ).value,
             )
 
-    def resolve_reclassifications(self, result: DiffResult) -> None:
+    def resolve_reclassifications(self, result: DiffResult, *, today: date | None = None) -> None:
         """Fill in :attr:`DispositionRecord.reclassified_by` (ADR-067 C-S2).
 
         ``Change`` carries no such attribute -- the value is computed on
@@ -562,13 +563,12 @@ class DispositionLedger:
         """
         from ..reclassify import reclassify_rule_for_change
 
-        gate = _GateContext.of(result)
+        gate = _GateContext.of(result, today=today)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
             if record.reclassified_by is not None:
                 continue  # already resolved (e.g. a re-closed scoped record)
             rule = reclassify_rule_for_change(
-                change,  # type: ignore[arg-type]
-                gate.policy_file,
+                change, gate.policy_file, gate.today,  # type: ignore[arg-type]
             )
             if rule is None:
                 continue

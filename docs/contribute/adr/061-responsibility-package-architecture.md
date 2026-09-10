@@ -928,6 +928,45 @@ compute/render module split yet), and what the real, current boundary it
 asserts instead is (the disposition-audit reuse path specifically, checked
 both by call-count and by an AST scan of the actual call site).
 
+**Closure package 3 (`ReportEnvelope`): gap C's remaining half — *one*
+document per evaluation, not one per format — has now landed.** The five
+progress updates above each routed one format through the shared *build
+function*; what stayed open was that `service_render.render_output` called
+it once **per format branch**, so N formats of one evaluation still meant N
+documents that merely agreed. `abicheck/report/envelope.py`'s
+`ReportEnvelope` (the plan's Phase 4 design, not a second one) is now built
+once, above format selection, by `report/build.py`'s
+`build_report_envelope`: it resolves the severity `GateDecision` *first* and
+hands it to `build_report_document` (so the document's `severity` block and
+the object SARIF/HTML read are the same object, not two agreeing calls),
+resolves one `ReportFinding` per `Change` — `result.changes` **and**
+`scoped_only_changes` — and carries the presentation-only `RenderOptions`.
+`service_render.render_envelope(fmt, envelope)` then selects a pure
+projection. Every previously-open *decision* in the paragraphs below is
+closed by reading the envelope: SARIF's and HTML's own
+`gate_decision_for_result` calls, HTML's and the review digest's own
+`report_findings_for` calls, JUnit's own `build_report_findings` call, and
+Markdown's `surface_changes` re-resolution. SARIF's invocation
+`exitCode`/`exitCodeDescription` fold moved to `report/sarif_invocation.py`
+(a renderer does not own exit behaviour) and JUnit's disposition-audit
+properties to `report/junit_disposition.py`. Everything still listed as
+open below was re-examined item by item and is *presentation* — an
+arrangement of already-decided findings in a format-specific shape — or a
+separate document by this ADR's own earlier scope decision (`--stat`/
+`oneline`, Markdown's/JSON's `leaf`/`root-cause`); there is no third
+category left unaccounted for. The process exit fold
+(`cli._exit_with_severity_or_verdict`) deliberately stays in `frontends`:
+the envelope carries the exit decision the *report* publishes, not the code
+the CLI exits with. Verified by capturing 512 renders (4 change sets × 16
+option sets × 8 formats, `render_output` end to end) against the
+**pre**-refactor tree first and diffing byte-for-byte after — the same
+"golden first, then refactor" discipline this section's own durable lessons
+record — plus `TestRendererOrderIndependence`'s new cases: one envelope
+rendered into every format in several orders is byte-identical each time,
+`render_envelope` agrees with `render_output` byte-for-byte, and a
+call-count spy shows every decision function runs exactly once during
+envelope construction and *never again* across ten subsequent projections.
+
 **What remains open.** Markdown's `leaf`/`root-cause` alternate views (see
 the scope decision immediately below — these are separate, legitimate
 documents, same reasoning as JSON's own `leaf`/`root-cause`/`--stat`, not an
@@ -1018,7 +1057,8 @@ if a future session judges it worth doing.
 tests pass; mutability tests show renderers cannot alter the workflow result;
 no renderer computes an exit code or compatibility decision. Items 1, 4, and
 5 are met per format; item 2's "once" — one document shared by every format
-of one evaluation — is gap C.
+of one evaluation — was gap C, and is met by closure package 3's
+`ReportEnvelope` (see the gap C status section above).
 
 ### Phase 3 — converge artifact workflows
 
@@ -1416,6 +1456,17 @@ Phase 4's `ReportEnvelope`.
 different format orders; the semantic content is identical every time, and
 no renderer re-runs extraction, policy evaluation, or gate resolution.
 
+**Closed** by closure package 3 — see the gap C status section under Phase 2
+above for what landed and how it was verified. `abicheck/report/envelope.py`
+holds the `ReportEnvelope`, `report/build.build_report_envelope` builds it
+once above format selection, and `service_render.render_envelope` projects
+it. The completion test is executable in
+`tests/unit/report/test_build_report_document.py`'s
+`TestRendererOrderIndependence` (order-independent byte-identity across
+formats and repeated renders, plus a call-count spy proving every decision
+function runs once at envelope-construction time and never during a
+projection).
+
 ### D. Typed request/plan and operand convergence
 
 The shared per-artifact contracts exist (Phase 3), but they carry no
@@ -1454,9 +1505,48 @@ orchestration conflation of the shape Phase 5 already solved for
   (the `public_root_surfaces` compatibility-facade treatment) — its own
   ~1500 remaining lines of codec logic are a separate, not-yet-attempted
   classification.
-- `bundle_facts.py` and its serialization/store siblings are classified
+- `bundle_facts.py` and its serialization/store siblings were classified
   `workflows`, conflating the `BundleFacts` value, its persistence, and
-  capture/comparison orchestration. **Not yet started.**
+  capture/comparison orchestration. **Closed:** applied the same split
+  Phase 5 proved for `*_metadata.py`. The value type and its construction
+  invariant (`require_degraded_members_known`, applied at every
+  construction/import choke point) moved to `model/bundle_facts.py`.
+  Persistence split three ways in `storage/`: `bundle_facts_codec.py`
+  (JSON (de)serialization, moved out of the flat `bundle_facts_serialization.py`),
+  `bundle_facts_archive.py` (the G40 content-addressed zip archive, moved
+  out of `bundle_facts.py`'s own G40 section), and `bundle_facts_package.py`
+  (the multi-artifact `ProjectSnapshot` package adapter, moved out of
+  `bundle_facts_store.py` and reclassified `storage` — its own historical
+  docstring had explained why it *couldn't* be `storage` yet, precisely
+  because `BundleFacts` had no settled layer; once it did, every dependency
+  this module actually has turned out to already be `storage`-legal).
+  Capture and comparison orchestration moved to `workflows/`:
+  `bundle_facts_capture.py` (`capture_bundle_facts`/`bundle_snapshot_from_facts`)
+  and `bundle_facts_compare.py` (`compare_bundle_from_facts`). The flat
+  `bundle_facts.py`/`bundle_facts_serialization.py`/`bundle_facts_store.py`
+  modules are now delegation-only compatibility facades (added to
+  `modules.yaml`'s `facades` list, each under the 150-line facade cap,
+  each with an explicit `__all__`) re-exporting the same public names, so
+  the documented Python API path (`docs/use/multi-binary.md`) and every
+  existing internal/test call site are unaffected. The one real,
+  unavoidable `serialization.py <-> storage.bundle_facts_codec` two-file
+  cycle (`bundle_facts_codec.py` needs `snapshot_to_dict`/`snapshot_from_dict`
+  from `serialization.py`; `serialization.py`'s own back-compat
+  `bundle_facts_to_dict`/etc. wrappers need the codec) is kept dynamic via
+  `importlib.import_module`, same shape as before the move, just retargeted
+  — not a new bridge, and not an `IMPORT_CYCLE_ALLOWLIST` entry. Every other
+  internal caller (`bundle_multibuild.py`, `bundle_side_input.py`,
+  `cli_compare_release_helpers.py`, `storage/import_bundle_facts.py`,
+  `storage/variant_composition.py`, `workflows/bundle_compare_operand.py`,
+  `workflows/bundle_stored_pair_compare.py`, `workflows/release_scope.py`)
+  now imports the canonical owner directly, per D6. Legacy-reader behavior
+  (schema-version fallback, the `degraded_members` marker, the G40 archive
+  format, resource-limit hardening) is pinned by the existing
+  `tests/test_bundle_facts*.py` suite, exercised unchanged before and after
+  the move; two of those files' `monkeypatch`-based tests were updated to
+  patch the real owner module (`storage.bundle_facts_archive`/
+  `storage.bundle_facts_package`) instead of the facade, per D10 ("unit
+  tests patch the owner module").
 - `probe_harness.py` (`compare`) needed `snapshot_to_dict`/
   `snapshot_from_dict` to serialize its own probe matrix. Comparison logic
   must not become the owner of persistence because a probe workflow needs

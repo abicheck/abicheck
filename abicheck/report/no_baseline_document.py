@@ -37,9 +37,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .finding import ReportFinding
+
 if TYPE_CHECKING:
     from .cross_source_evolution import CrossSourceEvolutionSummary
-    from .finding import ReportFinding
 
 __all__ = [
     "AUDIT_REPORT_SCHEMA_VERSION",
@@ -49,6 +50,9 @@ __all__ = [
     "NO_BASELINE_SUPPORTED_FORMATS",
     "NO_BASELINE_UNSUPPORTED_FORMATS",
     "NoBaselineDocument",
+    "SuppressedFinding",
+    "suppression_provenance_of",
+    "suppression_rule_label",
 ]
 
 
@@ -83,8 +87,37 @@ __all__ = [
 #: field, which implied a version history in a namespace it never had.
 #:
 #: Bump MINOR for an additive field, MAJOR for a removal or a changed
-#: meaning -- the same policy ``REPORT_SCHEMA_VERSION`` follows.
-AUDIT_REPORT_SCHEMA_VERSION = "1.0"
+#: meaning -- the same policy ``REPORT_SCHEMA_VERSION`` follows. A third
+#: case the policy did not name, and should: **moving a field into
+#: ``required`` is a tightening, not an addition.** It does not change what
+#: a producer emits, but it changes what *validates* -- a document that was
+#: schema-valid without the field is rejected afterwards. On a published
+#: version that is a MAJOR change, or grounds for leaving the field
+#: optional; MINOR is not available for it.
+#:
+#: ``1.1`` makes both kinds of change, and they are not the same kind.
+#: ``suppression_provenance`` on a suppressed finding (ADR-067 D3's full
+#: rule record beside the existing display label) is genuinely additive,
+#: which is what earns the MINOR bump: a consumer that selects or caches a
+#: schema by this string could otherwise not tell the two contracts apart.
+#: Moving ``old_acquisition_state`` into the root ``required`` list is the
+#: tightening. An earlier revision of this comment called both "additive"
+#: on the grounds that a ``1.0`` consumer reading known fields is
+#: unaffected -- that is the *producer's* view, and a schema's job is
+#: validation, where the change is strictly narrowing (Codex review, P2,
+#: correcting an earlier reply of mine that made the same conflation).
+#:
+#: It is accepted here for one reason, checked rather than assumed: version
+#: ``1.0`` was never released. This schema was introduced on 2026-09-10 in
+#: ``10c4de15``, after the last release (0.5.0, 2026-07-16), with every
+#: changelog fragment since still unreleased in ``changelog.d/`` -- so no
+#: published build has ever emitted a ``1.0`` audit document, and there is
+#: no such document anywhere to invalidate. ``required`` is also the
+#: truthful model, since the field is emitted unconditionally; a schema
+#: marking an always-present field optional describes the format less
+#: accurately. Once a release ships an audit document, the rule above
+#: applies with no such escape.
+AUDIT_REPORT_SCHEMA_VERSION = "1.1"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.
@@ -172,13 +205,127 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
 }
 
 
+def suppression_rule_label(
+    change: Any, provenance: Mapping[str, Any] | None
+) -> str | None:
+    """The suppressing rule's *label*, or ``None`` when it stated none.
+
+    The one owner of this question, because getting it wrong is easy and has
+    now been gotten wrong three times in this package alone.
+    ``Change.suppression_rule`` is ``SuppressionOutcome.rule_label()``'s
+    ``label or reason`` collapse -- a single string that does not say which
+    of the two it holds -- so reading it as a label is a coin flip. When the
+    run recorded provenance, the real ``label`` is knowable and the collapsed
+    field must not be consulted at all; only a run with no ledger entry falls
+    back to it, and there nothing better is knowable.
+
+    Every projection that shows a label separately from a reason routes
+    through here (the Markdown table's "Suppressed by" column, and
+    ``no_baseline_render._suppression_justification`` for SARIF and JUnit),
+    so a fourth call site cannot quietly form its own opinion. The failure
+    this prevents is a reason printed twice, once under a heading claiming
+    it is a rule label (Codex review, P2, twice).
+    """
+    if provenance:
+        label = provenance.get("label")
+        return str(label) if label else None
+    collapsed = getattr(change, "suppression_rule", None)
+    return str(collapsed) if collapsed else None
+
+
+def suppression_provenance_of(
+    entry: ReportFinding,
+) -> Mapping[str, Any] | None:
+    """The suppressing rule's record for *entry*, or ``None`` when it has none.
+
+    The one place any projection asks. ``NoBaselineDocument.suppressed`` is
+    typed as :class:`SuppressedFinding`, but the document is an ordinary
+    frozen dataclass a caller can build or ``dataclasses.replace`` by hand,
+    and a caller written against the pre-pairing shape passes plain
+    :class:`~abicheck.report.finding.ReportFinding` entries -- which made
+    every detailed renderer raise ``AttributeError`` on ``entry.provenance``
+    (Codex review, P2).
+
+    ``None`` for such an entry is the *truthful* answer, not a papered-over
+    one: a document carrying plain findings genuinely holds no ledger
+    record, so "no provenance recorded" is what it has to say. That is the
+    same distinction the renderers already draw for a run whose
+    ``DiffResult`` kept no ledger -- and the opposite of fabricating a
+    record, which is what this file's other rules forbid.
+    """
+    return getattr(entry, "provenance", None)
+
+
+@dataclass(frozen=True, slots=True)
+class SuppressedFinding(ReportFinding):
+    """One suppressed finding and the rule that actually hid it.
+
+    **A** :class:`~abicheck.report.finding.ReportFinding`, not a wrapper
+    around one: a suppressed entry *is* a finding, and the rule that hid it
+    is one more resolved fact about it. So ``entry.change``/``.verdict``/
+    ``.category`` work exactly as they do on any other finding, and
+    ``isinstance(entry, ReportFinding)`` holds -- which is what keeps every
+    consumer of ``NoBaselineDocument.suppressed`` working unchanged, rather
+    than trading an `AttributeError` for a provenance field (Codex review,
+    P2). A first version paired the two side by side and did force that
+    change on callers.
+
+    **Equality is per-class, deliberately.** The generated ``__eq__``
+    requires the same runtime class, so a ``SuppressedFinding`` never
+    compares equal to a bare ``ReportFinding`` holding the same three
+    fields, in either direction, and provenance participates in equality
+    between two suppressed entries. A review asked for the former
+    cross-class equality to be preserved (Codex, P2); it was measured
+    rather than argued, and declined. ``field(compare=False)`` does not
+    achieve it -- the class check blocks cross-class equality regardless --
+    so the only route is a hand-written ``__eq__`` ignoring both the class
+    and provenance. That works, and symmetry and transitivity do hold, but
+    the price is that two suppressions under *different waiver rules*
+    compare equal: provenance stops counting in equality at all. Dropping a
+    recorded field on the way to a consumer is the exact defect this class
+    exists to fix, and equality is a consumer. No caller compares these
+    entries either -- every use of ``NoBaselineDocument.suppressed`` in this
+    repository iterates or projects. Pinned by
+    ``test_suppressed_finding_equality_is_per_class``.
+
+    *provenance* is the already-serialized
+    :class:`~abicheck.policy.disposition_ledger.RuleProvenance` -- ADR-067
+    D3's full record (rule id, source file, reason, label, expiry), not a
+    display label. The audit carried ``Change.suppression_rule`` instead,
+    which is ``SuppressionOutcome.rule_label()``'s deliberate ``label or
+    reason`` collapse, so a rule stating both lost its reason and its source
+    file in every projection (Codex review, P1).
+
+    Resolved through the run's own disposition ledger by object identity --
+    the same ``rule_for`` join ``reporter.py``'s two-sided suppression block
+    uses -- never by re-evaluating the rule set, which could name a
+    different rule than the one that fired. ``None`` when the run kept no
+    ledger entry for this finding (a ``DiffResult`` rebuilt from JSON keeps
+    none); inventing a row from the display label would look like a real
+    ADR-067 record while carrying strictly less.
+    """
+
+    provenance: Mapping[str, Any] | None = None
+
+
 @dataclass(frozen=True)
 class NoBaselineDocument:
-    """The one frozen, plain-value audit document every format projects.
+    """The one frozen audit document every format projects.
 
     Holds resolved values only -- no ``DiffResult``, no live policy
     objects -- so a renderer cannot re-derive a verdict or reach past what
     the compute half decided.
+
+    **What "frozen" does and does not buy** (CodeRabbit review). ``frozen=
+    True`` and the tuple-typed collections stop a renderer from rebinding a
+    field or reordering a finding list. They do not deep-freeze the
+    ``Change`` each :class:`~abicheck.report.finding.ReportFinding` carries,
+    which is an ordinary mutable dataclass -- the same one every other
+    ``compute_*``/``render_*`` pair in this package hands to its renderers.
+    Deep-copying it here would fork that shared shape for one command and
+    silently double a large report's allocation, so the barrier this class
+    actually enforces is *structural* (no verdict, no policy object, nothing
+    to re-derive from) rather than a memory-level guarantee.
     """
 
     library: str
@@ -192,7 +339,30 @@ class NoBaselineDocument:
     #: alongside rather than dropped: ``vision.md``'s "Record before
     #: disposing" rule requires "detected, then suppressed by rule X" to
     #: stay visible on a passing run, never to read as "nothing found".
-    suppressed: tuple[ReportFinding, ...]
+    #:
+    #: Each carries its own rule provenance rather than the document holding
+    #: a second, positionally-aligned tuple: a pairing invariant a renderer
+    #: has to honor is one a renderer can break, and the finding and the
+    #: rule that hid it are one fact.
+    #: Typed as :class:`SuppressedFinding`, deliberately, even though
+    #: :func:`suppression_provenance_of` lets every renderer tolerate a plain
+    #: :class:`~abicheck.report.finding.ReportFinding` at runtime. Those two
+    #: facts are not in conflict: the tolerance is defensive robustness for a
+    #: hand-built document (an ``AttributeError`` from inside a renderer is a
+    #: terrible failure), while the annotation states what this package
+    #: *produces* and what a consumer may therefore rely on.
+    #:
+    #: Widening it to ``ReportFinding`` was considered and rejected on
+    #: measurement, not taste (Codex review, P2): under that annotation mypy
+    #: reports ``"ReportFinding" has no attribute "provenance"`` for the one
+    #: consumer this whole feature exists to serve -- code reading a
+    #: suppression's rule record off a computed document -- and breaks this
+    #: package's own ``mypy abicheck/`` cleanliness at ``_suppressed_json``.
+    #: A union does not help either: ``ReportFinding | SuppressedFinding``
+    #: collapses to ``ReportFinding``, since the latter is a subclass. So the
+    #: choice is binary, and it favours the real consumer over a hypothetical
+    #: caller hand-constructing a fourteen-field document.
+    suppressed: tuple[SuppressedFinding, ...]
     evolution: CrossSourceEvolutionSummary | None
     pattern_preprocessor_scan: dict[str, Any] | None
     run_outcome: dict[str, Any]

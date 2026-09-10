@@ -129,19 +129,29 @@ def _graphs_attached(
     Recorded from the real attach step's own output, so a graph that is
     built but empty is distinguishable from one never built at all — the
     distinction the stale claim was about.
+
+    Node **identities**, not a node count: ``GraphNode.id`` is the
+    deterministic identity graph comparison itself keys on, so two graphs of
+    equal size but different content would compare equal under a count
+    (CodeRabbit review). The count is recoverable from the ids, not the
+    reverse.
     """
     import abicheck.service_dump_native as native
     from abicheck.cli import main
 
     real_attach = native._attach_header_graph
-    seen: dict[str, int] = {}
+    seen: dict[str, tuple[str, ...]] = {}
 
     def _recording(*args: object, **kwargs: object) -> object:
         snap = real_attach(*args, **kwargs)
         pack = getattr(snap, "build_source", None)
         graph = getattr(pack, "source_graph", None) if pack is not None else None
         if graph is not None:
-            seen[snap.library] = max(seen.get(snap.library, 0), len(graph.nodes))
+            ids = tuple(sorted(node.id for node in graph.nodes))
+            # A library is attached once per side; keep the richer of the two
+            # rather than whichever ran last, matching the previous max().
+            if len(ids) >= len(seen.get(snap.library, ())):
+                seen[snap.library] = ids
         return snap
 
     monkeypatch.setattr(native, "_attach_header_graph", _recording)
@@ -163,7 +173,7 @@ class TestReleaseFanOutBuildsTheHeaderGraph:
             ["compare", str(old_dir), str(new_dir), "-H", str(inc), "--format", "json"],
         )
         assert set(seen) == {"libfoo.so", "libbar.so"}, seen
-        assert all(count > 0 for count in seen.values()), seen
+        assert all(ids for ids in seen.values()), seen
 
     def test_graph_matches_a_single_pair_compare_of_the_same_member(
         self,
@@ -171,7 +181,8 @@ class TestReleaseFanOutBuildsTheHeaderGraph:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Parity, not a pinned count: each member's graph through the
-        fan-out is the graph that member gets compared on its own.
+        fan-out is the graph that member gets compared on its own — compared
+        by node identity, so an equal-sized but different graph fails.
 
         The oracle is the other public surface, so this keeps holding when
         the parser's output changes — and fails the moment the two paths

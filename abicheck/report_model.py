@@ -36,6 +36,7 @@ imports ``reporter`` — ``reporter`` depends on this module one-directionally.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -133,11 +134,25 @@ class ReportModel:
     compatible: list[Change]
     summary: ReportSummary
     not_evaluated: list[Change] = field(default_factory=list)
+    #: ``id(change) -> Verdict`` for a caller with an already-completed
+    #: :class:`~abicheck.report.envelope.ReportEnvelope`. ``verdict_of``/
+    #: ``severity_label``/``is_breaking_boundary`` consult this before
+    #: falling back to ``result._effective_verdict_for_change`` -- which
+    #: resolves a dated ``PolicyFile.reclassify`` rule's expiry against
+    #: *today*, so a lookup made after that rule expires could disagree
+    #: with the bucket a ``classify()`` call made from the same envelope
+    #: earlier (Codex review, fresh evidence). Empty for a caller with no
+    #: envelope, which keeps every non-ADR-061-gap-C call site unchanged.
+    _verdict_overrides: dict[int, Verdict] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     @staticmethod
     def classify(
         changes: list[Change],
         result: DiffResult,
+        *,
+        verdict_overrides: Mapping[int, Verdict] | None = None,
     ) -> tuple[list[Change], list[Change], list[Change], list[Change]]:
         """Split *changes* into (breaking, source_breaks, risk, compatible) by the
         effective per-finding verdict (canonical severity, ADR-036).
@@ -147,10 +162,26 @@ class ReportModel:
         :meth:`classify_not_evaluated` instead — the partition is over the
         compatibility axis, and those findings are not on it. Without
         ``--contract`` nothing is excluded.
+
+        *verdict_overrides* (ADR-061 gap C), when given, is an
+        ``id(change) -> Verdict`` map of already-resolved verdicts -- an
+        envelope-driven caller passes one built from ``envelope.
+        findings_for(changes)`` so this bucket split reuses the same
+        finalized verdict the envelope's document was built from, instead of
+        calling ``result._effective_verdict_for_change`` fresh (see
+        :attr:`_verdict_overrides`'s own docstring for why that can
+        disagree).
         """
         from .contract_gating import is_evaluated
 
-        ev = result._effective_verdict_for_change
+        def ev(c: Change) -> Verdict:
+            override = verdict_overrides.get(id(c)) if verdict_overrides else None
+            return (
+                override
+                if override is not None
+                else result._effective_verdict_for_change(c)
+            )
+
         scored = [c for c in changes if is_evaluated(c)]
         breaking = [c for c in scored if ev(c) == Verdict.BREAKING]
         source_breaks = [c for c in scored if ev(c) == Verdict.API_BREAK]
@@ -166,7 +197,14 @@ class ReportModel:
         return [c for c in changes if not is_evaluated(c)]
 
     def verdict_of(self, change: Change) -> Verdict:
-        """Canonical per-finding verdict (policy + ADR-027 A4 overrides)."""
+        """Canonical per-finding verdict (policy + ADR-027 A4 overrides).
+
+        Reads :attr:`_verdict_overrides` first when *change* is one this
+        model was built with an already-resolved verdict for.
+        """
+        override = self._verdict_overrides.get(id(change))
+        if override is not None:
+            return override
         return self.result._effective_verdict_for_change(change)
 
     def severity_label(self, change: Change) -> str:
@@ -197,6 +235,7 @@ class ReportModel:
         result: DiffResult,
         *,
         changes: list[Change] | None = None,
+        effective_verdicts: Sequence[Verdict] | None = None,
     ) -> ReportModel:
         """Build the model and classify *changes* (defaults to all of
         ``result.changes``).
@@ -204,10 +243,24 @@ class ReportModel:
         The ``show_only`` display filter is applied by the caller (via
         ``reporter.apply_show_only``) and the filtered list passed in here, so
         this module stays free of any ``reporter`` import (no cycle).
+
+        *effective_verdicts* (ADR-061 gap C), when given, is a pre-resolved
+        verdict per entry in *changes* (same order, same length) -- an
+        envelope-driven caller passes ``[f.verdict for f in envelope.
+        findings_for(changes)]`` so the bucket split and any later
+        :meth:`verdict_of` lookup on the same change both reuse the
+        envelope's own finalized verdict (see :attr:`_verdict_overrides`).
         """
         if changes is None:
             changes = list(result.changes)
-        breaking, source_breaks, risk, compatible = cls.classify(changes, result)
+        verdict_overrides = (
+            {id(c): v for c, v in zip(changes, effective_verdicts)}
+            if effective_verdicts is not None
+            else {}
+        )
+        breaking, source_breaks, risk, compatible = cls.classify(
+            changes, result, verdict_overrides=verdict_overrides
+        )
         return cls(
             result=result,
             changes=changes,
@@ -217,4 +270,5 @@ class ReportModel:
             compatible=compatible,
             summary=build_summary(result),
             not_evaluated=cls.classify_not_evaluated(changes),
+            _verdict_overrides=verdict_overrides,
         )

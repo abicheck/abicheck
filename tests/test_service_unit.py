@@ -3381,13 +3381,15 @@ class TestContractEvaluationThreading:
         # manual-override removal). public_header_dirs (PR #1138) is next,
         # then collapse_versioned_symbols (Codex review: the release
         # fan-out's own gap -- see service_compare_pipeline.run_compare's
-        # docstring).
-        assert params[-11:] == [
+        # docstring), then project_policy_overrides (findings-analysis-fixes
+        # batch, second review round, defect 4: the release fan-out's own
+        # `.abicheck.yml` `policy.overrides` gap), same rule.
+        assert params[-12:] == [
             "diagnostic_comparison", "contract_evaluation",
             "include_dependencies", "contract_mode", "pack_policy_overrides",
             "pack_internal_namespaces", "compile_context", "depth",
             "severity_preset", "public_header_dirs",
-            "collapse_versioned_symbols",
+            "collapse_versioned_symbols", "project_policy_overrides",
         ]
 
     def test_new_gate_params_are_keyword_only_without_breaking_older_ones(self):
@@ -5453,16 +5455,14 @@ class TestDebugFormatResolution:
 
     def test_auto_is_not_rejected_for_a_non_elf_side(self, tmp_path, monkeypatch):
         # "auto" forces nothing, so there is nothing for a PE side to ignore.
-        self._spy(monkeypatch)
+        seen = self._spy(monkeypatch)
         old_p = tmp_path / "old.so"
         old_p.write_bytes(b"\x7fELF" + b"\x00" * 200)
         pe = tmp_path / "new.dll"
         pe.write_bytes(b"MZ" + b"\x00" * 200)
-        run_compare_request(
-            CompareRequest(
-                old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="auto"
-            )
-        )
+        req = CompareRequest(old=InputSpec(path=old_p), new=InputSpec(path=pe), debug_format="auto")
+        run_compare_request(req)
+        assert seen["debug_format"] is None
 
     def test_snapshot_inputs_are_unaffected(self, tmp_path, monkeypatch):
         # A JSON snapshot has no detected binary format; same as the CLI, that
@@ -5471,13 +5471,14 @@ class TestDebugFormatResolution:
         new_p = tmp_path / "new.json"
         save_snapshot(AbiSnapshot(library="l", version="1"), old_p)
         save_snapshot(AbiSnapshot(library="l", version="2"), new_p)
-        run_compare_request(
+        result = run_compare_request(
             CompareRequest(
                 old=InputSpec(path=old_p),
                 new=InputSpec(path=new_p),
                 debug_format="dwarf",
             )
         )
+        assert (result.old_snapshot.version, result.new_snapshot.version) == ("1", "2")
 
 
 class TestComparePipelinePhases:

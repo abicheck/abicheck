@@ -17,19 +17,13 @@
 The schemas in this package describe the stable JSON contract that
 automated consumers (CI gates, dashboards, other tooling) can rely on.
 
-Stability policy
-----------------
-The compare-report schema is versioned with a SemVer-style
-``MAJOR.MINOR`` string exposed as :data:`REPORT_SCHEMA_VERSION` and emitted
-in every JSON report as ``report_schema_version``:
-
-- **Additive** changes — new optional keys, new enum members, relaxing a
-  constraint — bump the **MINOR** component. Existing consumers keep working.
-- **Breaking** changes — removing/renaming a key, tightening a type,
-  removing an enum member — bump the **MAJOR** component.
-
-Consumers should accept any report whose ``report_schema_version`` shares
-their expected MAJOR component and ignore unknown keys.
+Stability policy: each artifact is versioned with a SemVer-style
+``MAJOR.MINOR`` string (e.g. :data:`REPORT_SCHEMA_VERSION`, emitted as
+``report_schema_version``). **Additive** changes (new optional keys, new
+enum members, relaxing a constraint) bump **MINOR** -- existing consumers
+keep working. **Breaking** changes (removing/renaming a key, tightening a
+type, removing an enum member) bump **MAJOR**. Consumers should accept any
+report sharing their expected MAJOR component and ignore unknown keys.
 """
 
 from __future__ import annotations
@@ -46,12 +40,10 @@ from .documents import (  # noqa: F401 -- re-exported: `abicheck.schemas` is the
 #: Artifact names :func:`current` accepts, each mapped to the module-level
 #: constant that already owns its version (ADR-055 D3). Read-only lookup
 #: facade -- adding an entry here never changes that constant's own value or
-#: bump policy. This frozenset itself is built once at import time; it is
-#: :func:`current`'s per-artifact lookups that use function-local imports
-#: (not this set), since some of those modules transitively import this
-#: package themselves (e.g. ``buildsource.run_plan`` -> ``buildsource.
-#: check_report`` -> ``schemas``) and a module-level import here would turn
-#: that into a real import cycle.
+#: bump policy. Built once at import time; it is :func:`current`'s
+#: per-artifact lookups that use function-local imports (not this set),
+#: since some of those modules transitively import this package themselves
+#: and a module-level import here would turn that into a real import cycle.
 _ARTIFACT_NAMES = frozenset(
     {
         "snapshot",
@@ -61,6 +53,7 @@ _ARTIFACT_NAMES = frozenset(
         "aggregate",
         "build-output",
         "run-plan",
+        "release",
     }
 )
 
@@ -856,25 +849,14 @@ _ARTIFACT_NAMES = frozenset(
 #:       again from 3.7 to 3.8 on the next, when ADR-068 D3 / plan P2's
 #:       ``cross_source_evolution`` claimed 3.7.
 #: 3.10 -- ADR-067 D5/D6 (plan workstream C-S3): the ``disposition_audit``
-#:       block gains additive ``acknowledged_total``/``acknowledgments`` (an
-#:       ``Acknowledgment`` record's own overlay, mirroring 2.51's
-#:       ``reclassified_total``/``reclassifications``) and
-#:       ``unacknowledged_additions_review`` (D6's review-gate result, or
-#:       ``null`` when a run never supplied an acknowledgment document).
-#:       Every pre-existing report gains three always-empty/``null`` keys and
-#:       nothing else changes -- no existing invocation's disposition,
-#:       verdict, or exit code moves (both are opt-in via
-#:       ``checker.compare(acknowledgments=...)``).
+#:       block gains additive ``acknowledged_total``/``acknowledgments``
+#:       and ``unacknowledged_additions_review`` (``null`` when a run never
+#:       supplied an acknowledgment document). No existing invocation's
+#:       disposition, verdict, or exit code moves (opt-in).
 #: 3.12 -- ``docs/contribute/plans/one-comparison-product.md`` Phase 2b
-#:       (ADR-068 D3/D4/D5, plan §3 #6/#8): an additive, always-present
-#:       top-level ``pattern_preprocessor_scan`` object -- the folded,
-#:       per-side lexical pattern pre-scan + preprocessor pre-scan result
-#:       (``workflows.pattern_preprocessor_scan``), mirroring
-#:       ``cross_source_evolution``'s own "run independently on OLD and
-#:       NEW, fold via the same four-state evolution axis" shape for the
-#:       two other scan-only primitives ADR-068 §1 named. On by default,
-#:       automatic, no front end flag (D4/D5); never a verdict on its own,
-#:       so no existing finding, verdict, or exit code moves.
+#:       (ADR-068 D3/D4/D5): an additive, always-present top-level
+#:       ``pattern_preprocessor_scan`` object. On by default, automatic, no
+#:       front end flag; never a verdict on its own.
 #: 3.13 -- additive ``summary.quality_issues``: the non-addition subset of unchanged ``summary.compatible_additions``, mirroring the release fan-out's per-library field of the same name; no verdict moves.
 #: 3.14 -- additive per-change ``demangled_symbol`` (Codex review): a
 #:       human-readable demangling of ``symbol``/``old_value``, present only
@@ -884,7 +866,15 @@ _ARTIFACT_NAMES = frozenset(
 #:       ``symbol``/``old_value`` stay the raw mangled spelling unchanged
 #:       (machine formats never demangle those); this is display-only and
 #:       moves no verdict, severity, or exit code.
-REPORT_SCHEMA_VERSION = "3.14"  #: 3.14 -- see the comment immediately above.
+#: 3.15 -- additive, always-present ``gate.fail_on_removed_library``
+#:       (ADR-065's flag), mirroring ``gate.on_incomplete_scope`` (2.50).
+#: 4.0 -- BREAKING (Codex review): a required field's own *meaning*
+#:       changing is breaking even with no key added/removed/retyped --
+#:       ``summary.compatible_additions`` now excludes ``quality_issues``
+#:       instead of every ``COMPATIBLE`` finding (unrelated to 3.15 above,
+#:       a different, already-released feature). Old value =
+#:       compatible_additions + quality_issues.
+REPORT_SCHEMA_VERSION = "4.0"  #: 4.0 -- see the comment immediately above.
 
 #: SemVer-style (MAJOR.MINOR) version of the ``scan`` JSON output, emitted as
 #: ``scan_schema_version`` at the top level of the public scan dict shape:
@@ -1216,24 +1206,40 @@ REPORT_SCHEMA_VERSION = "3.14"  #: 3.14 -- see the comment immediately above.
 #: 1.29 -- ADR-067 C-S1, mirrors `compare`'s 2.51 entry for the one field the two commands share: ``scan --against``'s baseline-summary ``detectors[]`` entries gain an additive ``not_evaluated`` boolean, distinguishing a detector whose support gate refused it from one that ran and produced nothing (``changes_count: 0`` in both cases). Detector provenance is an ADR-049 Phase 5 §6.4 parity field, so it moves on both sides together. The rest of ADR-067's scalar audit (the ``disposition_audit`` block, per-suppression rule provenance) is `compare`-only in this slice and does not reach scan output. Renumbered from a conflicting 1.28 when the origin/main merge claimed that version first for ADR-065 S2's scope/exit fields.
 #: 1.30 -- ADR-063 Track T3 (Codex review, PR #1078, twenty-fifth round): mirrors `compare`'s 2.53 entry -- `cli_scan_baseline._finding_summary()` serializes the same `report_finding_id()` whose documented algorithm gained a seventh, conditional `disambiguator` input for a typedef/constant occurrence-level finding needing collision disambiguation. `scan --against`'s JSON carries the identical changed ids with no version signal until now. Renumbered twice by successive origin/main merges: first from a conflicting 1.28 (ADR-065 S2's mirrored ``run_outcome``/``exit`` additions), then from the resulting conflicting 1.29 (ADR-067 C-S1's ``not_evaluated`` mirror).
 #: 1.31 -- ADR-068 Phase 4's typed-API slice: the typed ``ScanResult``/``ScanSetResult`` envelopes this marker also stamped are **gone**, along with ``run_scan``/``run_scan_set`` and ``scan --artifact-set`` itself (ADR-068's second 2026-09-09 amendment rules ``--artifact-set``/``new-library-set`` (b) -- dropped, pending ADR-065 S3). ``scan_schema_version`` now marks exactly one shape: ``ScanOutcome.to_dict()``, the ``scan --format json`` CLI contract (and the abort envelope ``workflows.scan_abort_result`` builds from the same fields). The ``per_artifact``/``bundle_findings``/``bundle_verdict``/``bundle_incomplete`` aggregate form 1.5 introduced, and the typed ``findings``/``layers``/``confidence``/``estimate``/``report`` envelope, are both unreachable -- a consumer that fed ``abicheck.service.run_scan``/``run_scan_set`` output to ``aggregate`` must run ``abicheck scan --format json`` (or, for a set, one invocation per library) instead. The CLI shape itself is unchanged by this bump. Two ``scan`` inputs also leave the command under the same amendment's (b) rulings: ``--risk-rules`` (and with it the risk-driven ``auto`` depth escalation -- an omitted ``--depth`` now resolves to the fixed ``headers`` rung the amendment names, the same default ``compare`` always used, so the ``level`` block of a pre-1.31 run that left ``--depth`` unset can differ: it read the risk-scored rung when a seed was present and the ``(S5, SOURCE)`` ``--mode`` preset otherwise, where it now always reads ``s0``/``headers``. Pin ``--depth source`` to ask for source evidence) and ``--build-target``.
-SCAN_SCHEMA_VERSION = "1.31"
+#: 1.32 -- mirrors `compare`'s 3.15 entry: additive ``gate.fail_on_removed_library``, always ``""`` (no release-fan-out scope).
+SCAN_SCHEMA_VERSION = "1.32"
+
+
+#: SemVer-style (MAJOR.MINOR) version of the directory/package release JSON
+#: envelope (`compare-release`'s per-run document,
+#: ``cli_compare_release_helpers._format_release_json``).
+#:
+#: 1.0 -- introduced (Codex review, findings-fixes round 11): this document
+#:       had no schema-version field at all before this constant, so a
+#:       consumer could not tell a release document predating the
+#:       ``compatible_additions`` correction (report schema 4.0: additions
+#:       only, excluding ``quality_issues``) apart from one written after
+#:       it -- both used the identical field name under two different
+#:       meanings. A document with no ``release_schema_version`` key
+#:       predates this constant and may carry either meaning depending on
+#:       which abicheck version produced it, with no reliable way to tell
+#:       from the payload alone; 1.0+ always carries the corrected value.
+RELEASE_SCHEMA_VERSION = "1.0"
 
 
 def current(name: str) -> str | int:
     """Return the current version abicheck emits for persisted artifact *name*.
 
     One read-only lookup facade over the version constants each artifact's
-    own module already owns (ADR-055 D3) -- current-version discovery only;
-    this is not a new versioning scheme, and does not add compatibility
-    metadata or cross-version lookup. *name* is one of ``"snapshot"``,
-    ``"compare"``, ``"audit"`` (``compare --no-baseline``, versioned
-    independently of ``"compare"``), ``"scan"``, ``"aggregate"``,
+    own module already owns (ADR-055 D3) -- current-version discovery only.
+    *name* is one of ``"snapshot"``, ``"compare"``, ``"audit"``
+    (``compare --no-baseline``), ``"scan"``, ``"release"``, ``"aggregate"``,
     ``"build-output"``, or ``"run-plan"``.
 
-    A doc generator (or an external integrator) can pull every current
-    version number from here instead of a human hand-copying one -- the
-    exact failure mode that let ``docs/use/python-api.md`` claim snapshots
-    carried ``schema_version 8`` long after the real value reached 17.
+    A doc generator can pull every current version number from here instead
+    of a human hand-copying one -- the exact failure mode that let
+    ``docs/use/python-api.md`` claim snapshots carried ``schema_version 8``
+    long after the real value reached 17.
     """
     if name not in _ARTIFACT_NAMES:
         raise ValueError(
@@ -1252,6 +1258,8 @@ def current(name: str) -> str | int:
         return REPORT_SCHEMA_VERSION
     if name == "scan":
         return SCAN_SCHEMA_VERSION
+    if name == "release":
+        return RELEASE_SCHEMA_VERSION
     if name == "aggregate":
         from ..workflows.aggregate import AGGREGATE_SCHEMA_VERSION
 
@@ -1262,15 +1270,10 @@ def current(name: str) -> str | int:
         return BUILD_OUTPUT_SCHEMA
     # RUN_PLAN_SCHEMA_GATE, not the base RUN_PLAN_SCHEMA -- a run-plan.json
     # is stamped one of two schema strings depending on whether it carries a
-    # `gate` block (CLI cleanup phase two, PR 2 continuation), so there is
-    # no single fixed "the" version this artifact always emits. This
-    # registry promises "the current version abicheck emits" (this
-    # function's own docstring); the highest version abicheck can produce
-    # is the truthful answer an external integrator/doc generator needs to
-    # be prepared to parse, not the lower, conditionally-emitted one (Codex
-    # review, fresh evidence -- reporting the base RUN_PLAN_SCHEMA here made
-    # this registry silently unaware of the newly emitted gate-bearing
-    # format).
+    # `gate` block, so there is no single fixed "the" version this artifact
+    # always emits. The highest version abicheck can produce is the
+    # truthful answer a doc generator needs to be prepared to parse, not
+    # the lower, conditionally-emitted one (Codex review).
     from ..buildsource.run_plan import RUN_PLAN_SCHEMA_GATE
 
     return RUN_PLAN_SCHEMA_GATE
@@ -1279,6 +1282,7 @@ def current(name: str) -> str | int:
 __all__ = [
     "REPORT_SCHEMA_VERSION",
     "SCAN_SCHEMA_VERSION",
+    "RELEASE_SCHEMA_VERSION",
     "COMPARE_REPORT_SCHEMA_PATH",
     "AGGREGATE_REPORT_SCHEMA_PATH",
     "load_compare_report_schema",

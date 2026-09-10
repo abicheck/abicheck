@@ -52,10 +52,23 @@ _VERSIONING_KNOWN_KEYS = frozenset(
 
 
 def _reject_unknown_keys(raw: dict[str, Any], known: frozenset[str], where: str) -> None:
+    """Hard-error when *raw* carries a key outside *known*.
+
+    A key need not be a string at all -- YAML happily parses ``1: foo`` at
+    any mapping level, string-keyed schema or not -- so *unknown* can mix
+    ``int``/``bool``/``None``/etc. with ``str`` members. ``sorted(unknown)``
+    on that mix previously raised an uncaught ``TypeError`` (int and str
+    aren't orderable) instead of the intended ``PolicyError``, turning a
+    malformed document into an operational failure rather than a clean
+    usage error. Sorting by each key's ``repr()`` keeps the message
+    deterministic and orderable regardless of what the malformed key's
+    *type* is, not just its spelling.
+    """
     unknown = set(raw) - known
     if unknown:
         raise PolicyError(
-            f"{where}: unknown key(s) {sorted(unknown)}. Valid keys: {sorted(known)}"
+            f"{where}: unknown key(s) {sorted(repr(k) for k in unknown)}. "
+            f"Valid keys: {sorted(known)}"
         )
 
 

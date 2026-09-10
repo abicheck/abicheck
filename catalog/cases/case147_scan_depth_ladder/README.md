@@ -5,15 +5,17 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE`, but the audit flags an
-advisory finding: `connect()` is a public function that takes
-`detail::SessionState&`, a type declared only in a private header — the same
-`private_header_leak` shape as case144, but this case exists to demonstrate
-*how much evidence abicheck needed to prove it*. ADR-035's honest-coverage
-promise is that a scan says exactly what each depth proved and what it
-could not, rather than silently upgrading a hint into a confirmed finding.
-This case is the legibility anchor for that promise: the same input, read at
-increasing evidence depth.
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
+D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+COMPATIBLE classification above describes the case, not the command's output.)
+The audit flags an advisory finding: `connect()` is a public function that
+takes `detail::SessionState&`, a type declared only in a private header — the
+same `private_header_leak` shape as case144, but this case exists to
+demonstrate *how much evidence abicheck needed to prove it*. ADR-035's
+honest-coverage promise is that a scan says exactly what each depth proved and
+what it could not, rather than silently upgrading a hint into a confirmed
+finding. This case is the legibility anchor for that promise: the same input,
+read at increasing evidence depth.
 
 ## What this snapshot contains
 

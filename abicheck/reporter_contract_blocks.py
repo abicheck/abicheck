@@ -33,6 +33,7 @@ from .report.render_json import render_json
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from datetime import date
 
     from .checker_types import Change, DiffResult
     from .report.scoped_gate import ScopedGateChangeHelpers
@@ -47,6 +48,7 @@ def add_contract_context(
     require_complete_analysis: bool = False,
     severity_config: SeverityConfig | None = None,
     include_exit_decision: bool = True,
+    today: date | None = None,
 ) -> None:
     """ADR-049 Phase 4's persisted contract blocks, plus P0.4's
     ``analysis_assurance``/``analysis_assurance_exit_contribution`` and CLI
@@ -59,6 +61,9 @@ def add_contract_context(
     :mod:`abicheck.contract_context_io` to match
     :func:`~abicheck.contract_replay.replay_original_decisions`. Called from
     all three JSON paths, same as ``_add_surface_scope``/``_add_reconciled``.
+    *today*, forwarded to the ``exit`` block's resolver and to
+    :func:`add_annotations`, keeps both agreeing with an already-frozen
+    ``ReportEnvelope`` (Codex review, fresh evidence).
     """
     from .analysis_assurance import (
         analysis_assurance_exit_contribution,
@@ -118,8 +123,9 @@ def add_contract_context(
             severity_config,
             scheme,
             require_complete_analysis=require_complete_analysis,
+            today=today,
         ).to_dict()
-    add_annotations(d, result, severity_config=severity_config)
+    add_annotations(d, result, severity_config=severity_config, today=today)
     add_use_case_impact(d, result, displayed)
     # Same `include_exit_decision` gate as the `exit` block above, for the
     # identical reason (Codex review, PR #803, fresh evidence): the digest's
@@ -197,6 +203,8 @@ def add_effective_config_digest(
     severity_config: SeverityConfig | None = None,
     exit_code_scheme: str | None = None,
     require_complete_analysis: bool = False,
+    on_incomplete_scope: str | None = None,
+    fail_on_removed_library: bool | None = None,
 ) -> None:
     """CLI cleanup phase two, PR B: the effective-configuration digest --
     "one effective configuration ... with the same effective-config digest
@@ -238,19 +246,37 @@ def add_effective_config_digest(
     rather than silently absent from the fingerprint (Codex review,
     PR #803, fresh evidence).
     """
+    import dataclasses
+
     from .effective_config_digest import (
         effective_config_digest,
         effective_config_fields,
     )
-    from .policy.gate_pack_fold import gate_exit_code_scheme
+    from .policy.effective_gate import EffectiveGate, scoped_gate_selection_from_result
 
-    scheme = exit_code_scheme or gate_exit_code_scheme(severity_config is not None)
-    ec_fields = effective_config_fields(
-        result,
-        severity_config=severity_config,
-        exit_code_scheme=scheme,
+    # The one real, per-run `EffectiveGate` this comparison resolved (Codex
+    # review, PR #1192, closure package 4's own follow-up findings):
+    # *severity_config*, *require_complete_analysis*, and *result*'s own
+    # recorded scoped-gate selection (`--used-by`/`--required-symbol`) are
+    # exactly this run's three other gate-changing facts. `scheme` may
+    # override the derived one (a caller's own already-resolved scheme,
+    # e.g. `scan --against`'s own `exit_scheme` -- see this function's own
+    # docstring on *exit_code_scheme*), so `gate` is rebuilt to actually
+    # carry it rather than leaving the model able to disagree with itself.
+    # `effective_config_fields` below reads every `gate.*` field from *this*
+    # object exclusively -- it is the digest's single source for them, not
+    # a second, independently-rederived projection of the same raw inputs.
+    gate = EffectiveGate.from_severity(
+        severity_config,
         require_complete_analysis=require_complete_analysis,
+        scope=scoped_gate_selection_from_result(result),
+        on_incomplete_scope=on_incomplete_scope,
+        fail_on_removed_library=fail_on_removed_library,
     )
+    scheme = exit_code_scheme or gate.exit_code_scheme
+    if scheme != gate.exit_code_scheme:
+        gate = dataclasses.replace(gate, exit_code_scheme=scheme)
+    ec_fields = effective_config_fields(result, gate=gate)
     d["effective_config_digest"] = effective_config_digest(ec_fields)
     d["effective_config_fields"] = ec_fields
 
@@ -376,8 +402,7 @@ def add_suppression_audit(d: dict[str, Any], result: DiffResult) -> None:
             suppression_rule_label(r, i) for i, r in enumerate(audit.expired_rules)
         ],
         "near_expiry_rules": [
-            suppression_rule_label(r, i)
-            for i, r in enumerate(audit.near_expiry_rules)
+            suppression_rule_label(r, i) for i, r in enumerate(audit.near_expiry_rules)
         ],
     }
 
@@ -487,6 +512,7 @@ def build_report_document_with_side_facts(
     gate: GateDecision | None = None,
     show_only: str | None = None,
     contract_evaluation: bool = False,
+    today: date | None = None,
 ) -> ReportDocument:
     """Fold in the shared side facts and freeze *d* as a :class:`ReportDocument`.
 
@@ -496,7 +522,10 @@ def build_report_document_with_side_facts(
     wants the *document* -- to project it into a non-JSON format, or to build
     it once and render it several times -- does not have to render to a JSON
     string and parse it back. ``render_json_with_side_facts`` itself is now a
-    thin ``build -> render`` wrapper kept for its existing callers.
+    thin ``build -> render`` wrapper kept for its existing callers. *today*,
+    forwarded to :func:`~abicheck.report.scoped_gate.apply_scoped_gate`, keeps
+    a scoped-only finding agreeing with an already-frozen ``ReportEnvelope``
+    (Codex review, fresh evidence).
     """
     from .report.cross_source_evolution import (
         compute_cross_source_evolution_summary,
@@ -522,6 +551,7 @@ def build_report_document_with_side_facts(
         severity_config=severity_config,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
+        today=today,
     )
     return ReportDocument.from_mapping(d)
 
@@ -531,6 +561,7 @@ def add_annotations(
     result: DiffResult,
     *,
     severity_config: SeverityConfig | None = None,
+    today: date | None = None,
 ) -> None:
     """CLI cleanup phase two, PR E: persist ``annotations`` (schema 2.43).
 
@@ -551,5 +582,5 @@ def add_annotations(
     from .annotations import annotation_report_entries
 
     d["annotations"] = annotation_report_entries(
-        result, severity_config=severity_config
+        result, severity_config=severity_config, today=today
     )

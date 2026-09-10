@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -114,6 +114,8 @@ from .workflows.release_scope import (
     build_release_scope_record,
     out_of_scope_provider_names,
     release_inventory_evidence,
+    resolve_release_scope_plan,
+    resolve_release_scope_result,
     scoped_bundle_maps,
 )
 from .workflows.release_stored_inventory import (
@@ -439,6 +441,16 @@ def compare_release_cmd(
     # is a true no-op: every library is compared exactly as it was before
     # this parameter existed.
     collapse_versioned_symbols: bool = False,
+    # ADR-068 §3 #23 / ADR-049 D7 (second review round): `compare`'s
+    # directory/package fan-out resolves `.abicheck.yml`'s `policy.overrides`
+    # once, ahead of dispatch (the same place it already resolves
+    # `project_cfg`/`pack_application` for this fan-out -- see
+    # `resolve_project_config_policy_overrides`), and hands the resolved
+    # `ChangeKind -> Verdict` mapping over here -- same internal-parameter
+    # shape as `pack_application`/`compile_context` above. `None` (the
+    # default) is a true no-op: every library is compared exactly as it was
+    # before this parameter existed.
+    project_policy_overrides: dict[Any, Any] | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -649,6 +661,47 @@ def compare_release_cmd(
                 old_inventory=old_inventory,
                 new_inventory=new_inventory,
             )
+            # ADR-061 gap D / DoD item 8, closure package 4: the pre-
+            # execution half of ADR-065's scope model (which members are
+            # paired, and each side's own completeness evidence) as one
+            # resolved plan object rather than four independent locals
+            # threaded by hand -- see `ReleaseScopePlan`'s own docstring.
+            #
+            # Codex review (PR #1192, follow-up finding): rebinding
+            # `old_map`/`new_map`/`matched_keys` to the plan's own copies
+            # here -- rather than only reading `scope_plan.*` at the record
+            # builder after execution -- is what makes `scope_plan` the
+            # actual input execution consumes, not a DTO wrapper computed
+            # alongside it. `stored_degraded_members`, `compare_keys`, and
+            # `_compare_release_libraries` below (and every other reader in
+            # this function) now see exactly what the plan resolved, so a
+            # future normalization/selection rule added to
+            # `resolve_release_scope_plan` changes which pairs actually run,
+            # not merely how the post-execution record describes them.
+            #
+            # Codex review (PR #1192, second follow-up finding): an explicit
+            # `--select`/`--select-required` selection is folded into
+            # `matched_keys` *before* `resolve_release_scope_plan` runs, not
+            # as a separate filter applied to `compare_keys` afterward (see
+            # the now-removed second filter below) -- so `scope_plan` itself,
+            # not a step downstream of it, is what narrows what executes.
+            # The direct-pair sentinel is exempt: `DIRECT_PAIR_KEY` names no
+            # real declared library for a selection to match against.
+            plan_matched_keys = matched_keys
+            if release_selection is not None and list(matched_keys) != [
+                DIRECT_PAIR_KEY
+            ]:
+                plan_matched_keys = [
+                    k for k in matched_keys if k in release_selection
+                ]
+            scope_plan = resolve_release_scope_plan(
+                old_map, new_map, plan_matched_keys, inventory_evidence
+            )
+            old_map, new_map, matched_keys = (
+                dict(scope_plan.old_map),
+                dict(scope_plan.new_map),
+                list(scope_plan.matched_keys),
+            )
 
             if fmt != "json":
                 for msg in warning_msgs:
@@ -673,6 +726,14 @@ def compare_release_cmd(
             # `_compute_release_severity_exit_code`,
             # `_fold_release_global_severity`) now reads the resulting
             # `GateOptions` instead of independently re-deriving it.
+            # Codex review, PR #1192, third follow-up round: `on_incomplete_
+            # scope`/`fail_on_removed` are this run's own already-resolved
+            # ADR-065 release-scope axes (the identical locals `compare_
+            # keys`'s scope-decision resolution and `_exit_compare_release`
+            # read below) -- passed straight through so `GateOptions`/
+            # `EffectiveGate`'s own digest-facing fields cannot silently
+            # disagree with the values that actually govern this run's exit
+            # code.
             gate = resolve_release_gate_options(
                 pack_application,
                 severity_preset=severity_preset,
@@ -680,6 +741,8 @@ def compare_release_cmd(
                 severity_potential_breaking=severity_potential_breaking,
                 severity_quality_issues=severity_quality_issues,
                 severity_addition=severity_addition,
+                on_incomplete_scope=on_incomplete_scope,
+                fail_on_removed_library=fail_on_removed,
             )
             # Resolved before the compare pass (its inputs are plain CLI values, no
             # dependency on compare results) so persisted per-library annotations
@@ -721,10 +784,10 @@ def compare_release_cmd(
             # caller did not declare is never run through the (expensive)
             # per-library dump/compare pass at all -- it is reported
             # `OUT_OF_SCOPE` on the scope record below, not silently
-            # compared anyway.
+            # compared anyway. `matched_keys` is already selection-narrowed
+            # (folded into `scope_plan` above), so no second filter is
+            # needed here.
             compare_keys = [k for k in matched_keys if k not in degraded_matched]
-            if release_selection is not None:
-                compare_keys = [k for k in compare_keys if k in release_selection]
             library_results, worst_verdict, diff_pairs = _compare_release_libraries(
                 compare_keys,
                 old_map,
@@ -772,6 +835,7 @@ def compare_release_cmd(
                 explain_patterns=explain_patterns,
                 public_header_dirs=public_header_dirs,
                 collapse_versioned_symbols=collapse_versioned_symbols,
+                project_policy_overrides=project_policy_overrides,
             )
 
             for key in matched_keys:
@@ -818,30 +882,37 @@ def compare_release_cmd(
                 from .workflows.release_plan import build_declared_selection_record
 
                 scope_record = build_declared_selection_record(
-                    old_map,
-                    new_map,
-                    matched_keys,
+                    scope_plan.old_map,
+                    scope_plan.new_map,
+                    scope_plan.matched_keys,
                     library_results,
-                    inventory_evidence,
+                    scope_plan.evidence,
                     release_selection,
                     **_scope_failed,
                 )
             else:
                 scope_record = build_release_scope_record(
-                    old_map,
-                    new_map,
-                    matched_keys,
+                    scope_plan.old_map,
+                    scope_plan.new_map,
+                    scope_plan.matched_keys,
                     library_results,
-                    inventory_evidence,
+                    scope_plan.evidence,
                     **_scope_failed,
                 )
+            # ADR-061 gap D / DoD item 8, closure package 4 (Codex review,
+            # PR #1192): the release fan-out's realized scope outcome, paired
+            # with the plan it was resolved against -- from here on this run
+            # reads the acquisition record through `scope_result.record`
+            # exclusively, not a bare `ScopeAcquisitionRecord` threaded
+            # alongside an independent, un-paired plan.
+            scope_result = resolve_release_scope_result(scope_plan, scope_record)
             # A member --dso-only could not classify is this run's own
             # acquisition failure: an operational `ERROR` library result
             # (the same rank a failed extraction takes, floored at exit 4
             # under either --on-incomplete-scope policy), unless D9 narrowed
             # it out of scope -- then it is listed on the record only (Codex
             # review, twentieth round).
-            scope_states = {m.member: m.state for m in scope_record.members}
+            scope_states = {m.member: m.state for m in scope_result.record.members}
             for key in sorted(set(old_unclassified) | set(new_unclassified)):
                 reason = old_unclassified.get(key) or new_unclassified[key]
                 if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
@@ -857,10 +928,12 @@ def compare_release_cmd(
             # Decided by policy once; every consumer below (the writers, the
             # sidecar, the stderr notice, the exit) reads this one decision.
             scope_terms = comparison_scope_terms(
-                resolve_scope_decision(scope_record, on_incomplete_scope)
+                resolve_scope_decision(scope_result.record, on_incomplete_scope)
             )
-            removed_keys = [m.member for m in scope_record.proven_removed_members]
-            added_keys = [m.member for m in scope_record.proven_added_members]
+            removed_keys = [
+                m.member for m in scope_result.record.proven_removed_members
+            ]
+            added_keys = [m.member for m in scope_result.record.proven_added_members]
             # ADR-065 S4: the fan-out's unmatched/removed/added stderr notices,
             # now written from the acquisition record instead of the deleted
             # `_match_release_keys` set difference -- so one line can say
@@ -868,7 +941,7 @@ def compare_release_cmd(
             # says "unmatched" (naming why the proof is missing) otherwise.
             # Emitted here, not with the discovery-time warnings above, because
             # the record does not exist until the fan-out has run.
-            scope_notices = release_scope_warnings(scope_record)
+            scope_notices = release_scope_warnings(scope_result.record)
             warning_msgs.extend(scope_notices)
             if fmt != "json":
                 for msg in scope_notices:
@@ -881,7 +954,7 @@ def compare_release_cmd(
             # one becomes an ordinary per-component result so the existing
             # verdict fold, severity aggregation, report renderers and
             # disposition audit see it without a parallel pipeline.
-            for entry in support_promise_results(scope_record, support_promise):
+            for entry in support_promise_results(scope_result.record, support_promise):
                 library_results.append(entry)
                 entry_verdict = str(entry["verdict"])
                 if _RELEASE_VERDICT_ORDER.get(
@@ -1073,7 +1146,7 @@ def compare_release_cmd(
             # *proven* removals/additions only -- an unchecked member
             # is absent from it, not a deleted provider (Codex review).
             bundle_old_map, bundle_new_map = scoped_bundle_maps(
-                old_map, new_map, scope_record
+                old_map, new_map, scope_result.record
             )
             bundle_result, worst_verdict = _collect_bundle_result(
                 library_results,
@@ -1083,18 +1156,22 @@ def compare_release_cmd(
                 manifest_path=manifest_path,
                 bundle_system_providers=(
                     *bundle_system_providers,
-                    *out_of_scope_provider_names(scope_record),
+                    *out_of_scope_provider_names(scope_result.record),
                 ),
                 bundle_cohorts=bundle_cohorts,
                 policy=policy,
                 policy_file=resolve_bundle_policy_file(
-                    suppress, policy, policy_file_path, pack_application
+                    suppress,
+                    policy,
+                    policy_file_path,
+                    pack_application,
+                    project_policy_overrides,
                 ),
                 old_root=old_dir,
                 new_root=new_dir,
                 old_variant=old_variant,
                 new_variant=new_variant,
-                scope_record=scope_record,
+                scope_record=scope_result.record,
             )
 
             # Strip _diff_result from entries and bump verdict for removed libraries.
@@ -1121,6 +1198,7 @@ def compare_release_cmd(
                 old_version=old_version,
                 new_version=new_version,
                 pack_application=pack_application,
+                project_policy_overrides=project_policy_overrides,
             )
 
             # Fold release-global bundle/matrix findings into the severity exit so a

@@ -64,9 +64,9 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError
+from ..model.bundle_facts import require_degraded_members_known
 from .bundle_facts_validation import (
     require_degraded_marker_version,
-    require_degraded_members_known,
     validated_inventory_complete,
 )
 from .dto import (

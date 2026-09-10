@@ -18,9 +18,11 @@
 ## Verdict and consumer impact
 
 Single-release audit: one build's evidence checked against itself, no
-baseline. abicheck's verdict is `COMPATIBLE` — the ABI hasn't broken — but
-the audit flags two advisory findings that are the two failure directions
-of the same L0-exports ↔ L2-decls contract:
+baseline. abicheck reports **no verdict at all** (`"verdict": null`): ADR-068
+D2 — a single build has nothing to be compatible *with*. (The catalog's 🟢
+COMPATIBLE classification above describes the case, not the command's output:
+the ABI hasn't broken.) But the audit flags two advisory findings that are the
+two failure directions of the same L0-exports ↔ L2-decls contract:
 
 | Direction | Symptom | Cross-check |
 |-----------|---------|--------------|

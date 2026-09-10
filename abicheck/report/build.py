@@ -29,24 +29,35 @@ back into *this* module through ``importlib`` instead of a static
 ``from .report.build import ...``, so the pair never forms a real import
 cycle -- only one direction is a static edge.
 
-Scope note (2026-09-07): JSON's own ``report_mode="full"`` build is the
-first, and so far only, pipeline routed through this choke point. Markdown,
-HTML, SARIF, and JUnit still each build (and freeze) their own document
-independently -- see ``docs/contribute/adr/
-061-responsibility-package-architecture.md``'s Gap C status note and
-``docs/contribute/plans/duplication-and-convergence-assessment.md``'s
-Phase 4 status note for the precise, current per-format state and the
-remaining work.
+Scope note (gap C closure package 3): every format now projects **one**
+document, not one document per format. :func:`build_report_envelope` is the
+call that makes that true -- it resolves the severity gate, the per-finding
+verdict/category set and this document once, above format selection, and
+hands the resulting :class:`~abicheck.report.envelope.ReportEnvelope` to
+``service_render.render_envelope``. It lives here, next to the document build
+it composes, rather than in ``report/envelope.py`` (see that module's own
+docstring: an ``envelope -> build`` import edge would close a real cycle
+through ``reporter.py``). ``--stat``/``oneline`` and the ``leaf``/
+``root-cause`` views remain separate documents by design -- see
+``docs/contribute/adr/061-responsibility-package-architecture.md``'s gap C
+status note and ``docs/contribute/plans/
+duplication-and-convergence-assessment.md``'s Phase 4 note.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING
 
+from ..checker_types import Change
 from .document import ReportDocument
+from .envelope import RenderOptions, ReportEnvelope
+from .finding import build_report_findings
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
+    from ..model import AbiSnapshot
+    from ..policy.severity import GateDecision
     from ..workflows.gate import SeverityConfig
 
 
@@ -59,6 +70,8 @@ def build_report_document(
     require_complete_analysis: bool = False,
     include_exit_decision: bool = True,
     contract_evaluation: bool = False,
+    gate: GateDecision | None = None,
+    today: date | None = None,
 ) -> ReportDocument:
     """Build the one canonical, format-neutral ``report_mode="full"`` document.
 
@@ -70,6 +83,28 @@ def build_report_document(
     ``show_recommendation``) is not a parameter here -- it belongs to the
     format's own render step, applied to a *projection* of this document,
     never to a second, differently-decided build.
+
+    *gate* (ADR-061 gap C) is the severity ``GateDecision``
+    :func:`build_report_envelope` below already resolved
+    for this render, so the envelope and this document cannot each resolve
+    one. Passing ``None`` (the default) resolves it here, exactly as before.
+    That default is unambiguous rather than a missing sentinel:
+    ``gate_decision_for_result`` returns ``None`` *if and only if*
+    ``severity_config`` is ``None``, so a real resolved gate is never ``None``
+    while a gate is configured -- "not supplied" and "resolved to no gate"
+    can only coincide in the one case where both answers are identical. That
+    same equivalence is why the fallback below is skipped outright when
+    ``severity_config is None``: resolving there could only ever return the
+    ``None`` this already holds.
+
+    *today*, when given, is forwarded to every date-sensitive resolution
+    this function's own helpers perform (the severity JSON's category
+    counts, per-change verdict/reclassify/gate-contribution fields, and the
+    active ``policy_reclassify`` rule set) -- without it, a caller building
+    from an already-frozen ``ReportEnvelope`` could still see this document
+    disagree with the envelope's own ``gate``/``findings`` once a dated
+    ``reclassify:`` rule's expiry is crossed between construction and render
+    (Codex review, fresh evidence).
     """
     # Static import of `reporter.py`'s own privately-defined helpers --
     # this is the one direction of the report.build <-> reporter dependency
@@ -129,7 +164,8 @@ def build_report_document(
         _add_show_only_filter(d, result, changes, show_only)
 
     # Severity-categorized summary when severity config is provided
-    gate = gate_decision_for_result(result, severity_config)
+    if gate is None and severity_config is not None:
+        gate = gate_decision_for_result(result, severity_config, today=today)
     if gate is not None:
         assert severity_config is not None  # gate is None otherwise
         d["severity"] = _build_severity_json(
@@ -139,6 +175,7 @@ def build_report_document(
             policy=result.policy,
             kind_sets=eff_sets,
             policy_file=result.policy_file,
+            today=today,
         )
 
     _add_changes_block(
@@ -149,9 +186,10 @@ def build_report_document(
         eff_sets,
         show_only,
         severity_config=severity_config,
+        today=today,
     )
     _add_suppression(d, result)
-    _add_disposition_audit(d, result, severity_config)
+    _add_disposition_audit(d, result, severity_config, today=today)
     _add_surface_changes(d, result, changes)
     _add_finding_evolution(d, result)
     _add_pattern_preprocessor_scan(d, result)
@@ -164,10 +202,11 @@ def build_report_document(
         require_complete_analysis=require_complete_analysis,
         severity_config=severity_config,
         include_exit_decision=include_exit_decision,
+        today=today,
     )
     _add_detectors(d, result)
     _add_confidence_evidence(d, result)
-    _add_policy_overrides(d, result)
+    _add_policy_overrides(d, result, today=today)
     _add_trailing_fields(d, result, show_impact, show_only)
     return build_report_document_with_side_facts(
         d,
@@ -177,4 +216,362 @@ def build_report_document(
         gate=gate,
         show_only=show_only,
         contract_evaluation=contract_evaluation,
+        today=today,
+    )
+
+
+def _snapshot_change(change: Change) -> Change:
+    """A fully independent copy of a single finding.
+
+    ``Change`` is an ordinary mutable dataclass, not a value type -- pattern
+    modulation legitimately sets ``effective_verdict`` on one *during*
+    ``compare()``, for one concrete example. A shared ``Change`` instance
+    reassigned after this envelope was built (its ``effective_verdict``, or
+    any other field) would still be classified from its pre-mutation value
+    by ``document``/``findings`` (frozen at that value) while a projection
+    that classifies straight from ``envelope.result`` would read the new
+    one -- the same class of disagreement :func:`_snapshot_diff_result`
+    closes for the containing lists, one level down.
+
+    A full ``copy.deepcopy`` rather than a shallow copy of just the
+    top-level list fields: several fields nest a mutable container inside
+    another (``impact_proof_path: list[dict[str, object]]``,
+    ``impact_alternative_paths: list[list[dict[str, object]]]``) -- a
+    shallow per-field list copy decouples the outer list but still shares
+    the dicts inside it, so mutating ``impact_proof_path[0]["label"]`` after
+    construction would reach the envelope exactly as reassigning
+    ``effective_verdict`` did before this fix (Codex review, fresh
+    evidence). Every field ``Change`` actually carries is plain,
+    self-contained data (strings, enums, nested frozen dataclasses like
+    ``ImpactAssessment``, dicts/lists of the same) -- nothing here holds a
+    reference to another large shared object (an ``AbiSnapshot``, a
+    ``PolicyFile``) that a deep copy would wastefully duplicate.
+    """
+    import copy
+
+    return copy.deepcopy(change)
+
+
+def _snapshot_diff_result(result: DiffResult) -> DiffResult:
+    """Return a copy of *result* with every list/tuple-of-``Change`` replaced.
+
+    :class:`ReportEnvelope` exists so a decision made once cannot drift by
+    the time a later projection reads it -- but ``DiffResult`` itself is an
+    ordinary mutable dataclass (``contract_pipeline``/``post_manifest``
+    legitimately append to ``.changes`` *during* ``compare()``, and
+    ``cli_scan_baseline`` reassigns it afterward for its own filtering
+    pass). A caller handing this same, still-live object to a later,
+    unrelated mutation after the envelope was built would otherwise
+    desynchronize ``document``/``findings``/``gate`` (built from the
+    original list) from any projection that reads ``envelope.result``
+    directly for presentation (HTML's/JUnit's bucketing, SARIF's rule
+    catalog) -- the exact case ``report/AGENTS.md``'s immutability
+    contract for this envelope forbids. Every ``Change`` element is itself
+    snapshotted too (:func:`_snapshot_change`) -- copying only the
+    containers and leaving the mutable ``Change`` objects inside shared by
+    reference closes the container-level version of this bug but not the
+    element-level one (a caller reassigning ``change.effective_verdict``
+    after construction, reported as a follow-up finding on this same fix).
+
+    ``copy.copy`` (not ``dataclasses.replace``) on purpose: some scoping
+    passes (``cli_helpers_compare.py``'s ``result.scoped_only_changes =
+    ...``) attach attributes that are not declared ``DiffResult`` fields at
+    all; ``dataclasses.replace`` reconstructs the object through
+    ``__init__`` and would silently drop them, while ``copy.copy`` carries
+    every attribute in ``__dict__``, declared or not. A list-valued
+    attribute gets a fresh list (with every ``Change`` element replaced by
+    its own snapshot; a non-``Change`` element is shared as before -- e.g.
+    ``coverage_warnings``' plain strings need no copy of their own). A
+    tuple-valued attribute (e.g. ``scoped_only_changes``) is already immune
+    to in-place *container* mutation, but still needs its own ``Change``
+    elements replaced the same way. A dict-valued attribute (e.g.
+    ``comparability_assurance``, read straight off ``envelope.result`` by
+    HTML's/Markdown's comparability section -- CodeRabbit review) gets a
+    fresh dict for the same reason a list does.
+
+    Every ``Change`` this replaces is tracked in an ``id(original) ->
+    replacement`` map, then used to remap ``result.disposition_ledger``
+    (:func:`_remap_disposition_ledger`) -- that ledger's every consumer
+    keys strictly on ``id(change)`` (Codex review, fresh evidence:
+    ``report/disposition_audit.py``'s own ``ledger_for(result,
+    severity_config)`` call, on this same snapshot, otherwise reads every
+    gating record as outside its gate's ``severity_input``, since none of
+    the ledger's recorded identities match these new objects).
+
+    Every other non-primitive attribute (``policy_file``, ``old_metadata``/
+    ``new_metadata``, and the many ``object | None``-typed fields --
+    ``suppression_audit``, ``contract_context``, ``analysis_assurance``,
+    ``acknowledgments``, ... -- ``DiffResult`` accumulates) gets the same
+    treatment via the catch-all branch below, rather than one field named
+    at a time as each was independently reported: a custom mutable object
+    hanging off ``DiffResult`` is exactly the same class of bug as a list
+    or a ``Change``, whichever field it happens to be (Codex review, fresh
+    evidence, three rounds: ``comparability_assurance`` -> ``policy_file``
+    -> ``old_metadata``/``new_metadata`` -- HTML's own
+    ``compatibility_metrics`` call classifies straight against
+    ``envelope.result.policy_file``; more than one format reads
+    ``old_metadata``/``new_metadata`` directly). ``disposition_ledger`` is
+    the one exception -- it needs identity-preserving remap
+    (:func:`_remap_disposition_ledger`), not a plain deep copy, so it is
+    excluded from the catch-all and handled on its own below. An ``Enum``
+    member is immutable by construction and never needs a copy of its own.
+
+    The catch-all deep copy is best-effort: some ``object | None`` fields
+    (e.g. a frozen dataclass built over a ``types.MappingProxyType``) are
+    not themselves deep-copyable at all (``TypeError: cannot pickle
+    'mappingproxy' object``) -- and don't need to be, since a value the
+    stdlib itself refuses to copy already can't be handed a *new*, mutable
+    container to leak through; sharing the original is exactly as safe as
+    copying it would have been. Falling back to sharing on that specific
+    failure, rather than letting it propagate, is what keeps this general
+    fix from being narrower than the one-field-at-a-time fixes it replaces.
+    """
+    import copy
+    from enum import Enum
+
+    snapshot = copy.copy(result)
+    identity_map: dict[int, Change] = {}
+
+    def _snapshot_element(value: object) -> object:
+        """One list/tuple/dict *element*'s own independent copy.
+
+        A ``Change`` gets the identity-tracked treatment every other Change
+        in this snapshot gets; anything else gets the same best-effort deep
+        copy the top-level catch-all below applies to a whole field --
+        a structured element (e.g. ``contract_conflicts``' own
+        ``dict``-shaped entries) is exactly as reachable through a
+        container this loop already opens as a bare field is (Codex
+        review, fresh evidence: the outer list container was
+        decoupled, but its own dict *elements* were still shared).
+        """
+        if isinstance(value, Change):
+            new_value = _snapshot_change(value)
+            identity_map[id(value)] = new_value
+            return new_value
+        try:
+            return copy.deepcopy(value)
+        except TypeError:
+            return value
+
+    for name, value in vars(result).items():
+        if name == "disposition_ledger":
+            continue
+        if isinstance(value, list):
+            setattr(snapshot, name, [_snapshot_element(v) for v in value])
+        elif isinstance(value, tuple) and any(isinstance(v, Change) for v in value):
+            setattr(snapshot, name, tuple(_snapshot_element(v) for v in value))
+        elif isinstance(value, dict):
+            setattr(
+                snapshot,
+                name,
+                {k: _snapshot_element(v) for k, v in value.items()},
+            )
+        elif value is not None and not isinstance(
+            value, (str, int, float, bool, bytes, Enum)
+        ):
+            try:
+                setattr(snapshot, name, copy.deepcopy(value))
+            except TypeError:
+                pass
+    ledger = getattr(snapshot, "disposition_ledger", None)
+    if ledger is not None:
+        snapshot.disposition_ledger = _remap_disposition_ledger(ledger, identity_map)
+    return snapshot
+
+
+def _remap_disposition_ledger(ledger: object, mapping: dict[int, Change]) -> object:
+    """A copy of *ledger* with every ``id(change)``-keyed identity remapped.
+
+    ``policy.disposition_ledger.DispositionLedger`` keys every one of its
+    lookups (``with_gate``'s ``severity_input`` test, ``index_for``/
+    ``record_for``/``rule_for``) on ``id(change)`` against the objects it
+    was recorded with -- see that class's own docstrings. This module
+    replaces every recorded ``Change`` with an independent copy
+    (:func:`_snapshot_change`/:func:`_snapshot_diff_result`), which
+    otherwise desynchronizes those lookups from this ledger's *own*
+    ``_anchors``/``_seen_ids``, silently answering every one of them
+    "unrecorded". Reaches into the ledger's own private state (rather than
+    adding a public method there) because that module carries an
+    ``architecture/debt.yaml`` ``no_growth`` baseline this PR does not own
+    and is already at, with no headroom for a new method; every attribute
+    name here is the one that class's own docstrings already document.
+    """
+    import copy as _copy
+
+    remapped = _copy.copy(ledger)
+    remapped._records = list(ledger._records)  # type: ignore[attr-defined]
+    remapped._seen_keys = dict(ledger._seen_keys)  # type: ignore[attr-defined]
+    remapped._anchors = [mapping.get(id(a), a) for a in ledger._anchors]  # type: ignore[attr-defined]
+    remapped._aliases = [mapping.get(id(a), a) for a in ledger._aliases]  # type: ignore[attr-defined]
+    remapped._seen_ids = {  # type: ignore[attr-defined]
+        (id(mapping[old_id]) if old_id in mapping else old_id): idx
+        for old_id, idx in ledger._seen_ids.items()  # type: ignore[attr-defined]
+    }
+    return remapped
+
+
+def _snapshot_abi_snapshot(snapshot: AbiSnapshot) -> AbiSnapshot:
+    """A shallow, container-decoupled copy of one operand ``AbiSnapshot``.
+
+    Mirrors :func:`_snapshot_diff_result`'s own reasoning (a caller
+    reassigning ``old.version`` or appending to ``old.functions`` after the
+    envelope was built must not reach HTML's/JUnit's own direct reads of
+    ``envelope.old``/``envelope.new``) but *not* its full depth: a real
+    ``AbiSnapshot`` carries every ``Function``/``RecordType``/``EnumType``
+    the extractor found -- tens of thousands for a large library -- and
+    ``copy.deepcopy``ing the whole object graph on every render measurably
+    dominates render time on such a library (Codex review, fresh evidence:
+    ~6s for a pair of 10k-function snapshots). A shallow copy of the
+    top-level object, a fresh container for each list/dict field, and one
+    shallow ``copy.copy`` per list *element* closes every case reported so
+    far -- attribute reassignment, list-level mutation, and mutating a
+    top-level attribute of one retained ``Function``/``RecordType`` (e.g.
+    ``old.functions[0].mangled``, which JUnit's own testcase naming reads
+    straight off ``envelope.old`` -- CodeRabbit review, fresh evidence) --
+    at a cost still orders of magnitude below full recursion: a shallow
+    per-element copy is O(1) per element, not O(depth). A field *nested
+    inside* one of those elements (e.g. a ``RecordType.fields`` entry) is
+    still shared -- unlike a ``Change``, which :func:`_snapshot_change`
+    deep-copies in full, an ``AbiSnapshot`` element's own nested structure
+    is deliberately left out of scope here for the size/performance reason
+    stated above.
+
+    ``dependency_info`` (populated only under ``--follow-deps``) is a
+    single mutable object stored directly as one field, not inside a
+    list/dict, so it got neither treatment above and stayed fully shared
+    with the caller (CodeRabbit review, fresh evidence: mutating
+    ``old.dependency_info.nodes`` after this call changed a later render).
+    It gets a shallow ``copy.copy`` of the object, a fresh container for
+    each of its own list/dict fields, and (Codex review, fresh evidence:
+    a bare ``list(value)`` still shared each ``dict`` entry, so mutating
+    ``old.dependency_info.nodes[0]["soname"]`` after construction could
+    still desync one projection from another already reading the same
+    envelope) one ``copy.deepcopy`` per list element -- each entry is one
+    small, JSON-shaped dict, not a large object graph, so this stays
+    nowhere near the cost the rest of this function avoids. Deliberately
+    scoped to this one known field rather than every optional metadata
+    attribute (``dwarf``/``elf``/...), several of which can be far larger
+    than a dependency graph.
+    """
+    import copy
+
+    result = copy.copy(snapshot)
+    for name, value in vars(snapshot).items():
+        if isinstance(value, list):
+            setattr(result, name, [copy.copy(v) for v in value])
+        elif isinstance(value, dict):
+            setattr(result, name, dict(value))
+    if result.dependency_info is not None:
+        dep = copy.copy(result.dependency_info)
+        for name, value in vars(dep).items():
+            if isinstance(value, list):
+                setattr(dep, name, [copy.deepcopy(v) for v in value])
+            elif isinstance(value, dict):
+                setattr(dep, name, dict(value))
+        result.dependency_info = dep
+    return result
+
+
+def build_report_envelope(
+    result: DiffResult,
+    old: AbiSnapshot,
+    new: AbiSnapshot | None = None,
+    *,
+    options: RenderOptions | None = None,
+    severity_config: SeverityConfig | None = None,
+) -> ReportEnvelope:
+    """Finalize every report decision for *result*, once, before format selection.
+
+    This is the only place the three shared resolutions run for a render:
+    ``gate_decision_for_result`` once, ``build_report_findings`` once per
+    change, and ``build_report_document`` once -- the gate resolved *first*
+    and handed to the document build, so the document's own ``severity``
+    block and the decision object SARIF's and HTML's gate blocks read are
+    literally the same object rather than two calls that agree.
+
+    *result* is snapshotted first (:func:`_snapshot_diff_result`) so nothing
+    a caller does to the object it passed in after this call returns can
+    ever reach the envelope -- every decision below, and every projection
+    that reads ``envelope.result`` directly, is computed from that one
+    frozen-in-effect copy. *old*/*new* get the analogous (shallower --
+    see :func:`_snapshot_abi_snapshot`) treatment: they are the public
+    multi-format workflow's own retained operands, read directly by more
+    than one projection (HTML's/JSON's version and dependency-info fields,
+    JUnit's unchanged-testcase set) that ``build_report_document`` itself
+    never touches -- reassigning ``old.version`` or mutating
+    ``old.functions`` after this call returned would otherwise desynchronize
+    exactly those projections from one another (Codex review, fresh
+    evidence).
+
+    ``today`` is resolved exactly once here and threaded into every
+    verdict resolution below, including the envelope's own later fallback
+    (:meth:`ReportEnvelope._resolve`, used for a display-only ``Change``
+    copy `report_correlation._suppress_dangling_correlation_notes` hands a
+    renderer under ``--show-only``): a dated ``PolicyFile.reclassify``
+    rule's expiry is checked against ``today``, so a render that happens
+    after the rule expires but reads an envelope built before it must still
+    see the same verdict the rest of that envelope's document was built
+    from -- not a second, later "today" (Codex review, fresh evidence).
+    """
+    from ..policy.gate_decision import gate_decision_for_result
+
+    result = _snapshot_diff_result(result)
+    old = _snapshot_abi_snapshot(old)
+    new = _snapshot_abi_snapshot(new) if new is not None else None
+    opts = options if options is not None else RenderOptions()
+    today = date.today()
+    gate = gate_decision_for_result(result, severity_config, today=today)
+    document = build_report_document(
+        result,
+        show_only=opts.show_only,
+        show_impact=opts.show_impact,
+        severity_config=severity_config,
+        require_complete_analysis=opts.require_complete_analysis,
+        contract_evaluation=opts.contract_evaluation,
+        gate=gate,
+        today=today,
+    )
+    kind_sets = result._effective_kind_sets()
+    findings = build_report_findings(
+        result.changes,
+        policy=result.policy,
+        kind_sets=kind_sets,
+        policy_file=result.policy_file,
+        today=today,
+    )
+    scoped_only = tuple(getattr(result, "scoped_only_changes", ()) or ())
+    scoped_only_findings = (
+        build_report_findings(
+            list(scoped_only),
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
+            today=today,
+        )
+        if scoped_only
+        else ()
+    )
+    suppressed_findings = (
+        build_report_findings(
+            list(result.suppressed_changes),
+            policy=result.policy,
+            kind_sets=kind_sets,
+            policy_file=result.policy_file,
+            today=today,
+        )
+        if result.suppressed_changes
+        else ()
+    )
+    return ReportEnvelope(
+        result=result,
+        old=old,
+        new=new,
+        options=opts,
+        severity_config=severity_config,
+        document=document,
+        findings=findings,
+        gate=gate,
+        resolved_today=today,
+        scoped_only_findings=scoped_only_findings,
+        suppressed_findings=suppressed_findings,
     )

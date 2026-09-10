@@ -85,9 +85,10 @@ class TestOverrideSuppressionRewritesAnAlreadyRecordedChange:
     def test_module_level_helper_is_none_safe(self) -> None:
         # Mirrors record_suppressed_change's own "no ledger, no-op" contract
         # -- a caller that never opted into the audit must not crash.
-        override_suppressed_change(
+        result = override_suppressed_change(
             None, _change(), rule=None, application_point="scan_crosscheck_off"
         )
+        assert result is None
 
     def test_module_level_helper_routes_to_the_ledger(self) -> None:
         ledger = DispositionLedger()

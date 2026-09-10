@@ -227,8 +227,13 @@ class TestStoredVersusLiveReleaseParity:
         # release fan-out too (matching the scalar `compare` path), so a
         # library that gained a public function also gets the ADR-027
         # PUBLIC_SURFACE_GREW roll-up finding alongside the per-symbol
-        # addition itself -- two compatible findings, not one.
-        assert outcomes["libb.so"][4] == 2  # baz added + public_surface_grew
+        # addition itself -- two compatible findings, not one. Split across
+        # compatible_additions/quality_issues since report_schema_version
+        # 4.0's compatible_additions correction (findings-fixes round 10/11):
+        # PUBLIC_SURFACE_GREW is not in ADDITION_KINDS, so it counts as a
+        # quality issue, not an addition.
+        assert outcomes["libb.so"][4] == 1  # baz added
+        assert outcomes["libb.so"][5] == 1  # public_surface_grew
         assert outcomes["libc.so"][0] == "NO_CHANGE"
 
     def test_stored_stored_matches_live_live(self, tmp_path: Path) -> None:

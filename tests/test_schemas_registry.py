@@ -38,6 +38,7 @@ class TestSchemasCurrent:
             # base RUN_PLAN_SCHEMA a gate-less plan still uses -- see
             # schemas.current()'s own run-plan branch for why.
             ("run-plan", RUN_PLAN_SCHEMA_GATE),
+            ("release", schemas.RELEASE_SCHEMA_VERSION),
         ],
     )
     def test_current_matches_the_owning_constant(self, name, expected):
@@ -57,6 +58,8 @@ class TestSchemasCurrent:
         # the value, so a docs generator can format it without guessing.
         assert isinstance(schemas.current("snapshot"), int)
 
-    @pytest.mark.parametrize("name", ["compare", "scan", "build-output", "run-plan"])
+    @pytest.mark.parametrize(
+        "name", ["compare", "scan", "build-output", "run-plan", "release"]
+    )
     def test_other_versions_are_strings(self, name):
         assert isinstance(schemas.current(name), str)

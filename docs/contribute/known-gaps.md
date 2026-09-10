@@ -7613,25 +7613,169 @@ library. A release's finding count therefore scales with member count rather
 than with what changed, and `--output-dir`'s per-library reports carry the
 duplicates too.
 
-The cause is structural, not a detector bug: `cli_compare_release.py` resolves
-one `old_h`/`new_h`/`old_inc`/`new_inc` set for the whole release and passes
-it unchanged to every `_compare_one_library` call, because there is no
-member-to-header attribution model. Fixing it means deciding what that model
-is, and every candidate is a real design choice with its own failure modes:
+The cause is a missing *transport*, not a missing model. `cli_compare_release.py`
+resolves one `old_h`/`new_h`/`old_inc`/`new_inc` set for the whole release and
+passes it unchanged to every `_compare_one_library` call — but that function
+already takes its header list **per member** (`cli_compare_release_pairwise.py`'s
+`old_h` parameter, forwarded straight to `_run_compare_pair`); only the caller
+flattens it. And the per-member mapping already exists upstream:
+`build-output.json` carries per-target `public_header_roots`/
+`generated_header_roots`, `buildsource/baseline_publish.py`'s
+`derive_baseline_libraries()` turns those into `actions/baseline`'s
+`libraries[].header`, and `publish-baseline.yml` already dumps **each library
+with its own headers** at a selectable `depth`. `BundleSpec.targets` is a list
+of target ids and `TargetSpec.public_headers` exists per target, so the
+declaration is in the project schema too.
 
-* per-member header *directories* by naming convention (`libfoo.so` ->
-  `foo.h`) — guesswork, and wrong for the common one-umbrella-header library;
-* attribution by symbol overlap (a header belongs to the member whose export
-  table its declarations resolve against) — principled, but it is the
-  `export_surface.py`/`type_reachability.py` machinery run per member, and it
-  must fail *closed* (an unattributable header stays global) or it will hide
-  real findings, which is strictly worse than today's over-reporting;
-* an explicit per-member mapping in `.abicheck.yml` — no guessing, but new
-  public configuration surface, so an ADR.
+So an earlier revision of this entry was wrong to frame this as "decide what
+the attribution model is" and to propose naming conventions or a new
+`.abicheck.yml` key. The model is declared; `compare` simply has no operand
+shape that carries it. Three things close this, in increasing order of scope:
+
+1. **De-duplicate first.** A header-derived finding that cannot be attributed
+   to one member should be reported **once**, release-scoped, rather than once
+   per member. That is the honest reading of the evidence ("which member this
+   affects was not established") and it removes most of the pain with no
+   guessing at all. The current N× duplication is the actual defect.
+2. **Carry the map into `compare`.** A per-member header operand (mirroring
+   `actions/baseline`'s own `libraries` JSON) so the fan-out resolves
+   `old_h`/`new_h` per member. Small, given the seam already exists.
+3. **Attribute by reachability** where no map is declared: a header-derived
+   finding belongs to the member(s) whose export surface reaches the entity —
+   `export_surface.compute_export_surface` and `type_reachability.py` already
+   do exactly this per library. Must fall back to (1), never to silence.
+
+Note that this is only half of header-aware package comparison. The other
+half is where OLD's headers come from at all:
+`buildsource/project_targets.py`'s `BUNDLE_CHECK_DEPTHS = {binary}` exists
+because a bundle baseline stages raw binaries and `check-project.yml` has one
+project-wide `header:` input, so `depth: headers` would parse *both* sides
+with the current checkout's headers and make a header-only change silently
+invisible — a false negative, strictly worse than this entry's over-reporting.
+Staging bundle baselines as per-member snapshots (what single-target mode
+already does) is what would let that restriction be relaxed.
 
 Deliberately not attempted as part of the `--depth` fix: it is a separate
-change, in a different layer, with a much larger blast radius, and AGENTS.md
-is explicit that recording the gap beats shipping a narrow guess as if it
-were the general fix. Note that over-reporting is the safe direction — no
-finding is *lost* today — which is why this is a gap rather than a blocker
-on the fix that surfaced it.
+change in a different layer. Over-reporting is the safe direction — no finding
+is *lost* today — which is why this is a gap rather than a blocker on the fix
+that surfaced it.
+
+## Suppression provenance stops at the display label outside the audit path
+
+ADR-067 D3 says a disposition keeps the rule that made it — rule id, source
+file, reason, label, expiry. `Change.suppression_rule` is not that record: it
+is `SuppressionOutcome.rule_label()`'s deliberate `label or reason` collapse,
+so a waiver stating both publishes one and silently drops the other, along
+with the file it lives in and when it lapses — exactly what a reviewer needs
+to decide whether the waiver still applies.
+
+`compare --no-baseline` had this in all four of its projections and was fixed
+in PR #1188: each suppressed entry now carries the run's own
+`DispositionLedger.rule_for` record, and the regression test is parametrized
+over `NO_BASELINE_SUPPORTED_FORMATS` so a format added later is held to it.
+Two-sided `compare`'s **JSON** was already correct before that
+(`reporter.py`'s `_suppressed_change_entry` emits `rule.to_dict()`).
+
+Two readers are still on the display label alone. Both were found by grepping
+every `suppression_rule` reader once the audit's own were fixed, and both are
+outside the scope PR #1188 was opened for, so they are recorded here rather
+than folded into it:
+
+1. **`sarif.py`** (two-sided `compare`) — the suppression's `justification`
+   interpolates `change.suppression_rule` only. Since the same run's JSON
+   already publishes the full record, this is a *between-formats* split of one
+   report: a SARIF consumer sees strictly less than a JSON consumer of the
+   identical run.
+2. **`cli_scan_baseline.py`** (`scan --against`) — each suppressed
+   `findings[]` entry sets `entry["suppression_rule"]` and carries no
+   provenance field at all.
+
+Fixing either is the same shape as the audit's fix: route the run's
+`DispositionLedger` to that entry builder and read `rule_for(change)`, rather
+than re-evaluating the rule set (which can name a different rule than the one
+that actually fired, since a finding's fields may have been enriched after the
+match). Neither needs a new mechanism — only the existing one wired to one
+more builder.
+
+Registered as open residuals on the `report.finding_entry_builder_parity`
+bug class in `tests/regressions/manifest.py`'s report sibling
+(`tests/regressions/manifest_report.py`), so the next person to touch that
+class sees them without re-deriving the grep.
+
+## `compare --no-baseline` crashes on any real ELF shared library
+
+Auditing a real ELF shared library raises an **uncaught**
+`NoBaselineInvariantError` — a Python traceback, not a diagnostic — from a
+bare CLI call:
+
+```console
+$ abicheck compare --no-baseline /lib/x86_64-linux-gnu/libm.so.6 --format json
+abicheck.policy.no_baseline_findings.NoBaselineInvariantError: a snapshot
+compared against itself must never produce a comparison finding -- if this
+fires, a detector is reading non-identity state. Offending findings:
+visibility_leak(<visibility>)
+```
+
+Reproduced on `main` at `f5df70dd` as well as on the branch that found it,
+so it is not a regression from any in-flight work. It was found only because
+a test fixture in `tests/test_compare_no_baseline_cli.py` was made more
+realistic (see that file's `_a_live_binary_this_host_can_audit`); every
+committed G20 fixture is a stored snapshot, so no existing test audits a
+real live library at all — which is why a crash on the command's most
+obvious input survived.
+
+**The invariant's own message misdiagnoses it.** Nothing is reading
+non-identity state. `diff_platform_elf_dynamic._diff_visibility_leak` is
+deliberately single-sided — its body opens `del new  # detector is
+intentionally old-library-only` — and reports internal-looking symbols
+exported from one snapshot under `elf_only_mode`. That is candidate-side
+hygiene, exactly the category `policy/no_baseline_findings.
+is_one_sided_finding` exists to recognise. But the detector emits a plain
+`make_change(...)` carrying **neither** marker that predicate looks for
+(`cross_source_evolution`, `candidate_side_enrichment`), so
+`partition_no_baseline_findings` files it under `identity`, and
+`check_no_baseline_partition` raises.
+
+There is an irony worth recording, because it is the actual lesson:
+`is_one_sided_finding`'s docstring argues at length against a `ChangeKind`
+allowlist on the grounds that it "would drift out of sync with the detector
+registry." The marker-based design it chose instead has drifted the *other*
+way — a genuinely one-sided detector that never got a marker. Neither
+mechanism is self-enforcing; the missing piece is a check that a detector
+ignoring its `new` argument emits marked findings.
+
+**Why it was not fixed where it was found.** The obvious patch — set
+`candidate_side_enrichment` on the finding — is not local. That marker is
+read on the ordinary two-sided `compare` path too, where this detector also
+runs and reports leaks in the OLD library, so setting it relabels a finding
+in the main command. And `_diff_visibility_leak` is unlikely to be alone:
+any detector that `del`s or ignores `new` is in the same position, so the
+real fix is an audit of that whole set plus a gate, not a one-line change
+to the one instance a traceback happened to name. That is a change with its
+own review surface, and it was out of scope for the pull request (#1188)
+that found it — which touches neither file.
+
+**Fix shape, for whoever takes it:**
+
+1. Enumerate every detector under `abicheck/diff_*.py` whose body ignores
+   its `new` snapshot argument (`del new`, or never referencing it). That
+   set is the population, not `visibility_leak` alone.
+2. Decide per detector whether it is candidate-side hygiene (mark it) or a
+   genuine comparison detector that happens not to need `new` yet.
+3. Mark the hygiene ones, and check what that does to two-sided `compare`'s
+   reports and gating before assuming it is inert there.
+4. Add the missing self-enforcement: a gate — the AI-readiness script is
+   the natural home, alongside `fact-detector-misuse` — asserting that a
+   detector which ignores `new` emits only marked findings. Without it the
+   next single-sided detector reintroduces this exact crash.
+5. Add a test that audits a **real live shared library**, not a stored
+   snapshot. Its absence is why this shipped;
+   `tests/test_compare_no_baseline_cli.py`'s helper documents the platform
+   traps (a soname is not a path; macOS keeps system libraries in the dyld
+   shared cache; a PE executable has no export directory).
+
+Registered as `test_fixture.host_artifact_assumed_capability` in
+`tests/regressions/manifest_report.py`'s sibling
+`tests/regressions/manifest_tool_surface.py` for the fixture half; the
+detector half above has no registry entry yet, deliberately — it is a real
+open defect, not a closed class.
