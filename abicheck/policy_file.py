@@ -90,6 +90,7 @@ from .policy.versioning_policy import (
     built_in_default_versioning_policy,
 )
 from .policy_file_acknowledgment import parse_acknowledgment_policy
+from .policy_file_top_level import reject_unknown_top_level_keys
 from .policy_file_versioning import parse_versioning_policy
 
 # NOTE: `.reclassify` is deliberately imported lazily (function-local) below,
@@ -692,6 +693,7 @@ class PolicyFile:
             raise PolicyError(
                 f"Policy file must be a YAML mapping, got {type(raw).__name__}"
             )
+        reject_unknown_top_level_keys(raw)
 
         base_policy = _parse_base_policy(raw)
         overrides = _parse_overrides(raw.get("overrides", {}), path)
