@@ -189,6 +189,11 @@ def test_main_never_fails_on_diff_error(
             "abicheck/policy/coverage_ledger.py",
             "docs/learn/contract-aware-compatibility.md",
         ),
+        ("abicheck/policy/evidence_status.py", "docs/learn/verdicts.md"),
+        ("abicheck/policy/reclassify.py", "docs/use/policies.md"),
+        ("abicheck/workflows/contracts.py", "docs/use/python-api.md"),
+        ("abicheck/workflows/request_inputs.py", "docs/use/python-api.md"),
+        ("abicheck/model/header_ast_frontends.py", "docs/use/python-api.md"),
     ],
 )
 def test_real_repo_gap_b_owner_paths_trigger_their_pages(
