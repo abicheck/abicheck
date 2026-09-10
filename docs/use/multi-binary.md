@@ -545,15 +545,17 @@ itemizes — never the verdict or exit code. `--output-dir` remains the way
 to see every library's full, unfiltered single-pair `compare` report
 unconditionally, regardless of this cap.
 
-When a library's list is actually truncated, the entry sets
-`findings_truncated`/`findings_view_truncated` (the latter only when
-`--view show=...` is active) alongside the exact, untruncated
-`findings_total_count`/`findings_total_count_view`, and also
-`findings_truncated_kinds`/`findings_view_truncated_kinds` — a
-`ChangeKind -> count` map of what was cut from that library's list, the
-same shape `scan --against`'s identical ledger uses — so the shape of a
-truncated library's diff is visible without rerunning at a higher cap.
-Both kind maps are absent when nothing was truncated for that library.
+When a library's list is actually truncated, the rendered entry sets
+`findings_truncated` (or, under `--view show=...`, `findings_view_truncated`
+swapped into that same key for the filtered display) and
+`findings_truncated_kinds` — a `ChangeKind -> count` map of what was cut
+from that library's *displayed* list, the same shape `scan --against`'s
+identical ledger uses — so the shape of a truncated library's diff is
+visible without rerunning at a higher cap. The map is absent when nothing
+was truncated for the displayed view. (The release JSON's own top-level
+`release_filtered_summary` block separately carries the exact, uncapped
+total finding count across the whole release, for the aggregate case where
+`--view show=...` is active.)
 
 ```json
 {
@@ -564,8 +566,7 @@ Both kind maps are absent when nothing was truncated for that library.
       "breaking": 25,
       "findings": ["... 10 entries ..."],
       "findings_truncated": true,
-      "findings_truncated_kinds": {"func_removed": 24, "public_surface_shrank": 1},
-      "findings_total_count": 25
+      "findings_truncated_kinds": {"func_removed": 24, "public_surface_shrank": 1}
     }
   ]
 }

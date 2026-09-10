@@ -373,6 +373,33 @@ class TestReleaseViewShowOnly:
         # raw `findings` list itself is capped to.
         assert doc["release_filtered_summary"] == {"displayed": 25, "total": 26}
 
+    def test_filtered_release_json_truncation_kinds_match_the_displayed_view(
+        self, tmp_path: Path
+    ) -> None:
+        """CodeRabbit review ("Fix the rendered truncation metadata before
+        documenting it"): `_release_findings_for_render`'s `findings`/
+        `findings_truncated` swap under `--view show=...` used to leave
+        `findings_truncated_kinds` reading the *unfiltered* projection's
+        value -- so a rendered, `show=functions`-filtered `findings` list
+        (25 `func_removed`, capped to 10) carried a truncation ledger that
+        also counted the one `public_surface_shrank` note the filter had
+        already excluded outright, and the private `findings_view_
+        truncated_kinds` key leaked into the rendered entry unstripped."""
+        old_dir, new_dir = _write_removed_functions_pair(tmp_path, count=25)
+
+        result = _invoke(
+            "compare", str(old_dir), str(new_dir),
+            "--format", "json", "--view", "show=functions",
+        )
+        assert result.exit_code == 4, result.output
+        lib = json.loads(result.output)["libraries"][0]
+        assert lib["findings_truncated"] is True
+        # Only the 15 excluded `func_removed` -- never the filtered-out
+        # `public_surface_shrank`, which isn't part of the displayed
+        # `show=functions` view at all.
+        assert lib["findings_truncated_kinds"] == {"func_removed": 15}
+        assert "findings_view_truncated_kinds" not in lib
+
     def test_output_dir_summary_json_never_leaks_the_internal_accounting_keys(
         self, tmp_path: Path
     ) -> None:

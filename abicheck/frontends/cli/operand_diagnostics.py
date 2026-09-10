@@ -55,6 +55,7 @@ def _warn_unused_set_flags(
     output_dir: Path | None,
     select: tuple[str, ...] = (),
     select_required: tuple[str, ...] = (),
+    max_findings_per_library: int | None = None,
 ) -> None:
     """Warn that the set-input fan-out flags do not apply to single-file inputs."""
     used = []
@@ -68,6 +69,13 @@ def _warn_unused_set_flags(
         used.append("--select")
     if select_required:
         used.append("--select-required")
+    if max_findings_per_library is not None:
+        # Codex/CodeRabbit review: a single-pair `compare` has no release
+        # summary to cap, and this option previously reached the single-pair
+        # path silently -- the given value was neither applied nor reported,
+        # the exact "dropped flag" defect this warning mechanism exists to
+        # prevent for its siblings above.
+        used.append("--max-findings-per-library")
     if used:
         click.echo(
             "Warning: " + ", ".join(used) + " only apply to directory/package "

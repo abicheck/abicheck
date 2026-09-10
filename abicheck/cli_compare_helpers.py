@@ -1597,7 +1597,7 @@ def run_compare(
     _warn_unused_set_flags(
         dso_only=resolved_cfg.release_dso_only, output_dir=output_dir,
         select=select, select_required=select_required,
-    )
+        max_findings_per_library=max_findings_per_library)
 
     # Preserved before _normalize_compare_options resolves `demangle` against
     # the *primary* fmt below — the secondary render needs the same tri-state

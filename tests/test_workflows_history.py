@@ -357,12 +357,22 @@ class TestFindingEvolutionWiring:
     def test_later_pair_classifies_against_the_prior_pair(
         self, tmp_path: Path
     ) -> None:
-        """A finding present in both of two adjacent pairwise diffs is
-        `persistent`; one that stops appearing in the later diff is
-        `resolved` and named in that pair's own `resolved` list; a finding
-        new to the later diff is `introduced` -- classified against the
-        *previous* pair's own result, not a third, independently-invented
-        comparison."""
+        """A finding introduced in one pairwise diff that stops appearing in
+        the next is `resolved` and named in that pair's own `resolved` list;
+        a finding new to the later diff is `introduced` -- classified
+        against the *previous* pair's own result, not a third,
+        independently-invented comparison.
+
+        `persistent` is deliberately not exercised here: a finding's
+        `report_finding_id` embeds its old/new value, so the exact same
+        finding recurring identically across two *independent* real
+        `compare()` calls over three genuinely distinct snapshots is not a
+        constructible scenario (unlike re-running `compare()` against a
+        fixed, unmoving baseline) -- `test_finding_evolution.py`'s own
+        primitive-level tests (`test_identical_chain_step_is_fully_
+        persistent`, `test_partition_matches_set_difference`) already cover
+        `persistent` directly against hand-built `DiffResult`s, which is
+        where that state's contract belongs."""
         p1 = _save(tmp_path, "1.0.0", [_fn("add"), _fn("subtract")])
         p2 = _save(tmp_path, "2.0.0", [_fn("add")])
         p3 = _save(tmp_path, "3.0.0", [_fn("add"), _fn("multiply")])
