@@ -27,12 +27,14 @@ ADR-068's Action-input-lifecycle amendment retired ``mode: scan`` outright:
 - ``budget`` works for a two-sided compare (``compare``'s own ``--budget``
   guard, exit 5) but is rejected upfront for the audit-only shape, since
   ``compare --no-baseline``'s wall-clock guard is not wired to that path.
-- ``require-complete-analysis`` -- unlike the two gaps above -- is NOT
-  withheld from the audit-only shape: `compare --no-baseline` accepts the
-  flag and gives it real teeth (an incomplete analysis-assurance
-  candidate-side finding fails the step), so this Action forwards it
-  unconditionally for every single-pair shape, two-sided and audit-only
-  alike.
+- ``require-complete-analysis`` -- unlike the two gaps above -- is not a
+  capability gap between the two shapes at all any more: rulings.py's
+  deferred-option followup retired the dedicated Action input outright, on
+  every shape alike (two-sided and audit-only), in favor of
+  ``.abicheck.yml``'s config-only ``assurance.require_complete: true`` with
+  no CLI or Action-input override (ADR-068 D5 guard #2, "no escape hatch").
+  Setting it now fails the step unconditionally rather than being forwarded
+  to either shape.
 - ``used-by``/``used-by-manifest``/``required-symbol``/``required-symbols``
   (ADR-043 consumer/entrypoint scoping) work for a two-sided compare, but
   ``compare --no-baseline`` hard-rejects all four -- scoping a comparison
@@ -44,10 +46,9 @@ upfront with a clear ``::error::`` naming the actual gap and its
 replacement (the same "reject, don't silently narrow" treatment as the
 hard-retired inputs in ``test_action_run_contract.py``) instead of reaching
 ``compare``'s own usage error deep in the run; a two-sided compare (either
-old-library or abi-baseline set) still forwards all three, plus
-require-complete-analysis; and the audit-only shape forwards
-require-complete-analysis too, since that one is a genuine, working
-capability rather than a documented no-op.
+old-library or abi-baseline set) still forwards since/changed-path/budget;
+and require-complete-analysis fails the step the same unconditional way on
+both shapes, since that input has no CLI flag left to forward to at all.
 """
 
 from __future__ import annotations
@@ -273,35 +274,24 @@ class TestAuditOnlyCompareUnaffectedWhenTheseInputsAreUnset:
         assert outputs["_returncode"] == 0, outputs
 
 
-class TestAuditOnlyCompareRequireCompleteAnalysisIsForwarded:
-    """Unlike since/changed-path/budget, require-complete-analysis is NOT
-    withheld from the audit-only shape: `compare --no-baseline` accepts the
-    flag and gives it real teeth (an incomplete analysis-assurance
-    candidate-side finding fails the step). This fixture's own stored
-    snapshot carries complete assurance, so setting the flag does not
-    change its outcome here -- this test proves the flag reaches the CLI
-    without erroring (a CLI that rejected it outright would fail this run
-    at exit 64, not agree with the no-flag run), not that the flag is inert
-    in general (`TestAuditOnlyCompareForwardsRequireCompleteAnalysis`
-    below proves it reaches the assembled command line directly)."""
+class TestAuditOnlyCompareRequireCompleteAnalysisIsRetired:
+    """rulings.py deferred-option followup: the dedicated
+    ``require-complete-analysis`` Action input is retired outright --
+    setting it fails the audit-only shape unconditionally, the same as the
+    two-sided shape below (`TestTwoSidedCompareRequireCompleteAnalysisIsRetired`),
+    rather than being forwarded to `compare --no-baseline`."""
 
-    def test_require_complete_analysis_does_not_error_and_does_not_change_this_fixtures_outcome(
-        self, tmp_path: Path
-    ) -> None:
-        without_flag = _run_action(
-            tmp_path,
-            {"INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE))},
-        )
-        with_flag = _run_action(
+    def test_require_complete_analysis_fails_the_step(self, tmp_path: Path) -> None:
+        outputs = _run_action(
             tmp_path,
             {
                 "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
                 "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             },
         )
-        assert without_flag["_returncode"] == 0, without_flag
-        assert with_flag["_returncode"] == 0, with_flag
-        assert with_flag.get("verdict") == without_flag.get("verdict")
+        assert outputs["_returncode"] == 1, outputs
+        assert "require-complete-analysis" in outputs["_stdout"], outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs
 
 
 # --- Static CMD-assembly checks for the two-sided-compare shape -----------
@@ -381,30 +371,35 @@ class TestTwoSidedCompareStillForwardsSinceChangedPathBudget:
         assert "--budget" in cmd, cmd
         assert "15m" in cmd, cmd
 
-    def test_require_complete_analysis_reaches_compare(self) -> None:
-        cmd = _run_cmd({**_BASELINE_INPUTS, "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"})
-        assert "--require-complete-analysis" in cmd, cmd
+    def test_require_complete_analysis_is_retired_and_fails_cmd_assembly(
+        self,
+    ) -> None:
+        """rulings.py deferred-option followup: the dedicated Action input
+        no longer reaches compare at all -- setting it fails the step
+        (the harness script itself exits non-zero) before CMD assembly
+        gets anywhere near it."""
+        with pytest.raises(AssertionError, match="require-complete-analysis"):
+            _run_cmd({**_BASELINE_INPUTS, "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"})
 
     def test_follow_deps_reaches_compare(self) -> None:
         cmd = _run_cmd({**_BASELINE_INPUTS, "INPUT_FOLLOW_DEPS": "true"})
         assert "--follow-deps" in cmd, cmd
 
 
-class TestAuditOnlyCompareForwardsRequireCompleteAnalysis:
-    """`compare --no-baseline` genuinely accepts require-complete-analysis
-    (live-verified against the real CLI), so unlike since/changed-path/
-    budget, this Action forwards it unconditionally for the audit-only
-    shape rather than withholding it."""
+class TestAuditOnlyCompareRequireCompleteAnalysisCmdAssemblyIsRetired:
+    """Same retirement, audit-only shape, at the CMD-assembly level: still an
+    unconditional failure, not a forwarded flag, the same as the two-sided
+    shape above."""
 
-    def test_flag_is_present_in_cmd_when_input_is_true(self) -> None:
-        cmd = _run_cmd(
-            {
-                "INPUT_MODE": "compare",
-                "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
-            }
-        )
-        assert "--require-complete-analysis" in cmd, cmd
+    def test_flag_is_absent_and_the_step_fails_when_input_is_true(self) -> None:
+        with pytest.raises(AssertionError, match="require-complete-analysis"):
+            _run_cmd(
+                {
+                    "INPUT_MODE": "compare",
+                    "INPUT_NEW_LIBRARY": "lib.so",
+                    "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
+                }
+            )
 
 
 class TestAuditOnlyCompareNeverForwardsBudget:

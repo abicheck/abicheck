@@ -63,7 +63,7 @@ flowchart TD
     R --> B["gate<br/>(each report's own severity/scan<br/>gate, combined — never recomputed)"]
     R --> C["coverage<br/>(did every REQUIRED target<br/>report at all?)"]
     R --> D["contract_coverage<br/>(for a target that DID report,<br/>was its own contract evidence complete?)"]
-    R --> F["analysis_assurance<br/>(for a target that DID report,<br/>was its own evidence complete<br/>under --require-complete-analysis?)"]
+    R --> F["analysis_assurance<br/>(for a target that DID report,<br/>was its own evidence complete<br/>under assurance.require_complete?)"]
     A -.->|context only| E["exit code = max(...)"]
     B --> E
     C --> E
@@ -96,8 +96,8 @@ flowchart TD
   produce exit `1`, for unrelated reasons, and the JSON output records which
   targets caused which.
 - **analysis_assurance** (P0.4, aggregate schema 1.5) — for a target that
-  *did* report, was its own evidence complete under
-  `--require-complete-analysis`? Read back from that report's own
+  *did* report, was its own evidence complete under `.abicheck.yml`'s
+  `assurance.require_complete: true`? Read back from that report's own
   `analysis_assurance_exit_contribution` and folded with `max`, exactly the
   way `compare`/`scan --against` fold theirs. The exact sibling of
   `contract_coverage` above, for a different question: a required target
@@ -174,7 +174,7 @@ example — every real report carries the field):
 target's report used `--contract` — it is never omitted. `analysis_assurance`
 is the exact sibling, present the same way, with `exit_contribution: 0` and
 an empty `incomplete_targets` list when no target's report used
-`--require-complete-analysis`.
+`assurance.require_complete: true`.
 
 ## Declaring the expected-target set
 

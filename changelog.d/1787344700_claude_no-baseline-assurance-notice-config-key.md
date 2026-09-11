@@ -1,0 +1,3 @@
+### Fixed
+
+- **The no-baseline audit's "analysis assurance incomplete" notice now names the live config key.** `compare --no-baseline`'s Markdown/oneline report told a reader that `--require-complete-analysis` caused the exit-1 gate; that flag was removed (rulings.py deferred-option followup), so following the remediation text produced a CLI usage error (exit `64`) instead of reproducing the gate. The notice (`abicheck/report/no_baseline_document.py`'s `NO_BASELINE_EXIT_AXIS_NOTICES["analysis_assurance"]`) now names `.abicheck.yml`'s `assurance.require_complete: true`, the switch that actually arms this axis.

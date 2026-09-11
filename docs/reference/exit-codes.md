@@ -189,7 +189,7 @@ run, folded with the same `max` discipline:
 | Axis | Contributes | When |
 |---|---|---|
 | Audit gate (ADR-068 2026-09-10 amendment) | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
-| Analysis assurance (P0.4) | `1` | `--require-complete-analysis` and `analysis_assurance.status` is not `complete` |
+| Analysis assurance (P0.4) | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete` |
 | Contract coverage (ADR-049 Phase 7) | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract (ADR-064) | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
 
@@ -257,29 +257,27 @@ present in `--format json` output (`analysis_assurance` — a top-level key on
 `compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
-is purely informational until a caller opts in. Passing
-`--require-complete-analysis` makes `compare`/`scan --against` additionally contribute exit `1`
+is purely informational until a caller opts in. Setting `.abicheck.yml`'s
+`assurance.require_complete: true` (config-only -- no CLI flag; the former
+`compare --require-complete-analysis` flag was demoted here entirely) makes
+`compare` additionally contribute exit `1`
 whenever `analysis_assurance.status` is not `complete`, folded with the same
 `max` discipline the contract-coverage axis above uses: it raises a clean `0`
 to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
 demote a real ABI break to "warnings only", and it never rewrites the
 compatibility verdict, any finding, or the severity gate's own contribution.
 
-`--require-complete-analysis` is single-pair only. A directory/package
+`assurance.require_complete: true` is single-pair only. A directory/package
 (release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out); `scan
---against` rejects it without `--against`, alongside every other
-baseline-only flag — there is no comparison for it to gate on otherwise.
+tracked follow-up for extending this axis to the release fan-out).
 
-**Without `--require-complete-analysis` every pre-existing invocation's exit
-code is unchanged**, exactly as `--contract`'s own coverage axis
+**Without `assurance.require_complete: true` every pre-existing invocation's
+exit code is unchanged**, exactly as `--contract`'s own coverage axis
 requires no opt-in flag change either.
 
-The composite GitHub Action folds this the same way it folds the
-contract-coverage axis: an assurance-gated exit `1` (via the dedicated
-`require-complete-analysis` input, on either command) maps to a dedicated
-`ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
-unconditional (no `fail-on-*` input disables it).
+The composite GitHub Action's own dedicated `require-complete-analysis`
+input is retired alongside the CLI flag it forwarded to (rulings.py
+deferred-option followup) -- see `docs/reference/github-action-inputs.md`.
 
 ## The `exit` report field (CLI cleanup phase two, PR G1 / PR E)
 
@@ -677,7 +675,7 @@ Phase 7), and the exit code is the worst contribution across them:
   produce exit `1`, for unrelated reasons, and `aggregate` records which one
   fired rather than merging them into one undifferentiated `1`.
 - **analysis_assurance** — reads back each analyzed target's own
-  `analysis_assurance_exit_contribution` (`--require-complete-analysis`; see
+  `analysis_assurance_exit_contribution` (`assurance.require_complete`; see
   "Analysis-assurance contribution" above) and folds it with `max` the same way (aggregate
   schema `1.5`); `aggregate` never recomputes it. A target whose own evidence
   was incomplete under that flag aggregates to `1` on this axis alone,
@@ -699,7 +697,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `--require-complete-analysis`; a release target's comparison scope gated (`.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; a target's own analysis assurance was incomplete under `.abicheck.yml`'s `assurance.require_complete: true`; a release target's comparison scope gated (`.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed); **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -762,7 +760,7 @@ for the current value) and carries the six axes
 separately under `gate` / `coverage` / `compatibility` / `contract_coverage` /
 `analysis_assurance` / `scope_completeness` — the last three are
 `{"exit_contribution": 0, "incomplete_targets": []}`-shaped and present even
-when no target used `--contract`/`--require-complete-analysis` or every
+when no target used `--contract`/`assurance.require_complete: true` or every
 release target checked its whole scope (an empty `incomplete_targets` list,
 not an omitted block).
 

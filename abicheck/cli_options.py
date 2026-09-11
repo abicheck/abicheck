@@ -23,7 +23,7 @@ Stacked-decorator helpers that bundle related ``compare`` options so the large
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
@@ -850,6 +850,116 @@ def compile_context_options(*, sided_frontend: bool = False) -> Callable[[F], F]
     return _apply
 
 
+def compile_config_argv_tokens(
+    std: str | None, defines: Iterable[str], options: Iterable[str]
+) -> list[str]:
+    """Synthesize one ``compile.std``/``compile.defines``/``compile.options``
+    document's worth of compiler-argv tokens, in the exact order
+    :func:`merge_compile_config` itself folds them: ``[-std=<std>] +
+    [-D<define> ...] + <options...>``. A single source of truth for this
+    order matters because a same-flag conflict (e.g. two ``-std=`` tokens
+    from different documents) is decided by *relative position* in the
+    combined sequence, not by which field produced which token -- any
+    second, independent reimplementation of this order (as
+    ``action_config_overlay._merge_compile_block`` once had) risks
+    silently disagreeing with the real one (P1, Codex review, PR #1222
+    ninth round)."""
+    tokens: list[str] = [f"-std={std}"] if std else []
+    tokens += [f"-D{d}" for d in defines]
+    tokens += list(options)
+    return tokens
+
+
+def _as_compile_field_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    return [str(v) for v in value] if isinstance(value, (list, tuple)) else [str(value)]
+
+
+def merge_compile_std_fields(
+    checkout_blk: dict[str, object], sources_blk: dict[str, object]
+) -> dict[str, object] | None:
+    """The cross-key half of ``action_config_overlay._merge_compile_block``:
+    ``compile.std``/``compile.defines``/``compile.options`` are never three
+    independent fields once EITHER document sets any of them -- the real
+    ``merge_compile_config`` always synthesizes one document's worth of
+    ``[-std=...] + [-D... ] + <options>`` argv tokens (see
+    :func:`compile_config_argv_tokens`) atomically for a single ``compile:``
+    document, then concatenates the sources-root document's own tokens
+    ahead of the checkout document's (checkout's own token ends up LAST and
+    wins a same-flag conflict, matching a compiler's "last flag wins"
+    behavior) -- exactly ``merge_compile_config``'s real two-stage
+    precedence.
+
+    A same-flag conflict is decided by a token's position in that combined
+    sequence, not by which ``compile.*`` field produced it, so folding
+    ``defines``/``options`` independently per key (each key's own
+    sources-then-checkout concatenation, done separately for ``defines``
+    and separately for ``options``) is only an accident-free shortcut when
+    both documents' contributions land in the SAME field, or when only ONE
+    of the two documents contributes anything among ``std``/``defines``/
+    ``options`` at all (then there is no second document's token to
+    mis-order against). It silently picks the wrong winner whenever the two
+    documents disagree via DIFFERENT fields -- checkout ``defines: [A]`` +
+    sources ``options: [-DA=2]``, with neither setting ``std``, resolves
+    via independent per-key folding to ``options: [-DA=2]`` `then`
+    ``defines: [A]`` (rendered as ``-DA=2`` before checkout's own ``-DA``,
+    so sources's redefinition wins the compiler's last-flag-wins rule) --
+    the reverse of the documented precedence. The original fix here only
+    widened the trigger to "a ``compile.std`` value co-occurs with a
+    ``defines``/``options`` value **on either document**", which happened
+    to also cover every ``std``-involving cross-field combination (``std``
+    vs ``defines``, ``std`` vs ``options``) but still missed the
+    defines-vs-options cross-key case entirely, since neither document sets
+    ``std`` there (fresh Codex review evidence, PR #1222 tenth round). The
+    general invariant this function now enforces: whenever BOTH documents
+    each contribute at least one of ``std``/``defines``/``options`` (in any
+    combination of which field each uses), all three are folded together as
+    one atomic per-document token sequence -- there is no narrower,
+    field-combination-specific condition that independent per-key folding
+    can get right in general once both sides are contributing. Verified
+    directly: checkout ``std: c++17`` + sources ``options: [-std=c++23]``
+    resolves to ``('-std=c++23', '-std=c++17')`` (checkout wins); checkout
+    ``defines: [A]`` + sources ``options: [-DA=2]`` resolves to
+    ``('-DA=2', '-DA')`` (checkout wins); checkout ``std: c++17`` + sources
+    ``defines: [A]`` (no ``options`` anywhere) resolves to
+    ``('-DA', '-std=c++17')`` (checkout wins) -- a combination the
+    ``std``-co-occurrence trigger already covered, kept here as a
+    regression case for the general condition.
+
+    Returns ``None`` when at most ONE document sets any of ``std``/
+    ``defines``/``options`` -- either both are empty (a pure no-op, the
+    joint fold would compute an empty token list regardless), or only one
+    side contributes anything, in which case that side's own value is
+    already correctly resolved by its own independent per-key rule and
+    folding it into ``options`` would needlessly lose its legible
+    structured-key representation (e.g. a lone checkout ``compile.std``
+    would otherwise be rewritten into an ``options: ["-std=..."]`` entry
+    for no ordering benefit). Otherwise returns the replacement ``options``
+    field (possibly empty, when both sides set only an equal, redundant
+    ``std`` whose tokens fully overlap -- callers still treat a present but
+    empty ``options`` list as "nothing to apply")."""
+
+    def _tokens(blk: dict[str, object]) -> list[str]:
+        std = blk.get("std")
+        return compile_config_argv_tokens(
+            str(std) if std else None,
+            _as_compile_field_list(blk.get("defines")),
+            _as_compile_field_list(blk.get("options")),
+        )
+
+    def _any_compile_field(blk: dict[str, object]) -> bool:
+        return (
+            bool(blk.get("std"))
+            or bool(_as_compile_field_list(blk.get("defines")))
+            or bool(_as_compile_field_list(blk.get("options")))
+        )
+
+    if not (_any_compile_field(checkout_blk) and _any_compile_field(sources_blk)):
+        return None
+    return {"options": _tokens(sources_blk) + _tokens(checkout_blk)}
+
+
 def merge_compile_config(
     cli_ctx: CompileContext,
     cli_includes: tuple[Path, ...],
@@ -980,17 +1090,15 @@ def merge_compile_config(
         # Config fields are structured metadata, not a shell-like option string.
         # Keep each synthesized flag as one literal argv entry so whitespace inside
         # a define/std value cannot be shlex-split into additional compiler
-        # options (for example plugin-loading flags).
-        config_tokens: list[str] = []
-        if bc.compile_std:
-            config_tokens.append(f"-std={bc.compile_std}")
-        config_tokens += [f"-D{d}" for d in bc.compile_defines]
-        # Phase 7 (compile.options — the demoted --compiler-option): raw
-        # pass-through tokens, appended after std/defines synthesis and
-        # before any surviving CLI --compiler-option tokens (scan only,
-        # since compare/dump no longer have the flag), same "config first,
-        # CLI wins a repeated flag" precedence as std/defines above.
-        config_tokens += list(bc.compile_options)
+        # options (for example plugin-loading flags). Phase 7 (compile.options
+        # — the demoted --compiler-option): raw pass-through tokens, appended
+        # after std/defines synthesis and before any surviving CLI
+        # --compiler-option tokens (scan only, since compare/dump no longer
+        # have the flag), same "config first, CLI wins a repeated flag"
+        # precedence as std/defines above.
+        config_tokens = compile_config_argv_tokens(
+            bc.compile_std, bc.compile_defines, bc.compile_options
+        )
         gcc_options = None
         # CLI > config (same precedence every other field in this function
         # follows): config-synthesized tokens go *first* so an explicit CLI

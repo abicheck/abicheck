@@ -29,72 +29,18 @@ scripts delegate to is unit-tested in isolation in
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
-
-ACTION_DIR = Path(__file__).resolve().parents[1] / "actions" / "check-target"
-RUN_SH = ACTION_DIR / "run.sh"
-VALIDATE_SH = ACTION_DIR / "validate-inputs.sh"
-
-PROFILE = "linux-x86_64-gcc13-release"
-
-
-def _bash_executable() -> str:
-    if os.name != "nt":
-        return "bash"
-    for candidate in (
-        os.environ.get("GIT_BASH_PATH"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return "bash"
-
-
-def _run(
-    script: Path, env_extra: dict[str, str], cwd: Path
-) -> subprocess.CompletedProcess[str]:
-    base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
-    env = {**base_env, "ACTION_PATH": str(ACTION_DIR), **env_extra}
-    return subprocess.run(
-        [_bash_executable(), str(script)],
-        capture_output=True,
-        text=True,
-        env=env,
-        cwd=cwd,
-        check=False,
-    )
-
-
-def _run_finalize(
-    env_extra: dict[str, str], cwd: Path
-) -> tuple[subprocess.CompletedProcess[str], dict[str, str]]:
-    github_output = cwd / "github_output"
-    github_output.write_text("")
-    result = _run(RUN_SH, {"GITHUB_OUTPUT": str(github_output), **env_extra}, cwd)
-    outputs: dict[str, str] = {}
-    for line in github_output.read_text(encoding="utf-8").splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            outputs[k] = v
-    return result, outputs
-
-
-_BASE_IDENTITY = {
-    "INPUT_NAME": "libpvxs",
-    "INPUT_PROFILE": PROFILE,
-    "INPUT_BASELINE_CHANNEL": "accepted-main",
-    "INPUT_REQUESTED_DEPTH": "headers",
-    "INPUT_GATE_MODE": "local",
-    "INPUT_PROJECT": "epics-base/pvxs",
-    "INPUT_HEAD_SHA": "deadbeef",
-    "INPUT_BASE_REF": "main",
-    "INPUT_ACTION_VERSION": "abicheck/abicheck@v1",
-}
+from _check_target_exec import (
+    _BASE_IDENTITY,
+    ACTION_DIR,
+    PROFILE,
+    RUN_SH,
+    VALIDATE_SH,
+    _run,
+    _run_finalize,
+)
 
 
 def _write_compare_report(

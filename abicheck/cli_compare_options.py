@@ -194,7 +194,7 @@ def _reject_set_input_flags(
         )
     if require_complete_analysis:
         raise click.UsageError(
-            "--require-complete-analysis is not supported for directory/"
+            "assurance.require_complete is not supported for directory/"
             "package (release) comparisons yet (P0.4): the per-library "
             "fan-out has no single analysis_assurance result to gate on. "
             "Compare the specific library individually to use it, or see "

@@ -581,17 +581,23 @@ def record_resolved_config(
     result: Any,
     resolved_cfg: Any,
     config: Any,
+    *,
+    project_config_path: Any = None,
+    project_config_sha256: str | None = None,
+    require_complete_analysis_stated: bool = False,
 ) -> None:
     """Install this front end's resolved configuration onto the context.
 
-    A no-op unless ``--contract`` produced a context (and unless
-    the caller resolved a *config* at all -- a run with neither
-    ``--contract`` nor ``--pack`` resolves nothing, since nothing
-    would read the result). Runs before any report is rendered, so every
-    output path sees one configuration resolved by the canonical resolver
-    rather than the core verb's argument-shaped reconstruction, and sees the
-    gate the run was actually scored with rather than :class:`GateConfig`'s
-    built-in defaults.
+    *project_config_path*/*project_config_sha256*/*require_complete_
+    analysis_stated* are forwarded, not re-derived, to :func:`~abicheck.
+    contract_context.with_resolved_gate` -- see its own docstring.
+
+    A no-op unless ``--contract`` produced a context (and unless the caller
+    resolved a *config* at all). Runs before any report is rendered, so
+    every output path sees one configuration resolved by the canonical
+    resolver rather than the core verb's argument-shaped reconstruction,
+    and sees the gate the run was actually scored with rather than
+    :class:`GateConfig`'s built-in defaults.
 
     *config* arrives already resolved rather than being resolved here: since
     ADR-049's ``--pack`` landed, the same object also *configures* the run
@@ -633,6 +639,10 @@ def record_resolved_config(
             category: config.provenance[SEVERITY_CATEGORY_FIELDS[category]]
             for category in _SEVERITY_CATEGORIES
         },
+        require_complete_analysis=resolved_cfg.require_complete_analysis,
+        require_complete_analysis_stated=require_complete_analysis_stated,
+        project_config_path=str(project_config_path) if project_config_path else None,
+        project_config_sha256=project_config_sha256,
     )
 
 

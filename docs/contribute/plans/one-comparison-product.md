@@ -969,13 +969,16 @@ inputs.py`, `test_docs_cli_flags.py`, `test_project_snapshot_v2_wiring.py`,
 compare divergence pending a fix -- no longer has a second tool to diverge
 from). Three flag demotions this phase unblocked
 (`compare --env-matrix`, `compare --require-complete-analysis`,
-`dump --build-target`) were **not** implemented in this PR -- each needs
+`dump --build-target`) were **not** implemented in this PR -- each needed
 real, unimplemented feature work (a new `deployment:` config key,
 `assurance.require_complete` resolver wiring plus Action-input retirement,
 and rewiring `dump --build-target`'s own callers onto `build.targets`
 respectively) beyond a ruling-table edit; `frontends/cli/options/
-rulings.py`'s own entries record this explicitly as a tracked followup, not
-a silent gap.
+rulings.py`'s own entries recorded this explicitly as a tracked followup,
+not a silent gap. `compare --require-complete-analysis` has since landed
+(`assurance.require_complete` in `.abicheck.yml`, plus the Action-input
+retirement, rulings.py deferred-option followup); the other two remain
+open.
 
 The command, `cli_scan*.py`, `scan_engine.py`, `service_scan.py`,
 `workflows/scan_*.py`, `frontends/cli/scan_*.py`, `pr_comment_scan*.py`,

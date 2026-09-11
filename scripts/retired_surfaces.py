@@ -477,6 +477,38 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
     ),
     (
+        "compare --require-complete-analysis (rulings.py deferred-option"
+        " followup: hard removal, demoted to CONFIG-only --"
+        " assurance.require_complete in .abicheck.yml, no CLI override)."
+        " The Action's own dedicated require-complete-analysis input, and"
+        " actions/check-target's mirrored input, are retired the same way.",
+        (
+            "--require-complete-analysis",
+            "require-complete-analysis:",
+        ),
+        # reference/exit-codes.md/config-file.md/config-keys-reference.md/
+        # github-action-inputs.md name the config-key replacement in their
+        # own historical-record capacity; the rest are historical ADR/plan
+        # design records for a flag that existed when they were written.
+        frozenset(
+            {
+                "reference/exit-codes.md",
+                "reference/config-file.md",
+                "reference/config-keys-reference.md",
+                "reference/github-action-inputs.md",
+                "use/aggregate-reports.md",
+                "contribute/plans/vision-api-abi-evolution.md",
+                "contribute/plans/product-gaps-2026-09-audit.md",
+                "contribute/plans/one-semantic-pipeline.md",
+                "contribute/plans/duplication-and-convergence-assessment.md",
+                "contribute/plans/g41-baseline-consumer-context-and-declarative-assurance.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "contribute/adr/index.md",
+            }
+        ),
+    ),
+    (
         "compare --on-incomplete-scope/--fail-on-removed-library/"
         "--no-fail-on-removed-library/--dso-only/--include-private-dso"
         " (Phase 7d, ADR-068 D5: demoted to CONFIG-only -- scope."
@@ -797,7 +829,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " EnvironmentMatrix's own YAML shape inline via"
         " EnvironmentMatrix.from_dict rather than a side file -- no"
         " surviving CLI override)",
-        ("--env-matrix",),
+        ("--env-matrix", "env-matrix:"),
         # config-file.md/environment-drift.md: each names the old flag only
         # in the sentence explaining its own fold into `deployment:`.
         frozenset({"reference/config-file.md", "learn/environment-drift.md"}),
@@ -916,12 +948,26 @@ def retired_surface_scan_targets(
     neither `docs.rglob` nor the `cases.glob` pattern above ever walks
     `examples/` at all (Codex review, fresh evidence).
 
+    `examples/workflows/**/workflow.yaml` is the machine-readable sibling of
+    the READMEs already covered above (`workflow_examples.py`'s own manifest
+    schema) -- its `flow:`/command text can name a retired flag exactly like
+    its README can, invisible to a scan that only walked `*.md` there.
+
+    `.github/workflows/**/*.{yml,yaml}` is this repository's own CI, which a
+    reader (including a contributor copying a job) can see -- a stale
+    `require-complete-analysis:`/`env-matrix:`-shaped Action input surviving
+    in a workflow after the underlying flag retired is exactly the same
+    class of gap this whole sweep exists to catch, one directory further out
+    than `action.yml`/`actions/*/action.yml` themselves (which are Tier-1
+    generated-doc sources checked elsewhere, not this sweep's own target).
+
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
     `catalog/ground_truth.json`, `README.md`, `AGENTS.md`,
-    `tools/<tool>/README.md`, `examples/workflows/<name>/README.md`), which
-    cannot collide with a docs-relative key, so an allowlist entry stays
-    unambiguous.
+    `tools/<tool>/README.md`, `examples/workflows/<name>/README.md`,
+    `examples/workflows/<name>/workflow.yaml`,
+    `.github/workflows/<name>.yml`), which cannot collide with a
+    docs-relative key, so an allowlist entry stays unambiguous.
     """
     targets = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
     targets += [
@@ -951,6 +997,17 @@ def retired_surface_scan_targets(
         targets += [
             (p, f"examples/workflows/{p.relative_to(workflows_dir).as_posix()}")
             for p in sorted(workflows_dir.rglob("*.md"))
+        ]
+        targets += [
+            (p, f"examples/workflows/{p.relative_to(workflows_dir).as_posix()}")
+            for p in sorted(workflows_dir.rglob("workflow.yaml"))
+        ]
+    gha_workflows_dir = root / ".github" / "workflows"
+    if gha_workflows_dir.is_dir():
+        targets += [
+            (p, f".github/workflows/{p.relative_to(gha_workflows_dir).as_posix()}")
+            for p in sorted(gha_workflows_dir.rglob("*.yml"))
+            + sorted(gha_workflows_dir.rglob("*.yaml"))
         ]
     return targets
 

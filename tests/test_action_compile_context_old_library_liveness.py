@@ -438,25 +438,68 @@ class TestCompileContextPairwiseOldLibraryClassification:
             ("old_unrecognized.bin", b"not a recognized format at all"),
         ],
     )
-    def test_sources_root_compile_block_is_sourced_from_it_under_compare_with_stored_old_snapshot(
+    def test_sources_root_compile_block_is_never_sourced_from_it_under_compare_with_stored_old_snapshot(
         self, tmp_path: Path, old_library: str, content: bytes
     ) -> None:
         """A ``compare`` whose OLD operand is a stored snapshot (whatever a
         prior ``abicheck dump -o ...`` named it -- a direct old-library
         input, or what an ``abi-baseline`` auto-fetch always resolves
         ``old-library`` to) has no "other side" for a --sources tree's
-        compile:/source:/debug: to leak into: OLD does no header/debug
-        extraction at all. The earlier ``$MODE == "compare"`` check alone
-        could not see this and unconditionally treated every compare as
-        pairwise, silently discarding NEW's own sources-root
-        compile:/source:/debug: settings. Companion to the dump-mode
-        single-sided test in the sibling module, and the negative
-        (genuinely pairwise, live OLD) tests just above.
+        compile: to leak into: OLD does no header/debug extraction at all.
+        The earlier ``$MODE == "compare"`` check alone could not see this
+        and unconditionally treated every compare as pairwise, silently
+        discarding NEW's own sources-root compile: settings. Companion to
+        the dump-mode single-sided test in the sibling module, and the
+        negative (genuinely pairwise, live OLD) tests just above.
 
         ``_old_library_is_stored_snapshot`` is content-sniffed and
         simplified to its actual invariant (class docstring) -- so each
         case here writes real bytes exercising that rule, not just a
-        suggestively-named, empty/nonexistent path."""
+        suggestively-named, empty/nonexistent path.
+
+        ``compile:`` itself is NOT "the same single-sided promotion as
+        dump" (Codex review, fresh evidence, PR #1222 fourth round, second
+        finding -- corrected here, then corrected AGAIN by the eleventh
+        round below): unlike `dump`/`scan --against`'s genuine
+        single-document-exclusive ``compile:`` selection, ``compare``'s
+        own ``resolve_compile_context(..., build_config=cfg_path, ...)``
+        ALWAYS independently resolves the checkout-root document's
+        ``compile:`` block FIRST, unconditionally (confirmed by calling the
+        real function directly against fixtures shaped exactly like this
+        test's own), and NEW's own ``--sources`` tree only folds ON TOP of
+        that already-resolved context via a second ``merge_compile_config``
+        call inside ``frontends/cli/commands/compare.py``'s
+        ``_embed_inline_source_side`` -- but (P1 finding, Codex review,
+        fresh evidence, PR #1222 eleventh round) that second stage runs
+        UNCONDITIONALLY, regardless of whether ``--config``/
+        ``build-config`` was explicit, so THIS overlay-generation script
+        must NOT reproduce it: doing so would fold the sources-root
+        document's own ``compile:`` block in a SECOND time on top of what
+        the CLI is about to fold in on its own, applying a
+        repeat-sensitive flag twice. This overlay must therefore leave
+        ``compile:`` at EXACTLY the checkout document's own value --
+        NEW's sources-root ``sysroot`` (whether conflicting or not) is
+        never consulted here at all any more, left entirely for the CLI's
+        own single, unconditional fold when "Run analysis" actually runs.
+
+        ``source:``/``debug:`` are NOT the same shape as ``compile:``
+        here, despite both being "single-sided" in the pairwise sense (P1
+        finding, Codex review, fresh evidence, PR #1222 eighth round,
+        correcting this test's own previous assertion): unlike `dump`/
+        `scan --against`'s genuine single-document-exclusive resolution of
+        these two, `compare`'s own pipeline NEVER re-resolves `source:`/
+        `debug:` from NEW's ``--sources`` tree at all --
+        ``frontends/cli/commands/compare.py``'s
+        ``_embed_inline_source_side`` receives both as already-frozen
+        arguments (``_resolved_collect_mode``/``_resolved_debug``) computed
+        once from the CHECKOUT-side ``resolved_cfg``, before the
+        ``--sources`` tree is even considered. So the sources-root
+        document's own ``source:``/``debug:`` values below must be ignored
+        entirely for `compare` -- neither document here defines them at
+        the checkout level, so the real pipeline's own view has nothing
+        for either key, and the synthesized overlay must match that
+        (absent), not manufacture a value from NEW's tree the real
+        pipeline never reads."""
         (tmp_path / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/checkout-sysroot\n", encoding="utf-8"
         )
@@ -482,12 +525,98 @@ class TestCompileContextPairwiseOldLibraryClassification:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        # Same single-sided promotion as dump: NEW is the only operand that
-        # does any live header/debug extraction here, so the sources-root's
-        # own compile:/source:/debug: are the intended, only source for it.
-        assert doc["compile"]["sysroot"] == "/opt/sources-root-sysroot"
-        assert doc["source"] == {"method": "s6"}
-        assert doc["debug"] == {"format": "dwarf"}
+        # source:/debug: are NEVER sourced from NEW's --sources tree for
+        # `compare` -- neither document here sets them at the checkout
+        # level, so the real pipeline's own view (and this overlay) has
+        # nothing for either key.
+        assert "source" not in doc
+        assert "debug" not in doc
+        # compile: is left at exactly the checkout document's own value --
+        # the sources-root document's own (conflicting) sysroot is never
+        # consulted here at all, deferred entirely to the CLI's own,
+        # single, unconditional fold (see the docstring above).
+        assert doc["compile"] == {
+            "sysroot": "/opt/checkout-sysroot",
+            "compiler": "/opt/gcc-14/bin/g++",
+        }
+
+    def test_sources_root_source_debug_never_leak_into_compare_with_stored_old_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion positive control for the fix above: when the
+        CHECKOUT document sets `source:`/`debug:`, those checkout values
+        must survive into the overlay UNCHANGED for `compare` against a
+        stored OLD snapshot -- even though NEW's own ``--sources`` tree
+        sets conflicting values of its own, which the real pipeline never
+        reads and this overlay must therefore ignore too."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "source:\n  method: headers\ndebug:\n  format: btf\n",
+            encoding="utf-8",
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "source:\n  method: s6\ndebug:\n  format: dwarf\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
+        cmd, _ = _run_region_with_cwd(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_OLD_LIBRARY": "old.abicheck.json",
+            },
+            tmp_path,
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["source"] == {"method": "headers"}
+        assert doc["debug"] == {"format": "btf"}
+
+    def test_compile_disjoint_keys_do_not_merge_under_compare_with_stored_old_snapshot(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 eleventh
+        round): the disjoint-key (no conflict) sibling of the test above,
+        proving the overlay generator no longer merges at all -- not even
+        for keys that wouldn't conflict. The checkout document sets ONLY
+        ``compile.std``, the sources-root document sets ONLY
+        ``compile.include_dirs``: a previous round's own overlay merged
+        the two per-field here (reproducing what it believed was the real
+        pipeline's own second merge stage), but that stage already runs,
+        unconditionally, inside the CLI's own ``_embed_inline_source_side``
+        when "Run analysis" actually invokes ``compare`` -- so this
+        overlay merging the two ITSELF would fold the sources-root
+        document's ``compile:`` block in a second, redundant time. The
+        generated overlay must therefore carry ONLY the checkout
+        document's own ``compile.std``, with no ``include_dirs`` key at
+        all."""
+        (tmp_path / ".abicheck.yml").write_text(
+            "compile:\n  std: c++20\n", encoding="utf-8"
+        )
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  include_dirs: [foo]\n", encoding="utf-8"
+        )
+        (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
+        cmd, _ = _run_region_with_cwd(
+            _COMPARE_MODE_MARKER,
+            {
+                "INPUT_GCC_PATH": "/opt/gcc-14/bin/g++",
+                "INPUT_SOURCES": "src",
+                "INPUT_OLD_LIBRARY": "old.abicheck.json",
+            },
+            tmp_path,
+            _COMPARE_COMPILE_CONTEXT_START,
+        )
+        doc = json.loads(
+            Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
+        )
+        assert doc["compile"] == {"std": "c++20", "compiler": "/opt/gcc-14/bin/g++"}
 
     def test_sources_root_compile_block_stays_pairwise_when_old_library_is_a_live_binary(
         self, tmp_path: Path

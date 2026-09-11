@@ -2375,6 +2375,7 @@ def check_adr_index_and_nav_sync(f: Findings) -> None:
 # can be redirected, suppressed, or annotated by callers.
 _PRINT_ALLOWED: frozenset[str] = frozenset(
     {
+        "abicheck/action_config_overlay.py",
         "abicheck/cli.py",
         "abicheck/cli_baseline.py",
         "abicheck/cli_compare_release.py",

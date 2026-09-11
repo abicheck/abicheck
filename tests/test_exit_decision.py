@@ -824,9 +824,26 @@ def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
     )
 
 
+def _assurance_config_args(tmp_path: Path) -> list[str]:
+    """``["--config", path]`` for a config declaring
+    ``assurance.require_complete: true`` -- rulings.py deferred-option
+    followup: the direct replacement for the retired
+    ``--require-complete-analysis`` flag."""
+    cfg_path = tmp_path / ".abicheck-assurance.yml"
+    if not cfg_path.exists():
+        cfg_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+    return ["--config", str(cfg_path)]
+
+
 def _compare(tmp_path: Path, pair: tuple[AbiSnapshot, AbiSnapshot], *extra: str):
     old_p, new_p = _write(tmp_path, *pair)
-    return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra])
+    extra_list = list(extra)
+    if "--require-complete-analysis" in extra_list:
+        extra_list.remove("--require-complete-analysis")
+        extra_list.extend(_assurance_config_args(tmp_path))
+    return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra_list])
 
 
 class TestCompareExitDecisionIntegration:
@@ -988,7 +1005,7 @@ class TestCompareExitDecisionIntegration:
                 "compare", str(old_p), str(new_p),
                 "--required-symbol", "_Z5pub_av",  # survives -- clean scoped gate
                 "--format", "json",
-                "--require-complete-analysis",  # elf-only pair: incomplete
+                *_assurance_config_args(tmp_path),  # elf-only pair: incomplete
             ],
         )
         assert res.exit_code == 1, res.output

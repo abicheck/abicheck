@@ -990,16 +990,19 @@ jobs:
           requested-depth: ${{ matrix.requested_depth }}
           explicit-id: ${{ matrix.explicit_id || '' }}
           gate-mode: ${{ matrix.gate_mode }}
-          # Product-gaps audit §3: a truthful projection of this cell's
-          # declared checks[].analysis.assurance (RunPlanCheck.
-          # analysis_assurance) -- 'complete' is the one value
-          # project_targets.py's analysis_assurance_gate.py accepts (any
-          # other declared value fails `project plan` before a run plan is
-          # even generated, per that module's own docstring), so this is
-          # the whole domain check-target's own require-complete-analysis
-          # input needs to distinguish. check-target itself further gates
-          # this to kind != 'bundle' before forwarding to the root Action.
-          require-complete-analysis: ${{ matrix.analysis_assurance == 'complete' }}
+          # require-complete-analysis is RETIRED (rulings.py deferred-option
+          # followup, mirroring the root Action's own retirement) -- no
+          # longer forwarded here. checks[].analysis.assurance (RunPlanCheck.
+          # analysis_assurance, product-gaps audit §3) is still validated at
+          # run-plan generation time (project_targets.py's
+          # analysis_assurance_gate.py still accepts only 'complete') and is
+          # now enforced again too: check-target's own
+          # analysis-assurance-complete input (the config-overlay
+          # replacement that former docstring named as a tracked gap) merges
+          # an assurance.require_complete: true fragment into whatever
+          # build-config the internal analysis step reads, the same effect a
+          # project author's own .abicheck.yml line would have.
+          analysis-assurance-complete: ${{ matrix.analysis_assurance == 'complete' && 'true' || 'false' }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}

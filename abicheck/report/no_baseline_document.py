@@ -223,8 +223,9 @@ NO_BASELINE_EXIT_AXIS_NOTICES: dict[str, str] = {
     ),
     "analysis_assurance": (
         "**Analysis assurance incomplete** -- the evidence behind this audit was "
-        "not complete enough to be relied on, and `--require-complete-analysis` "
-        "makes that a failure rather than a note."
+        "not complete enough to be relied on, and `.abicheck.yml`'s "
+        "`assurance.require_complete: true` makes that a failure rather than a "
+        "note."
     ),
     "evidence_contract": (
         "**Evidence contract not met** -- a pinned `--depth build`/`--depth "

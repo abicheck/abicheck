@@ -588,3 +588,43 @@ def test_the_real_tools_readmes_are_in_the_target_set(
     tool_keys = {k for k in keys if k.startswith("tools/")}
     assert tool_keys, sorted(keys)[:5]
     assert "tools/clang-layout-tool/README.md" in tool_keys
+
+
+def test_retired_surfaces_flags_env_matrix_yaml_key_in_a_workflow(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CodeRabbit review, PR #1222: the retired ``compare --env-matrix``
+    entry previously registered only the CLI flag spelling
+    (``--env-matrix``), so a ``.github/workflows/*.yml`` file still setting
+    the retired composite-Action YAML input ``env-matrix:`` went unflagged.
+    ``env-matrix:`` is now a registered pattern for this entry, matching
+    the ``require-complete-analysis``/``require-complete-analysis:`` pair
+    convention already used for that sibling retired input."""
+    monkeypatch.setattr(dc, "ROOT", tmp_path)
+    monkeypatch.setattr(dc, "DOCS", tmp_path / "docs")
+    (tmp_path / "docs").mkdir()
+    workflows_dir = tmp_path / ".github" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "ci.yml").write_text(
+        "jobs:\n"
+        "  check:\n"
+        "    uses: ./actions/check-target\n"
+        "    with:\n"
+        "      env-matrix: matrix.json\n",
+        encoding="utf-8",
+    )
+    f = dc.Findings()
+    dc._check_retired_surfaces(f)
+    assert len(f.warnings) == 1, f.warnings
+    assert ".github/workflows/ci.yml" in f.warnings[0][1]
+
+
+def test_the_real_gha_workflows_are_in_the_target_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring half: the real ``.github/workflows/`` tree is actually
+    reached, not just the autouse fixture's empty stand-in ``ROOT``."""
+    monkeypatch.undo()
+    keys = {rel for _, rel in dc._retired_surface_scan_targets()}
+    workflow_keys = {k for k in keys if k.startswith(".github/workflows/")}
+    assert workflow_keys, sorted(keys)[:5]

@@ -1,0 +1,648 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Shared sanitization for a project config folded into a synthesized,
+always-``explicit`` ``--config`` overlay by this repository's own GitHub
+Actions Python glue.
+
+Two call sites build one of these overlays today: ``action/run.sh``'s
+``_merge_config_overlay_with_discovered_project_config`` (used for the
+compile-context and release-topology overlays) and
+``actions/check-target/action.yml``'s "Generate assurance-overlay config"
+step. Both read a project's ``.abicheck.yml`` (either auto-discovered by
+walking up from a directory, or an operator-named explicit file), fold in a
+synthesized top-level key, and write the merged result to a *fresh* path
+that is then handed to the ``abicheck`` CLI as an EXPLICIT ``--config``.
+
+Every ``explicit_config``/``config_explicit`` trust check inside the engine
+(``cli_options.py``'s ``compile.compiler`` gate, ADR-032 D5's ``build.query``
+gate, ``compare_bundle_facts.dispatch()``'s pre-``json.loads()`` decode-node
+budget) treats "this run was given an explicit ``--config``" as an
+operator's own deliberate authorization, regardless of how that file's
+*content* was actually assembled. So an auto-discovered base document --
+untrusted, PR-controlled content on a ``pull_request`` trigger -- must never
+be folded into one of these overlays unchanged: doing so launders it into
+that trusted, executable-authorized status the moment any unrelated Action
+input triggers the overlay's synthesis (Codex review; see
+``action/run.sh``'s own, more detailed docstring on
+``_merge_config_overlay_with_discovered_project_config`` for the original
+finding this module's checks were first written to close).
+
+:func:`strip_untrusted_execution_keys` implements the part of that rule
+shared byte-for-byte by both call sites -- stripping ``build.query``/
+``compile.compiler`` outright and capping (never raising)
+``resource_limits.max_bundle_facts_decode_nodes``. It deliberately does NOT
+also handle ``build.compile_db``: a discovered ``build.compile_db`` is kept
+when it demonstrably resolves against a known ``--sources`` root (stripping
+a perfectly usable path is its own real cost -- see
+:func:`discovered_compile_db_resolves`'s own docstring) and stripped
+otherwise; each caller decides what its own effective ``--sources`` root is
+(if any) and calls that function with it, so the resolution check itself
+can't independently drift between the two call sites the way it briefly did
+(one call site used to strip unconditionally because it believed it had no
+``--sources`` context, when in fact its own ``sources`` Action input already
+supplies one).
+
+Must be called for a base document that is NOT itself an operator-supplied,
+explicit ``--config`` (an auto-discovered ``.abicheck.yml``, in both call
+sites' own terminology). A caller already holding a genuinely explicit base
+document (``action/run.sh``'s own "explicit" merge mode; the assurance
+overlay step's own ``BASE_CONFIG``-given branch) must NOT call this --
+that document is already the trusted case these same gates exist to allow,
+matching ``cli_options.py``'s own ``explicit_config = build_config is not
+None`` line.
+
+:func:`validate_base_config` is a third, orthogonal concern from the same
+family: a base document -- discovered OR explicit -- loaded via a bare
+``yaml.safe_load`` is syntactically valid YAML, but has never been run
+through the real strict-schema check (``BuildConfig.from_dict``) the native
+CLI's own ``load_build_config``/``discover_project_config`` loading path
+always applies before any command sees the parsed config. Left unvalidated,
+a structurally invalid document (``build.query: 7``, ``compile.compiler:
+[]``, ``build.compile_db: false``) can have its own invalid field silently
+STRIPPED by :func:`strip_untrusted_execution_keys` or REPLACED by either
+caller's own top-level-key overlay merge before the nested engine ever gets
+a chance to reject it -- turning a config a direct ``compare --config
+<file>`` invocation would refuse outright into a silently-accepted run.
+Must run BEFORE both of the other two functions in this module, for exactly
+that reason -- validating a document only after its invalid fields have
+already been stripped or overwritten proves nothing about what the operator
+actually wrote. Unlike :func:`strip_untrusted_execution_keys`, it applies to
+BOTH kinds of base document alike (discovered and explicit) -- an explicit
+build-config is trusted to run ``build.query``/``compile.compiler``, but
+that is a distinct question from whether it is schema-valid at all, and the
+same ``compare --config <file>`` a user could run directly would reject an
+explicit config just as loudly as a discovered one.
+
+:func:`rebase_relative_config_paths` is an unrelated, purely-correctness
+concern that applies to BOTH kinds of base document alike: relocating the
+merged overlay to a fresh path (typically under ``$RUNNER_TEMP``, chosen so
+a PR-planted symlink at a predictable in-checkout path can't hijack the
+write -- see the assurance-overlay step's own comments) changes what a
+config-relative path inside it resolves against. ``compile.include_dirs``
+is the one config key resolved against the config file's own project root
+(``config_paths.project_root_for_config`` -- confirmed the *only* such key
+by grepping every ``buildsource/build_config.py`` field for a
+``project_root_for_config`` consumer); left unrebased, a relative entry
+silently resolves against the overlay's own scratch location instead of the
+real project, dropping headers from extraction with no diagnostic.
+
+:func:`apply_sources_root_config_blocks` is the fourth shared primitive,
+covering the "sources-root promotion" step both call sites perform when no
+explicit ``--config`` is given: a ``--sources`` tree carrying its own
+``.abicheck.yml`` (found via ``config_paths.discover_build_config`` --
+non-recursive, anchored at the sources root, never walking up) supplies
+``build:``/``sources:`` EXCLUSIVELY, mirroring ``embed_build_source()``'s
+own ``build_config or discover_build_config(raw_sources)`` selection -- see
+that function's own docstring for why a checkout-root-discovered document
+must never supply those blocks once a distinct sources-root document
+exists. Before PR #1222's own third round this promotion existed only in
+``action/run.sh``'s inline merge; the assurance-overlay step never
+performed it at all, silently letting its synthesized overlay shadow a
+sources-root ``.abicheck.yml``'s own ``build:``/``sources:`` settings
+(compile-DB selection, build-system targets, graph-detail settings) the
+moment ``build-config`` was omitted. ``compile:`` (for a genuinely
+single-sided caller) is promoted too, but -- PR #1222 fourth round, Codex
+review -- as a real per-field MERGE, not a wholesale block replace:
+``cli_options.merge_compile_config`` folds a sources-root document's
+``compile:`` on top of an ALREADY-resolved checkout-config-derived context,
+field by field, so replacing the whole block silently drops any
+checkout-only ``compile:`` setting the sources-root document doesn't happen
+to also specify. See :func:`action_config_overlay_compile.merge_compile_block`'s own docstring for the
+exact per-field precedence reproduced.
+
+**P1 fix (Codex review, fresh evidence, PR #1222 eleventh round):** a
+``compare``-shaped caller (``merge_compile=True``) must NOT include
+``"compile"`` in *blocks* at all any more -- reversing the fourth round's
+own conclusion just above, which believed this promotion needed to
+reproduce BOTH stages of the real pipeline's own two-stage merge itself.
+It doesn't: ``frontends/cli/commands/compare.py``'s
+``_embed_inline_source_side`` performs the second stage (folding the live
+side's own ``--sources`` tree's ``compile:`` block onto the CLI's
+already-resolved compile context) UNCONDITIONALLY, regardless of whether
+``--config``/``build-config`` was explicit -- unlike ``build:``/
+``sources:``, whose own single-sided selection genuinely IS
+short-circuited by an explicit ``--config`` (see the "Sources-root
+promotion" paragraph above), which is what makes promoting THOSE two
+blocks necessary. A caller that also promotes ``compile:`` therefore folds
+the sources-root document's ``compile:`` block in TWICE -- once via this
+promotion, once again inside ``_embed_inline_source_side``'s own
+always-running merge -- applying a repeat-sensitive flag
+(``compile.options: [-include, foo.h]``) twice in the final compiler
+invocation purely because the overlay-generating feature
+(``analysis.assurance: complete``) was enabled. The correct shape for a
+``merge_compile=True`` caller is to leave ``compile:`` OUT of *blocks*
+entirely, supplying only the checkout-side half of the real pipeline's own
+two-stage merge and letting the CLI's own second stage run unaided --
+identical to how ``source:``/``debug:`` are already excluded for this same
+caller (see below). A ``dump``/``scan`` caller (``merge_compile=False``)
+is unaffected: an explicit ``--config`` genuinely DOES suppress the CLI's
+own ``compile:`` resolution from the ``--sources`` tree entirely there, so
+promoting it (as a real per-field merge, described above) remains the only
+way that setting ever reaches the run.
+
+``source:``(singular)/``debug:`` are a THIRD, narrower shape (PR #1222
+eighth round, Codex review) -- unlike every block above, they are never
+safe to promote from a sources-root document for a caller whose single-
+sided resolution is `compare`'s own shape (``merge_compile=True``): the
+real ``compare`` pipeline always resolves both from the CHECKOUT project
+config alone (``frontends/cli/commands/compare.py``'s
+``_embed_inline_source_side`` receives them as already-frozen
+``_resolved_collect_mode``/``_resolved_debug`` arguments, computed once
+from the checkout-side ``resolved_cfg`` before any per-side ``--sources``
+tree is even considered) and NEVER re-resolves them from a per-side tree's
+own document, unlike ``compile:``'s genuine two-stage merge. So for a
+``merge_compile=True`` caller, *blocks* must name only ``build``/
+``sources``/``compile`` -- never ``source``/``debug``. A single-document
+caller whose single-sided resolution is `dump`/`scan`'s shape
+(``merge_compile=False``) is different again: there, ``source:``/
+``debug:`` genuinely ARE a single-document selection off the ``--sources``
+tree's own config (``frontends/cli/dump_debug_config.
+resolve_dump_debug_config``'s own ``build_config or
+discover_build_config(sources)``), so *blocks* may include them there,
+exactly as the four-block claim above originally stated. Each caller must
+therefore choose *blocks* off BOTH its own pairwise/single-sided axis AND
+(when single-sided) its own merge_compile/replace axis -- three cases, not
+two -- see each call site's own block-selection comment for the concrete
+three-way branch.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+from .action_config_overlay_compile import merge_compile_block
+from .buildsource.build_config import BuildConfig
+from .bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
+from .config_paths import project_root_for_config
+from .frontends.cli.commands.compare_bundle_facts_rejections import (
+    resolve_max_json_object_nodes_cfg,
+)
+
+
+def validate_base_config(doc: dict[str, object]) -> None:
+    """Validate *doc* against the real ``BuildConfig`` schema -- the same
+    strict-structure check (``BuildConfig._validate_structure``: unknown
+    top-level keys, wrong-typed values) that ``load_build_config``/
+    ``discover_project_config`` always apply before the native CLI ever
+    sees a parsed config document.
+
+    Raises ``ValueError`` (the identical exception :meth:`BuildConfig.
+    from_dict` itself raises for a structurally invalid document) when
+    *doc* is invalid; the caller decides how to present that failure (both
+    current call sites format it as a GitHub Actions ``::error::``
+    annotation and exit non-zero, matching what a direct ``compare
+    --config <file>`` invocation against the same document would report).
+    Does nothing when *doc* is schema-valid.
+
+    See the module docstring for why this must run before
+    :func:`strip_untrusted_execution_keys`/:func:`rebase_relative_config_paths`
+    and why it applies to an explicit base document too, not just a
+    discovered one.
+    """
+    BuildConfig.from_dict(doc)
+
+
+def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]:
+    """Return a COPY of *base* with the fields an auto-discovered project
+    config must never be trusted to carry into a synthesized, always-
+    explicit ``--config`` overlay stripped or capped.
+
+    Strips ``build.query`` and ``compile.compiler`` outright (both select
+    code/an executable to run -- ``cli_options.py``'s ``compile.compiler``
+    gate and ADR-032 D5's ``build.query`` gate exist specifically to
+    withhold that from anything but an operator's own explicit
+    ``--config``), and caps (never strips -- a lower value is never a
+    decode-bomb risk) ``resource_limits.max_bundle_facts_decode_nodes`` via
+    the identical
+    :func:`~abicheck.frontends.cli.commands.compare_bundle_facts_rejections.
+    resolve_max_json_object_nodes_cfg` the CLI itself calls, so the two can
+    never drift.
+
+    *base* is never mutated -- every changed top-level block is a fresh
+    copy, so the caller's own reference is left untouched. Does not touch
+    ``build.compile_db`` (see the module docstring for why that field is
+    each caller's own responsibility), ``compile.include_dirs``, or any
+    other path field -- see :func:`rebase_relative_config_paths` for that
+    orthogonal concern.
+    """
+    base = dict(base)
+
+    build_blk = base.get("build")
+    if isinstance(build_blk, dict) and "query" in build_blk:
+        build_blk = dict(build_blk)
+        del build_blk["query"]
+        base["build"] = build_blk
+        print(
+            "::warning::the discovered .abicheck.yml's build.query was "
+            "dropped from this synthesized --config overlay -- an "
+            "auto-discovered config is never trusted to run a build-system "
+            "query; set build-config explicitly (naming a config you "
+            "reviewed) to opt in.",
+            file=sys.stderr,
+        )
+
+    compile_blk = base.get("compile")
+    if isinstance(compile_blk, dict) and "compiler" in compile_blk:
+        compile_blk = dict(compile_blk)
+        del compile_blk["compiler"]
+        base["compile"] = compile_blk
+        print(
+            "::warning::the discovered .abicheck.yml's compile.compiler was "
+            "dropped from this synthesized --config overlay -- an "
+            "auto-discovered config is never trusted to select a compiler "
+            "executable; set build-config explicitly (naming a config you "
+            "reviewed) to opt in.",
+            file=sys.stderr,
+        )
+
+    resource_limits = base.get("resource_limits")
+    if isinstance(resource_limits, dict):
+        configured_nodes = resource_limits.get("max_bundle_facts_decode_nodes")
+        # CodeRabbit review, fresh evidence: a wrong-typed configured_nodes
+        # (a string, list, or bool -- bool is an int subclass, so it's
+        # excluded explicitly) used to be coerced to None here before
+        # calling resolve_max_json_object_nodes_cfg(), which returns None
+        # right back for a None input -- capped_nodes (None) then compares
+        # unequal to configured_nodes (the original wrong-typed value), so
+        # the "capped" branch fired and OVERWROTE the value with a literal
+        # null, printing a "capped to the conservative default" warning
+        # that doesn't describe what actually happened. A wrong-typed value
+        # is not this function's concern at all (see the module docstring:
+        # :func:`validate_base_config` -- called first by every real
+        # caller -- is what rejects it, with the same error a direct
+        # ``compare --config <file>`` would raise); this function must
+        # leave it untouched rather than inventing a replacement.
+        if not isinstance(configured_nodes, int) or isinstance(configured_nodes, bool):
+            return base
+        capped_nodes = resolve_max_json_object_nodes_cfg(
+            configured_nodes,
+            config_explicit=False,
+            default=DEFAULT_MAX_JSON_OBJECT_NODES,
+        )
+        if capped_nodes != configured_nodes:
+            resource_limits = dict(resource_limits)
+            resource_limits["max_bundle_facts_decode_nodes"] = capped_nodes
+            base["resource_limits"] = resource_limits
+            print(
+                "::warning::the discovered .abicheck.yml's "
+                "resource_limits.max_bundle_facts_decode_nodes was capped to "
+                f"the conservative default ({DEFAULT_MAX_JSON_OBJECT_NODES}) "
+                "when synthesizing this --config overlay -- an "
+                "auto-discovered config is never trusted to raise this "
+                "pre-json.loads() decode-bomb budget; set build-config "
+                "explicitly (naming a config you reviewed) to opt in.",
+                file=sys.stderr,
+            )
+
+    return base
+
+
+def rebase_relative_config_paths(
+    base: dict[str, object], *, found_path: Path
+) -> dict[str, object]:
+    """Return a COPY of *base* with every config-location-relative path
+    field rewritten to an absolute path anchored at *found_path*'s own
+    project root (``config_paths.project_root_for_config``), so the
+    document keeps parsing the same surface after it is relocated to a
+    fresh overlay path elsewhere on disk (typically under
+    ``$RUNNER_TEMP``).
+
+    ``compile.include_dirs`` is the only such field today (confirmed by
+    grepping every ``buildsource/build_config.py`` field for a
+    ``project_root_for_config`` consumer -- ``build.compile_db`` is a glob
+    resolved against the ``--sources`` root instead, never the config
+    file's own location, so it is unaffected by relocation and is handled
+    by :func:`strip_untrusted_execution_keys` for an unrelated,
+    trust-driven reason).
+
+    Applies regardless of whether *base* is trusted (an operator's own
+    explicit ``--config``) or not -- this is a pure correctness concern,
+    orthogonal to :func:`strip_untrusted_execution_keys`'s trust-driven
+    stripping: an explicit ``--config`` with a relative
+    ``compile.include_dirs`` breaks exactly the same way a discovered one
+    does the moment its document moves.
+    """
+    base = dict(base)
+    compile_blk = base.get("compile")
+    if not isinstance(compile_blk, dict):
+        return base
+    include_dirs = compile_blk.get("include_dirs")
+    if include_dirs is None:
+        return base
+
+    root = project_root_for_config(found_path)
+
+    def _abs(p: object) -> object:
+        if not isinstance(p, str):
+            return p
+        pp = Path(p)
+        return str(pp) if pp.is_absolute() else str((root / pp).resolve())
+
+    compile_blk = dict(compile_blk)
+    compile_blk["include_dirs"] = (
+        [_abs(p) for p in include_dirs]
+        if isinstance(include_dirs, list)
+        else _abs(include_dirs)
+    )
+    base["compile"] = compile_blk
+    return base
+
+
+def discovered_compile_db_resolves(compile_db: str, sources_root: str) -> bool:
+    """Return whether an auto-discovered ``build.compile_db`` glob
+    demonstrably resolves -- via ``buildsource/inline.py``'s own SELECTION
+    RULE, not merely "some match exists" -- to a real file *contained
+    within* *sources_root*.
+
+    Mirrors ``buildsource/inline.py``'s own resolution exactly:
+    ``for match in sorted(sources.glob(cfg.compile_db)): if match.is_file():
+    return match`` -- sort every glob match (``pathlib.Path`` ordering,
+    i.e. lexicographic by path-component tuple), then return the FIRST
+    match that is a real file. A glob that matches only a directory is not
+    usable evidence there either, so treating it as "resolves" here would
+    still promote a dead-end path to explicit, must-not-be-missing status.
+
+    This function must therefore validate that SAME first-selected match,
+    not merely check whether *any* contained match exists anywhere in the
+    glob's result set (Codex review, fresh evidence, PR #1222 eighth
+    round): an earlier version iterated the glob in whatever (unsorted)
+    order ``Path.glob`` itself yields and returned ``True`` on the first
+    match it happened to find *contained* within *sources_root*, ignoring
+    every match that sorts earlier. A pattern such as
+    ``"../*/compile_commands.json"`` can match both a database inside
+    *sources_root* itself (via a `..`-then-back-in path) and one in a
+    lexically EARLIER sibling directory outside it; the real collector
+    above always selects the lexically-first ``is_file()`` match, so if
+    that one lies outside *sources_root* the collector reads a database
+    this validator must reject, even though some other (not selected)
+    match in the same glob result would have been fine on its own. Sorting
+    first and then walking in that exact order -- stopping at (and judging
+    only) the first ``is_file()`` match -- reproduces the real collector's
+    own selection precisely, so "validated" and "will actually be used"
+    never diverge.
+
+    Containment itself is checked the same way as before: ``Path.glob``
+    happily matches a pattern containing ``..`` components, or one that
+    walks through a symlink, and neither is rejected by ``match.is_file()``
+    alone (Codex review, fresh evidence -- confirmed empirically:
+    ``Path("sources").glob("../outside/secret.json")`` both matches and
+    reports ``is_file()``). ``build.compile_db`` is untrusted,
+    auto-discovered content by construction (see the module docstring);
+    accepting a selected match that resolves OUTSIDE *sources_root* would
+    launder a path-traversal or symlink-escape read into the explicit,
+    always-authorized status this whole module exists to withhold from a
+    discovered document. So the first ``is_file()`` match only counts as
+    "resolves" when its own real path (``Path.resolve()``, which
+    dereferences any symlink component) stays within *sources_root*'s own
+    real path -- checked with :meth:`pathlib.PurePath.is_relative_to`
+    (Python 3.9+), never by comparing the un-resolved strings, which a
+    symlink would defeat. When that first selected match escapes
+    *sources_root*, this function returns ``False`` outright -- it does
+    NOT keep scanning for a later, in-root match, since the real collector
+    would never reach one either (it already returned on the first
+    ``is_file()`` hit).
+
+    ``build.compile_db`` is documented as a glob relative to the
+    ``--sources`` root -- never the config file's own location -- so it can
+    only be validated once that root is known.
+
+    A blank *sources_root* (the caller's own effective ``--sources`` value
+    is empty, or not applicable to this call site at all -- e.g. the
+    release-topology overlay, which never reads ``build.compile_db``)
+    always returns ``False``: with no root to validate the glob against,
+    the field cannot be trusted to resolve, so both callers strip it
+    (see each caller's own comment on which of those two cases applies).
+
+    Both call sites (``action/run.sh``'s compile-context overlay and
+    ``actions/check-target/action.yml``'s assurance overlay) call this
+    identical function rather than each re-implementing the resolution
+    check, so they cannot independently drift on what counts as
+    "resolves" -- exactly the shared-implementation discipline
+    :func:`strip_untrusted_execution_keys` already gives the trust-driven
+    fields above. Swallows ``OSError``/``ValueError`` from a malformed glob
+    pattern, an unreadable directory, or an unresolvable path the same way
+    a real caller would want: a glob (or path) that cannot even be
+    evaluated has not "resolved". An absolute *compile_db* pattern is
+    likewise treated as "does not resolve" rather than raised: ``build.
+    compile_db`` is documented as a glob RELATIVE to *sources_root*, so an
+    absolute pattern can never validly resolve against it, but
+    ``Path.glob`` itself raises ``NotImplementedError`` (not ``OSError``/
+    ``ValueError``) for an absolute pattern on every Python version this
+    project supports (confirmed still true on 3.13/3.14) -- left uncaught,
+    that crashed this function (and, in ``check-target``, made the "Run
+    analysis" step's own condition evaluate unexpectedly) instead of
+    yielding the safe "doesn't resolve" outcome (CodeRabbit review, fresh
+    evidence).
+    """
+    if not sources_root:
+        return False
+    try:
+        if Path(compile_db).is_absolute():
+            return False
+        root = Path(sources_root).resolve()
+        for match in sorted(Path(sources_root).glob(compile_db)):
+            if not match.is_file():
+                continue
+            # The real collector (buildsource/inline.py) stops at -- and
+            # selects -- exactly this match, so its containment is the
+            # only one that matters: return its answer immediately rather
+            # than continuing to scan for a different, in-root match
+            # further down the sorted list.
+            return match.resolve().is_relative_to(root)
+        return False
+    except (OSError, ValueError, NotImplementedError):
+        return False
+
+
+def apply_sources_root_config_blocks(
+    base: dict[str, object],
+    sources_doc: object,
+    *,
+    blocks: tuple[str, ...],
+    merge_compile: bool = False,
+) -> dict[str, object]:
+    """Return a COPY of *base* with each key in *blocks* updated from
+    whatever *sources_doc* defines for that same top-level key.
+
+    *merge_compile* selects which of the two real ``compile:`` resolution
+    shapes a ``"compile"`` entry in *blocks* should reproduce for the
+    *particular command* the caller is building an overlay for --
+    ``cli_options.merge_compile_config`` is NOT one shape for every caller
+    (Codex review, fresh evidence, PR #1222 fourth round, second finding on
+    this same fix): a bare ``dump``/``scan --against`` invocation resolves
+    ``compile:`` with exactly ONE ``merge_compile_config`` call, where
+    ``build_config`` (the CLI's own ``--build-config``, never
+    auto-discovered from cwd for these two commands) and
+    ``sources=<the --sources tree>`` are mutually EXCLUSIVE alternatives
+    (``cfg = build_config if explicit_config else
+    discover_build_config(sources)``) -- when no explicit ``--build-config``
+    is given, the ``--sources`` tree's own document supplies ``compile:``
+    EXCLUSIVELY, the identical single-document-selection shape as ``build:``/
+    ``sources:``/``source:``/``debug:`` above, so ``merge_compile=False``
+    (REPLACE, the default) with ``"compile"`` included in *blocks* is
+    correct there. ``compare``'s own per-side inline embed
+    (``frontends/cli/commands/compare.py``'s ``_embed_inline_source_side``)
+    is different: it always independently resolves the checkout-root
+    document's ``compile:`` block FIRST, unconditionally, via
+    ``cli_compare_helpers.py``'s own ``resolve_compile_context(...,
+    build_config=cfg_path, ...)`` (``cfg_path`` is the explicit ``--config``
+    OR the cwd-upward-discovered project config -- resolved regardless of
+    whether ``--sources`` was even given), and only THEN calls
+    ``merge_compile_config`` a SECOND time with ``build_config=None,
+    sources=<that side's tree>`` to fold the tree's own ``compile:`` ON TOP
+    of that already-resolved context -- a genuine two-stage MERGE, but this
+    second stage runs UNCONDITIONALLY, regardless of whether ``--config``
+    was explicit (Codex review, P1, fresh evidence, PR #1222 eleventh
+    round -- reverses this paragraph's own prior conclusion): unlike
+    ``build:``/``sources:``, an explicit ``--config`` does NOT suppress it.
+    So a ``compare``-shaped caller must NOT also include ``"compile"`` in
+    *blocks* -- doing so would fold the sources-root document's own
+    ``compile:`` block in a SECOND time, on top of what
+    ``_embed_inline_source_side`` is about to fold in a second time anyway.
+    ``merge_compile=True`` still names this shape (for callers that reach
+    this function with ``"compile"`` in *blocks* for some other reason —
+    the parameter combination is not itself forbidden), but neither current
+    caller (``action/run.sh``, ``actions/check-target/action.yml``) ever
+    passes both together any more: each computes its own
+    ``sources_merge_compile``/``_sources_merge_compile`` flag to EXCLUDE
+    ``"compile"`` from *blocks* in exactly the case that used to set
+    ``merge_compile=True`` alongside it, leaving ``compile:`` at the
+    checkout-only value and letting the CLI's own second stage run
+    unaided. The caller still decides ``dump``/``scan`` vs. ``compare``
+    shape the same way as before (``run.sh``'s ``$MODE`` shell variable /
+    ``actions/check-target/action.yml``'s own ``mode:`` computation).
+
+    This is the block-selection half of ``action/run.sh``'s own
+    ``_merge_config_overlay_with_discovered_project_config`` (its
+    "sources-root promotion" section, added to mirror
+    ``embed_build_source()``'s own ``build_config or
+    discover_build_config(raw_sources)`` selection -- see that shell
+    function's own extensive docstring for the full reasoning). When no
+    explicit ``--config`` is given, a ``--sources`` directory carrying its
+    own ``.abicheck.yml`` (found via :func:`abicheck.config_paths.
+    discover_build_config` -- non-recursive, anchored at the sources root
+    itself, never walking up to parents, unlike a checkout-root discovery
+    that walks up from a starting directory) supplies ``build:``/
+    ``sources:`` EXCLUSIVELY -- each of those two blocks is a genuine
+    single-document selection in the real pipeline too
+    (``embed_build_source()``'s ``build_config or discover_build_config(...)``),
+    so REPLACING the checkout document's block wholesale (or clearing it
+    when *sources_doc* doesn't define it) is correct for both: a
+    checkout-root document found by a separate, upward-walking discovery is
+    never even consulted for them once a distinct sources-root document
+    exists.
+
+    ``source:``(singular)/``debug:`` are ALSO a genuine single-document
+    selection off the sources-root document -- but ONLY for a caller whose
+    single-sided resolution is `dump`/`scan`'s shape (``merge_compile=
+    False``): ``resolved_cfg``/``project_cfg``'s single load in
+    ``cli_compare_helpers.py``/``frontends/cli/dump_debug_config.py``
+    resolves them from `dump`/`scan`'s OWN ``build_config or
+    discover_build_config(sources)`` selection, the identical shape
+    ``build:``/``sources:`` use. For a ``merge_compile=True`` caller
+    (`compare`'s own single-sided shape), the two must be left OUT of
+    *blocks* entirely (Codex review, P1, fresh evidence, PR #1222 eighth
+    round): `compare`'s real pipeline resolves both EXCLUSIVELY from the
+    CHECKOUT project config (``frontends/cli/commands/compare.py``'s
+    ``_embed_inline_source_side`` receives them as already-frozen
+    ``_resolved_collect_mode``/``_resolved_debug`` arguments, computed once
+    from the checkout-side ``resolved_cfg`` before any per-side
+    ``--sources`` tree is even considered) and never re-resolves them from
+    a per-side tree's own document at all -- unlike ``compile:``'s genuine
+    two-stage merge below. Promoting them here for `compare` would let a
+    sources-root document control this run's collection depth or
+    debug-info extraction in a way the real, non-overlay invocation never
+    permits, purely because this promotion ran.
+
+    ``compile:`` under ``merge_compile=True`` is a real, documented
+    per-field merge behavior this function still supports (as opposed to
+    ``source:``/``debug:``, which are simply excluded from *blocks*
+    whenever this caller shape applies) -- ``cli_options.
+    merge_compile_config`` really is a genuine TWO-STAGE fold in the CLI
+    itself (the checkout document's ``compile:`` block folded into the
+    compile context FIRST via ``resolve_compile_context``'s own
+    ``build_config=cfg_path`` call, then a second ``merge_compile_config``
+    call layering the sources-root document's own ``compile:`` block ON
+    TOP, per field). But (P1 fix, PR #1222 eleventh round) **neither
+    current caller reaches this function with ``"compile"`` in *blocks*
+    while ALSO passing ``merge_compile=True`` any more** -- ``compare``'s
+    own single-sided shape already gets that second stage for free,
+    unconditionally, from ``_embed_inline_source_side`` itself, so
+    reproducing it here too would fold the sources-root document in twice;
+    both callers now compute their own ``sources_merge_compile``/
+    ``_sources_merge_compile`` flag to EXCLUDE ``"compile"`` from *blocks*
+    in exactly that case (mirroring how ``source:``/``debug:`` are already
+    excluded). This ``key == "compile" and merge_compile`` branch is
+    consequently unreached by either caller today; it is kept, rather than
+    deleted, as the one documented, tested primitive a *future* caller with
+    a genuine two-stage ``compile:`` merge need (unlike either current
+    caller) could still reach correctly. ``dump``/``scan`` (``merge_compile
+    =False``) still promotes ``"compile"`` as a plain REPLACE, same as
+    ``build:``/``sources:`` -- REPLACING the whole block wholesale (what
+    every block used to do uniformly, before the fourth round introduced
+    the merge behavior above for ``merge_compile=True``) is correct there
+    because that shape's own real resolution genuinely is single-document-
+    exclusive, so there is no checkout-level ``compile:`` setting a replace
+    could wrongly drop. See :func:`action_config_overlay_compile.
+    merge_compile_block`'s own docstring and the key-bucket constants
+    above it for exactly which side wins for which key, for the
+    ``merge_compile=True`` shape this branch still implements.
+
+    A non-``dict`` *sources_doc* (``None`` for an empty file, or any other
+    non-mapping value) is treated as an empty document -- every OTHER block
+    in *blocks* is REMOVED from the copy rather than left untouched,
+    matching ``load_build_config``'s own empty-``BuildConfig`` outcome for
+    the identical case: an existing-but-empty/malformed-shape sources-root
+    config file is not "no config found" (``discover_build_config``'s own
+    selection is exclusive), so it must clear whatever the checkout-root
+    document happened to declare under the same key, not silently leave it
+    in place. ``compile:`` under ``merge_compile=True`` is the one
+    exception even here: an empty sources-root document still means
+    "sources-root sets nothing", which ``action_config_overlay_compile.merge_compile_block`` already
+    treats as a no-op fold rather than a block-clearing one -- there is no
+    checkout-level ``compile:`` setting for an empty sources-root document
+    to legitimately erase, since the real two-stage ``merge_compile_config``
+    fold never clears a field the earlier stage set just because the later
+    document is empty/absent. Under ``merge_compile=False`` (the default),
+    ``compile:`` follows the SAME clear-on-empty rule as every other block
+    -- matching the single-document-exclusive selection ``dump``/``scan``
+    actually perform.
+
+    *base* is never mutated -- the caller's own reference is left
+    untouched, matching :func:`strip_untrusted_execution_keys`'s and
+    :func:`rebase_relative_config_paths`'s own copy-on-write convention.
+    """
+    base = dict(base)
+    doc = sources_doc if isinstance(sources_doc, dict) else {}
+    for key in blocks:
+        if key == "compile" and merge_compile:
+            checkout_compile = base.get("compile")
+            checkout_blk = (
+                checkout_compile if isinstance(checkout_compile, dict) else {}
+            )
+            sources_compile = doc.get("compile")
+            sources_blk = sources_compile if isinstance(sources_compile, dict) else {}
+            merged_compile = merge_compile_block(checkout_blk, sources_blk)
+            if merged_compile:
+                base[key] = merged_compile
+            else:
+                base.pop(key, None)
+        elif key in doc:
+            base[key] = doc[key]
+        else:
+            base.pop(key, None)
+    return base

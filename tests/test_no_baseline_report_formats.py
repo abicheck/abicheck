@@ -683,6 +683,25 @@ def test_the_two_axis_tables_cover_the_same_axes() -> None:
     assert set(NO_BASELINE_EXIT_AXIS_LABELS) == set(NO_BASELINE_EXIT_AXIS_NOTICES)
 
 
+def test_analysis_assurance_notice_names_the_config_key_not_the_retired_flag() -> None:
+    """The remediation text must name a switch a reader can actually flip.
+
+    `compare --require-complete-analysis` was removed (rulings.py
+    deferred-option followup): the only way to arm this axis is
+    `.abicheck.yml`'s `assurance.require_complete: true`. The notice
+    previously still told a reader to pass `--require-complete-analysis`,
+    which now exits 64 as a usage error instead of reproducing the gate
+    (Codex review, P2). Assert the fix directly on the notice text rather
+    than only through the headline-substring check the other axis tests use,
+    since that check would pass unchanged whether the remediation clause
+    named the live config key or the dead flag.
+    """
+    notice = NO_BASELINE_EXIT_AXIS_NOTICES["analysis_assurance"]
+    assert "--require-complete-analysis" not in notice
+    assert "assurance.require_complete" in notice
+    assert ".abicheck.yml" in notice
+
+
 @pytest.mark.parametrize(
     ("axis", "require_complete"),
     [(axis, req) for axis, (_, req) in _GATED_AXIS_FIXTURES.items()],

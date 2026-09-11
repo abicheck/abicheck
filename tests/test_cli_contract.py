@@ -1407,7 +1407,7 @@ def test_contract_evaluation_no_longer_rejected_for_directory_comparisons() -> N
     """
     import inspect
 
-    from abicheck.cli_compare_helpers import _reject_set_input_flags
+    from abicheck.cli_compare_options import _reject_set_input_flags
 
     params = inspect.signature(_reject_set_input_flags).parameters
     assert "contract_evaluation" not in params

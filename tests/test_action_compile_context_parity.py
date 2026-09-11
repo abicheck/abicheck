@@ -1380,10 +1380,21 @@ class TestCompileContextPreservesUsableDiscoveredCompileDb:
         """``sources`` is normally a checkout-relative path too (e.g.
         ``sources: src``) -- the same relative-path-vs-``$_PY_SAFE_DIR``
         bug class ``TestCompileContextMergesWithRelativeBuildConfig``
-        covers for ``build-config``."""
+        covers for ``build-config``.
+
+        P1 finding follow-up (Codex review, fresh evidence, PR #1222 ninth
+        round): ``build.compile_db`` now lives in the SOURCES-ROOT's own
+        ``.abicheck.yml`` -- ``build:`` is sources-root-exclusive, so a
+        checkout-root-only setting no longer survives once ``--sources``
+        is given at all, matching
+        ``TestCompileContextDiscoversSourcesRootOwnConfig``'s own
+        ``test_no_sources_root_config_clears_to_defaults`` below. This test
+        previously planted ``build.compile_db`` on the checkout-root
+        document instead, which only passed because of the very bug that
+        round fixed."""
         src_dir = tmp_path / "src"
         src_dir.mkdir()
-        (tmp_path / ".abicheck.yml").write_text(
+        (src_dir / ".abicheck.yml").write_text(
             "build:\n  compile_db: compile_commands.json\n", encoding="utf-8"
         )
         (src_dir / "compile_commands.json").write_text("[]", encoding="utf-8")
@@ -1512,17 +1523,31 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
             "system": "cmake",
         }
 
-    def test_no_sources_root_config_falls_back_to_checkout_root(
-        self, tmp_path: Path
-    ) -> None:
-        """When --sources carries no config of its own, behavior is
-        unchanged from before this fix -- the checkout-root config (if any)
-        is used as-is."""
+    def test_no_sources_root_config_clears_to_defaults(self, tmp_path: Path) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 ninth round):
+        when ``--sources`` carries NO config of its own at all
+        (``discover_build_config`` returns ``None``), ``build:`` must clear
+        to pure defaults -- NOT fall back to the checkout-root config, even
+        though one exists. This test's name and assertion previously
+        encoded the opposite (buggy) behavior this same round's finding
+        reported: ``embed_build_source()``'s own ``cfg_path = build_config
+        or discover_build_config(raw_sources)`` never consults the
+        checkout-root document for ``build:``/``sources:`` once
+        ``--sources`` is given, whether or not that tree has its own
+        config -- so forwarding the checkout's ``build: {system: make}``
+        here would apply a setting the real, non-overlay pipeline would
+        never have picked up, purely because this Action's overlay
+        synthesis ran. See ``tests/test_reusable_workflows_assurance_
+        overlay_compile_context.py::
+        TestAssuranceOverlayClearsSourcesRootBlocksWhenNoSourcesConfigExists``
+        for the identical fix at the ``actions/check-target/action.yml``
+        call site."""
         (tmp_path / ".abicheck.yml").write_text(
             "build:\n  system: make\n", encoding="utf-8"
         )
         src_dir = tmp_path / "src"
         src_dir.mkdir()
+        # Deliberately no `.abicheck.yml` at all under src_dir.
         cmd, _ = _run_region_with_cwd(
             _DUMP_MODE_MARKER,
             {"INPUT_GCC_PATH": "/opt/gcc-14/bin/g++", "INPUT_SOURCES": "src"},
@@ -1532,7 +1557,7 @@ class TestCompileContextDiscoversSourcesRootOwnConfig:
         doc = json.loads(
             Path(cmd[cmd.index("--config") + 1]).read_text(encoding="utf-8")
         )
-        assert doc["build"] == {"system": "make"}
+        assert "build" not in doc
 
     def test_sources_root_sources_block_is_also_carried(self, tmp_path: Path) -> None:
         """Codex review, PR #1159 (P1, second round, fresh evidence): ``sources``

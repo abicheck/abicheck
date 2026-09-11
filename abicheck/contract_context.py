@@ -414,6 +414,10 @@ def with_resolved_gate(
     exit_code_scheme: str,
     severity: SeverityConfig,
     severity_provenance: Mapping[str, ValueProvenance],
+    require_complete_analysis: bool | None = None,
+    require_complete_analysis_stated: bool = False,
+    project_config_path: str | None = None,
+    project_config_sha256: str | None = None,
 ) -> PersistedContractContext:
     """Return *context* with the front end's real gate configuration recorded.
 
@@ -451,13 +455,37 @@ def with_resolved_gate(
     says about how the run was gated. *exit_code_scheme* itself carries no
     provenance entry any more (PR G2 deleted the manual selector; purely
     derived now).
+
+    *require_complete_analysis*/*require_complete_analysis_stated*/
+    *project_config_path*/*project_config_sha256* are the sibling ``gate.
+    require_complete_analysis`` field's own resolved value, whether the
+    project config *literally stated* it (as opposed to an omitted key
+    defaulting to the same resolved value), and provenance identity,
+    threaded through for the identical reason as *severity_provenance*
+    above -- see ``contract_gate_require_complete_provenance.py``'s module
+    docstring for the full account (split out purely to stay under this
+    file's own ``no_growth`` cap).
     """
     from .compatibility_evaluation_frontend import SEVERITY_CATEGORY_FIELDS
+    from .contract_gate_require_complete_provenance import (
+        resolve_require_complete_analysis_provenance,
+    )
 
     config = context.evaluation_context.resolved_config
     provenance = dict(config.provenance)
     for category, entry in severity_provenance.items():
         provenance[SEVERITY_CATEGORY_FIELDS[category]] = entry
+    resolved_require_complete_analysis, require_provenance = (
+        resolve_require_complete_analysis_provenance(
+            default_value=config.gate.require_complete_analysis,
+            require_complete_analysis=require_complete_analysis,
+            require_complete_analysis_stated=require_complete_analysis_stated,
+            project_config_path=project_config_path,
+            project_config_sha256=project_config_sha256,
+        )
+    )
+    if require_provenance is not None:
+        provenance["gate.require_complete_analysis"] = require_provenance
     return replace(
         context,
         evaluation_context=replace(
@@ -469,7 +497,7 @@ def with_resolved_gate(
                     preset=config.gate.preset,
                     packs=config.gate.packs,
                     severity=severity,
-                    require_complete_analysis=config.gate.require_complete_analysis,
+                    require_complete_analysis=resolved_require_complete_analysis,
                     scope=config.gate.scope,
                 ),
                 provenance=provenance,

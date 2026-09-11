@@ -36,7 +36,6 @@ GCC_OPTIONS="${INPUT_GCC_OPTIONS:-}"
 SYSROOT="${INPUT_SYSROOT:-}"
 NOSTDINC="${INPUT_NOSTDINC:-false}"
 SNAPSHOT_COMPRESSION="${INPUT_SNAPSHOT_COMPRESSION:-}"
-REQUIRE_COMPLETE_ANALYSIS="${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}"
 
 # A directory, or a file whose name/magic bytes match a recognized package
 # format (RPM, Deb, tar, conda, wheel) — mirrors action/run.sh's
@@ -282,17 +281,6 @@ case "$MODE" in
         _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support lang/ast-frontend/gcc-path/gcc-prefix/gcc-options/sysroot/nostdinc -- the per-library fan-out never threads the L2 compile context to each pair's header dump, so the requested context would silently never be applied and headers could be parsed under the wrong macros/sysroot/frontend. Compare the libraries individually (mode: compare with single-file operands) to use them."
       fi
     fi
-    # P0.4: require-complete-analysis is rejected outright by run.sh for a
-    # directory/package operand too -- the per-library release fan-out has
-    # no single analysis_assurance result to gate on -- so mirror that
-    # check here as well (same rationale as the compile-context guard
-    # immediately above: without it, a slow dependency-install step still
-    # runs before the request is rejected).
-    if [[ "$REQUIRE_COMPLETE_ANALYSIS" == "true" ]] \
-       && { { [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; } \
-            || { [[ -n "$OLD_LIBRARY" ]] && _is_release_style_operand "$OLD_LIBRARY"; }; }; then
-      _fail "mode: compare with a directory/package operand (old-library='$OLD_LIBRARY', new-library='$NEW_LIBRARY') does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
-    fi
     ;;
   *)
     # An unrecognized mode (e.g. a typo like 'scna') has no arm above, so
@@ -499,6 +487,16 @@ if [[ -n "${INPUT_JOBS:-}" ]]; then
 fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
+fi
+# require-complete-analysis: RETIRED (rulings.py deferred-option followup --
+# hard removal, no deprecation window, no config-overlay synthesis the way
+# dso-only/fail-on-removed-library got, since the CLI-side flag itself is
+# gone entirely, not merely demoted to a still-forwarded Action input). Same
+# severity reasoning as bundle-system-providers directly above: leaving it
+# set would silently drop the requested orthogonal exit-1 assurance floor
+# rather than actually enforcing it, so this is a hard error, not a warning.
+if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — leaving it set would silently analyse without the orthogonal exit-1 assurance floor you asked for. Set \`assurance.require_complete: true\` in your .abicheck.yml and pass that file as build-config instead, then remove this input."
 fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$MODE" != "compare" ]]; then

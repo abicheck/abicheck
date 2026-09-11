@@ -690,3 +690,334 @@ class TestWiringContract:
         result = _Result()
         record_resolved_config(result, object(), None)
         assert result.contract_context is None
+
+
+class TestRequireCompleteAnalysisReceiptConsistency:
+    """P2 (Codex review, fresh evidence on the require-complete-analysis
+    retirement PR): for a ``--contract`` compare with
+    ``assurance.require_complete: true``, ``record_resolved_config`` used to
+    call ``with_resolved_gate`` without threading the resolved
+    ``require_complete_analysis`` value through, so it fell back to the
+    resolver's own built-in-default ``GateConfig.require_complete_
+    analysis=False``. The persisted receipt then disagreed with itself:
+    the top-level ``effective_config_fields["gate.require_complete_
+    analysis"]`` (sourced from ``resolved_cfg`, the value that actually
+    gated the run) read ``"True"`` while ``contract_context.
+    evaluation_context.resolved_config.gate.require_complete_analysis``
+    read ``False``. Both must now agree.
+    """
+
+    def test_both_representations_agree_when_true(self, tmp_path: Path) -> None:
+        (tmp_path / ".abicheck.yml").write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(tmp_path / ".abicheck.yml"),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        top_level = payload["effective_config_fields"]["gate.require_complete_analysis"]
+        contract_context_value = payload["contract_context"]["evaluation_context"][
+            "resolved_config"
+        ]["gate"]["require_complete_analysis"]
+
+        assert top_level == "True", payload["effective_config_fields"]
+        assert contract_context_value is True, payload["contract_context"]
+        # The actual agreement this test exists to pin: the receipt's two
+        # ways of stating the same field must not diverge.
+        assert (top_level == "True") == (contract_context_value is True)
+
+    def test_both_representations_agree_when_false(self, tmp_path: Path) -> None:
+        """Negative control: the default (no assurance.require_complete
+        set at all) must agree too, not just the True case this bug hid
+        behind (a fixed-input regression test only proves the reported
+        input, per this repo's own bug-class-regression-testing
+        convention -- the False side is a real, independently-checkable
+        sibling case, not a restatement of the same assertion)."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        top_level = payload["effective_config_fields"]["gate.require_complete_analysis"]
+        contract_context_value = payload["contract_context"]["evaluation_context"][
+            "resolved_config"
+        ]["gate"]["require_complete_analysis"]
+
+        assert top_level == "False", payload["effective_config_fields"]
+        assert contract_context_value is False, payload["contract_context"]
+        assert (top_level == "True") == (contract_context_value is True)
+
+
+class TestRequireCompleteAnalysisFieldProvenance:
+    """P2 (Codex review, fresh evidence after
+    ``TestRequireCompleteAnalysisReceiptConsistency`` above landed): that fix
+    threaded the resolved *value* through to ``with_resolved_gate``, but
+    ``field_provenance["gate.require_complete_analysis"]`` was still absent
+    from the persisted receipt -- the receipt could show *that* the gate was
+    enabled but not *why* (which layer/file resolved it). Fixed by
+    constructing the entry directly in ``record_resolved_config`` (this
+    field has no D7 resolver of its own -- see ``with_resolved_gate``'s own
+    docstring for why that is the correct fix rather than projecting it
+    into ``ProjectCompatibilityInputs``)."""
+
+    def test_provenance_entry_present_when_config_sets_it(self, tmp_path: Path) -> None:
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        entry = field_provenance.get("gate.require_complete_analysis")
+        assert entry is not None, field_provenance
+        assert entry["layer"] == "project_config", entry
+        assert entry["field_location"] == "assurance.require_complete", entry
+
+    def test_provenance_entry_absent_when_not_set(self, tmp_path: Path) -> None:
+        """Negative control: the "absent, not defaulted" rule -- an unset
+        field gets no provenance entry at all, mirroring how an unsupplied
+        severity category is handled."""
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        assert "gate.require_complete_analysis" not in field_provenance
+
+    def test_provenance_entry_absent_when_assurance_block_omits_the_key(
+        self, tmp_path: Path
+    ) -> None:
+        """An ``assurance:`` block present WITHOUT ``require_complete`` is
+        the same "not stated" case as an entirely-omitted block above --
+        still no provenance entry. ``require_complete`` is currently the
+        ONLY key ``assurance:`` accepts, so an empty mapping is the one way
+        to state "the block is present but the key isn't"."""
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text("assurance: {}\n", encoding="utf-8")
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        assert "gate.require_complete_analysis" not in field_provenance
+
+    def test_provenance_entry_present_for_an_explicit_false(
+        self, tmp_path: Path
+    ) -> None:
+        """P2 finding (Codex review, fresh evidence, PR #1222 fourth
+        round): an EXPLICIT ``assurance.require_complete: false`` is a
+        real, deliberate statement in the document -- distinct from never
+        having mentioned the setting at all (the negative control above)
+        -- and must produce a real provenance entry naming the config path/
+        digest, even though the resolved gate value (``false``) is
+        identical to the built-in default."""
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: false\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        gate = payload["contract_context"]["evaluation_context"]["resolved_config"][
+            "gate"
+        ]
+        assert gate["require_complete_analysis"] is False
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        entry = field_provenance.get("gate.require_complete_analysis")
+        assert entry is not None, field_provenance
+        assert entry["layer"] == "project_config", entry
+        assert entry["field_location"] == "assurance.require_complete", entry
+        assert entry["path"] == str(config_path), entry
+        assert entry["sha256"], entry
+
+
+class TestRequireCompleteAnalysisProvenanceIdentity:
+    """P2 (Codex review, fresh evidence after
+    ``TestRequireCompleteAnalysisFieldProvenance`` above landed): the
+    provenance entry named the ``project_config`` layer but not the config
+    document itself -- for a project whose ``.abicheck.yml`` sets ONLY
+    ``assurance.require_complete`` (no other override, so no OTHER
+    field_provenance entry happens to name the same file), the persisted
+    receipt could not identify or replay which exact file/digest enabled
+    the gate. Fixed by threading the real, already-resolved project-config
+    path/digest through ``record_resolved_config`` -> ``with_resolved_gate``
+    (``cli_compare_receipt.py``, ``contract_context.py``)."""
+
+    def test_provenance_entry_names_the_real_config_path_and_digest(
+        self, tmp_path: Path
+    ) -> None:
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        entry = field_provenance.get("gate.require_complete_analysis")
+        assert entry is not None, field_provenance
+        # Not a bare stub: the entry identifies the actual document (path
+        # and content digest), the same identity every other project-
+        # config-sourced field_provenance entry in this receipt carries.
+        assert entry["path"] == str(config_path), entry
+        assert entry.get("sha256"), entry
+        selected_by = entry.get("selected_by") or []
+        assert len(selected_by) == 1, entry
+        hop = selected_by[0]
+        assert hop["layer"] == "project_config", hop
+        assert hop["option"] == "assurance.require_complete", hop
+        assert hop["path"] == str(config_path), hop
+        assert hop.get("sha256"), hop
+
+    def test_a_config_setting_only_assurance_still_identifies_itself(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario the finding names: a project config with NO
+        other override -- so no sibling field_provenance entry happens to
+        carry the same path/digest this one must supply for itself."""
+        config_path = tmp_path / ".abicheck.yml"
+        config_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+        old_p, new_p = _write_pair(tmp_path)
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                "--contract",
+                "auto",
+                "--config",
+                str(config_path),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code in (1, 2, 4), result.output
+        payload = json.loads(result.output)
+
+        field_provenance = payload["contract_context"]["evaluation_context"][
+            "field_provenance"
+        ]
+        # No other field in this minimal config contributed a provenance
+        # entry at the project_config layer for this same document --
+        # this entry is the only place that identity can come from.
+        other_project_entries = {
+            key: value
+            for key, value in field_provenance.items()
+            if key != "gate.require_complete_analysis"
+            and value.get("layer") == "project_config"
+        }
+        assert other_project_entries == {}, field_provenance
+        entry = field_provenance["gate.require_complete_analysis"]
+        assert entry["path"] == str(config_path), entry
+        assert entry.get("sha256"), entry

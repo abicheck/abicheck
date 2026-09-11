@@ -452,12 +452,37 @@ _merge_config_overlay_with_discovered_project_config() {
   #     regressed dump's own single-sided use of a --sources tree's
   #     compile:/debug: settings the moment any compile-context input was
   #     also set).
+  # $7: optional; "true" selects a genuine per-field MERGE for `compile:`
+  #     specifically (`abicheck.action_config_overlay.apply_sources_root_
+  #     config_blocks`'s own `merge_compile` parameter) instead of the
+  #     wholesale REPLACE every other promoted block still uses -- Codex
+  #     review, fresh evidence, PR #1222 fourth round, second finding on
+  #     this fix: within the single-sided ($6 omitted) bucket, `compile:`
+  #     does NOT always resolve the same way. `dump`/`scan --against`
+  #     genuinely select `compile:` from exactly ONE document (the
+  #     `--sources` tree's own, when no explicit `--build-config` is given
+  #     -- `cli_options.merge_compile_config`'s own `build_config if
+  #     explicit_config else discover_build_config(sources)`, mutually
+  #     exclusive alternatives), the same single-document shape as
+  #     build:/sources:/source:/debug: -- pass "" (the default) there.
+  #     `compare`'s own single-sided shape (a stored-snapshot old operand,
+  #     `_compile_context_sources_pairwise`'s own docstring) is different:
+  #     the checkout-root document's `compile:` is ALREADY independently
+  #     resolved first, unconditionally
+  #     (`cli_compare_helpers.resolve_compile_context(..., build_config=
+  #     cfg_path, ...)`), and the live side's own `--sources` tree only
+  #     folds ON TOP of that via a SECOND `merge_compile_config` call
+  #     (`compare.py`'s `_maybe_dump_side`) -- a genuine two-stage MERGE,
+  #     so pass "true" there. Meaningless (never read) when $6 is
+  #     "pairwise", since `compile:` is excluded from `_sources_root_blocks`
+  #     entirely in that case.
   local overlay_json="$1"
   local out_path="$2"
   local base_source="$3"
   local merge_mode="${4:-discover}"
   local sources_root="${5:-}"
   local sources_pairwise="${6:-}"
+  local sources_merge_compile="${7:-}"
   # Codex review, PR #1159, third round: in "explicit" mode base_source is
   # the caller-supplied build-config input, which is very often a
   # checkout-relative path (e.g. `build-config: .abicheck.yml`) -- exactly
@@ -508,6 +533,7 @@ _merge_config_overlay_with_discovered_project_config() {
       ABICHECK_OVERLAY_JSON="$overlay_json" \
       ABICHECK_SOURCES_ROOT="$sources_root" \
       ABICHECK_SOURCES_PAIRWISE="$sources_pairwise" \
+      ABICHECK_SOURCES_MERGE_COMPILE="$sources_merge_compile" \
       PYTHONPATH= "$_PY_BIN" - "$out_path" <<'PYEOF'
 # Discovers the real project .abicheck.yml (if any) the same way
 # discover_project_config() does -- config_paths.find_config_in_dir(),
@@ -561,15 +587,16 @@ from pathlib import Path
 
 import yaml
 
-from abicheck.buildsource.build_config import BuildConfig
-from abicheck.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
+from abicheck.action_config_overlay import (
+    apply_sources_root_config_blocks,
+    discovered_compile_db_resolves,
+    rebase_relative_config_paths,
+    strip_untrusted_execution_keys,
+    validate_base_config,
+)
 from abicheck.config_paths import (
     discover_build_config,
     find_config_in_dir,
-    project_root_for_config,
-)
-from abicheck.frontends.cli.commands.compare_bundle_facts_rejections import (
-    resolve_max_json_object_nodes_cfg,
 )
 
 
@@ -606,9 +633,14 @@ def _validate_or_exit(doc: dict[str, object], source_path: Path) -> None:
     # error as if it had been valid all along, instead of the loud usage
     # error the equivalent native CLI invocation would raise. Validating
     # here, before any merge happens, surfaces the same error the user
-    # would see running abicheck directly against this file.
+    # would see running abicheck directly against this file. Shared with
+    # actions/check-target/action.yml's own equivalent "Generate
+    # assurance-overlay config" step via
+    # abicheck.action_config_overlay.validate_base_config (Codex review,
+    # second finding) so the two call sites can't independently drift on
+    # what counts as a valid base document.
     try:
-        BuildConfig.from_dict(doc)
+        validate_base_config(doc)
     except ValueError as exc:
         print(
             f"::error::the config at {_gha_escape(source_path)} is invalid: "
@@ -716,15 +748,12 @@ else:
     # (not merge into) the checkout-root document's own such blocks --
     # exactly as if no explicit --config had been in the way.
     #
-    # compile:/source:(singular)/debug: are conditionally included too --
-    # gated on ABICHECK_SOURCES_PAIRWISE (see this shell function's own $6
+    # compile: is conditionally included too -- gated on
+    # ABICHECK_SOURCES_PAIRWISE (see this shell function's own $6
     # docstring). A second Codex review (fresh evidence, PR #1159) caught
-    # that those three blocks are pair-wide for single-pair `compare`, not
-    # per-side: compile: flows through resolve_compile_context ("It applies
-    # to both sides", cli_compare_helpers.py), source:(singular).method
-    # resolves resolved_cfg.source_method (also pair-wide,
-    # cli_helpers_compare.py), and debug: resolves resolved_cfg.debug_format
-    # for both operands -- promoting them from a NEW-only sources-root
+    # that it is pair-wide for single-pair `compare`, not per-side: compile:
+    # flows through resolve_compile_context ("It applies to both sides",
+    # cli_compare_helpers.py) -- promoting it from a NEW-only sources-root
     # config there would silently apply NEW-only settings to OLD's own
     # parsing too. But a THIRD review round (fresh evidence, PR #1171) found
     # that blanket exclusion regressed `dump`, which has no "other side"
@@ -740,9 +769,67 @@ else:
     # the ORIGINAL five-block version of this fix before the second review
     # round overcorrected it for every mode at once.
     sources_pairwise = os.environ.get("ABICHECK_SOURCES_PAIRWISE", "") == "pairwise"
+    # Codex review, fresh evidence, PR #1222 fourth round, second finding:
+    # within the single-sided bucket, `compile:` does NOT always resolve
+    # the same way -- see this shell function's own $7 docstring and
+    # `apply_sources_root_config_blocks`'s own `merge_compile` parameter
+    # docstring for the exact distinction (dump/scan single-document
+    # REPLACE vs. compare's checkout-then-sources two-stage MERGE).
+    # P1 fix (Codex review, fresh evidence, PR #1222 eleventh round --
+    # reverses the fourth round's own conclusion documented just below,
+    # unchanged for historical context): `compile:` is no longer promoted
+    # from the sources root for `mode: compare`'s single-sided shape at
+    # all (see `_sources_root_blocks` below) -- `sources_merge_compile`
+    # now only decides whether `source:`(singular)/`debug:` may be
+    # promoted, unrelated to `compile:`'s own (unchanged) exclusion. See
+    # `actions/check-target/action.yml`'s own identical fix and its
+    # `_sources_merge_compile` comment for the full account of the P1
+    # finding this closes -- `frontends/cli/commands/compare.py`'s
+    # `_embed_inline_source_side` always independently folds the live
+    # side's own `--sources` tree's `compile:` block on top of the CLI's
+    # already-resolved compile context, unconditionally, regardless of
+    # whether `--config`/`build-config` was explicit -- so this overlay
+    # promoting/merging `compile:` too folds the sources-root document in
+    # TWICE, applying a repeat-sensitive flag (`-include`, ...) twice in
+    # the final compiler invocation.
+    sources_merge_compile = (
+        os.environ.get("ABICHECK_SOURCES_MERGE_COMPILE", "") == "true"
+    )
+    # `source:`(singular)/`debug:` are excluded from sources-root promotion
+    # whenever `sources_merge_compile` is set (Codex review, P1, fresh
+    # evidence, PR #1222 eighth round) -- that flag is true exactly for
+    # `mode: compare`'s own single-sided shape (a stored-snapshot old
+    # operand; see `_compile_context_sources_merge_compile`'s own
+    # docstring), and unlike `compile:`, `compare`'s real pipeline never
+    # resolves `source:`/`debug:` from a per-side `--sources` tree's own
+    # document at all: `frontends/cli/commands/compare.py`'s
+    # `_embed_inline_source_side` receives both as already-frozen arguments
+    # (`_resolved_collect_mode`/`_resolved_debug`), computed once from the
+    # checkout-side `resolved_cfg` before any per-side tree is even
+    # considered, and forwards them verbatim to the nested dump invocation's
+    # own private hooks of the same name -- `frontends/cli/
+    # dump_debug_config.resolve_dump_debug_fields` only falls back to
+    # resolving a tree's own document when `resolved_debug` is `None`,
+    # which never happens on `compare`'s own call path. Promoting these two
+    # blocks here for `mode: compare` would therefore let a sources-root
+    # document control this run's collection depth (`source:`) or
+    # debug-info extraction (`debug:`) in a way the real, non-overlay
+    # `compare` invocation never permits. `dump`/`scan`
+    # (`sources_merge_compile` unset) are unaffected: their own
+    # single-document selection genuinely takes `source:`/`debug:` from the
+    # `--sources` tree's own document exclusively
+    # (`resolve_dump_debug_config`'s `build_config or
+    # discover_build_config(sources)`), the identical shape `build:`/
+    # `sources:` already use.
+    # `compile:` is EXCLUDED here whenever `sources_merge_compile` is set
+    # too now (Codex review, P1, fresh evidence, PR #1222 eleventh round):
+    # this bucket now collapses to the SAME two-block set the pairwise
+    # bucket already uses -- see `sources_merge_compile`'s own comment
+    # above and `actions/check-target/action.yml`'s identical fix for the
+    # full account.
     _sources_root_blocks = (
         ("build", "sources")
-        if sources_pairwise
+        if sources_pairwise or sources_merge_compile
         else ("build", "sources", "compile", "source", "debug")
     )
     sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
@@ -780,25 +867,95 @@ else:
             # `load_build_config`'s own empty-BuildConfig outcome exactly.
             if isinstance(sources_loaded, dict):
                 _validate_or_exit(sources_loaded, sources_found)
-            _sources_doc = sources_loaded if isinstance(sources_loaded, dict) else {}
+            # Rebase EACH document's own compile.include_dirs against ITS
+            # OWN project root BEFORE merging (Codex review, fresh
+            # evidence, PR #1222 fourth round): `compile:` is now a real
+            # per-field MERGE inside apply_sources_root_config_blocks (see
+            # that function's own docstring), not a wholesale block
+            # replace -- so a merged include_dirs can hold entries from
+            # BOTH documents. The single later rebase_relative_config_paths()
+            # call (below, at module scope) anchors against only ONE root,
+            # which would silently mis-resolve the OTHER document's own
+            # relative entries now that compile: is no longer a
+            # whole-document selection. Pre-resolving each document's own
+            # entries to absolute paths here, before the merge, makes that
+            # later single-anchor call a safe no-op for both (an
+            # already-absolute path is left untouched).
+            if found_path is not None:
+                base = rebase_relative_config_paths(base, found_path=found_path)
+            if isinstance(sources_loaded, dict):
+                sources_loaded = rebase_relative_config_paths(
+                    sources_loaded, found_path=sources_found
+                )
             # "sources" (plural -- public_headers/exclude/graph) is a
             # DISTINCT top-level block from "source" (singular). Which
             # blocks get replaced depends on sources_pairwise, computed
-            # above.
-            for _blk_key in _sources_root_blocks:
-                if _blk_key in _sources_doc:
-                    base[_blk_key] = _sources_doc[_blk_key]
-                else:
-                    base.pop(_blk_key, None)
+            # above. Shared with actions/check-target/action.yml's own
+            # "Generate assurance-overlay config" step via
+            # abicheck.action_config_overlay.apply_sources_root_config_blocks
+            # (Codex review, fresh evidence, PR #1222 third round) so the two
+            # call sites' block-selection/empty-document semantics can't
+            # independently drift the way the assurance-overlay step's own
+            # entirely-missing promotion once did.
+            base = apply_sources_root_config_blocks(
+                base,
+                sources_loaded,
+                blocks=_sources_root_blocks,
+                merge_compile=sources_merge_compile,
+            )
             # found_path is reassigned to sources_found ONLY when compile:
-            # was actually sourced from it (single-sided callers) -- it
-            # anchors compile.include_dirs resolution below, and a pairwise
-            # caller's compile: block (never sourced from the sources root,
-            # per above) must keep resolving against whichever document
-            # actually supplied base["compile"] (the checkout-root config,
-            # if any).
-            if not sources_pairwise:
+            # was actually sourced from it (the `dump`/`scan` single-
+            # document shape) -- it anchors compile.include_dirs resolution
+            # below, and neither a pairwise NOR a `mode: compare`
+            # single-sided caller's compile: block is ever sourced from the
+            # sources root any more (per `_sources_root_blocks` above -- P1
+            # fix, PR #1222 eleventh round: `mode: compare` used to
+            # reassign `found_path` here too, back when it still merged
+            # `compile:` from the sources root), so both must keep
+            # resolving against whichever document actually supplied
+            # base["compile"] (the checkout-root config, if any). Now that
+            # both documents' own include_dirs entries are already
+            # absolute (above), this reassignment only matters for the
+            # `dump`/`scan` bucket -- the rebase call below is otherwise a
+            # no-op regardless of which root it names.
+            if not (sources_pairwise or sources_merge_compile):
                 found_path = sources_found
+        elif sources_found is None:
+            # Codex review, P1, fresh evidence, PR #1222 ninth round: no
+            # `.abicheck.yml` exists ANYWHERE in the `--sources` tree at
+            # all -- distinct from the "a sources-root document exists
+            # but is empty/non-mapping" case just above, which already
+            # clears these same blocks via apply_sources_root_config_
+            # blocks' own empty-document handling. The real pipeline
+            # treats "no document" identically to "an empty document" for
+            # this purpose: embed_build_source()'s own `cfg_path =
+            # build_config or discover_build_config(raw_sources)` resolves
+            # to `None` either way, so `cfg` stays `None` and every one of
+            # build:/sources:(plural)/compile:/source:(singular)/debug: --
+            # whichever this function's own `_sources_root_blocks` says
+            # are sources-root-exclusive for this particular command/mode
+            # -- falls back to a bare `BuildConfig()`'s pure defaults,
+            # NEVER the checkout-root document's own values for those same
+            # keys. Leaving `base` untouched here (as a previous round
+            # did) let the checkout document's own build:/sources: survive
+            # into the generated overlay, which `embed.py` then applies as
+            # an explicit --config -- settings the real, non-overlay
+            # `--sources <dir>` invocation would never have picked up.
+            # Reuse the identical apply_sources_root_config_blocks
+            # clearing with `sources_doc=None` (its own docstring: a
+            # non-dict `sources_doc` clears every block in `blocks` except
+            # a `merge_compile=True` empty-fold, which is a correct no-op
+            # onto the checkout's own compile: -- see that function's
+            # docstring for why `compile:` is the one exception even
+            # here). Mirrors actions/check-target/action.yml's own
+            # identical `elif _sources_found is None:` branch so the two
+            # shared call sites cannot independently drift on this again.
+            base = apply_sources_root_config_blocks(
+                base,
+                None,
+                blocks=_sources_root_blocks,
+                merge_compile=sources_merge_compile,
+            )
 
 # Discover mode's own base document is untrusted, repository-controlled
 # content: strip (or, for the decode-node budget below, cap) each key that
@@ -808,18 +965,18 @@ else:
 # already the trusted case cli_options.py's own `explicit_config` check
 # grants, so nothing here is stripped from it.
 if merge_mode != "explicit":
-    if isinstance(base.get("build"), dict) and "query" in base["build"]:
-        stripped_build = dict(base["build"])
-        del stripped_build["query"]
-        base["build"] = stripped_build
-        print(
-            "::warning::the discovered .abicheck.yml's build.query was dropped "
-            "from this Action's synthesized --config overlay -- an "
-            "auto-discovered config is never trusted to run a build-system "
-            "query; set build-config explicitly (naming a config you reviewed) "
-            "to opt in.",
-            file=sys.stderr,
-        )
+    # build.query/compile.compiler stripping and the resource_limits cap are
+    # identical in both spirit and implementation to
+    # actions/check-target/action.yml's own "Generate assurance-overlay
+    # config" step -- both fold a possibly-untrusted, auto-discovered base
+    # document into a synthesized, always-explicit overlay, and both must
+    # withhold the same executable-authorized status from it. Shared via
+    # abicheck.action_config_overlay (see its own module docstring) so the
+    # two can't silently drift; build.compile_db stays each caller's own
+    # responsibility to resolve (via the shared
+    # discovered_compile_db_resolves() -- see its own docstring) since only
+    # the caller knows its own effective --sources root.
+    base = strip_untrusted_execution_keys(base)
     if isinstance(base.get("build"), dict) and "compile_db" in base["build"]:
         # A different concern from build.query above (that one is a trust/
         # execution gate) -- here the field itself is harmless, but
@@ -849,24 +1006,9 @@ if merge_mode != "explicit":
         # compile_db at all) leaves it empty, always stripping, matching
         # this field's own irrelevance there.
         _sources_root = os.environ.get("ABICHECK_SOURCES_ROOT", "")
-        _compile_db_resolves = False
-        if _sources_root:
-            try:
-                # match.is_file() (not just "any match at all"): mirrors
-                # inline.py's own `for match in sorted(sources.glob(cfg.
-                # compile_db)): if match.is_file():` exactly -- a glob that
-                # only matches a directory is not usable evidence there
-                # either, and treating it as "resolves" here would still
-                # promote a dead-end path to explicit, must-not-be-missing
-                # status (Codex review, fresh evidence).
-                _compile_db_resolves = any(
-                    match.is_file()
-                    for match in Path(_sources_root).glob(
-                        base["build"]["compile_db"]
-                    )
-                )
-            except (OSError, ValueError):
-                _compile_db_resolves = False
+        _compile_db_resolves = discovered_compile_db_resolves(
+            base["build"]["compile_db"], _sources_root
+        )
         if not _compile_db_resolves:
             stripped_build = dict(base["build"])
             del stripped_build["compile_db"]
@@ -880,69 +1022,12 @@ if merge_mode != "explicit":
                 "config you reviewed) to opt in.",
                 file=sys.stderr,
             )
-    if isinstance(base.get("compile"), dict) and "compiler" in base["compile"]:
-        stripped_compile = dict(base["compile"])
-        del stripped_compile["compiler"]
-        base["compile"] = stripped_compile
-        print(
-            "::warning::the discovered .abicheck.yml's compile.compiler was "
-            "dropped from this Action's synthesized --config overlay -- an "
-            "auto-discovered config is never trusted to select a compiler "
-            "executable; set build-config explicitly (naming a config you "
-            "reviewed) to opt in.",
-            file=sys.stderr,
-        )
-    # Codex review, fresh evidence, third round: forwarding this merged
-    # overlay via --config makes the CLI's own explicit-vs-auto-discovered
-    # check (resolve_dispatch_compile_context's `_config_explicit`) see an
-    # *explicit* --config, which the compare_bundle_facts dispatch trusts to
-    # *raise* resource_limits.max_bundle_facts_decode_nodes past the
-    # conservative default -- laundering this discovered, repository-
-    # controlled value into that trusted status. Reuses the identical
-    # resolve_max_json_object_nodes_cfg() the CLI itself calls, with
-    # config_explicit=False, so the two can never drift: this only ever
-    # caps the value down (a lower budget is never a decode-bomb risk and
-    # is left untouched), never strips it outright.
-    if isinstance(base.get("resource_limits"), dict):
-        _configured_nodes = base["resource_limits"].get("max_bundle_facts_decode_nodes")
-        _capped_nodes = resolve_max_json_object_nodes_cfg(
-            _configured_nodes if isinstance(_configured_nodes, int) and not isinstance(_configured_nodes, bool) else None,
-            config_explicit=False,
-            default=DEFAULT_MAX_JSON_OBJECT_NODES,
-        )
-        if _capped_nodes != _configured_nodes:
-            stripped_rl = dict(base["resource_limits"])
-            stripped_rl["max_bundle_facts_decode_nodes"] = _capped_nodes
-            base["resource_limits"] = stripped_rl
-            print(
-                "::warning::the discovered .abicheck.yml's "
-                "resource_limits.max_bundle_facts_decode_nodes was capped to "
-                f"the conservative default ({DEFAULT_MAX_JSON_OBJECT_NODES}) "
-                "when synthesizing this Action's --config overlay -- an "
-                "auto-discovered config is never trusted to raise this "
-                "pre-json.loads() decode-bomb budget; set build-config "
-                "explicitly (naming a config you reviewed) to opt in.",
-                file=sys.stderr,
-            )
+    # compile.compiler stripping and the resource_limits cap are handled by
+    # strip_untrusted_execution_keys() above, alongside build.query -- see
+    # that call's own comment.
 
-if found_path is not None and isinstance(base.get("compile"), dict):
-    include_dirs = base["compile"].get("include_dirs")
-    if include_dirs is not None:
-        root = project_root_for_config(found_path)
-
-        def _abs(p: object) -> object:
-            if not isinstance(p, str):
-                return p
-            pp = Path(p)
-            return str(pp) if pp.is_absolute() else str((root / pp).resolve())
-
-        compile_blk = dict(base["compile"])
-        compile_blk["include_dirs"] = (
-            [_abs(p) for p in include_dirs]
-            if isinstance(include_dirs, list)
-            else _abs(include_dirs)
-        )
-        base["compile"] = compile_blk
+if found_path is not None:
+    base = rebase_relative_config_paths(base, found_path=found_path)
 
 for key, value in overlay.items():
     if isinstance(value, dict) and isinstance(base.get(key), dict):
@@ -1084,6 +1169,67 @@ _compile_context_sources_pairwise() {
   if [[ "$MODE" == "compare" && -n "${INPUT_OLD_LIBRARY:-}" ]] \
      && ! _old_library_is_stored_snapshot "${INPUT_OLD_LIBRARY:-}"; then
     echo "pairwise"
+  fi
+}
+
+# Whether the caller's own single-sided `compile:` resolution (see
+# _compile_context_sources_pairwise's own docstring for what "single-sided"
+# covers) is a genuine two-stage MERGE (echoes "true") or a single-document
+# EXCLUSIVE selection/REPLACE (echoes "", the default) -- Codex review,
+# fresh evidence, PR #1222 fourth round, second finding: within the
+# single-sided bucket, `compile:` does NOT always resolve the same way.
+# `dump`/`scan --against` (`$MODE != "compare"`) call `merge_compile_config`
+# exactly ONCE, where `build_config`/`sources` are mutually exclusive
+# alternatives (`cli_options.merge_compile_config`'s own `cfg = build_config
+# if explicit_config else discover_build_config(sources)`) -- the
+# `--sources` tree's own document supplies `compile:` EXCLUSIVELY when no
+# explicit `--build-config` is given, the identical single-document shape
+# `build:`/`sources:`/`source:`/`debug:` already use, so this echoes ""
+# (REPLACE) for them. `compare`'s TWO-SIDED shape (`$MODE == "compare"` with
+# old-library or abi-baseline actually set -- which, per
+# _compile_context_sources_pairwise's own docstring, reaches this
+# single-sided bucket at all only via a stored-snapshot old operand) is
+# different: `cli_compare_helpers.py`'s own `resolve_compile_context(...,
+# build_config=cfg_path, ...)` ALWAYS independently resolves the
+# checkout-root document's `compile:` block FIRST, unconditionally, and the
+# live side's own `--sources` tree only folds ON TOP of that via a SECOND
+# `merge_compile_config` call (`compare.py`'s `_maybe_dump_side`) -- a
+# genuine two-stage MERGE, so this echoes "true" for it.
+#
+# P1 fix, PR #1222 eleventh round (Codex review, fresh evidence): this
+# flag's OWN "true" value no longer causes `_sources_root_blocks` to
+# promote/merge `compile:` from the sources root at the overlay-generation
+# layer any more -- `_embed_inline_source_side` (its real name today; the
+# `_maybe_dump_side` reference above predates a rename) performs that
+# second merge stage unconditionally, regardless of whether `--config` was
+# explicit, so this overlay ALSO folding the sources root's `compile:` in
+# duplicated it. This function keeps echoing "true" for the identical
+# `mode: compare` condition purely because `source:`(singular)/`debug:`
+# promotion still depends on it (see the caller's own comment) -- it is no
+# longer read for any `compile:`-specific decision.
+#
+# The audit-only shape (old-library/abi-baseline BOTH omitted, `compare
+# --no-baseline`) also reaches the single-sided bucket, but is NOT the
+# stored-snapshot-old case above and does NOT go through
+# `resolve_compile_context` at all: `compare_no_baseline.py`'s own
+# `_resolve_no_baseline_invocation` resolves the checkout-root config only
+# for scope/severity/assurance, and the candidate's own compile: comes from
+# `workflows.no_baseline_compare.resolve_no_baseline_candidate` ->
+# `resolve_side_snapshot` -- the exact same per-side primitive `dump`
+# resolves through, with no second, checkout-root-first merge stage at all
+# (verified by reading that call chain -- no `compile=` override is ever
+# threaded through, so a checkout-root `compile:` block plays no part here).
+# So this must NOT echo "true" for the audit-only shape (a real regression
+# found via `test_action_compile_context_old_library_liveness.py`'s own
+# `TestAuditOnlyCompareStaysSingleSidedUnconditionally`, which this
+# unconditional `$MODE == "compare"` check failed): it echoes "true" only
+# when compare actually has an old side to two-stage-merge against. See
+# `apply_sources_root_config_blocks`'s own `merge_compile` parameter
+# docstring for the full account.
+_compile_context_sources_merge_compile() {
+  if [[ "$MODE" == "compare" \
+        && ( -n "${INPUT_OLD_LIBRARY:-}" || -n "${INPUT_ABI_BASELINE:-}" ) ]]; then
+    echo "true"
   fi
 }
 
@@ -1276,11 +1422,13 @@ PYEOF
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" \
         "${INPUT_BUILD_CONFIG}" "explicit" "${INPUT_SOURCES:-}" \
-        "$(_compile_context_sources_pairwise)"
+        "$(_compile_context_sources_pairwise)" \
+        "$(_compile_context_sources_merge_compile)"
     else
       _merge_config_overlay_with_discovered_project_config \
         "$_compile_overlay_json" "$_COMPILE_CONTEXT_CONFIG_OVERLAY" "$PWD" \
-        "discover" "${INPUT_SOURCES:-}" "$(_compile_context_sources_pairwise)"
+        "discover" "${INPUT_SOURCES:-}" "$(_compile_context_sources_pairwise)" \
+        "$(_compile_context_sources_merge_compile)"
     fi
   fi
   CMD+=(--config "$_COMPILE_CONTEXT_CONFIG_OVERLAY")
@@ -1438,8 +1586,7 @@ PYEOF
 # two, PR E, the release engine supports --write directly (json/markdown/
 # junit, the same set --format itself accepts there) -- this helper is no
 # longer needed to skip the --write PR-comment JSON injection, but stays in
-# use for the release-only flags below (--output-dir, --dso-only,
-# --require-complete-analysis's own rejection, ...).
+# use for the release-only flags below (--output-dir, --dso-only, ...).
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -2894,23 +3041,16 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--budget" "${INPUT_BUDGET:-}"
   fi
 
-  # P0.4: single-pair compares only -- the CLI itself rejects this flag
-  # outright (a UsageError) for a directory/package release fan-out, which
-  # has no single analysis_assurance result to gate on. Fail loud rather
-  # than silently drop the request (Codex review): action.yml documents
-  # this input as applying to compare mode with no release-operand
-  # carve-out, so a release workflow that explicitly asks for the
-  # assurance gate must not run ungated without any indication the gate
-  # was never applied -- the same "explicit request, not silently
-  # ignorable" treatment the L2 compile-context and evidence-flag guards
-  # above already give their own release-incompatible inputs.
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
-    if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-       || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
-      exit 1
-    fi
-    CMD+=(--require-complete-analysis)
+  # require-complete-analysis: RETIRED (rulings.py deferred-option followup
+  # -- hard removal, no deprecation window). The CLI's own
+  # --require-complete-analysis flag is gone entirely (config-only now,
+  # .abicheck.yml's assurance.require_complete); validate-inputs.sh already
+  # rejects a non-empty/false input before this step ever runs, so this is
+  # defense in depth for anyone invoking run.sh directly (same rationale as
+  # every other pre-validated guard in this file).
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+    echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+    exit 1
   fi
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
@@ -3382,6 +3522,38 @@ if query == "no_baseline_audit":
         print("findings" if has_findings else "clean")
 elif query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
+elif query == "assurance_contribution":
+    # P0.4's own axis, the exact sibling of `coverage_contribution` above:
+    # `analysis_assurance_exit_contribution` is already self-describing --
+    # `checker.compare`/`cli_compare_helpers` compute it as 0 unless the
+    # *resolved* `assurance.require_complete` (CLI flag or config-file value
+    # alike, since the dedicated Action input's retirement) was true AND
+    # the run's own evidence was incomplete -- so no separate "was gating
+    # requested" signal is needed here, unlike the retired
+    # `assurance_status`-only query below.
+    #
+    # `_either` alone only covers the two-sided compare shape (root) and
+    # the `scan --against` shape (nested under `diff`) -- but a `mode: scan`
+    # / `--no-baseline` audit-only report is a THIRD shape
+    # (`report/no_baseline.py:_document_json`) that carries this same
+    # information under `exit_axes.analysis_assurance` instead, since that
+    # document has no `verdict`/gate namespace of its own to hang a
+    # top-level `analysis_assurance_exit_contribution` key from (Codex
+    # review): without this fallback, an audit-only run with
+    # `assurance.require_complete: true` reads a missing key here, silently
+    # answers "not gated", and this Action reports a plain ERROR/nothing
+    # instead of ANALYSIS_INCOMPLETE even though the CLI itself correctly
+    # exited 1. `_either`'s own sentinel-safe None check (not the
+    # zero-collapsing default) is what lets a real `0` from either primary
+    # shape short-circuit before ever consulting `exit_axes`.
+    _value = report.get("analysis_assurance_exit_contribution")
+    if _value is None:
+        _value = nested.get("analysis_assurance_exit_contribution")
+    if _value is None:
+        _exit_axes = report.get("exit_axes")
+        if isinstance(_exit_axes, dict):
+            _value = _exit_axes.get("analysis_assurance")
+    print(_value if _value is not None else 0)
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
     # 0/2/4 for compare and 0/2/4/5/6 for scan -- never 1 either way -- so
@@ -3704,73 +3876,53 @@ _coverage_gated() {
   [[ -n "$_contribution" && "$_contribution" == "1" ]]
 }
 
-# Did P0.4's orthogonal analysis-assurance axis (--require-complete-analysis,
-# analysis_assurance.py) contribute to this exit?
+# Did P0.4's orthogonal analysis-assurance axis
+# (`assurance.require_complete`, analysis_assurance.py) contribute to this
+# exit?
 #
-# Unlike `_coverage_gated` above, the JSON report's own `analysis_assurance`
-# block is NOT self-describing here: `checker.compare` always attaches it
-# (status included) regardless of whether `--require-complete-analysis` was
-# ever passed, so a present, non-"complete" status alone cannot tell "this
-# run asked to gate on it" apart from "this run's evidence happens to be
-# partial and nobody asked".
+# History, briefly (fuller account retained in git blame/PR history rather
+# than repeated here): this predicate used to gate on a dedicated
+# `require-complete-analysis` Action input first, since the JSON report's
+# `analysis_assurance` block used to attach unconditionally (status
+# included) regardless of whether gating was ever requested -- so a present,
+# non-"complete" status alone couldn't tell "this run asked to gate on it"
+# apart from "this run's evidence happens to be partial and nobody asked".
+# Three earlier revisions tried to infer that request from other signals
+# (an unanchored stderr grep, a `$CMD`-array token scan, an `extra-args`-
+# scoped token scan) and each was a real, Codex-found forgery/collision bug
+# before the dedicated input replaced all three.
 #
-# The FIRST, load-bearing check is therefore whether this Action's own
-# dedicated `require-complete-analysis` boolean input is `true`. This is the
-# third revision of this check, and the earlier two are worth recording
-# because each was a real, Codex-found bug in trying to infer the flag from
-# *other* signals, before a dedicated input existed to ask directly:
+# `require-complete-analysis` is now retired entirely (this PR): the CLI's
+# only remaining source for the setting is `.abicheck.yml`'s
+# `assurance.require_complete: true`, a config-only path
+# `validate-inputs.sh` cannot see or forward as a boolean the way it could a
+# real Action input. Re-deriving "was gating requested" from an Action-level
+# signal is therefore no longer possible in the way the retired input made
+# possible -- and it no longer needs to be: `analysis_assurance_exit_
+# contribution` (schema 2.40) is *already* self-describing the exact way
+# `contract_coverage_exit_contribution` is for `_coverage_gated` above --
+# `cli_compare_helpers`/`checker.compare` compute it as 0 unless the
+# *resolved* `assurance.require_complete` (wherever it came from -- CLI flag
+# while that existed, or the config file now) was true AND the run's own
+# evidence was incomplete, folding both "was this asked for" and "did it
+# fire" into the one number the CLI's own exit code was itself floored by.
+# Reading that field directly is therefore not a weaker substitute for the
+# retired input check -- it is the more general form the input check was
+# only ever approximating, and it is correct for every source `assurance.
+# require_complete` can be given from (CLI or config), not only the one the
+# retired input covered.
 #
-#   1. An unanchored stderr grep as the sole signal, which a hostile input
-#      (a header/symbol name, or any other value an `abicheck` diagnostic
-#      echoes back) could forge to spoof the whole match string and fail
-#      an otherwise clean, flag-less run through this axis's own
-#      unconditional gate.
-#   2. The fix for (1) scanned the fully-built `$CMD` array instead -- safe
-#      from (1)'s forgery, but `$CMD` also carries values a *different*,
-#      structured Action input supplied (e.g. `output-file:
-#      --require-complete-analysis` legitimately produces the adjacent
-#      tokens `-o --require-complete-analysis`, with Click consuming the
-#      second one as `-o`'s filename argument, never parsing it as a
-#      flag), so a bare token scan over the merged array could
-#      true-positive on a value that was never parsed as this flag at all.
-#   3. Scoping the scan to `extra-args`'s own split tokens closed (2)'s
-#      collision with *other* inputs, but not an identical collision
-#      *within* `extra-args` itself -- e.g. `--header
-#      --require-complete-analysis` (a real `--header old=|new=PATH` option
-#      consuming the next token as its own value) still false-positives,
-#      since no amount of scoping proves a token was parsed as *this* flag
-#      rather than as some other option's argument. No token-scan of any
-#      input can be sound against this class of collision in general.
-#
-# A dedicated `require-complete-analysis` Action input (mirroring
-# `fail-on-breaking`) eliminates the whole class: this Action's own
-# detection is a plain boolean read, never a guess at how `abicheck`'s CLI
-# parser will tokenize some other string. `extra-args` is no longer
-# consulted for this flag at all -- a caller who still passes
-# `--require-complete-analysis` via `extra-args` gets correct CLI exit-code
-# behavior from Python (the flag still works), just an un-relabeled
-# `ERROR`/`SEVERITY_ERROR` verdict from this wrapper rather than
-# `ANALYSIS_INCOMPLETE`; the dedicated input is the documented way to get
-# the labeled verdict.
-#
-# Once the input is confirmed set, the JSON report's own
-# `analysis_assurance.status` is the sole answer (mirroring
-# `_coverage_gated`'s JSON-only rule). ADR-063 Track T8 removed the
-# `assurance_floor_diagnostic` stderr grep that used to answer this when no
-# readable JSON report existed (a non-JSON-format run, or an unreadable
-# report file): re-deriving an axis contribution from rendered prose is the
-# textual reconstruction that track retires, and it is the same class of
-# forgeable inference revisions (1)-(3) above were already found to be.
-# No structured data therefore means "not gated by this axis" rather than a
-# guess -- the same "cannot claim it fired" contract `_coverage_gated` now
-# states.
+# Read from the structured report alone, the same "cannot claim it fired"
+# contract `_coverage_gated` states: an unreadable/absent report, or an
+# absent field on an older report, means "not gated by this axis" rather
+# than a guess reconstructed from rendered prose (ADR-063 Track T8 retired
+# exactly that class of stderr/diagnostic reconstruction for this axis's
+# sibling).
 _assurance_gated() {
-  [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
-
-  local _src _status
+  local _src _contribution
   _src=$(_json_report_src)
-  _status=$(_report_query "$_src" assurance_status)
-  [[ -n "$_status" && "$_status" != "complete" ]]
+  _contribution=$(_report_query "$_src" assurance_contribution)
+  [[ -n "$_contribution" && "$_contribution" == "1" ]]
 }
 
 # ADR-065 S2's completeness axis (D6 under --on-incomplete-scope block, D7
@@ -4144,7 +4296,7 @@ _blocking_gate_note() {
     # immediately above -- same orthogonal-axis shape, different evidence
     # question (completeness of this run's own evidence, not closure of a
     # selected --contract domain).
-    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Set assurance.require_complete: false (or omit it) in .abicheck.yml to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
   elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
     # A promoted `--crosscheck KEY=error` raises the published gate the same
     # way a severity category does, but it is not one: `_severity_gate_
@@ -4280,7 +4432,7 @@ else
               VERDICT="COVERAGE_INCOMPLETE"
               echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
               if _assurance_gated; then
-                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+                echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
               fi
               if _scope_gated; then
                 echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
@@ -4294,14 +4446,14 @@ else
               VERDICT="SCOPE_INCOMPLETE"
               echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under scope.on_incomplete: block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
               if _assurance_gated; then
-                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+                echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
               fi
             else
               # P0.4's orthogonal analysis-assurance axis alone (no
               # contract-coverage gap this run) -- same "not a break, not a
               # severity-policy failure" shape as the coverage branch above.
               VERDICT="ANALYSIS_INCOMPLETE"
-              echo "::warning::abicheck's own evidence was not fully complete under --require-complete-analysis (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
+              echo "::warning::abicheck's own evidence was not fully complete under assurance.require_complete (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
             fi
           else
             # Either severity gated too, or there is no readable JSON report
@@ -4312,7 +4464,7 @@ else
               echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
             fi
             if _assurance_gated; then
-              echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+              echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
             fi
             if _scope_gated; then
               echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
@@ -4623,7 +4775,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         _json_src=$(_json_report_src)
         _assurance_notes=$(_report_query "$_json_src" assurance_notes)
         if [[ -n "$_assurance_notes" ]]; then
-          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
+          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Set assurance.require_complete: false (or omit it) in .abicheck.yml to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
         else
           echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`analysis_assurance\` in the JSON report."
         fi
@@ -5221,7 +5373,7 @@ else
   # P0.4's analysis-assurance axis, unconditional exactly like the
   # contract-coverage check immediately above and for the same reason.
   if _assurance_gated; then
-    echo "::error::abicheck's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
+    echo "::error::abicheck's own evidence was not fully complete under assurance.require_complete; see analysis_assurance in the JSON report for what fell short."
     FINAL_EXIT=1
   fi
 

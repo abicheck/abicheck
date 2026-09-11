@@ -126,9 +126,9 @@ an unknown-key error.
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
-`deployment:`, `resource_limits:`, `policy:`, `version:`, `risk_rules:`,
-`crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are
-the recognized top-level keys.
+`assurance:`, `deployment:`, `resource_limits:`, `policy:`, `version:`,
+`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`, and
+`baseline:` are the recognized top-level keys.
 See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
@@ -365,6 +365,27 @@ more**:
 - `include_private_dso:` (default `false`) — the former `compare
   --include-private-dso`: include private (non-public) shared objects from
   non-standard paths.
+
+---
+
+### `assurance:`
+
+P0.4's orthogonal analysis-assurance exit floor, demoted off the CLI
+(rulings.py deferred-option followup) — **no CLI spelling any more**. One
+key today: `require_complete:` (default `false`) — the former `compare
+--require-complete-analysis`: fail the step when `analysis_assurance.status`
+is not `complete`, independent of the compatibility verdict. Contributes
+exit `1`, folded with `max` the same way `--contract`'s coverage axis is
+(ADR-049 Phase 7): it raises a clean `0` to `1` and never lowers a `2`/`4`.
+Single-pair `compare` only — a directory/package (release) fan-out rejects
+it (the per-library fan-out has no single `analysis_assurance` result to
+gate on). See [Exit codes § Analysis-assurance
+contribution](exit-codes.md#analysis-assurance-contribution-p04).
+
+```yaml
+assurance:
+  require_complete: true
+```
 
 ---
 

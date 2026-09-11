@@ -370,8 +370,8 @@ topics:
   # `contract-relevance-and-coverage` (the ADR-049 coverage gate): "how
   # complete and trustworthy was the evidence behind this comparison",
   # independent of what the verdict itself says. Always computed and
-  # reported; `--require-complete-analysis` is the opt-in exit-code gate
-  # (P0.4).
+  # reported; `.abicheck.yml`'s `assurance.require_complete: true` is the
+  # opt-in exit-code gate (P0.4).
   analysis-assurance:
     canonical_page: reference/exit-codes.md
     fact_sources:

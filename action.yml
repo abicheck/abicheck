@@ -745,20 +745,21 @@ inputs:
     required: false
   require-complete-analysis:
     description: >
-      Fail the step (P0.4's orthogonal ANALYSIS_INCOMPLETE axis) when
-      analysis_assurance.status is not 'complete', independent of the
-      compatibility verdict. Mirrors `compare`'s own
-      --require-complete-analysis flag. Applies to single-pair compare
-      (old-library/new-library are individual files, not a directory or
-      package) -- both the two-sided and audit-only (`--no-baseline`)
-      shapes, which the CLI accepts identically -- rejected outright
-      (step fails) for a directory/package compare's per-library release
-      fan-out, which has no single analysis_assurance result to gate on.
-      A dedicated
-      input rather than routing through extra-args, so this Action's own
-      detection of whether the flag was requested is never ambiguous
-      with a value some other option in extra-args happens to spell the
-      same way.
+      RETIRED (rulings.py deferred-option followup -- hard removal, no
+      deprecation window): removed and no longer forwarded. The CLI's own
+      `compare --require-complete-analysis` flag it mirrored is gone
+      entirely: P0.4's orthogonal ANALYSIS_INCOMPLETE axis is config-only
+      now, `.abicheck.yml`'s `assurance.require_complete: true`, with no
+      CLI override. Applied identically to single-pair compare's two-sided
+      and audit-only (`--no-baseline`) shapes before its removal, and
+      rejected outright for a directory/package compare's per-library
+      release fan-out, which has no single analysis_assurance result to
+      gate on -- `assurance.require_complete: true` inherits that same
+      single-pair-only scope now that it lives in config instead. Still
+      declared here so a workflow that sets it gets an explicit `::error::`
+      naming that replacement instead of a silently-ignored input; set
+      `assurance.require_complete: true` in your `.abicheck.yml` and pass
+      that file as build-config instead, then remove this input.
     required: false
     default: 'false'
   annotate:
@@ -775,10 +776,9 @@ inputs:
       by passing --annotate to the abicheck CLI -- no second comparison is
       ever run to collect them, for either operand shape. Has no effect on
       dump/deps-tree/deps-compare. A dedicated input rather than
-      routing through extra-args, for the same reason
-      require-complete-analysis is: this Action's own detection of whether
-      annotations were requested is never ambiguous with some other
-      extra-args value.
+      routing through extra-args: this Action's own detection of whether
+      annotations were requested must never be ambiguous with some other
+      extra-args value, which a free-text passthrough can't guarantee.
     required: false
     default: 'false'
   annotate-additions:
@@ -863,7 +863,7 @@ outputs:
       to the compatibility verdict, which then covers the compared members
       only; fails the step unconditionally, since no fail-on-* input governs
       it), ANALYSIS_INCOMPLETE (single-pair
-      operands only, with the require-complete-analysis input, when
+      operands only, with `.abicheck.yml`'s `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict
       unchanged; rejected outright for a directory/package operand, so
@@ -914,10 +914,11 @@ outputs:
       in the job log for what a real run would do. Two-sided dry-run is a
       separate, pre-existing gap this value does not cover -- only the
       audit-only shape's dry-run behavior is documented here),
-      ANALYSIS_INCOMPLETE (with the require-complete-analysis input, when
+      ANALYSIS_INCOMPLETE (with `.abicheck.yml`'s
+      `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- the same P0.4
       orthogonal assurance axis as the two-sided shape above, reachable
-      here since require-complete-analysis applies to both compare shapes;
+      here since that config key applies to both compare shapes;
       not a two-sided compatibility verdict either, since no baseline was
       compared -- fails the step unconditionally),
       NOT_COMPARABLE (two-sided shape only, with the old-library or
@@ -984,7 +985,7 @@ outputs:
       abicheck exit code. compare, two-sided shape: 0 (compatible), 1
       (severity error, incomplete contract coverage, incomplete analysis
       assurance with
-      the require-complete-analysis input, or -- directory/package
+      `.abicheck.yml`'s `assurance.require_complete: true`, or -- directory/package
       operands, ADR-065 -- an incompletely checked comparison scope under
       `.abicheck.yml`'s scope.on_incomplete: block key, or no comparison completed at all under
       either setting; the four share the code and are told apart by the
@@ -1000,7 +1001,8 @@ outputs:
       0 (compatible/advisory, or DRY_RUN under dry-run: true -- see the
       verdict output's own description), 1 (incomplete contract coverage, or
       incomplete analysis assurance with
-      the require-complete-analysis input -- unlike the two-sided shape,
+      `.abicheck.yml`'s `assurance.require_complete: true` -- unlike the
+      two-sided shape,
       there is no bare severity-gate exit-1 source here (severity-based
       audit gating uses the dedicated exit 3 below instead). A third
       cause, dry-run only: with dry-run true, a live-candidate (not a
