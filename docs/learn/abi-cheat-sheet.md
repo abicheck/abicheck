@@ -153,9 +153,10 @@ BREAKING, not risk). See
 ## Intra-Version Hygiene (audit — no baseline needed)
 
 `abicheck compare --no-baseline libfoo.so` lints a *single* build for bad
-ABI hygiene — problems you can see without a previous version. Absence of
-`--against` is already a one-build audit; there is no separate `--audit` flag.
-All 🟡 COMPATIBLE_WITH_RISK.
+ABI hygiene — problems you can see without a previous version. `--no-baseline`
+is what selects the one-build audit; there is no separate `--audit` flag, and
+no `--against` option on `compare` at all (that was the retired `scan`
+command's spelling). All 🟡 COMPATIBLE_WITH_RISK.
 
 | Finding | What it flags | Example |
 |---------|---------------|---------|

@@ -528,7 +528,7 @@ as evidence:
 | `UC-WORKFLOW-single-release-audit` | workflow | D8 | 3c |
 | `UC-WORKFLOW-evidence-directed-scope` | workflow | D7 | 3b |
 | `UC-TC-build-emitted-facts` | toolchain | D5 | 4 |
-| `UC-REPORTING-scan-coverage-estimate` | reporting | D9/D10 | 3, 3b |
+| `UC-REPORTING-scan-coverage-estimate` (split in the ADR-068 Phase 6 doc follow-up into `UC-REPORTING-dry-run-cost-preview`, surviving, and `UC-REPORTING-scan-coverage-report`, retired with no replacement) | reporting | D9/D10 | 3, 3b |
 
 ## Out of scope
 

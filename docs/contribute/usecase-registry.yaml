@@ -940,7 +940,13 @@ use_cases:
       `evidence.tier_shortcut_without_substitute` regression-class
       retirement note). Depth semantics (the binary rung staying
       artifact-only even with matrix-wide headers/sources/compile-DB flags
-      present) remain covered by `tests/test_scenarios.py`.
+      present) are **no longer covered**: `tests/test_scenarios.py`'s own
+      `SC-SCAN-BINARY-DEPTH-MATRIX-ARGS` scenario was retired (marked
+      `automated: false`) in this same follow-up, since its automated test
+      asserted on a `coverage`/`pattern_scan` report shape `compare` has
+      never emitted. See `docs/contribute/known-gaps.md`'s "`compare
+      --depth binary` ignoring matrix-wide `--sources`/`--build-info` is
+      untested" entry.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
@@ -1056,9 +1062,9 @@ use_cases:
       fallbacks documented. Lets vendor/closed builds contribute exact-build-context
       facts without shipping sources; replay stays the portable default.
 
-  - id: UC-REPORTING-scan-coverage-estimate
+  - id: UC-REPORTING-dry-run-cost-preview
     axis: reporting
-    name: Scan coverage/confidence report + per-project cost estimate
+    name: Per-project dry-run cost estimate
     status: complete
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
@@ -1069,23 +1075,39 @@ use_cases:
       tests:
         - tests/test_compare_cost_preview.py
     next_steps: >
-      ADR-035 D9/D10. DONE (originally): `scan` emitted one report (text/JSON)
-      carrying the per-tier coverage table (intrinsic L0-L2 + pattern-scan S3
-      + L3/L4/L5 pack coverage + per-crosscheck rows + the POI focus summary),
-      the resolved level, and the risk score, so a partial scan was legible
-      (never a bare "source scan failed"). DONE: the typed
-      `ScanRequest`/`CostEstimate`/`LayerResult`/`Budget` API +
-      `service.estimate_scan()` (probes TU count from the compile DB / source
-      tree + header fan-out), surfaced as `scan --estimate` — a dry-run that
-      scanned nothing. ADR-068 Phase 6 update: `scan`, `cli_scan.py`, and the
-      per-run coverage/POI/risk report they emitted were all deleted outright
-      (no alias, no deprecation window) — there is no current replacement for
-      that per-run scan-coverage report. `service_scan.py` was renamed to
-      `dry_run_estimate.py` and now holds only the surviving dry-run cost
-      model (`estimate_scan`/`CostEstimate`) and header-expansion helpers,
-      unrelated to any CLI orchestration; the "full `ScanResult`/`run_scan`
-      refactor" REMAINS item is now moot, since there is no `scan` command
-      left for it to serve.
+      ADR-035 D9/D10. DONE: the typed `ScanRequest`/`CostEstimate`/
+      `LayerResult`/`Budget` API + `service.estimate_scan()` (probes TU count
+      from the compile DB / source tree + header fan-out) survives the
+      ADR-068 Phase 6 `scan` deletion — `service_scan.py` was renamed to
+      `dry_run_estimate.py` and now holds only this dry-run cost model and
+      header-expansion helpers, unrelated to any CLI orchestration, surfaced
+      today as `compare`'s own `--dry-run` cost preview
+      (`tests/test_compare_cost_preview.py`). Split out of the former
+      `UC-REPORTING-scan-coverage-estimate` entry, whose other half (the
+      per-run coverage/confidence report) is `by_design_excluded` below.
+
+  - id: UC-REPORTING-scan-coverage-report
+    axis: reporting
+    name: Per-run coverage/confidence report (retired)
+    status: by_design_excluded
+    gap: G19
+    note: >
+      ADR-035 D9/D10. DONE (originally): `scan` emitted one report
+      (text/JSON) carrying the per-tier coverage table (intrinsic L0-L2 +
+      pattern-scan S3 + L3/L4/L5 pack coverage + per-crosscheck rows + the
+      POI focus summary), the resolved level, and the risk score, so a
+      partial scan was legible (never a bare "source scan failed").
+      ADR-068 Phase 6 update: `scan`, `cli_scan.py`, and this per-run
+      coverage/POI/risk report were all deleted outright (no alias, no
+      deprecation window) — **there is no current replacement**: no
+      `compare` invocation emits an equivalent per-tier coverage table.
+      Split out of the former `UC-REPORTING-scan-coverage-estimate` entry
+      so this capability's absence is not masked by its surviving sibling
+      (`UC-REPORTING-dry-run-cost-preview` above) staying `status: complete`.
+      The "full `ScanResult`/`run_scan` refactor" REMAINS item the original
+      entry tracked is now moot, since there is no `scan` command left for
+      it to serve; reintroducing this report would mean designing a
+      `compare`-native equivalent from scratch, not reviving `ScanResult`.
 
   # ── Source-scan & cross-source example corpus (ADR-035 / G20) ──────────────
   - id: UC-WORKFLOW-audit-example-corpus
