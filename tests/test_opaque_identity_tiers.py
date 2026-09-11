@@ -31,7 +31,7 @@ import pytest
 from hypothesis import given, strategies as st
 
 from abicheck.checker_policy import ChangeKind
-from abicheck.compare.opaque_types import OpaqueTypeIndex
+from abicheck.compare.opaque_types import OpaqueTypeIndex, find_opaque_struct_types
 from abicheck.diff_filtering import (
     _downgrade_opaque_struct_changes,
     _downgrade_opaque_type_changes,
@@ -965,3 +965,131 @@ class TestOpaqueTypeIndexBuildProperties:
         only ever query it with ``strict=False``."""
         index = OpaqueTypeIndex.build(declarations)
         assert index.stable_by_local == {}
+
+
+# -- Primitive-level property tests: find_opaque_struct_types's stable tier -
+
+
+_THIRD_STABLE_ID = entity_id_for_type((Namespace("third"),), "Handle")
+#: Two *different* entities deliberately sharing one bare rendered spelling
+#: ("Handle") -- the real collision shape (ADR-063 Phase 2/10's whole
+#: reason for a stable tier at all) -- plus one entity under its own name.
+#: A stable id's own leaf name is fixed here and never reassigned to a
+#: different bare ``RecordType.name`` within a side below: a real producer
+#: derives identity from a declaration's own scope/name, so the same
+#: identity cannot legitimately show up under two different spellings
+#: inside one already-parsed snapshot (letting the generator do that
+#: produced a meaningless first draft of this property -- ids and names
+#: must vary together, not independently).
+_ENTITY_TABLE = [
+    ("Handle", _STABLE_ID),
+    ("Handle", _OTHER_STABLE_ID),
+    ("Other", _THIRD_STABLE_ID),
+]
+
+
+@st.composite
+def _opaque_struct_scenario(draw):
+    """A small random (old, new) pair of plain (no-field, so the by-value
+    embedding exclusion never applies) declaration lists. Each identified
+    entity in :data:`_ENTITY_TABLE` independently decides whether it
+    appears on each side at all, and its opacity there if so; a separate
+    pool of identity-less declarations (the mixed-producer/pre-baseline
+    shape) may additionally collide on an arbitrary bare name, including
+    an identified entity's own name -- exactly the shapes four rounds of
+    Codex review on PR #1218 found real gaps in."""
+    old_records: list[RecordType] = []
+    new_records: list[RecordType] = []
+    for name, entity_id in _ENTITY_TABLE:
+        if draw(st.booleans()):
+            old_records.append(
+                _record(name, is_opaque=draw(st.booleans()), entity_id=entity_id)
+            )
+        if draw(st.booleans()):
+            new_records.append(
+                _record(name, is_opaque=draw(st.booleans()), entity_id=entity_id)
+            )
+    extra_names = draw(st.lists(_names, min_size=0, max_size=2))
+    for name in extra_names:
+        if draw(st.booleans()):
+            old_records.append(
+                _record(name, is_opaque=draw(st.booleans()), entity_id=None)
+            )
+        if draw(st.booleans()):
+            new_records.append(
+                _record(name, is_opaque=draw(st.booleans()), entity_id=None)
+            )
+    return old_records, new_records
+
+
+class TestFindOpaqueStructTypesStableTierSoundness:
+    """Four rounds of Codex review on PR #1218 each found a way for
+    :func:`find_opaque_struct_types` to add a stable id to its index
+    without that specific entity actually satisfying the function's own
+    documented criterion (opaque on both sides, or genuinely absent -- by
+    identity, not by name -- from the other snapshot). Rather than
+    re-implementing the same bare-name-grouping computation as a second
+    "oracle" (which would just reproduce whatever conceptual mistake the
+    implementation itself makes), this audits the *output* directly
+    against that criterion, resolving each returned id's own declarations
+    fresh by identity -- independent of the implementation's internal
+    ``truly_opaque``/``declarations`` bookkeeping."""
+
+    @given(_opaque_struct_scenario())
+    def test_every_stable_id_satisfies_the_documented_criterion(self, scenario) -> None:
+        old_records, new_records = scenario
+        old = _snap(old_records)
+        new = _snap(new_records)
+        index = find_opaque_struct_types(old, new)
+
+        old_by_id: dict[StableEntityId, list[RecordType]] = {}
+        for r in old_records:
+            resolved = stable_entity_id(r.entity_id)
+            if resolved is not None:
+                old_by_id.setdefault(resolved, []).append(r)
+        new_by_id: dict[StableEntityId, list[RecordType]] = {}
+        for r in new_records:
+            resolved = stable_entity_id(r.entity_id)
+            if resolved is not None:
+                new_by_id.setdefault(resolved, []).append(r)
+        old_names = {r.name for r in old_records}
+        new_names = {r.name for r in new_records}
+
+        for sid in index.stable:
+            old_decls = old_by_id.get(sid, [])
+            new_decls = new_by_id.get(sid, [])
+            # The id must actually be attested as opaque on at least one
+            # side (it cannot have entered the index otherwise).
+            assert any(d.is_opaque for d in old_decls) or any(
+                d.is_opaque for d in new_decls
+            )
+            if old_decls and new_decls:
+                # Present (by identity) on both sides: every declaration
+                # under this id on both sides must be opaque -- this is
+                # the two-sided criterion, checked by identity rather than
+                # by name.
+                assert all(d.is_opaque for d in old_decls)
+                assert all(d.is_opaque for d in new_decls)
+            elif old_decls and not new_decls:
+                # Present only in old, by identity -- the asymmetric
+                # criterion requires it to ALSO be absent from new by
+                # bare name (never merely "no id resolved there").
+                assert all(d.name not in new_names for d in old_decls)
+            elif new_decls and not old_decls:
+                assert all(d.name not in old_names for d in new_decls)
+
+    @given(_opaque_struct_scenario())
+    def test_result_is_independent_of_old_new_type_list_order(self, scenario) -> None:
+        """Reordering the declarations within one snapshot's own type list
+        must not change which stable ids qualify -- this function's
+        criterion is about identity and cross-snapshot presence, never
+        about position."""
+        old_records, new_records = scenario
+        old = _snap(old_records)
+        new = _snap(new_records)
+        old_shuffled = _snap(list(reversed(old_records)))
+        new_shuffled = _snap(list(reversed(new_records)))
+        assert (
+            find_opaque_struct_types(old, new).stable
+            == find_opaque_struct_types(old_shuffled, new_shuffled).stable
+        )
