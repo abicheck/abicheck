@@ -38,6 +38,7 @@ from abicheck.diff_filtering import (
     _find_by_value_types,
     _find_opaque_types,
     _resolve_struct_change_entity_id,
+    _struct_change_record_name,
 )
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, TypeField, Variable
 from abicheck.model.identity import (
@@ -656,6 +657,22 @@ def _struct_size_change(symbol: str, entity_id=None):
     )
 
 
+def _struct_field_removed_change(record: str, field_name: str, entity_id=None):
+    """Mirrors diff_platform._removed_field_changes's own production shape:
+    a compound ``f"{record}::{field_name}"`` symbol, no entity_id (the
+    DWARF shape), field_name carried separately."""
+    from abicheck.diff_helpers import make_change
+
+    return make_change(
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        symbol=f"{record}::{field_name}",
+        detail=field_name,
+        old_value="int",
+        field_name=field_name,
+        entity_id=entity_id,
+    )
+
+
 class TestDowngradeOpaqueStructChangesIdentityTiers:
     """``_downgrade_opaque_struct_changes`` used to test bare
     ``c.symbol in truly_opaque`` string membership -- a second, independent
@@ -1199,3 +1216,75 @@ class TestResolveStructChangeEntityId:
         out = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
         assert out[0] is change
         assert out[0].entity_id is None
+
+
+class TestStructChangeRecordName:
+    """``_struct_change_record_name`` recovers a field-level DWARF change's
+    owning record name -- Codex review round 7 on PR #1218 found the
+    identity bridge (and, pre-existing and unrelated to this migration,
+    the always-safe spelling tier too) never worked for
+    ``STRUCT_FIELD_REMOVED``/``STRUCT_FIELD_OFFSET_CHANGED``/
+    ``STRUCT_FIELD_TYPE_CHANGED`` at all, since their own ``symbol`` is
+    compounded as ``f"{record}::{field_name}"``."""
+
+    def test_recovers_the_record_name_from_a_compound_field_symbol(self) -> None:
+        change = _struct_field_removed_change("ns::Handle", "count")
+        assert _struct_change_record_name(change) == "ns::Handle"
+
+    def test_a_whole_struct_changes_symbol_is_returned_unchanged(self) -> None:
+        change = _struct_size_change("ns::Handle")
+        assert _struct_change_record_name(change) == "ns::Handle"
+
+    def test_the_bridge_resolves_identity_for_a_field_level_dwarf_change(
+        self,
+    ) -> None:
+        """The PR's own headline scenario, but for a field-level change
+        (STRUCT_FIELD_REMOVED) rather than a whole-struct one -- the
+        bridge must recover "Handle" from "ns::Handle::count", not guess
+        "count" via a generic bare-name heuristic on the whole symbol."""
+        old = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        new = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        change = _struct_field_removed_change("ns::Handle", "count")
+        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+    def test_the_spelling_tier_also_matches_a_field_level_change_by_record_name(
+        self,
+    ) -> None:
+        """Even with no identity anywhere (the pre-migration shape), a
+        field-level change must now be checked against the record's own
+        bare spelling -- previously always missed, since the compound
+        "Record::field" symbol was compared directly against a bare
+        record-name set."""
+        old = _record("Handle", is_opaque=True)
+        new = _record("Handle", is_opaque=True)
+        change = _struct_field_removed_change("Handle", "count")
+        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+
+class TestMemberPointerFollowsTemplatedOwners:
+    """A pointer-to-data-member declarator's owner scope may itself be
+    template-qualified (``"Handle Owner<int>::*"``,
+    ``"Handle ns::Owner<int>::*"``) -- Codex review round 7 on PR #1218
+    found the round-6 fix's plain ``\\w+`` segment matching couldn't
+    accept a ``<...>`` template argument list at all."""
+
+    @pytest.mark.parametrize(
+        "field_type",
+        [
+            "Handle Owner<int>::*",
+            "Handle ns::Owner<int>::*",
+            "Handle Owner<Pair<int, int>>::*",
+        ],
+    )
+    def test_a_templated_owner_is_still_recognized_as_indirect(
+        self, field_type: str
+    ) -> None:
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record("Wrapper", fields=[TypeField(name="ptr", type=field_type)])
+        old = _snap([opaque_handle, wrapper])
+        new = _snap([opaque_handle, wrapper])
+        change = _struct_size_change("Handle", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE

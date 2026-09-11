@@ -1763,6 +1763,25 @@ _OPAQUE_DOWNGRADEABLE: frozenset[ChangeKind] = frozenset(
 )
 
 
+def _struct_change_record_name(c: Change) -> str:
+    """The owning record's own name for a ``STRUCT_*``/``TYPE_FIELD_*``
+    change -- not always ``c.symbol`` itself.
+
+    Whole-struct changes (``STRUCT_SIZE_CHANGED``/``STRUCT_ALIGNMENT_
+    CHANGED``, and the header-AST ``TYPE_FIELD_*`` kinds, which already
+    pass ``entity_id`` directly and need no bridging at all) use the bare
+    record name as ``symbol`` already. Only ``diff_platform``'s
+    DWARF-sourced ``STRUCT_FIELD_REMOVED``/``STRUCT_FIELD_OFFSET_CHANGED``/
+    ``STRUCT_FIELD_TYPE_CHANGED`` compound their own ``symbol`` as
+    ``f"{record}::{field_name}"`` (Codex review, PR #1218, round 7) --
+    recovered here by stripping the *exact*, already-known ``field_name``
+    suffix ``Change.field_name`` carries, never by a generic bare-name
+    guess (which would instead yield the field's own name)."""
+    if c.field_name and c.symbol.endswith(f"::{c.field_name}"):
+        return c.symbol[: -(len(c.field_name) + 2)]
+    return c.symbol
+
+
 def _resolve_struct_change_entity_id(
     c: Change, old: AbiSnapshot, new: AbiSnapshot
 ) -> Change:
@@ -1783,11 +1802,21 @@ def _resolve_struct_change_entity_id(
     spelling or its depth-aware bare name) across ``old.types``/
     ``new.types`` combined, or none at all, *c* is returned unchanged --
     this never guesses under ambiguity, leaving the always-safe spelling
-    tier as the fallback exactly as before this bridge existed."""
+    tier as the fallback exactly as before this bridge existed.
+
+    **Field-level DWARF changes need their owning record's name, not
+    their own ``symbol``** (Codex review, PR #1218, round 7):
+    ``_removed_field_changes``/``_existing_field_changes`` compound
+    ``symbol`` as ``f"{record}::{field_name}"``, so a generic bare-name
+    guess on the *whole* symbol yields the field's own name (e.g.
+    ``"field"``), never the record's. ``_struct_change_record_name``
+    recovers the exact record spelling by stripping the known
+    ``field_name`` suffix instead of guessing."""
     if c.entity_id is not None:
         return c
-    bare = depth_aware_bare_name(c.symbol)
-    candidate_names = {c.symbol} if bare == c.symbol else {c.symbol, bare}
+    record_name = _struct_change_record_name(c)
+    bare = depth_aware_bare_name(record_name)
+    candidate_names = {record_name} if bare == record_name else {record_name, bare}
     candidates: set[EntityId] = set()
     for snap in (old, new):
         for t in snap.types:
@@ -1849,6 +1878,22 @@ def _downgrade_opaque_struct_changes(
     resolves to among ``old.types``/``new.types`` — never guessing under
     ambiguity (more than one distinct id resolves, or none at all), which
     leaves the always-safe spelling tier as the fallback exactly as before.
+
+    **Field-level changes need their owning record's name, not their own
+    ``symbol``, for either tier** (Codex review, PR #1218, round 7):
+    ``_removed_field_changes``/``_existing_field_changes`` compound
+    ``symbol`` as ``f"{record}::{field_name}"`` for
+    ``STRUCT_FIELD_REMOVED``/``STRUCT_FIELD_OFFSET_CHANGED``/
+    ``STRUCT_FIELD_TYPE_CHANGED`` — a compound string the *spelling* tier
+    was already comparing against a bare record-name set even before this
+    migration, and always missing, since neither identity nor the pre-
+    migration bare-string check was ever record-name-aware for these three
+    kinds. ``_struct_change_record_name`` recovers the exact record
+    spelling (from the already-known ``Change.field_name``, not a generic
+    bare-name guess) and is used as the ``spelling`` argument to
+    :meth:`~abicheck.compare.opaque_types.OpaqueTypeIndex.contains` here,
+    closing that pre-existing gap for the spelling tier at the same time
+    as wiring the new stable tier through it correctly.
     """
     index = _find_opaque_struct_types(old, new)
     if not index:
@@ -1857,7 +1902,8 @@ def _downgrade_opaque_struct_changes(
     result: list[Change] = []
     for c in changes:
         lookup_c = _resolve_struct_change_entity_id(c, old, new)
-        if c.kind in _OPAQUE_DOWNGRADEABLE and index.contains(lookup_c, c.symbol):
+        record_name = _struct_change_record_name(c)
+        if c.kind in _OPAQUE_DOWNGRADEABLE and index.contains(lookup_c, record_name):
             # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
             result.append(
                 make_change(

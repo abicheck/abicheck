@@ -655,15 +655,58 @@ def _unqualified_type_token_matches(
 #: (``"Handle (Class::*)[3]"``).
 _DECLARATOR_GROUP_RE = re.compile(r"\(\s*(?:\w+(?:::\w+)*::\s*)?[*&]")
 
-#: An *un*-parenthesized pointer-to-data-member declarator -- ``"Handle
-#: Owner::*member"`` stores a byte offset into ``Owner``, not an embedded
-#: ``Handle`` object, but needs no grouping parens the way a pointer-to-
-#: member-function/array declarator does (:data:`_DECLARATOR_GROUP_RE`
-#: covers the latter). Codex review, PR #1218, round 6: this shape was
-#: previously read as by-value, since the ``::*`` scope qualifier sits
-#: between the type name and its own sigil, past what
-#: :data:`_CV_OR_SPACE_RE` skips.
-_MEMBER_POINTER_RE = re.compile(r"\w+(?:::\w+)*::\s*\*")
+#: One qualified-scope segment of a pointer-to-member declarator's owner --
+#: a plain identifier, optionally followed by a template argument list.
+#: The argument list itself is skipped via :func:`~abicheck.model.
+#: qualified_name_split.skip_template_arguments` in
+#: :func:`_member_pointer_follows` (bracket-aware, so a nested nested
+#: ``<...>`` doesn't confuse the scan), not matched by this regex directly
+#: -- a regex alone cannot balance arbitrary nested angle brackets.
+_MEMBER_POINTER_SEGMENT_RE = re.compile(r"\w+")
+
+
+def _member_pointer_follows(text: str, pos: int) -> bool:
+    """Whether an *un*-parenthesized pointer-to-data-member declarator's
+    owner-scope-then-``*`` starts at *pos* -- ``"Owner::*member"``,
+    ``"ns::Owner<int>::*member"``, ....
+
+    ``"Handle Owner::*member"`` stores a byte offset into ``Owner``, not an
+    embedded ``Handle`` object, but needs no grouping parens the way a
+    pointer-to-member-function/array declarator does
+    (:data:`_DECLARATOR_GROUP_RE` covers that parenthesized shape). Codex
+    review, PR #1218, round 6: this unparenthesized shape was previously
+    read as by-value, since the ``::*`` scope qualifier sits between the
+    type name and its own sigil, past what :data:`_CV_OR_SPACE_RE` skips.
+
+    Round 7 follow-up: the owner scope's own segments were first matched
+    with a plain ``\\w+(?:::\\w+)*`` regex, which cannot match a
+    *templated* owner (``"Handle Owner<int>::*"``,
+    ``"Handle ns::Owner<int>::*"``) at all, since ``<...>`` isn't ``\\w``.
+    Each segment here may carry its own template argument list, skipped as
+    one bracket-balanced unit via :func:`~abicheck.model.
+    qualified_name_split.skip_template_arguments` -- the same primitive
+    :func:`_occurrence_is_indirect` already uses to skip a *matched type
+    name's own* template arguments before checking its declarator sigil,
+    applied here to each scope segment in turn instead. Requires at least
+    one ``::`` segment before the trailing ``*`` -- a bare identifier with
+    no scope at all (e.g. plain ``"Owner*"``) is not member-pointer syntax
+    and is already handled, when relevant, by the plain sigil check in
+    :func:`_sigil_follows`."""
+    n = len(text)
+    saw_scope = False
+    while True:
+        m = _MEMBER_POINTER_SEGMENT_RE.match(text, pos)
+        if not m:
+            break
+        pos = m.end()
+        if pos < n and text[pos] == "<":
+            pos = skip_template_arguments(text, pos)
+        if text.startswith("::", pos):
+            pos += 2
+            saw_scope = True
+            continue
+        break
+    return saw_scope and pos < n and text[pos] == "*"
 
 
 def _sigil_follows(text: str, pos: int) -> bool:
@@ -674,15 +717,15 @@ def _sigil_follows(text: str, pos: int) -> bool:
     wrapped in a declarator-grouping paren (:data:`_DECLARATOR_GROUP_RE`)
     immediately following, so ``"Handle (*)[3]"``'s pointer-to-array
     declarator is found too -- or an unparenthesized pointer-to-member
-    declarator (:data:`_MEMBER_POINTER_RE`), so ``"Handle Owner::*member"``
-    is found as well."""
+    declarator (:func:`_member_pointer_follows`), so ``"Handle
+    Owner::*member"`` (including a templated owner) is found as well."""
     m = _CV_OR_SPACE_RE.match(text, pos)
     pos = m.end() if m else pos
     if pos < len(text) and text[pos] in "*&":
         return True
     if _DECLARATOR_GROUP_RE.match(text, pos) is not None:
         return True
-    return _MEMBER_POINTER_RE.match(text, pos) is not None
+    return _member_pointer_follows(text, pos)
 
 
 def _occurrence_is_indirect(text: str, end: int) -> bool:
