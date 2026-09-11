@@ -112,7 +112,10 @@ class TestSchemaStalenessStatus:
         d["from_headers"] = True
         d["ast_producer"] = "clang"
         old = snapshot_from_dict(d)
-        new = snapshot_from_dict(d)
+        # A genuinely two-sided comparison: the two snapshots must differ in
+        # content, or the pair is provably finding-free and correctly reads
+        # "clean" (see test_content_identical_reload_is_never_degraded).
+        new = snapshot_from_dict({**d, "version": f"{d.get('version', '1.0')}-next"})
         assert old.clang_restrict_facts_reliable is False
 
         result = checker.compare(old, new)
@@ -146,7 +149,7 @@ class TestSchemaStalenessStatus:
         d["from_headers"] = True
         d["ast_producer"] = "clang"
         old = snapshot_from_dict(d)
-        new = snapshot_from_dict(d)
+        new = snapshot_from_dict({**d, "version": f"{d.get('version', '1.0')}-next"})
         assert degraded_reliability_facts(old)  # this fixture is degraded
 
         result = checker.compare(old, new)
@@ -780,9 +783,10 @@ class TestSchemaStalenessStatus:
             aa.notes
         )
 
-        # The mirror: two independently-built (merely content-identical,
-        # not object-identical) snapshots must NOT take this shortcut --
-        # real object identity is what this checks, never equal content.
+        # Two independently-built but content-EQUAL snapshots take the
+        # same shortcut, for the same reason (see
+        # TestSchemaStalenessContentIdentity below): the argument was never
+        # about object identity.
         new_copy = AbiSnapshot(
             version=new.version,
             library=new.library,
@@ -790,8 +794,23 @@ class TestSchemaStalenessStatus:
             from_headers=new.from_headers,
             param_kind_facts_reliable=False,
         )
+        assert new_copy == new
         result2 = checker.compare(new, new_copy)
-        assert result2.analysis_assurance.schema_staleness_status == "degraded"
+        assert result2.analysis_assurance.schema_staleness_status == "clean"
+
+        # The mirror that stays degraded: content that actually DIFFERS
+        # (here a different version string) is a real two-sided comparison
+        # a stale fact can still distort.
+        differing = AbiSnapshot(
+            version="99.0",
+            library=new.library,
+            functions=list(new.functions),
+            from_headers=new.from_headers,
+            param_kind_facts_reliable=False,
+        )
+        assert differing != new
+        result3 = checker.compare(new, differing)
+        assert result3.analysis_assurance.schema_staleness_status == "degraded"
 
 
 class TestFieldInitializerSameProducerGating:

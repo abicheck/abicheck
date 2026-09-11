@@ -446,6 +446,25 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
     return kept
 
 
+def _same_content(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """Whether *old* and *new* are provably the same content.
+
+    Plain ``AbiSnapshot`` dataclass equality (structural, every field).
+    Chosen over a serialized digest (``storage.snapshot_encode.
+    snapshot_content_digest``, this repo's existing content fingerprint)
+    because ``policy`` may not import ``storage`` (``architecture/
+    modules.yaml``: ``policy -> model, compare``), and because equality is
+    the stronger test of the two -- a digest can only ever agree with it,
+    after paying a full re-serialization. Soundness is what matters here,
+    and field-wise equality has it in the direction actually used: equal
+    ==> every input a pairwise detector reads agrees on both sides ==> no
+    pairwise finding is possible. The converse is neither claimed nor
+    needed: any inequality falls through to the ordinary degraded report,
+    which is the safe direction.
+    """
+    return old == new
+
+
 def schema_staleness_status(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> tuple[str, list[str]]:
@@ -483,16 +502,36 @@ def schema_staleness_status(
     would otherwise be the one context-status field self-pairing does NOT
     make safe by construction, purely because it asks a per-side question
     ("is THIS side's flag False") rather than a cross-side agreement
-    question. A user-supplied ``compare foo.so foo.so`` (two independently
-    parsed, merely content-identical snapshots) never hits this: real
-    identity, not equal content, is what this checks, and two separate
-    parses are always two separate objects.
+    question. That argument never depended on object
+    identity, and an earlier revision of this docstring wrongly carved the
+    two-operand case out ("two separate parses are always two separate
+    objects"). ONE stored snapshot file loaded twice -- ``compare
+    baseline.abi.json baseline.abi.json``, or a CI job re-checking an
+    unchanged cached baseline -- produces two distinct objects whose
+    content is nevertheless equal, and reporting that as ``"degraded"``
+    (flipping ``assurance.status`` complete -> partial, newly failing a job
+    gating on it) makes exactly the claim the ``old is new`` return already
+    rejects.
+
+    So the early return is widened from object identity to *provable
+    content identity* (:func:`_same_content`). That test is SOUND, not
+    heuristic: equal content means every input the pairwise detectors read
+    is equal on both sides, so no pairwise finding is possible, reliable
+    facts or not. It is deliberately NOT widened to "same input path" or
+    "same binary": two independent extractions of one binary can
+    legitimately differ in schema vintage, which is precisely the case this
+    field exists to report. It is also evaluated only AFTER
+    :func:`_pair_aware_degraded_facts` has returned something for at least
+    one side, so an ordinary clean comparison never pays for it; that path
+    is rare by construction.
     """
     if old is new:
         return "clean", []
     old_degraded = _pair_aware_degraded_facts(old, new)
     new_degraded = _pair_aware_degraded_facts(new, old)
     if not old_degraded and not new_degraded:
+        return "clean", []
+    if _same_content(old, new):
         return "clean", []
     notes: list[str] = []
     if old_degraded:
