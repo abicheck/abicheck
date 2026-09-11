@@ -68,11 +68,15 @@ class TestSchemaStalenessStatus:
     #: ``clang_deprecation_facts_reliable`` ALSO needs a real ``ast_producer``
     #: here (round 8): this dict is shared verbatim by both ``old`` (with the
     #: flag forced False) and ``new`` (this generalized test's minimal-diff
-    #: partner) below, and the pair-aware gate now requires ``new`` to carry
-    #: a positively known, non-degraded producer too -- an unset
-    #: ``ast_producer`` (this dict's previous shape) makes ``new`` look like
-    #: a legacy pre-provenance snapshot, which correctly never taints
-    #: (see ``test_deprecation_flag_needs_a_known_other_side_producer_too``).
+    #: partner) below. The pair-aware gate
+    #: (``_other_side_supports_known_producer_comparison``) only requires
+    #: ``new`` to be confirmed header-aware -- plus, when ``new.ast_producer
+    #: == "hybrid"``, a recorded per-declaration deprecation provenance entry
+    #: (round 10 removed the earlier, stricter "known, non-degraded producer"
+    #: requirement as backwards). An unset ``ast_producer`` (this dict's
+    #: previous shape) makes ``new`` look like a legacy pre-provenance
+    #: snapshot -- still confirmed header-aware, so it still taints
+    #: (see ``test_deprecation_flag_still_taints_with_unknown_other_side_producer``).
     _CONSULTED_KWARGS: dict[str, dict[str, object]] = {
         "header_cv_facts_reliable": {},
         "clang_deprecation_facts_reliable": {
@@ -117,15 +121,14 @@ class TestSchemaStalenessStatus:
         assert aa.schema_staleness_status == "degraded"
         assert aa.status != "complete"
         # Named as clang_restrict_facts_reliable, not clang_deprecation_
-        # facts_reliable (round 8): both old and new are loaded from the
-        # SAME dict, so both are confirmed-header, degraded "clang"
-        # producers -- fact_provenance.fact_producer(new, <a deprecated/
-        # is_scoped key>) resolves None for THIS reason too (not just header
-        # confirmation), so the deprecation detector can never run for this
-        # exact pair and correctly does not taint the status for that one
-        # flag (see test_deprecation_flag_clean_when_other_side_is_itself_
-        # degraded_clang below). restrict has no such other-side-producer
-        # exclusion and is unaffected -- still a real, taintable flag here.
+        # facts_reliable: both old and new are loaded from the SAME dict, so
+        # both are confirmed-header "clang" producers -- and round 10
+        # reversed the earlier (round 8) belief that a degraded producer on
+        # the OTHER side excludes deprecation too. Both flags ARE real,
+        # taintable degradations for this pair (see
+        # test_deprecation_flag_still_taints_when_other_side_is_itself_
+        # degraded_clang below); this assertion only pins that restrict is
+        # named among the notes, not that deprecation is absent from them.
         assert any("clang_restrict_facts_reliable" in n for n in aa.notes), aa.notes
 
     def test_v4_fixture_roundtrip_reports_the_same_compatibility_result(
@@ -346,12 +349,18 @@ class TestSchemaStalenessStatus:
     #: restrict``/``_diff_func_deprecated``) requires BOTH sides confirmed
     #: header-aware but places no further requirement on the OTHER side's
     #: producer -- documented as cross-producer-safe once both sides are
-    #: header-confirmed. NOTE (round 8): ``clang_deprecation_facts_
-    #: reliable`` picked up a further, producer-aware narrowing on top of
-    #: this shared header-confirmation shape (see ``test_deprecation_flag_
-    #: needs_a_known_other_side_producer_too`` below) -- kept in this list
-    #: too since a KNOWN, mismatched producer (what this list's own tests
-    #: use) still taints it exactly as it does restrict. NOTE (round 11):
+    #: header-confirmed. NOTE (round 8, reversed round 10): a producer-aware
+    #: narrowing was briefly added on top of this shared header-confirmation
+    #: shape for ``clang_deprecation_facts_reliable`` (excluding it whenever
+    #: the OTHER side's own producer was unknown or itself degraded) and
+    #: found backwards -- regenerating the OTHER side would fix that too, so
+    #: it isn't a permanent exclusion reason (see
+    #: ``test_deprecation_flag_still_taints_with_unknown_other_side_producer``/
+    #: ``test_deprecation_flag_still_taints_when_other_side_is_itself_
+    #: degraded_clang`` below). ``clang_deprecation_facts_reliable`` stays in
+    #: this list, gated only by ``_other_side_supports_known_producer_
+    #: comparison``'s header-confirmation (plus hybrid-provenance) check,
+    #: same as restrict. NOTE (round 11):
     #: ``clang_field_initializer_facts_reliable`` moved OUT of this list --
     #: unlike restrict/deprecation, its real consumers DO require a
     #: producer MATCH (same shape as va_list/var_access) -- see
@@ -365,9 +374,9 @@ class TestSchemaStalenessStatus:
         self,
     ) -> None:
         """Codex review, PR #1209 round 7: the mirror of the producer-gated
-        flags' own "same producer still taints" case, generalized to all
-        three header-only-gated flags. When ``other`` is confirmed header-
-        aware (any producer -- these three detectors are cross-producer-safe
+        flags' own "same producer still taints" case, generalized to both
+        header-only-gated flags. When ``other`` is confirmed header-
+        aware (any producer -- these two detectors are cross-producer-safe
         once both sides clear ``_both_header_aware``), a degraded flag on
         the OTHER side must still taint the reported status."""
         for flag_name in self._HEADER_ONLY_GATED_FLAGS:
@@ -399,7 +408,7 @@ class TestSchemaStalenessStatus:
         """The other half of round 7's fresh evidence: an ``other`` side
         that is confirmed header-aware on paper but only ever had its
         ``from_headers`` *inferred* still fails ``_both_header_aware``, so
-        each of these three detectors never runs for this pair -- the
+        each of these two detectors never runs for this pair -- the
         degraded flag must not taint the reported status, the identical
         shape :func:`test_other_side_only_inferred_header_awareness_never_
         taints` already covers for the producer-gated flags."""
