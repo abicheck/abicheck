@@ -965,15 +965,37 @@ runs:
             base_path = Path(base_path_env)
             source_desc = str(base_path)
             found_path = base_path
-            with open(base_path, encoding="utf-8") as fh:
-                loaded = yaml.safe_load(fh)
-            if loaded is not None:
-                if not isinstance(loaded, dict):
-                    raise SystemExit(
-                        f"::error::{_gha_escape(source_desc)} does not parse "
-                        "to a YAML mapping -- cannot merge an "
-                        "assurance.require_complete overlay into it."
-                    )
+            # Codex review (P1), fresh evidence, PR #1222: a malformed
+            # explicit build-config (e.g. bad indentation) fails inside
+            # `yaml.safe_load` itself, before `_validate_or_exit`/
+            # `_gha_escape` ever run -- PyYAML's own ParserError embeds the
+            # source's filename verbatim in its error mark, so an unguarded
+            # raise here can put attacker-controlled text (a crafted
+            # filename containing a newline + a workflow command) on its
+            # own output line, unescaped. Catch the parse failure and
+            # escape it exactly like every other error this step emits,
+            # mirroring the sources-root branch's own identical guard
+            # below.
+            try:
+                with open(base_path, encoding="utf-8") as fh:
+                    loaded = yaml.safe_load(fh)
+            except Exception as exc:
+                raise SystemExit(
+                    "::error::failed to parse the explicit build-config "
+                    f"{_gha_escape(source_desc)}: {_gha_escape(exc)}. "
+                    "Refusing to let a raw parser traceback (which may "
+                    "embed attacker-controlled file content) reach the "
+                    "runner."
+                ) from exc
+            # An empty (or non-mapping) explicit build-config is not "no
+            # config given" -- the file still exists and was named
+            # explicitly -- but `load_build_config()` itself treats every
+            # non-mapping document (None, a scalar, a list) as an empty
+            # `BuildConfig()` and proceeds (Codex review, P2, fresh
+            # evidence, PR #1222): merge as an empty base here too instead
+            # of rejecting the run, matching both the ordinary CLI and the
+            # sources-root branch's own identical handling below.
+            if isinstance(loaded, dict):
                 _validate_or_exit(loaded, source_desc)
                 data = loaded
         else:
@@ -988,14 +1010,22 @@ runs:
             if discovered is not None:
                 source_desc = str(discovered)
                 found_path = discovered
-                loaded = yaml.safe_load(discovered.read_text(encoding="utf-8"))
-                if loaded is not None:
-                    if not isinstance(loaded, dict):
-                        raise SystemExit(
-                            f"::error::{_gha_escape(source_desc)} does not "
-                            "parse to a YAML mapping -- cannot merge an "
-                            "assurance.require_complete overlay into it."
-                        )
+                # Same two guards as the explicit build-config branch above
+                # (Codex review, PR #1222): an unguarded parse failure would
+                # leak a raw, unescaped traceback, and a non-mapping
+                # document must merge as an empty base rather than fail the
+                # run, matching `load_build_config()`.
+                try:
+                    loaded = yaml.safe_load(discovered.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    raise SystemExit(
+                        "::error::failed to parse the discovered project "
+                        f"config {_gha_escape(source_desc)}: "
+                        f"{_gha_escape(exc)}. Refusing to let a raw parser "
+                        "traceback (which may embed attacker-controlled "
+                        "file content) reach the runner."
+                    ) from exc
+                if isinstance(loaded, dict):
                     _validate_or_exit(loaded, source_desc)
                     data = loaded
             # Sources-root promotion (Codex review, P1, fresh evidence, PR

@@ -302,12 +302,13 @@ class TestAssuranceOverlayGenerationExecuted:
         assert "assurance" in result.stderr
         assert "config-path" not in result.outputs
 
-    def test_non_mapping_whole_document_still_fails_loud(self, tmp_path: Path) -> None:
-        """Negative control for the pre-existing top-level guard, exercised
-        the same executing way as the new assurance-shape guard above."""
-        result = self._run(tmp_path, "- just\n- a\n- list\n")
-        assert result.returncode != 0
-        assert "::error::" in result.stderr
+    # Codex review (P1/P2, fresh evidence, PR #1222): the explicit-YAML
+    # parse-failure-escaping and non-mapping-document handling tests moved
+    # to their own sibling module,
+    # ``test_reusable_workflows_assurance_overlay_parse_safety.py``, so this
+    # already-1199-line file doesn't cross the ``architecture/debt.yaml``
+    # test-file cap -- see that module's own docstring for the two findings
+    # it covers.
 
 
 class TestAssuranceOverlayGenerationIsIsolated:
