@@ -457,9 +457,10 @@ def bazel_deps_expression(targets: Sequence[str]) -> str:
 
     ``()`` (no explicit root targets declared) resolves to the historical
     workspace-wide ``//...`` — this is what makes root-target scoping purely
-    additive: a caller that never declares ``build_targets``/
-    ``--build-target`` gets byte-identical query behavior to before this
-    feature existed. A single target is used bare (``//:math``); several are
+    additive: a caller that never declares ``build_targets`` (via
+    ``.abicheck.yml``'s ``build.targets`` -- the CLI's own ``--build-target``
+    flag was later removed) gets byte-identical query behavior to before
+    this feature existed. A single target is used bare (``//:math``); several are
     joined with Bazel's own ``set(...)`` target-pattern union (space-
     separated per the query-language grammar) so ``deps(...)`` computes the
     union of each root's own transitive closure rather than requiring the

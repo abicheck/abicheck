@@ -431,12 +431,19 @@ if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" \
   _warn "public-header-dir is set but has no effect: it only applies to mode: dump, or mode: compare's audit-only (no old-library/abi-baseline) shape (mode is '$MODE')."
 fi
 
-# build-target: dump mode only (the CLI's own --build-target flag exists on
-# that subcommand only; compare never had an equivalent). run.sh's
-# compare/deps-tree/deps-compare branches never forward it (Codex review).
-_BUILD_TARGET="${INPUT_BUILD_TARGET:-}"
-if [[ -n "$_BUILD_TARGET" && "$MODE" != "dump" ]]; then
-  _warn "build-target is set but has no effect: it only applies to mode: dump (mode is '$MODE')."
+# build-target: RETIRED on every mode (hard removal, no deprecation
+# window). `scan --build-target` went first (ADR-068's second 2026-09-09
+# amendment, ruling (b)); `dump --build-target`, which this input mapped to
+# for mode: dump (compare/deps-tree/deps-compare never forwarded it), was
+# retired next, once that removal resolved the routing hazard that had
+# deferred it (`frontends/cli/options/rulings.py`'s former deferred
+# ruling). Unlike the mode-scoped "has no effect" warning this replaced,
+# there is no longer a mode where setting it does anything but fail --
+# checked here (mode-independent, like bundle-system-providers below) so a
+# workflow that still sets it fails before Python setup and the toolchain
+# install, matching this script's own fail-fast rationale.
+if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
+  _fail "build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config input (or let it auto-discover from sources)."
 fi
 
 # new-library-set: retired outright (ADR-068 (b): scan --artifact-set is

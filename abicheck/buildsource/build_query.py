@@ -738,7 +738,7 @@ def _merge_query_result(
             f"build_query_auto: {system} exited {proc.returncode}"
         )
         if system == "bazel" and bazel_targets:
-            # A typo'd/nonexistent root target (e.g. `--build-target //:typo`)
+            # A typo'd/nonexistent root target (e.g. `build.targets: ["//:typo"]`)
             # makes the aquery itself exit nonzero, well before
             # `_ingest_query_output` -- the only path that otherwise stamps
             # `target_scope` -- ever runs. Record the requested labels with an
@@ -824,9 +824,9 @@ def run_inferred_build_query(
 
     *bazel_targets* (P0.2): forwarded to :func:`inferred_query_command`/
     :func:`inferred_bazel_cquery_command` so a caller that declared root
-    targets (``dump --build-target`` / ``.abicheck.yml``'s ``build.targets``)
-    gets a scoped Bazel query instead of the workspace-wide default; a no-op
-    for cmake/make.
+    targets (``.abicheck.yml``'s ``build.targets``, the only route left now
+    that ``dump --build-target`` is retired) gets a scoped Bazel query
+    instead of the workspace-wide default; a no-op for cmake/make.
     """
     system = detect_build_system(sources)
     if not system or sources is None:

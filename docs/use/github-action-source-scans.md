@@ -40,8 +40,14 @@ below). `new-library-set` (the multi-library audit mode) and `risk-rules`
 (the risk-driven `auto` depth escalation) are retired outright with no
 replacement input — see the depth table below for `risk-rules`'
 replacement, and compare each library individually for `new-library-set`
-until ADR-065 S3's component inventories land. `budget` (a wall-clock
-guard, `BUDGET_OVERFLOW` rather than overrun) now applies to `mode:
+until ADR-065 S3's component inventories land. `build-target` is retired
+too, on every mode: `mode: scan`'s own retirement of it went first, and
+`mode: dump`'s `build-target` input (the only other mode that ever forwarded
+it) was retired outright next, once that removal resolved the routing
+hazard that had deferred it — put the root target(s) in `.abicheck.yml`'s
+`build.targets` instead (Bazel only so far) and pass the config via
+`mode: dump`'s `build-config:` input. `budget` (a wall-clock guard,
+`BUDGET_OVERFLOW` rather than overrun) now applies to `mode:
 compare`'s two-sided shape.
 
 ### `mode: scan` is retired — use `mode: compare`

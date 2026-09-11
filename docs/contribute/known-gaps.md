@@ -134,7 +134,17 @@ looked like the obvious fix and wasn't.
   `scan` — investigated, not fixed (Codex review, fresh evidence, P0.2
   follow-up). Fixed (ADR-063 Phase 4, "option 2" below): the combination now
   raises a clean usage error instead of silently collecting an unscoped
-  graph.** `abicheck.workflows.plan.bazel_target_scoping_failure()` is the
+  graph.** **Status note, added once this was closed:** `scan` (including
+  every `scan`-specific mechanism this entry narrates —
+  `scan_bazel_scoping_failure`, `ScanRequest`, `cli_scan.py`) was later
+  removed outright (ADR-068 Phase 6), and `dump`'s own `--build-target` CLI
+  flag was removed after it (once `scan`'s removal resolved the routing
+  hazard that had deferred it). `.abicheck.yml`'s `build.targets` is now the
+  *only* front-end-reachable source of root-target scoping for `dump`/
+  `compare`; the historical narrative below (written while both the flag and
+  `scan` still existed) is kept for the reasoning it records about the
+  underlying `bazel_target_scoping_failure`/`_discovered_config_build_targets`
+  mechanism, which is unchanged. `abicheck.workflows.plan.bazel_target_scoping_failure()` is the
   one check both `dump`/`compare` (via `AnalysisPlanner`, wired into
   `service_dump_pipeline.resolve_dump_request`/`service_compare_pipeline.
   resolve_compare_request`) and `scan --against`'s own candidate resolution
@@ -7373,11 +7383,22 @@ ADR amendment for the full reasoning each):
   `--policy`/`.abicheck.yml`'s `policy.overrides` already lets a user
   control any one check's severity; only the `KEY=LEVEL` *syntax* itself
   does not survive.
-- `--build-target` — no `compare`/`dump` flag or config equivalent exists
-  yet (`.abicheck.yml`'s planned `build.targets` CONFIG key, §4.2, is not
-  implemented for either command); implementing it is `dump`'s own
-  CLI/config-cleanup phase (a different workstream's owned files), not this
-  one's.
+- `--build-target` — **stale, corrected below.** This entry originally said
+  no config equivalent existed for either command; that was already false
+  by the time it was written (`.abicheck.yml`'s `build.targets` key existed
+  and `dump --build-target` already consumed it, CLI-override-wins). `scan`
+  *did* have its own `--build-target` flag
+  (`changelog.d/20260816_113000_noreply_abicheck_scan_build_target.md`
+  records it being added), and it was retired first, in ADR-068's
+  2026-09-09 amendment (the `scan` retirement) — `dump`'s own
+  `--build-target` was deliberately left in place at that point precisely
+  because `scan` still existed and shared its plumbing, so pulling `dump`'s
+  copy first would have broken `scan`'s still-live flag. `dump`'s own
+  `--build-target` CLI flag was later removed outright too (ADR-068 Phase 6
+  follow-up, once `scan`'s full removal cleared the routing hazard that had
+  deferred `dump`'s own removal) — `.abicheck.yml`'s `build.targets` is now
+  the *only* front-end-reachable source for either command, with no CLI
+  override left to take precedence over it.
 - `--artifact-set`/`new-library-set` — ADR-065 S3's package component
   inventories (plan Prerequisite P5) are explicitly "Not started"; routing
   this onto `compare --no-baseline DIR` today would silently narrow its

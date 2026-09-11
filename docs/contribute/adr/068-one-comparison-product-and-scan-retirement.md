@@ -6,9 +6,10 @@ root command is deleted outright (`abicheck scan` exits 64, naming
 `compare`/`compare --no-baseline` as the replacement), its scan-only
 modules and tests are deleted, and `tests/parity/` is now a compare-only
 regression corpus. Of the three flag demotions Phase 6 unblocked,
-`compare --env-matrix` is now implemented (see the 2026-09-11 amendment
-below); `compare --require-complete-analysis` and `dump --build-target`
-remain open, unimplemented followups — see
+ `compare --env-matrix` and `dump --build-target` are now both implemented (see the 2026-09-11 amendments below — `--env-matrix`'s own amendment, and `--build-target`'s: `frontends/cli/options/
+rulings.py`'s deferred ruling recorded its only real blocker as
+`--build-target` still being a live `scan` option (`plans/
+one-comparison-product.md`'s "One deferral's blocker re-attributed" note); with `scan` deleted, that blocker is gone and the flag is removed outright (old spelling exits 64, no alias; `.abicheck.yml`'s `build.targets` is the only front-end-reachable source now)). `compare --require-complete-analysis` remains the one open, unimplemented follow-up — see
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
 exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends
@@ -446,7 +447,7 @@ trade a possible *false negative* for a shorter CLI — not convenience.
 | `--budget` (§3 #19) | **(c) — implemented** | The other condition the task explicitly named as a real (c) candidate: an unbounded run is a real CI risk (opaque runner kill instead of a clear, actionable exit code). `compare` gained a `--budget` option (`frontends/cli/commands/compare.py`) parsed the same way `scan`'s always was (`15m`/`900s`/`1h`, bare number = seconds) and enforced via `deadline.deadline_scope` — the same ambient, contextvar-based mechanism `scan_engine.py` already used, which every deadline-aware subprocess call already downstream of it (castxml/clang extraction, the preprocessor scan, source replay) already consults without further plumbing. Entered around both the resolve and the classify phase, with the *remaining* budget (not the full duration again) passed to the second entry, so a slow resolution cannot silently grant classification a second full budget. Overflow sets `DiffResult.budget_overflow` (exit 5, ADR-064's existing axis) via the native CLI's own catch of `deadline.DeadlineExceeded`; the typed API (`CompareRequest.budget_s`, `service_compare_pipeline.run_compare_request`) raises the same exception rather than fabricating a partial result, since a typed caller can already catch it. Verified live: `compare --budget 0s -H foo.h old.so new.so` exits `5`. **Known, accepted narrowing versus `scan`'s own budget guard:** `scan_engine.py`'s per-stage checks additionally bounded fine-grained sub-steps within a single collection pass; this implementation bounds the two coarser phases (resolve, classify) `compare`'s own architecture actually separates. Still a real, enforced ceiling — recorded in `docs/contribute/known-gaps.md` as an accepted granularity difference, not a capability gap. |
 | `--risk-rules` (§3 #14) and risk-driven `auto` depth selection (§3 #13) | **(b) — dropped** | Omitting `--depth` on `compare` already deterministically defaults to `headers` — never narrower than what a *non*-risk-driven `scan` run would have used, so dropping the risk-scoring auto-escalation is not a new false negative relative to `compare`'s own existing, already-shipped default; it is the removal of a convenience that used to *sometimes* escalate depth further than the default, never a removal of a floor. A CI job that wants source-level assurance on every run must now pin `--depth source` explicitly rather than rely on risk scoring inferring it — a documented breaking change to `mode: scan`'s implicit depth selection when `depth` is left unset, not a silent capability loss (the Action now requires an explicit `depth` input, or accepts the same fixed `headers` default `compare` always used). |
 | `--crosscheck KEY=error` promotion syntax (§3 #23) | **(b) — dropped, superseded** | All eleven cross-source checks already reach `compare` as ordinary `ChangeKind`s (§3 #3, landed), so the underlying capability — controlling a specific check's severity — already exists via `--policy`/`.abicheck.yml`'s `policy.overrides` (a `ChangeKind`-keyed mechanism every one of these checks already has a registry entry for). The `KEY=LEVEL` *syntax* itself does not survive; `policy.overrides.<CHANGE_KIND>: error` is the replacement spelling. A documented breaking change to `mode: scan`'s `crosscheck` input's promotion syntax — the dedicated `crosscheck` report block itself was already scan-only surface with no compare equivalent, and disappears with the mode. |
-| `--build-target` (no `compare` flag equivalent) | **(b) — dropped** | `scan --build-target` is `dump --build-target`'s own CLI equivalent (`BuildEvidence.target_scope`), an advanced knob narrowing which build target's evidence collection uses when a compile database names several — not a correctness floor: omitting it does not silently narrow what `compare` reports below its own ordinary (all-targets) default, it only foregoes a precision narrowing a minority of multi-target libraries need. `.abicheck.yml`'s `build.targets` (§4.2's own CONFIG classification) is the eventual config-level replacement, but that key is not implemented for either `dump` or `compare` yet (verified: no `build.targets`/`build_target` reference anywhere outside `scan`'s own modules) — implementing it is `dump`'s own CLI/config-cleanup phase (Phase 7 in the plan, a different agent's owned files: `cli_dump*.py`), not this commit's. Documented breaking change: `build-target` under `mode: scan` now errors clearly rather than routing to a nonexistent flag or a silent no-op. |
+| `--build-target` (no `compare` flag equivalent) | **(b) — dropped** | `scan --build-target` is `dump --build-target`'s own CLI equivalent (`BuildEvidence.target_scope`), an advanced knob narrowing which build target's evidence collection uses when a compile database names several — not a correctness floor: omitting it does not silently narrow what `compare` reports below its own ordinary (all-targets) default, it only foregoes a precision narrowing a minority of multi-target libraries need. `.abicheck.yml`'s `build.targets` (§4.2's own CONFIG classification) was, at the time of this ruling, the eventual config-level replacement, but that key was not implemented for either `dump` or `compare` yet (verified then: no `build.targets`/`build_target` reference anywhere outside `scan`'s own modules) — implementing it was blocked on `dump --build-target` itself remaining a live flag until this same Phase 6 `scan` removal landed (`frontends/cli/options/rulings.py`'s deferred ruling for `--build-target` named exactly that blocker, not an undecided architectural question). Documented breaking change: `build-target` under `mode: scan` now errors clearly rather than routing to a nonexistent flag or a silent no-op. **Resolved by the 2026-09-11 amendment below:** with `scan` (and `scan --build-target` with it) now deleted, that blocker is gone — `dump --build-target` has since been removed outright too (old spelling exits 64, no alias), and `.abicheck.yml`'s `build.targets` is now the only front-end-reachable source, on both `dump` and `compare`. |
 | `--artifact-set`/`new-library-set` (§3 #16/#17) | **(b) — dropped, pending prerequisite** | ADR-065 S3's package component inventories (plan Prerequisite P5) — the model `compare --no-baseline DIR`'s own N-library audit selection would need to genuinely preserve `--artifact-set`'s per-member manifest/coverage accounting — is explicitly "Not started" in the plan, owned by a different workstream. Routing `new-library-set` onto `compare --no-baseline` today would silently narrow its member-selection/coverage guarantees rather than reproduce them, which is exactly the false-negative risk the (c) bar exists to catch — so this is not implemented in this commit. `mode: scan` with `new-library-set` set now errors clearly (naming ADR-065 S3 as the blocking prerequisite) instead of silently falling back to a legacy CLI branch that itself was one asymmetric input combination away from disappearing anyway. Tracked as a real, open gap in `docs/contribute/known-gaps.md`, not silently dropped. |
 | Per-side header/include root: additive (`scan`) vs. overriding (`compare`) | **(a) — already covered, fixed in the Action** | This was never a `compare` capability gap — it is purely how `action/run.sh` assembles `-H`/`-I` flags before invoking either CLI. The Action itself now unions a shared `header`/`include` root into each side-specific list before building `CMD`, reproducing `scan`'s documented additive semantics without needing any `compare` change — `compare`'s own per-side override behavior when given a bare (non-side-prefixed) root plus a side-specific one elsewhere is unaffected and pre-existing. |
 | `.json`/`.json.gz`/`.json.zst`/content-sniffed snapshot baseline, `dependency_scope` tag matching | **(a) — already covered** | `service.run_dump`'s `include_dependencies` parameter already lets `compare`'s own live-binary dumping filter consistently with a `dump --include-system-declarations` baseline (module map, "Snapshot" section) — the exact tag-matching `scan`'s own `_scan_candidate_include_dependencies` provided. No `compare`-side gap; the Action's own JSON-snapshot-sniffing routing check is simply no longer needed once every `mode: scan` request routes to `compare` unconditionally. |
@@ -460,13 +461,15 @@ trade a possible *false negative* for a shorter CLI — not convenience.
 below):** `_SCAN_NEEDS_LEGACY_CLI` and its call sites are deleted outright.
 Every `mode: scan` request — baseline and audit-only alike — is assembled as
 a `compare`/`compare --no-baseline` invocation. `new-library-set` and
-`build-target` inputs are rejected with a clear `::error::` naming the
-blocking prerequisite (ADR-065 S3, and `dump`'s own config-cleanup phase,
-respectively) rather than silently degrading or routing to a branch that no
-longer exists; `risk-rules`/`crosscheck` inputs are rejected the same way,
-naming their `.abicheck.yml` replacement. This is what D8 calls hard removal
-with no deprecation window, applied to the Action's own input surface for
-the first time — previously only the CLI's flag surface was held to it.
+`build-target` inputs are rejected with a clear `::error::`; `new-library-set`
+names its still-blocking prerequisite (ADR-065 S3), while `build-target` —
+per the 2026-09-11 amendment below, once `dump --build-target` itself was
+retired — is simply retired on every mode, naming `.abicheck.yml`'s
+`build.targets` as the replacement rather than a prerequisite still to land;
+`risk-rules`/`crosscheck` inputs are rejected the same way, naming their
+`.abicheck.yml` replacement. This is what D8 calls hard removal with no
+deprecation window, applied to the Action's own input surface for the first
+time — previously only the CLI's flag surface was held to it.
 
 **Current state (CodeRabbit review, this same commit):** the ruling table
 above is complete, but `_SCAN_NEEDS_LEGACY_CLI` and its ~17 `MODE == "scan"`
@@ -716,11 +719,47 @@ request — see `abicheck/workflows/contracts.py`'s own field docstring and
 Only the CLI flag surface and its
 `--support-promise`-shaped strict-schema enforcement moved.
 `compare --require-complete-analysis` remains the one
-still-open, unimplemented deferral from this same list; see
+still-open, unimplemented deferral from this same list (`dump
+--build-target` is also now implemented — see the following amendment); see
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for its
 exact scope. This amendment closes the `--env-matrix` deferral the plan
 already ruled on; it does not reopen that ruling or the CONFIG
 classification itself.
+
+## Amendment (2026-09-11): `dump --build-target` removed, closing the last flag-demotion deferral Phase 6 unblocked
+
+Phase 6 (`scan` retirement) named three flag demotions it unblocked but did
+not itself implement: `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` — the ruling table
+above's own `--build-target` row (2026-09-09) recorded `dump --build-target`
+as still blocked specifically on `scan --build-target` remaining a live
+option, not as an open architectural question. With `scan` (and
+`scan --build-target` with it) deleted, that blocker is gone, and this
+amendment closes it: `dump --build-target` is removed outright (old spelling
+exits 64, no alias), and `.abicheck.yml`'s `build.targets` — the CONFIG
+classification the ruling table already named as the eventual replacement —
+is now the only front-end-reachable source of build-target scoping, on both
+`dump` and `compare`. `InputSpec.build_targets` stays as a genuine typed-API
+field for a programmatic caller: unlike `--build-query`/`--build-compile-db`
+(removed from `InputSpec` for being entangled with build-system execution
+trust), `build_targets` is ordinary per-side evidence-scoping data, the same
+shape as `compile_db_filter`/`public_header_dirs`. The existing
+CLI-overrides-config fallback (`buildsource/embed.py`, `buildsource/
+l2_seed.py`, `workflows/plan.py`'s `_discovered_config_build_targets`)
+already read `.abicheck.yml`'s `build.targets` whenever `build_targets` was
+empty, so removing the CLI's only non-empty source makes config the sole
+front-end-reachable route with no further plumbing changes needed.
+`action.yml`/`action/run.sh`/`action/validate-inputs.sh`'s `build-target`
+input is retired on every mode now (previously scan-only), failing loudly
+before the toolchain install and naming `.abicheck.yml`'s `build.targets` as
+the replacement — the "Consequence for `action/run.sh`" paragraph above is
+updated accordingly. `compare --env-matrix` is also now implemented (see the
+preceding amendment); `compare --require-complete-analysis` remains the one
+still-open, unimplemented follow-up; see
+`docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for its
+exact scope. This amendment closes the `--build-target`
+deferral the ruling table already ruled on; it does not reopen that ruling
+or the (b) classification itself.
 
 ## Alternatives considered
 
