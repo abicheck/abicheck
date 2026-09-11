@@ -1150,3 +1150,26 @@ class TestMarkLayersNotCollectedInsertsAMissingRow:
             )
             == 1
         )
+
+    def test_missing_rows_are_inserted_in_evidence_ladder_order(self) -> None:
+        """Codex review, PR #1216, fifth round: a coverage-free pack's L4/L5
+        rows must be appended in a fixed order (L4 before L5), not whatever
+        order a bare ``frozenset`` iteration happens to yield under the
+        process's current ``PYTHONHASHSEED`` -- run repeatedly, since a
+        single run can't distinguish "always this order" from "coincidence
+        of one hash seed"."""
+        for _ in range(20):
+            graph = SourceGraphSummary(nodes=[])
+            pack = BuildSourcePack(
+                root="", source_abi=SourceAbiSurface(), source_graph=graph
+            )
+            assert pack.manifest.coverage == []
+
+            projected = project_build_source_pack_to_depth(pack, "build")
+
+            assert projected is not None
+            layers = [c.layer for c in projected.manifest.coverage]
+            assert layers == [
+                DataLayer.L4_SOURCE_ABI.value,
+                DataLayer.L5_SOURCE_GRAPH.value,
+            ]
