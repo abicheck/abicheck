@@ -80,3 +80,40 @@
   `DiffResult`) and once at the release envelope, since one release run
   threads the identical `EnvironmentMatrix` to every library. Release JSON
   schema `1.2`.
+- **`deployment.runtime_floors.WHEEL_ARCH` (and the sibling `MUSLLINUX`/
+  `WHEEL_CONTEXT` keys) now reject a YAML list, mapping, or bare boolean
+  instead of silently stringifying it.** These three keys are exempt from
+  the dotted-numeric-version check every other `runtime_floors` key gets
+  (they carry a non-version token), but that exemption previously let
+  `EnvironmentMatrix.from_dict` accept *any* type for them — `WHEEL_ARCH:
+  [x86_64]` became the literal string `"['x86_64']"`, which the wheel-
+  architecture-mismatch detector treats as an unrecognized claim and
+  reports nothing for, silently disabling a hard wheel-architecture check
+  instead of raising the config error `strict=True` promises. Now raises
+  `ValueError` for a non-string value on any of the three keys, in both
+  strict and lenient `from_dict` modes.
+- **`EnvironmentMatrix` is now genuinely immutable, not merely hashable.**
+  The hashability fix above computed a hashable *projection* of the
+  still-mutable `runtime_floors`/`compilers` fields (and the `sycl`/`cuda`
+  sub-objects' own `backends`/`gpu_architectures`) inside `__hash__`, which
+  satisfies Python's hash contract only as long as nothing mutates those
+  containers after construction — a `CompareRequest` carrying a real
+  `EnvironmentMatrix` inserted into a dict/set became silently unfindable
+  after a caller mutated `matrix.runtime_floors["GLIBC"] = "2.34"`, since
+  the object's hash changed out from under the container. `runtime_floors`
+  is now a `types.MappingProxyType` wrapping a private copy (item
+  assignment raises `TypeError`; `.get(...)`/`.items()`/`in`/`len()` still
+  work identically for existing callers), and `compilers`/`sycl.backends`/
+  `cuda.gpu_architectures` are now `tuple`s rather than `list`s.
+- **A directory/package `compare-release` with zero matched or completed
+  library pairs, but a declared `deployment:` contract, now still publishes
+  the correct `env_matrix_source_sha256`** in both the release JSON
+  envelope and the `--output-dir` `summary.json` sidecar's
+  `effective_config_fields["policy.env_matrix"]` — previously derived only
+  by reading the digest off a completed per-library entry, which made a
+  genuinely-configured contract indistinguishable from none whenever no
+  library comparison completed. Computed once, directly from the resolved
+  `EnvironmentMatrix`, via the new shared `checker.env_matrix_content_digest`
+  (also now used by `compare()`'s own stamping and
+  `workflows.no_baseline_compare`'s post-hoc field replacement, replacing
+  three independent inline computations with one).
