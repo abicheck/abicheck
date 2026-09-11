@@ -67,7 +67,6 @@ def test_dump_surface_covers_root_commands(dump_mod) -> None:  # type: ignore[no
         "deps",
         "dump",
         "project",
-        "scan",
     }
 
 

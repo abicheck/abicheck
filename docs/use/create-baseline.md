@@ -96,33 +96,31 @@ abicheck compare libfoo-1.0.rpm libfoo-1.1.rpm
 See [Multi-Binary Releases](multi-binary.md) for the bundle/package flags and the
 [GitHub Action](github-action.md) guide for CI examples with packages.
 
-### `scan --against` for a one-off comparison
+### A one-off comparison with side-scoped headers
 
-`abicheck scan ARTIFACT` doesn't require a stored baseline at all — pass
-`--against` with a previous native library or saved ABI dump (a single file,
-not a directory or package -- for those use
-`abicheck compare OLD_PACKAGE NEW_PACKAGE`) to compare against, and `scan`
-runs its always-on audit checks plus that comparison in one pass:
+`abicheck compare OLD NEW` doesn't require a stored baseline at all — `OLD`
+can be a previous native library or a saved ABI dump directly (a single
+file, not a directory or package -- for those, `compare` takes the two
+package roots the same way):
 
 ```bash
-abicheck scan new/libfoo.so --header new/include --against old/libfoo.so
+abicheck compare old/libfoo.so new/libfoo.so --header new/include
 ```
 
 `-H`/`--header` and `-I`/`--include` are side-aware: a bare value applies to
-both `ARTIFACT` and the `--against` side, and an `old=`/`new=` prefix scopes
-to one side. When `--against` is a **native library** (not a snapshot) and
-its public headers differ from the new version, parse the old side with
-**its own** headers using the `old=` prefix:
+both sides, and an `old=`/`new=` prefix scopes to one side. When `OLD` is a
+**native library** (not a snapshot) and its public headers differ from the
+new version, parse the old side with **its own** headers using the `old=`
+prefix:
 
 ```bash
-abicheck scan new/libfoo.so --against old/libfoo.so \
+abicheck compare old/libfoo.so new/libfoo.so \
   --header new=new/include --header old=old/include
 ```
 
-- Without an `old=`-scoped header, a native `--against` library is parsed
-  with the same headers as `ARTIFACT` (correct only when the headers didn't
-  change).
-- A **JSON-snapshot** `--against` target already has its headers baked in, so
+- Without an `old=`-scoped header, a native `OLD` library is parsed with the
+  same headers as `NEW` (correct only when the headers didn't change).
+- A **JSON-snapshot** `OLD` operand already has its headers baked in, so
   side-scoped headers are unnecessary there. Prefer a pre-dumped snapshot
   baseline when you can — it's unambiguous and needs no toolchain at compare
   time.

@@ -733,7 +733,7 @@ class TestShimShortOptionClusters:
 
         declared = {
             opt
-            for name in ("compare", "scan")
+            for name in ("compare",)
             for param in cli_main.commands[name].params
             if isinstance(param, click.Option) and not param.is_flag
             for opt in (*param.opts, *param.secondary_opts)

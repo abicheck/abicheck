@@ -69,11 +69,11 @@ interpretation rather than a second manual snapshot.
 | Stripped headers | catalog cases | `validate_examples.py --artifact-variant stripped-headers --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Reduced-evidence informational lane; known signal-loss rows remain visible there |
 | Build/source proof | fixed 10-case proof set | `validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` in CI artifact | [Current CI result](https://github.com/abicheck/abicheck/blob/main/examples/README.md#current-validation-status) | Blocking fixed-set proof: every expected result must be present and `PASS` |
 | Binary competitor scan | 159 shared-library pairs × 2 external tools (4 tool/mode combinations) | abicc (dumper + xml) and libabigail `abidiff` (+headers) over built `.so` pairs | 636 tool invocations attempted; per-tool correct/accuracy in the [full-catalog benchmark](#full-catalog-benchmark-2026-07-18-all-193-cases) below | Competitor `.so` lane only; the 38 dedicated non-`.so` cases are represented in their own lanes, not as missing `.so` results |
-| Scan-depth matrix | not independently re-run this pass | `abicheck scan --depth {binary,headers,build,source,full}` | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
+| Scan-depth matrix | not independently re-run this pass | `abicheck compare OLD NEW --depth {binary,headers,build,source}`, once per depth per target | see prior methodology note below | Compare-style status by depth; full-catalog audit/cross-source/bundle/BTF/snapshot cases are covered by dedicated lanes |
 
 The volatile catalog-lane status is intentionally maintained in the canonical
 Examples Validation block linked above; do not copy its counts here. The
-scan-depth matrix specifically needs a fresh run of `abicheck scan --depth`
+scan-depth matrix specifically needs a fresh run of `abicheck compare --depth`
 across the current comparable-target set (it was previously pinned to 141
 targets against an older, smaller catalog) — that regeneration is a tracked
 follow-up, not fabricated here.

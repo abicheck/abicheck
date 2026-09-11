@@ -502,13 +502,12 @@ class TestPromotionNeverLowersAVerdict:
         assert result.verdict is Verdict.BREAKING
 
 
-class TestScanKeepsWhatItDoesNotScore:
-    """`scan --against` itemizes findings from the compatibility buckets, so
+class TestCompareKeepsWhatItDoesNotScore:
+    """`compare` itemizes findings from the compatibility buckets, so
     filtering those buckets removed excluded findings from its report
-    entirely — not merely from its gate (Codex review).
-
-    That is the one outcome ADR-049 D9 forbids outright: a detector fact has
-    to land in exactly one *visible* outcome, and "gone" is not one of them.
+    entirely — not merely from its gate (Codex review). That is the one
+    outcome ADR-049 D9 forbids outright: a detector fact has to land in
+    exactly one *visible* outcome, and "gone" is not one of them.
     """
 
     @staticmethod
@@ -519,8 +518,7 @@ class TestScanKeepsWhatItDoesNotScore:
         old_p.write_text(snapshot_to_json(old), encoding="utf-8")
         new_p.write_text(snapshot_to_json(new), encoding="utf-8")
         result = CliRunner().invoke(
-            main,
-            ["scan", str(new_p), "--against", str(old_p), "--format", "json", *extra],
+            main, ["compare", str(old_p), str(new_p), "--format", "json", *extra]
         )
         # A documented nonzero exit is a `SystemExit`, not a failure --
         # anything else is a real traceback the parse below would hide.
@@ -530,15 +528,17 @@ class TestScanKeepsWhatItDoesNotScore:
 
     def test_an_excluded_finding_is_still_itemized(self, tmp_path: Path) -> None:
         report = self._scan(tmp_path, "--contract", "exports")
-        diff = report["diff"]
-        assert diff["breaking"] == 0
+        assert report["summary"]["breaking"] == 0
         # `public_surface_shrank` (ADR-027 Phase 5's surface-metric roll-up,
-        # unconditional at the shared `compare_snapshots` Tier-2 chokepoint
-        # regardless of `scan`'s own flags) now joins `func_removed` here --
-        # both are informational-or-excluded facts the removal pair's export
-        # scope proves out of contract.
-        assert diff["not_evaluated"] == 2
-        entries = [f for f in diff["findings"] if f["bucket"] == "not_evaluated"]
+        # unconditional at the shared `compare_snapshots` Tier-2 chokepoint)
+        # joins `func_removed`: both are excluded facts the export scope
+        # proves out of contract.
+        entries = [
+            f
+            for f in report["changes"]
+            if f.get("compatibility_evaluation_status") == "NOT_EVALUATED"
+        ]
+        assert len(entries) == 2
         assert {f["kind"] for f in entries} == {"func_removed", "public_surface_shrank"}
         # ...with the reason it did not gate, which is what makes the row
         # actionable rather than merely present.
@@ -549,13 +549,14 @@ class TestScanKeepsWhatItDoesNotScore:
         self, tmp_path: Path
     ) -> None:
         """ADR-049 section 6.4 is field-for-field parity, not just matching
-        exit codes: a scan row that stated the relevance but not the decision
-        could not be compared with `compare`'s finding for the same fact
-        (Codex review). `null` is the required value for an unscored row --
-        it records that policy never ran."""
+        exit codes: a row stating relevance but not decision couldn't be
+        compared with a scored finding (Codex review). `null` is required
+        for an unscored row -- it records that policy never ran."""
         report = self._scan(tmp_path, "--contract", "exports")
         row = next(
-            f for f in report["diff"]["findings"] if f["bucket"] == "not_evaluated"
+            f
+            for f in report["changes"]
+            if f.get("compatibility_evaluation_status") == "NOT_EVALUATED"
         )
         assert row["compatibility_evaluation_status"] == "NOT_EVALUATED"
         assert row["compatibility_decision"] is None
@@ -564,16 +565,15 @@ class TestScanKeepsWhatItDoesNotScore:
         """The control: absent, not null. A run that never opted in has no
         contract decision at all, so the whole group stays off the row."""
         report = self._scan(tmp_path)
-        row = report["diff"]["findings"][0]
+        row = report["changes"][0]
         assert "compatibility_evaluation_status" not in row
         assert "compatibility_decision" not in row
 
     def test_an_ordinary_scan_is_unchanged(self, tmp_path: Path) -> None:
-        """No opt-in means no excluded findings, so the key is absent rather
-        than present-and-zero — an ordinary scan summary stays byte-identical."""
-        diff = self._scan(tmp_path)["diff"]
-        assert diff["breaking"] == 1
-        assert "not_evaluated" not in diff
+        """No opt-in means no excluded findings in the summary."""
+        report = self._scan(tmp_path)
+        assert report["summary"]["breaking"] == 1
+        assert all("compatibility_evaluation_status" not in f for f in report["changes"])
 
 
 class TestReleaseFanoutKeepsWhatItDoesNotScore:

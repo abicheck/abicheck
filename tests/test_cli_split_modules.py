@@ -686,12 +686,26 @@ class TestCompareReleaseErrorPaths:
         new_pkg.write_bytes(b"not-a-tarball")
 
         runner = CliRunner()
-        # cli_compare_release.py imports is_package/detect_extractor from the
-        # workflows.extraction facade (a fresh function-local import per call,
-        # per ADR-061), not from abicheck.package directly -- patch there,
-        # matching workflows/extraction.py's own documented gotcha.
-        with patch("abicheck.workflows.extraction.is_package", return_value=True), \
-             patch("abicheck.workflows.extraction.detect_extractor", return_value=None):
+        # ADR-061 gap D (c098e033) moved this dispatch into
+        # frontends/cli/release_compare_request.py, which imports
+        # is_package/detect_extractor at module level (deliberately, per
+        # that module's own documented convention -- "a test can patch
+        # abicheck.frontends.cli.release_compare_request.<name>", matching
+        # every other module-level binding in this release fan-out) rather
+        # than the function-local import cli_compare_release.py itself
+        # still uses elsewhere. Patch the module that actually binds the
+        # name now, or this silently falls through to the real
+        # is_package/detect_extractor against a corrupt-but-real-tarball-
+        # named fixture -- order-dependent on whether release_compare_
+        # request.py has already been imported with its real binding by an
+        # earlier test (Codex review, reproduced).
+        with patch(
+            "abicheck.frontends.cli.release_compare_request.is_package",
+            return_value=True,
+        ), patch(
+            "abicheck.frontends.cli.release_compare_request.detect_extractor",
+            return_value=None,
+        ):
             result = runner.invoke(main, [
                 "compare", str(old_pkg), str(new_pkg),
             ])

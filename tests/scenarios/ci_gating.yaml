@@ -114,20 +114,16 @@ scenarios:
       inputs, skip the source pattern scan and L3 collection, and return the same
       binary verdict quickly.
     flow:
-      # `scan` here, not `compare`, because this scenario's whole point is the
-      # coverage block's `skipped`/`not_collected` rows and `scan`'s pinned-depth
-      # contract -- neither of which `compare` reproduces yet (ADR-068 plan §3
-      # row 28). It moves onto `compare` when that row closes.
-      - abicheck scan new.json --against old.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
+      # ADR-068 Phase 6 retired `scan` outright; this scenario now runs the
+      # identical check through `compare`, which pins the requested
+      # `--depth binary` the same way `scan` used to.
+      - abicheck compare old.json new.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
     expected:
       exit_code: 4
       verdict: BREAKING
-      coverage:
-        L0_binary: present
-        L1_debug: not_collected
-        L2_header: skipped
-        pattern_scan: not_collected
-        L3_build: not_collected
+      old_evidence_depth: binary
+      new_evidence_depth: binary
+      evidence_tiers: [elf]
     validates: UC-WORKFLOW-pr-source-tier
     automated: true
     test: test_sc_scan_binary_depth_matrix_args

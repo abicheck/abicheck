@@ -57,6 +57,34 @@ _ENTITY_LIST_KEYS = frozenset(
 )
 
 
+def _unwrap_snapshot_envelope(raw: dict) -> dict:
+    """Return *raw* in the flat shape this script's ``.get()`` calls expect.
+
+    ADR-062/ADR-063 Phase 8: a real ``abicheck dump`` writes
+    ``storage.sectioned_document``'s envelope -- ``{"schema_version": N,
+    "sections": {...}, "section_schema_versions": {...}}`` -- so
+    ``build_source`` (and every other former top-level field) now lives at
+    ``sections.build.payload.build_source``, not at the top level. Reading
+    ``raw["build_source"]`` therefore returns ``None`` unconditionally, which
+    is how this lane started failing with "merged baseline has no embedded
+    build_source payload" against a dump that had in fact folded the pack
+    correctly.
+
+    Unwrapping through abicheck's own reader rather than indexing
+    ``["sections"]["build"]["payload"]`` by hand keeps this consumer off a
+    second, hand-maintained copy of the envelope layout -- the same fix
+    ``actions/baseline/build_manifest.py`` already applies. A flat snapshot
+    (an older ``.abi.json``, or a hand-written fixture) passes through
+    untouched.
+    """
+    from abicheck.storage.sectioned_document import (
+        from_sectioned_document,
+        is_sectioned_document,
+    )
+
+    return from_sectioned_document(raw) if is_sectioned_document(raw) else raw
+
+
 def _run(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
     print("+ " + " ".join(cmd), flush=True)
     proc = subprocess.run(
@@ -179,7 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             cwd=src,
         )
         print(dump_out, end="")
-        baseline = json.loads((src / "widget.baseline.json").read_text())
+        baseline = _unwrap_snapshot_envelope(
+            json.loads((src / "widget.baseline.json").read_text())
+        )
         build_source = baseline.get("build_source") or {}
         if not build_source:
             raise SystemExit("merged baseline has no embedded build_source payload")

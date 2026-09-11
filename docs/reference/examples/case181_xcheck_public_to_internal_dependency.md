@@ -123,8 +123,14 @@ the source graph's call edges do, supplied by the `source_index` provider.
 When the internal declaration's own file is among the revision's changed
 paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
 higher confidence — "this call reaches a file that changed this revision"
-is a stronger signal than "this call reaches *something* internal" — and
-`abicheck scan --since` wires the changed-path set through automatically.
+is a stronger signal than "this call reaches *something* internal".
+
+That higher-confidence variant is **not** reachable from the audit shown
+above: `--since`/`--changed-path` are rejected under `--no-baseline`
+(exit 64), because changed-path localization narrows a *comparison* to what
+a revision range touched and a single-build audit has no range to narrow.
+Reaching it takes a two-sided `abicheck compare OLD NEW --since <rev>`,
+which wires the changed-path set through automatically.
 
 ## Why this matters for a real release
 

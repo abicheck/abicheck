@@ -688,24 +688,29 @@ Every JSON report carries a top-level `report_schema_version` field
 > carry different version numbers at the same time; consumers should read
 > whichever field belongs to the file they loaded.
 >
-> `scan --format json` is a **third, separate shape**: it emits a `ScanOutcome`
-> object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …). It carries its
-> own top-level `scan_schema_version` field (`MAJOR.MINOR`, importable as
-> `abicheck.schemas.SCAN_SCHEMA_VERSION`) — independent of, and not
-> interchangeable with, `report_schema_version`. Through `1.30` the typed
-> Python `ScanResult.to_dict()` envelope stamped the same value and nested
-> the `ScanOutcome` dict under its `report` key; that type was removed in
-> ADR-068 Phase 4, so `scan --format json` is the only shape the marker
-> applies to now. There is currently no
-> packaged `.schema.json` for scan output (unlike `compare`'s
-> `compare_report.schema.json`); the version field is honored the same way
-> (accept a shared `MAJOR`, ignore unknown keys) until one exists.
->
-> `scan --against`'s baseline summary carries an optional `coverage_warnings`
-> list (`scan_schema_version` 1.21), mirroring `compare`'s own top-level
-> field of the same name and shape — e.g. a warning that the two compared
-> binaries are byte-identical (a possible mistaken input, not a real
-> "no ABI differences" result). Omitted when there is nothing to warn about.
+> `scan --format json` used to be a **third, separate shape** here: it
+> emitted a `ScanOutcome` object with its own top-level `scan_schema_version`
+> field (`SCAN_SCHEMA_VERSION`), independent of `report_schema_version`.
+> ADR-068 Phase 6 retired the `scan` command outright (and
+> `SCAN_SCHEMA_VERSION` with it). `compare` has two report-schema version
+> markers today, one per report shape: `report_schema_version` above for a
+> two-sided `compare` report, and **`audit_report_schema_version`** for
+> `compare --no-baseline --format json`'s single-build audit document
+> (`AUDIT_REPORT_SCHEMA_VERSION`, `abicheck/report/no_baseline_document.py`).
+> The audit document deliberately carries *only* its own marker and never
+> `report_schema_version`: the compare report's schema tells consumers to
+> accept any matching MAJOR, so stamping an audit there would be a
+> different document wearing the compare report's identity. A consumer
+> keys off whichever marker the document it loaded actually carries --
+> which is the rule for every report family, not just these two: `aggregate`
+> is its own document with its own `aggregate_schema_version` (see
+> [`aggregate`'s own report shape](#aggregates-own-report-shape) below), so
+> "two markers" is a fact about `compare`, never a discriminator to apply
+> across all of abicheck's output.
+> `compare`'s own top-level
+> `coverage_warnings` field (e.g. a warning that the two compared binaries
+> are byte-identical — a possible mistaken input, not a real "no ABI
+> differences" result) is omitted when there is nothing to warn about.
 
 ```json
 {

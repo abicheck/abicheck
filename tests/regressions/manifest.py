@@ -349,7 +349,6 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_gha_expr.py",
             "tests/test_consumer_compile_full_chain_propagation.py",
             "tests/test_explicit_source_extractor_propagation.py",
-            "tests/test_dump_scan_l3_comparability.py",
         ),
         known_gaps=(
             KnownGap(
@@ -371,17 +370,22 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "value and then ignored it "
                     "(tests/test_explicit_source_extractor_propagation.py, "
                     "exhaustive over the frontend x env domain, grounded in "
-                    "_make_source_extractor, with the end-to-end half in "
-                    "tests/test_dump_scan_l3_comparability.py). The same "
+                    "_make_source_extractor). ADR-068 Phase 6 deleted `scan` "
+                    "and its own end-to-end half of that coverage "
+                    "(tests/test_dump_scan_l3_comparability.py) along with "
+                    "the production call site the primitive fed "
+                    "(scan_engine._build_new_snapshot) -- no `compare`-side "
+                    "caller passes an explicit `--ast-frontend` through to "
+                    "L4 source-ABI replay selection today, so this whole "
+                    "chain is currently unreachable from any production "
+                    "code path (see that module's own docstring). The "
+                    "primitive's request-domain contract stays covered "
+                    "regardless; only the end-to-end and call-site halves "
+                    "are gone, with no replacement caller to re-derive them "
+                    "against. The same "
                     "concern's *other* consumers (the L2 header parse, the "
-                    "preprocessor/pattern pre-scans) are untouched, and one "
-                    "frontend divergence is deliberately still open rather "
-                    "than closed: an UNFLAGGED `auto` resolves to clang for "
-                    "`scan` and castxml for `dump`/`compare`, which is a "
-                    "real default change to make deliberately (the CLI "
-                    "cleanup phase-two plan's PR 3A item 2), not a "
-                    "propagation bug to patch. consumer_compile was chosen "
-                    "as the first "
+                    "preprocessor/pattern pre-scans) are untouched. "
+                    "consumer_compile was chosen as the first "
                     "worked example specifically because #860/#883's own "
                     "history and this class's pre-existing seed tests "
                     "already pointed at it, not because it's necessarily "
@@ -471,6 +475,71 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="storage.out_of_band_snapshot_reader_envelope_drift",
+        invariant=(
+            "A consumer outside `abicheck/` that hand-parses a snapshot "
+            "document written by `abicheck dump` must answer identically "
+            "for the sectioned envelope and the equivalent flat document. "
+            "Indexing a formerly-top-level key (`build_source`, "
+            "`dump_provenance`, `declarations`, ...) without unwrapping the "
+            "ADR-063 Phase 8 envelope first reads `None` for every real "
+            "dump output, and nothing distinguishes that from the field "
+            "genuinely being absent -- so the failure is silent wherever "
+            "absence is a legitimate answer. The in-tree readers go "
+            "through `snapshot_from_dict`, which accepts either shape; "
+            "only the out-of-band ones can drift, and they drift at the "
+            "moment the envelope changes, not at the moment they are "
+            "written."
+        ),
+        fixed_by=(1225,),
+        seed_tests=("tests/test_snapshot_envelope_out_of_band_readers.py",),
+        # `()` deliberately: the seed test calls the reader helpers directly
+        # (importlib-loaded modules, no CliRunner, no Action step), so it
+        # reaches neither surface. This field documents what a seed test
+        # actually exercises -- a claimed surface it does not reach conceals
+        # the very cross-surface gap a contributor should find here
+        # (CodeRabbit review; the rule is this schema's own, from PR #885).
+        public_surfaces=(),
+        axes={
+            "encoding": ("flat", "sectioned"),
+            "embedded_layers": ("none", "L3", "L4", "L5", "combinations"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The behavioural half covers the three readers known "
+                    "today and only the `build_source` key in depth; the "
+                    "other keys the envelope moved (`dump_provenance`, "
+                    "`declarations`, `types`, `enums`) are covered by the "
+                    "structural AST scan alone, which proves an unwrap is "
+                    "*mentioned* in the reading function, not that it is "
+                    "applied to the right value on every path. A reader "
+                    "that unwraps one document and then indexes a second, "
+                    "un-unwrapped one in the same function passes the scan. "
+                    "The scan is also function-local: a reader that indexes "
+                    "a moved key on a dict some *other* helper loaded is not "
+                    "flagged, correctly when that helper unwraps (as "
+                    "`tests/_snapshot_document_reader.py` does) and silently "
+                    "when it does not."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+            KnownGap(
+                description=(
+                    "The scan covers `actions/`, `contrib/`, `scripts/`, "
+                    "`validation/` and `tests/` -- first-party trees only. "
+                    "A downstream consumer (a user's CI script, a "
+                    "third-party integration) reading `build_source` off a "
+                    "dump-written baseline has the identical bug and "
+                    "nothing here can see it; the durable fix for that "
+                    "population is a documented, supported reader entry "
+                    "point rather than a scan."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="registry.kind_completeness",
         invariant=(
             "Every declared ChangeKind/evidence-kind/provider is accounted "
@@ -511,61 +580,19 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    BugClass(
-        id="evidence.tier_shortcut_without_substitute",
-        invariant=(
-            "A cost shortcut that skips one evidence source because "
-            "another is expected to supply the same facts may only be "
-            "taken when that substitute source is actually present. With "
-            "the substitute absent, the shortcut leaves the run with "
-            "neither, and the loss is silent: the report still names the "
-            "tier that was requested. Two corollaries, each independently "
-            "falsified during review: an input that *names* the substitute "
-            "without feeding it to the consumer is not the substitute "
-            "(`--public-header-dir` is a provenance boundary, not an AST "
-            "input); and the question is per operand, since one shared "
-            "answer does not equalise two sides' evidence tiers, it only "
-            "decides which side gets starved."
-        ),
-        fixed_by=(1186,),
-        seed_tests=(
-            "tests/test_scan_depth_evidence_shortcut.py",
-            "tests/test_scan_compare_parity.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "depth": ("headers", "auto"),
-            "change": ("record", "enum", "symbol"),
-            "header_input": ("none", "provenance_only", "baseline_only"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "Only the DWARF-vs-header-AST shortcut "
-                    "(`cli_scan_helpers._uses_debug_presence_only`) is "
-                    "covered. The same shape exists wherever one "
-                    "extractor is skipped on the expectation that a "
-                    "richer one runs; none of the L3/L4/L5 collect-mode "
-                    "decisions has an equivalent 'the substitute is "
-                    "actually present' guard or generalized test yet."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-            KnownGap(
-                description=(
-                    "`--depth binary` is excluded from the seed test's "
-                    "scan-vs-compare matrix: the two genuinely diverge "
-                    "there (`scan` extracts symbols only, "
-                    "`compare --depth binary` still reads DWARF and "
-                    "reports `type_size_changed`), which is a question "
-                    "about whether `compare`'s binary rung honours its "
-                    "own pin rather than about this shortcut. Predates "
-                    "ADR-068 Phase 4 on both sides and is untested."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-        ),
-    ),
+    # `evidence.tier_shortcut_without_substitute` (fixed_by PR #1186) used to
+    # live here: the DWARF-vs-header-AST shortcut it pinned
+    # (`cli_scan_helpers._uses_debug_presence_only`) was `scan`-only, and
+    # ADR-068 Phase 6 deleted it along with both of the class's seed tests
+    # (`tests/test_scan_depth_evidence_shortcut.py`,
+    # `tests/test_scan_compare_parity.py`) with no `compare`-side successor
+    # to repoint them at -- `compare` has no equivalent "skip one evidence
+    # source because a substitute is expected to supply the same facts"
+    # cost-shortcut mechanism today. Removed rather than kept with fabricated
+    # seed tests, per this file's own "a BugClass with no seed_tests is
+    # prose, not a regression test" rule; the invariant and its incident
+    # history remain findable in PR #1186 and this file's own git history if
+    # an analogous shortcut is ever added to `compare`.
     BugClass(
         id="evidence.silent_degradation_to_clean_verdict",
         invariant=(

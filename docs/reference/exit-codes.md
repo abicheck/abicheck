@@ -14,7 +14,7 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` still has one too, but it is **being retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-being-retired) before depending on any of its codes.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below. `scan` had one too, but it was **retired outright** (ADR-068 D1/D8) — see [that section's warning](#abicheck-scan-retired) before depending on any of its historical codes.
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
@@ -508,35 +508,37 @@ scheme-independent CI behaviour.
 
 ---
 
-## `abicheck scan` (being retired)
+## `abicheck scan` (retired)
 
-!!! danger "`scan` is retired by ADR-068 — hard removal, no deprecation window"
+!!! danger "`scan` was retired by ADR-068 Phase 6 — hard removal, no deprecation window"
     [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-    D1 reduces the root surface to six verbs and retires `scan` as a second
+    D1 reduced the root surface to six verbs and retired `scan` as a second
     analysis product. D8 is explicit that the removal is **hard**: no hidden
-    alias, no shim, no silent ignoring. Once the retirement PR lands,
-    `abicheck scan` exits `64` with `No such command`, and the error names
-    `compare --no-baseline`. **The whole table below stops existing at that
-    point** — exit `5`, `6` and `7` do not become `compare` codes by
-    inheritance; each moves onto `compare`'s own `ExitDecision` axes on its
-    own schedule, and the `compare` sections above are where a migrated axis
-    is documented.
+    alias, no shim, no silent ignoring. `abicheck scan` now exits `64` with
+    `No such command`, and the error names `compare --no-baseline`. **The
+    whole table below no longer describes any live command** — exit `5`, `6`
+    and `7` did not become `compare` codes by inheritance; each moved onto
+    `compare`'s own `ExitDecision` axes on its own schedule (where one exists
+    yet), and the `compare` sections above are where a migrated axis is
+    documented. The table is kept below purely as a historical record of
+    `scan`'s own exit-code contract while it existed.
 
-    Nothing is deleted before its capability has a proven home (D9), so this
-    table is accurate for the current build. But do not write new CI against
-    it: pin the equivalent `compare` invocation instead, and where none
-    exists yet, see
+    Do not write new CI against it: pin the equivalent `compare` invocation
+    instead, and where none exists yet, see
     [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
     for what is still open. The GitHub Action's own `mode: scan` input has
     since been retired outright too — see
     [ADR-068's Action-input-lifecycle amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
     and the [migration guide](../use/github-action.md#migrating-from-mode-scan).
 
-The one-shot source-intelligence scan has its own contract (it may compare
-`ARTIFACT` against `--against` and adds a budget guard). `--against` is the
-only thing that selects the mode: omit it and `scan` runs a one-build
-audit/hygiene/source-consistency scan only; pass it and `scan` also compares
-`ARTIFACT` against it — there is no separate `--audit` flag:
+**Everything below this point, to the end of this section, is historical —
+`scan` no longer exists and none of it is a live invocation to copy.** While
+it existed, the one-shot source-intelligence scan had its own contract (it
+could compare `ARTIFACT` against `--against` and added a budget guard).
+`--against` was the only thing that selected the mode: omit it and `scan`
+ran a one-build audit/hygiene/source-consistency scan only; pass it and
+`scan` also compared `ARTIFACT` against it — there was no separate
+`--audit` flag:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -564,9 +566,9 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > not abandoned: plan §3 #16 retires the *mode*, and it returns as
 > `compare --no-baseline DIR` over ADR-065 S3's package component
 > inventories, which are the prerequisite for preserving its per-member
-> selection and coverage accounting. Until then, run one `scan` per library.
-> Exit `1` on a `scan` is unchanged and means a genuine CLI/operational
-> error.
+> selection and coverage accounting. Until then, run `compare --no-baseline`
+> once per library. Exit `1` on a `scan` was unchanged there and meant a
+> genuine CLI/operational error.
 
 ### `scan --against` and severity (mirrors `compare`)
 

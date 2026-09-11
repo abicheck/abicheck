@@ -7,7 +7,8 @@ The GCC/Clang lanes intentionally own only compilable single-library pairs and
 the remaining committed fixture shapes through ``python -m abicheck``:
 
 * BTF, reconcile, environment, and Linux kABI comparisons;
-* G20 single-release ``scan`` (no ``--against``) audit cross-checks;
+* G20 single-release ``compare --no-baseline`` audit cross-checks (ADR-068
+  D2; the retired ``scan``'s no-``--against`` mode);
 * L3/L4/L5 evidence packs attached to ``compare``;
 * a CPython-extension comparison with sibling ``.pyi`` stubs.
 
@@ -78,7 +79,7 @@ COMPARE_CASES: dict[str, CompareSpec] = {
     ),
 }
 
-SCAN_CASES = {
+AUDIT_CASES = {
     "case143_audit_accidental_export",
     "case144_audit_private_header_leak",
     "case145_audit_unversioned_export",
@@ -136,7 +137,7 @@ EVIDENCE_CASES: dict[str, EvidenceSpec] = {
 }
 
 PYTHON_CASE = "case163_python_kwarg_renamed"
-CASE_IDS = set(COMPARE_CASES) | SCAN_CASES | set(EVIDENCE_CASES) | {PYTHON_CASE}
+CASE_IDS = set(COMPARE_CASES) | AUDIT_CASES | set(EVIDENCE_CASES) | {PYTHON_CASE}
 
 
 def _ground_truth() -> dict[str, dict[str, Any]]:
@@ -311,13 +312,60 @@ def _run_compare_case(
     )
 
 
-def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[str, Any]:
+def _run_audit_case(
+    case_id: str, entry: dict[str, Any], timeout: int
+) -> dict[str, Any]:
+    """Single-release audit, no baseline -- ``compare --no-baseline``'s
+    replacement for legacy ``scan``'s no-``--against`` mode (ADR-068 D2/D3,
+    Phase 6 hard removal).
+
+    The report shape differs from legacy ``scan`` in ways that change what
+    this validates, not just the invocation:
+
+    * No top-level verdict: ADR-068 D2 -- an audit never produces a
+      compatibility verdict, so ``verdict`` is always JSON ``null`` and the
+      process exit is always ``0`` by *default*, regardless of the finding
+      kinds' own severity classification (hygiene findings never gate on
+      their own without an explicit ``--severity-preset`` opt-in, ADR-028
+      D3/ADR-035 D1) -- unlike legacy ``scan``, whose exit code followed
+      ``expected`` (``API_BREAK``/``BREAKING`` -> 2/4). Verified against
+      ``tests/parity/test_no_baseline_audit_corpus_parity.py``'s own
+      ``test_no_baseline_exit_code_is_clean_without_a_contract``.
+    * Findings live in the flat ``findings`` list (``kind`` per row), not a
+      ``crosscheck.counts_by_check`` map.
+    * Legacy ``scan``'s per-check ``crosscheck.providers`` coverage rows
+      (ground truth's ``provider_assertions``) have no ``compare``-report
+      equivalent yet -- ADR-068 Phase 6 retired the whole-audit orchestrator
+      (``scan_engine.py``) that built them, and no replacement per-check
+      coverage projection has landed in ``report/no_baseline.py``. It is
+      therefore **not** checked here, and a case whose ground truth carries
+      one says so in its own result (``unvalidated_assertions``) rather than
+      passing as a complete proof: case151 exists precisely to prove a
+      finding is corroborated by *both* ``public_header_ast`` and
+      ``source_index``, so a regression dropping the latter while still
+      emitting ``private_header_leak`` would be invisible to every check
+      this runner can make (Codex review). The underlying provider/coverage
+      facts are still exercised directly by
+      ``abicheck/buildsource/cross_source_checks.py``'s own unit tests
+      (``tests/test_cross_source_checks.py``) -- which is detector-level
+      proof, not proof of this case's public workflow behavior.
+
+    What *is* checked, and was not before: each ``findings[]`` row's own
+    retained ``verdict``. The top-level verdict being ``null`` is required
+    by D2 but says nothing about classification, so asserting only the
+    finding *kind* let a reclassification of e.g.
+    ``header_build_context_mismatch`` from ``API_BREAK`` to a risk or
+    compatible verdict pass silently (Codex review). The oracle is the
+    catalog's own hand-curated ``abi_break``/``api_break``/``bad_practice``
+    flags, not anything the implementation derives.
+    """
     snapshot = example_catalog.case_dir(case_id) / "snapshot.abi.json"
     command = [
         sys.executable,
         "-m",
         "abicheck",
-        "scan",
+        "compare",
+        "--no-baseline",
         str(snapshot),
         "--format",
         "json",
@@ -327,33 +375,48 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
     if execution["message"]:
         errors.append(str(execution["message"]))
     payload = execution["payload"] or {}
-    expected = str(entry.get("expected"))
-    expected_rc = _expected_returncode(expected)
     got = payload.get("verdict")
-    crosscheck = payload.get("crosscheck") or {}
-    got_kinds = set((crosscheck.get("counts_by_check") or {}).keys())
+    got_kinds = {
+        str(finding["kind"])
+        for finding in (payload.get("findings") or [])
+        if isinstance(finding, dict) and finding.get("kind")
+    }
     expected_kinds = set(entry.get("expected_kinds") or [])
-    if execution["returncode"] != expected_rc:
+    if execution["returncode"] != 0:
         errors.append(
-            f"exit code {execution['returncode']}, expected {expected_rc} for {expected}"
+            f"exit code {execution['returncode']}, expected 0 (audit-only, no --severity-preset)"
         )
-    if payload.get("exit_code") != expected_rc:
+    # Presence, not just value: `abicheck/schemas/audit_report.schema.json`
+    # lists `exit_code` in its `required` set, so a renderer that dropped the
+    # field would be off-contract -- and `.get(...) not in (0, None)` would
+    # have waved that through, since an absent field reads as None (Codex
+    # review). This lane is the end-to-end check of the rendered document;
+    # accepting a missing required field is exactly what it must not do.
+    if "exit_code" not in payload:
         errors.append(
-            f"JSON exit_code {payload.get('exit_code')!r}, expected {expected_rc}"
+            "audit JSON is missing the required `exit_code` field "
+            "(audit_report.schema.json lists it in `required`)"
         )
-    if got != expected:
-        errors.append(f"scan verdict {got!r}, expected {expected!r}")
+    elif payload.get("exit_code") != 0:
+        errors.append(f"JSON exit_code {payload.get('exit_code')!r}, expected 0")
+    if got is not None:
+        errors.append(f"audit verdict {got!r}, expected null (ADR-068 D2)")
     if got_kinds != expected_kinds:
         errors.append(
-            f"cross-check kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
+            f"finding kinds {sorted(got_kinds)!r}, expected exact {sorted(expected_kinds)!r}"
         )
-    providers = crosscheck.get("providers") or {}
-    for kind, provider_assertions in (entry.get("provider_assertions") or {}).items():
-        if providers.get(kind) != provider_assertions:
-            errors.append(
-                f"providers for {kind}: {providers.get(kind)!r}, "
-                f"expected {provider_assertions!r}"
-            )
+    # Keyed by kind, and *every* row kept -- including one whose `verdict` is
+    # missing or empty. Collapsing to a set of the non-empty verdicts let a
+    # report drop the verdict from one of case150's two findings and still
+    # pass on the other's (both reviewers, independently). A missing verdict
+    # is now its own error, named by the kind that lost it.
+    verdicts_by_kind = [
+        (str(finding.get("kind") or "<no kind>"), finding.get("verdict"))
+        for finding in (payload.get("findings") or [])
+        if isinstance(finding, dict)
+    ]
+    finding_verdicts = sorted({str(v) for _, v in verdicts_by_kind if v})
+    errors.extend(_audit_verdict_errors(entry, verdicts_by_kind))
     result = _result(
         case_id,
         command,
@@ -365,7 +428,117 @@ def _run_scan_case(case_id: str, entry: dict[str, Any], timeout: int) -> dict[st
         input_sha256={"snapshot.abi.json": _sha256(snapshot)},
     )
     result["expected_kinds"] = sorted(expected_kinds)
+    result["expected_returncode"] = 0
+    result["finding_verdicts"] = finding_verdicts
+    result["expected_finding_verdicts"] = sorted(_expected_audit_verdicts(entry))
+    # Machine-visible, not prose-only: `collect_full_example_matrix.py`
+    # surfaces this on the COVERED row the same way it surfaces
+    # `kinds_strict`, so a PASS here is never read as "every ground-truth
+    # assertion for this case was checked".
+    result["unvalidated_assertions"] = (
+        ["provider_assertions"] if entry.get("provider_assertions") else []
+    )
     return result
+
+
+#: The report's verdict vocabulary as ordered severity bands. Ordering is
+#: what lets one comparison catch a regression in *both* directions -- a
+#: break case demoted to hygiene, and a hygiene case escalated to a break --
+#: rather than only the direction a membership test happens to look for.
+_AUDIT_VERDICT_BAND = {
+    "NO_CHANGE": 0,
+    "COMPATIBLE": 0,
+    "COMPATIBLE_WITH_RISK": 0,
+    "API_BREAK": 1,
+    "BREAKING": 2,
+}
+_AUDIT_BAND_NAMES = {0: "hygiene", 1: "API_BREAK", 2: "BREAKING"}
+
+
+def _expected_audit_band(entry: dict[str, Any]) -> int:
+    """The highest severity band *entry*'s ground truth claims.
+
+    The catalog's own hand-curated ``abi_break``/``api_break``/
+    ``bad_practice`` flags are the oracle; this is the only place they are
+    mapped onto the report's verdict vocabulary.
+    """
+    if entry.get("abi_break"):
+        return 2
+    if entry.get("api_break"):
+        return 1
+    return 0
+
+
+def _expected_audit_verdicts(entry: dict[str, Any]) -> set[str]:
+    """The finding-level verdicts *entry*'s ground truth allows at all."""
+    expected = _expected_audit_band(entry)
+    return {v for v, band in _AUDIT_VERDICT_BAND.items() if band <= expected}
+
+
+def _audit_verdict_errors(
+    entry: dict[str, Any], verdicts_by_kind: list[tuple[str, Any]]
+) -> list[str]:
+    """Compare an audit's per-finding verdicts against the catalog's flags.
+
+    Three separate failures, because collapsing them loses one:
+
+    1. **A finding with no verdict at all.** Reported per kind. Silently
+       skipping such a row is what let a report keep every expected kind,
+       lose a verdict, and still pass on a sibling finding's verdict.
+    2. **A verdict outside the vocabulary.** Not silently treated as
+       hygiene, which would read an unknown value as the safest one.
+    3. **The highest band observed is not the band the ground truth
+       claims.** Equality, not membership: a case flagged ``api_break``
+       whose findings are all hygiene has been demoted, and a hygiene-only
+       case carrying an ``API_BREAK`` finding has been escalated. The
+       top-level verdict is ``null`` for every audit, so without this the
+       classification is unasserted in both directions.
+
+    An audit with no findings at all is already reported by the kinds check
+    above; adding a second error for it would only duplicate that message.
+    """
+    if not verdicts_by_kind:
+        return []
+
+    errors: list[str] = []
+    missing = sorted(kind for kind, verdict in verdicts_by_kind if not verdict)
+    if missing:
+        errors.append(
+            f"finding(s) with no verdict: {missing!r} -- every audit finding "
+            "must carry its own verdict, since the top-level one is null"
+        )
+    unknown = sorted(
+        {
+            str(verdict)
+            for _, verdict in verdicts_by_kind
+            if verdict and str(verdict) not in _AUDIT_VERDICT_BAND
+        }
+    )
+    if unknown:
+        errors.append(
+            f"finding verdict(s) outside the known vocabulary: {unknown!r} "
+            f"(known: {sorted(_AUDIT_VERDICT_BAND)!r})"
+        )
+    if errors:
+        # The band comparison below would be computed from an incomplete or
+        # unrecognized set; report the concrete defect instead of a derived
+        # one that would only confuse the reader.
+        return errors
+
+    expected = _expected_audit_band(entry)
+    observed = max(_AUDIT_VERDICT_BAND[str(v)] for _, v in verdicts_by_kind)
+    if observed != expected:
+        direction = "demoted" if observed < expected else "escalated"
+        errors.append(
+            f"highest finding verdict band is {_AUDIT_BAND_NAMES[observed]!r} "
+            f"but this case's ground truth claims "
+            f"{_AUDIT_BAND_NAMES[expected]!r} ({direction}; "
+            f"abi_break={bool(entry.get('abi_break'))}, "
+            f"api_break={bool(entry.get('api_break'))}, "
+            f"bad_practice={bool(entry.get('bad_practice'))}); "
+            f"per-kind verdicts: {sorted(verdicts_by_kind)!r}"
+        )
+    return errors
 
 
 def _make_pack(
@@ -533,8 +706,8 @@ def main(argv: list[str] | None = None) -> int:
                 result = _run_compare_case(
                     case_id, COMPARE_CASES[case_id], entry, args.timeout
                 )
-            elif case_id in SCAN_CASES:
-                result = _run_scan_case(case_id, entry, args.timeout)
+            elif case_id in AUDIT_CASES:
+                result = _run_audit_case(case_id, entry, args.timeout)
             elif case_id in EVIDENCE_CASES:
                 result = _run_evidence_case(
                     case_id,

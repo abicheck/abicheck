@@ -13,7 +13,7 @@ depends_on:
   - abicheck/model/header_ast_frontends.py
   - abicheck/service_dump_pipeline.py
   - abicheck/service_compare_pipeline.py
-  - abicheck/service_scan.py
+  - abicheck/dry_run_estimate.py
   - abicheck/deadline.py
   - abicheck/policy/depth_evidence_contract.py
 lifecycle: active
@@ -302,10 +302,16 @@ point yet: `compare --no-baseline` is the CLI replacement, and (as of the
 fixes recorded in `docs/contribute/known-gaps.md`'s
 "`compare --no-baseline` does not yet reproduce `scan`'s audit-mode
 findings" entry) it now reproduces `scan`'s own candidate-side findings and,
-opt-in via `--severity-preset`, its exit-code gating too. Until a typed
+opt-in via `--severity-preset`, its exit-code gating too. Concretely: all
+eleven cross-source hygiene checks and the pattern/preprocessor pre-scan run
+on the self-compared candidate, and everything they find lands in the
+report's `findings[]` — `changes` stays empty, since an audit reports no
+addition, removal or comparison verdict at all (ADR-068 D2). A consumer
+reading only `changes` therefore sees an empty audit; read `findings`. Until a typed
 `CompareRequest`/`CompareResult`-shaped entry point exists for it, call the
-CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers)
-rather than the `abicheck scan` CLI, which this migration is retiring.
+CLI directly (`subprocess`, or `abicheck.service`'s CLI-adjacent helpers) --
+the `abicheck scan` CLI this migration replaced no longer exists (ADR-068
+Phase 6).
 
 `estimate_scan` — the dry-run per-layer cost projection — survives, but takes
 an `InputSpec` plus the run-scoped level arguments rather than a request:

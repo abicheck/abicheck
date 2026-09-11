@@ -29,23 +29,33 @@ directories, and translation units were in view.
 
 ## The dials
 
+`--include` / `-I` is the one *compile-context* dial that stays a per-run CLI
+flag; every other compile-context dial is config-only (`.abicheck.yml`'s
+`compile:` block) — there is no per-run CLI spelling for those at all.
+Deployment constraints are not a compile-context dial either (they declare
+which environments the library ships into, not how headers are parsed), and
+they are config-only too: ADR-068 D5 demoted the former `compare --env-matrix
+FILE` to `.abicheck.yml`'s `deployment:` key, which embeds the environment
+matrix inline. No CLI spelling for it exists any more.
+
 | Dial | Use |
 |---|---|
-| `--lang c\|c++` | language of the surface |
-| `--compiler`, `--compiler-prefix` | select the compiler driver used for header extraction |
-| `--compiler-option` (repeatable) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
-| `--sysroot`, `--include` / `-I`, `--nostdinc` | header search context |
-| `--ast-frontend` | which header-AST backend parses the headers |
+| `--include` / `-I` | header search context (CLI flag) |
+| `compile:`'s `lang` key | language of the surface (`c` or `c++`) |
+| `compile:`'s `compiler` key | select the compiler driver used for header extraction |
+| `compile:`'s `options` key (list) | ABI-relevant flags (`-std=`, `-D`, `-fvisibility=`, ...) |
+| `compile:`'s `sysroot`/`nostdinc` keys | header search context beyond `--include` |
+| `compile:`'s `frontend` key | which header-AST backend parses the headers |
+| `deployment:`'s keys | declared target environments and runtime floors |
 
-Project-level defaults belong in `.abicheck.yml` rather than repeated on the
-command line; the exhaustive key reference is
-[the config file page](../../docs/reference/config-file.md), and
-`abicheck project validate` checks a project's own configuration. Declared
-deployment constraints (target compilers, SYCL/CUDA backends, `GLIBC`/
-`GLIBCXX`/`CXXABI` runtime floors) are one such project-level default: they
-live in `.abicheck.yml`'s `deployment:` block, not a CLI flag, and apply to
-every comparison of the project — a bare `compare` and the directory/package
-release fan-out alike.
+Project-level defaults belong in `.abicheck.yml`; the exhaustive key
+reference is [the config file page](../../docs/reference/config-file.md),
+and `abicheck project validate` checks a project's own configuration.
+Declared deployment constraints (target compilers, SYCL/CUDA backends,
+`GLIBC`/`GLIBCXX`/`CXXABI` runtime floors) are one such project-level
+default: they live in `.abicheck.yml`'s `deployment:` block, not a CLI
+flag, and apply to every comparison of the project — a bare `compare` and
+the directory/package release fan-out alike.
 
 ## Two distinct failure modes, do not conflate them
 
