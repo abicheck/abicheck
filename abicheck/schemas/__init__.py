@@ -884,7 +884,16 @@ _ARTIFACT_NAMES = frozenset(
 #:       facts.degraded_reliability_facts`` marks stale. Folds into the existing
 #:       ``status``/``notes`` the same way every context-status field
 #:       already does; unaffected for a run with no stale fact.
-REPORT_SCHEMA_VERSION = "4.1"  #: 4.1 -- see the comment immediately above.
+#: 4.2 -- additive, top-level ``env_matrix_source_sha256`` (Codex review,
+#:       P2): the declared-deployment-floor contract's content digest
+#:       (``DiffResult.env_matrix_source_sha256``), present only when a
+#:       run actually resolved an ``EnvironmentMatrix``
+#:       (``--env-matrix``/``.abicheck.yml``'s ``deployment:``). Omitted
+#:       entirely, not ``null``, for a run with no declared deployment
+#:       contract. The ``--no-baseline`` audit report's
+#:       ``NO_BASELINE_REPORT_SCHEMA_VERSION`` gains the identical field
+#:       under this same name for the same reason.
+REPORT_SCHEMA_VERSION = "4.2"  #: 4.2 -- see the comment immediately above.
 
 # The directory/package release envelope's own version and version history
 # live in `release_schema.py` (see that module's docstring for why); the

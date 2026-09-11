@@ -302,6 +302,7 @@ def compute_no_baseline_document(
             result, require_complete_analysis, audit_gate_enabled
         ),
         policy=diff.policy,
+        env_matrix_source_sha256=getattr(diff, "env_matrix_source_sha256", None),
     )
 
 
@@ -487,6 +488,16 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         "exit_axes": dict(doc.exit_axes),
         "exit_code": doc.exit_code,
         "policy": doc.policy,
+        # Codex review, P2: the declared-deployment-floor contract's content
+        # digest -- omitted, not `null`, when this audit's candidate declared
+        # no `deployment.runtime_floors`/`EnvironmentMatrix` contract at all,
+        # the same additive convention `reporter._add_env_matrix_digest`
+        # follows for the two-sided compare report under this identical key.
+        **(
+            {"env_matrix_source_sha256": doc.env_matrix_source_sha256}
+            if doc.env_matrix_source_sha256 is not None
+            else {}
+        ),
     }
 
 
