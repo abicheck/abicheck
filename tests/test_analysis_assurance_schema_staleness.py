@@ -546,7 +546,7 @@ class TestSchemaStalenessStatus:
         as both a stale "old snapshot" and a stale "new snapshot" would be
         double-counting the one candidate's own degradation as if it were
         two distinct sides."""
-        old, new = _header_pair()
+        _, new = _header_pair()
         new.param_kind_facts_reliable = False
         assert degraded_reliability_facts(new) == ["param_kind_facts_reliable"]
 
