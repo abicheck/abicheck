@@ -192,7 +192,12 @@ _PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS: frozenset[str] = frozenset(
 #: well as *other*. An unknown producer on EITHER side is deliberately NOT
 #: treated as a permanent mismatch (round-10 principle,
 #: ``_other_side_supports_known_producer_comparison``'s own docstring): it
-#: is itself just another regeneratable, schema-vintage gap.
+#: is itself just another regeneratable, schema-vintage gap. A "hybrid"
+#: producer on EITHER side is ALSO deliberately never excluded on its own
+#: (round 12 -- see :func:`_other_side_matches_snap_producer`'s own
+#: docstring): the real gate resolves producer PER DECLARATION for a
+#: hybrid snapshot, so a whole-snapshot label mismatch against "hybrid"
+#: does not prove the actually-matched declaration disagrees too.
 _PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS: frozenset[str] = frozenset(
     {"clang_field_initializer_facts_reliable"}
 )
@@ -311,8 +316,8 @@ def _other_side_matches_snap_producer(snap: AbiSnapshot, other: AbiSnapshot) -> 
     """Whether *other* alone would satisfy ``diff_symbols._diff_param_
     defaults``'s/``diff_types_field_facts._diff_field_default_initializer``'s
     own same-KNOWN-producer gate against *snap* -- confirmed header
-    awareness AND (when both sides' producers are positively known) an
-    EXACT match.
+    awareness AND (when both sides' producers are positively known AND
+    NEITHER is "hybrid") an EXACT match.
 
     Deliberately NOT excluded when either side's ``ast_producer`` is
     unknown (``None``): unlike a real, KNOWN mismatch (the permanent,
@@ -322,10 +327,31 @@ def _other_side_matches_snap_producer(snap: AbiSnapshot, other: AbiSnapshot) -> 
     regeneratable, schema-vintage gap (the exact round-10 principle
     :func:`_other_side_supports_known_producer_comparison` documents) --
     excluding on that basis would repeat that same bug in a new spot.
+
+    **Round 12 correction (Codex review, PR #1209, fresh evidence):**
+    deliberately NOT excluded when EITHER side's ``ast_producer`` is
+    "hybrid" either, even against a real, known, differing top-level label
+    (e.g. hybrid vs. pure "clang"). The real gates
+    (``fact_provenance.fact_producer``'s hybrid branch) resolve producer
+    PER DECLARATION for a hybrid snapshot -- a hybrid merge's per-entity
+    provenance can independently land on either backend regardless of the
+    snapshot's own top-level label, so a whole-snapshot label comparison
+    (the round-11 shape this function started with) can wrongly EXCLUDE a
+    pair whose actually-matched declaration really is same-producer at the
+    per-declaration level, silently hiding a real suppressed finding --
+    the DANGEROUS direction (under-tainting), unlike every other
+    conservative choice in this module. Resolving the true per-declaration
+    match would mean walking matched declaration pairs, the same
+    per-declaration probe this module's "rollup over already-computed
+    snapshot-level fields" contract declines to attempt elsewhere (see the
+    module docstring's known limitations) -- so a "hybrid" producer on
+    either side is treated the same as an unknown one: never excluded by
+    this whole-snapshot check alone. Only a real, KNOWN mismatch between
+    two NON-hybrid producers remains a permanent, excludable block.
     """
     if not _other_side_is_header_confirmed(other):
         return False
-    if snap.ast_producer is None or other.ast_producer is None:
+    if snap.ast_producer in (None, "hybrid") or other.ast_producer in (None, "hybrid"):
         return True
     return snap.ast_producer == other.ast_producer
 

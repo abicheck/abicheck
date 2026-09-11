@@ -828,6 +828,62 @@ class TestFieldInitializerSameProducerGating:
             "clang_field_initializer_facts_reliable" in n for n in aa.notes
         ), aa.notes
 
+    def test_hybrid_other_side_never_excluded_by_label_mismatch(self) -> None:
+        """Codex review, PR #1209 round 12, fresh evidence: a whole-
+        snapshot label mismatch against a "hybrid" ``other`` (e.g. hybrid
+        vs. pure "clang") does NOT prove the actually-matched declaration
+        disagrees too -- ``fact_provenance.fact_producer``'s hybrid branch
+        resolves producer PER DECLARATION, and a hybrid merge's per-entity
+        provenance can independently land on either backend regardless of
+        the snapshot's own top-level label. Excluding on the label alone
+        (this test class's own round-11 shape) risked silently hiding a
+        real suppressed finding -- the dangerous, under-tainting direction.
+        Must still taint, both directions (snap hybrid vs other clang, and
+        snap clang vs other hybrid)."""
+        old_hybrid = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new_clang = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        result = checker.compare(old_hybrid, new_clang)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
+
+        old_clang = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new_hybrid = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+        )
+        result2 = checker.compare(old_clang, new_hybrid)
+        aa2 = result2.analysis_assurance
+        assert aa2.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa2.notes), (
+            aa2.notes
+        )
+
     def test_matching_producer_still_taints(self) -> None:
         old = AbiSnapshot(
             version="1.0",
