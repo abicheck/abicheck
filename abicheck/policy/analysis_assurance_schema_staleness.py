@@ -114,31 +114,47 @@ _PAIR_PRODUCER_GATED_FLAGS: dict[str, str] = {
     "castxml_var_access_facts_reliable": "castxml",
 }
 
-#: The three flags whose one real consumer requires BOTH sides confirmed
+#: The two flags whose one real consumer requires BOTH sides confirmed
 #: (non-inferred) header-aware -- ``_both_header_aware`` -- but, unlike
 #: :data:`_PAIR_PRODUCER_GATED_FLAGS`, places no further requirement on the
 #: *other* side's producer (Codex review, PR #1209 round 7, fresh evidence):
 #: ``diff_symbols._diff_param_restrict`` exits at ``_both_header_aware``
-#: before ever reading ``clang_restrict_facts_reliable``;
-#: ``diff_types_field_facts._diff_field_default_initializer`` does the same
-#: for ``clang_field_initializer_facts_reliable``; and ``diff_symbols.
-#: _diff_func_deprecated`` calls ``fact_provenance.fact_producer`` on BOTH
-#: sides independently and skips the pair entirely if either returns
-#: ``None`` -- which it does whenever that side isn't confirmed header-aware
-#: -- for ``clang_deprecation_facts_reliable``. So a degraded, confirmed-
-#: header side paired with an ``other`` that is only ever inferred-header
-#: (``from_headers_inferred=True``) or not header-derived at all means the
-#: affected detector never runs for this pair, the identical shape
-#: :data:`_PAIR_PRODUCER_GATED_FLAGS` already covers minus the producer
-#: match (each of these three detectors is documented as cross-producer-safe
-#: once both sides are confirmed header-aware -- see each named function's
-#: own docstring).
+#: before ever reading ``clang_restrict_facts_reliable``, and ``diff_types_
+#: field_facts._diff_field_default_initializer`` does the same before its
+#: own per-field ``fact_same_producer_qualified`` gate for ``clang_field_
+#: initializer_facts_reliable`` -- both documented as cross-producer-safe
+#: (restrict) or handled by a separate, deliberately conservative per-
+#: declaration limitation (field initializer -- see this module's own
+#: docstring) once both sides are confirmed header-aware. ``clang_
+#: deprecation_facts_reliable`` moved OUT of this set in round 8 -- see
+#: :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS` below, its own real
+#: consumer needs more than header confirmation alone.
 _PAIR_HEADER_ONLY_GATED_FLAGS: frozenset[str] = frozenset(
     {
-        "clang_deprecation_facts_reliable",
         "clang_field_initializer_facts_reliable",
         "clang_restrict_facts_reliable",
     }
+)
+
+#: ``clang_deprecation_facts_reliable`` (Codex review, PR #1209 round 8,
+#: fresh evidence): ``diff_symbols._diff_func_deprecated`` calls
+#: ``fact_provenance.fact_producer`` independently on BOTH sides and skips
+#: the pair entirely if either call returns ``None`` -- which it does
+#: whenever *that* side isn't confirmed header-aware (the
+#: :data:`_PAIR_HEADER_ONLY_GATED_FLAGS` half of the gate) OR that side's
+#: own ``ast_producer`` isn't positively known (``None`` -- a legacy
+#: snapshot that predates provenance tracking entirely) OR that side is
+#: ITSELF a degraded, confirmed-header "clang" producer for this exact fact
+#: family (``fact_producer``'s own ``ast_producer == "clang" and not
+#: clang_deprecation_facts_reliable`` exclusion for a ``:deprecated``/
+#: ``:is_scoped`` key -- in which case no comparison can structurally run
+#: for either side's sake, so reporting "degraded" here would be a spurious
+#: signal, not a conservative one). Mirrored exactly in :func:`_other_side_
+#: supports_known_producer_comparison` rather than approximated with a bare
+#: header-confirmation check, which a confirmed-header-but-unknown-producer
+#: (or itself-degraded-clang) ``other`` would incorrectly still taint.
+_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS: frozenset[str] = frozenset(
+    {"clang_deprecation_facts_reliable"}
 )
 
 
@@ -159,13 +175,29 @@ def _other_side_confirms_pair_gate(other: AbiSnapshot, producer: str) -> bool:
     return _other_side_is_header_confirmed(other) and other.ast_producer == producer
 
 
+def _other_side_supports_known_producer_comparison(other: AbiSnapshot) -> bool:
+    """Whether ``fact_provenance.fact_producer(other, <a deprecated/
+    is_scoped key>)`` could resolve non-``None`` for SOME declaration --
+    mirroring that function's own gating logic exactly (confirmed header
+    awareness, a positively known ``ast_producer``, and not itself an
+    unreliable confirmed-header "clang" producer for this same fact family)
+    rather than approximating it with header confirmation alone.
+    """
+    if not _other_side_is_header_confirmed(other):
+        return False
+    if other.ast_producer == "clang" and not other.clang_deprecation_facts_reliable:
+        return False
+    return other.ast_producer in ("castxml", "clang", "hybrid")
+
+
 def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[str]:
     """*snap*'s own :func:`degraded_reliability_facts`, narrowed to drop a
-    :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`
-    entry whose one real consumer never ran for this pair because *other*
-    doesn't also clear the detector's own both-sides gate (see
-    :func:`_other_side_confirms_pair_gate`/
-    :func:`_other_side_is_header_confirmed`).
+    :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`/
+    :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS` entry whose one real
+    consumer never ran for this pair because *other* doesn't also clear the
+    detector's own both-sides gate (see :func:`_other_side_confirms_pair_
+    gate`/:func:`_other_side_is_header_confirmed`/:func:`_other_side_
+    supports_known_producer_comparison`).
     """
     kept = []
     for name in degraded_reliability_facts(snap):
@@ -176,6 +208,10 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
             continue
         if name in _PAIR_HEADER_ONLY_GATED_FLAGS:
             if _other_side_is_header_confirmed(other):
+                kept.append(name)
+            continue
+        if name in _PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS:
+            if _other_side_supports_known_producer_comparison(other):
                 kept.append(name)
             continue
         kept.append(name)
@@ -195,8 +231,9 @@ def schema_staleness_status(
     gated on BOTH sides carrying the same channel), a *single* side's stale
     fact already means the affected detector(s) declined to trust it for
     THIS comparison, whether or not the other side is current -- except the
-    :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`
-    flags, which :func:`_pair_aware_degraded_facts` narrows first.
+    :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`/
+    :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS` flags, which
+    :func:`_pair_aware_degraded_facts` narrows first.
 
     ``old is new`` (real Python object identity, not merely equal content)
     is a self-diff -- the exact shape ``workflows.no_baseline_compare``'s
