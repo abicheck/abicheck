@@ -205,7 +205,7 @@ users.
 > (`binary`/`headers`/`build`/`source` — `--max` and the old `full` depth no
 > longer exist) drive the collection depth per run.
 
-See [Scan levels](../use/scan-levels.md) and the
+See [Scan levels](../use/evidence-depth.md) and the
 [`--depth` dial](../learn/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
 (`graph` is not a valid `source:` sub-key — a config with `source: {graph:
 ...}` now fails with an unknown-key error. The L5 graph-detail knob is
@@ -276,7 +276,7 @@ error), but they are handled outside the `compare` config merge:
   path-glob risk profile. It is loaded by `scan`'s `--risk-rules <file>` option
   (which reads a `risk_rules:` block from the given YAML file); it is **not**
   auto-loaded from a discovered `.abicheck.yml`. Parsed by `RiskRules.from_dict`
-  in `buildsource/risk.py`. See [Scan levels](../use/scan-levels.md).
+  in `buildsource/risk.py`. See [Scan levels](../use/evidence-depth.md).
 - **`crosschecks:`** — reserved. The active mechanism for tuning cross-checks is
   `scan`'s repeatable `--crosscheck KEY=LEVEL` flag; the current code does not
   read a `crosschecks:` block from the file.

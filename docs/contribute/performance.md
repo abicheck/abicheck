@@ -181,9 +181,9 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
   `classify` job always runs, diffs the PR's changed files against
   `PERF_SENSITIVE_PATTERNS` — the detector core (`abicheck/diff_*.py`,
   `checker.py`, `post_processing.py`, `demangle.py`, `binary_fingerprint.py`,
-  `surface.py`, ...), all of `abicheck/buildsource/**`, scan/compare/dump
-  orchestration (`service_scan.py`/`service_input_resolution.py`/
-  `scan_engine.py` and the other `service_*`/cache modules), the benchmark
+  `surface.py`, ...), all of `abicheck/buildsource/**`, compare/dump
+  orchestration (`service_compare_pipeline.py`/`service_input_resolution.py`/
+  `service_dump_pipeline.py` and the other `service_*`/cache modules), the benchmark
   scripts, and the perf tests — and reports a `run` output the four
   downstream jobs each gate on (`if: needs.classify.outputs.run == 'true'`).
   Adding the **`performance`** label force-runs the lane regardless of
@@ -455,7 +455,7 @@ median/warmup/combined-threshold design over its own `--repeat`/
 the underlying statistics via `scripts/perf_measurement.py` so their
 regression math can't independently drift.
 
-### Scan level cost model: one cliff at L4
+### Depth cost model: one cliff at L4
 
 A real `scan`-level sweep on two UXL libraries (oneTBB v2021.12→.13, C++;
 UMF v0.10→v0.11, C; raw data in `validation/data/uxl_scan_results_2026-06.json`)

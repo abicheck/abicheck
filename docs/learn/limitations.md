@@ -96,7 +96,7 @@ don't exactly match what was compiled, results will be unreliable.
   `abicheck dump libfoo.so -H foo.h -I include/ --compiler-option -std=c++20 --compiler-option -DFEATURE_X`
   (the same flags work on `abicheck scan`; persist them in a `.abicheck.yml`
   `compile:` block so every run is reproducible — see
-  [Compile context for header parsing](../use/scan-levels.md#compile-context-for-header-parsing-l2))
+  [Compile context for header parsing](../use/evidence-depth.md#compile-context-for-header-parsing-l2))
 - For `abicheck compat`, use `-s` (strict mode) to promote `COMPATIBLE`/`API_BREAK` to BREAKING:
   `abicheck compat check -lib foo -old OLD.xml -new NEW.xml -s`
   (use `--strict-mode api` to promote only `API_BREAK`; `-s` is not available on `abicheck compare`)

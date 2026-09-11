@@ -138,7 +138,7 @@ the aside became a one-line summary + link.
 **A concept explained a fourth time.** `use/tool-modes.md` carried its
 own full copy of the L0–L4 evidence-layer table — the same model already
 explained by the deliberate three-page trio (`learn/evidence-and-detectability.md`,
-`learn/what-each-level-sees.md`, `use/scan-levels.md`). The fix was
+`learn/what-each-level-sees.md`, `use/evidence-depth.md`). The fix was
 a "Quick decision" one-liner plus links back to the trio, and registering the
 page as an `allowed_summaries` entry so the next person who touches it can
 see, from `topics.yaml` alone, that a full table doesn't belong there.

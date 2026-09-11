@@ -2592,7 +2592,7 @@ docs/integration/
   scenarios/
     single-library.md                       # NEW — absorbs github-action.md quick-start (S1)
     existing-build-artifact.md              # NEW — S3, the preferred large-repo flow
-    header-aware-check.md                   # NEW — absorbs relevant scan-levels.md section (S6)
+    header-aware-check.md                   # NEW — absorbs relevant evidence-depth.md section (S6)
     source-replay.md                        # NEW — absorbs github-action-source-scans.md (S7)
     build-integrated-facts.md               # NEW — absorbs producing-source-facts.md (S8, S9)
     single-build-audit.md                   # NEW — absorbs choose-your-workflow.md's audit path (S5)
@@ -2632,7 +2632,7 @@ inbound links remain — reuse `check_ai_readiness.py`'s `mkdocs-nav-coverage`
 check, which already flags unlinked pages); `github-action-source-scans.md`,
 `baseline-management.md`, `producing-source-facts.md`,
 `build-evidence-setup.md` are retired with content distributed similarly;
-`scan-levels.md`, `multi-binary.md`, `ci-gating.md`, `real-world-example.md`,
+`evidence-depth.md`, `multi-binary.md`, `ci-gating.md`, `real-world-example.md`,
 `concepts/build-source-data.md`, `concepts/evidence-and-detectability.md`
 are **kept as-is** (per `docs/CLAUDE.md`'s explicit note that the L0-L5
 evidence trio and exit-code reference are deliberately single-sourced
@@ -2684,10 +2684,10 @@ sequencing this plan's own PR-boundary suggestion names first.**
 job the batch-1 status note above flagged). **Written as task/how-to pages
 that link to the existing canonical deep-dive rather than duplicate it — the
 "absorbs X" phrasing in this section's own file-tree comment turned out to
-conflict with the very next paragraph's "`scan-levels.md` ... kept as-is ...
+conflict with the very next paragraph's "`evidence-depth.md` ... kept as-is ...
 `docs/integration/` pages link to them rather than duplicating," so the
 more specific, later paragraph was treated as authoritative:** no existing
-page (`github-action.md`, `github-action-source-scans.md`, `scan-levels.md`,
+page (`github-action.md`, `github-action-source-scans.md`, `evidence-depth.md`,
 `build-output-schema.md`) was edited, trimmed, or retired in this batch —
 each new scenario page is additive, and the "retire and redirect" migration
 work the file tree implies for e.g. `github-action.md` becoming
@@ -2839,7 +2839,7 @@ a deliberate, permanent scope correction, not a placeholder for finishing
 the retirement later: the five pages stay as the canonical deep-dive
 content they already are, and `docs/integration/` stays the scenario-first
 front door that links to them — two views of the same material, not one
-superseding the other, matching how `scan-levels.md`/`multi-binary.md`
+superseding the other, matching how `evidence-depth.md`/`multi-binary.md`
 were already treated in batches 2-3. Verified via `mkdocs build --strict`
 (clean, no new broken links) and `scripts/check_docs_contract.py`
 (0 errors, no new duplication warnings — every addition is a short pointer

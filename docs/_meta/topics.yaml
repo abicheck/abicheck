@@ -52,7 +52,7 @@ topics:
       - abicheck/buildsource/model.py
     worked_example: learn/what-each-level-sees.md
     task_pages:
-      - use/scan-levels.md
+      - use/evidence-depth.md
     allowed_summaries:
       - start/first-check.md
       - start/choose-your-workflow.md

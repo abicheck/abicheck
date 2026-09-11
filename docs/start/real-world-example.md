@@ -156,7 +156,7 @@ reuse a `compile:` block).
     with.
 
 Every field and the CLI-vs-config precedence are in
-[Source-Scan Depth](../use/scan-levels.md#where-each-setting-belongs-cli-vs-config).
+[Source-Scan Depth](../use/evidence-depth.md#where-each-setting-belongs-cli-vs-config).
 
 ---
 
@@ -198,7 +198,7 @@ binary-only, up to `source` = source-ABI replay — unseeded, it replays the
 whole library; with a `--since`/`--changed-path` seed, just the changed TUs);
 leave it off and abicheck **auto**-picks by changed-path risk. **How each depth
 works, how to produce a compile database for `make`/`cmake`/`bazel`/`meson`,
-and the per-level input table live in [Source-Scan Depth](../use/scan-levels.md)** —
+and the per-level input table live in [Source-Scan Depth](../use/evidence-depth.md)** —
 that's the home for the build-system details, kept out of this walkthrough on
 purpose. (The old `--source-method s0…s6`/`--mode` axes and the separate
 `--depth full` rung have been removed outright.)
@@ -316,6 +316,6 @@ Other formats — **HTML**, SARIF, JUnit — are in [Output Formats](../use/outp
    as a CI gate).
 3. **Go deeper** (recommended) with `abicheck scan --sources . --since … --depth source`
    when you can give it your sources and build command — see
-   [Source-Scan Depth](../use/scan-levels.md).
+   [Source-Scan Depth](../use/evidence-depth.md).
 4. **Read** the verdict + confidence: headers give a high-confidence,
    public-API-scoped result that names the changes that matter.

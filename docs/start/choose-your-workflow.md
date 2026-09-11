@@ -150,8 +150,8 @@ for a raw-shell/other-CI pattern see [CLI Usage](../use/cli-usage.md) and
 [Baseline Management](../use/baseline-management.md).
 
 *How often* to run which depth (PR gate vs. nightly vs. release-amortized) is
-covered by [Source-Scan Depth → Worked examples](../use/scan-levels.md#worked-examples)
-and its [Cost guide](../use/scan-levels.md#cost-guide-rules-of-thumb) — the
+covered by [Source-Scan Depth → Worked examples](../use/evidence-depth.md#worked-examples)
+and its [Cost guide](../use/evidence-depth.md#cost-guide-rules-of-thumb) — the
 L4/L5 cost cliff means "always run the deepest check on every push" is rarely
 the right default.
 

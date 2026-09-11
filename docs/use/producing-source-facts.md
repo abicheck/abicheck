@@ -21,7 +21,7 @@ producer. For what the layers mean, see
 worked example of the concrete L4/L5 data these producers yield (and what the
 lower levels miss), see the
 [level-by-level walk-through](../learn/what-each-level-sees.md).
-For how a scan *consumes* it, see [Source-scan depth](scan-levels.md). For the
+For how a scan *consumes* it, see [Source-scan depth](evidence-depth.md). For the
 deeper operational reference on setting up the Clang plugin (per-build-system
 wiring, the Bazel/ccache traps, `.abicheck.yml` project-contract blocks,
 out-of-band packs, and external CLI extractors), see
@@ -372,7 +372,7 @@ This links each source declaration to the binary's exported symbol (matching
 ctor/dtor ABI clone variants — `C1`/`C2`/`C3`, `D0`/`D1`/`D2` — so one source
 constructor claims all of its exported symbols). The result is a single
 self-contained `.baseline.json` carrying L0–L5, ready for
-[`compare`](cli-usage.md) or [`scan --against`](scan-levels.md).
+[`compare`](cli-usage.md) or [`scan --against`](evidence-depth.md).
 
 ### Reading the L4 coverage numbers
 

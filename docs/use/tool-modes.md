@@ -121,7 +121,7 @@ sources) switches on more detectors, and going down the ladder only ever
 For the full per-layer table (what you provide, what it catches) and the
 authority rule (only L0–L2 can declare `BREAKING`), see [Evidence &
 Detectability](../learn/evidence-and-detectability.md); for the practical
-`--depth` flag mapping, see [Source-Scan Depth](scan-levels.md); for a
+`--depth` flag mapping, see [Source-Scan Depth](evidence-depth.md); for a
 worked walkthrough of what each layer actually sees on one example, see
 [What Each Level Sees](../learn/what-each-level-sees.md).
 
