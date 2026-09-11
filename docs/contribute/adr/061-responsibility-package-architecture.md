@@ -1490,12 +1490,14 @@ package importing either would trip `unclassified-import` the moment
 `dumper.py`, a separate, much larger migration this gap does not attempt.
 
 Net: eight of the eleven original entries now name a real owner (six moved,
-two already had one); three are confirmed, not merely asserted, "no single
-layer" leaves; one (`serialization`) is an explicit, recorded `migrate`
-gap; `public_root_surfaces` itself shrank from eleven to seven entries
-(`checker_policy`, `contract_evidence`, `contract_gating`, `header_only_dump`,
-`reclassify`, `schemas`, `serialization`) — every remaining one a reviewed
-exception with a stated reason, not an unclassified default.
+two already had one); four (`checker_policy`, `contract_gating`,
+`reclassify`, and — closure package 6 — `serialization`) are confirmed, not
+merely asserted, "no single layer" leaves, `serialization`'s own former
+`migrate` gap now closed the same way; `public_root_surfaces` itself shrank
+from eleven to seven entries (`checker_policy`, `contract_evidence`,
+`contract_gating`, `header_only_dump`, `reclassify`, `schemas`,
+`serialization`) — every remaining one a reviewed exception with a stated
+reason, not an unclassified default.
 
 ### C. One result, one document, several projections
 
@@ -1660,8 +1662,8 @@ orchestration conflation of the shape Phase 5 already solved for
   ceiling (mechanical extraction, verified against `check_architecture.py`
   directly — a brand-new file has no adoption-debt exemption available, so
   each sibling had to clear 800 lines on its own merits, not via a baseline).
-  `serialization.py` itself shrank from ~1550 lines to under 300 and now
-  joins `checker_policy`/`contract_gating`/`reclassify` as a confirmed (not
+  `serialization.py` itself shrank to a thin orchestration-only facade and
+  now joins `checker_policy`/`contract_gating`/`reclassify` as a confirmed (not
   merely documented) "no single layer" leaf, for the identical structural
   reason gap B's own closure status names for those three: it is the one
   legal route through which two genuinely storage-illegal steps —
