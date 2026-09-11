@@ -537,13 +537,19 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
     # schema docstring ("a class with no test is a 'Known gaps' AGENTS.md
     # paragraph, not a registry entry") it does not belong here with an
     # empty `seed_tests`. See `docs/contribute/known-gaps.md`'s
-    # "`scan --depth binary` and `compare --depth binary` see different
-    # evidence" entry for the full retirement note -- including what would
+    # "`compare --depth binary` still performs a deep DWARF type walk the
+    # public evidence-depth contract says that rung skips" entry (reopened
+    # 2026-09-11 -- an earlier pass at this PR incorrectly marked it CLOSED
+    # on the theory that retiring `scan` mooted it; it did not, since
+    # `scan` was only this entry's oracle, not the bug) for the retirement
+    # note on `debug_presence_only` specifically -- including what would
     # need to be true (a real caller computing `debug_presence_only` from a
-    # depth/collect-mode decision again) for this to become a live registry
-    # entry once more, retargeted rather than restored verbatim, since the
-    # scan-specific invariant text above would need to be re-stated against
-    # whatever new caller reintroduces the shortcut.
+    # depth/collect-mode decision again) for *that* mechanism to become a
+    # live registry entry once more, retargeted rather than restored
+    # verbatim, since the scan-specific invariant text above would need to
+    # be re-stated against whatever new caller reintroduces the shortcut.
+    # The `--depth binary` DWARF-type-walk defect itself is unrelated to
+    # `debug_presence_only` and remains open, independent of this class.
     BugClass(
         id="evidence.silent_degradation_to_clean_verdict",
         invariant=(

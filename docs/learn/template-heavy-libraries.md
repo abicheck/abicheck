@@ -113,14 +113,25 @@ a baseline), so this is a two-sided `compare`:
 
 ```bash
 abicheck compare old.so new.so -H include/ --sources . --depth source \
-  --since origin/main --dry-run
+  --since origin/main
 ```
 
-The dry run prints the translation units the seed selects and the
-projected per-layer cost without scanning. In CI, `--budget` fails loudly
-on overflow rather than shrinking scope, so a scan that finished is a scan
-that did what it claims. Numbers, knobs and the reasoning behind the
-memory cap are owned by
+That seeds the L4/L5 replay to the changed translation units instead of the
+full target, which is where the minutes-versus-hours saving above actually
+comes from. **`--dry-run`'s own cost preview does not reflect this seeding
+yet** — verified live: adding `--dry-run` to the command above still prints
+`source scope: target on each side (compare has no PR change seed)` and
+leaves the "Cost preview" TU counts unchanged, because `--since`'s
+changed-path resolution runs after `--dry-run` has already emitted and
+exited (a documented gap:
+[known-gaps.md](../contribute/known-gaps.md), "`compare --dry-run`'s cost
+preview does not reflect `--since`'s changed-path seeding" entry). So a dry
+run here only ever previews the *unseeded* upper-bound cost; run the
+command above for real (without `--dry-run`) to get the actual seeded,
+cheaper replay. In CI, `--budget`
+fails loudly on overflow rather than shrinking scope, so a scan that
+finished is a scan that did what it claims. Numbers, knobs and the
+reasoning behind the memory cap are owned by
 [Performance § L4 source-replay performance](../contribute/performance.md#l4-source-replay-dump-side-performance);
 the moments to run the seeded versus the unseeded scan by
 [Where in the Pipeline](where-in-the-pipeline.md).

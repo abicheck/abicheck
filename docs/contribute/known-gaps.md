@@ -7626,27 +7626,59 @@ legitimate three categories above is a gate in
 reasoned allowlist. Doing the gate first would invert that order and bake
 today's 25 unexamined sites into an allowlist nobody revisits.
 
-## ~~`scan --depth binary` and `compare --depth binary` see different evidence~~ — CLOSED (moot: `scan` retired)
+## `compare --depth binary` still performs a deep DWARF type walk the public evidence-depth contract says that rung skips
 
-**Closed in ADR-068 Phase 6**, which deleted the `scan` command outright (no
-deprecation window). Kept here, struck through, for the historical record
-and because the underlying `debug_presence_only` shortcut mechanism it
-describes is still real code — see the retirement note below for what would
-need to be true to reopen this as a live question.
+**Reopened 2026-09-11** (Codex review, PR #1220 doc follow-up) after an
+earlier pass at that same PR incorrectly marked this entry CLOSED,
+reasoning that deleting `scan` (ADR-068 Phase 6) made the gap moot because
+the comparison it originally described needed a `scan` reading on one side.
+That reasoning was wrong: `scan`'s own `--depth binary` behavior was never
+the bug — it was only the *oracle* this entry originally used to show
+`compare`'s behavior was inconsistent with something. Deleting `scan`
+removes that oracle, not the underlying defect in `compare` itself, and the
+entry's own body already said as much before being closed ("that question
+is now `compare`'s alone to answer" — see below). Verified live against the
+*current* code before reopening, not taken on Codex's word alone:
 
-Original gap: `scan --depth binary` extracted exported symbols only, while
-`compare --depth binary` on the same two live binaries still read DWARF and
-reported type-level findings (`type_size_changed`,
-`type_field_added_compatible`) that the symbols-only view could not produce.
-The two commands were not wrong in the same way: `scan` honoured the pin as
-an *extraction floor and ceiling*, while `compare`'s `--depth` projection
-(`policy/depth_projection.py`) drops the L3-L5 layers but does not restrict
-the L1 debug parse the resolution already performed, so the pin acted as a
-ceiling on collected layers rather than on read evidence. Which of the two
-was the intended contract at this rung was left open as a `compare`-side
-question (ADR-063 Phase 8's `--depth` ceiling) — that question is now
-`compare`'s alone to answer, since there is no `scan` reading to compare it
-against any more.
+```
+$ gcc -shared -fPIC -g old.c -o libold.so      # struct Point { int x, y; }
+$ gcc -shared -fPIC -g new.c -o libnew.so      # struct Point { int x, y, z; }
+$ abicheck compare libold.so libnew.so --depth binary --format json
+```
+
+reports `verdict: BREAKING` with a `type_size_changed` finding ("Size
+changed: Point (64 → 96 bits)") and a `type_field_added_compatible`
+finding, from DWARF alone (no headers passed on either side). That directly
+contradicts `docs/use/evidence-depth.md`'s own published contract for this
+rung (`| binary | L0/L1 exported symbols + binary metadata + debug-info
+*presence* (no deep DWARF type walk, no L2 AST) + always-on pattern scan |`)
+— "debug-info presence" promises only "is DWARF present", not "walk every
+DWARF type and report on it". `policy/depth_projection.py`'s own module
+docstring confirms this is by design, not an oversight: it documents `BINARY`
+as covering both L0 *and* L1 ("no L2 AST", explicitly *not* "no debug info"),
+and keeps layout/signature facts at the `binary` rung whenever DWARF
+confirms them, "the way a real DWARF-informed binary dump would". The
+*code*'s contract and the *docs*' contract disagree with each other, and
+this entry's status must track that disagreement as still open — reworded
+below to describe the `compare`-only shape of the question now that `scan`
+is gone, but **not marked CLOSED**.
+
+Original gap, kept for context: `scan --depth binary` extracted exported
+symbols only, while `compare --depth binary` on the same two live binaries
+still read DWARF and reported type-level findings that the symbols-only
+view could not produce. The two commands were not wrong in the same way:
+`scan` honoured the pin as an *extraction floor and ceiling*, while
+`compare`'s `--depth` projection (`policy/depth_projection.py`) drops the
+L3-L5 layers but does not restrict the L1 debug parse the resolution
+already performed, so the pin acted as a ceiling on collected layers rather
+than on read evidence. Which of the two was the intended contract at this
+rung was left open as a `compare`-side question (ADR-063 Phase 8's
+`--depth` ceiling) — that question is now `compare`'s alone to answer,
+since there is no `scan` reading to compare it against any more, but it
+remains unanswered: either `docs/use/evidence-depth.md`'s "no deep DWARF
+type walk" promise needs fixing to match what `compare --depth binary`
+actually does, or `policy/depth_projection.py`'s `BINARY`-keeps-L1 behavior
+needs to change to match the documented promise. Neither has happened.
 
 ADR-068 Phase 4's typed-API slice had fixed the adjacent *headers*-rung
 divergence before scan's removal — `cli_scan_helpers._uses_debug_presence_only`
@@ -7946,6 +7978,37 @@ did it. Needs a regression test asserting the confidence *does* change under
 invocation, not only an internal `run_crosschecks(...)` call — the gap here
 was invisible to internal tests precisely because nothing exercises the
 public `--since` flag's effect on this specific check's confidence.
+
+## `compare --dry-run`'s cost preview does not reflect `--since`'s changed-path seeding
+
+Found during the PR #1220 doc follow-up (Codex review): a two-sided
+`compare old.so new.so --depth source --since origin/main --dry-run`
+example claimed the dry run "prints the translation units the seed selects
+and the projected per-layer cost without scanning". Verified live against
+the current code before fixing the doc: it does not.
+
+`build_compare_dry_run_result` (`frontends/cli/compare_dry_run.py`) always
+renders `"source scope: target on each side (compare has no PR change
+seed)"` whenever `collect_mode` is `source-target`/`source-changed`/
+`graph-full`, and its "Cost preview" section is built from
+`workflows.compare_cost_preview.estimate_compare_dry_run_cost`, whose
+signature accepts no `since`/changed-path parameter at all — so the TU
+counts and per-layer cost it prints are the *unseeded*, full-target
+numbers regardless of `--since`. The reason is ordering, not a missing
+render field: `cli_compare_helpers.py`'s `--dry-run` branch calls
+`emit_dry_run(...)` (which raises `SystemExit`, per `dry_run.py`) **before**
+`_enrichment.resolve_compare_enrichment_inputs(since=since, ...)` —
+the call that actually interprets `--since` and localizes `collect_mode` —
+ever runs. `--since` genuinely does narrow the real (non-dry-run) replay;
+only the dry-run preview is blind to it.
+
+Tractable when picked up: resolve the changed-path seed (and its resulting
+localized `collect_mode`/TU set) *before* the `--dry-run` emit, the same
+way `--dry-run` already reflects other resolved-but-not-yet-executed
+decisions (depth, headers, tool discovery) rather than echoing raw CLI
+input back. Needs a regression test asserting the dry run's own TU
+count/cost preview actually changes between `--since origin/main` and no
+`--since` on the same real inputs, not only that the flag is accepted.
 
 ## `compare --depth binary` ignoring matrix-wide `--sources`/`--build-info` is untested
 
