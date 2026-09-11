@@ -907,11 +907,12 @@ runs:
             --depth | --devel-pkg | --dump-manifest | --format | \
             --frontend-context | --header | --include | --instantiation-manifest | \
             --lang | --ld-library-path | --manifest | --max-findings | \
-            --output | --output-dir | --pack | \
+            --max-findings-per-library | --output | --output-dir | --pack | \
             --pdb-path | --policy | --post-manifest | --probe-matrix | \
             --public-header-dir | --required-symbol | \
-            --search-path | --severity-preset | --since | --sources | \
-            --suppress | --sysroot | --use-cases | --used-by | --variant | --version | --view | \
+            --search-path | --select | --select-required | --severity-preset | --since | --sources | \
+            --suppress | --sysroot | --use-cases | --used-by | --used-by-manifest | \
+            --variant | --version | --view | \
             --write | -H | -I | -o)
               return 0
               ;;

@@ -58,8 +58,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from _assurance_overlay_exec import _run_overlay, _written_overlay
-from _workflow_exec import make_workspace, run_step
+from _workflow_exec import HOSTILE_SCALAR_CORPUS, make_workspace, run_step
 
 
 class TestAssuranceOverlayMergesExtraArgsConfig:
@@ -260,6 +261,192 @@ class TestAssuranceOverlayExpandsShortOptionClusters:
         assert result.outputs["effective-extra-args"] == "-v -H somefile.h"
 
 
+class TestAssuranceOverlayRecognizesUsedByManifestAsValueOption:
+    """Codex review (P2), fresh evidence, PR #1222 (merged as commit
+    1acebd605; this fix follows up on ``main`` post-merge):
+    ``--used-by-manifest`` is a genuine value-taking ``compare`` CLI option
+    (``abicheck/frontends/cli/options/release.py``'s ``used_by_manifests``,
+    confirmed directly against the installed CLI's ``compare --help-all``)
+    that was missing from this step's own ``_ct_extra_args_is_value_option``
+    case list. A caller passing ``extra-args: '--used-by-manifest --config'``
+    with a consumer manifest literally named ``--config`` -- an argv the real
+    CLI genuinely accepts, since ``--used-by-manifest FILE`` consumes the
+    following token as its own value -- was misread by this tokenizer as one
+    opaque, unrecognized ``--used-by-manifest`` flag followed by a bare,
+    trailing, valueless ``--config`` occurrence, which
+    ``TestAssuranceOverlayRejectsValuelessConfigOccurrence``'s own guard then
+    rejected outright: ``analysis-assurance-complete: true`` broke a check
+    that would otherwise succeed.
+
+    Root-caused (per root ``AGENTS.md``'s "fix the cause, not the instance")
+    to a stale/incomplete value-taking-option enumeration, not one missing
+    name: ``action/run.sh``'s own hand-synced ``_extra_args_is_value_option``
+    sibling was independently missing the identical four options
+    (``--used-by-manifest``, ``--select``, ``--select-required``,
+    ``--max-findings-per-library``) -- see
+    ``tests/test_extra_args_is_value_option_completeness.py`` for the
+    systematic, generative invariant test (introspects the real ``compare``
+    Click command itself and diffs it against both hand-maintained lists)
+    that now catches a *future* missing option mechanically, rather than
+    needing another Codex round per omission."""
+
+    def test_used_by_manifest_before_config_shaped_value_is_not_misread(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact reported repro: ``--used-by-manifest --config``, where
+        ``--config`` is meant as ``--used-by-manifest``'s own literal FILE
+        value (a consumer manifest literally named ``--config``), not a real
+        ``--config`` flag. Overlay generation must succeed, with no
+        merge-base config extracted, and the untouched raw ``extra-args``
+        forwarded onward unchanged (this step's own pass-through behavior
+        for extra-args that name no real ``--config`` flag)."""
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--used-by-manifest --config"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written == {"assurance": {"require_complete": True}}
+        assert result.outputs["effective-extra-args"] == "--used-by-manifest --config"
+
+    def test_real_config_flag_survives_alongside_used_by_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """A genuine ``--config real.yml`` occurring alongside a real
+        ``--used-by-manifest consumers.json`` value must still be recognized
+        and extracted correctly -- ``--used-by-manifest``'s own value must
+        not be misread as a flag/unknown token, and the later real
+        ``--config`` must still be found and extracted."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "real.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "EXTRA_ARGS": "--used-by-manifest consumers.json --config real.yml",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["targets"] == {}
+        assert (
+            result.outputs["effective-extra-args"]
+            == "--used-by-manifest consumers.json"
+        )
+
+
+class TestAssuranceOverlayValueOptionValuesResistInjection:
+    """Malicious-fixture / side-effect-absence coverage for THIS PR's own
+    diff (widening ``_ct_extra_args_is_value_option``'s case list with
+    ``--used-by-manifest``, ``--select``, ``--select-required``, and
+    ``--max-findings-per-library``): does recognizing these four additional
+    names as value-consuming open any NEW injection path for the token that
+    immediately follows one of them in ``extra-args``, versus the ~50
+    already-recognized names right beside them in the same list?
+
+    Investigated concretely (not asserted from the YAML text): once a
+    following token is classified as a value-taking option's own value, this
+    tokenizer does exactly ONE thing with it -- push it onto
+    ``_extra_args_without_config`` (or, for a literal ``--config``, onto
+    ``_ct_extra_args_config``) UNCHANGED, verbatim, with no interpolation
+    into an ``echo``/``::error::``-style workflow command anywhere in this
+    step. An unrecognized token gets pushed onto the exact same array via
+    the exact same append, just individually rather than paired with its
+    predecessor -- so classification changes *grouping*, never *escaping*.
+    The one place a raw value COULD change behavior -- being misread as a
+    literal ``--config`` flag and having ITS OWN following token loaded as
+    project-config YAML -- is a risk classifying a token as a value shrinks
+    (a `--config`-shaped value immediately after one of these four options
+    is now correctly treated as inert data, not extracted as a config path)
+    rather than grows.
+
+    This class proves that concretely, using this repo's shared
+    ``HOSTILE_SCALAR_CORPUS`` (`tests/_workflow_exec.py`, the same corpus
+    ``bug-class-regression-testing.md`` Phase 8 established for exactly this
+    "scalar value reaching a shell/workflow step" shape) run as the literal
+    value of each of the four newly-recognized options, through the REAL
+    step (``_run_overlay`` executes ``actions/check-target/action.yml``'s
+    actual ``run:`` body), asserting real observed behavior: the value
+    reaches ``effective-extra-args`` byte-for-byte, is never extracted as a
+    ``--config`` path, and never produces a smuggled ``::``-prefixed
+    workflow-command line on stdout/stderr -- following the same
+    execute-and-observe pattern established by
+    ``tests/test_action_check_target_assurance_validation.py``'s
+    ``TestAssuranceOverlayEscapesWorkflowCommandInjection`` rather than
+    asserting the YAML's text."""
+
+    #: Single-token hostile shapes only: `set -- ${EXTRA_ARGS}` word-splits
+    #: on whitespace (a pre-existing, documented property of this tokenizer,
+    #: unrelated to this PR's diff), so a corpus entry containing a space or
+    #: newline would split into multiple argv tokens before ever reaching
+    #: `_ct_extra_args_is_value_option` -- exercising the splitting behavior
+    #: itself, not "is a single option value handled safely". Filtering to
+    #: whitespace-free entries keeps each parametrized case a true single
+    #: token consumed as exactly one option's value.
+    _SINGLE_TOKEN_HOSTILE_VALUES = [
+        p
+        for p in HOSTILE_SCALAR_CORPUS
+        if not any(c.isspace() for c in p.values[0]) and p.values[0] != ""
+    ]
+
+    @pytest.mark.parametrize(
+        "option", ["--used-by-manifest", "--select", "--select-required"]
+    )
+    @pytest.mark.parametrize("hostile_value", _SINGLE_TOKEN_HOSTILE_VALUES)
+    def test_hostile_value_is_consumed_literally_with_no_side_effect(
+        self, tmp_path: Path, option: str, hostile_value: str
+    ) -> None:
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": f"{option} {hostile_value}"},
+        )
+        assert result.returncode == 0, result.stderr
+        # No side effect #1: the hostile value must never be misread as a
+        # real `--config` occurrence and extracted into the merge-base
+        # overlay -- it is `option`'s own value, not a config path.
+        written = _written_overlay(result)
+        assert written == {"assurance": {"require_complete": True}}
+        # No side effect #2: it must reach `effective-extra-args` completely
+        # unchanged -- proving it was consumed as one opaque value, never
+        # partially parsed, re-quoted, or executed.
+        assert result.outputs["effective-extra-args"] == f"{option} {hostile_value}"
+        # No side effect #3: it must never smuggle a workflow command onto
+        # the real stdout/stderr stream this step actually emits -- the
+        # `::`-prefixed-line check `TestAssuranceOverlayEscapesWorkflowCommandInjection`
+        # (tests/test_action_check_target_assurance_validation.py) already
+        # established for this exact class of concern.
+        combined = result.stdout + result.stderr
+        assert not any(line.startswith("::") for line in combined.splitlines())
+
+    def test_max_findings_per_library_hostile_value_is_consumed_literally(
+        self, tmp_path: Path
+    ) -> None:
+        """``--max-findings-per-library`` alone, not parametrized above,
+        since its own real value shape is ``NAME=N`` -- one representative
+        hostile shape (command substitution) confirms the same literal,
+        unexecuted pass-through the other three options get exercised
+        against the full corpus for."""
+        workspace = make_workspace(tmp_path)
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "EXTRA_ARGS": "--max-findings-per-library $(whoami)=5",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written == {"assurance": {"require_complete": True}}
+        assert (
+            result.outputs["effective-extra-args"]
+            == "--max-findings-per-library $(whoami)=5"
+        )
+        combined = result.stdout + result.stderr
+        assert not any(line.startswith("::") for line in combined.splitlines())
+
+
 class TestAssuranceOverlayRejectsValuelessConfigOccurrence:
     """Codex review (P2), fresh evidence, PR #1222: a ``--config`` occurrence
     in ``extra-args`` with no value at all (a trailing bare ``--config``, or
@@ -332,9 +519,7 @@ class TestAssuranceOverlayRejectsValuelessConfigOccurrence:
         assert "::error::" in combined
         assert "config-path" not in result.outputs
 
-    def test_equals_form_with_a_real_value_still_succeeds(
-        self, tmp_path: Path
-    ) -> None:
+    def test_equals_form_with_a_real_value_still_succeeds(self, tmp_path: Path) -> None:
         """Sanity check alongside the two failure cases above: a REAL
         ``--config=<path>`` value must keep working exactly as before this
         fix -- only the EMPTY-value shape is malformed."""
