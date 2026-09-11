@@ -46,7 +46,7 @@ scenarios:
     test: test_sc_offline_snapshot
 
   - id: SC-BASELINE-PIN
-    title: Pin a release ABI as a baseline file, then gate future builds with scan
+    title: Pin a release ABI as a baseline file, then gate future builds with compare
     persona: Release engineer
     narrative: >
       A team keeps each release's ABI snapshot on disk as its pinned baseline —
@@ -54,12 +54,13 @@ scenarios:
       baseline is simply an old dump/library passed directly to `compare`
       (`abicheck compare v1.json v2.json`), which folds the always-on
       cross-source tier and the gating comparison into one command for CI.
-      The flow below still shows the legacy `scan --against` spelling this
-      scenario's automated counterpart exercises; it moves onto `compare`
-      with that test (ADR-068 retires `scan`, plan §3 row 1).
+      (`scan v2.json --against v1.json` was this scenario's spelling before
+      `scan` was deleted outright in ADR-068 Phase 6 -- no alias, no
+      deprecation window; the flow below and its automated test both use
+      `compare` directly now.)
     flow:
       - abicheck dump libfoo.so -H include/ -o v1.json    # at release time, kept as the baseline
-      - abicheck scan v2.json --against v1.json --format json
+      - abicheck compare v1.json v2.json --format json
     expected:
       exit_code: 4
       verdict: BREAKING

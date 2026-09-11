@@ -105,32 +105,40 @@ scenarios:
     test: test_sc_malformed_input
 
   - id: SC-SCAN-BINARY-DEPTH-MATRIX-ARGS
-    title: Binary-depth scan ignores matrix-wide source/build inputs
+    title: Binary-depth compare ignores matrix-wide source/build inputs (gap)
     persona: CI maintainer running a depth matrix
     narrative: >
       A CI matrix often builds one command template and varies only --depth,
       leaving --headers, --sources, and --build-info on every rung. The binary
-      rung must remain an L0/L1 artifact scan: it should ignore those deeper
-      inputs, skip the source pattern scan and L3 collection, and return the same
-      binary verdict quickly.
+      rung must remain an L0/L1 artifact comparison: it should ignore those
+      deeper inputs, skip the source pattern scan and L3 collection, and
+      return the same binary verdict quickly.
     flow:
-      # `scan` here, not `compare`, because this scenario's whole point is the
-      # coverage block's `skipped`/`not_collected` rows and `scan`'s pinned-depth
-      # contract -- neither of which `compare` reproduces yet (ADR-068 plan §3
-      # row 28). It moves onto `compare` when that row closes.
-      - abicheck scan new.json --against old.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
+      # `scan new.json --against old.json ... --depth binary --format json`
+      # was this scenario's spelling before `scan` was deleted outright in
+      # ADR-068 Phase 6 (no alias, no deprecation window). Its automated test
+      # asserted a `coverage` array (`L0_binary`/`L1_debug`/`L2_header`/
+      # `pattern_scan`/`L3_build` rows) and a top-level
+      # `pattern_scan.files_scanned` field -- both `ScanOutcome`-shaped
+      # fields `compare --format json` has never emitted (verified live: a
+      # `compare --depth binary` JSON report carries neither key at all).
+      # `compare` reaches the same BREAKING verdict/exit code, but nothing
+      # currently asserts it *ignored* the deeper `-H`/`--sources`/
+      # `--build-info` inputs the way `scan` did -- the coverage-block
+      # contract this scenario existed to pin has no compare equivalent yet.
+      - abicheck compare old.json new.json -H include/ --sources src/ --build-info compile_commands.json --depth binary --format json
     expected:
       exit_code: 4
       verdict: BREAKING
-      coverage:
-        L0_binary: present
-        L1_debug: not_collected
-        L2_header: skipped
-        pattern_scan: not_collected
-        L3_build: not_collected
     validates: UC-WORKFLOW-pr-source-tier
-    automated: true
-    test: test_sc_scan_binary_depth_matrix_args
+    automated: false
+    status: planned
+    note: >
+      Retired as an automated scenario in the same PR that removed `scan`
+      (ADR-068 Phase 6): the flow line above reaches the right verdict/exit
+      code, but the specific "ignored the deeper inputs" coverage-block
+      contract `scan` enforced has no `compare`-side assertion today. See
+      `docs/contribute/known-gaps.md`.
 
   # G2: fold build-config (probe-matrix) findings into the mainline gate.
   - id: SC-PROBE-MATRIX-GATE

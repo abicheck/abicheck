@@ -357,11 +357,14 @@ def test_sc_offline_snapshot(tmp_path: Path) -> None:
 def test_sc_baseline_pin(tmp_path: Path) -> None:
     # No baseline registry (pre-1.0 CLI reset): a baseline is just an old
     # snapshot file, pinned by keeping it around and passed straight to
-    # `scan --against`, which folds the always-on tier and the gating
-    # comparison into one CI-facing command.
+    # `compare`, which folds the always-on cross-source tier and the gating
+    # comparison into one CI-facing command. (`scan v2 --against v1` was
+    # this scenario's spelling before `scan` was deleted outright in
+    # ADR-068 Phase 6 -- no alias, no deprecation window; `compare v1 v2`
+    # is the direct replacement.)
     v1 = _save(_lib("1", [_fn("a"), _fn("b")]), tmp_path / "v1.json")
     v2 = _save(_lib("2", [_fn("a")]), tmp_path / "v2.json")
-    res = _cli("scan", v2, "--against", v1, "--format", "json")
+    res = _cli("compare", v1, v2, "--format", "json")
     assert res.exit_code == 4
     payload = json.loads(res.output)
     assert payload["verdict"] == "BREAKING"
@@ -588,55 +591,20 @@ def test_sc_malformed_input(tmp_path: Path) -> None:
     assert "Failed to load" in res.output
 
 
-def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
-    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-
-    old = _lib(
-        "1",
-        [_fn("kept"), _fn("removed")],
-        elf=ElfMetadata(symbols=[ElfSymbol(name="kept"), ElfSymbol(name="removed")]),
-    )
-    new = _lib("2", [_fn("kept")], elf=ElfMetadata(symbols=[ElfSymbol(name="kept")]))
-    old_path = _save(old, tmp_path / "old.json")
-    new_path = _save(new, tmp_path / "new.json")
-    include = tmp_path / "include"
-    include.mkdir()
-    (include / "api.h").write_text("int kept(void);\n", encoding="utf-8")
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "api.cpp").write_text(
-        'extern "C" int kept(void) { return 0; }\n',
-        encoding="utf-8",
-    )
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text("[]", encoding="utf-8")
-
-    res = _cli(
-        "scan",
-        new_path,
-        "--against",
-        old_path,
-        "-H",
-        str(include),
-        "--sources",
-        str(src),
-        "--build-info",
-        str(cdb),
-        "--depth",
-        "binary",
-        "--format",
-        "json",
-    )
-    assert res.exit_code == 4, res.output
-    doc = json.loads(res.output)
-    assert doc["verdict"] == "BREAKING"
-    rows = {row["layer"]: row for row in doc["coverage"]}
-    assert rows["L0_binary"]["status"] == "present"
-    assert rows["L1_debug"]["status"] == "not_collected"
-    assert rows["L2_header"]["status"] == "skipped"
-    assert rows["pattern_scan"]["status"] == "not_collected"
-    assert rows["L3_build"]["status"] == "not_collected"
-    assert doc["pattern_scan"]["files_scanned"] == 0
+# `test_sc_scan_binary_depth_matrix_args` (SC-SCAN-BINARY-DEPTH-MATRIX-ARGS)
+# was retired here, not rewritten, when ADR-068 Phase 6 deleted `scan`
+# outright. It asserted on a `coverage` array (`layer`/`status` rows for
+# `L0_binary`/`L1_debug`/`L2_header`/`pattern_scan`/`L3_build`) and a
+# top-level `pattern_scan.files_scanned` field -- both entirely
+# `ScanOutcome`-shaped fields `compare --format json` has never emitted
+# (verified live: a `compare --depth binary` JSON report on an equivalent
+# fixture carries neither key at all). The scenario's own comment already
+# named this precisely: "neither of which `compare` reproduces yet" -- that
+# gap was never closed before `scan` itself was deleted, so there is no
+# `compare`-based rewrite that preserves this test's actual assertions.
+# See `docs/contribute/known-gaps.md` for the tracked gap this leaves open
+# (whether `compare --depth binary` ignores matrix-wide `--sources`/
+# `--build-info` the same way `scan --depth binary` did is now untested).
 
 
 def test_sc_c_struct_layout(tmp_path: Path) -> None:
