@@ -43,3 +43,10 @@
   `require_complete_analysis=True` is passed — the field has no CLI
   override and no pack route, so `True` can only ever have come from
   `.abicheck.yml`'s `assurance.require_complete`.
+- **`analysis_assurance_exit_contribution`'s packaged and published JSON
+  Schema descriptions (`compare_report.schema.json`,
+  `aggregate_report.schema.json`, and their `docs/reference/schemas/v1/`
+  mirrors) no longer describe the trigger as the retired
+  `--require-complete-analysis` CLI flag.** They now name the live
+  `.abicheck.yml` `assurance.require_complete: true` config key, matching
+  the earlier fix to the no-baseline notice text above.
