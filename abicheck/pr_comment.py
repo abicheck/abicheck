@@ -483,6 +483,94 @@ def _from_compare(
     )
 
 
+#: `compare --no-baseline`'s per-finding `verdict` field (`Verdict` enum,
+#: uppercase) -> `_bucket_changes`'s own lowercase `severity` vocabulary
+#: (`_SEVERITY_BUCKET`'s keys). `Verdict.NO_CHANGE` never appears on a real
+#: finding, so it has no entry here; an unmapped/missing value falls back to
+#: `_SEVERITY_BUCKET`'s own `"unknown"` default (reviewed, per-finding).
+_NO_BASELINE_VERDICT_TO_SEVERITY = {
+    "BREAKING": "breaking",
+    "API_BREAK": "api_break",
+    "COMPATIBLE_WITH_RISK": "risk",
+    "COMPATIBLE": "compatible",
+}
+
+
+def _from_no_baseline(
+    report: dict[str, object],
+    gate_api_break: bool = False,
+    gate_breaking: bool = True,
+) -> CommentModel:
+    """Build a :class:`CommentModel` from ``compare --no-baseline``'s audit
+    report shape (``audit_report_schema_version``/top-level ``findings``) --
+    the report this Action's audit-only ``mode: scan`` translation now
+    produces (ADR-068).
+
+    Reuses ``_bucket_changes`` (``compare``'s own bucketing) rather than a
+    parallel implementation: each finding already carries the same
+    ``kind``/``symbol``/``description`` field names ``_bucket_changes``/
+    ``_detail_text`` read, plus a ``verdict`` field
+    (``BREAKING``/``API_BREAK``/``COMPATIBLE_WITH_RISK``/``COMPATIBLE``)
+    translated here to ``_bucket_changes``'s lowercase ``severity``
+    vocabulary via :data:`_NO_BASELINE_VERDICT_TO_SEVERITY`.
+
+    Modeled as ``mode="scan"`` + ``scan_audit_only=True`` rather than a new
+    mode value: this is exactly the shape legacy ``scan``'s own audit-only
+    path (``pr_comment_scan.from_scan``'s ``audit_only`` branch) already
+    renders -- "ran, found candidate-side findings, but no baseline to
+    compare against" -- so it reuses that rendering (headline wording,
+    ``scan_note``) for what is the same underlying situation now reached
+    through a different CLI, rather than duplicating it.
+
+    Without this branch, ``build_model`` fell through to ``_from_compare``,
+    which reads ``report["changes"]`` -- always ``[]`` on a no-baseline
+    report, since a real finding lives under the top-level ``findings`` key
+    instead -- so a gating audit finding rendered as "No ABI changes" and,
+    under the default ``pr-comment-on: changes``, was never posted at all
+    (Codex review, PR #1210).
+    """
+    findings_raw = report.get("findings")
+    changes_shaped: list[dict[str, object]] = []
+    if isinstance(findings_raw, list):
+        for f in findings_raw:
+            if not isinstance(f, dict):
+                continue
+            item = dict(f)
+            item["severity"] = _NO_BASELINE_VERDICT_TO_SEVERITY.get(
+                str(item.get("verdict", "")), "unknown"
+            )
+            changes_shaped.append(item)
+    breaking, review, safe, incomplete = _bucket_changes(
+        changes_shaped, gate_api_break, {}
+    )
+    incomplete_blocking = _incomplete_is_blocking(
+        incomplete, gate_api_break, gate_breaking, {}
+    )
+    incomplete = incomplete + _contract_coverage_findings(report)
+    contract_exit = report.get("contract_coverage_exit_contribution")
+    contract_coverage_blocking = isinstance(contract_exit, int) and contract_exit >= 1
+    if contract_coverage_blocking:
+        incomplete_blocking = True
+    suppressed_count = report.get("suppressed_count")
+    return CommentModel(
+        mode="scan",
+        subject=str(report.get("library", "artifact")),
+        old_label="baseline",
+        new_label=str(report.get("new_version", "candidate")),
+        policy=str(report.get("policy", "strict_abi")),
+        breaking=breaking,
+        review=review,
+        safe=safe,
+        incomplete=incomplete,
+        incomplete_blocking=incomplete_blocking,
+        contract_coverage_blocking=contract_coverage_blocking,
+        breaking_categories=_breaking_categories(breaking),
+        breaking_severities=_breaking_severities(breaking),
+        scan_audit_only=True,
+        suppressed_count=suppressed_count if isinstance(suppressed_count, int) else 0,
+    )
+
+
 def _from_appcompat(
     report: dict[str, object],
     gate_api_break: bool = False,
@@ -948,6 +1036,8 @@ def build_model(
         return _from_appcompat(report, gate_api_break, gate_breaking)
     if "scan_schema_version" in report:
         return from_scan(report, gate_api_break, gate_breaking)
+    if "audit_report_schema_version" in report:
+        return _from_no_baseline(report, gate_api_break, gate_breaking)
     return _from_compare(report, gate_api_break, gate_breaking)
 
 

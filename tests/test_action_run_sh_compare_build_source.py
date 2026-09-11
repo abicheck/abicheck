@@ -262,6 +262,37 @@ class TestScanModeForwardsCrossCompilerFlags:
         assert overlay["compile"]["options"] == ["-D__ARM_NEON"]
         assert overlay["compile"]["sysroot"] == "/opt/sysroots/aarch64"
 
+    def test_quoted_whitespace_atom_matches_compare_mode_synthesis(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review, PR #1210: legacy `scan`'s own removed
+        `--compiler-option` CLI flag forwarded a whitespace-containing atom
+        (e.g. `-DMSG="hello world"`) verbatim as one real CLI arg, never
+        subject to `compile.options`' own one-atom-per-entry, whitespace-
+        free contract (that check only ever applied to a config *file*
+        value). Since `scan` has no CLI of its own left to take advantage
+        of that any more (ADR-068), it now synthesizes the identical
+        single-item, whitespace-containing `compile.options` entry
+        `TestCompareModeForwardsCrossCompilerFlags.
+        test_quoted_whitespace_atom_stays_one_atom` below proves compare
+        mode already produces -- same synthesis helper, same accepted
+        outcome (`BuildConfig._safe_compile_atom` rejects it at parse time
+        with a clear error; this test only proves what reaches that
+        parser, not the parser's own behavior, which is exercised
+        elsewhere against `abicheck/buildsource/build_config.py` directly).
+        """
+        result, _captured, captured_config = _run_scan_against_raw(
+            {
+                "INPUT_AGAINST": "",
+                "INPUT_GCC_OPTIONS": '-DMSG="hello world"',
+            },
+            tmp_path,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        with open(captured_config, encoding="utf-8") as f:
+            overlay = json.load(f)
+        assert overlay["compile"]["options"] == ["-DMSG=hello world"]
+
 
 class TestCompareModeForwardsCrossCompilerFlags:
     """The gcc-path/gcc-prefix/gcc-options/sysroot inputs are documented root-
@@ -295,6 +326,22 @@ class TestCompareModeForwardsCrossCompilerFlags:
         assert "--compiler-prefix" not in cmd
         assert "--compiler-option" not in cmd
         assert "--sysroot" not in cmd
+
+    def test_quoted_whitespace_atom_stays_one_atom(self, tmp_path: Path) -> None:
+        """A single-line `gcc-options` value is shell-quoting-aware split
+        (`shlex.split`), so a quoted segment stays one flag -- but that one
+        flag can still contain an embedded space once its quotes are
+        stripped (`-DMSG="hello world"` -> one atom, `-DMSG=hello world`,
+        with a literal space inside it). `add_compile_context_flags` never
+        re-splits on that internal space -- it is `BuildConfig.
+        _safe_compile_atom` (a separate module, exercised directly
+        elsewhere) that then rejects a `compile.options` entry containing
+        one at parse time. `TestScanModeForwardsCrossCompilerFlags.
+        test_quoted_whitespace_atom_matches_compare_mode_synthesis` above
+        proves `scan` now produces the identical overlay."""
+        cmd = _run_compare({"INPUT_GCC_OPTIONS": '-DMSG="hello world"'}, tmp_path)
+        compile_blk = _compile_overlay_from_cmd(cmd, tmp_path)
+        assert compile_blk["options"] == ["-DMSG=hello world"]
 
 
 class TestCompareModeSkipsEvidenceFlagsForDirectoryOperands:

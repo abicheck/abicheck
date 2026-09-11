@@ -373,9 +373,18 @@ add_single_flag() {
 # Action's own cross-compilation inputs (ast-frontend/gcc-path/gcc-prefix/
 # gcc-options/sysroot/nostdinc/lang) still exist, so forwarding them now
 # means synthesizing a `compile:` block into a project config the run reads
-# via --config, instead of passing per-run flags. `scan` is unaffected --
-# it keeps every one of these flags, so its own call site (mode: scan)
-# still uses add_single_flag/add_flag_shlex_split directly, unchanged.
+# via --config, instead of passing per-run flags. `scan` is no longer an
+# exception (ADR-068's second 2026-09-09/2026-09-10 amendments retired its
+# own CLI entirely, this Action's own mode: scan translates unconditionally
+# to `compare`/`compare --no-baseline`) -- its call site now calls this same
+# `add_compile_context_flags` helper too, same as dump/single-pair compare,
+# rather than the removed add_single_flag/add_flag_shlex_split-direct
+# forwarding an earlier Action version used here. One real, accepted
+# narrowing this brings: `compile.options` (below) rejects any entry
+# containing whitespace, where scan's own removed --compiler-option CLI
+# flag forwarded such a flag verbatim (see `gcc-options`'s own action.yml
+# description for the full account) -- scan has no CLI path left to take
+# advantage of that any more.
 #
 # When the caller ALSO names their own build-config, this Action merges the
 # two: the synthesized compile: overlay is folded into a COPY of the named
@@ -1135,10 +1144,10 @@ _compile_context_sources_pairwise() {
 
 add_compile_context_flags() {
   # $1: "true" to also fold the `lang` input into the synthesized overlay
-  # (dump, single-pair compare, and scan's translated-to-compare branch --
-  # see _compile_context_sources_pairwise's own docstring above -- all take
-  # --lang here; only the *legacy* scan CLI branch keeps its own literal
-  # --lang flag and never calls this function at all).
+  # (dump, single-pair compare, and scan -- which has no CLI of its own left
+  # to take a literal --lang flag at all any more, ADR-068's second
+  # 2026-09-09/2026-09-10 amendments -- see _compile_context_sources_
+  # pairwise's own docstring above -- all take --lang here now).
   local include_lang="${1:-true}"
   # action.yml maps an omitted `lang` input to INPUT_LANG=c++ -- that is the
   # *default*, not a user override, so it must not by itself count as "lang

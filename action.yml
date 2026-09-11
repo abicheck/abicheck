@@ -228,52 +228,58 @@ inputs:
     required: false
   gcc-path:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary. On scan, maps to the
-      CLI's --compiler; on dump and single-pair compare, Phase 7 removed
-      that flag from the CLI entirely, so this Action folds it (together
-      with gcc-prefix, gcc-options, sysroot, and nostdinc, when any of
-      those are also set) into a synthesized .abicheck.yml compile: block
-      forwarded via --config instead. Applies to dump, scan, and compare
-      mode with a single-pair (non-directory, non-package) operand — a
-      directory/package compare rejects it with an error (same
-      restriction as ast-frontend above). Combining any of this group with
-      build-config is supported: the synthesized compile: block is merged
-      into a copy of the named build-config, and this Action's input wins
-      on a key conflict.
+      Path to GCC/G++ (or clang) cross-compiler binary. `scan` has no CLI
+      of its own left at all (this Action always translates it to
+      `compare`/`compare --no-baseline`, ADR-068) — like dump and
+      single-pair compare, it folds into a synthesized .abicheck.yml
+      compile: block forwarded via --config (together with gcc-prefix,
+      gcc-options, sysroot, and nostdinc, when any of those are also set).
+      Applies to dump, scan, and compare mode with a single-pair (non-
+      directory, non-package) operand — a directory/package compare
+      rejects it with an error (same restriction as ast-frontend above).
+      Combining any of this group with build-config is supported: the
+      synthesized compile: block is merged into a copy of the named
+      build-config, and this Action's input wins on a key conflict.
     required: false
   gcc-prefix:
     description: >
-      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. On scan, maps to the
-      CLI's --compiler-prefix; on dump and single-pair compare, it folds
-      into the same synthesized compile: block gcc-path describes above
-      (a full gcc-path wins if both are set, since the merged compile.compiler
-      config key can only hold one). Applies to dump, scan, and compare mode
-      with a single-pair (non-directory, non-package) operand — a
-      directory/package compare rejects it with an error (same restriction
-      as ast-frontend above).
+      Cross-toolchain prefix, e.g. aarch64-linux-gnu-. Folds into the same
+      synthesized compile: block gcc-path describes above, on every mode
+      that accepts it (a full gcc-path wins if both are set, since the
+      merged compile.compiler config key can only hold one). Applies to
+      dump, scan, and compare mode with a single-pair (non-directory,
+      non-package) operand — a directory/package compare rejects it with
+      an error (same restriction as ast-frontend above).
     required: false
   gcc-options:
     description: >
-      Extra compiler flags passed through to the header frontend. On scan,
-      maps to the CLI's --compiler-option; on dump and single-pair compare,
-      it folds into a synthesized compile.options list in the same
-      synthesized compile: block gcc-path describes above. A single-line
+      Extra compiler flags passed through to the header frontend. Folds
+      into a synthesized compile.options list in the same synthesized
+      compile: block gcc-path describes above, on every mode that accepts
+      it -- including scan, which has no CLI of its own left to forward a
+      raw --compiler-option flag to any more (ADR-068: this Action always
+      translates it to compare/compare --no-baseline). A single-line
       value is shell-quoting-aware split on whitespace into separate flags
-      (a quoted segment such as -DMSG="hello world" stays one flag); a
-      multi-line (YAML block scalar) value treats each line as one already-
-      complete flag, not split further. On scan, that per-line flag is
-      forwarded verbatim as one --compiler-option occurrence even if it
-      contains a space; on dump and single-pair compare, each synthesized
-      compile.options entry must be a single whitespace-free flag, so a
-      line containing a space is rejected with a clear error rather than
-      silently accepted — put each word needing its own flag on its own
-      line instead. Applies to dump, scan, and compare mode with a
+      (a quoted segment such as -DMSG="hello world" stays one flag, but
+      that one flag still contains a space internally); a multi-line
+      (YAML block scalar) value treats each line as one already-complete
+      flag, not split further. Either way, each resulting compile.options
+      entry must be a single whitespace-free flag -- a flag containing a
+      space (whether from a quoted single-line segment or a spaced
+      multi-line entry) is rejected with a clear error rather than
+      silently accepted or silently split further; put each word needing
+      its own flag on its own line instead. This is a real, accepted
+      narrowing from an earlier Action version, where scan's own removed
+      --compiler-option CLI flag forwarded such a flag verbatim (a raw CLI
+      arg is not subject to compile.options' own whitespace-free-atom
+      contract) -- scan has no such CLI path left to take advantage of
+      that any more. Applies to dump, scan, and compare mode with a
       single-pair (non-directory, non-package) operand — a directory/
       package compare rejects it with an error (same restriction as
       ast-frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (scan and deps-tree keep their own direct --sysroot/CLI forwarding). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump, scan, and single-pair compare this folds into the same synthesized compile: block gcc-path describes above (deps-tree keeps its own direct --sysroot CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, scan, deps-tree, and compare mode with a single-pair (non-directory, non-package) operand — a directory/package compare rejects it with an error (same restriction as ast-frontend above).'
     required: false
   nostdinc:
     description: >
