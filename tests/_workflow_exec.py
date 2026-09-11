@@ -34,6 +34,7 @@ and stays structural.
 
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import subprocess
@@ -43,6 +44,10 @@ from typing import Any
 
 import pytest
 import yaml
+
+#: Distinguishes the per-invocation step-body script files `run_step` writes,
+#: so two calls sharing one tmp_path never race on the same name.
+_BODY_COUNTER = itertools.count()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -249,13 +254,25 @@ def run_step(
     step_env.update({k: str(v) for k, v in (step.get("env") or {}).items()})
     step_env.update(env or {})
 
+    # The body goes to a real script file rather than `bash -c <body>`, which
+    # is both what the runner itself does (`bash -e {0}`, a generated script)
+    # and the only form that has no length ceiling: Windows caps a process
+    # command line at 32767 characters, so a long `run:` body (the
+    # `assurance_overlay` step in `actions/check-target/action.yml` is ~50 KB)
+    # raised `FileNotFoundError: [WinError 206] The filename or extension is
+    # too long` before bash ever started — every executing test in the module
+    # failing for a reason unrelated to the step it models. The file lives
+    # beside the workspace, not inside it, so `StepResult.tree()` and the
+    # `$RUNNER_TEMP` assertions keep seeing only what the step itself created.
+    body = workspace.parent / f"_step_body_{os.getpid()}_{next(_BODY_COUNTER)}.sh"
+    body.write_text(step["run"], encoding="utf-8")
     proc = subprocess.run(
         # `-e` as well as pipefail: the runner invokes a `run:` body as
         # `bash -e {0}` (and `-eo pipefail` for `shell: bash`), so without it a
         # command failing mid-body left returncode 0 here while the real step
         # failed — every `assert result.returncode == 0` in the workflow tests
         # was weaker than the thing it models (CodeRabbit review).
-        [bash_executable(), "-eo", "pipefail", "-c", step["run"]],
+        [bash_executable(), "-eo", "pipefail", str(body).replace("\\", "/")],
         cwd=workspace,
         env=step_env,
         capture_output=True,
