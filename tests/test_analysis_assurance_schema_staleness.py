@@ -315,3 +315,41 @@ class TestSchemaStalenessStatus:
         aa = result.analysis_assurance
         assert aa.schema_staleness_status == "clean"
         assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_self_diff_never_taints_the_no_baseline_audit(self) -> None:
+        """Codex review, PR #1209 round 6: ``workflows.no_baseline_compare``
+        audits a candidate with no real baseline by calling ``checker.
+        compare(new, new, ...)`` -- the literal same object as both sides --
+        to reuse the ordinary comparison machinery, then discards the
+        (asserted-empty) comparison half and keeps only the candidate-side
+        hygiene findings. A stale candidate's own degraded fact must not
+        make that audit read ``"partial"``/``"degraded"``: no real pairwise
+        comparison ever happens (comparing a value against itself can never
+        produce a false pairwise finding, reliable or not), so reporting it
+        as both a stale "old snapshot" and a stale "new snapshot" would be
+        double-counting the one candidate's own degradation as if it were
+        two distinct sides."""
+        old, new = _header_pair()
+        new.param_kind_facts_reliable = False
+        assert degraded_reliability_facts(new) == ["param_kind_facts_reliable"]
+
+        result = checker.compare(new, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("param_kind_facts_reliable" in n for n in aa.notes), aa.notes
+        assert not any("old snapshot" in n or "new snapshot" in n for n in aa.notes), (
+            aa.notes
+        )
+
+        # The mirror: two independently-built (merely content-identical,
+        # not object-identical) snapshots must NOT take this shortcut --
+        # real object identity is what this checks, never equal content.
+        new_copy = AbiSnapshot(
+            version=new.version,
+            library=new.library,
+            functions=list(new.functions),
+            from_headers=new.from_headers,
+            param_kind_facts_reliable=False,
+        )
+        result2 = checker.compare(new, new_copy)
+        assert result2.analysis_assurance.schema_staleness_status == "degraded"

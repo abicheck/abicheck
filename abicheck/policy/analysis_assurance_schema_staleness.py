@@ -153,7 +153,33 @@ def schema_staleness_status(
     THIS comparison, whether or not the other side is current -- except the
     two :data:`_PAIR_PRODUCER_GATED_FLAGS` flags, which :func:`_pair_aware_
     degraded_facts` narrows first.
+
+    ``old is new`` (real Python object identity, not merely equal content)
+    is a self-diff -- the exact shape ``workflows.no_baseline_compare``'s
+    audit path builds via ``_diff_pair(new, new, ...)`` to reuse the
+    ordinary comparison machinery for a candidate with no real baseline,
+    then asserts the *comparison* half of the resulting changes is empty
+    and discards it, keeping only the candidate-side hygiene/pattern-scan
+    findings (Codex review, PR #1209 round 6). Every ``*_facts_reliable``
+    flag exists to guard exactly one thing -- a false PAIRWISE finding from
+    comparing two independently-extracted sides whose evidence generations
+    differ -- and comparing a value against itself can never produce one,
+    reliable or not, the identical reason ``_l0_context_status``/
+    ``_header_context_status``/``_dwarf_context_status``/etc. are all
+    already trivially ``"clean"``/``"not_evaluated"`` under self-pairing
+    (their own OLD-vs-NEW agreement checks are vacuously true). Reading
+    ``old``/``new`` as two distinct sides here -- reporting the one
+    candidate's own staleness as BOTH "old snapshot" and "new snapshot" --
+    would otherwise be the one context-status field self-pairing does NOT
+    make safe by construction, purely because it asks a per-side question
+    ("is THIS side's flag False") rather than a cross-side agreement
+    question. A user-supplied ``compare foo.so foo.so`` (two independently
+    parsed, merely content-identical snapshots) never hits this: real
+    identity, not equal content, is what this checks, and two separate
+    parses are always two separate objects.
     """
+    if old is new:
+        return "clean", []
     old_degraded = _pair_aware_degraded_facts(old, new)
     new_degraded = _pair_aware_degraded_facts(new, old)
     if not old_degraded and not new_degraded:
