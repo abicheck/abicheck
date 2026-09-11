@@ -291,101 +291,116 @@ def resolve_release_compare_plan(
         allocated_temp_dirs.append(path)
         return path
 
-    (
-        old_debug_dir,
-        new_debug_dir,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
-        old_map,
-        new_map,
-        warning_msgs,
-        matched_keys,
-        old_unclassified,
-        new_unclassified,
-        old_inventory,
-        new_inventory,
-    ) = _prepare_compare_release_inputs(
-        request.old_dir,
-        request.new_dir,
-        request.debug_info1,
-        request.debug_info2,
-        request.devel_pkg1,
-        request.devel_pkg2,
-        request.include_private_dso,
-        request.dso_only,
-        request.headers,
-        request.old_headers_only,
-        request.new_headers_only,
-        request.includes,
-        request.old_includes_only,
-        request.new_includes_only,
-        request.config_includes,
-        _do_extract,
-        discover_shared_libraries,
-        is_package,
-        _is_elf_shared_object,
-        old_variant=request.old_variant,
-        new_variant=request.new_variant,
-        make_temp_dir=_make_temp_dir,
-    )
+    try:
+        (
+            old_debug_dir,
+            new_debug_dir,
+            old_h,
+            new_h,
+            old_inc,
+            new_inc,
+            old_map,
+            new_map,
+            warning_msgs,
+            matched_keys,
+            old_unclassified,
+            new_unclassified,
+            old_inventory,
+            new_inventory,
+        ) = _prepare_compare_release_inputs(
+            request.old_dir,
+            request.new_dir,
+            request.debug_info1,
+            request.debug_info2,
+            request.devel_pkg1,
+            request.devel_pkg2,
+            request.include_private_dso,
+            request.dso_only,
+            request.headers,
+            request.old_headers_only,
+            request.new_headers_only,
+            request.includes,
+            request.old_includes_only,
+            request.new_includes_only,
+            request.config_includes,
+            _do_extract,
+            discover_shared_libraries,
+            is_package,
+            _is_elf_shared_object,
+            old_variant=request.old_variant,
+            new_variant=request.new_variant,
+            make_temp_dir=_make_temp_dir,
+        )
 
-    old_stored = request.old_dir.is_dir() and is_project_snapshot_package_dir(
-        request.old_dir
-    )
-    new_stored = request.new_dir.is_dir() and is_project_snapshot_package_dir(
-        request.new_dir
-    )
-    old_complete = old_stored and stored_side_inventory_complete(
-        request.old_dir, variant_id=request.old_variant
-    )
-    new_complete = new_stored and stored_side_inventory_complete(
-        request.new_dir, variant_id=request.new_variant
-    )
-    inventory_evidence = release_inventory_evidence(
-        old_stored=old_stored,
-        new_stored=new_stored,
-        old_complete=old_complete,
-        new_complete=new_complete,
-        direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
-        new_single_artifact=request.new_dir.is_file()
-        and not is_package(request.new_dir),
-        old_unclassified=old_unclassified,
-        new_unclassified=new_unclassified,
-        old_inventory=old_inventory,
-        new_inventory=new_inventory,
-    )
+        old_stored = request.old_dir.is_dir() and is_project_snapshot_package_dir(
+            request.old_dir
+        )
+        new_stored = request.new_dir.is_dir() and is_project_snapshot_package_dir(
+            request.new_dir
+        )
+        old_complete = old_stored and stored_side_inventory_complete(
+            request.old_dir, variant_id=request.old_variant
+        )
+        new_complete = new_stored and stored_side_inventory_complete(
+            request.new_dir, variant_id=request.new_variant
+        )
+        inventory_evidence = release_inventory_evidence(
+            old_stored=old_stored,
+            new_stored=new_stored,
+            old_complete=old_complete,
+            new_complete=new_complete,
+            direct_pair=list(matched_keys) == [DIRECT_PAIR_KEY],
+            new_single_artifact=request.new_dir.is_file()
+            and not is_package(request.new_dir),
+            old_unclassified=old_unclassified,
+            new_unclassified=new_unclassified,
+            old_inventory=old_inventory,
+            new_inventory=new_inventory,
+        )
 
-    plan_matched_keys = matched_keys
-    if request.release_selection is not None and list(matched_keys) != [
-        DIRECT_PAIR_KEY
-    ]:
-        plan_matched_keys = [k for k in matched_keys if k in request.release_selection]
+        plan_matched_keys = matched_keys
+        if request.release_selection is not None and list(matched_keys) != [
+            DIRECT_PAIR_KEY
+        ]:
+            plan_matched_keys = [
+                k for k in matched_keys if k in request.release_selection
+            ]
 
-    scope_plan = resolve_release_scope_plan(
-        old_map, new_map, plan_matched_keys, inventory_evidence
-    )
+        scope_plan = resolve_release_scope_plan(
+            old_map, new_map, plan_matched_keys, inventory_evidence
+        )
 
-    gate = resolve_release_gate_options(
-        request.pack_application,
-        severity_preset=request.severity_preset,
-        severity_abi_breaking=request.severity_abi_breaking,
-        severity_potential_breaking=request.severity_potential_breaking,
-        severity_quality_issues=request.severity_quality_issues,
-        severity_addition=request.severity_addition,
-        on_incomplete_scope=request.on_incomplete_scope,
-        fail_on_removed_library=request.fail_on_removed_library,
-    )
+        gate = resolve_release_gate_options(
+            request.pack_application,
+            severity_preset=request.severity_preset,
+            severity_abi_breaking=request.severity_abi_breaking,
+            severity_potential_breaking=request.severity_potential_breaking,
+            severity_quality_issues=request.severity_quality_issues,
+            severity_addition=request.severity_addition,
+            on_incomplete_scope=request.on_incomplete_scope,
+            fail_on_removed_library=request.fail_on_removed_library,
+        )
 
-    degraded = stored_degraded_members(
-        request.old_dir,
-        request.new_dir,
-        dict(scope_plan.old_map),
-        dict(scope_plan.new_map),
-        old_variant=request.old_variant,
-        new_variant=request.new_variant,
-    )
+        degraded = stored_degraded_members(
+            request.old_dir,
+            request.new_dir,
+            dict(scope_plan.old_map),
+            dict(scope_plan.new_map),
+            old_variant=request.old_variant,
+            new_variant=request.new_variant,
+        )
+    except BaseException:
+        # Codex review (PR #1215, second finding): a failure partway
+        # through resolution -- an old-side archive already extracted
+        # before a malformed new-side stored-package variant raises, or a
+        # later inventory/degraded-marker read failing -- must not leave
+        # whatever this call already allocated behind just because no
+        # ReleaseComparePlan was ever returned for a caller to clean up.
+        import shutil
+
+        for path in allocated_temp_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+        raise
 
     return ReleaseComparePlan(
         request=request,

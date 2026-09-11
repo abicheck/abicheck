@@ -29,6 +29,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from test_compare_release import _invoke, _snap, _write_snap
 
 from abicheck.frontends.cli.release_compare_request import (
@@ -221,3 +222,38 @@ class TestTempDirTracking:
         )
         assert plan.temp_dirs == ()
         cleanup_release_compare_plan(plan)  # must not raise
+
+    def test_a_directory_allocated_before_a_later_failure_is_still_removed(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review (PR #1215, second finding): a temp dir allocated by
+        ``_prepare_compare_release_inputs`` (e.g. for the old side) must not
+        survive a failure raised *after* that allocation but *before* a
+        ``ReleaseComparePlan`` is ever returned -- there is no plan for a
+        caller to pass to :func:`cleanup_release_compare_plan` in that case,
+        so this module's own resolution must clean up after itself."""
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+
+        created: list[Path] = []
+
+        def _fake_resolve_release_package_side(side_dir, variant_id, make_temp_dir, *, side):
+            path = make_temp_dir(f"abicheck_relpkg_{side}_")
+            created.append(path)
+            if side == "new":
+                raise RuntimeError("simulated failure after the old side allocated")
+            return None
+
+        with patch(
+            "abicheck.cli_compare_release_matrix._resolve_release_package_side",
+            side_effect=_fake_resolve_release_package_side,
+        ):
+            request = ReleaseCompareRequest(old_dir=old_dir, new_dir=new_dir)
+            with pytest.raises(RuntimeError, match="simulated failure"):
+                resolve_release_compare_plan(request)
+
+        assert created  # both sides' factories ran before the raise
+        assert not any(p.exists() for p in created)
