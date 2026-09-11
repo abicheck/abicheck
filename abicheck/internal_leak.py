@@ -41,7 +41,7 @@ import collections
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .buildsource.call_graph import (
     CALL_KIND_FUNCTION_POINTER,
@@ -975,16 +975,16 @@ def compute_call_graph_leak_paths(
 
     Requires an embedded L5 graph (``--sources``/``--build-info``, or the
     now-always-on L2 header-only graph) with at least one relevant edge;
-    returns ``{}``
-    otherwise — never an error, mirroring
+    returns ``{}`` otherwise — never an error, mirroring
     :func:`~abicheck.buildsource.poi.resolve_changed_paths_public_impact`'s
     degrade contract, so a project with no build-source evidence sees no
     behavior change at all.
     """
     build_source = getattr(snap, "build_source", None)
-    graph = build_source.source_graph if build_source is not None else None
+    graph = snap.surface_graph or (build_source.source_graph if build_source else None)
     if graph is None or not getattr(graph, "nodes", None):
         return {}
+    graph = cast("SourceGraphSummary", graph)
 
     from .buildsource.source_graph_findings import _format_dependency_path
     from .buildsource.source_graph_query import is_consumer_compiled_public_entry

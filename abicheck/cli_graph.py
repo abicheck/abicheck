@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -68,6 +68,17 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
         ) from exc
     if not isinstance(data, dict):
         raise click.ClickException(f"{path} must contain a JSON object.")
+    # ADR-063 Phase 10: a full snapshot document (e.g. one written by `dump
+    # --sources -o out.abi.json`) carries its L5 graph nested under
+    # `surface_graph` (the canonical location, schema v29+) or
+    # `build_source.source_graph` (a pre-Phase-3 document, or the fallback
+    # when `surface_graph` was never populated), never as top-level
+    # `nodes`/`edges` -- accept that shape, preferring `surface_graph`, before
+    # falling through to the bare-graph-JSON contract below. See
+    # `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 10 checklist.
+    embedded = _embedded_source_graph_dict(data)
+    if embedded is not None:
+        return SourceGraphSummary.from_dict(embedded)
     # SourceGraphSummary.from_dict is intentionally forgiving (it defaults a
     # missing nodes/edges to empty), so guard here: an unrelated JSON file (e.g.
     # a pack manifest) would otherwise load as an empty graph and report a bogus
@@ -80,6 +91,26 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
             "(expected top-level 'nodes' and 'edges' lists)."
         )
     return SourceGraphSummary.from_dict(data)
+
+
+def _embedded_source_graph_dict(data: dict[str, Any]) -> dict[str, Any] | None:
+    """The nested L5 graph dict inside a full snapshot document, ADR-063
+    Phase 10's fallback rule applied to a raw JSON dict rather than a live
+    ``AbiSnapshot``: prefers the canonical top-level ``surface_graph`` key,
+    falling back to the legacy ``build_source.source_graph`` nested key only
+    when ``surface_graph`` is absent. Returns ``None`` when *data* carries
+    neither key at all -- i.e. it isn't a snapshot document -- so the caller
+    falls through to the bare-graph-JSON contract instead.
+    """
+    graph = data.get("surface_graph")
+    if isinstance(graph, dict):
+        return graph
+    build_source = data.get("build_source")
+    if isinstance(build_source, dict):
+        graph = build_source.get("source_graph")
+        if isinstance(graph, dict):
+            return graph
+    return None
 
 
 def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:

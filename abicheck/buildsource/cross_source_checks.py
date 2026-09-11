@@ -626,7 +626,7 @@ def _check_private_header_leak(
     # so checking presence alone would record a provider with no fact behind it and
     # mask regressions in real source-graph extraction (ADR-035 D4 coverage honesty
     # — Codex review).
-    sg = (
+    sg = snapshot.surface_graph or (
         snapshot.build_source.source_graph
         if snapshot.build_source is not None
         else None
@@ -1003,7 +1003,7 @@ def _check_public_to_internal_dependency(
     advisory naming what to enable — it is never counted clean.
     """
     providers = [PROVIDER_SOURCE_INDEX]
-    graph = (
+    graph = snapshot.surface_graph or (
         snapshot.build_source.source_graph
         if snapshot.build_source is not None
         else None
@@ -1015,6 +1015,7 @@ def _check_public_to_internal_dependency(
             "no L5 source graph on the snapshot (run --depth source)",
             providers,
         )
+    assert isinstance(graph, SourceGraphSummary)  # narrow SurfaceGraphLike
     if not any(e.kind in _DEPENDENCY_EDGE_KINDS for e in graph.edges):
         return _CheckOutput(
             [],

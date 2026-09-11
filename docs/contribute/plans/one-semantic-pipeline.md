@@ -16979,6 +16979,59 @@ not new design.
   alias assignment in the L5 builder — the one piece this row can actually
   remove once every reader stops going through it.
 
+  **Five-reader migration landed.** All five named readers
+  (`internal_leak.py`, `buildsource/cross_source_checks.py`'s two call
+  sites, `buildsource/evidence_report.py`, `evidence_depth.py`,
+  `cli_graph.py`) now read `graph = snap.surface_graph or
+  (snap.build_source.source_graph if snap.build_source else None)` (or the
+  pack-aware equivalent for a call site whose *pack* may be an out-of-band
+  one the caller resolved independently of the snapshot —
+  `evidence_report._side_source_graph`/`evidence_depth._l5_payload_empty`
+  only substitute `surface_graph` when the pack in hand actually **is**
+  `snap.build_source`, never for an unrelated `--old/new-build-info`/
+  `--old/new-sources` pack, per those two modules' own pre-existing "never
+  default *pack* to `snap.build_source`" contract). `cli_graph.py`'s
+  `_load_source_graph` has no `AbiSnapshot` in scope at all (it loads a
+  bare graph JSON file or an out-of-band pack directory), so its migration
+  is the dict-shaped analogue: a full embedded-snapshot JSON document is
+  now recognized and its graph read preferring the top-level
+  `surface_graph` key over the nested `build_source.source_graph` one.
+  `tests/test_surface_graph_reader_migration.py` pins output parity
+  between the pre-Phase-3 shape (`surface_graph` absent) and the
+  post-Phase-3 shape (`surface_graph` populated) for all five.
+
+  **The in-memory alias-assignment deletion is NOT done, and is being left
+  open rather than forced through unverified.** The one place that builds
+  the alias — `service_header_graph_attach.py`'s `_attach_header_graph` —
+  threads one shared `SourceGraphSummary` instance into
+  `AbiSnapshot.surface_graph` *and* a synthesized `snap.build_source`
+  (`BuildSourcePack(root=Path(""), source_graph=graph)`) for the
+  always-on, header-only (L2) graph case, purely so a legacy
+  `build_source.source_graph` reader still sees it even when no
+  `--sources`/`--build-info` ran. A real audit for this row (not limited to
+  the five named readers) found this synthesized pack has further
+  production readers this checklist never named: coverage reporting
+  (`evidence_report.optional_coverage`/`layer_presence`,
+  `evidence_report.detect_coverage_asymmetry`), `cli_buildsource.py`'s own
+  `_layer_payload_empty`/`build_source_already_satisfies`, and
+  `buildsource/embed.py`'s own `--sources`/`--build-info` backfill logic
+  (`existing = snap.build_source; ... existing.source_graph is not None`)
+  — every one of them would silently regress (reporting `NOT_COLLECTED`
+  L5 coverage for a plain header-only dump, or skipping the header-only
+  graph backfill entirely) if `_attach_header_graph` stopped populating
+  `snap.build_source` for this case. None of those call sites were part of
+  this row's five-reader scope, and auditing and migrating them too is a
+  materially larger, separately-scoped change than this row's own text
+  anticipated ("the one piece this row can actually remove" undersold the
+  blast radius). Per this file's own root-`AGENTS.md`-inherited
+  decision-making principles ("if a genuinely general fix isn't feasible
+  in one pass, say so explicitly and record the gap"), that deletion is
+  left as an explicitly named, separately-scoped follow-up rather than
+  performed against an incomplete audit. Until it lands, `git grep -n
+  "surface_graph = graph"` inside `service_header_graph_attach.py` still
+  finds the alias-construction site outside history — expected, and
+  tracked here rather than silently left implied-closed.
+
   **"Delete the legacy-document aliasing fallback in `snapshot_from_dict()`"
   is no longer this row's to do — that fallback was itself retracted
   earlier in this same phase (see the correction above), and a further

@@ -1165,8 +1165,34 @@ concepts:
       None outstanding for the shipped design (a deterministic closure
       walk over snapshot declarations). D5's own literal "traversal over
       one authoritative mergeable graph" text remains unfulfilled by
-      design (see Phase 3 (D5) amendment) rather than by an open gap;
-      AbiSnapshot.surface_graph itself still has no production reader.
+      design (see Phase 3 (D5) amendment) rather than by an open gap.
+      **Phase 10 checklist row landed:** AbiSnapshot.surface_graph now has
+      five real production readers -- internal_leak.py,
+      buildsource/cross_source_checks.py (two call sites),
+      buildsource/evidence_report.py, evidence_depth.py, and
+      cli_graph.py -- each preferring surface_graph and falling back to
+      the legacy build_source.source_graph nested field only when
+      surface_graph is absent (a pre-Phase-3 document never populates it).
+      tests/test_surface_graph_reader_migration.py pins output parity
+      between the two shapes per reader. **Not closed by this row:**
+      deleting the L5 builder's own in-memory identity-aliasing
+      (service_header_graph_attach.py's _attach_header_graph, which
+      threads one shared SourceGraphSummary instance into both
+      AbiSnapshot.surface_graph and a synthesized snap.build_source.
+      source_graph purely so a legacy build_source.source_graph reader
+      still sees the header-only graph). Investigation during this row
+      found strictly more readers of that synthesized pack than the five
+      named above -- coverage reporting (evidence_report.optional_coverage/
+      layer_presence), cli_buildsource.py's own _layer_payload_empty/
+      build_source_already_satisfies, and embed.py's own backfill logic
+      all depend on snap.build_source being populated for a plain
+      (--sources-less) dump -- so removing the synthesized pack outright is
+      a wider, separately-scoped change than "the five named readers",
+      not something this row's own audit covers. Recorded as an explicit
+      open gap per AGENTS.md's decision-making principles rather than
+      forced through unverified; tracked as a follow-up sub-item of this
+      same Phase 10 checklist row in
+      docs/contribute/plans/one-semantic-pipeline.md.
 
   analysis_plan:
     primitive: complete
