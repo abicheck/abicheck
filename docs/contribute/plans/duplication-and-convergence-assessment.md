@@ -2410,35 +2410,60 @@ witness: the new leaf module `extract/dwarf_vtable_completeness.py`'s
 existing ODR-duplicate branch) compares each non-retained, non-declaration
 duplicate DIE's own membership sets against the retained definition's, and
 `finalize_vtable_evidence_completeness` (a new post-CU-walk pass, run
-alongside the existing `_finalize_vptr_offsets`) downgrades
-`bases_fact`/`virtual_bases_fact`/`vtable_fact` to `Fact.partial(...)` —
-the *existing* `FactStatus` member whose own docstring ("covered only part
-of the requested scope... the uncovered part is unknown, not absent")
-already states exactly this claim. Both functions take the builder itself
+alongside the existing `_finalize_vptr_offsets`) downgrades exactly the
+sibling fact(s) among `bases_fact`/`virtual_bases_fact`/`vtable_fact` that
+actually disagreed to `Fact.partial(...)` — the *existing* `FactStatus`
+member whose own docstring ("covered only part of the requested scope...
+the uncovered part is unknown, not absent") already states exactly this
+claim. A record where all three genuinely disagree still gets all three
+downgraded; a record confined to one field (e.g. `vtable` only) leaves the
+other two `PRESENT` — a Codex review round found the first landed version
+of this slice downgraded all three as a blanket per-record decision
+whenever any one disagreed, which could suppress a genuinely evidenced
+`TYPE_BASE_CHANGED`/`BASE_CLASS_VIRTUAL_CHANGED` finding for a reason
+unconnected to bases/virtual_bases evidence at all; `builder._vtable_
+evidence_conflicts` is `dict[str, set[str]]` (qualified record name -> the
+disagreeing field subset), not `set[str]`, to track this. Both functions
+take the builder itself
 (duck-typed `Any`, no import of it) rather than several pieces of state
 individually, since `dwarf_snapshot.py` is already at its own
 `architecture/debt.yaml` `no_growth` line-count ceiling and needed its two
-call sites to stay one line each (that ceiling was still raised by 4 lines,
-1994 -> 1998, for the genuinely irreducible wiring: one import, one
-per-instance conflict-tracking set, and the two one-line call sites)
-— for every record where a disagreement was observed. `vptr_offset_bits_
-fact` is deliberately untouched (see `compare/vtable_evidence.py`'s own
-"NOT consulted here" note: that field carries a different, DWARF-partially-
-circular meaning already and touching it here would be a drive-by
-extension of a status `diff_layout._check_vptr_introduced` already relies
-on meaning something else for the direct-clang backend).
+call sites to stay one line each (that ceiling was raised in two small,
+rationale-carrying steps, 1994 -> 1998 for the genuinely irreducible
+wiring -- one import, one per-instance conflict-tracking set, and the two
+one-line call sites -- then 1998 -> 1999 for the `set[str]` ->
+`dict[str, set[str]]` annotation-type change the per-field fix above
+needed) — for every record where a disagreement was observed.
+`vptr_offset_bits_fact` is deliberately untouched (see
+`compare/vtable_evidence.py`'s own "NOT consulted here" note: that field
+carries a different, DWARF-partially-circular meaning already and
+touching it here would be a drive-by extension of a status
+`diff_layout._check_vptr_introduced` already relies on meaning something
+else for the direct-clang backend).
 
 `compare/vtable_evidence.vtable_transition_is_evidenced`'s own decline
 check — previously gated on `FactStatus.UNSUPPORTED` only, for
-`vtable_fact` only — now also declines on `FactStatus.PARTIAL`, and checks
-`bases_fact`/`virtual_bases_fact` alongside `vtable_fact` (all three,
-since `dwarf_snapshot.py` always downgrades them together — a disagreement
-on any one sibling casts doubt on all three, since they would all have
-come from the same discarded DIE). `diff_cxx_rules._transitive_bases`
-needed no code change: it already reads `bases_fact`/`virtual_bases_fact`
-through `_fact_str_list_confirmed`, which already treats any non-`PRESENT`
-status (`PARTIAL` included) as "not confirmed complete" — producing
-`PARTIAL` is what activates a gate that was already there.
+`vtable_fact` only — now also declines on `FactStatus.PARTIAL`, for
+`vtable_fact` at its own top-level gate (the whole function declines when
+either side's `vtable_fact` is `PARTIAL`/`UNSUPPORTED`) and for
+`virtual_bases_fact` at that field's own point of use (the final
+size/virtual-bases fallback branch, gated there rather than over the
+whole function). `bases_fact` is not part of this function's decline
+logic at all — this function never reads `bases`/`bases_fact` in the
+first place (only `diff_cxx_rules._transitive_bases` does, via the next
+sentence). A second Codex review round caught the first landed version of
+this consumer-side fix still gating the *whole* function on
+`bases_fact`/`virtual_bases_fact` alongside `vtable_fact` — reasoning
+(true of the pre-per-field producer, no longer true after the fix above)
+that a disagreement on any one sibling cast doubt on all three since the
+producer downgraded them together; once the producer stopped doing that,
+the consumer's own blanket gate started rejecting direct, non-empty
+vtable evidence for a record whose only disagreement was on `bases`.
+`diff_cxx_rules._transitive_bases` needed no code change: it already
+reads `bases_fact`/`virtual_bases_fact` through `_fact_str_list_confirmed`,
+which already treats any non-`PRESENT` status (`PARTIAL` included) as
+"not confirmed complete" — producing `PARTIAL` is what activates a gate
+that was already there.
 
 Verified with a dedicated bug-class test suite (AGENTS.md's "regression
 test targets the bug class" rule), not a single fixed reproducer:

@@ -246,11 +246,23 @@ concepts:
           type; the new extract/dwarf_vtable_completeness.py leaf module
           now compares that discarded copy's own bases/virtual_bases/vtable
           membership against the retained definition's before discarding
-          it, and downgrades all three sibling facts to
-          Fact.partial(...) (the existing FactStatus member, not a new one)
-          when they disagree. vtable_transition_is_evidenced's own decline
-          check now includes FactStatus.PARTIAL alongside UNSUPPORTED, for
-          bases_fact/virtual_bases_fact alongside vtable_fact.
+          it, and downgrades exactly the sibling fact(s) that actually
+          disagreed to Fact.partial(...) (the existing FactStatus member,
+          not a new one) -- per-field, not a blanket per-record decision
+          (a Codex review round found the first landed version downgraded
+          all three whenever any one disagreed; builder._vtable_evidence_
+          conflicts is dict[str, set[str]], not set[str], to track which
+          field(s) per record). vtable_transition_is_evidenced's own
+          decline check now includes FactStatus.PARTIAL alongside
+          UNSUPPORTED, gated per field at each field's own point of use:
+          vtable_fact at the function's top-level gate (both sides),
+          virtual_bases_fact at the final size/virtual-bases fallback
+          branch that actually reads it -- bases_fact is not part of this
+          function's decline logic at all, since this function never reads
+          bases/bases_fact (a second Codex round caught the first version
+          of this consumer-side fix still gating the whole function on
+          bases_fact/virtual_bases_fact together, which would suppress a
+          fully-evidenced vtable change whenever only bases disagreed).
           diff_cxx_rules._transitive_bases needed no code change -- it
           already treats any non-PRESENT status as incomplete via
           _fact_str_list_confirmed. vptr_offset_bits_fact is deliberately
