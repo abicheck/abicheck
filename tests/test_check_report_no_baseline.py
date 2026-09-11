@@ -263,3 +263,93 @@ class TestAugmentReportNoBaseline:
             gate_mode="advisory",
         )
         assert out["exit_axes"]["analysis_assurance"] == 0
+
+    def test_advisory_neutralizes_a_no_baseline_audits_exit_axes_contract_coverage(
+        self,
+    ) -> None:
+        """Codex review, third round, fresh evidence: `exit_axes.
+        contract_coverage` mirrors the *value* the generic contract-
+        coverage-block loop already zeroes at the dedicated root
+        `contract_coverage_exit_contribution` key this shape also carries
+        (`report/no_baseline.py` serializes the identical `coverage_exit_
+        floor(diff)` result under both names) -- but the generic loop only
+        rewrites that one key, leaving this copy stale. Left unzeroed, the
+        persisted document read self-contradictory: `contract_coverage_
+        exit_contribution: 0` beside `exit_axes.contract_coverage: 1`."""
+        out = augment_report(
+            self._no_baseline_report(exit_code=1)
+            | {
+                "contract_coverage_exit_contribution": 1,
+                "exit_axes": {
+                    "audit_gate": 0,
+                    "contract_coverage": 1,
+                    "analysis_assurance": 0,
+                    "evidence_contract": 0,
+                },
+            },
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_axes"]["contract_coverage"] == 0
+        assert out["contract_coverage_exit_contribution"] == 0
+
+    def test_advisory_recomputes_the_audit_documents_top_level_exit_code(
+        self,
+    ) -> None:
+        """Codex review, third round, fresh evidence: the document's own
+        top-level `exit_code` is computed once at construction time as
+        `max(exit_axes.values())` and was never recomputed here -- so an
+        advisory audit's *persisted* `exit_code` stayed at its original
+        nonzero value even after every axis inside `exit_axes` was
+        neutralized. The aggregate's own gate was never affected (it reads
+        the dedicated root key, not `exit_axes`/`exit_code`), but a
+        consumer reading this document's own canonical exit fields
+        directly was."""
+        out = augment_report(
+            self._no_baseline_report(exit_code=3)
+            | {
+                "exit_axes": {
+                    "audit_gate": 3,
+                    "contract_coverage": 0,
+                    "analysis_assurance": 0,
+                    "evidence_contract": 0,
+                    "incomplete_scope": 0,
+                    "no_comparison_completed": 0,
+                },
+            },
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_code"] == 0
+
+    def test_advisory_recomputed_exit_code_still_reflects_a_never_completed_axis(
+        self,
+    ) -> None:
+        """The recomputation must not fold away a genuine "never completed"
+        contribution just because every gate-worthy axis was neutralized --
+        `evidence_contract` stays, so the recomputed `exit_code` stays 7."""
+        out = augment_report(
+            self._no_baseline_report(exit_code=7)
+            | {
+                "exit_axes": {
+                    "audit_gate": 0,
+                    "contract_coverage": 0,
+                    "analysis_assurance": 0,
+                    "evidence_contract": 7,
+                    "incomplete_scope": 0,
+                    "no_comparison_completed": 0,
+                },
+            },
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="source",
+            gate_mode="advisory",
+        )
+        assert out["exit_code"] == 7

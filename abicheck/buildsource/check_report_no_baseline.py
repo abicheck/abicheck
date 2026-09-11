@@ -66,7 +66,9 @@ def no_baseline_effective_depth(
 
 def neutralize_no_baseline_axes(report: dict[str, Any]) -> None:
     """Zero a no-baseline audit's own ``exit_axes.audit_gate``/
-    ``.analysis_assurance`` in place, for ``gate-mode: advisory``.
+    ``.contract_coverage``/``.analysis_assurance`` in place -- and recompute
+    the document's own top-level ``exit_code`` to match -- for
+    ``gate-mode: advisory``.
 
     A `compare --no-baseline` audit's own AUDIT_GATE axis (ADR-068's
     2026-09-10 amendment) is a THIRD way this report can drive a blocking
@@ -90,19 +92,42 @@ def neutralize_no_baseline_axes(report: dict[str, Any]) -> None:
     own audit loader reads `exit_axes.analysis_assurance` directly (via
     `max()` against that always-absent dedicated key), so an unneutralized
     value there still gated an explicitly advisory
-    `require-complete-analysis: true` audit. `exit_axes.evidence_contract`
-    is deliberately left untouched -- it is a comparison-never-completed-
-    style failure, not a compatibility/assurance-style finding advisory
-    mode neutralizes, the same distinction the caller's own exit-block loop
-    draws for its own five "never completed" contributions.
+    `require-complete-analysis: true` audit.
+
+    `exit_axes.contract_coverage` (Codex review, third round, fresh
+    evidence) mirrors the *value* the caller's generic loop already zeroes
+    at the dedicated root `contract_coverage_exit_contribution` key this
+    shape also carries (`report/no_baseline.py` serializes the identical
+    `coverage_exit_floor(diff)` result under both names) -- but the generic
+    loop only rewrites that one key, leaving this copy stale. Left
+    unzeroed, the persisted document read self-contradictory --
+    `contract_coverage_exit_contribution: 0` beside `exit_axes.
+    contract_coverage: 1` -- and, since the document's own top-level
+    `exit_code` was computed once at construction time as `max(exit_axes.
+    values())` and never recomputed here, an advisory audit's *persisted*
+    `exit_code` stayed at its original nonzero value even after every axis
+    inside `exit_axes` was neutralized. Recomputing it from the
+    already-updated `updated_axes` below closes both gaps in one place --
+    the aggregate's own gate was never affected (it reads the dedicated
+    root key, not `exit_axes`/`exit_code`), but a consumer reading this
+    document's own canonical exit fields directly was.
+
+    `exit_axes.evidence_contract`/`.incomplete_scope`/
+    `.no_comparison_completed` are deliberately left untouched -- each is a
+    comparison-never-completed-style failure, not a compatibility/
+    assurance-style finding advisory mode neutralizes, the same distinction
+    the caller's own exit-block loop draws for its own five "never
+    completed" contributions.
     """
     exit_axes = report.get("exit_axes")
     if isinstance(exit_axes, dict):
         updated_axes = dict(exit_axes)
-        for axis in ("audit_gate", "analysis_assurance"):
+        for axis in ("audit_gate", "contract_coverage", "analysis_assurance"):
             if axis in updated_axes:
                 updated_axes[axis] = 0
         report["exit_axes"] = updated_axes
+        if "exit_code" in report:
+            report["exit_code"] = max(updated_axes.values(), default=0)
 
 
 def classify_no_baseline_verdict(
