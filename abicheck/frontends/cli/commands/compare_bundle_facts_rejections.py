@@ -82,6 +82,7 @@ def reject_unsupported_options(
     fail_on_removed: bool = False,
     support_promise: str | None = None,
     new_is_single_file: bool = False,
+    require_complete_analysis: bool = False,
 ) -> None:
     """Raise ``click.UsageError`` for any flag a stored-bundle-facts
     OLD_INPUT has no channel to honor. See this module's own docstring for
@@ -95,9 +96,11 @@ def reject_unsupported_options(
     *live* directory/package (the default, ``False``, unchanged).
 
     *dso_only*/*include_private_dso*/*fail_on_removed*/*support_promise*
-    (Phase 7d/7i, one-comparison-product.md §4.1) are the resolved
+    (Phase 7d/7i, one-comparison-product.md §4.1) and *require_complete_
+    analysis* (rulings.py deferred-option followup) are the resolved
     ``release.dso_only``/``release.include_private_dso``/
-    ``gate.fail_on_removed_library``/``release.support_promise``
+    ``gate.fail_on_removed_library``/``release.support_promise``/
+    ``assurance.require_complete``
     ``.abicheck.yml`` values -- no longer CLI kwargs at all, so the caller
     resolves them off the loaded project config and passes them in here,
     rather than this (pure, kwargs-only) function loading config itself.
@@ -251,7 +254,7 @@ def reject_unsupported_options(
         # (see _reject_set_input_flags's own comment for the full reasoning).
         suppress=kwargs.get("suppress"),
         include_labels=kwargs.get("include_labels"),
-        require_complete_analysis=bool(kwargs.get("require_complete_analysis", False)),
+        require_complete_analysis=require_complete_analysis,
     )
     if any(
         kwargs.get(name) is not None

@@ -20,15 +20,28 @@ audit, "First vertical slice" -- see
 ``checks[].analysis.assurance`` was accepted as any non-empty identifier
 string, forwarded verbatim through ``RunPlanCheck`` into the generated run
 plan, and honored by nothing: the only analysis-completeness axis this
-codebase actually wires into an exit code is the existing
-``compare``/``scan --against --require-complete-analysis`` boolean gate
-(``abicheck.analysis_assurance.AnalysisAssurance``/
-``fold_analysis_assurance_exit``) -- there is no graduated or otherwise
-distinct assurance-level mechanism a declared check could select between.
-So a project author writing e.g. ``analysis: {assurance: partial}`` got a
-structurally-valid config that silently did nothing, ever -- exactly the
-"declared but unhonored setting" failure the project-checks contract exists
-to prevent.
+codebase actually wires into an exit code is
+``compare``'s ``.abicheck.yml`` ``assurance.require_complete: true`` boolean
+gate (``abicheck.analysis_assurance.AnalysisAssurance``/
+``fold_analysis_assurance_exit`` -- config-only since the CLI's own former
+``--require-complete-analysis`` flag was demoted, rulings.py deferred-option
+followup) -- there is no graduated or otherwise distinct assurance-level
+mechanism a declared check could select between. So a project author
+writing e.g. ``analysis: {assurance: partial}`` got a structurally-valid
+config that silently did nothing, ever -- exactly the "declared but
+unhonored setting" failure the project-checks contract exists to prevent.
+
+**Known, tracked gap (rulings.py deferred-option followup):** this module's
+own validation (below) still accepts ``'complete'`` at run-plan generation
+time, but the Action layer (``actions/check-target/action.yml``,
+``.github/workflows/check-project.yml``) that used to translate a declared
+``'complete'`` into the CLI's own boolean gate no longer does -- the CLI's
+flag it forwarded to is gone, and building a config-overlay replacement
+(the way ``dso-only``/``fail-on-removed-library`` get one) is out of this
+followup's scope. A declared ``checks[].analysis.assurance: complete`` is
+therefore validated but currently unenforced by ``check-target``/
+``check-project.yml`` -- a documented gap, not a silent regression, until a
+config-overlay mechanism lands for it.
 
 Split into its own leaf module (rather than living inline in
 ``project_targets.py``) purely to respect that file's ``architecture/
@@ -57,7 +70,7 @@ def analysis_assurance_issues(value: str, *, where: str) -> list[str]:
         f"{where}: analysis.assurance {value!r} is not a supported assurance "
         "level -- no gate in this codebase enforces any value other than "
         f"{sorted(SUPPORTED_ANALYSIS_ASSURANCE_VALUES)!r} (which maps onto "
-        "`compare`/`scan --against`'s existing --require-complete-analysis "
+        "`compare`'s `.abicheck.yml` `assurance.require_complete: true` "
         "gate). Declaring an unsupported value would be silently accepted "
         "and never honored by any check execution, report, or gate -- "
         "remove it or use a supported value."

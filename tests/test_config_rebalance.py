@@ -298,6 +298,37 @@ class TestConfigPrecedence:
                 "Phase 7d override was supposed to be deleted, not just hidden"
             )
 
+    def test_assurance_require_complete_default(self) -> None:
+        """rulings.py deferred-option followup: unset resolves to `False`,
+        the former `--require-complete-analysis` flag's own default."""
+        r = resolve_compare_config(
+            None,
+            cli_severity_preset=None,
+            cli_scope_public=None,
+        )
+        assert r.require_complete_analysis is False
+
+    def test_assurance_require_complete_config_beats_default(self) -> None:
+        """assurance.require_complete is the only source -- no CLI override
+        at all, same shape as the Phase 7d release/bundle topology knobs
+        above."""
+        cfg = BuildConfig(assurance_require_complete=True)
+        r = resolve_compare_config(
+            cfg,
+            cli_severity_preset=None,
+            cli_scope_public=None,
+        )
+        assert r.require_complete_analysis is True
+
+    def test_assurance_require_complete_has_no_cli_override(self) -> None:
+        """`resolve_compare_config` accepts no `cli_*` argument for the
+        assurance knob (ADR-068 D5 guard #2, "no escape hatch") -- matching
+        the release/bundle topology precedent above."""
+        import inspect
+
+        params = inspect.signature(resolve_compare_config).parameters
+        assert "cli_require_complete_analysis" not in params
+
     def test_resource_limits_default(self) -> None:
         """Phase 7g (one-comparison-product.md §4.1/§3 #21): unset resolves
         to `None`, so the caller applies
@@ -590,6 +621,10 @@ class TestRemovedConfigDuplicates:
         "--no-fail-on-removed-library",
         "--include-private-dso",
         "--on-incomplete-scope",
+        # rulings.py deferred-option followup: assurance.require_complete
+        # in .abicheck.yml is the only source now, no CLI escape hatch --
+        # same shape as the release/bundle topology knobs above.
+        "--require-complete-analysis",
     )
 
     @staticmethod

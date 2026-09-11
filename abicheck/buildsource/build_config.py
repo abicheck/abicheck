@@ -331,6 +331,14 @@ class BuildConfig:
     release_support_promise: str | None = None
     #: ``resource_limits:`` — Phase 7g: former ``--max-json-object-nodes``.
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
+    #: ``assurance:`` — rulings.py deferred-option followup: the former
+    #: ``compare --require-complete-analysis`` (P0.4's orthogonal assurance
+    #: floor: fail the build when ``analysis_assurance.status`` is not
+    #: "complete", independent of the compatibility verdict) -- a project's
+    #: CI strictness is a stable property, no surviving CLI override, same
+    #: shape as ``gate.fail_on_removed_library`` above. ``None`` = unset (no
+    #: exit-1 assurance gate).
+    assurance_require_complete: bool | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -363,6 +371,7 @@ class BuildConfig:
             "gate",
             "release",
             "resource_limits",
+            "assurance",
             "version",
             "risk_rules",
             "crosschecks",
@@ -432,6 +441,8 @@ class BuildConfig:
         "release": frozenset({"dso_only", "include_private_dso", "support_promise"}),
         "resource_limits": frozenset({"max_bundle_facts_decode_nodes"}),  # Phase 7g
         "policy": frozenset({"overrides"}),  # ADR-068 §3 #23
+        # rulings.py deferred-option followup: former --require-complete-analysis.
+        "assurance": frozenset({"require_complete"}),
     }
 
     @classmethod
@@ -522,6 +533,7 @@ class BuildConfig:
         release = _block(top, "release")
         resource_limits = _block(top, "resource_limits")
         policy = _block(top, "policy")
+        assurance = _block(top, "assurance")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -634,6 +646,7 @@ class BuildConfig:
                 "release.support_promise",
             ),
             resource_limits_max_bundle_facts_decode_nodes=_opt_int(resource_limits, "max_bundle_facts_decode_nodes"),
+            assurance_require_complete=_opt_bool(assurance, "require_complete"),
             version=(
                 version_raw
                 if isinstance(version_raw, int) and not isinstance(version_raw, bool)
@@ -793,6 +806,12 @@ class BuildConfig:
             release["support_promise"] = self.release_support_promise
         return release
 
+    def _assurance_block(self) -> dict[str, Any]:
+        """Non-default ``assurance:`` keys (former ``--require-complete-analysis``)."""
+        if self.assurance_require_complete is not None:
+            return {"require_complete": self.assurance_require_complete}
+        return {}
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -818,6 +837,7 @@ class BuildConfig:
             ("release", self._release_block()),
             ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
             ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
+            ("assurance", self._assurance_block()),
         ):
             if block:
                 out[key] = block

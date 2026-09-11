@@ -292,22 +292,21 @@ inputs:
     default: 'default'
   require-complete-analysis:
     description: >
-      Forwarded to the internal analysis step's own require-complete-
-      analysis input (product-gaps audit §3): a truthful projection of this
-      cell's declared checks[].analysis.assurance, which check-project.yml
-      sets to 'true' only when that value is 'complete' (the one value
-      project_targets.py's analysis_assurance_gate.py accepts -- any other
-      declared value is rejected before a run plan is even generated, so
-      this input is never asked to honor an unsupported one). Unconditionally
-      dropped to 'false' for kind: bundle, mirroring every other per-cell
-      compile/frontend override this Action already gates on kind !=
-      'bundle': a bundle check's old-library is a directory (the resolved
-      binaries-dir), and the root Action's own require-complete-analysis
-      input rejects a directory/package compare outright (no single
-      analysis_assurance result to gate a release fan-out on) -- forwarding
-      it unconditionally would turn a working bundle check into a hard
-      operational error the moment a project declared assurance: complete
-      anywhere in its checks:.
+      RETIRED (rulings.py deferred-option followup -- hard removal, no
+      deprecation window, mirroring the root Action's own
+      require-complete-analysis retirement, which this input forwarded
+      to). The root Action's input it mapped onto is gone: P0.4's
+      orthogonal ANALYSIS_INCOMPLETE axis is config-only now,
+      `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or
+      Action-input override. This also means `checks[].analysis.assurance`
+      (product-gaps audit §3) is validated at run-plan generation time
+      (project_targets.py's analysis_assurance_gate.py still accepts only
+      'complete') but is no longer enforced by this Action -- a tracked,
+      documented gap (see check-project.yml's own comment at its call
+      site) rather than a silent behavior change, pending a config-overlay
+      replacement analogous to dso-only/fail-on-removed-library's. Still
+      declared so a workflow that sets it gets an explicit `::error::`
+      instead of a silently-ignored input.
     required: false
     default: 'false'
   extra-args:
@@ -401,6 +400,7 @@ runs:
         INPUT_CONSUMER_BINARY: ${{ inputs.consumer-binary }}
         INPUT_CONTRACT_FILE: ${{ inputs.contract-file }}
         INPUT_ALLOW_NEW_TARGET: ${{ inputs.allow-new-target }}
+        INPUT_REQUIRE_COMPLETE_ANALYSIS: ${{ inputs.require-complete-analysis }}
       run: bash "${{ github.action_path }}/validate-inputs.sh"
 
     # ── Capture this Action's own identity before any nested `uses:` step ──
@@ -668,10 +668,10 @@ runs:
         policy-file: ${{ inputs.policy-file }}
         suppress: ${{ inputs.suppress }}
         severity-preset: ${{ inputs.severity-preset }}
-        # Gated on kind != 'bundle' -- see this input's own docstring above
-        # for why forwarding it unconditionally would turn a working bundle
-        # check into a hard operational error.
-        require-complete-analysis: ${{ inputs.kind != 'bundle' && inputs.require-complete-analysis == 'true' }}
+        # require-complete-analysis: RETIRED -- this Action's own input (see
+        # its docstring above) is validated to 'false' before this step can
+        # ever run, and the root Action's own input it used to forward to is
+        # gone too, so there is nothing left to forward here.
         extra-args: ${{ inputs.extra-args }}
         format: 'json'
         output-file: 'check-target-analysis.json'

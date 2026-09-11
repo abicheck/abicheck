@@ -5,9 +5,11 @@
 root command is deleted outright (`abicheck scan` exits 64, naming
 `compare`/`compare --no-baseline` as the replacement), its scan-only
 modules and tests are deleted, and `tests/parity/` is now a compare-only
-regression corpus. Three flag demotions Phase 6 unblocked
-(`compare --env-matrix`, `compare --require-complete-analysis`,
-`dump --build-target`) remain open, unimplemented followups — see
+regression corpus. Of the three flag demotions Phase 6 unblocked,
+`compare --require-complete-analysis` has since landed
+(`assurance.require_complete` in `.abicheck.yml`, rulings.py
+deferred-option followup); `compare --env-matrix` and
+`dump --build-target` remain open, unimplemented followups — see
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
 exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends

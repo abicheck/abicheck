@@ -1539,7 +1539,7 @@ def assurance_floor_diagnostic(
     where = "; ".join(aa.notes) if aa.notes else "no further detail recorded"
     return (
         f"Analysis assurance incomplete (status={aa.status!r}) under "
-        f"--require-complete-analysis: {where}. {effect} (P0.4 "
+        f"assurance.require_complete: {where}. {effect} (P0.4 "
         "analysis-assurance axis). Use --format json for the full "
         "analysis_assurance block."
     )

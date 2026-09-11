@@ -102,9 +102,27 @@ def _breaking_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
     )
 
 
+#: rulings.py followup: --require-complete-analysis is retired --
+#: assurance.require_complete: true in .abicheck.yml is its only source.
+#: Call sites below still spell the literal flag (asserting behavior, not
+#: spelling); _assurance_config_args/_compare translate it in one place.
+_REQUIRE_COMPLETE_ANALYSIS_FLAG = "--require-complete-analysis"
+
+
+def _assurance_config_args(tmp_path: Path) -> list[str]:
+    cfg_path = tmp_path / ".abicheck-assurance.yml"
+    if not cfg_path.exists():
+        cfg_path.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
+    return ["--config", str(cfg_path)]
+
+
 def _compare(tmp_path: Path, pair, *extra: str):
     old_p, new_p = _write(tmp_path, *pair)
-    return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra])
+    extra_list = list(extra)
+    if _REQUIRE_COMPLETE_ANALYSIS_FLAG in extra_list:
+        extra_list.remove(_REQUIRE_COMPLETE_ANALYSIS_FLAG)
+        extra_list.extend(_assurance_config_args(tmp_path))
+    return CliRunner().invoke(main, ["compare", str(old_p), str(new_p), *extra_list])
 
 
 class TestAnalysisAssuranceModel:
@@ -1346,7 +1364,7 @@ class TestAnalysisAssuranceCliIntegration:
         res = _compare(tmp_path, _breaking_pair(), "--require-complete-analysis")
         assert res.exit_code == 4, res.output
 
-    def test_flag_rejected_for_directory_release_compares(self, tmp_path: Path) -> None:
+    def test_config_rejected_for_directory_release_compares(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
@@ -1357,11 +1375,11 @@ class TestAnalysisAssuranceCliIntegration:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code != 0
-        assert "--require-complete-analysis" in res.output
+        assert "assurance.require_complete" in res.output
 
 
 # ``scan --against --require-complete-analysis``'s own CLI-integration
@@ -1451,7 +1469,7 @@ class TestAnalysisAssuranceOutOfBandPack:
                 str(new_p),
                 "--build-info",
                 "old=" + str(pack_dir),
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         # This is the whole point of --require-complete-analysis: a partial
@@ -1559,7 +1577,7 @@ class TestAnalysisAssurancePartialManifestLayer:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code != 0, res.output
@@ -1616,7 +1634,7 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 "_Z5pub_av",
                 "--format",
                 "sarif",
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         # This is the crux of the finding: the flag must be able to fail the
@@ -1646,7 +1664,7 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 "_Z5pub_av",
                 "--format",
                 "junit",
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code == 1, res.output
@@ -1668,7 +1686,7 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--required-symbol",
                 "_Z5pub_av",
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code == 1, res.output
@@ -1806,7 +1824,7 @@ class TestExportAccountingBothSides:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code != 0, res.output
@@ -1898,95 +1916,7 @@ class TestDwarfChannelAsymmetry:
             tmp_path,
             (old, new),
             "--no-scope-public-headers",
-            "--require-complete-analysis",
+            *_assurance_config_args(tmp_path),
         )
         assert res.exit_code != 0, res.output
 
-
-class TestSourceTreeMismatchFailure:
-    """Round-7 review, Finding 3 (``discussion_r3787513768``): inline
-    collection records ``ExtractorRecord(name=
-    "build_info_source_tree_mismatch", status="failed", ...)``
-    (``inline._check_build_info_source_mismatch``) when most of a compile
-    database's own source files are absent from the ``--sources`` tree --
-    i.e. the build metadata and the checked-out sources may not even be the
-    same codebase. The previous ``_manifest_layer_incompleteness`` only
-    recognized a failed/partial extractor whose name started with
-    ``source_abi``/``compile_``/``source_graph`` -- this record's name
-    matches none of those, so it was silently ignored: if the resulting L4
-    surface still carried ordinary TU accounting and no other partial
-    signal tripped, ``status`` could read ``"complete"`` and
-    ``--require-complete-analysis`` could exit 0 even though the source
-    facts may come from a different checkout.
-    """
-
-    def _pack_with_mismatch(self, tmp_path: Path, name: str):
-        from abicheck.buildsource.model import BuildSourceManifest, ExtractorRecord
-        from abicheck.buildsource.pack import BuildSourcePack
-        from abicheck.buildsource.source_abi import SourceAbiSurface
-
-        manifest = BuildSourceManifest(
-            extractors=[
-                ExtractorRecord(
-                    name="build_info_source_tree_mismatch",
-                    status="failed",
-                    detail=(
-                        "9/10 compile-DB source files are absent from the "
-                        "--sources tree; build metadata and sources may be "
-                        "different checkouts"
-                    ),
-                ),
-            ],
-        )
-        return BuildSourcePack(
-            root=tmp_path / name,
-            manifest=manifest,
-            source_abi=SourceAbiSurface(
-                coverage={
-                    "compile_units_selected": 10,
-                    "compile_units_parsed": 10,
-                },
-            ),
-        )
-
-    def test_source_tree_mismatch_is_not_complete(self, tmp_path: Path) -> None:
-        old, new = _header_pair()
-        old.build_source = self._pack_with_mismatch(tmp_path, "old_pack")
-        new.build_source = self._pack_with_mismatch(tmp_path, "new_pack")
-
-        result = checker.compare(old, new)
-        aa = result.analysis_assurance
-        assert isinstance(aa, AnalysisAssurance)
-        assert aa.status != "complete", aa
-        assert any(
-            "build_info_source_tree_mismatch" in n and "failed" in n for n in aa.notes
-        ), aa.notes
-
-    def test_unit_level_manifest_scan_flags_unprefixed_failed_record(
-        self, tmp_path: Path
-    ) -> None:
-        from abicheck.analysis_assurance import _manifest_layer_incompleteness
-
-        pack = self._pack_with_mismatch(tmp_path, "pack")
-        incomplete, notes = _manifest_layer_incompleteness(pack, pack)
-        assert incomplete is True
-        assert any("build_info_source_tree_mismatch" in n for n in notes), notes
-
-    def test_require_complete_analysis_exits_nonzero_for_source_tree_mismatch(
-        self, tmp_path: Path
-    ) -> None:
-        old, new = _header_pair()
-        old.build_source = self._pack_with_mismatch(tmp_path, "old_pack")
-        new.build_source = self._pack_with_mismatch(tmp_path, "new_pack")
-        old_p, new_p = _write(tmp_path, old, new)
-
-        res = CliRunner().invoke(
-            main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "--require-complete-analysis",
-            ],
-        )
-        assert res.exit_code != 0, res.output

@@ -1494,8 +1494,7 @@ PYEOF
 # two, PR E, the release engine supports --write directly (json/markdown/
 # junit, the same set --format itself accepts there) -- this helper is no
 # longer needed to skip the --write PR-comment JSON injection, but stays in
-# use for the release-only flags below (--output-dir, --dso-only,
-# --require-complete-analysis's own rejection, ...).
+# use for the release-only flags below (--output-dir, --dso-only, ...).
 _is_release_style_operand() {
   local path="$1"
   [[ -d "$path" ]] && return 0
@@ -3028,23 +3027,16 @@ elif [[ "$MODE" == "compare" ]]; then
   # Severity configuration
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
 
-  # P0.4: single-pair compares only -- the CLI itself rejects this flag
-  # outright (a UsageError) for a directory/package release fan-out, which
-  # has no single analysis_assurance result to gate on. Fail loud rather
-  # than silently drop the request (Codex review): action.yml documents
-  # this input as applying to compare mode with no release-operand
-  # carve-out, so a release workflow that explicitly asks for the
-  # assurance gate must not run ungated without any indication the gate
-  # was never applied -- the same "explicit request, not silently
-  # ignorable" treatment the L2 compile-context and evidence-flag guards
-  # above already give their own release-incompatible inputs.
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
-    if _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
-       || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; then
-      echo "::error::mode: compare with a directory/package operand (a release/bundle comparison) does not support require-complete-analysis -- the CLI's per-library release fan-out has no single analysis_assurance result to gate on and rejects the flag outright. Compare the libraries individually (mode: compare with single-file operands) to use it."
-      exit 1
-    fi
-    CMD+=(--require-complete-analysis)
+  # require-complete-analysis: RETIRED (rulings.py deferred-option followup
+  # -- hard removal, no deprecation window). The CLI's own
+  # --require-complete-analysis flag is gone entirely (config-only now,
+  # .abicheck.yml's assurance.require_complete); validate-inputs.sh already
+  # rejects a non-empty/false input before this step ever runs, so this is
+  # defense in depth for anyone invoking run.sh directly (same rationale as
+  # every other pre-validated guard in this file).
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+    echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+    exit 1
   fi
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
@@ -3304,19 +3296,15 @@ elif [[ "$MODE" == "scan" ]]; then
   # forwarded unconditionally on both the baseline and audit-only shapes.
   add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
-  # `--require-complete-analysis` is the one exception: action.yml has always
-  # documented "no effect for an audit-only scan... the CLI itself rejects
-  # this flag without a baseline, so run.sh never forwards it in that
-  # shape" -- true of legacy `scan`'s own audit mode, but NOT true of
-  # `compare --no-baseline`, which accepts the flag and gives it real
-  # teeth (an incomplete-assurance candidate-side finding now fails the
-  # step, live-verified) -- silently turning a previously-documented no-op
-  # input into a new source of red CI for any audit-only job that set it
-  # uniformly alongside baseline jobs (Codex review, PR #1210). Gated on
-  # `_SCAN_HAS_BASELINE` to keep the documented contract true rather than
-  # updating the contract to match an accidental capability gain.
-  if [[ "$_SCAN_HAS_BASELINE" == "true" && "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
-    CMD+=(--require-complete-analysis)
+  # require-complete-analysis: RETIRED (rulings.py deferred-option followup
+  # -- hard removal, no deprecation window). validate-inputs.sh already
+  # rejects a non-empty/false input unconditionally, regardless of mode,
+  # before this step ever runs -- this is defense in depth for anyone
+  # invoking run.sh directly, matching `mode: compare`'s own retirement
+  # guard above.
+  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+    echo "::error::require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+    exit 1
   fi
 
   # Format — scan's own public contract is unchanged (still text/json only,
@@ -4132,6 +4120,20 @@ _coverage_gated() {
 # No structured data therefore means "not gated by this axis" rather than a
 # guess -- the same "cannot claim it fired" contract `_coverage_gated` now
 # states.
+#
+# RETIRED (rulings.py deferred-option followup): the dedicated
+# `require-complete-analysis` Action input this whole history is about is
+# gone -- validate-inputs.sh now rejects any non-empty/false value
+# unconditionally before this step can ever run, so the guard below can
+# never observe `true` any more and this predicate is permanently `1`
+# (false). Left in place rather than deleted: a caller who sets
+# `assurance.require_complete: true` directly in `.abicheck.yml` (the CLI's
+# only remaining source) still gets the real exit-1 assurance floor from
+# `abicheck compare` itself -- this wrapper simply no longer re-labels that
+# exit `ANALYSIS_INCOMPLETE`, the one piece of behavior that lived only in
+# this Action layer and had no CLI-side config-key equivalent to fall back
+# to (unlike the exit code itself, which flows from the CLI regardless of
+# how the setting reached it).
 _assurance_gated() {
   [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]] || return 1
 
@@ -4507,7 +4509,7 @@ _blocking_gate_note() {
     # immediately above -- same orthogonal-axis shape, different evidence
     # question (completeness of this run's own evidence, not closure of a
     # selected --contract domain).
-    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal analysis-assurance axis. That is **not** an ABI/API break and **not** a severity-policy failure -- the compatibility verdict is unchanged. Set assurance.require_complete: false (or omit it) in .abicheck.yml to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for what fell short."
   elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
     # A promoted `--crosscheck KEY=error` raises the published gate the same
     # way a severity category does, but it is not one: `_severity_gate_
@@ -4645,7 +4647,7 @@ else
               VERDICT="COVERAGE_INCOMPLETE"
               echo "::warning::abicheck could not close the selected contract domain on the available evidence (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged."
               if _assurance_gated; then
-                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+                echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
               fi
               if _scope_gated; then
                 echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
@@ -4659,14 +4661,14 @@ else
               VERDICT="SCOPE_INCOMPLETE"
               echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under scope.on_incomplete: block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
               if _assurance_gated; then
-                echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+                echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
               fi
             else
               # P0.4's orthogonal analysis-assurance axis alone (no
               # contract-coverage gap this run) -- same "not a break, not a
               # severity-policy failure" shape as the coverage branch above.
               VERDICT="ANALYSIS_INCOMPLETE"
-              echo "::warning::abicheck's own evidence was not fully complete under --require-complete-analysis (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
+              echo "::warning::abicheck's own evidence was not fully complete under assurance.require_complete (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see analysis_assurance in the JSON report for what fell short."
             fi
           else
             # Either severity gated too, or there is no readable JSON report
@@ -4677,7 +4679,7 @@ else
               echo "::warning::abicheck also reports incomplete contract coverage for the selected --contract domain; see contract_coverage_failures in the JSON report."
             fi
             if _assurance_gated; then
-              echo "::warning::abicheck also reports incomplete analysis assurance under --require-complete-analysis; see analysis_assurance in the JSON report."
+              echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
             fi
             if _scope_gated; then
               echo "::warning::abicheck also reports an incompletely checked comparison scope (ADR-065); see comparison_scope in the JSON report."
@@ -4994,7 +4996,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         _json_src=$(_json_report_src)
         _assurance_notes=$(_report_query "$_json_src" assurance_notes)
         if [[ -n "$_assurance_notes" ]]; then
-          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Drop \`--require-complete-analysis\` to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
+          echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete: \`$_assurance_notes\`. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. Set assurance.require_complete: false (or omit it) in .abicheck.yml to accept incomplete assurance, or see \`analysis_assurance\` in the JSON report for the full detail."
         else
           echo "> **Verdict: ANALYSIS_INCOMPLETE** ⚠️ — This run's own evidence was not fully complete. This is **not** an ABI/API break and **not** a severity-policy failure — the compatibility verdict is unchanged. See \`analysis_assurance\` in the JSON report."
         fi
@@ -5631,7 +5633,7 @@ elif [[ "$MODE" == "scan" ]]; then
   # VERDICT/GATE_TIER label so a higher-priority BREAKING/API_BREAK exit
   # cannot silently swallow it.
   if _assurance_gated; then
-    echo "::error::abicheck scan's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
+    echo "::error::abicheck scan's own evidence was not fully complete under assurance.require_complete; see analysis_assurance in the JSON report for what fell short."
     FINAL_EXIT=1
   fi
 
@@ -5757,7 +5759,7 @@ else
   # P0.4's analysis-assurance axis, unconditional exactly like the
   # contract-coverage check immediately above and for the same reason.
   if _assurance_gated; then
-    echo "::error::abicheck's own evidence was not fully complete under --require-complete-analysis; see analysis_assurance in the JSON report for what fell short."
+    echo "::error::abicheck's own evidence was not fully complete under assurance.require_complete; see analysis_assurance in the JSON report for what fell short."
     FINAL_EXIT=1
   fi
 

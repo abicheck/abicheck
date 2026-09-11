@@ -6,6 +6,12 @@ Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource
 
 ## Blocks
 
+### `assurance:`
+
+| Sub-key | Type |
+|---|---|
+| `require_complete` | bool |
+
 ### `build:`
 
 | Sub-key | Type |

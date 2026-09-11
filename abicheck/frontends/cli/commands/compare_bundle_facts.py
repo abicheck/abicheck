@@ -287,11 +287,11 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
     )
 
     # Phase 7d (one-comparison-product.md §4.1): --dso-only/
-    # --include-private-dso/--fail-on-removed-library are config-only now
-    # (release.dso_only/release.include_private_dso/
-    # gate.fail_on_removed_library) -- loaded here, ahead of
-    # reject_unsupported_options, since a project that sets any of them can
-    # no longer state them as CLI kwargs for this dispatcher to reject.
+    # --include-private-dso/--fail-on-removed-library (and, since, the
+    # former --require-complete-analysis / assurance.require_complete) are
+    # config-only now -- loaded here, ahead of reject_unsupported_options,
+    # since a project that sets any of them can no longer state them as CLI
+    # kwargs for this dispatcher to reject.
     from ....workflows.extraction import (
         load_build_config_with_digest as _load_cfg_early,
     )
@@ -346,6 +346,9 @@ def dispatch(*, compile_context: Any, new_is_stored: bool = False, config_explic
             _early_cfg.release_support_promise if _early_cfg else None
         ),
         new_is_single_file=_new_is_single_file,
+        require_complete_analysis=(
+            bool(_early_cfg.assurance_require_complete) if _early_cfg else False
+        ),
     )
 
     old_facts_path: Path = kwargs["old_input"]

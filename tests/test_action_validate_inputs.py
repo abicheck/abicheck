@@ -374,6 +374,38 @@ class TestRemovedInputTombstones:
             # The migration target must be named, not just the removal.
             assert "bundle.system_providers" in result.stdout
 
+    def test_require_complete_analysis_is_a_hard_error(self) -> None:
+        """rulings.py deferred-option followup: the dedicated
+        require-complete-analysis Action input is retired the same way
+        bundle-system-providers is above -- leaving it set would silently
+        drop the requested orthogonal exit-1 assurance floor rather than
+        actually enforcing it, so this is a hard error on every mode, not a
+        warning."""
+        for mode_env in (
+            {"INPUT_MODE": "compare"},
+            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"},
+            {"INPUT_MODE": "dump"},
+        ):
+            result = _run_validate(
+                {**mode_env, "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"}
+            )
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert "::error::" in result.stdout
+            assert "require-complete-analysis" in result.stdout
+            # The migration target must be named, not just the removal.
+            assert "assurance.require_complete" in result.stdout
+
+    def test_require_complete_analysis_false_is_not_an_error(self) -> None:
+        """The default ('false') and an explicit 'false' must both stay
+        silent -- only a genuinely non-false value trips the tombstone."""
+        for value in (None, "false"):
+            env = {"INPUT_MODE": "compare"}
+            if value is not None:
+                env["INPUT_REQUIRE_COMPLETE_ANALYSIS"] = value
+            result = _run_validate(env)
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "require-complete-analysis" not in result.stdout
+
     def test_jobs_warns_on_every_mode(self) -> None:
         """``jobs`` was a tuning knob (worker count), so its removal warns
         rather than breaking a version bump -- but it must not be silent.
@@ -396,8 +428,11 @@ class TestRemovedInputTombstones:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "jobs" not in result.stdout
         assert "bundle-system-providers" not in result.stdout
+        assert "require-complete-analysis" not in result.stdout
 
-    @pytest.mark.parametrize("name", ["jobs", "bundle-system-providers"])
+    @pytest.mark.parametrize(
+        "name", ["jobs", "bundle-system-providers", "require-complete-analysis"]
+    )
     def test_removed_inputs_stay_declared_in_action_yml(self, name: str) -> None:
         """The rejection above is only reachable if the input is still
         *declared*: an undeclared key never reaches the composite action at
@@ -743,12 +778,15 @@ class TestCompareRejectsCompileContextForDirectoryOrPackage:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestCompareRejectsRequireCompleteAnalysisForDirectoryOrPackage:
-    """Mirrors run.sh's P0.4 release-operand guard (Codex review): the CLI's
-    per-library release fan-out has no single ``analysis_assurance`` result
-    to gate on and rejects ``--require-complete-analysis`` outright, so a
-    directory/package compare with the flag set must fail here too, before
-    dependency install -- not only later in run.sh."""
+class TestCompareRejectsRequireCompleteAnalysisUnconditionally:
+    """rulings.py deferred-option followup: the release-operand-scoped
+    guard this class used to pin (Codex review: the CLI's per-library
+    release fan-out has no single ``analysis_assurance`` result to gate on,
+    so only a directory/package compare with the flag set used to fail
+    here) is superseded by the input's own outright retirement -- setting
+    it now fails the step on *every* operand shape, single-pair included,
+    the same way ``TestRemovedInputTombstones`` above pins for every mode.
+    """
 
     def test_directory_old_library_with_the_flag_is_rejected(
         self, tmp_path: Path
@@ -764,9 +802,10 @@ class TestCompareRejectsRequireCompleteAnalysisForDirectoryOrPackage:
             }
         )
         assert result.returncode == 1
-        assert "does not support require-complete-analysis" in result.stdout
+        assert "require-complete-analysis" in result.stdout
+        assert "assurance.require_complete" in result.stdout
 
-    def test_single_pair_compare_with_the_flag_passes(self) -> None:
+    def test_single_pair_compare_with_the_flag_is_also_rejected(self) -> None:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
@@ -775,7 +814,8 @@ class TestCompareRejectsRequireCompleteAnalysisForDirectoryOrPackage:
                 "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             }
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.returncode == 1
+        assert "require-complete-analysis" in result.stdout
 
     def test_directory_compare_with_the_flag_unset_passes(self, tmp_path: Path) -> None:
         lib_dir = tmp_path / "lib"

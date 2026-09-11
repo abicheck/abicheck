@@ -995,7 +995,7 @@ def _report_compare_result(
     # (e.g. both sides lack a compile database, so the effective depth stays
     # `headers`) silently read `requested_depth=None`, `depth_satisfied=None`,
     # and could still report `status="complete"` under
-    # `--require-complete-analysis`. `depth` here is `run_compare`'s own
+    # `assurance.require_complete`. `depth` here is `run_compare`'s own
     # raw, Click-validated `--depth` string (one of
     # `checker_types.EVIDENCE_DEPTH_VALUES`, `None` when the flag was
     # omitted) -- copy it onto the result before recomputing
@@ -1230,7 +1230,6 @@ def run_compare(
     old_dump_manifest: Path | None = None,
     new_dump_manifest: Path | None = None,
     frontend_context: str = "host",
-    require_complete_analysis: bool = False,
     since: str | None = None,  # ADR-068 Phase 2c: changed-path localization
     changed_paths_opt: tuple[str, ...] = (),
     abi3: str | None = None,  # ADR-068 Phase 2d: candidate-side abi3 audit
@@ -1317,6 +1316,7 @@ def run_compare(
     collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
     strict_suppressions = resolved_cfg.strict_suppressions
     require_justification = resolved_cfg.require_justification
+    require_complete_analysis = resolved_cfg.require_complete_analysis  # former CLI flag
     # ADR-068 D5 / Phase 7a: --dwarf-only/--debuginfod/--debuginfod-url/
     # --debug-format are gone as CLI flags (hidden, already config-backed
     # duplicates) -- config-only now, read straight off the resolved config

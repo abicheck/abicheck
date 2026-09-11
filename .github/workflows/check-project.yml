@@ -990,16 +990,18 @@ jobs:
           requested-depth: ${{ matrix.requested_depth }}
           explicit-id: ${{ matrix.explicit_id || '' }}
           gate-mode: ${{ matrix.gate_mode }}
-          # Product-gaps audit §3: a truthful projection of this cell's
-          # declared checks[].analysis.assurance (RunPlanCheck.
-          # analysis_assurance) -- 'complete' is the one value
-          # project_targets.py's analysis_assurance_gate.py accepts (any
-          # other declared value fails `project plan` before a run plan is
-          # even generated, per that module's own docstring), so this is
-          # the whole domain check-target's own require-complete-analysis
-          # input needs to distinguish. check-target itself further gates
-          # this to kind != 'bundle' before forwarding to the root Action.
-          require-complete-analysis: ${{ matrix.analysis_assurance == 'complete' }}
+          # require-complete-analysis is RETIRED (rulings.py deferred-option
+          # followup, mirroring the root Action's own retirement) -- no
+          # longer forwarded here. checks[].analysis.assurance (RunPlanCheck.
+          # analysis_assurance, product-gaps audit §3) is still validated at
+          # run-plan generation time (project_targets.py's
+          # analysis_assurance_gate.py still accepts only 'complete'), but a
+          # cell declaring it is no longer enforced by this workflow -- a
+          # tracked, documented gap (see check-target/action.yml's own
+          # require-complete-analysis docstring) rather than a silent
+          # behavior change, pending a config-overlay replacement analogous
+          # to the CLI's own release-topology inputs (dso-only/
+          # fail-on-removed-library).
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
           head-sha: ${{ inputs.head-sha != '' && inputs.head-sha || github.sha }}
           base-ref: ${{ inputs.base-ref }}

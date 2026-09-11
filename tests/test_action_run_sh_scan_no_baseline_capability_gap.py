@@ -179,33 +179,27 @@ class TestAuditOnlyScanUnaffectedWhenTheseInputsAreUnset:
         assert outputs["_returncode"] == 0, outputs
 
 
-class TestAuditOnlyScanRequireCompleteAnalysisHasNoEffect:
-    """``action.yml`` has always documented ``require-complete-analysis`` as
-    having "no effect" on an audit-only scan. Before this fix, ``compare
-    --no-baseline`` silently gained real teeth for it (an incomplete
-    analysis-assurance candidate-side finding now fails the step) --
-    verified directly against the real CLI in this PR's own investigation.
-    This test proves the *documented* contract holds again: the flag is
-    simply never forwarded for an audit-only shape, so this run's outcome
-    is identical with or without it."""
+class TestAuditOnlyScanRequireCompleteAnalysisIsRetired:
+    """rulings.py deferred-option followup: the dedicated
+    ``require-complete-analysis`` Action input this class used to document
+    as having "no effect" on an audit-only scan is retired outright --
+    setting it now fails the step unconditionally, on every mode/shape, the
+    same as the baseline-scan and compare shapes (see
+    ``test_action_analysis_assurance_verdict.py``'s own retirement
+    coverage). ``assurance.require_complete: true`` in ``.abicheck.yml`` is
+    the only surviving spelling."""
 
-    def test_require_complete_analysis_does_not_change_the_outcome(
-        self, tmp_path: Path
-    ) -> None:
-        without_flag = _run_action(
-            tmp_path,
-            {"INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE))},
-        )
-        with_flag = _run_action(
+    def test_require_complete_analysis_fails_the_step(self, tmp_path: Path) -> None:
+        outputs = _run_action(
             tmp_path,
             {
                 "INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE)),
                 "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             },
         )
-        assert without_flag["_returncode"] == 0, without_flag
-        assert with_flag["_returncode"] == 0, with_flag
-        assert with_flag.get("verdict") == without_flag.get("verdict")
+        assert outputs["_returncode"] == 1, outputs
+        assert "require-complete-analysis" in outputs["_stdout"], outputs
+        assert "assurance.require_complete" in outputs["_stdout"], outputs
 
 
 # --- Static CMD-assembly checks for the baseline-scan shape ---------------
@@ -286,21 +280,29 @@ class TestBaselineScanStillForwardsSinceChangedPathBudget:
         assert "--budget" in cmd, cmd
         assert "15m" in cmd, cmd
 
-    def test_require_complete_analysis_reaches_compare(self) -> None:
-        cmd = _run_cmd({**_BASELINE_INPUTS, "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"})
-        assert "--require-complete-analysis" in cmd, cmd
+    def test_require_complete_analysis_is_retired_and_fails_cmd_assembly(
+        self,
+    ) -> None:
+        """rulings.py deferred-option followup: the dedicated Action input
+        no longer reaches compare at all -- setting it fails the step
+        (the harness script itself exits non-zero) before CMD assembly
+        gets anywhere near it."""
+        with pytest.raises(AssertionError, match="require-complete-analysis"):
+            _run_cmd({**_BASELINE_INPUTS, "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true"})
 
 
 class TestAuditOnlyScanNeverForwardsRequireCompleteAnalysis:
-    def test_flag_is_absent_from_cmd_even_when_input_is_true(self) -> None:
-        cmd = _run_cmd(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
-            }
-        )
-        assert "--require-complete-analysis" not in cmd, cmd
+    def test_flag_is_absent_and_the_step_fails_when_input_is_true(self) -> None:
+        """Same retirement, audit-only shape: still an unconditional
+        failure, not a silent no-op the way it used to be."""
+        with pytest.raises(AssertionError, match="require-complete-analysis"):
+            _run_cmd(
+                {
+                    "INPUT_MODE": "scan",
+                    "INPUT_NEW_LIBRARY": "lib.so",
+                    "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
+                }
+            )
 
 
 class TestAuditOnlyScanNeverForwardsBudget:

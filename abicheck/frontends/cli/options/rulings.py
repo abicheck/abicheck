@@ -439,19 +439,6 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "not landed in the Phase 6 PR itself; tracked as a followup.",
         blocker="A `deployment:` config key + resolver -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
     ),
-    "--require-complete-analysis": _deferred(
-        "P0.4's orthogonal assurance floor. §4.1 rules it CONFIG "
-        "(`assurance.require_complete`) as a project's CI strictness. Same "
-        "scan-routing blocker as --env-matrix, verified the same way, and "
-        "it additionally has a dedicated Action input "
-        "(`require-complete-analysis`) that must retire in the same PR for "
-        "front-end parity. `scan` itself is now gone (ADR-068 Phase 6), "
-        "which resolves the routing hazard this blocker named -- but the "
-        "CONFIG demotion (`assurance.require_complete` resolver wiring + "
-        "the Action input retirement) is real, unimplemented feature work, "
-        "not landed in the Phase 6 PR itself; tracked as a followup.",
-        blocker="`assurance.require_complete` resolver wiring + Action-input retirement -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
-    ),
     "--scope-public-headers": _deferred(
         "Phase 9 collapses this into `--contract public`/`--contract all` "
         "so there is one contract mechanism rather than two. Explicitly "

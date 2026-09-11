@@ -74,6 +74,11 @@ BOOL_SUBKEYS: dict[str, frozenset[str]] = {
     # directory/package release topology, demoted off the CLI.
     "gate": frozenset({"fail_on_removed_library"}),
     "release": frozenset({"dso_only", "include_private_dso"}),
+    # rulings.py deferred-option followup: the former `compare
+    # --require-complete-analysis` (P0.4's orthogonal assurance-floor exit
+    # axis), demoted off the CLI entirely -- a project's CI strictness is a
+    # stable property, same shape as `gate.fail_on_removed_library` above.
+    "assurance": frozenset({"require_complete"}),
 }
 STR_SUBKEYS: dict[str, frozenset[str]] = {
     "build": frozenset({"system", "query", "compile_db", "compile_db_filter"}),

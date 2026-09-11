@@ -101,7 +101,6 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--policy",
         "--post-manifest",
         "--probe-matrix",
-        "--require-complete-analysis",
         "--required-symbol",
         "--scope-public-headers",
         "--search-path",

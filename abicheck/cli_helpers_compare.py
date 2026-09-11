@@ -541,6 +541,7 @@ class ResolvedCompareConfig:
     #: Phase 7: ``release.support_promise`` (``off``/``declared``).
     release_support_promise: str = "off"
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
+    require_complete_analysis: bool = False  # former --require-complete-analysis
 
     @property
     def exit_code_scheme(self) -> str:
@@ -656,6 +657,7 @@ def resolve_compare_config(
     release_support_promise = (cfg.release_support_promise if cfg else None) or "off"
     release_include_private_dso = bool(cfg.release_include_private_dso) if cfg else False
     res_limit_nodes = cfg.resource_limits_max_bundle_facts_decode_nodes if cfg else None
+    require_complete_analysis = bool(cfg.assurance_require_complete) if cfg else False
 
     return ResolvedCompareConfig(
         severity=severity,
@@ -686,6 +688,7 @@ def resolve_compare_config(
         release_support_promise=release_support_promise,
         release_include_private_dso=release_include_private_dso,
         resource_limits_max_bundle_facts_decode_nodes=res_limit_nodes,
+        require_complete_analysis=require_complete_analysis,
     )
 
 

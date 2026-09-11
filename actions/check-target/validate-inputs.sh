@@ -165,4 +165,13 @@ if [[ "$BASELINE_CHANNEL" != "none" && -z "$BASELINE_PATH" ]]; then
   _fail "baseline-path is required when baseline-channel is not 'none'."
 fi
 
+# require-complete-analysis: RETIRED (rulings.py deferred-option followup --
+# hard removal, no deprecation window, mirroring the root Action's own
+# retirement). Leaving it set would silently drop the requested orthogonal
+# exit-1 assurance floor rather than actually enforcing it, so this is a
+# hard error, same severity reasoning as the root Action's own check.
+if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" != "false" ]]; then
+  _fail "require-complete-analysis ('${INPUT_REQUIRE_COMPLETE_ANALYSIS}') was removed and is no longer forwarded — set assurance.require_complete: true in your .abicheck.yml and pass that file as build-config instead, then remove this input."
+fi
+
 exit 0

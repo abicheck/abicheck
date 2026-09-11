@@ -358,9 +358,11 @@ def _resolve_no_baseline_invocation(
             output=kwargs.get("output"),
             dry_run=bool(kwargs.get("dry_run", False)),
             secondary_writes=tuple(kwargs.get("secondary_writes") or ()),
-            require_complete_analysis=bool(
-                kwargs.get("require_complete_analysis", False)
-            ),
+            # rulings.py deferred-option followup: the former
+            # --require-complete-analysis CLI flag is gone; .abicheck.yml's
+            # assurance.require_complete (already folded into resolved_cfg
+            # above, same as scope/collapse) is its only source now.
+            require_complete_analysis=bool(resolved_cfg.require_complete_analysis),
             audit_gate_enabled=audit_gate_enabled_for_severity_preset(
                 kwargs.get("severity_preset")
             ),

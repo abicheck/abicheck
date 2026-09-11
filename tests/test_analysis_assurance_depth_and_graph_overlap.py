@@ -53,7 +53,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from abicheck import checker
-from abicheck.analysis_assurance import compute_analysis_assurance
+from abicheck.analysis_assurance import AnalysisAssurance, compute_analysis_assurance
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import save_snapshot, snapshot_to_json
@@ -71,6 +71,19 @@ def _write(tmp_path: Path, old: AbiSnapshot, new: AbiSnapshot) -> tuple[Path, Pa
     old_p.write_text(snapshot_to_json(old), encoding="utf-8")
     new_p.write_text(snapshot_to_json(new), encoding="utf-8")
     return old_p, new_p
+
+
+def _assurance_config_args(tmp_path: Path) -> list[str]:
+    """``["--config", path]`` for a config declaring
+    ``assurance.require_complete: true`` -- rulings.py deferred-option
+    followup: the direct replacement for the retired
+    ``--require-complete-analysis`` flag."""
+    cfg_path = tmp_path / ".abicheck-assurance.yml"
+    if not cfg_path.exists():
+        cfg_path.write_text(
+            "assurance:\n  require_complete: true\n", encoding="utf-8"
+        )
+    return ["--config", str(cfg_path)]
 
 
 def _header_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -179,7 +192,7 @@ class TestRequestedDepthPropagation:
                 str(new_p),
                 "--depth",
                 "source",
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code != 0, res.output
@@ -536,7 +549,7 @@ class TestGraphCompletenessPartialFamilyOverlap:
                 "compare",
                 str(old_p),
                 str(new_p),
-                "--require-complete-analysis",
+                *_assurance_config_args(tmp_path),
             ],
         )
         assert res.exit_code != 0, res.output
@@ -902,3 +915,92 @@ class TestGraphCompletenessConditionallyApplicableFamily:
         status, notes = _graph_completeness(old_pack, new_pack)
         assert status == "unknown", notes
         assert any("call_graph" in n for n in notes), notes
+
+
+class TestSourceTreeMismatchFailure:
+    """Round-7 review, Finding 3 (``discussion_r3787513768``): inline
+    collection records ``ExtractorRecord(name=
+    "build_info_source_tree_mismatch", status="failed", ...)``
+    (``inline._check_build_info_source_mismatch``) when most of a compile
+    database's own source files are absent from the ``--sources`` tree --
+    i.e. the build metadata and the checked-out sources may not even be the
+    same codebase. The previous ``_manifest_layer_incompleteness`` only
+    recognized a failed/partial extractor whose name started with
+    ``source_abi``/``compile_``/``source_graph`` -- this record's name
+    matches none of those, so it was silently ignored: if the resulting L4
+    surface still carried ordinary TU accounting and no other partial
+    signal tripped, ``status`` could read ``"complete"`` and
+    ``--require-complete-analysis`` could exit 0 even though the source
+    facts may come from a different checkout.
+    """
+
+    def _pack_with_mismatch(self, tmp_path: Path, name: str):
+        from abicheck.buildsource.model import BuildSourceManifest, ExtractorRecord
+        from abicheck.buildsource.pack import BuildSourcePack
+        from abicheck.buildsource.source_abi import SourceAbiSurface
+
+        manifest = BuildSourceManifest(
+            extractors=[
+                ExtractorRecord(
+                    name="build_info_source_tree_mismatch",
+                    status="failed",
+                    detail=(
+                        "9/10 compile-DB source files are absent from the "
+                        "--sources tree; build metadata and sources may be "
+                        "different checkouts"
+                    ),
+                ),
+            ],
+        )
+        return BuildSourcePack(
+            root=tmp_path / name,
+            manifest=manifest,
+            source_abi=SourceAbiSurface(
+                coverage={
+                    "compile_units_selected": 10,
+                    "compile_units_parsed": 10,
+                },
+            ),
+        )
+
+    def test_source_tree_mismatch_is_not_complete(self, tmp_path: Path) -> None:
+        old, new = _header_pair()
+        old.build_source = self._pack_with_mismatch(tmp_path, "old_pack")
+        new.build_source = self._pack_with_mismatch(tmp_path, "new_pack")
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.status != "complete", aa
+        assert any(
+            "build_info_source_tree_mismatch" in n and "failed" in n for n in aa.notes
+        ), aa.notes
+
+    def test_unit_level_manifest_scan_flags_unprefixed_failed_record(
+        self, tmp_path: Path
+    ) -> None:
+        from abicheck.analysis_assurance import _manifest_layer_incompleteness
+
+        pack = self._pack_with_mismatch(tmp_path, "pack")
+        incomplete, notes = _manifest_layer_incompleteness(pack, pack)
+        assert incomplete is True
+        assert any("build_info_source_tree_mismatch" in n for n in notes), notes
+
+    def test_require_complete_analysis_exits_nonzero_for_source_tree_mismatch(
+        self, tmp_path: Path
+    ) -> None:
+        old, new = _header_pair()
+        old.build_source = self._pack_with_mismatch(tmp_path, "old_pack")
+        new.build_source = self._pack_with_mismatch(tmp_path, "new_pack")
+        old_p, new_p = _write(tmp_path, old, new)
+
+        res = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(old_p),
+                str(new_p),
+                *_assurance_config_args(tmp_path),
+            ],
+        )
+        assert res.exit_code != 0, res.output

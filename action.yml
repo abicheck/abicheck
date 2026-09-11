@@ -744,21 +744,16 @@ inputs:
     required: false
   require-complete-analysis:
     description: >
-      Fail the step (P0.4's orthogonal ANALYSIS_INCOMPLETE axis) when
-      analysis_assurance.status is not 'complete', independent of the
-      compatibility verdict. Mirrors `compare`/`scan --against`'s own
-      --require-complete-analysis flag. Applies to single-pair compare
-      (old-library/new-library are individual files, not a directory or
-      package) and scan (--against) modes only -- rejected outright
-      (step fails) for a directory/package compare's per-library release
-      fan-out, which has no single analysis_assurance result to gate on.
-      Has no effect for an audit-only scan (new-library with no
-      against/abi-baseline): the CLI itself rejects this flag without a
-      baseline, so run.sh never forwards it in that shape. A dedicated
-      input rather than routing through extra-args, so this Action's own
-      detection of whether the flag was requested is never ambiguous
-      with a value some other option in extra-args happens to spell the
-      same way.
+      RETIRED (rulings.py deferred-option followup -- hard removal, no
+      deprecation window): removed and no longer forwarded. The CLI's own
+      `compare --require-complete-analysis` flag it mirrored is gone
+      entirely: P0.4's orthogonal ANALYSIS_INCOMPLETE axis is config-only
+      now, `.abicheck.yml`'s `assurance.require_complete: true`, with no
+      CLI override. Still declared so a workflow that sets it gets an
+      explicit `::error::` naming that replacement instead of a
+      silently-ignored input; set `assurance.require_complete: true` in
+      your `.abicheck.yml` and pass that file as build-config instead,
+      then remove this input.
     required: false
     default: 'false'
   annotate:
@@ -770,10 +765,9 @@ inputs:
       by passing --annotate to the abicheck CLI -- no second comparison is
       ever run to collect them, for either operand shape. Has no effect on
       scan mode as of this Action version. A dedicated input rather than
-      routing through extra-args, for the same reason
-      require-complete-analysis is: this Action's own detection of whether
-      annotations were requested is never ambiguous with some other
-      extra-args value.
+      routing through extra-args, so this Action's own detection of
+      whether annotations were requested is never ambiguous with some
+      other extra-args value.
     required: false
     default: 'false'
   annotate-additions:
@@ -857,7 +851,7 @@ outputs:
       to the compatibility verdict, which then covers the compared members
       only; fails the step unconditionally, since no fail-on-* input governs
       it), ANALYSIS_INCOMPLETE (single-pair
-      operands only, with the require-complete-analysis input, when
+      operands only, with `.abicheck.yml`'s `assurance.require_complete: true`, when
       analysis_assurance.status is not "complete" -- P0.4's orthogonal
       assurance axis, which likewise leaves the compatibility verdict
       unchanged; rejected outright for a directory/package operand, so
@@ -877,7 +871,7 @@ outputs:
       compare's, above), SEVERITY_ERROR (with --against and a
       severity setting, when an error-level
       category has findings), COVERAGE_INCOMPLETE, ANALYSIS_INCOMPLETE
-      (with --against and the require-complete-analysis input, same
+      (with --against and `.abicheck.yml`'s `assurance.require_complete: true`, same
       axis as compare's), API_BREAK, BREAKING,
       AUDIT_GATE (audit-only, no baseline -- i.e. no against/abi-baseline
       resolved, ADR-068's 2026-09-10 amendment: a real, BREAKING/
@@ -963,7 +957,7 @@ outputs:
     description: >
       abicheck exit code. compare: 0 (compatible), 1 (severity error,
       incomplete contract coverage, incomplete analysis assurance with
-      the require-complete-analysis input, or -- directory/package
+      `.abicheck.yml`'s `assurance.require_complete: true`, or -- directory/package
       operands, ADR-065 -- an incompletely checked comparison scope under
       `.abicheck.yml`'s scope.on_incomplete: block key, or no comparison completed at all under
       either setting; the four share the code and are told apart by the
@@ -977,7 +971,7 @@ outputs:
       inventory).
       scan: 0 (compatible/advisory), 1 (with --against: severity error,
       incomplete contract coverage, or incomplete analysis assurance with
-      the require-complete-analysis input -- as on compare, the three
+      `.abicheck.yml`'s `assurance.require_complete: true` -- as on compare, the three
       share the code and are told apart the same way, one level down
       under diff),
       2 (API break), 3 (AUDIT_GATE -- audit-only only, the audit-gate axis;
