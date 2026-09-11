@@ -399,11 +399,13 @@ either:
   `compare --no-baseline` against `new-library` alone. See
   [Source Scans § Single-release audit](github-action-source-scans.md#single-release-audit-no-baseline).
 
-**The one required migration step: add `severity-preset` to keep an
-audit-only step gating.** Legacy `mode: scan` with no baseline gated a CI job
-on a `BREAKING`/`API_BREAK`-classified finding **by default, unconditionally,
-no flag needed**. `mode: compare`'s own audit-only shape reproduces the
-identical partition at its own orthogonal exit code, `3`, published as the
+Two migration steps are required, not one:
+
+**1. Add `severity-preset` to keep an audit-only step gating.** Legacy
+`mode: scan` with no baseline gated a CI job on a `BREAKING`/
+`API_BREAK`-classified finding **by default, unconditionally, no flag
+needed**. `mode: compare`'s own audit-only shape reproduces the identical
+partition at its own orthogonal exit code, `3`, published as the
 `AUDIT_GATE` verdict — but that axis is **opt-in**, activated only by
 `severity-preset` (any value except `info-only`). If your audit-only
 `mode: scan` step relied on the default gating (i.e. you did not already pass
@@ -412,6 +414,20 @@ identical partition at its own orthogonal exit code, `3`, published as the
 step always exits `0`/passes regardless of what the audit finds. A step that
 already set `severity-preset: info-only` needs no change. See the G20-corpus
 verification transcript in the ADR-068 amendment linked above.
+
+**2. Replace `format: text` with `format: markdown`, if set.** Legacy
+`mode: scan` supported exactly two `format` values, `text` (its own
+default) and `json` — `text` was rendered internally through compare's own
+`markdown` renderer, never a distinct text format of its own.
+`mode: compare` has no `text` format at all — `action/validate-inputs.sh`
+rejects it outright, before Python/toolchain install, for both the
+audit-only shape (`json`/`markdown`/`sarif`/`junit`/`oneline` only) and the
+two-sided shape (`json`/`markdown`/`sarif`/`html`/`junit`/`review`/`oneline`
+only). A step that explicitly set `format: text` under either scan shape
+must change it to `format: markdown` (or drop the input entirely --
+`markdown` is `mode: compare`'s own default too) when migrating; a step
+that never set `format` (so relied on scan's own `text` default) needs no
+change, since both defaults render the identical markdown output.
 
 Three inputs have no `mode: compare` equivalent and are retired outright,
 with no replacement: `new-library-set` (multi-library audit — compare each
