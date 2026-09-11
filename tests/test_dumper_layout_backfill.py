@@ -802,6 +802,50 @@ class TestBackfilledRecordFactSync:
         assert merged.vtable_fact.status is FactStatus.PRESENT
         assert merged.vtable_fact.value == ["_ZN6WidgetD1Ev"]
 
+    def test_dwarf_own_partial_vtable_fact_survives_backfill(self) -> None:
+        """Codex review, PR #1213: the vtable sibling of
+        ``test_dwarf_own_fact_status_carries_when_dwarf_value_wins`` above.
+        ADR-063 Phase 5B / T9's DWARF per-TU completeness slice can mark
+        ``dwarf.vtable_fact`` as ``Fact.partial(...)`` -- when dwarf's value
+        wins the backfill (the clang header backend never populates
+        ``RecordType.vtable`` itself), that known-incomplete status must
+        survive, not get silently promoted to ``Fact.present(...)`` by
+        ``replace_with_fact_sync``'s default derivation. Losing it here
+        would let ``compare/vtable_evidence.py``'s own PARTIAL decline gate
+        never see the signal for any ELF dump combining the clang header
+        frontend with DWARF layout backfill -- reproducing the exact
+        cross-translation-unit fabrication that slice exists to close.
+        """
+        header = RecordType(name="Widget", kind="class", vtable=[])
+        dwarf = RecordType(
+            name="Widget",
+            kind="class",
+            vtable=["_ZN6WidgetD1Ev"],
+            vtable_fact=Fact.partial(["_ZN6WidgetD1Ev"], producer="dwarf"),
+        )
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vtable == ["_ZN6WidgetD1Ev"]
+        assert merged.vtable_fact == Fact.partial(["_ZN6WidgetD1Ev"], producer="dwarf")
+
+    def test_header_own_populated_vtable_still_wins_and_fact_agrees(self) -> None:
+        """Negative control: when header's own (non-empty) vtable wins --
+        the castxml backend, which does populate ``RecordType.vtable``
+        itself, unlike clang -- header's own Fact status must be what
+        survives, not dwarf's, and not an unconditional ``Fact.present()``
+        either."""
+        header = RecordType(
+            name="Widget",
+            kind="class",
+            vtable=["_ZN6WidgetD1Ev"],
+            vtable_fact=Fact.partial(["_ZN6WidgetD1Ev"], producer="dwarf"),
+        )
+        dwarf = RecordType(
+            name="Widget", kind="class", vtable=["_ZN6WidgetD2Ev", "_ZN6Widget1fEv"]
+        )
+        merged = _backfilled_record(header, dwarf)
+        assert merged.vtable == ["_ZN6WidgetD1Ev"]
+        assert merged.vtable_fact == Fact.partial(["_ZN6WidgetD1Ev"], producer="dwarf")
+
     def test_header_own_vptr_offset_bits_still_wins_and_fact_agrees(self) -> None:
         header = RecordType(name="Widget", kind="class", vptr_offset_bits=64)
         dwarf = RecordType(name="Widget", kind="class", vptr_offset_bits=0)

@@ -28,11 +28,11 @@ from pathlib import Path
 
 from abicheck.cli_dump_helpers import (
     check_dump_debug_format_error,
-    compile_db_from_build_info,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
     resolve_dump_debug_format,
 )
+from abicheck.header_conditionals import compile_db_from_build_info
 
 # Canonical home (``dumper_scoping``), not ``cli_dump_helpers``'s former
 # private alias of it: that alias existed only for ``perform_elf_dump``'s own

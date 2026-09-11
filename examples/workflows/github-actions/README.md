@@ -86,8 +86,10 @@ merge with the ABI break unreviewed.
 
 - Only have one release's binary and want to catch *hygiene* issues (an
   accidental export, say) rather than compare two releases? See
-  [`audit-release`](../audit-release/README.md) — same Action, `mode: scan`
-  instead of the default `compare`.
+  [`audit-release`](../audit-release/README.md) — same Action, `mode: compare`
+  with `old-library`/`abi-baseline` both omitted (the audit-only shape)
+  instead of the default two-sided comparison; set `severity-preset` if the
+  step should gate on what it finds.
 - Need to gate on severity rather than the legacy verdict scheme (e.g. warn
   on additions but fail on breaks)? See
   [Severity & Exit Codes](../../../docs/use/severity.md).

@@ -33,8 +33,10 @@ on top of *this* function for the cross-side gates its own docstring covers,
 rather than re-deriving which flags are single-snapshot-consulted a third
 time.
 
-Both call sites -- ``serialization.decode_snapshot``'s load-time
-``UserWarning`` and ``analysis_assurance_schema_staleness.schema_staleness_
+Both call sites -- ``serialization.snapshot_from_dict``'s load-time
+``UserWarning`` (ADR-061 gap E: the warning itself is a ``policy``
+judgement that runs *after* ``storage.snapshot_codec.decode_snapshot``,
+which cannot own it) and ``analysis_assurance_schema_staleness.schema_staleness_
 status`` -- import THIS function rather than keeping their own copy of the
 table, so the two can never independently drift on what counts as
 "degraded" (see ``analysis_assurance.py``'s module docstring and

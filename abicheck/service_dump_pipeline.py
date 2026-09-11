@@ -263,9 +263,10 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
             ``.abicheck.yml`` ``build.targets`` declaration combined with a
             pre-captured Bazel ``aquery``/``cquery`` jsonproto.
     """
-    from . import service, service_compare_evidence as _sce
+    from . import service_compare_evidence as _sce
     from .header_utils import split_public_header_inputs
     from .model.header_ast_frontends import HEADER_AST_FRONTENDS
+    from .workflows.input_resolution import detect_binary_format
     from .workflows.plan import AnalysisPlanner
 
     request.validate()
@@ -290,7 +291,7 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
     # there is no native artifact to sniff a format from. `validate()` above
     # already required real `sources`/`build_info`/`dump_manifest` for that
     # shape, so this is the binary-less request, not a missing-input mistake.
-    fmt = service.detect_binary_format(side.path) if side.path is not None else None
+    fmt = detect_binary_format(side.path) if side.path is not None else None
     debug_format = _sce.normalized_debug_format(request)
     _sce.reject_debug_format_for_binaries(debug_format, (("input", fmt),))
 

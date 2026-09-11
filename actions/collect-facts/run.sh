@@ -464,7 +464,7 @@ case "$INSTALL_DEPS" in
 esac
 
 if [[ "$PHASE" == "verify" && "$PRODUCER" == "replay" ]]; then
-  echo "::notice::producer: replay collects inline at dump/scan/compare time -- there is nothing for phase: verify to check here. Pass sources: $SOURCES directly to the next abicheck step."
+  echo "::notice::producer: replay collects inline at dump/compare time -- there is nothing for phase: verify to check here. Pass sources: $SOURCES directly to the next abicheck step."
 fi
 
 # ---------------------------------------------------------------------------
@@ -482,9 +482,9 @@ _prepare_replay() {
     has_db="yes"
   fi
   if [[ -z "$has_db" ]]; then
-    echo "::notice::No compile_commands.json found under '$SOURCES'. abicheck infers and runs the build-system query itself (cmake/bazel/make) at dump/scan/compare time when it sees --sources -- no separate collection step is needed here."
+    echo "::notice::No compile_commands.json found under '$SOURCES'. abicheck infers and runs the build-system query itself (cmake/bazel/make) at dump/compare time when it sees --sources -- no separate collection step is needed here."
   fi
-  echo "producer: replay needs no separate collection step -- pass sources: $SOURCES directly to dump/scan/compare (--depth build/source selects how much of it is used)."
+  echo "producer: replay needs no separate collection step -- pass sources: $SOURCES directly to dump/compare (--depth build/source selects how much of it is used)."
   _write_output "producer" "replay"
   _write_output "mode" "inline"
   _write_output "pack-path" ""

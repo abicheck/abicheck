@@ -30,9 +30,6 @@ import click
 
 from ....cli_dump_helpers import (
     _dump_will_attempt_hybrid_l4_extraction,
-    compile_db_filter_scope_error,
-    compile_db_for_filter_scope_check,
-    compile_db_from_build_info,
     reject_snapshot_compression_conflict,
     resolve_dump_collect_context,
     resolve_dump_compile_context,
@@ -67,6 +64,10 @@ from ....cli_resolve import (
     _normalize_binary_input,
 )
 from ....frontends.cli import help as cli_help
+from ....service_compare_evidence import (
+    dump_cli_compile_db_filter_scope_error,
+    dump_cli_compile_db_path,
+)
 from ..dump_debug_config import (
     DumpDebugConfig,
     resolve_dump_build_compile_db_filter,
@@ -367,7 +368,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # The L2 compile database is whatever --build-info names, read back after
     # --depth binary has had its say about the headers (a headerless dump has
     # no header AST for a database to parameterize).
-    compile_db_path = compile_db_from_build_info(build_info, headers)
+    compile_db_path = dump_cli_compile_db_path(build_info, headers)
     # The scope check itself resolves the compile database more broadly than
     # `compile_db_path` above -- a `--sources` tree with no `--build-info` can
     # still auto-discover one, and the L3->L2 fold/L3 embed both resolve it
@@ -377,10 +378,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # (`effective_compile_db`) -- see `compile_db_for_filter_scope_check`'s
     # own docstring for why widening it here would widen that too.
     if (
-        _filter_scope_error := compile_db_filter_scope_error(
-            compile_db_filter,
-            compile_db_for_filter_scope_check(build_info, sources, headers),
-            collect_mode,
+        _filter_scope_error := dump_cli_compile_db_filter_scope_error(
+            compile_db_filter, build_info, sources, headers, collect_mode,
         )
     ) is not None:
         raise click.UsageError(_filter_scope_error)

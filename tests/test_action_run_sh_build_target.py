@@ -33,6 +33,7 @@ Extracts the full mode-branch region of ``run.sh`` verbatim -- same
 sets the relevant ``INPUT_*`` env vars, capturing the resulting ``CMD``
 array (or the rejection's exit code/``::error::`` text).
 """
+
 from __future__ import annotations
 
 import os
@@ -65,12 +66,13 @@ def _bash_executable() -> str:
 
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
-    script = (
-        _mode_branches_region()
-        + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
-    )
+    script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
@@ -79,7 +81,10 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -114,9 +119,14 @@ def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestBuildTargetIsRetiredOnEveryMode:
-    """Neither `mode: dump` nor `mode: scan` forwards `build-target` any
-    more -- both reject it outright, naming `.abicheck.yml`'s `build.targets`
-    as the replacement."""
+    """`mode: dump` no longer forwards `build-target` -- it rejects it
+    outright, naming `.abicheck.yml`'s `build.targets` as the replacement.
+    (`mode: scan`'s own copy of this flag was retired first, ADR-068's
+    second 2026-09-09 amendment; `mode: scan` itself is now retired
+    outright too, so there is no `scan`-shaped rejection left to test
+    here -- `action/validate-inputs.sh`'s unconditional `mode: scan is no
+    longer supported` check runs, and fails the step, before build-target
+    is ever consulted.)"""
 
     def test_dump_rejected_with_an_error_naming_config(self) -> None:
         result = _run_mode_branches(
@@ -135,25 +145,32 @@ class TestBuildTargetIsRetiredOnEveryMode:
         assert "dump" in cmd
         assert "--build-target" not in cmd
 
-    def test_scan_rejected_with_an_error_naming_config(self) -> None:
-        result = _run_mode_branches(
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestCompareNeverForwardsBuildTarget:
+    """`compare` has no `--build-target` flag at all (`dump`-only); setting
+    build-target on mode: compare (either shape) is simply never forwarded
+    -- there is no dedicated rejection for it (unlike the now-removed
+    mode: scan, ADR-068's Action-input-lifecycle amendment), since it was
+    never a documented compare capability to silently narrow."""
+
+    def test_absent_from_two_sided_compare(self) -> None:
+        cmd = _run_cmd(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.json",
                 "INPUT_BUILD_TARGET": "//:math",
             }
         )
-        assert result.returncode != 0
-        assert "build-target is retired" in result.stdout
-        assert "build.targets" in result.stdout
+        assert "--build-target" not in cmd
 
-    def test_scan_absent_forwards_none(self) -> None:
+    def test_absent_from_audit_only_compare(self) -> None:
         cmd = _run_cmd(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.json",
+                "INPUT_BUILD_TARGET": "//:math",
             }
         )
         assert "--build-target" not in cmd

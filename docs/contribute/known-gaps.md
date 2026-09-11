@@ -6098,15 +6098,32 @@ looked like the obvious fix and wasn't.
   may legitimately import both `compare` (for the dataclasses) and
   `serialization`. `probe_harness.py` no longer calls
   `serialization.snapshot_to_dict`/`snapshot_from_dict` at all. Neither
-  latent violation this entry named is still open; `serialization.py`
-  itself stays unclassified (`public_root_surfaces`) since its own
-  ~1500-line `snapshot_to_dict`/`snapshot_from_dict` codec proper was not
-  part of either slice -- that remains a separate, not-yet-attempted
-  classification, verified against the full
-  architecture gate, before `serialization.py` itself can be classified
-  `storage`. Left `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
+  latent violation this entry named is still open. `serialization.py`'s own
+  ~1500-line `snapshot_to_dict`/`snapshot_from_dict` codec proper has since
+  been given a real owner too (ADR-061 gap E closure package 6): it moved to
+  `storage/snapshot_codec.py` and four siblings
+  (`snapshot_schema_versions.py`, `snapshot_encode.py`,
+  `snapshot_decode_declarations.py`, `snapshot_reliability_flags.py`), each
+  kept under the ADR-061 new-file production line ceiling since a brand-new
+  file gets no adoption-debt baseline exemption. `serialization.py` itself
+  is confirmed (not just documented) to stay `public_root_surfaces`-listed
+  permanently, for the same "no single layer" reason ADR-061 gap B's own
+  closure status already established for `checker_policy`/`contract_gating`/
+  `reclassify`: it is the one legal route through which
+  `workflows.snapshot_load.backfill_python_ext_from_evidence` and
+  `policy.analysis_assurance_degraded_facts.degraded_reliability_facts` run
+  between `storage.snapshot_codec.decode_snapshot` and
+  `storage.snapshot_codec.finalize_snapshot` -- neither call is legal from a
+  `storage`-classified module (`may_import: [model]` only), and
+  `dependency-direction` resolves a dynamic `importlib.import_module` call
+  against a classified target the identical way it resolves a static import
+  (only an *unclassified* target, like this facade, is skipped by design),
+  so there is no bridge-module trick available for either. Verified against
+  the full architecture gate (`scripts/check_architecture.py`) with zero new
+  findings. Left `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
   placement (its own docstring already states the reason and the
-  precedent it follows) as accepted debt until that slice is done.
+  precedent it follows) as accepted debt -- that placement was never about
+  `serialization.py`'s own classification, so this closure does not change it.
 
 - **[Superseded 2026-09-01 for `surface.py`'s own half — see the correction
   below; the node-id-namespace half is still accurate.] ADR-063 Phase 3
@@ -7913,3 +7930,253 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 `tests/regressions/manifest_tool_surface.py` for the fixture half; the
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
+
+### ADR-061 gap F: thirteen nested `buildsource`/`compat`/`impact` modules still carry no disposition
+
+[ADR-061](adr/061-responsibility-package-architecture.md)'s gap F requires
+every unclassified first-party module under `abicheck/` to carry one of
+three recorded dispositions (migrate/retain/accept) — "unclassified for
+now" is explicitly not one of them. `architecture/dispositions.yaml`
+already carries this for every *root* `abicheck/*.py` module (its own
+schema requires a direct root path, so it structurally cannot record a
+nested one), and `architecture/debt.yaml`'s `files` list requires
+`baseline_lines >= 800` (this repo's production file-size cap), so it
+cannot record a small nested leaf module either. A repo-wide re-audit for
+this gap (enumerating every `.py` file under `abicheck/` not already
+covered by a canonical layer directory, a layer's `legacy_paths`, or an
+existing `debt.yaml` entry) found 44 such nested modules, all under
+`abicheck/buildsource/`, `abicheck/compat/`, `abicheck/impact/`, and
+`abicheck/schemas/`. 31 of them were classified by adding them to the
+appropriate layer's `legacy_paths` in `architecture/modules.yaml` (the
+"migrate through a named responsibility slice" disposition — verified,
+not merely asserted, by a full `scripts/check_architecture.py` run showing
+no new `dependency-direction`/`dependency-cycle`/`unclassified-import`
+findings after the change; three of the thirty-one — `entity_identity.py`/
+`entity_resolver.py`/`source_graph_query.py` — are pure re-export facades
+and are additionally registered in `architecture/modules.yaml`'s `facades`
+list so `_check_facade`'s delegation-only rules apply to them too). The
+remaining
+thirteen could not be classified
+the same way without breaking that verification, and are recorded here
+instead, following the same "trial classification measured N new
+violations, blocked" pattern this ADR's other gaps already use for
+`comparability.py`/`build_context.py`/etc.
+
+**Blocked `migrate` dispositions**, three shapes:
+
+- *Caller-forced* (the common case below): each module's own outgoing
+  imports are clean for its named target layer, but a *different*,
+  already-classified module imports it directly from a layer that target
+  does not allow, so classifying it would immediately trip
+  `check_architecture.py`'s `dependency-direction` check. Each needs the
+  same fix this ADR's other blocked entries name: route the offending
+  caller through a workflows-owned wrapper (or otherwise decouple it)
+  before the target classification is safe — not attempted here, per this
+  ADR's "not the same-PR fix" bar for migrations that already have
+  caller-side test/behavior surface to preserve.
+- *Self-dependency* (`build_evidence.py` and `graph_impact.py`, the two
+  exceptions below): the module's *own* outgoing import, not a caller, is
+  what blocks its target classification. The caller-side remedy above
+  (wrap or decouple the caller) does not apply here — the fix is to move
+  or decouple the blocking dependency inside the module itself.
+- *Mixed-responsibility* (`fact_set.py`, `impact/use_case_impact.py`, and
+  `evidence_report.py`, the three exceptions below): the module itself
+  bundles two structurally different responsibilities whose real callers
+  are already split across incompatible layers. Neither the caller-side
+  nor the self-dependency remedy applies — no single target layer is even
+  the right answer until
+  the module is split along its own seam.
+
+- `abicheck/buildsource/build_evidence.py` (target: `model` — its own
+  docstring is literally "Build-system-neutral build evidence model", and
+  `abicheck/buildsource/pack.py` (already `model`-classified) imports it
+  directly, ruling out `extract`) — a *self-dependency* block: it itself
+  imports `.comdat_groups` (`extract`-classified), which `model`'s empty
+  `may_import` forbids. Unlike every other entry below, no caller needs to
+  change — `comdat_groups` (or the piece of it this module actually uses)
+  would need to move or be decoupled from this module directly.
+- `abicheck/buildsource/graph_impact.py` (target: `compare` — its own
+  docstring: "Structured graph impact/proof-path data attached to
+  findings"; it deliberately *enriches an existing `Change` finding*
+  rather than extracting a fact, the same shape as its already-`compare`
+  -classified `graph_reconcile.py` sibling — `source_graph_findings.py` is
+  *not* a `compare`-classified precedent despite a similar-sounding role:
+  `architecture/debt.yaml` records it with target `extract/build-or-source`,
+  and it carries no `modules.yaml` classification of its own today — not
+  `extract`, which this module's previous classification in this change
+  wrongly assigned it, laundering a real boundary issue instead of
+  recording it) — a *self-dependency* block, verified empirically by trial
+  classification: it itself imports `.call_graph` (`extract`-classified),
+  producing four new `compare -> extract` findings the moment it is
+  classified `compare`, since `compare`'s `may_import` is `model` only.
+  `call_graph` (or the specific pieces this module actually uses from it)
+  would need to move or be decoupled from this module directly.
+- `abicheck/buildsource/build_output.py` (target: `extract`, alongside its
+  sibling adapters) — blocked because `abicheck/cli_project.py`
+  (`frontends`) imports it directly; `frontends` may not import `extract`.
+- `abicheck/buildsource/merge_support.py` (target: `extract`) — blocked
+  because `abicheck/cli_buildsource_merge.py` (`frontends`) imports it
+  directly.
+- `abicheck/buildsource/evidence_policy.py` (target: `policy`, per its own
+  D7 verdict-modulation/`require_evidence`-gate docstring) — blocked
+  because `abicheck/cli_buildsource_helpers.py` (`frontends`) imports it
+  directly; `frontends` may not import `policy`.
+- `abicheck/buildsource/fact_set.py` — **not a single-target-layer case at
+  all**, unlike every other entry here: this module bundles two
+  structurally different responsibilities (`rollup_coverage`/
+  `rollup_fact_set`/`fact_set_rollup_is_inconsistent`/
+  `incomplete_families`, a dependency-free per-TU fold — genuinely
+  `extract`-shaped, and `check_fact_set_compatibility`/
+  `check_fact_compatibility`, an old/new pairwise comparison rule —
+  `compare`/`policy`-shaped) under one file, and its callers split along
+  exactly that seam: `abicheck/buildsource/source_link.py` (`extract`)
+  uses only the rollup half; `abicheck/buildsource/inputs_validate.py`
+  (`extract`) uses both; `abicheck/buildsource/source_diff.py` (`compare`)
+  and `abicheck/analysis_assurance.py` (`policy`) use only the
+  compatibility half. No single classification — `extract` included, this
+  entry's own earlier revision wrongly proposed — can be correct while
+  both halves stay in one file, since `compare`'s and `policy`'s
+  `may_import` never include `extract`. Splitting the file is necessary
+  but not sufficient on its own: the compatibility half's natural owner is
+  `compare` (it's an old/new pairwise comparison rule, the same shape as
+  `source_diff.py`'s own responsibility — `model` would mis-own it, since
+  `model` holds entities/values, not comparison algorithms), but
+  `inputs_validate.py` itself is `extract`-classified and calls
+  `check_fact_set_compatibility` directly; `extract`'s `may_import` is
+  `model`/`storage` only, so moving the compatibility half to `compare`
+  would immediately turn `inputs_validate.py`'s own call into a new,
+  forbidden `extract -> compare` edge. The real fix therefore has two
+  parts, not one: the internal split (rollup functions to `extract`, the
+  compatibility-check functions to `compare`) *and* moving or interposing
+  `inputs_validate.py`'s own call site (e.g. routing it through a
+  `workflows`-owned caller, the same pattern this ADR's caller-forced
+  entries already use) — a combination neither the caller-forced nor the
+  self-dependency shape above covers on its own, and not a single
+  blocked-migrate target either; recorded here as its own third shape.
+- `abicheck/impact/use_case_impact.py` — the identical mixed-responsibility
+  shape as `fact_set.py`: `build_use_case_impact()` is comparison-time
+  orchestration (`workflows`-shaped — not this module's actual
+  `architecture/modules.yaml` classification, since it carries none, but
+  the layer its own content fits), but the same file also defines
+  `render_use_case_impact_lines()` (text/markdown rendering) and
+  `add_use_case_impact()` (mutates a serialized JSON report dict) — both
+  report-shaping, not orchestration. A `workflows` classification (as an
+  earlier version of this change assigned it) would bless report
+  construction as workflow logic and let a future workflow-only dependency
+  reach those two functions unchecked. No single classification is correct
+  while all three stay in one file; the real fix is the same shape as
+  `fact_set.py`'s — split the report-shaping functions out to a
+  `report`-owned sibling.
+- `abicheck/buildsource/evidence_report.py` — the identical
+  mixed-responsibility shape again: `resolve_side_pack()`/
+  `intrinsic_coverage()`/`optional_coverage()`/`detect_coverage_asymmetry()`/
+  `diff_embedded_build_source()`/`prepare_embedded_build_source()`/
+  `attach_evidence_metrics()` are pack resolution and diff orchestration
+  (`workflows`-shaped — again, the layer its content fits, not a real
+  classification this module carries), but `coverage_lines()`/
+  `compare_side_coverage_lines()`/`capability_lines()` in the same file
+  construct the human-readable evidence-coverage report text — `report`-
+  shaped. Same fix shape as the two entries above: split the rendering
+  functions out to a `report`-owned sibling before either half gets a
+  real target.
+- `abicheck/compat/descriptor.py` (target: `extract` — ABICC XML
+  descriptor parsing, the same shape as the already-`extract`-classified
+  `compat/abicc_dump_import.py`) — blocked because `abicheck/compat/cli.py`
+  (`frontends`) imports it directly (both the runtime `parse_descriptor`
+  call and a `TYPE_CHECKING`-only `CompatDescriptor` reference).
+- `abicheck/impact/engine.py` (target: `workflows` — its `assess_change`
+  builder is called from `appcompat.py`/`appcompat_consumer_impact.py`,
+  both already `workflows`) — blocked because
+  `abicheck/post_processing_reachability.py` (`policy`) also imports it
+  directly (lazily); `policy` may not import `workflows`.
+- `abicheck/compat/_helpers.py` (target: `frontends` — split directly out
+  of `compat/cli.py` per its own module docstring, implements ABICC CLI
+  translations, imports `click`, and is imported only by `compat/cli.py`
+  itself, already `frontends`-classified) — blocked because its own body
+  imports `..policy.classification` directly, which `frontends`' `may_import`
+  (`model`/`workflows`/`report` only) forbids. Its sibling `compat/_errors.py`
+  carries no such import (only `click` and the already-`model`-classified
+  `errors.py`) and was reclassified to `frontends` in this same pass —
+  verified empirically, not merely asserted, the same way every `migrate`
+  disposition in this gap was. Classifying `_helpers.py` under `workflows`
+  instead (as a superficial fix) would not be a correct disposition: it
+  would paper over the real edge — `compat/cli.py` (`frontends`) reaching
+  `policy.classification` through this one intermediate file — rather than
+  recording it as the blocked `frontends -> policy` case it actually is.
+
+**Retain, deliberately unclassified**:
+
+- `abicheck/buildsource/source_graph.py` — a pure back-compat re-export
+  facade (its own docstring: "Back-compat facade: source-graph values/
+  construction/comparison split"), not a real implementation module. Every
+  name it used to define now lives in already-classified siblings
+  (`model.graph_facts`/`model.source_graph`/the now-`model`-classified
+  `source_graph_query.py` for values, `extract`-classified
+  `source_graph_build.py`/`source_graph_build_source_abi.py` for
+  construction, `compare`-classified `source_graph_compare.py` for
+  comparison); this module only re-exports those names (`X as X`) so a
+  pre-existing `from .source_graph import ...` call site keeps resolving.
+  No internal first-party module actually imports it any more (every real
+  internal caller already imports the split-out siblings directly) — it
+  exists purely for external/legacy callers. Classifying it `workflows`
+  (as an earlier version of this change did) would misstate its
+  responsibility: it coordinates nothing, and giving a pure re-export
+  facade a real layer identity is exactly the kind of false ownership
+  this ADR's `facades` mechanism exists to prevent elsewhere. Unlike
+  `dispositions.yaml`, `architecture/modules.yaml`'s `facades` list is
+  **not** root-path-limited — `check_architecture.py` resolves each entry
+  as `facade.replace(".", "/") + ".py"`, which reaches a nested module
+  like `abicheck.buildsource.source_graph` just as well (verified: adding
+  it there and running `check_architecture.py` does invoke
+  `_check_facade` against it). The real reason it isn't registered there
+  is that it doesn't satisfy that check's stricter delegation-only rules:
+  it has no `__all__`, and it carries a real `__getattr__` function body
+  (a deliberate, documented lazy import breaking a real
+  `source_graph -> source_graph_findings -> source_graph` cycle the
+  AI-readiness gate would otherwise reject) — trial-registering it
+  produces exactly those two `facade-exports`/`facade-logic` findings.
+  Making it pass would mean removing that cycle-breaking `__getattr__` or
+  restructuring the module, a real code change out of scope for this
+  docs-only pass. Recorded here as a retained, deliberately-unclassified
+  exception instead, with the concrete blocking findings named rather
+  than asserted.
+- `abicheck/impact/model.py` — the identical shape gap B already
+  established for `checker_policy.py`/`contract_gating.py`/`reclassify.py`:
+  `abicheck/checker_types.py` (`model`, whose `may_import` is empty)
+  imports `ImpactAssessment` from this module directly and statically
+  (`from .impact.model import ImpactAssessment`), so the module cannot be
+  classified into anything other than `model` itself without turning that
+  pre-existing edge into a real `dependency-direction` violation — but the
+  module's own body imports `..policy.evidence_status` (`Confidence`,
+  `ReachabilityState`), which `model`'s empty `may_import` equally
+  forbids. No single ADR-061 layer admits both directions at once, the
+  same conflict gap B's own worked example (`DiffResult`/`checker_policy`)
+  describes. Its sibling `impact/engine.py` above depends on this module
+  too and inherits the same constraint, which is part of why it stays
+  blocked rather than reclassified on its own.
+
+Not fixed here, matching this ADR's own migration-rules bar ("a real,
+separate migration slice, not a same-PR fix"). This applies differently
+per shape, not as one blanket remedy: each *caller-forced* entry above
+names the specific caller that would need to route through a
+`workflows`-owned wrapper (mirroring gap A's `cli_dump_helpers.py ->
+header_conditionals.py` precedent) before its target classification
+becomes safe; each *self-dependency* entry (`build_evidence.py`,
+`graph_impact.py`) instead needs its own blocking import moved or
+decoupled, with no caller-side fix at all; each *mixed-responsibility*
+entry (`fact_set.py`, `impact/use_case_impact.py`, `evidence_report.py`)
+needs an internal split before either half gets a target. The two
+*retained* entries are not
+migration targets at all, but for two different reasons, not one:
+`source_graph.py` is a pure facade with no offending caller in the first
+place (it exists purely for external/legacy call sites); `impact/model.py`
+is the opposite — it has a real, named offending edge
+(`checker_types.py -> impact.model -> policy.evidence_status`), the same
+"no single ADR-061 layer admits both directions" conflict gap B's own
+worked example describes, and is forced *toward* (never actually
+classified as) `model` because that conflict has no caller-side or
+self-dependency fix available today — not because there's no caller to
+fix. It carries no `architecture/modules.yaml` entry at all, same as
+every other entry in this file. Tractable per-entry, not as one slice —
+`build_output.py`'s single `frontends` caller is independent of any other
+entry's fix.

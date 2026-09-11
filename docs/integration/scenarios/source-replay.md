@@ -44,17 +44,20 @@ where the *build* emits source facts as it compiles instead.
 
 ## Two entry points, same evidence
 
-**One-step, root-Action `mode: scan`** — the simplest wiring, classifies
-changed paths, runs the pinned evidence level, and compares in one step:
+**One-step, root-Action `mode: compare`** — the simplest wiring, classifies
+changed paths, runs the pinned evidence level, and compares in one step
+([ADR-068's Action-input-lifecycle amendment](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
+retired the once-separate `mode: scan` outright — this is now the same
+`mode: compare` the rest of this page's two-sided examples use, with
+`old-library` as the baseline):
 
 ```yaml
 - uses: abicheck/abicheck@v0.5.0
   with:
-    mode: scan
+    old-library: abi-baseline.json
     new-library: build/libfoo.so
     new-header: include/
     sources: .
-    against: abi-baseline.json
     since: origin/${{ github.base_ref }}
 ```
 
@@ -92,6 +95,6 @@ full `evidence-producer` contract and how it composes with `collect-facts`.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the canonical `mode: scan` reference.
+- [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the canonical source-intelligence `mode: compare` reference.
 - [Evidence Depth](../../use/evidence-depth.md) — the depth ladder and compile-DB acquisition options.
 - [What Each Level Sees](../../learn/what-each-level-sees.md) — a worked example of what L3/L4/L5 actually produce.

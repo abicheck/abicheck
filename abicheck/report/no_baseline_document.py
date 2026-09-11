@@ -130,7 +130,16 @@ __all__ = [
 #: nests the same ``AnalysisAssurance.to_dict()`` compare's report does, so
 #: this always-present block also gains the additive ``schema_staleness_
 #: status`` key.
-AUDIT_REPORT_SCHEMA_VERSION = "1.3"
+#:
+#: ``1.4`` adds the top-level ``disposition_audit`` block (ADR-067 C-S2) --
+#: purely additive, a straightforward MINOR bump under the policy stated
+#: above. Closes the gap where an audit that suppressed every one of its
+#: findings still read, in an ``abicheck aggregate`` fan-in, as
+#: ``detected_total: 0``/``suppressed: 0``: the rule-attributed
+#: ``suppressed`` list was already on this document, but nothing folded it
+#: into the one block every other report shape's own fan-in reads (Codex
+#: review, fresh evidence).
+AUDIT_REPORT_SCHEMA_VERSION = "1.4"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.
@@ -427,3 +436,20 @@ class NoBaselineDocument:
     #: field states what *did* classify the findings, not what a caller
     #: asked for.
     policy: str = "strict_abi"
+    #: ADR-067 C-S2's raw-versus-effective disposition ledger
+    #: (``report.disposition_audit.compute_disposition_audit``), already
+    #: serialized -- the same block every two-sided ``compare`` report
+    #: carries at its root. Previously absent from this shape entirely: a
+    #: ``--no-baseline`` audit that suppressed every one of its findings
+    #: emitted a real, rule-attributed ``suppressed`` list of its own, but
+    #: an aggregate fan-in reading a target's generic root
+    #: ``disposition_audit`` block (``workflows.aggregate.disposition_axis.
+    #: disposition_audit_block``) found none on this shape, and folded a
+    #: clean-looking ``detected_total: 0``/``suppressed: 0`` in its place --
+    #: losing the very rule provenance and count `vision.md`'s "Record
+    #: before disposing" rule exists to keep visible (Codex review, fresh
+    #: evidence). ``None`` only for a hand-constructed document (a test
+    #: fixture) that never called :func:`compute_no_baseline_document`; the
+    #: real compute half always attaches one, since ``result.diff`` is a
+    #: genuine self-compared ``DiffResult`` carrying its own ledger.
+    disposition_audit: Mapping[str, Any] | None = None

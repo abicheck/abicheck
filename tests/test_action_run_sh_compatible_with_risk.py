@@ -437,24 +437,3 @@ class TestSarifIsNeverReadForAVerdict:
             bindir,
         )
         assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
-
-
-class TestScanExitZeroReportsCompatibleWithRisk:
-    def test_verdict_output_is_compatible_with_risk_not_compatible(
-        self, tmp_path: Path
-    ) -> None:
-        report = {**_risk_report(), "scan_schema_version": "1.2"}
-        bindir = _stub_abicheck(tmp_path, exit_code=0, report=report)
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "COMPATIBLE_WITH_RISK", outputs
-        assert outputs["exit-code"] == "0", outputs
-        assert outputs["_exit"] == 0, outputs

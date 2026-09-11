@@ -65,7 +65,11 @@ def _bash_executable() -> str:
 _VALIDATOR_INPUT_VARS = (
     "INPUT_MODE",
     "INPUT_NEW_LIBRARY",
+    "INPUT_NEW_LIBRARY_SET",
     "INPUT_OLD_LIBRARY",
+    "INPUT_OLD_HEADER",
+    "INPUT_OLD_INCLUDE",
+    "INPUT_OLD_VERSION",
     "INPUT_FORMAT",
     "INPUT_UPLOAD_SARIF",
     "INPUT_DEBUG_INFO1",
@@ -76,11 +80,23 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_INCLUDE_PRIVATE_DSO",
     "INPUT_FAIL_ON_REMOVED_LIBRARY",
     "INPUT_ABI_BASELINE",
+    "INPUT_BASELINE_PROFILE",
+    "INPUT_BASELINE_TARGET",
+    "INPUT_BASELINE_ASSET_NAME_TEMPLATE",
+    "INPUT_AGAINST",
     "INPUT_ESTIMATE",
     "INPUT_AUDIT",
+    "INPUT_CROSSCHECK",
+    "INPUT_RISK_RULES",
+    "INPUT_SINCE",
+    "INPUT_CHANGED_PATH",
+    "INPUT_BUDGET",
+    "INPUT_FOLLOW_DEPS",
     "INPUT_USED_BY",
+    "INPUT_USED_BY_MANIFEST",
     "INPUT_REQUIRED_SYMBOL",
     "INPUT_REQUIRED_SYMBOLS",
+    "INPUT_LANG",
     "INPUT_AST_FRONTEND",
     "INPUT_GCC_PATH",
     "INPUT_GCC_PREFIX",
@@ -91,6 +107,8 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_BUILD_INFO",
     "INPUT_COMPILE_DB",
     "INPUT_BUILD_TARGET",
+    "INPUT_PUBLIC_HEADER_DIR",
+    "INPUT_REQUIRE_COMPLETE_ANALYSIS",
     "INPUT_JOBS",
     "INPUT_BUNDLE_SYSTEM_PROVIDERS",
 )
@@ -150,12 +168,20 @@ class TestUnknownModeIsRejected:
         assert "Unknown mode" in result.stdout
         assert "scna" in result.stdout
 
-    @pytest.mark.parametrize(
-        "mode", ["compare", "dump", "scan", "deps-tree", "deps-compare"]
-    )
+    @pytest.mark.parametrize("mode", ["compare", "dump", "deps-tree", "deps-compare"])
     def test_every_real_mode_is_accepted(self, mode: str) -> None:
         result = _run_validate({"INPUT_MODE": mode})
         assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_scan_is_rejected_outright(self) -> None:
+        """`mode: scan` is retired outright (ADR-068's Action-input-
+        lifecycle amendment, D8 hard removal) -- unlike a genuine typo, it
+        gets a specific `::error::` naming the replacement for the caller's
+        shape, not the generic "Unknown mode" message."""
+        result = _run_validate({"INPUT_MODE": "scan"})
+        assert result.returncode == 1
+        assert "mode: scan is no longer supported" in result.stdout
+        assert "Unknown mode" not in result.stdout
 
 
 @pytest.mark.skipif(
@@ -233,51 +259,50 @@ class TestDumpSnapshotCompressionIsValidated:
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestScanRejectsDirectoryOrPackage:
+class TestAuditOnlyCompareRejectsDirectoryOrPackage:
+    """The replacement for legacy `mode: scan`'s own "exactly one artifact,
+    no per-library fan-out" restriction: compare's audit-only shape
+    (old-library and abi-baseline both omitted) still has no fan-out."""
+
     def test_directory_is_rejected(self, tmp_path: Path) -> None:
         lib_dir = tmp_path / "release" / "lib" / "intel64"
         lib_dir.mkdir(parents=True)
         result = _run_validate(
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": str(lib_dir)}
+            {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": str(lib_dir)}
         )
         assert result.returncode == 1
         assert "does not accept a directory or package" in result.stdout
-        assert "scan" in result.stdout
 
     def test_plain_binary_passes(self, tmp_path: Path) -> None:
         lib = tmp_path / "libfoo.so.1"
         lib.write_text("")
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": str(lib)})
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": str(lib)})
         assert result.returncode == 0, result.stdout + result.stderr
 
     def test_json_snapshot_passes(self, tmp_path: Path) -> None:
         snap = tmp_path / "baseline.json"
         snap.write_text("{}")
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": str(snap)})
+        result = _run_validate(
+            {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": str(snap)}
+        )
         assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
-class TestScanRetiredInputsFailPreflight:
-    """ADR-068's second 2026-09-09 amendment, ruling (b): four `scan` inputs
-    are retired, and preflight -- not just `run.sh` -- is where a workflow
-    that still sets one must find out. Three are a hard removal with no
-    replacement (`new-library-set`/`risk-rules`/`build-target`); the fourth,
-    `crosscheck`, is dropped as *superseded* -- its `KEY=error` promotion
-    syntax is gone, but every cross-source check it used to gate already
-    reaches `compare` as an ordinary `ChangeKind`, so
-    `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` is the
-    replacement (`action/run.sh`'s routing-predicate comment has the fuller
-    account of what closed and what didn't).
+class TestGloballyRetiredInputsFailPreflight:
+    """`new-library-set`/`risk-rules`/`crosscheck` applied only to the now
+    fully-removed `mode: scan` (ADR-068's Action-input-lifecycle amendment,
+    D8 hard removal) -- with that mode gone, none of the three can ever do
+    anything on any mode, so preflight rejects them outright (not just a
+    scan-mode arm), before Python setup, the pixi/toolchain provision and
+    the abicheck install. `build-target` is different: it stays a real,
+    valid `dump`-mode input, only its (now nonexistent) `scan` application
+    is gone -- covered separately below.
 
-    `validate-inputs.sh` runs *before* Python setup, the pixi/toolchain
-    provision and the abicheck install; `run.sh` runs after all three. Codex
-    review on PR #1186 caught the first attempt rejecting these only in
-    `run.sh`, so a workflow paid the whole provisioning cost to be told about
-    an input error already knowable from the inputs alone. `run.sh` keeps its
-    own copies for anyone invoking it directly.
+    `run.sh` keeps its own copies of these checks for anyone invoking it
+    directly.
     """
 
     @pytest.mark.parametrize(
@@ -286,7 +311,6 @@ class TestScanRetiredInputsFailPreflight:
             ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "new-library-set"),
             ({"INPUT_NEW_LIBRARY_SET": "release/lib"}, "new-library-set"),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "risk-rules"),
-            ({"INPUT_BUILD_TARGET": "//:math"}, "build-target"),
             ({"INPUT_CROSSCHECK": "odr_type_variant=error"}, "crosscheck"),
         ],
     )
@@ -294,7 +318,7 @@ class TestScanRetiredInputsFailPreflight:
         self, env: dict[str, str], expected: str
     ) -> None:
         result = _run_validate(
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so", **env}
+            {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "new.so", **env}
         )
         assert result.returncode == 1, result.stdout + result.stderr
         assert "::error::" in result.stdout
@@ -306,43 +330,32 @@ class TestScanRetiredInputsFailPreflight:
         for env, needle in (
             ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "ADR-065 S3"),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "depth: source"),
-            ({"INPUT_BUILD_TARGET": "//:math"}, "mode: dump"),
             (
                 {"INPUT_CROSSCHECK": "odr_type_variant=error"},
-                "policy.overrides.<CHANGE_KIND>",
+                "policy.overrides",
             ),
         ):
             result = _run_validate(
-                {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so", **env}
+                {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "new.so", **env}
             )
             assert result.returncode == 1
             assert needle in result.stdout, (needle, result.stdout)
 
-    def test_a_plain_scan_is_unaffected(self) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"})
+    def test_a_plain_compare_is_unaffected(self) -> None:
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "new.so"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::error::" not in result.stdout
 
-    def test_warns_new_library_set_outside_scan(self) -> None:
-        """Inert on another mode, so it stays a warning there -- failing a
-        workflow over an input that never affected it would be gratuitous."""
+    @pytest.mark.parametrize("mode", ["compare", "dump", "deps-tree"])
+    def test_rejected_on_every_mode_not_just_compare(self, mode: str) -> None:
         result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY_SET": "a.so,b.so"}
+            {
+                "INPUT_MODE": mode,
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_CROSSCHECK": "odr_type_variant=error",
+            }
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "new-library-set" in result.stdout
-
-    def test_warns_crosscheck_outside_scan(self) -> None:
-        """Same shape as `new-library-set` above: `crosscheck` was always
-        scan-only and is now retired, so it stays a warning -- not a hard
-        failure -- on any other mode."""
-        result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_CROSSCHECK": "odr_type_variant=error"}
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "crosscheck" in result.stdout
+        assert result.returncode == 1, result.stdout + result.stderr
 
 
 class TestRemovedInputTombstones:
@@ -362,7 +375,7 @@ class TestRemovedInputTombstones:
         """
         for mode_env in (
             {"INPUT_MODE": "compare"},
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"},
+            {"INPUT_MODE": "deps-tree", "INPUT_NEW_LIBRARY": "new.so"},
             {"INPUT_MODE": "dump"},
         ):
             result = _run_validate(
@@ -381,7 +394,7 @@ class TestRemovedInputTombstones:
         inert with nothing failing (~2.8x wall time, ~3.2x peak RSS)."""
         for mode_env in (
             {"INPUT_MODE": "compare"},
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"},
+            {"INPUT_MODE": "deps-tree", "INPUT_NEW_LIBRARY": "new.so"},
             {"INPUT_MODE": "dump"},
         ):
             result = _run_validate({**mode_env, "INPUT_JOBS": "1"})
@@ -417,20 +430,44 @@ class TestRemovedInputTombstones:
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
 class TestFormatIsHardErrorNotSilentFallback:
-    @pytest.mark.parametrize("fmt", ["sarif", "html", "xml", "csv"])
-    def test_scan_rejects_unsupported_format(self, fmt: str) -> None:
+    @pytest.mark.parametrize("fmt", ["xml", "csv"])
+    def test_compare_rejects_unsupported_format(self, fmt: str) -> None:
         # An allowlist, not a denylist of known-bad values (CodeRabbit
         # review, PR #594): a typo/garbage value like 'xml' must be caught
-        # here too, not just sarif/html specifically.
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_FORMAT": fmt})
+        # here too, not just a known-bad one.
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_FORMAT": fmt})
         assert result.returncode == 1
         assert "does not support format" in result.stdout
         assert "warning" not in result.stdout.lower()
 
-    @pytest.mark.parametrize("fmt", ["text", "json"])
-    def test_scan_accepts_supported_format(self, fmt: str) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_FORMAT": fmt})
+    @pytest.mark.parametrize("fmt", ["json", "markdown", "sarif", "junit", "oneline"])
+    def test_audit_only_compare_accepts_its_own_format_set(self, fmt: str) -> None:
+        # Audit-only compare has a NARROWER format contract than a two-sided
+        # compare: 'html'/'review' are two-sided-report renderers with no
+        # audit-only equivalent (NO_BASELINE_UNSUPPORTED_FORMATS). See
+        # TestAuditOnlyCompareRejectsTwoSidedOnlyFormats below.
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": fmt,
+            }
+        )
         assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("fmt", ["html", "review"])
+    def test_audit_only_compare_rejects_two_sided_only_formats(
+        self, fmt: str
+    ) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_FORMAT": fmt,
+            }
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "does not support format" in result.stdout
 
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
     @pytest.mark.parametrize("fmt", ["sarif", "xml"])
@@ -458,8 +495,8 @@ class TestFormatIsHardErrorNotSilentFallback:
         self, mode: str, tmp_path: Path
     ) -> None:
         # Regression (Codex review): `abicheck deps tree`/`deps compare`
-        # both take a single BINARY, the same per-artifact contract dump/
-        # scan have -- this branch only validated format, so an
+        # both take a single BINARY, the same per-artifact contract dump
+        # has -- this branch only validated format, so an
         # unsupported directory/package operand passed this fail-fast step
         # and would only fail later in the CLI, after setup/dependency
         # installation.
@@ -797,35 +834,29 @@ class TestUnsetFormatUsesEachModesOwnDefault:
     """Regression (Codex review, PR #594): action.yml's `format` input must
     NOT declare a static top-level default. GitHub Actions applies a
     declared default to `inputs.format` even when the caller's workflow
-    never sets `format:` at all, so a single 'markdown' default would reach
-    run.sh as INPUT_FORMAT=markdown for every mode -- including scan, whose
-    own default is 'text' -- and this validator would then hard-reject the
-    ordinary, most common scan invocation that never touches `format`.
-    Leaving the input's default unset means an un-set `format:` reaches
-    here as an empty string, and each run.sh mode branch already supplies
-    its own correct per-mode default (`${INPUT_FORMAT:-text}` for scan,
-    `${INPUT_FORMAT:-markdown}` elsewhere)."""
+    never sets `format:` at all, so a single default would reach run.sh as
+    INPUT_FORMAT=<default> for every mode. Leaving the input's default
+    unset means an un-set `format:` reaches here as an empty string, and
+    each run.sh mode branch already supplies its own correct per-mode
+    default (`${INPUT_FORMAT:-markdown}`)."""
 
-    @pytest.mark.parametrize(
-        "mode", ["scan", "compare", "dump", "deps-tree", "deps-compare"]
-    )
+    @pytest.mark.parametrize("mode", ["compare", "dump", "deps-tree", "deps-compare"])
     def test_format_left_completely_unset_passes(self, mode: str) -> None:
         result = _run_validate({"INPUT_MODE": mode})
         assert result.returncode == 0, result.stdout + result.stderr
 
     def test_action_yml_format_input_has_no_static_default(self) -> None:
-        """The actual regression: action.yml declaring `default: 'markdown'`
-        on `format` would silently populate INPUT_FORMAT=markdown for scan
-        runs that never set it, defeating the empty-string sentinel every
-        mode branch's `${INPUT_FORMAT:-...}` relies on."""
+        """The actual regression: action.yml declaring a static default on
+        `format` would silently populate INPUT_FORMAT for every mode that
+        never sets it, defeating the empty-string sentinel every mode
+        branch's `${INPUT_FORMAT:-...}` relies on."""
         import yaml
 
         action_yml = ACTION_DIR.parent / "action.yml"
         data = yaml.safe_load(action_yml.read_text(encoding="utf-8"))
         assert "default" not in data["inputs"]["format"], (
             "action.yml's `format` input must not declare a default — see "
-            "this class's docstring for why a single default breaks scan's "
-            "own 'text' default."
+            "this class's docstring."
         )
 
 
@@ -846,7 +877,7 @@ class TestUploadSarif:
     def test_upload_sarif_with_non_compare_mode_is_rejected(self) -> None:
         result = _run_validate(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "dump",
                 "INPUT_FORMAT": "json",
                 "INPUT_UPLOAD_SARIF": "true",
             }
@@ -866,7 +897,7 @@ class TestUploadSarif:
         assert "upload-sarif requires format: sarif" in result.stdout
 
     def test_upload_sarif_false_default_never_triggers_the_check(self) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_FORMAT": "json"})
+        result = _run_validate({"INPUT_MODE": "dump", "INPUT_FORMAT": "json"})
         assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -889,7 +920,7 @@ class TestModeScopedInputWarnings:
         ],
     )
     def test_package_input_warns_on_non_compare_mode(self, env_name: str) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", env_name: "some-package.rpm"})
+        result = _run_validate({"INPUT_MODE": "dump", env_name: "some-package.rpm"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" in result.stdout
         assert "has no effect" in result.stdout
@@ -951,7 +982,7 @@ class TestModeScopedInputWarnings:
         assert "::warning::" not in result.stdout
 
     @pytest.mark.parametrize("mode", ["dump", "deps-tree", "deps-compare"])
-    def test_abi_baseline_warns_outside_compare_and_scan(self, mode: str) -> None:
+    def test_abi_baseline_warns_outside_compare(self, mode: str) -> None:
         result = _run_validate(
             {"INPUT_MODE": mode, "INPUT_ABI_BASELINE": "latest-release"}
         )
@@ -959,16 +990,15 @@ class TestModeScopedInputWarnings:
         assert "::warning::" in result.stdout
         assert "abi-baseline" in result.stdout
 
-    @pytest.mark.parametrize("mode", ["compare", "scan"])
-    def test_abi_baseline_silent_on_compare_and_scan(self, mode: str) -> None:
+    def test_abi_baseline_silent_on_compare(self) -> None:
         result = _run_validate(
-            {"INPUT_MODE": mode, "INPUT_ABI_BASELINE": "latest-release"}
+            {"INPUT_MODE": "compare", "INPUT_ABI_BASELINE": "latest-release"}
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
-    @pytest.mark.parametrize("mode", ["compare", "deps-tree", "deps-compare"])
-    def test_public_header_dir_warns_outside_dump_and_scan(self, mode: str) -> None:
+    @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare"])
+    def test_public_header_dir_warns_outside_dump_and_compare(self, mode: str) -> None:
         result = _run_validate(
             {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIR": "include/"}
         )
@@ -976,25 +1006,54 @@ class TestModeScopedInputWarnings:
         assert "::warning::" in result.stdout
         assert "public-header-dir" in result.stdout
 
-    @pytest.mark.parametrize("mode", ["dump", "scan"])
-    def test_public_header_dir_silent_on_dump_and_scan(self, mode: str) -> None:
+    def test_public_header_dir_warns_on_two_sided_compare(self) -> None:
+        # A two-sided compare has no --public-header-dir equivalent -- only
+        # compare's own audit-only shape (below) folds it into -H.
         result = _run_validate(
-            {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIR": "include/"}
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_PUBLIC_HEADER_DIR": "include/",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" in result.stdout
+
+    def test_public_header_dir_silent_on_dump(self) -> None:
+        result = _run_validate(
+            {"INPUT_MODE": "dump", "INPUT_PUBLIC_HEADER_DIR": "include/"}
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::warning::" not in result.stdout
+
+    def test_public_header_dir_silent_on_audit_only_compare(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_PUBLIC_HEADER_DIR": "include/",
+            }
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
     @pytest.mark.parametrize(
-        "mode", ["compare", "dump", "scan", "deps-tree", "deps-compare"]
+        "mode", ["compare", "dump", "deps-tree", "deps-compare"]
     )
     def test_build_target_fails_on_every_mode(self, mode: str) -> None:
         """`build-target` is retired on every mode now (hard removal, no
         deprecation window): `scan --build-target` was retired first
-        (ADR-068 (b), `TestScanRetiredInputsFailPreflight` pins its own
-        arm), and `dump --build-target` -- which this input mapped to for
-        `mode: dump` -- was retired next, once that removal resolved the
-        routing hazard that had deferred it. There is no longer a mode
-        where setting it merely warns."""
+        (ADR-068 (b)), and `dump --build-target` -- which this input mapped
+        to for `mode: dump` -- was retired next, once that removal resolved
+        the routing hazard that had deferred it. There is no longer a mode
+        where setting it merely warns. `mode: scan` itself is excluded from
+        this parametrization: it is now retired outright too, and its own
+        `case "$MODE" in scan) ... esac` arm fails the step (naming
+        `mode: scan is no longer supported`, not build-target) before this
+        script ever reaches the unconditional build-target check --
+        `TestUnknownModeIsRejected.test_scan_is_rejected_outright` pins that
+        arm's own message."""
         result = _run_validate({"INPUT_MODE": mode, "INPUT_BUILD_TARGET": "//:math"})
         assert result.returncode == 1, result.stdout + result.stderr
         assert "::error::" in result.stdout
@@ -1002,16 +1061,18 @@ class TestModeScopedInputWarnings:
         assert "build.targets" in result.stdout
 
     @pytest.mark.parametrize("env_name", ["INPUT_ESTIMATE", "INPUT_AUDIT"])
-    def test_deprecated_scan_alias_warns_outside_scan(self, env_name: str) -> None:
+    def test_deprecated_scan_alias_is_a_hard_error_on_any_mode(
+        self, env_name: str
+    ) -> None:
+        # `estimate`/`audit` are retired outright (ADR-068's Action-input-
+        # lifecycle amendment): both applied only to the now-removed
+        # mode: scan, so neither can ever do anything on any mode any more
+        # -- unlike an ordinary mode-scoped input, this is a hard error
+        # naming the replacement, not a warning.
         result = _run_validate({"INPUT_MODE": "compare", env_name: "true"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-
-    @pytest.mark.parametrize("env_name", ["INPUT_ESTIMATE", "INPUT_AUDIT"])
-    def test_deprecated_scan_alias_silent_on_scan(self, env_name: str) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", env_name: "true"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
+        assert "no longer supported" in result.stdout
 
     def test_no_mode_scoped_inputs_set_produces_no_warnings(self) -> None:
         result = _run_validate({"INPUT_MODE": "compare"})
@@ -1025,7 +1086,11 @@ class TestModeScopedInputWarnings:
 class TestScopedComparisonInputs:
     """ADR-043 --used-by/--required-symbol(s) contracts (G30 P1.3: resolves
     the ADR-047 S22/S23 gap -- these were previously not forwarded by the
-    root Action at all)."""
+    root Action at all). Exercised on a genuine two-sided request
+    (old-library set) -- consumer/entrypoint scoping needs two versions to
+    compare (ADR-043); see TestScopedComparisonInputsRejectedOnAuditOnly
+    below for the audit-only (no-baseline) shape, which rejects all four of
+    these inputs outright."""
 
     def test_used_by_and_required_symbol_together_is_hard_error(self) -> None:
         # The CLI itself rejects this combination, but only after Python
@@ -1035,6 +1100,7 @@ class TestScopedComparisonInputs:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_USED_BY": "app1",
                 "INPUT_REQUIRED_SYMBOL": "abi_do_thing",
             }
@@ -1046,6 +1112,7 @@ class TestScopedComparisonInputs:
         result = _run_validate(
             {
                 "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_USED_BY": "app1",
                 "INPUT_REQUIRED_SYMBOLS": "symbols.txt",
             }
@@ -1054,35 +1121,24 @@ class TestScopedComparisonInputs:
         assert "mutually exclusive" in result.stdout
 
     def test_used_by_alone_passes(self) -> None:
-        result = _run_validate({"INPUT_MODE": "compare", "INPUT_USED_BY": "app1"})
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_USED_BY": "app1",
+            }
+        )
         assert result.returncode == 0, result.stdout + result.stderr
 
     def test_required_symbol_alone_passes(self) -> None:
         result = _run_validate(
-            {"INPUT_MODE": "compare", "INPUT_REQUIRED_SYMBOL": "abi_do_thing"}
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
+                "INPUT_REQUIRED_SYMBOL": "abi_do_thing",
+            }
         )
         assert result.returncode == 0, result.stdout + result.stderr
-
-    @pytest.mark.parametrize(
-        "env_name,value",
-        [
-            ("INPUT_USED_BY", "app1"),
-            ("INPUT_REQUIRED_SYMBOL", "abi_do_thing"),
-            ("INPUT_REQUIRED_SYMBOLS", "symbols.txt"),
-        ],
-    )
-    def test_scoped_input_warns_on_non_compare_mode(
-        self, env_name: str, value: str
-    ) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", env_name: value})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
-        assert "has no effect" in result.stdout
-
-    def test_no_scoped_inputs_set_produces_no_warnings(self) -> None:
-        result = _run_validate({"INPUT_MODE": "scan"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1235,7 +1291,7 @@ class TestBaselineProfileRequiresAbiBaseline:
     def test_target_without_abi_baseline_fails(self) -> None:
         result = _run_validate(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "new.so",
                 "INPUT_BASELINE_PROFILE": "release",
                 "INPUT_BASELINE_TARGET": "libfoo",

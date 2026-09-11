@@ -273,6 +273,7 @@ def compute_no_baseline_document(
 ) -> NoBaselineDocument:
     """Resolve *result* into the one document every format below projects."""
     from ..policy.contract_coverage_exit import coverage_exit_floor
+    from .disposition_audit import compute_disposition_audit
     from .pattern_preprocessor_scan import compute_pattern_preprocessor_scan_json
 
     diff = result.diff
@@ -302,6 +303,7 @@ def compute_no_baseline_document(
             result, require_complete_analysis, audit_gate_enabled
         ),
         policy=diff.policy,
+        disposition_audit=compute_disposition_audit(diff).to_dict(),
     )
 
 
@@ -487,6 +489,13 @@ def _document_json(doc: NoBaselineDocument) -> dict[str, Any]:
         "exit_axes": dict(doc.exit_axes),
         "exit_code": doc.exit_code,
         "policy": doc.policy,
+        # ADR-067 C-S2's raw-versus-effective ledger, at the same root key
+        # every two-sided `compare` report carries it under -- so a reader
+        # (including `abicheck aggregate`'s own generic
+        # `disposition_audit_block` fold-in) does not need a shape-specific
+        # path to find it. Never omitted: `None` only for a hand-built
+        # document a test constructs directly.
+        "disposition_audit": doc.disposition_audit,
     }
 
 

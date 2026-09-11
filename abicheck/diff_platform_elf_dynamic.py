@@ -613,7 +613,7 @@ def _diff_abi_flags(old_elf: Any, new_elf: Any, machine: str) -> list[Change]:
     # Back-compat normalization: the pre-fix RISC-V decoder emitted a legacy
     # `rvc` token (compressed-instruction ISA bit, not an ABI selector; #504). A
     # saved `.abi.json` baseline rehydrates `abi_flags` verbatim via
-    # `serialization._elf_from_dict`, so an old baseline can carry `rvc` while a
+    # `snapshot_platform_blocks.elf_from_dict`, so an old baseline can carry `rvc` while a
     # freshly-parsed side no longer does. Strip it from both sides before
     # comparing, else `(float-double, rvc)` vs `(float-double)` would falsely
     # report a BREAKING elf_abi_flags_changed on the same ABI.

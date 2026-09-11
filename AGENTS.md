@@ -703,7 +703,20 @@ Core pipeline (in order of data flow):
    - `annotations.py` — annotation handling
    - `errors.py` — exception types
    - `serialization.py` — snapshot serialization (`load_snapshot`/
-     `save_snapshot`/`write_snapshot` — the public compatibility surface)
+     `save_snapshot`/`write_snapshot` — the public compatibility surface).
+     A thin, delegation-only facade (ADR-061 gap E, closure package 6): the
+     real codec lives in `storage/snapshot_codec.py` and its siblings
+     (`storage/snapshot_schema_versions.py`, `storage/snapshot_encode.py`,
+     `storage/snapshot_decode_declarations.py`,
+     `storage/snapshot_reliability_flags.py`, split purely to keep each
+     file under the ADR-061 new-file line ceiling). This facade itself
+     stays permanently unclassified (`public_root_surfaces`) — it is the
+     one legal route through which `workflows.snapshot_load.
+     backfill_python_ext_from_evidence` and `policy.
+     analysis_assurance_degraded_facts.degraded_reliability_facts` run
+     between the storage codec's `decode_snapshot`/`finalize_snapshot`,
+     neither of which a `storage`-classified module (`may_import: [model]`
+     only) may call
    - `snapshot_io.py` — ADR-059's canonical snapshot *storage envelope* I/O:
      plain/gzip/zstd detection (magic bytes), atomic + deterministic
      compressed writes, decompression-bomb limits. A dependency-free leaf

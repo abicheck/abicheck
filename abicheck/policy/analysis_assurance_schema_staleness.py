@@ -32,7 +32,7 @@ see that module's own docstring), within ``policy``'s own ``may_import``
 **The gap this closes:** loading a snapshot whose own ``schema_version``
 predates this abicheck's, or one re-saved since without ever being
 regenerated, already produced a load-time ``UserWarning`` naming the
-degraded fact (``serialization.decode_snapshot``) -- but that warning is
+degraded fact (``serialization.snapshot_from_dict``) -- but that warning is
 stderr-only, invisible to any programmatic consumer of the JSON report, and
 ``analysis_assurance``'s own completeness rollup had no signal for it at
 all: a run with one or more degraded facts still read

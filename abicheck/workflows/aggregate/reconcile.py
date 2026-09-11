@@ -677,6 +677,23 @@ def parse_report_findings(data: Mapping[str, Any]) -> ReportFindings:
     release_arrays = [data.get(key) for key in _RELEASE_FINDING_KEYS]
     if isinstance(scan_diff, Mapping):
         release_arrays.append(scan_diff.get(_SCAN_FINDINGS_KEY))
+    # A `compare --no-baseline` audit's own candidate-side findings
+    # (ADR-068 D2) live in a FOURTH shape: a root-level `findings` array,
+    # entirely distinct from `changes` (always `[]` for this shape -- an
+    # audit has no compatibility change set to report) and from every
+    # shape above. Gated on the same `no_baseline` discriminator every
+    # other no-baseline branch in this package uses, rather than reading
+    # any root `findings` key unconditionally -- no other report shape
+    # publishes one today, but keying off the explicit marker is what
+    # keeps this reader from silently reinterpreting a future, unrelated
+    # shape's own root `findings` field the wrong way. Without this, an
+    # audit's real findings -- the ones that produced AUDIT_GATE -- were
+    # discarded outright (`changes: []` parses as a real, complete, empty
+    # set), so multi-profile fan-in could neither reconcile nor display
+    # them, and could wrongly treat another profile as unaffected (Codex
+    # review, fresh evidence).
+    if data.get("no_baseline") is True:
+        release_arrays.append(data.get("findings"))
 
     for raw in release_arrays:
         if not isinstance(raw, list):
