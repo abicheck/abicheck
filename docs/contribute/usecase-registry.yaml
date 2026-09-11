@@ -500,17 +500,14 @@ use_cases:
       ]
       tests: [tests/test_python_ext.py]
     notes: >
-      Capability is real and working (verified live, independent of the note
-      below: `compare foo.abi3.so foo.abi3.so --abi3 3.9` against a snapshot
-      carrying a stable-ABI violation exits 0 and reports it as a
-      `COMPATIBLE_WITH_RISK` deployment-risk finding). The `tests` evidence
-      above is currently stale, not proof of this: 11 of `test_python_ext.py`'s
-      own tests (`test_scan_abi3_*`) still invoke the deleted `scan` command
-      via a `_scan_abi3()` helper and fail with `No such command 'scan'`
-      (exit 64) rather than exercising `compare --abi3` at all — see
-      `docs/contribute/known-gaps.md`'s "~46 test files still invoke the
-      deleted scan command directly" for the full account and why it isn't
-      fixed here (a docs-only follow-up).
+      Capability is real and working (verified live: `compare foo.abi3.so
+      foo.abi3.so --abi3 3.9` against a snapshot carrying a stable-ABI
+      violation exits 0 and reports it as a `COMPATIBLE_WITH_RISK`
+      deployment-risk finding). The `tests` evidence above is real, current
+      proof of this, not stale: `test_python_ext.py`'s own `_compare_abi3()`
+      helper invokes `compare <path> <path> --abi3 ...` (self-compare), not
+      the deleted `scan` command, and all 108 tests in the file pass
+      (verified live, `pytest tests/test_python_ext.py -q`).
 
       An abi3 module's compatibility surface is the set of CPython C-API symbols
       it IMPORTS, not what it exports. python_ext recognises extension modules
@@ -948,16 +945,24 @@ use_cases:
       REMAINS as a known gap: no live equivalent of `scan`'s own
       risk-directed depth escalation or POI-focused source replay. Depth
       semantics themselves (the binary rung staying artifact-only even with
-      matrix-wide headers/sources/compile-DB flags present) ARE covered:
-      `tests/test_scenarios.py`'s `SC-SCAN-BINARY-DEPTH-MATRIX-ARGS`
-      scenario now runs `compare --depth binary` directly and asserts on
-      the report's own `pattern_preprocessor_scan`/`preprocessor` fields
+      matrix-wide headers/sources/compile-DB flags present) are still
+      UNTESTED, not covered: `tests/test_scenarios.py`'s
+      `SC-SCAN-BINARY-DEPTH-MATRIX-ARGS` scenario now runs `compare --depth
+      binary` directly and asserts on the report's own
+      `pattern_preprocessor_scan`/`preprocessor` fields
       (`test_sc_scan_binary_depth_matrix_args`) rather than the retired
-      `scan`-only report shape. See `docs/contribute/known-gaps.md`'s
-      "`compare --depth binary` still performs a deep DWARF type walk the
-      public evidence-depth contract says that rung skips" entry for the
-      unrelated, still-open `compare`-only DWARF-type-walk defect this
-      scenario does not cover.
+      `scan`-only report shape, but its `OLD`/`NEW` operands are stored JSON
+      snapshots, not live binaries -- `-H`/`--sources`/`--build-info` are
+      ignored for a snapshot input regardless of `--depth` (the CLI's own
+      documented behavior), so the test's zero-file assertions cannot
+      distinguish "binary depth skipped deeper collection" from "the inputs
+      were snapshots, which always skip it." See
+      `docs/contribute/known-gaps.md`'s "`compare --depth binary` ignoring
+      matrix-wide `--sources`/`--build-info` is untested" entry (the real
+      gap this scenario leaves open) and its separate "`compare --depth
+      binary` still performs a deep DWARF type walk the public
+      evidence-depth contract says that rung skips" entry for the
+      unrelated, still-open `compare`-only DWARF-type-walk defect.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class

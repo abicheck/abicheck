@@ -162,8 +162,8 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
 !!! note "How these gate CI"
     These four are **compare-time** kinds. Like every `RISK` change they are
     advisory in `compare` by default; gate them through `compare`'s severity /
-    policy configuration (e.g. a policy profile that escalates the kind, or the
-    `--severity-*` flags). `python_stable_abi_violation` from the single-module
+    policy configuration (e.g. a policy profile that escalates the kind, or
+    `--severity-preset`). `python_stable_abi_violation` from the single-module
     `--abi3` audit gates the same way — see [Gating](#1-audit-a-single-module-compare-abi3)
     above. The retired `scan`'s separate `--crosscheck KEY=LEVEL` switch had no
     replacement flag; both the audit finding and these four compare-time kinds

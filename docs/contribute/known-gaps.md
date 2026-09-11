@@ -8330,52 +8330,6 @@ every other entry in this file. Tractable per-entry, not as one slice —
 `build_output.py`'s single `frontends` caller is independent of any other
 entry's fix.
 
-## ~46 test files still invoke the deleted `scan` command directly
-
-Found during the ADR-068 Phase 6 doc follow-up (PR #1220, Codex round):
-`docs/contribute/usecase-registry.yaml`'s `UC-WF-stable-abi-subset` entry
-cites `tests/test_python_ext.py` as evidence the `compare --abi3` workflow
-is complete and tested. It is not currently tested by that file: 11 of its
-tests (`test_scan_abi3_*`, plus `test_scan_crosscheck_rejects_compare_time_
-python_kinds`) still invoke `CliRunner().invoke(main, ["scan", ...])` via
-the file's own `_scan_abi3()` helper — `scan` was deleted outright in
-ADR-068 Phase 6 (no alias, no deprecation window), so all 11 fail with
-`No such command 'scan'` (exit 64) rather than exercising `compare --abi3`
-at all. The underlying capability itself is real and working — verified
-live here, independent of the broken test file: `compare foo.abi3.so
-foo.abi3.so --abi3 3.9` against a snapshot with a stable-ABI violation
-exits 0 and reports it as a `COMPATIBLE_WITH_RISK` deployment-risk finding,
-exactly as `workflows/abi3_audit.py`'s own docstring describes — so this is
-a stale-test-evidence gap, not a broken-capability gap.
-
-This is one instance of a much broader, already-known pattern: the same
-PR's own description records **46 additional pre-existing test failures on
-`main`** (confirmed zero-diff against every failing file, so none are
-caused by that PR), spread across ~15 files, every one following the
-identical shape — a test still invokes `main.commands["scan"]`/
-`CliRunner().invoke(main, ["scan", ...])` directly instead of the
-`compare`/`compare --no-baseline` equivalent ADR-068 Phase 6 retired
-`scan` in favor of. `test_python_ext.py` (11 failures, this entry's own
-trigger) and `test_pack_application.py` (12) are the two largest files;
-others include `test_contract_coverage_exit.py` (5),
-`test_contract_authoritative_pipeline.py` (4), `test_baseline_reuse_
-context.py`, `test_cli_frontend_context.py`, `test_cli_surface_diff.py`,
-`test_config_rebalance.py`, `test_dry_run_contract.py`,
-`test_main_entrypoint.py`, `test_policy_project_config.py` (2),
-`test_skill_eval_graders.py`, `test_skill_eval_harness.py`, and
-`test_agent_skills_drift.py` (2).
-
-Tractable when picked up, file by file: each failing test needs the same
-individual retarget-vs-retire judgment call this PR's own
-`tests/test_scenarios.py` migration already applied twice (migrate a case
-that maps cleanly onto `compare`/`compare --no-baseline`; retire a case
-whose assertions target report shape or CLI behavior `compare` never
-produced, recording the gap rather than faking the assertion) — not a
-single mechanical rename, since `scan`'s CLI surface (`--depth`,
-`--crosscheck`, JSON/text output shape) does not map 1:1 onto `compare`'s.
-Left as a dedicated follow-up PR, out of scope for a docs-only pass; not
-fixed here.
-
 ## The `compare --no-baseline` audit report carries no per-finding provider attribution, so `provider_assertions` is unvalidated
 
 Every G20 audit case in `catalog/ground_truth.json` declares
