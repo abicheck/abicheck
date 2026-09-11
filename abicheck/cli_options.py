@@ -1494,27 +1494,14 @@ def abi3_option(func: F) -> F:
     return func
 
 
-def env_matrix_option(func: F) -> F:
-    """The ``--env-matrix`` option: declared deployment constraints (ADR-020b).
-
-    Defined here so ``cli.py`` stays under its size cap and any future
-    front-end shares one spelling/help. The value stays a path; loading and
-    validation happen in the Tier-2 service
-    (:func:`abicheck.service.load_env_matrix`) so CLI and request-API callers
-    surface identical errors.
-    """
-    func = click.option(
-        "--env-matrix",
-        "env_matrix_path",
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        default=None,
-        help="Environment-matrix YAML declaring deployment constraints "
-        "(ADR-020b). With runtime_floors (e.g. 'runtime_floors: {GLIBC: "
-        '"2.28"}\'), a new symbol-version requirement is judged against '
-        "the declared floor: at/below it -> compatible, above it -> "
-        "breaking, instead of the default deployment-risk verdict.",
-    )(func)
-    return func
+#: ``env_matrix_option``/``--env-matrix`` was removed (ADR-068 D5, plan
+#: "compare --env-matrix" ruling): declared deployment constraints are a
+#: stable project property, now ``.abicheck.yml``'s ``deployment:`` config
+#: key (``buildsource.build_config.BuildConfig.deployment``, parsed via
+#: ``EnvironmentMatrix.from_dict``), resolved through
+#: ``cli_helpers_compare.resolve_compare_config``'s ``deployment`` field
+#: with no surviving CLI override (guard #2 -- no escape hatch). See
+#: ``scripts/retired_surfaces.py`` for the retired spelling.
 
 
 def set_input_options(func: F) -> F:

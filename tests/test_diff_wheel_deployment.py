@@ -25,6 +25,8 @@ from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_wheel_deployment import (
+    _ARCH_CLAIM_TO_ELF_MACHINE,
+    _ARCH_CLAIM_TO_MACHO_CPU_TYPE,
     check_macos_deployment_target_floor,
     check_wheel_closure_dependency_violation,
     check_wheel_rpath_not_portable,
@@ -34,6 +36,7 @@ from abicheck.elf_metadata import ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot
+from abicheck.model.wheel_arch_claims import WHEEL_ARCH_CLAIMS
 
 
 def _macho(**kwargs) -> MachoMetadata:
@@ -60,6 +63,38 @@ def _elf_snap(elf: ElfMetadata, **kwargs) -> AbiSnapshot:
 
 def _kinds(changes) -> set[ChangeKind]:
     return {c.kind for c in changes}
+
+
+class TestWheelArchClaimsVocabularyStaysInSync:
+    """Codex review, PR #1221, Finding 1: `environment_matrix.py`'s
+    `WHEEL_ARCH` config-parse validation and this module's own per-claim
+    detection dicts must recognize exactly the same architecture tokens --
+    otherwise a strict config could accept a token this detector still
+    silently treats as "no claim declared" (or reject one it actually
+    would have checked). `model.wheel_arch_claims.WHEEL_ARCH_CLAIMS` is the
+    single source of truth both read; this pins the union identity
+    directly (the same invariant `diff_wheel_deployment.py` asserts at
+    import time) so a future edit to either side that breaks it fails a
+    test, not just an import-time `AssertionError` a developer has to trace
+    back."""
+
+    def test_union_of_per_claim_dicts_equals_the_shared_vocabulary(self) -> None:
+        assert (
+            _ARCH_CLAIM_TO_ELF_MACHINE.keys() | _ARCH_CLAIM_TO_MACHO_CPU_TYPE.keys()
+            == WHEEL_ARCH_CLAIMS
+        )
+
+    def test_every_recognized_claim_is_actually_checkable(self) -> None:
+        """Every token `EnvironmentMatrix.from_dict` will accept as a
+        `WHEEL_ARCH` value must map to at least one real ELF or Mach-O
+        detection rule here -- an entry in `WHEEL_ARCH_CLAIMS` with no
+        corresponding detector dict entry would be a config-accepted claim
+        this module can never actually flag a mismatch for."""
+        for claim in WHEEL_ARCH_CLAIMS:
+            assert (
+                claim in _ARCH_CLAIM_TO_ELF_MACHINE
+                or claim in _ARCH_CLAIM_TO_MACHO_CPU_TYPE
+            )
 
 
 class TestMacosDeploymentTargetFloorUnit:
@@ -226,12 +261,23 @@ class TestMacosDeploymentTargetFloorUnit:
 
 
 class TestMacosDeploymentTargetFloorCliEndToEnd:
-    """The check reaches exit code / JSON through the real ``compare`` CLI
-    via ``--env-matrix``'s existing ``runtime_floors`` mechanism (no
-    dedicated flag — same declared-constraint contract G10/G27's GLIBC
-    checks already use)."""
+    """The check reaches a verdict via ``EnvironmentMatrix.runtime_floors``
+    (ADR-020b; now declared through ``.abicheck.yml``'s ``deployment:``
+    config key rather than the former ``compare --env-matrix FILE`` flag —
+    same declared-constraint contract G10/G27's GLIBC checks already use).
+    These tests drive ``checker.compare`` directly; see
+    ``test_environment_drift.py::TestPlatformBaselineFloorCliEndToEnd`` for
+    the real CLI-level ``deployment:`` coverage."""
 
-    def test_raised_floor_surfaces_as_risk(self) -> None:
+    def test_raised_floor_surfaces_as_breaking(self) -> None:
+        # MACOS_DEPLOYMENT_TARGET_RAISED's catalog default verdict is RISK,
+        # but check_macos_deployment_target_floor only ever fires on an
+        # actual floor violation (it returns [] when the requirement is
+        # within the declared floor), so
+        # diff_versioning.promote_baseline_violation_findings
+        # unconditionally promotes any occurrence to BREAKING (Codex
+        # review, P1) -- a declared deployment target genuinely cannot
+        # load this binary.
         old = _snap(_macho(min_os_version="12.3"))
         new = _snap(_macho(min_os_version="12.3"))
         result = compare(
@@ -242,10 +288,11 @@ class TestMacosDeploymentTargetFloorCliEndToEnd:
             ),
         )
         assert ChangeKind.MACOS_DEPLOYMENT_TARGET_RAISED in _kinds(result.changes)
-        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict is Verdict.BREAKING
 
     def test_raised_floor_reaches_compare_via_from_dict(self) -> None:
-        # End-to-end through the documented --env-matrix/from_dict path,
+        # End-to-end through the documented EnvironmentMatrix.from_dict path
+        # (what BuildConfig.deployment now parses `deployment:` through),
         # not just the direct-constructor path the test above uses — the
         # same reachability gap WHEEL_ARCH previously had (Codex review
         # #583) before EnvironmentMatrix._parse_runtime_floors was fixed to
@@ -971,7 +1018,16 @@ class TestWheelClosureDependencyViolationUnit:
 
 
 class TestWheelRpathAndClosureCliEndToEnd:
-    def test_absolute_rpath_surfaces_as_risk(self) -> None:
+    def test_absolute_rpath_stays_at_risk(self) -> None:
+        # WHEEL_RPATH_NOT_PORTABLE's catalog default verdict is RISK and
+        # stays there (Codex review, P1 follow-up): check_wheel_rpath_
+        # not_portable's own docstring says a non-$ORIGIN-relative entry is
+        # "almost always" a build artifact, not proof the dependency it
+        # names is actually unresolvable -- a separate closure/reachability
+        # check is what proves that. diff_versioning.
+        # promote_baseline_violation_findings deliberately does NOT promote
+        # this kind, unlike its two genuinely-unambiguous
+        # declared-floor-violation siblings.
         old = _elf_snap(_elf(rpath="/usr/local/lib"))
         new = _elf_snap(_elf(rpath="/usr/local/lib"))
         result = compare(
@@ -982,7 +1038,7 @@ class TestWheelRpathAndClosureCliEndToEnd:
             ),
         )
         assert ChangeKind.WHEEL_RPATH_NOT_PORTABLE in _kinds(result.changes)
-        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict is not Verdict.BREAKING
 
     def test_unresolvable_vendored_dependency_surfaces_as_breaking(self) -> None:
         old = _elf_snap(_elf(needed=["libopenblas-a1b2c3d4.so.0"]))

@@ -17,14 +17,14 @@ question about your library's own surface — the symbols, layouts, and headers
 a vendor SDK. abicheck calls the minimum version of each such dependency the
 binary demands its **runtime floor** (detected as
 [`runtime_floor_raised`](../reference/change-kinds.md), gated with
-`compare --env-matrix`).
+`.abicheck.yml`'s `deployment:` block).
 
 The page builds the idea up from the trivial case to the one that surprises
 performance-library maintainers: a release whose only change is a new
 CPU-specific kernel can stop loading on older OS releases for *every* user.
 
 > **Tool-track companion:** this page teaches the *concept*. The exact
-> detector semantics, `--env-matrix` file format, and CI recipes live in
+> detector semantics, `deployment:` config shape, and CI recipes live in
 > [Environment & Toolchain Drift](environment-drift.md); the runnable fixture
 > is [case170](../reference/examples/case170_env_runtime_floor_raised.md).
 
@@ -84,13 +84,14 @@ breaks depends on deployment targets the binary can't name. They become
 decidable the moment you declare your targets:
 
 ```yaml
-# env-rhel8.yaml — "we still ship to RHEL 8 / Ubuntu 20.04"
-runtime_floors:
-  GLIBC: "2.28"
-  GLIBCXX: "3.4.25"
+# .abicheck.yml — "we still ship to RHEL 8 / Ubuntu 20.04"
+deployment:
+  runtime_floors:
+    GLIBC: "2.28"
+    GLIBCXX: "3.4.25"
 ```
 
-With `--env-matrix env-rhel8.yaml`, a new requirement at or below the declared
+With this declared, a new requirement at or below the declared
 floor is 🟢 `COMPATIBLE`; one above it is 🔴 `BREAKING` (exit 4 — CI gates).
 Run the check once per supported tier ("does this cut off RHEL 8?" and "does
 it cut off Ubuntu 22.04?" are different invocations with possibly different
@@ -194,9 +195,9 @@ dispatch *keeps the ABI* stable and *still moves the deployment envelope*.
 
 What the floor check buys you here is precisely the triage: the
 `runtime_floor_raised` evidence list tells you whether the pulled-up symbols
-are relink plumbing, core-path API, or confined to the new kernel — and per-tier
-`--env-matrix` runs tell you which supported OS versions the release just cut
-off. If the answer is "only the AMX path needs it, but it cut off RHEL 8", the
+are relink plumbing, core-path API, or confined to the new kernel — and
+per-tier `deployment:`-declared runs tell you which supported OS versions
+the release just cut off. If the answer is "only the AMX path needs it, but it cut off RHEL 8", the
 established fixes keep both audiences:
 
 - **isolate the new-HW path behind runtime resolution** — `dlopen` a per-ISA
@@ -204,7 +205,7 @@ established fixes keep both audiences:
   symbols with a fallback, so the main `.so`'s floor stays put;
 - **split packaging per target** — glibc-hwcaps directories or per-distro
   builds, each with its own honest floor;
-- **declare and gate** — one env matrix per deployment tier in CI, so the day
+- **declare and gate** — one `deployment:` block per deployment tier in CI, so the day
   a kernel drags a new version node into the shared code path, the RHEL 8
   lane goes red before the release ships.
 
@@ -212,7 +213,7 @@ established fixes keep both audiences:
 
 | You want to… | Go to |
 |--------------|-------|
-| Detector semantics, `--env-matrix` format, binutils-side drift (DT_RELR, RPATH type, hash style, time64) | [Environment & Toolchain Drift](environment-drift.md) |
+| Detector semantics, `deployment:` config shape, binutils-side drift (DT_RELR, RPATH type, hash style, time64) | [Environment & Toolchain Drift](environment-drift.md) |
 | Run the worked fixture yourself | [case170 — Runtime Floor Raised](../reference/examples/case170_env_runtime_floor_raised.md) |
 | ELF symbol versioning fundamentals | [Part 5 — Linker & ELF](abi-series/05-linker-elf.md) |
 | Per-platform loader/versioning parallels | [Platform Support](../reference/platforms.md) |

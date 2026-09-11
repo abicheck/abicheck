@@ -44,6 +44,8 @@ the concrete accounting.
 
 from __future__ import annotations
 
+from ..environment_matrix import EnvironmentMatrix
+
 #: Phase 7g (one-comparison-product.md §4.1/§3 #21): the calibrated JSON
 #: decode resource limit, demoted off the CLI (`--max-json-object-nodes`).
 #: See `bundle_facts.DEFAULT_MAX_JSON_OBJECT_NODES`'s own docstring for the
@@ -195,6 +197,39 @@ def subkey_findings(key: str, sub: str, sub_value: object) -> list[str]:
         return [
             f"{key}.{sub} must be a list of strings, got non-string element(s): {bad!r}"
         ]
+    return []
+
+
+def deployment_findings(value: object) -> list[str]:
+    """Type findings for the top-level ``deployment:`` key -- not a fixed
+    subkey set (unlike every other block above) since it embeds
+    ``EnvironmentMatrix``'s own richer, nested YAML shape (a ``compilers``
+    list, ``sycl:``/``cuda:`` sub-blocks, a ``runtime_floors:`` dict), so it
+    delegates to ``EnvironmentMatrix.from_dict`` itself rather than
+    re-declaring that shape here.
+
+    This function used to live on ``BuildConfig`` itself
+    (``build_config.py``): ``environment_matrix.py`` was classified
+    ``workflows`` in ``architecture/modules.yaml``, and this module (``build_
+    config_schema.py``) is ``extract``-classified, which may import only
+    ``model``/``storage`` -- an ``extract -> workflows`` edge
+    ``scripts/check_architecture.py`` rejects. Splitting
+    ``model.dotted_version.parse_dotted_numeric_version`` out of
+    ``diff_versioning.py`` (``compare``-classified) removed
+    ``environment_matrix.py``'s only non-stdlib dependency, which is what let
+    it be reclassified ``model`` instead -- ``model`` is exactly the one
+    extra layer ``extract`` may import, so this validation now has a real
+    home in the sibling schema module every other subkey-type check already
+    lives in, the same as everything else here.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, dict):
+        return [f"deployment must be a mapping, got {type(value).__name__}: {value!r}"]
+    try:
+        EnvironmentMatrix.from_dict(value, strict=True)
+    except (TypeError, ValueError) as exc:
+        return [f"deployment: {exc}"]
     return []
 
 

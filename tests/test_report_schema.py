@@ -128,6 +128,21 @@ class TestSchemaFile:
         schema = load_compare_report_schema()
         assert "report_schema_version" in schema["required"]
 
+    def test_schema_declares_env_matrix_source_sha256(self):
+        # Schema 4.2 (Codex review, P2): the packaged schema previously
+        # described the pre-4.2 shape and had no declaration for this field
+        # at all -- additionalProperties' permissiveness let real output
+        # keep validating, but a schema-driven consumer (one that *types* or
+        # *discovers* fields from the schema, not merely validates against
+        # it) could not see the field exists.
+        schema = load_compare_report_schema()
+        prop = schema["properties"]["env_matrix_source_sha256"]
+        assert prop["type"] == "string"
+        assert prop["pattern"] == "^sha256:[0-9a-f]{64}$"
+        # Schema-optional, matching DiffResult.env_matrix_source_sha256's own
+        # "omitted entirely, not null, when unset" contract.
+        assert "env_matrix_source_sha256" not in schema.get("required", [])
+
     def test_docs_mirror_matches_packaged_schema(self):
         # Regression guard (code review, PR #611): the docs/reference/schemas/v1
         # copy previously drifted from the packaged schema (PR #595) without any
@@ -203,6 +218,40 @@ class TestReportValidatesAgainstSchema:
         f = _fn("api", "_Z3apiv")
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
         payload = json.loads(reporter.to_json(compare(snap, snap)))
+        self._validate(payload)
+
+    def test_env_matrix_source_sha256_validates_when_present(self):
+        """Schema 4.2 (Codex review, P2): a run resolving a declared
+        EnvironmentMatrix emits a top-level env_matrix_source_sha256, and
+        the real value -- not a hand-typed stand-in -- must validate
+        against the packaged schema's declaration for it."""
+        from abicheck.elf_metadata import ElfMetadata
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        elf = ElfMetadata(
+            machine="EM_X86_64",
+            hash_styles=frozenset({"gnu"}),
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.34"]},
+        )
+        snap = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            elf=elf,
+            elf_only_mode=True,
+            platform="elf",
+        )
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        result = compare(snap, snap, env_matrix=matrix)
+        payload = json.loads(reporter.to_json(result))
+        assert "env_matrix_source_sha256" in payload
+        self._validate(payload)
+
+    def test_env_matrix_source_sha256_omitted_without_a_declared_matrix(self):
+        f = _fn("api", "_Z3apiv")
+        snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
+        payload = json.loads(reporter.to_json(compare(snap, snap)))
+        assert "env_matrix_source_sha256" not in payload
         self._validate(payload)
 
     def test_no_change_report_carries_analysis_assurance(self):

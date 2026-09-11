@@ -423,22 +423,13 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "verdict, gate or exit code."
     ),
     # ── Deferred: ruled demotable/removable, each with a named blocker ───
-    "--env-matrix": _deferred(
-        "ADR-020b runtime_floors: a project's declared deployment targets "
-        "are a stable property and §4.1 rules this CONFIG (`deployment:`). "
-        "It is also a real `scan` option today, and action/run.sh routes a "
-        "`mode: scan` request onto `compare` unless a predicate says it "
-        "must stay on the legacy CLI -- verified again for this audit: "
-        "--env-matrix is *not* in `_extra_args_has_scan_only_flag`, so "
-        "removing it from compare alone would silently break that "
-        "translation, and widening the predicate is a change to scan's own "
-        "routing. `scan` itself is now gone (ADR-068 Phase 6), which "
-        "resolves the routing hazard this blocker named -- but the CONFIG "
-        "demotion (a new `deployment:` config key + resolver wiring, no "
-        "config key exists today) is real, unimplemented feature work, "
-        "not landed in the Phase 6 PR itself; tracked as a followup.",
-        blocker="A `deployment:` config key + resolver -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
-    ),
+    # `--env-matrix` (PR #1221) and `--require-complete-analysis` (this PR)
+    # have both since been fully retired -- `deployment:`/
+    # `assurance.require_complete` config-key resolver wiring landed and
+    # each CLI flag/Action input was removed, closing the followups their
+    # entries here used to track. No entry remains for either, matching
+    # the precedent of every other fully-retired option (e.g.
+    # `--build-target`, PR #1219) never appearing in this dict at all.
     "--scope-public-headers": _deferred(
         "Phase 9 collapses this into `--contract public`/`--contract all` "
         "so there is one contract mechanism rather than two. Explicitly "

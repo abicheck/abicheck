@@ -748,6 +748,7 @@ def _release_summary_effective_config_block(
     scope_public_headers: bool = True,
     on_incomplete_scope: str = "",
     fail_on_removed_library: bool | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> tuple[str, dict[str, str]]:
     """The ``(digest, fields)`` pair for a release-level *summary* document
     (the primary release JSON and ``--output-dir``'s ``summary.json``
@@ -788,6 +789,13 @@ def _release_summary_effective_config_block(
     forced-public-symbols concept of its own (unlike single-pair ``compare``,
     where the two can diverge), so both fields are simply the raw CLI value
     here.
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up): the release-
+    wide deployment-floor digest, computed once by the caller at release
+    scope from the resolved ``EnvironmentMatrix`` -- not read off any
+    per-library ``DiffResult`` (none exists at this scope), so a release
+    with zero matched/completed pairs still reports a real ``policy.
+    env_matrix`` rather than leaving it empty.
     """
     from types import SimpleNamespace
 
@@ -827,6 +835,8 @@ def _release_summary_effective_config_block(
         ),
         scope_to_public_surface=scope_public_headers,
         scope_to_public_surface_requested=scope_public_headers,
+        # Codex review, P2 follow-up: feeds `policy.env_matrix` below.
+        env_matrix_source_sha256=env_matrix_source_sha256,
         # ADR-068 D4/Phase 5 + §4.1's AUTO rows: modulation, surface metrics and ADR-039 reconciliation are unconditional now (forced on at the Tier-2 chokepoint every library here routes through), so this stand-in must agree rather than default to the old "off".
         pattern_verdicts_enabled=True,
         surface_metrics_enabled=True,

@@ -91,6 +91,7 @@ if TYPE_CHECKING:
 
     from ..checker_types import Change, DiffResult
     from ..compile_context import CompileContext
+    from ..environment_matrix import EnvironmentMatrix
     from ..model import AbiSnapshot
     from ..policy_file import PolicyFile
     from ..suppression import SuppressionList
@@ -407,6 +408,7 @@ def run_no_baseline_compare(
     contract_mode: str | None = None,
     depth: str | None = None,
     candidate_is_live: bool = True,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> NoBaselineCompareResult:
     """Audit *new* alone via a self-diff (see module docstring for why this
     is exact, not an approximation) and pair it with OLD's
@@ -428,7 +430,47 @@ def run_no_baseline_compare(
     cannot pick up the audit and forget the axis. *candidate_is_live* comes
     from :func:`candidate_is_live_artifact`; ``False`` exempts a stored
     snapshot this run never extracted.
+
+    *env_matrix*, when given, runs the declared-runtime-floor/wheel-
+    packaging checks against *new* alone via
+    :func:`~abicheck.workflows.env_matrix_audit.env_matrix_candidate_findings`
+    -- the same ``.abicheck.yml`` ``deployment:``-resolved
+    :class:`~abicheck.environment_matrix.EnvironmentMatrix` the two-sided
+    ``compare`` path threads through as ``resolved_cfg.deployment``. Folded
+    into *extra_changes* (mirroring the ``--abi3`` audit's own
+    ``candidate_side_enrichment`` pattern) rather than passed as this
+    function's own ``_diff_pair(..., env_matrix=...)`` argument: the latter
+    would also invoke ``checker._env_matrix_contract_changes``'s
+    diff-reclassification half against this self-diff's empty change set
+    (harmless -- there is never a version-requirement delta to reclassify
+    on a self-diff) but would produce its candidate-only findings with
+    neither ADR-068 D3 one-sided marker set, which
+    ``policy.no_baseline_findings.partition_no_baseline_findings`` would
+    then read as *identity*-half findings and fail the audit outright
+    (Codex review: previously this parameter didn't exist at all, so a real
+    declared ``deployment.runtime_floors`` config was silently ignored for
+    a no-baseline audit of a candidate that violates it). Omitted (the
+    default): behavior is unchanged from before this parameter existed.
+
+    *env_matrix* is also, separately, stamped onto the returned
+    :class:`~abicheck.checker_types.DiffResult` as
+    ``env_matrix_source_sha256`` -- the same digest ``checker.compare()``
+    would stamp had *env_matrix* been passed to it directly. It cannot be:
+    see above for why this path never runs ``_diff_pair(..., env_matrix=
+    ...)``. Without this, a typed caller reading the result back cannot tell
+    a run governed by a declared ``deployment.runtime_floors`` contract from
+    one with no deployment contract at all, even though the matrix changed
+    this run's findings and verdict (Codex review, P2). Computed with
+    ``checker.env_matrix_content_digest``, the identical shared function
+    ``compare()`` itself calls, as a plain post-hoc field replacement --
+    not a second comparison.
     """
+    import dataclasses as _dataclasses
+
+    from ..checker import env_matrix_content_digest
+    from .env_matrix_audit import fold as _fold_env_matrix
+
+    extra_changes = _fold_env_matrix(None, new, env_matrix)
     diff = _diff_pair(
         new,
         new,
@@ -437,11 +479,17 @@ def run_no_baseline_compare(
         policy_file=policy_file,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
+        extra_changes=extra_changes,
         pattern_verdicts=pattern_verdicts,
         collapse_versioned_symbols=collapse_versioned_symbols,
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
+    if env_matrix is not None:
+        diff = _dataclasses.replace(
+            diff,
+            env_matrix_source_sha256=env_matrix_content_digest(env_matrix),
+        )
     record_no_baseline_depth_evidence_contract_error(
         diff, depth, new, is_live=candidate_is_live
     )

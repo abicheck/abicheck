@@ -761,6 +761,8 @@ def to_sarif(
     tool_version = _tool_version()
     gate_decision = resolved_gate(envelope, result, severity_config)  # ADR-061 gap C
     disposition_audit_dict = disposition_audit_dict_reusing_document(result, severity_config, resolved_document(envelope, report_document))  # ADR-061 Phase 2 gap C
+    from abicheck.report.envelope import env_matrix_digest_reusing_document
+    _env_matrix_digest = env_matrix_digest_reusing_document(result, resolved_document(envelope, report_document))  # ADR-061 gap C
     # Codex review: filtered so an expired rule -- which ReclassifyRule.
     # matches() would already refuse to apply -- isn't disclosed in
     # policyReclassify below as though it were still in effect. *today*
@@ -1205,6 +1207,9 @@ def to_sarif(
                         if result.reconciled_changes
                         else {}
                     ),
+                    # Mirrors no_baseline_render.py's envMatrixSourceSha256.
+                    **({"envMatrixSourceSha256": _env_matrix_digest}
+                       if _env_matrix_digest is not None else {}),
                 },
             }
         ],

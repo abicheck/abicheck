@@ -266,6 +266,7 @@ def build_review_digest_document(
         "surface_changes": (
             None if digest.surface_changes is None else digest.surface_changes.to_dict()
         ),
+        "env_matrix_source_sha256": digest.env_matrix_source_sha256,
     }
     return ReportDocument.from_mapping(d)
 
@@ -302,6 +303,7 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
             if d.get("surface_changes") is None
             else SurfaceChangeSection.from_dict(d["surface_changes"])
         ),
+        env_matrix_source_sha256=d.get("env_matrix_source_sha256"),
     )
 
 
@@ -673,6 +675,7 @@ def build_markdown_document(
             if show_impact
             else None
         ),
+        "env_matrix_source_sha256": result.env_matrix_source_sha256,
     }
     return ReportDocument.from_mapping(d)
 
@@ -776,6 +779,9 @@ def render_markdown_document(doc: ReportDocument) -> str:
         lines.append("")
     if d["library_files"] is not None:
         lines += render_library_files_section(LibraryFilesSection(**d["library_files"]))
+    if d.get("env_matrix_source_sha256") is not None:
+        lines.append(f"- Deployment floor digest: `{d['env_matrix_source_sha256']}`")
+        lines.append("")
     for group in d["severity_groups"]:
         lines += [group["heading"], ""]
         if group["note_lines"]:

@@ -53,7 +53,6 @@ from ....cli_options import (
     changed_path_options,
     contract_options,
     debug_resolution_options,
-    env_matrix_option,
     evidence_options,
     include_dependencies_option,
     normalize_sided_options,
@@ -719,7 +718,8 @@ def _embed_inline_source_side(
 # ADR-068 D4 / Phase 5: --surface-metrics is gone -- ADR-027's metric-drift
 # findings are computed on every comparison and merged into result.changes,
 # so nothing was left for the flag to select, not even a rendering choice.
-@env_matrix_option  # ADR-020b: --env-matrix (runtime_floors contract)
+# ADR-068 D5: --env-matrix is gone -- declared deployment constraints are
+# now `.abicheck.yml`'s `deployment:` config key (runtime_floors contract).
 # §4.1's AUTO row: ADR-039 build-context reconciliation is unconditional now
 # and `--reconcile-build-context` is gone. It is strictly evidence-gated and
 # can only ever move a phantom finding out of the verdict, never manufacture

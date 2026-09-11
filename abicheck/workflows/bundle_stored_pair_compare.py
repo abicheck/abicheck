@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..bundle_models import BundleDiffResult
     from ..checker_types import DiffResult
+    from ..environment_matrix import EnvironmentMatrix
     from ..policy_file import PolicyFile
     from .suppression import SuppressionList
 from ..errors import ProfileMismatchError, ScopeMismatchError
@@ -70,6 +71,7 @@ def compare_stored_bundle_facts_pair(
     old_max_json_object_nodes: int | None = None,
     new_max_json_object_nodes: int | None = None,
     depth: str | None = None,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> BundleDiffResult:
     """End-to-end driver: two stored ``BundleFacts`` documents compared
     against each other -- the stored/stored operand shape (CLI cleanup
@@ -164,6 +166,17 @@ def compare_stored_bundle_facts_pair(
     no-op for both the floor check and the projection, matching
     ``enforce_requested_depth``'s/``project_snapshot_to_depth``'s own
     documented contracts.
+
+    *env_matrix*, when given, is forwarded to each per-library
+    ``compare_snapshots()`` call the same way
+    :func:`~abicheck.bundle_side_input.compare_release_against_bundle_facts`
+    forwards it on the stored/live side -- the same ``.abicheck.yml``
+    ``deployment:``-resolved
+    :class:`~abicheck.environment_matrix.EnvironmentMatrix` the scalar
+    ``compare`` path threads through (``resolved_cfg.deployment``,
+    ``cli_compare_helpers.py``). Previously ignored entirely for this
+    operand cardinality (Codex review). Omitted (the default): behavior is
+    unchanged from before this parameter existed.
     """
     from ..analysis_assurance import compute_analysis_assurance
     from ..bundle_manifest import load_manifest
@@ -302,6 +315,7 @@ def compare_stored_bundle_facts_pair(
                 suppress,
                 policy=policy,
                 policy_file=policy_file,
+                env_matrix=env_matrix,
                 # pattern_verdicts is deliberately NOT forced True here:
                 # ADR-027 (accepted) defers flipping --pattern-verdicts to
                 # default-on pending FP-rate/parity validation; ADR-068,
@@ -432,4 +446,12 @@ def compare_stored_bundle_facts_pair(
         result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
     result.not_comparable_members = dict(not_comparable)
+    # Codex review, P2 (Finding 5): computed directly from the resolved
+    # `env_matrix` this function already has -- see
+    # `bundle_side_input.compare_release_against_bundle_facts`'s identical
+    # fix (same shared `env_matrix_content_digest()`, so the two BundleFacts
+    # drivers can't independently drift) for the full rationale.
+    from ..checker import env_matrix_content_digest
+
+    result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
     return result

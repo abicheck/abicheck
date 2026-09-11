@@ -6,16 +6,17 @@ root command is deleted outright (`abicheck scan` exits 64, naming
 `compare`/`compare --no-baseline` as the replacement), its scan-only
 modules and tests are deleted, and `tests/parity/` is now a compare-only
 regression corpus. Of the three flag demotions Phase 6 unblocked,
-`compare --require-complete-analysis` has since landed
+all three of the deferred flag demotions Phase 6 unblocked have since
+landed: `dump --build-target` (`.abicheck.yml`'s `build.targets` is the
+only front-end-reachable source now — `frontends/cli/options/rulings.py`'s
+deferred ruling recorded its only real blocker as `--build-target` still
+being a live `scan` option, per `plans/one-comparison-product.md`'s "One
+deferral's blocker re-attributed" note; with `scan` deleted, that blocker
+is gone and the flag is removed outright, old spelling exits 64, no
+alias), `compare --env-matrix` (`deployment:` in `.abicheck.yml`, PR
+#1221), and `compare --require-complete-analysis`
 (`assurance.require_complete` in `.abicheck.yml`, rulings.py
-deferred-option followup), and `dump --build-target` is now implemented too:
-`frontends/cli/options/rulings.py`'s deferred ruling recorded its only real
-blocker as `--build-target` still being a live `scan` option (`plans/
-one-comparison-product.md`'s "One deferral's blocker re-attributed" note);
-with `scan` deleted, that blocker is gone and the flag is removed outright
-(old spelling exits 64, no alias; `.abicheck.yml`'s `build.targets` is the
-only front-end-reachable source now). `compare --env-matrix` remains open,
-the one unimplemented followup — see
+deferred-option followup, this PR) — none remain open. See
 `docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for the
 exact scope and what stayed a documented gap. Supersedes
 [ADR-056](056-multi-artifact-library-set-scan.md) outright and amends
@@ -683,6 +684,64 @@ test_audit_gate_axis_honors_a_policy_promoted_verdict` (live, an
 flip its exit code from `0` to `3` with no change to which finding is
 reported).
 
+## Amendment (2026-09-11): `compare --env-matrix` demoted to `.abicheck.yml`'s `deployment:` config key
+
+Phase 6 (`scan` retirement) named three flag demotions it unblocked but did
+not itself implement: `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` — the plan's own
+"Blocked by `scan`" ruling (`one-comparison-product.md` §7k) recorded
+`--env-matrix` as blocked specifically on `scan`'s own `action/run.sh`
+routing predicate translating a `mode: scan` request onto `compare`, not as
+an open architectural question about whether the demotion itself was
+correct (it was already ruled CONFIG in §4.1). With `scan` (and its
+`action/run.sh` translation layer) deleted, that blocker is gone, and this
+amendment closes it: `compare --env-matrix FILE` is retired (old spelling
+exits 64, no alias, per D8's hard-removal-no-deprecation-window rule), and
+`.abicheck.yml`'s new top-level `deployment:` block — embedding
+`EnvironmentMatrix`'s existing YAML shape (`compilers`, `sycl:`/`cuda:`
+sub-blocks, `runtime_floors:`) verbatim, via `EnvironmentMatrix.from_dict`
+— is now the only front-end-reachable source of declared deployment
+constraints, on both a bare `compare` and the directory/package release
+fan-out (`cli_compare_release.py`/`cli_compare_release_pairwise.py` resolve
+`BuildConfig.deployment` per library, the same as every other project-config
+field the fan-out already reads — so the constraint now applies across a
+release the way `--env-matrix` itself, a single-invocation flag, never did).
+The typed Python API's `compare(..., env_matrix=...)` parameter is
+unaffected: it is ordinary per-comparison evidence data, the same shape
+every other CONFIG-demoted field keeps as a typed-API parameter alongside
+its `.abicheck.yml` route. **Correction (Codex review, fresh evidence on
+this PR):** the claim above did not, as first written, extend to
+`CompareRequest`'s own constructor shape — this PR's first pass replaced the
+documented, released `env_matrix_path: Path` field outright with
+`env_matrix: EnvironmentMatrix`, so a Tier-2 caller built exactly per the
+previously-published `CompareRequest(..., env_matrix_path=Path(...))` shape
+(credited in `CHANGELOG.md`'s 0.4.0 entry) hit an immediate `TypeError` at
+construction, not a graceful fallback. Fixed in the same review round:
+`CompareRequest.env_matrix_path` is kept as a genuine, still-accepted
+constructor parameter, but resolution into an `EnvironmentMatrix` is lazy
+rather than immediate — `__post_init__` only checks the structural
+"not both `env_matrix` and `env_matrix_path`" invariant (no file I/O), and
+the actual load (via `workflows.input_resolution.load_env_matrix`, the same
+loader the retired CLI flag itself used) happens later, at the
+plan/execution boundary, through `CompareRequest.effective_env_matrix()` —
+called from `resolve_compare_request()` and cached on
+`ResolvedComparePair.resolved_env_matrix` for `classify_compare_pair()` to
+read. So constructing a `CompareRequest(..., env_matrix_path=...)` succeeds
+even if the file doesn't exist yet (and does not cache stale contents from
+before a later edit); the two spellings become equivalent only once the
+request is resolved, not at construction — see
+`abicheck/workflows/contracts.py`'s own field docstring and
+`tests/test_environment_drift.py::TestCompareRequestEnvMatrixPathCompat`.
+Only the CLI flag surface and its
+`--support-promise`-shaped strict-schema enforcement moved.
+`compare --require-complete-analysis` and `dump --build-target` — this same
+list's other two deferrals — are also now both implemented; see the
+following two amendments and
+`docs/contribute/plans/one-comparison-product.md`'s Phase 6 section for
+their exact scope. This amendment closes the `--env-matrix` deferral the
+plan already ruled on; it does not reopen that ruling or the CONFIG
+classification itself.
+
 ## Amendment (2026-09-11): `dump --build-target` removed, closing the last flag-demotion deferral Phase 6 unblocked
 
 Phase 6 (`scan` retirement) named three flag demotions it unblocked but did
@@ -711,11 +770,41 @@ input is retired on every mode now (previously scan-only), failing loudly
 before the toolchain install and naming `.abicheck.yml`'s `build.targets` as
 the replacement — the "Consequence for `action/run.sh`" paragraph above is
 updated accordingly. `compare --env-matrix` and `compare
---require-complete-analysis` remain the two still-open, unimplemented
-followups; see `docs/contribute/plans/one-comparison-product.md`'s Phase 6
+--require-complete-analysis` — this same list's other two deferrals — are
+also both now implemented (see the preceding amendment and the following
+one); see `docs/contribute/plans/one-comparison-product.md`'s Phase 6
 section for their exact scope. This amendment closes the `--build-target`
 deferral the ruling table already ruled on; it does not reopen that ruling
 or the (b) classification itself.
+
+## Amendment (2026-09-11): `compare --require-complete-analysis` demoted to `.abicheck.yml`'s `assurance.require_complete` config key
+
+The third and final flag demotion Phase 6 unblocked but did not itself
+implement (the same list the two preceding amendments each closed one entry
+of): the ruling table's `--require-complete-analysis` row recorded it as
+blocked on the identical `scan`-routing hazard as `--env-matrix` (`action/
+run.sh` translating a `mode: scan` request onto `compare` unless a predicate
+said it must stay on the legacy CLI), plus a dedicated Action input
+(`require-complete-analysis`) that needed to retire in the same PR for
+front-end parity — not as an open architectural question about whether the
+demotion itself was correct (P0.4's orthogonal assurance floor was already
+ruled CONFIG). With `scan` deleted, the routing hazard is gone, and this
+amendment closes it: `compare --require-complete-analysis` is retired (old
+spelling exits 64, no alias, per D8's hard-removal-no-deprecation-window
+rule), and `.abicheck.yml`'s new `assurance:` block's `require_complete`
+key — resolved into `BuildConfig.assurance_require_complete` and read
+straight off it by `resolve_compare_config` with no surviving CLI override,
+the same shape `gate.fail_on_removed_library` already uses — is now the
+only front-end-reachable source. The composite Action's own
+`require-complete-analysis` input is retired the same way, on every mode
+(previously forwarded only through `compare`'s branch per the "Action input
+lifecycle" amendment above): `action/validate-inputs.sh` now rejects it
+outright before the toolchain install, and `action/run.sh` no longer
+forwards it as a CLI flag, naming `.abicheck.yml`'s `assurance.require_complete`
+as the replacement. This closes the last of the three flag demotions named
+at the top of this section — `compare --env-matrix`, `compare
+--require-complete-analysis`, and `dump --build-target` are now all
+implemented, with no open, unimplemented deferral remaining from that list.
 
 ## Alternatives considered
 
@@ -858,13 +947,17 @@ audit-only translation used to do for this shape now lives in the one
   install) as usage errors for this shape, matching `compare --no-baseline`'s
   own CLI-level rejection (D2) — unchanged from the previous `mode: scan`
   behavior for this shape.
-- `require-complete-analysis`: **now forwarded**, unlike legacy `scan`'s own
-  audit mode (which never accepted the flag at all, so this Action
-  documented it as a no-op for that shape). `compare --no-baseline` genuinely
-  accepts the flag and gives it real teeth (live-verified: an incomplete
-  analysis-assurance candidate-side finding fails the step under it). This
-  is a real, accepted capability gain from unifying onto `compare`'s own CLI
-  surface rather than preserving a narrower historical accident.
+- `require-complete-analysis`: at the time this amendment landed, **now
+  forwarded**, unlike legacy `scan`'s own audit mode (which never accepted
+  the flag at all, so this Action documented it as a no-op for that shape) —
+  `compare --no-baseline` genuinely accepted the flag and gave it real teeth
+  (live-verified: an incomplete analysis-assurance candidate-side finding
+  failed the step under it). **Superseded by the later 2026-09-11
+  `assurance.require_complete` amendment below**: the CLI flag and Action
+  input this paragraph describes have since been retired outright in favor
+  of `.abicheck.yml`'s `assurance:` config block, so this shape now forwards
+  no `--require-complete-analysis` flag at all — history kept here for the
+  historical record of what this specific amendment changed at the time.
 - `budget`: the two-sided (baseline) shape gains the dedicated `budget`
   Action input's forwarding too — previously `compare`'s own branch had no
   `--budget` forwarding at all (the input was documented scan-only); now any

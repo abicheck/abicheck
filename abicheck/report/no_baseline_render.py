@@ -276,6 +276,18 @@ def render_no_baseline_sarif(doc: NoBaselineDocument) -> dict[str, Any]:
                         else {}
                     ),
                     "exitAxes": dict(doc.exit_axes),
+                    # Codex review, P2: the same declared-deployment-floor
+                    # digest the JSON/Markdown/oneline projections carry
+                    # under `env_matrix_source_sha256` -- omitted, not
+                    # `null`, when no `deployment:` contract governed this
+                    # run, matching this package's other additive fields.
+                    **(
+                        {
+                            "envMatrixSourceSha256": doc.env_matrix_source_sha256,
+                        }
+                        if doc.env_matrix_source_sha256 is not None
+                        else {}
+                    ),
                 },
             }
         ],
@@ -350,6 +362,21 @@ def render_no_baseline_junit(doc: NoBaselineDocument) -> str:
         ("exit_code", str(doc.exit_code)),
     ):
         ET.SubElement(props, "property", {"name": name, "value": value or ""})
+
+    # Codex review, P2: the same declared-deployment-floor digest the JSON/
+    # Markdown/oneline/SARIF projections carry -- omitted entirely (not an
+    # empty-string property) when no `deployment:` contract governed this
+    # run, since a real digest and "no contract" must not read the same way
+    # to a JUnit consumer either.
+    if doc.env_matrix_source_sha256 is not None:
+        ET.SubElement(
+            props,
+            "property",
+            {
+                "name": "env_matrix_source_sha256",
+                "value": doc.env_matrix_source_sha256,
+            },
+        )
 
     # One property per orthogonal exit axis, carrying its own contribution.
     # Without these the suite published only the total and the coverage

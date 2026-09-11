@@ -760,6 +760,12 @@ def build_html_document(
         "file_metadata": (
             dataclasses.asdict(file_metadata) if file_metadata is not None else None
         ),
+        # Codex review, P2 (Finding 4): the same declared-deployment-floor
+        # digest the JSON/Markdown/SARIF/JUnit projections carry under
+        # `env_matrix_source_sha256` -- shared by both the native and
+        # compat_html layouts below, `None` when no `deployment:` contract
+        # governed this run.
+        "env_matrix_source_sha256": getattr(result, "env_matrix_source_sha256", None),
     }
 
     # compat_html (ABICC-clone layout) ignores severity_config entirely and

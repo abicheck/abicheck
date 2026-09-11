@@ -710,6 +710,19 @@ class BundleDiffResult:
     #: completed comparison survives; a consumer exits 16 on it, ranked
     #: above ``ERROR``, exactly as the fan-out does. Empty otherwise.
     not_comparable_members: dict[str, tuple[str, str]] = field(default_factory=dict)
+    #: Codex review, P2 (Finding 5, round 7): the ``sha256:<hex>`` content
+    #: digest of the resolved declared-deployment-floor contract (mirrors
+    #: ``DiffResult.env_matrix_source_sha256``/the release fan-out's own
+    #: identically-named JSON field) -- computed once at BUNDLE scope by
+    #: both BundleFacts drivers (``bundle_side_input.
+    #: compare_release_against_bundle_facts``/``workflows.
+    #: bundle_stored_pair_compare.compare_stored_bundle_facts_pair``) from
+    #: the resolved ``EnvironmentMatrix`` directly, rather than left absent
+    #: whenever the run completes zero matched per-library pairs (the same
+    #: reason the release fan-out's own round-6 fix stopped inferring this
+    #: from a per-library ``DiffResult``). ``None`` when no ``deployment:``
+    #: contract governed this run.
+    env_matrix_source_sha256: str | None = None
 
     @property
     def bundle_verdict(self) -> Verdict:

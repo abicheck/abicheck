@@ -233,7 +233,6 @@ def _attach_suppression_audit(result: Any, suppression: Any) -> None:
 def _reject_flags_unsupported_for_set_inputs(
     ctx: click.Context,
     *,
-    env_matrix_path: Path | None,
     used_by_apps: tuple[ConsumerAppInput, ...],
     required_symbols: tuple[str, ...],
     diagnostic_comparison: bool,
@@ -265,7 +264,6 @@ def _reject_flags_unsupported_for_set_inputs(
     :func:`~abicheck.cli_compare_options._resolve_depth_for_set_inputs`).
     """
     _reject_set_input_flags(
-        env_matrix_path,
         used_by_apps=used_by_apps,
         required_symbols=required_symbols,
         use_cases_manifest=use_cases_manifest,

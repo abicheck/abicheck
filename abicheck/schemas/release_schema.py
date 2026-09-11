@@ -61,4 +61,18 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``evidence_contract_error`` when it is nonzero. A pre-1.1 consumer
 #:       reads nothing differently; one that wants the axis feature-detects
 #:       the key or requires >= 1.1.
-RELEASE_SCHEMA_VERSION = "1.1"
+#: 1.2 -- Codex review, P2 (PR #1221 follow-up): the declared-deployment-
+#:       floor contract's content digest, ``env_matrix_source_sha256`` --
+#:       the same field the scalar ``compare`` report (schema 4.2) and the
+#:       ``--no-baseline`` audit report already carry under this identical
+#:       name, for the identical ``EnvironmentMatrix``/``.abicheck.yml``
+#:       ``deployment:`` contract. Present on both a ``libraries[]`` entry
+#:       (mirroring what a standalone `compare` of that pair would report)
+#:       and, once, on the release envelope itself (since ``env_matrix`` is
+#:       threaded identically to every library in one release fan-out, so
+#:       every entry that carries the key carries the identical digest) --
+#:       omitted entirely, never ``null``, from both when this release's
+#:       candidate declared no ``deployment:`` contract at all. A pre-1.2
+#:       consumer reads nothing differently; one that wants the field
+#:       feature-detects the key or requires >= 1.2.
+RELEASE_SCHEMA_VERSION = "1.2"
