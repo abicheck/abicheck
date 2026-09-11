@@ -534,6 +534,27 @@ pytest_add_cli_args = [
     # and aborts with "Could not figure out where the code to mutate is."
     # before the compare command ever runs — failing the whole `-x` lane.
     "--ignore=tests/test_action_run_sh_annotate_renderer.py",
+    # Same "subprocess re-enters the mutated tree with no mutmut config"
+    # failure class as the entry immediately above, discovered via the
+    # ADR-061 gap E storage/snapshot_codec split PR (#1214) once it touched
+    # serialization.py, mutation-scoped, for real: this test file's
+    # TestAuditOnlyScanRoutesThroughCompareNoBaseline class shells out to
+    # `action/run.sh`, which execs the real `abicheck` console script from a
+    # scratch `cwd` via `_run_action` -- mutmut's PYTHONPATH-based
+    # redirection into `mutants/` follows that subprocess, but the mutated
+    # tree's import machinery then calls mutmut's own config loader fresh in
+    # that process, which can't find `pyproject.toml`'s `[tool.mutmut]`
+    # section from a temp directory and aborts with "Could not figure out
+    # where the code to mutate is." before `compare` ever runs -- failing
+    # the whole `-x` lane before it can even generate mutants. Not caused
+    # by anything this PR's own diff changed: `test_stderr_names_no_such_
+    # option_for_a_scan_only_flag` exercises unrelated ADR-068 `scan`
+    # CLI-flag behavior, and every other recently-completed `mutmut
+    # (detector core)` PR job in this same window whose diff did not touch
+    # a mutation-scoped module was `skipped` outright (never exercised
+    # `mutmut run` for real) -- this PR's `serialization.py` change is what
+    # first put this test file in scope.
+    "--ignore=tests/test_action_run_sh_audit_gate.py",
     # Same failure class as the entry immediately above, one more real
     # `action/run.sh` + real `abicheck` binary subprocess test tripped by
     # this same G38 bundle-facts PR once it touched a second
