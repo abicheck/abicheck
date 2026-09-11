@@ -238,6 +238,31 @@ class _AbicheckGroup(_RootGroupBase):
     are deliberately left untouched.
     """
 
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        """Give the retired ``scan`` root command a named-replacement error.
+
+        ``scan`` was removed outright (ADR-068 Phase 6, no alias, no
+        deprecation period) — every other retired root command falls through
+        to Click's plain ``No such command`` usage error, but ``scan``'s
+        replacement is not obvious from the name alone (it split across
+        ``compare``'s baseline-vs-no-baseline modes), so this is the one
+        retired command worth naming its replacement for. Still surfaces the
+        literal phrase ``No such command`` so it remains indistinguishable
+        from every other retired command under
+        ``test_cli_root_surface.py``'s generic parametrized check, and still
+        exits 64 via ``_AbicheckGroup.main``'s usage-error remap below (a
+        ``UsageError`` defaults to Click exit code 2).
+        """
+        if args and args[0] == "scan":
+            raise click.UsageError(
+                "No such command 'scan'. `scan` was removed (ADR-068) -- use "
+                "`compare` (with a stored baseline) or `compare --no-baseline` "
+                "(audit-only, no stored baseline) instead."
+            )
+        return super().resolve_command(ctx, args)  # type: ignore[no-any-return]
+
     def main(self, *args: Any, standalone_mode: bool = True, **kwargs: Any) -> Any:  # type: ignore[override]
         """Run the group, remapping only Click's usage exit per the class note."""
         # Call plain click's main (not rich-click's RichGroup.main, our direct
