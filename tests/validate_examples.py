@@ -978,9 +978,16 @@ def _collect_build_source_evidence(
 # sectioned envelope, which this function did not, so it read `None` for every
 # real dump-written snapshot. Bug class
 # `storage.out_of_band_snapshot_reader_envelope_drift`.
-from ._snapshot_document_reader import (  # noqa: E402
-    embedded_present_layers as _embedded_present_layers,
-)
+# This module is both imported as `tests.validate_examples` and run directly
+# as a script, so neither import form works on its own.
+try:
+    from ._snapshot_document_reader import (  # noqa: E402
+        embedded_present_layers as _embedded_present_layers,
+    )
+except ImportError:  # run as a script: `tests/` is sys.path[0], no package
+    from _snapshot_document_reader import (  # type: ignore[no-redef]  # noqa: E402
+        embedded_present_layers as _embedded_present_layers,
+    )
 
 
 def _source_layers_for_result(
