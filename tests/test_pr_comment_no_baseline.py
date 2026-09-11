@@ -40,7 +40,7 @@ from abicheck.pr_comment import build_model, render_comment, should_post
 
 def _audit_report(**overrides):
     report = {
-        "audit_report_schema_version": "1.1",
+        "audit_report_schema_version": "1.2",
         "no_baseline": True,
         "library": "libdemo.so",
         "new_version": "1.0",
@@ -283,3 +283,72 @@ class TestSuppressedCountIsReadFromTopLevel:
         report = _audit_report(suppressed_count=3)
         model = build_model(report)
         assert model.suppressed_count == 3
+
+
+class TestBlockedWithNoItemizableFindingStillGetsABlockingHeadline:
+    """Codex review, PR #1210, round 5: `evidence_contract` (exit 7 -- a
+    pinned `--depth build`/`--depth source` whose required evidence never
+    materialized) can make a run fail with NO itemizable finding at all --
+    breaking/review/incomplete all stay empty. The headline must not read
+    the empty buckets as "clean" before checking whether the run actually
+    blocked."""
+
+    def test_blocked_with_empty_buckets_is_not_reported_clean(self) -> None:
+        report = _audit_report(exit_axes={"evidence_contract": 7}, exit_code=7)
+        model = build_model(report)
+        assert not model.breaking
+        assert not model.review
+        assert not model.has_incomplete
+        assert model.no_baseline_audit_blocking is True
+        assert model.no_baseline_audit_gate_fired is False
+        body = render_comment(model, sha="deadbeef")
+        assert "🛑" in body
+        assert "no baseline to compare" not in body
+
+
+class TestFullySuppressedAuditStillPosts:
+    """Codex review, PR #1210, round 5: when every finding a run detected
+    was matched by a --suppress rule, `total_changes` is 0 (suppressed
+    findings never enter the compatibility buckets) -- but the run still
+    detected and disposed of something real, which `--on=changes` must
+    surface (vision.md's "record before disposing" rule) rather than
+    treating identically to a run that found nothing at all."""
+
+    def test_should_post_true_on_suppressed_count_alone(self) -> None:
+        report = _audit_report(suppressed_count=2)
+        model = build_model(report)
+        assert model.total_changes == 0
+        assert should_post(model, "changes") is True
+
+    def test_zero_suppressed_and_zero_changes_still_does_not_post(self) -> None:
+        # Confirms the fix is additive, not a blanket "always post" --
+        # a genuinely clean, unsuppressed audit still doesn't post under
+        # --on=changes.
+        report = _audit_report()
+        model = build_model(report)
+        assert should_post(model, "changes") is False
+
+
+class TestPolicyReflectsTheReportsOwnResolvedValue:
+    """Codex review, PR #1210, round 5: the no-baseline report previously
+    carried no top-level `policy` key at all, so the comment always
+    fell back to the hard-coded "strict_abi" default even when a
+    non-default policy actually classified the findings. Report schema
+    bumped to 1.2 to add the field (`abicheck/schemas/audit_report.
+    schema.json`, `abicheck/report/no_baseline_document.py`)."""
+
+    def test_non_default_policy_is_reflected_in_the_comment(self) -> None:
+        report = _audit_report(policy="sdk_vendor")
+        model = build_model(report)
+        assert model.policy == "sdk_vendor"
+        body = render_comment(model, sha="deadbeef")
+        assert "sdk_vendor" in body
+        assert "strict_abi" not in body
+
+    def test_missing_policy_key_falls_back_to_default(self) -> None:
+        # Backward compatibility: an older-schema report with no `policy`
+        # key at all must not raise, and should fall back sensibly.
+        report = _audit_report()
+        assert "policy" not in report
+        model = build_model(report)
+        assert model.policy == "strict_abi"

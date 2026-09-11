@@ -259,3 +259,66 @@ class TestAuditOnlyScanExplicitNonDefaultPresetIsHonored:
         combined = f"{outputs['_stdout']}\n{outputs['_stderr']}"
         assert combined.count("--severity-preset") == 1, outputs
         assert "strict" in combined, outputs
+
+
+class TestAuditOnlyScanExitZeroVerdictNeverClaimsCompatible:
+    """Codex review, PR #1210, round 6: exit 0 on an audit-only scan was
+    previously mapped to the generic VERDICT=COMPATIBLE -- "No binary ABI
+    break detected" in the job summary/PR title -- even though no
+    comparison ever ran. AUDIT_CLEAN (no finding at all) and AUDIT_RISK (a
+    real finding present but not gated) replace it for this shape."""
+
+    def test_no_findings_reports_audit_clean_not_compatible(
+        self, tmp_path: Path
+    ) -> None:
+        # None of the committed G20 audit-corpus fixtures are genuinely
+        # clean -- every one carries at least one candidate-side finding by
+        # design (they exist specifically to exercise the audit detectors).
+        # AUDIT_CLEAN needs a real zero-finding candidate, so compile one
+        # on the fly: a single public function, no accidental exports, no
+        # cross-source/ODR hazards for the audit detectors to flag.
+        from tests._libabigail import compile_shared_lib
+
+        lib = tmp_path / "libclean.so"
+        compile_shared_lib(
+            "int abicheck_clean_example(int x) { return x + 1; }",
+            lib,
+        )
+        outputs = _run_action(
+            tmp_path,
+            {"INPUT_NEW_LIBRARY": str(lib)},
+        )
+        assert outputs["_returncode"] == 0, outputs
+        assert outputs.get("verdict") == "AUDIT_CLEAN", outputs
+        assert outputs.get("exit-code") == "0", outputs
+
+    def test_risk_only_finding_reports_audit_risk_not_compatible(
+        self, tmp_path: Path
+    ) -> None:
+        # case143's own accidental-export finding: RISK-classified, never
+        # gates (policy/audit_gate_exit.py) -- exit 0, but there IS a real
+        # candidate-side finding, which AUDIT_CLEAN would misreport as
+        # "nothing found".
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(
+                    _snapshot_path("case143_audit_accidental_export")
+                )
+            },
+        )
+        assert outputs["_returncode"] == 0, outputs
+        assert outputs.get("verdict") == "AUDIT_RISK", outputs
+        assert outputs.get("exit-code") == "0", outputs
+
+    def test_gating_case_still_reports_audit_gate_not_audit_risk(
+        self, tmp_path: Path
+    ) -> None:
+        # Sanity check that the new exit-0 verdicts don't leak into the
+        # existing exit-3 AUDIT_GATE path (case148, default preset).
+        outputs = _run_action(
+            tmp_path,
+            {"INPUT_NEW_LIBRARY": str(_snapshot_path(_GATING_CASE))},
+        )
+        assert outputs.get("verdict") == "AUDIT_GATE", outputs
+        assert outputs.get("exit-code") == "3", outputs

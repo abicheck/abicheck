@@ -94,32 +94,22 @@ _POLICY_ONLY_HEADER: dict[frozenset[str], tuple[str, str]] = {
 
 def _header(model: CommentModel) -> tuple[str, str]:
     if model.no_baseline_audit:
-        # `compare --no-baseline` never compared two versions, so none of
-        # the two-sided wording below ("ABI BREAKING", "Source API changed;
-        # binary ABI unchanged") is accurate here even when the bucket
-        # counts below would otherwise select it -- every one of those
-        # phrasings implies a before/after result this run never produced
-        # (Codex review, PR #1210, round 3). Blocking-ness for this
-        # dedicated headline comes from the report's own overall
-        # `exit_code` (`no_baseline_audit_blocking` -- every orthogonal
-        # axis already max-folded into it, not just `audit_gate`; round 4
-        # fix: an earlier revision checked `audit_gate` alone, which missed
-        # a run blocked by `--contract`'s coverage axis instead), never from
-        # bucket membership -- an api_break-severity finding lands in
-        # Review the same way it would for a real comparison, but whether
-        # THIS run's exit code actually failed is a fact only the report
-        # itself states (severity-preset opt-in, case143/case148's own
-        # asymmetric gating).
-        if not model.breaking and not model.review and not model.has_incomplete:
-            return "✅", "Audit — no baseline to compare"
+        # No two-sided comparison ran, so none of the "ABI BREAKING"/"Source
+        # API changed; binary ABI unchanged" wording below applies (Codex
+        # review, PR #1210, rounds 3-5). Blocking-ness comes from the
+        # report's own overall `exit_code` (`no_baseline_audit_blocking`,
+        # every orthogonal axis max-folded into it -- not bucket membership,
+        # and checked even when every bucket is empty: `evidence_contract`
+        # (exit 7) can block with no itemizable finding at all).
         if model.no_baseline_audit_blocking:
             if model.no_baseline_audit_gate_fired:
                 return "🛑", "Audit gate: candidate-side finding blocks this step"
-            # Blocked by a different orthogonal axis (e.g. --contract's
-            # coverage ledger) -- still a real, blocking failure, just not
-            # the audit-gate axis specifically; the "🛑 Analysis incomplete"
-            # section below (has_incomplete) names which one.
+            # A different orthogonal axis blocked (e.g. --contract's
+            # coverage ledger, or evidence_contract); "🛑 Analysis
+            # incomplete" below names which one when there's a finding for it.
             return "🛑", "Audit: this run blocks the step"
+        if not model.breaking and not model.review and not model.has_incomplete:
+            return "✅", "Audit — no baseline to compare"
         return "⚠️", "Audit — candidate-side finding(s), not gated"
     if (
         model.mode == "scan"

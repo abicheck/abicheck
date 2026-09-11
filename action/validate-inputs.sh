@@ -158,7 +158,17 @@ case "$MODE" in
     # all three -- see action.yml's own since/changed-path/budget
     # descriptions for the full account. run.sh keeps its own copy of this
     # exact check for anyone invoking it directly (e.g. tests).
-    if [[ -z "${INPUT_AGAINST:-}" || "${INPUT_AUDIT:-false}" == "true" ]]; then
+    #
+    # `abi-baseline` also counts as "has a baseline" here (Codex review, PR
+    # #1210, round 6): a job that names a release/file via abi-baseline
+    # instead of a direct against still ends up with a real baseline --
+    # run.sh's own later `INPUT_AGAINST="$BASELINE_FILE"` resolution proves
+    # it -- but that resolution runs well after this earlier preflight step
+    # (before the toolchain/dependency install), so `INPUT_AGAINST` alone
+    # reads empty here for that shape even though the job is not audit-only
+    # at all. Checking `INPUT_ABI_BASELINE` too avoids rejecting a
+    # perfectly valid baseline scan as if it were audit-only.
+    if [[ ( -z "${INPUT_AGAINST:-}" && -z "${INPUT_ABI_BASELINE:-}" ) || "${INPUT_AUDIT:-false}" == "true" ]]; then
       if [[ -n "${INPUT_SINCE:-}" ]]; then
         _fail "mode: scan without a baseline (against) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports since identically to legacy scan --against, or drop since for this audit-only run."
       fi

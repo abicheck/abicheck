@@ -3702,7 +3702,21 @@ def _severity():
 
 
 query = sys.argv[2]
-if query == "coverage_contribution":
+if query == "no_baseline_audit":
+    # `compare --no-baseline`'s own discriminator (Codex review, PR #1210,
+    # round 6): this report's top-level `verdict` is always null (no
+    # comparison ran at all), so _report_compat_verdict's own query prints
+    # nothing for it and the exit-0 dispatch silently defaulted to
+    # VERDICT=COMPATIBLE -- "No binary ABI break detected" for a run that
+    # never compared two builds, and the same flattening for a risk-only
+    # audit that found something but didn't gate on it. Prints "clean" (no
+    # findings), "findings" (candidate-side findings present, none gated --
+    # this branch is only reached for a real exit-0 run), or nothing (not a
+    # no-baseline audit report at all).
+    if report.get("no_baseline") is True:
+        findings = report.get("findings")
+        print("findings" if isinstance(findings, list) and findings else "clean")
+elif query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
 elif query == "severity_exit":
     # An absent `severity` block is the legacy scheme, whose exit codes are
@@ -4295,8 +4309,23 @@ ADVISORY_BREAK=false
 # only an escalation (see `_escalate_verdict_to_report`) makes the two differ.
 GATE_TIER=""
 _resolve_clean_exit_verdict() {
-  local _v
+  local _v _no_baseline_audit
   VERDICT="COMPATIBLE"
+  # A no-baseline audit's own `verdict` field is always null (no comparison
+  # ran at all), so `_report_compat_verdict` below prints nothing for it and
+  # this function would otherwise silently default to VERDICT=COMPATIBLE --
+  # "No binary ABI break detected" for a run that never compared two builds
+  # (Codex review, PR #1210, round 6). Checked first and returns early:
+  # AUDIT_CLEAN (no candidate-side findings) or AUDIT_RISK (findings
+  # present, none of them gated -- this function only runs on exit 0).
+  _no_baseline_audit=$(_report_query "$(_json_report_src)" no_baseline_audit)
+  if [[ "$_no_baseline_audit" == "clean" ]]; then
+    VERDICT="AUDIT_CLEAN"
+    return
+  elif [[ "$_no_baseline_audit" == "findings" ]]; then
+    VERDICT="AUDIT_RISK"
+    return
+  fi
   _v=$(_report_compat_verdict)
   if [[ "$_v" == "BREAKING" || "$_v" == "API_BREAK" ]]; then
     VERDICT="$_v"
@@ -4854,6 +4883,23 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # additions/removals/compatibility verdict are ever reported by an
         # audit (ADR-068 D2) -- only the candidate-side findings themselves.
         echo "> **Verdict: AUDIT_GATE** 🛑 — A gating audit finding was detected against the candidate's own public surface (no baseline was compared). This is not a two-sided compatibility verdict; see the JSON report's \`findings[]\` for what gated. Pass \`severity-preset: info-only\` to stop gating on audit findings."
+        ;;
+      AUDIT_CLEAN)
+        # Codex review, PR #1210, round 6: exit 0 on a no-baseline audit
+        # with no candidate-side findings at all previously fell through to
+        # the generic COMPATIBLE arm above ("No binary ABI break detected"),
+        # which falsely implies a two-sided comparison ran. Distinct from
+        # AUDIT_GATE the same way COMPATIBLE is distinct from BREAKING --
+        # the exit-0 sibling of the same axis family.
+        echo "> **Verdict: AUDIT_CLEAN** ✅ — No candidate-side finding against the candidate's own public surface (no baseline was compared). This is not a two-sided compatibility verdict — an audit reports no additions, removals, or compatibility verdict at all."
+        ;;
+      AUDIT_RISK)
+        # Same audit-only shape as AUDIT_CLEAN above, but with a real
+        # candidate-side finding that this run's own axes did not gate on
+        # (no severity-preset opt-in, or a RISK-classified finding, which
+        # policy/audit_gate_exit.py never gates regardless of preset) --
+        # exit 0, but there is something to look at, unlike AUDIT_CLEAN.
+        echo "> **Verdict: AUDIT_RISK** ⚠️ — A candidate-side finding was detected against the candidate's own public surface (no baseline was compared), but this run did not gate on it. This is not a two-sided compatibility verdict; see the JSON report's \`findings[]\`. Set \`severity-preset\` to a non-\`info-only\` value to gate on a future \`BREAKING\`/\`API_BREAK\`-classified finding like it."
         ;;
       COVERAGE_INCOMPLETE)
         # ADR-049's orthogonal contract-coverage axis (exit code 1). Naming

@@ -1082,4 +1082,15 @@ def should_post(model: CommentModel, on: str) -> bool:
         # ADR-065: an incompletely checked scope is a change to what the
         # comment can claim, so it posts under --on=changes too.
         or model.scope_notice is not None
+        # vision.md's "record before disposing" rule (Codex review, PR
+        # #1210, round 5, on the no-baseline audit shape, but the gap is
+        # general): a run whose every finding a --suppress rule matched has
+        # total_changes == 0 (they're removed from the compatibility
+        # buckets by the time this model exists), yet the run genuinely
+        # detected something and disposed of it by a real rule -- a fact
+        # "--on=changes" should surface, not treat the same as "nothing
+        # happened". Without this, --pr-comment-mode: update could delete a
+        # previous sticky comment the moment every finding it once showed
+        # became suppressed.
+        or model.suppressed_count > 0
     )
