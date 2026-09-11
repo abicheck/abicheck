@@ -856,6 +856,9 @@ def _render_json(
         ],
         "analysis_errors": list(result.analysis_errors),
     }
+    # Mirrors the two-sided compare report's env_matrix_source_sha256.
+    if result.env_matrix_source_sha256 is not None:
+        summary["env_matrix_source_sha256"] = result.env_matrix_source_sha256
     return json.dumps(summary, indent=2)
 
 
@@ -876,6 +879,10 @@ def _render_markdown(
         f"- Bundle verdict: `{result.bundle_verdict.value}`",
         "",
     ]
+    # Mirrors the JSON renderer above / compare report's own bullet.
+    if result.env_matrix_source_sha256 is not None:
+        lines.append(f"- Deployment floor digest: `{result.env_matrix_source_sha256}`")
+        lines.append("")
     lines += markdown_scope_lines(scope_terms if scope_terms is not None else scope_terms_for(result, {}))
     if result.analysis_errors:
         lines.append("## Bundle analysis errors")

@@ -446,4 +446,12 @@ def compare_stored_bundle_facts_pair(
         result.analysis_errors.append(manifest_note)
     result.scope_record = scope_record
     result.not_comparable_members = dict(not_comparable)
+    # Codex review, P2 (Finding 5): computed directly from the resolved
+    # `env_matrix` this function already has -- see
+    # `bundle_side_input.compare_release_against_bundle_facts`'s identical
+    # fix (same shared `env_matrix_content_digest()`, so the two BundleFacts
+    # drivers can't independently drift) for the full rationale.
+    from ..checker import env_matrix_content_digest
+
+    result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
     return result

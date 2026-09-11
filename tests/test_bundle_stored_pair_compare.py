@@ -609,3 +609,66 @@ class TestCompareStoredBundleFactsPairEnvMatrix:
         )
         assert len(result_declared.per_library) == 1
         assert result_declared.per_library[0].verdict is Verdict.BREAKING
+
+
+class TestCompareStoredBundleFactsPairEnvMatrixDigestWithNoCompletedComparison:
+    """Codex review, P2 (Finding 5, round 7): mirrors the release fan-out's
+    own ``TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison`` (
+    ``tests/test_compare_release_env_matrix.py``) -- a declared
+    ``deployment:`` contract must not become indistinguishable from "none"
+    just because OLD and NEW share no matched library. The digest is a
+    property of the *resolved matrix*, not of how many per-library
+    comparisons happened to complete."""
+
+    def test_carries_the_digest_with_zero_matched_pairs(self, tmp_path: Path) -> None:
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        # Deliberately disjoint library names -- OLD and NEW share no
+        # matched pair, so `per_library` is empty, while both stored
+        # documents still load successfully.
+        old_elf = ElfMetadata(soname="libfoo.so")
+        new_elf = ElfMetadata(soname="libbar.so")
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(
+            capture_bundle_facts(
+                {"libfoo.so": AbiSnapshot(library="libfoo.so", version="old", elf=old_elf)}
+            ),
+            old_path,
+        )
+        save_bundle_facts(
+            capture_bundle_facts(
+                {"libbar.so": AbiSnapshot(library="libbar.so", version="new", elf=new_elf)}
+            ),
+            new_path,
+        )
+
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+        result = compare_stored_bundle_facts_pair(old_path, new_path, env_matrix=matrix)
+
+        assert result.per_library == [], "fixture precondition: zero matched pairs"
+        assert result.env_matrix_source_sha256 is not None
+        assert result.env_matrix_source_sha256.startswith("sha256:")
+
+    def test_omits_the_digest_without_a_declared_matrix(self, tmp_path: Path) -> None:
+        old_elf = ElfMetadata(soname="libfoo.so")
+        new_elf = ElfMetadata(soname="libbar.so")
+        old_path = tmp_path / "old.bundlefacts.json"
+        new_path = tmp_path / "new.bundlefacts.json"
+        save_bundle_facts(
+            capture_bundle_facts(
+                {"libfoo.so": AbiSnapshot(library="libfoo.so", version="old", elf=old_elf)}
+            ),
+            old_path,
+        )
+        save_bundle_facts(
+            capture_bundle_facts(
+                {"libbar.so": AbiSnapshot(library="libbar.so", version="new", elf=new_elf)}
+            ),
+            new_path,
+        )
+
+        result = compare_stored_bundle_facts_pair(old_path, new_path)
+
+        assert result.per_library == [], "fixture precondition: zero matched pairs"
+        assert result.env_matrix_source_sha256 is None

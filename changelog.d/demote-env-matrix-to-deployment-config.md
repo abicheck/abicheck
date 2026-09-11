@@ -30,3 +30,27 @@
   (`CompareRequest.env_matrix`/`service.run_compare(env_matrix=...)`) now
   carries an already-resolved `EnvironmentMatrix` directly instead of a
   `env_matrix_path` to load.
+
+### Fixed
+
+- `EnvironmentMatrix`/`SyclConstraints`/`CudaConstraints` are now genuinely
+  `@dataclass(frozen=True)` (ordinary attribute reassignment previously
+  still worked despite the class being hashable, which could change an
+  already-inserted dict/set member's hash out from under it), and
+  `copy.deepcopy(matrix)`/`pickle.dumps(matrix)`/`dataclasses.asdict(matrix)`
+  now round-trip correctly instead of raising `TypeError: cannot pickle
+  'mappingproxy' object` — a Python stdlib gap (`types.MappingProxyType` has
+  no registered pickle reducer at all) that surfaced through any
+  `CompareRequest` embedding a real declared `deployment:` contract.
+- The declared-deployment-floor digest (`env_matrix_source_sha256`) is now
+  projected by every `compare` output format — Markdown, the `review`
+  digest, SARIF, HTML, and JUnit — not only JSON, matching the digest's own
+  documented "present whenever a `deployment:` contract was resolved"
+  contract.
+- A BundleFacts comparison (`compare_release_against_bundle_facts`/
+  `compare_stored_bundle_facts_pair`) now carries the same
+  `env_matrix_source_sha256` digest on `BundleDiffResult` and its JSON/
+  Markdown renderers, computed once at bundle scope from the resolved
+  matrix — previously absent whenever OLD and NEW shared zero matched
+  library pairs, making a genuinely-configured `deployment:` contract
+  indistinguishable from none.

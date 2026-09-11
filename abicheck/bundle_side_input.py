@@ -655,4 +655,15 @@ def compare_release_against_bundle_facts(
     result.scope_record = scope_record
     result.extraction_failures = dict(failed)
     result.not_comparable_members = dict(not_comparable)
+    # Codex review, P2 (Finding 5): computed directly from the resolved
+    # `env_matrix` this function already has -- not inferred after the fact
+    # from whichever per-library `DiffResult` happens to carry
+    # `env_matrix_source_sha256` (which the release fan-out's own round-6
+    # fix already established as wrong: indistinguishable from "no
+    # deployment contract at all" whenever the run completes zero matched
+    # pairs). Same shared `env_matrix_content_digest()` the fan-out uses, so
+    # the two can't independently drift.
+    from .checker import env_matrix_content_digest
+
+    result.env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
     return result
