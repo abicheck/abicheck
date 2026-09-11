@@ -57,6 +57,7 @@ from .workflows.contracts import CompareResult
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
+    from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
     from .workflows.gate import SeverityConfig
 
@@ -115,6 +116,7 @@ _CompareReleaseCommonArgs = tuple[
     "list[Path] | None",
     bool,
     "dict[Any, Any] | None",
+    "EnvironmentMatrix | None",
 ]
 
 
@@ -150,6 +152,7 @@ def _run_compare_pair(
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> CompareResult:
     """Run compare for one old/new pair and return result + resolved snapshots.
 
@@ -205,6 +208,14 @@ def _run_compare_pair(
     forwarded unchanged to ``service.run_compare``'s own identically-named
     parameter, closing the gap where this fan-out never threaded the config
     key a single-pair ``compare`` already honors.
+
+    *env_matrix* (ADR-020b / ADR-068 D5): the project's declared deployment
+    constraints, resolved once for the whole release from ``.abicheck.yml``'s
+    ``deployment:`` config key (the former ``--env-matrix FILE``, which used
+    to be rejected outright for a directory/package compare) -- forwarded
+    unchanged to ``service.run_compare``'s own identically-named parameter so
+    every library in the fan-out gets the same declared-floor symbol-version
+    reclassification a single-pair ``compare`` of that library would.
     """
     from . import service
 
@@ -244,6 +255,7 @@ def _run_compare_pair(
         public_header_dirs=public_header_dirs,
         collapse_versioned_symbols=collapse_versioned_symbols,
         project_policy_overrides=project_policy_overrides,
+        env_matrix=env_matrix,
     )
     record_release_resolved_config(
         result.diff, getattr(pack_application, "resolved_config", None)
@@ -284,6 +296,7 @@ def _compare_one_library(
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch. Any
     exception yields an ERROR entry rather than aborting the release.
@@ -352,6 +365,7 @@ def _compare_one_library(
             public_header_dirs=public_header_dirs,
             collapse_versioned_symbols=collapse_versioned_symbols,
             project_policy_overrides=project_policy_overrides,
+            env_matrix=env_matrix,
         )
         result = compare_result.diff
         pattern_modulations_text: str | None = None
@@ -652,6 +666,7 @@ def _compare_release_libraries(
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -729,6 +744,7 @@ def _compare_release_libraries(
         public_header_dirs,
         collapse_versioned_symbols,
         project_policy_overrides,
+        env_matrix,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:

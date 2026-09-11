@@ -26,7 +26,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `pattern_verdicts` | `bool` | `False` |
 | `enable_debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
-| `env_matrix_path` | `Path \| None` | `None` |
+| `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
@@ -384,6 +384,7 @@ Compare two ABI inputs and return the classified diff result.
 | `public_header_dirs` | `list[Path] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
 | `project_policy_overrides` | `dict[Any, Any] \| None` | `None` |
+| `env_matrix` | `EnvironmentMatrix \| None` | `None` |
 
 **Returns:** `CompareResult`
 

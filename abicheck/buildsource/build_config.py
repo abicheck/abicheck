@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from ..config_paths import discover_build_config as _discover_build_config
+from ..environment_matrix import EnvironmentMatrix
 from ..policy.support_promise import (
     SUPPORT_PROMISE_POLICIES as _SUPPORT_PROMISE_POLICIES,
 )
@@ -331,6 +332,12 @@ class BuildConfig:
     release_support_promise: str | None = None
     #: ``resource_limits:`` — Phase 7g: former ``--max-json-object-nodes``.
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
+    #: ``deployment:`` — ADR-020b §4.1 / ADR-068 D5: the former
+    #: ``compare --env-matrix FILE``. Embeds ``EnvironmentMatrix``'s YAML
+    #: shape inline (parsed via ``EnvironmentMatrix.from_dict``) instead of
+    #: a side file kept in sync by hand. ``None`` = unset; no surviving CLI
+    #: override at all (guard 2, no escape hatch).
+    deployment: EnvironmentMatrix | None = None
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
@@ -372,6 +379,7 @@ class BuildConfig:
             "baseline",
             "aggregate",
             "policy",
+            "deployment",
         }
     )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
@@ -462,6 +470,30 @@ class BuildConfig:
         return _subkey_type_findings(key, sub, sub_value)
 
     @classmethod
+    def _deployment_findings(cls, value: object) -> list[str]:
+        """Type findings for ``deployment:``: not a fixed subkey set (unlike
+        every other block) since it embeds ``EnvironmentMatrix``'s own
+        richer, nested YAML shape -- delegates to
+        ``EnvironmentMatrix.from_dict`` itself rather than re-declaring that
+        shape here, the same reasoning ``from_dict`` below reuses for
+        parsing. Kept on this class (not ``build_config_schema.py``, which
+        is ``extract``-classified and may not import ``environment_matrix``,
+        a ``workflows`` module) rather than the sibling schema module every
+        other subkey-type check lives in.
+        """
+        if value is None:
+            return []
+        if not isinstance(value, dict):
+            return [
+                f"deployment must be a mapping, got {type(value).__name__}: {value!r}"
+            ]
+        try:
+            EnvironmentMatrix.from_dict(value)
+        except (TypeError, ValueError) as exc:
+            return [f"deployment: {exc}"]
+        return []
+
+    @classmethod
     def _block_findings(cls, key: str, value: object, known_block: object) -> list[str]:
         """Type findings for one recognized top-level *block* key."""
         if value is None:
@@ -494,6 +526,9 @@ class BuildConfig:
             if key not in cls._KNOWN_TOP_KEYS:
                 findings.append(f"unknown .abicheck.yml key {key!r}")
                 continue
+            if key == "deployment":
+                findings += cls._deployment_findings(value)
+                continue
             known_block = cls._KNOWN_BLOCK_KEYS.get(key)
             if known_block is None:
                 findings += cls._scalar_findings(key, value)
@@ -522,6 +557,7 @@ class BuildConfig:
         release = _block(top, "release")
         resource_limits = _block(top, "resource_limits")
         policy = _block(top, "policy")
+        deployment_raw = top.get("deployment")
 
         def _safe_compile_atoms(key: str) -> list[str]:
             atoms = [_safe_compile_atom(key, item) for item in _strs(compile_blk, key)]
@@ -640,6 +676,11 @@ class BuildConfig:
                 else 0
             ),
             policy_overrides=_parse_policy_overrides(policy),
+            deployment=(
+                EnvironmentMatrix.from_dict(deployment_raw)
+                if isinstance(deployment_raw, dict)
+                else None
+            ),
         )
 
     def _build_block(self) -> dict[str, Any]:
@@ -793,6 +834,13 @@ class BuildConfig:
             release["support_promise"] = self.release_support_promise
         return release
 
+    def _deployment_block(self) -> dict[str, Any]:
+        """``deployment:`` block -- the embedded ``EnvironmentMatrix`` shape
+        (empty when unset)."""
+        if self.deployment is None:
+            return {}
+        return self.deployment.to_dict()
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
 
@@ -818,6 +866,7 @@ class BuildConfig:
             ("release", self._release_block()),
             ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
             ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
+            ("deployment", self._deployment_block()),
         ):
             if block:
                 out[key] = block

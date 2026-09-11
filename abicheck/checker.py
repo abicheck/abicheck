@@ -1328,11 +1328,12 @@ def compare(
         else None
     )
 
-    # Canonical content digest of the resolved --env-matrix (Codex review,
-    # PR #803, fresh evidence): `dataclasses.asdict` recursively serializes
-    # `EnvironmentMatrix`'s own nested `SyclConstraints`/`CudaConstraints`
-    # dataclasses into a plain, JSON-safe dict for `content_digest`. `None`
-    # when no --env-matrix was given at all.
+    # Canonical content digest of the resolved deployment matrix (Codex
+    # review, PR #803; source: `.abicheck.yml`'s `deployment:` config key,
+    # ADR-068 D5, former `--env-matrix FILE`): `dataclasses.asdict`
+    # recursively serializes `EnvironmentMatrix`'s own nested
+    # `SyclConstraints`/`CudaConstraints` into a plain dict for
+    # `content_digest`. `None` when no matrix was declared at all.
     import dataclasses as _dataclasses
 
     env_matrix_source_sha256 = (

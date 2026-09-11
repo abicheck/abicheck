@@ -128,6 +128,7 @@ from .workflows.storage import is_project_snapshot_package_dir
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
+    from .environment_matrix import EnvironmentMatrix
     from .pack_application import PackApplication
 
 
@@ -466,6 +467,18 @@ def compare_release_cmd(
     # before this parameter existed.
     project_policy_overrides: dict[Any, Any] | None = None,
     max_findings_per_library: int | None = None,
+    # ADR-020b / ADR-068 D5: resolved once by the caller
+    # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
+    # same place `collapse_versioned_symbols`/`public_header_dirs` above are
+    # resolved) and forwarded here -- same internal-parameter shape as those
+    # two. `None` (the default) is a true no-op: every library is compared
+    # exactly as it was before this parameter existed. The former
+    # `--env-matrix FILE` used to be rejected outright for a directory/
+    # package compare; now that it is a project-wide config key
+    # (`.abicheck.yml`'s `deployment:` block) it applies to every library in
+    # the fan-out, the same way `gate.fail_on_removed_library`/`release.*`
+    # already do.
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -851,6 +864,7 @@ def compare_release_cmd(
                 public_header_dirs=public_header_dirs,
                 collapse_versioned_symbols=collapse_versioned_symbols,
                 project_policy_overrides=project_policy_overrides,
+                env_matrix=env_matrix,
             )
 
             for key in matched_keys:

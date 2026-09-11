@@ -419,10 +419,15 @@ class TestCompareRequestRemovedFieldDoesNotShiftPositionalArgs:
     """Codex review, PR #1180 ("Prevent positional CompareRequest arguments
     from shifting"): removing ``reconcile_build_context`` from the middle of
     this dataclass used to silently rebind every field after it for a
-    positional caller (a later ``bool`` landing in ``env_matrix_path``'s
+    positional caller (a later ``bool`` landing in the next field's own
     slot, a later ``Path`` in ``diagnostic_comparison``'s). A ``KW_ONLY``
     sentinel now sits exactly where that field used to be, so such a call
-    fails loudly at construction instead.
+    fails loudly at construction instead. The dummy trailing value below
+    (``"env-matrix.yaml"``) is just an arbitrary string past the boundary --
+    not a reference to the since-removed ``env_matrix_path`` field, which
+    would have sat there before ADR-068 D5's ``compare --env-matrix``
+    demotion (``CompareRequest.env_matrix`` now carries an already-resolved
+    ``EnvironmentMatrix``, not a path).
     """
 
     def test_documented_short_positional_shape_still_works(self):

@@ -295,6 +295,57 @@ class EnvironmentMatrix:
             target_arch=data.get("target_arch"),
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize back to the ``EnvironmentMatrix`` YAML/dict shape.
+
+        Round-trips via :meth:`from_dict` — only non-default fields are
+        emitted, matching :class:`~abicheck.buildsource.build_config.
+        BuildConfig.to_dict`'s own "minimal, round-trippable" convention.
+        This is what lets ``BuildConfig``'s ``deployment:`` block (ADR-020b
+        §4.1) embed this shape inline in ``.abicheck.yml`` and dump it back
+        out unchanged, now that ``compare --env-matrix FILE`` has been
+        demoted to that config key.
+        """
+        out: dict[str, Any] = {}
+        if self.compilers:
+            out["compilers"] = list(self.compilers)
+        if self.abi_version is not None:
+            out["abi_version"] = self.abi_version
+        if self.libstdcxx_dual_abi is not None:
+            out["libstdcxx_dual_abi"] = self.libstdcxx_dual_abi
+        if self.runtime_floors:
+            out["runtime_floors"] = dict(self.runtime_floors)
+        if self.sycl.implementation or self.sycl.backends or self.sycl.min_pi_version:
+            sycl: dict[str, Any] = {}
+            if self.sycl.implementation:
+                sycl["implementation"] = self.sycl.implementation
+            if self.sycl.backends:
+                sycl["backends"] = list(self.sycl.backends)
+            if self.sycl.min_pi_version:
+                sycl["min_pi_version"] = self.sycl.min_pi_version
+            out["sycl"] = sycl
+        if (
+            self.cuda.gpu_architectures
+            or self.cuda.driver_range is not None
+            or self.cuda.toolkit_version
+            or self.cuda.require_ptx
+        ):
+            cuda: dict[str, Any] = {}
+            if self.cuda.gpu_architectures:
+                cuda["gpu_architectures"] = list(self.cuda.gpu_architectures)
+            if self.cuda.driver_range is not None:
+                cuda["driver_range"] = list(self.cuda.driver_range)
+            if self.cuda.toolkit_version:
+                cuda["toolkit_version"] = self.cuda.toolkit_version
+            if self.cuda.require_ptx:
+                cuda["require_ptx"] = self.cuda.require_ptx
+            out["cuda"] = cuda
+        if self.target_os is not None:
+            out["target_os"] = self.target_os
+        if self.target_arch is not None:
+            out["target_arch"] = self.target_arch
+        return out
+
     @classmethod
     def from_yaml(cls, path: Path) -> EnvironmentMatrix:
         """Load from a YAML file.

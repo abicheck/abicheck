@@ -122,7 +122,7 @@ Nothing in the library's own contract changed; its *floor* did — a rebuild
 on a newer toolchain now requires a newer runtime
 ([Dependency & Runtime Floors](dependency-floors.md)). The requirement is
 recorded in the binary, so Level 0 reads it; deciding whether it is a break
-needs a declared supported-OS matrix (`--env-matrix`):
+needs a declared supported-OS matrix (`.abicheck.yml`'s `deployment:` block):
 [case170](../reference/examples/case170_env_runtime_floor_raised.md).
 
 ### 8. It works for the application and breaks the plugin, or a sibling library

@@ -26,25 +26,33 @@ between the two shipped binaries' dynamic version requirements:
 ## abicheck command
 
 ```bash
-abicheck compare old.abi.json new.abi.json                              # default
-abicheck compare old.abi.json new.abi.json --env-matrix env-newer.yaml  # declare floor >= 2.36
-abicheck compare old.abi.json new.abi.json --env-matrix env-older.yaml  # declare floor 2.28
+abicheck compare old.abi.json new.abi.json  # default: no .abicheck.yml deployment: block
+
+# .abicheck.yml declaring a floor >= 2.36:
+#   deployment:
+#     runtime_floors: {GLIBC: "2.36"}
+abicheck compare old.abi.json new.abi.json  # run with that config in the working dir
+
+# .abicheck.yml declaring floor 2.28:
+#   deployment:
+#     runtime_floors: {GLIBC: "2.28"}
+abicheck compare old.abi.json new.abi.json  # run with that config in the working dir
 ```
 
 ## Expected abicheck finding
 
 ```text
-Default (no --env-matrix):
+Default (no deployment: block):
 Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
 - symbol_version_required_added: New symbol version requirement: GLIBC_2.34 (from libc.so.6)
 - runtime_floor_raised: Runtime floor raised for libc.so.6: GLIBC_2.28 -> GLIBC_2.34
   (required by: __libc_start_main@GLIBC_2.34)
 
---env-matrix env-newer.yaml (declared floor 2.36, e.g. Ubuntu 24.04+):
+deployment.runtime_floors.GLIBC: "2.36" (e.g. Ubuntu 24.04+):
 Verdict: COMPATIBLE (exit 0)
 
---env-matrix env-older.yaml (declared floor 2.28, e.g. RHEL 8):
+deployment.runtime_floors.GLIBC: "2.28" (e.g. RHEL 8):
 Verdict: BREAKING (exit 4)
 ```
 
@@ -74,22 +82,23 @@ an older base image to a newer one (or a distro's compiler/glibc bump)
 with zero source changes. The declared interface is untouched, but the
 binary's minimum runtime silently rises, and only a build that pins (or
 declares) its oldest supported runtime catches it before a customer on an
-older system hits a load failure. `--env-matrix` is exactly that
-declaration: pairing the observed floor against a stated deployment target
-turns the open question into a pass/fail verdict, as the two `--env-matrix`
-runs above show.
+older system hits a load failure. `.abicheck.yml`'s `deployment:` block is
+exactly that declaration: pairing the observed floor against a stated
+deployment target turns the open question into a pass/fail verdict, as the
+two declared-floor runs above show.
 
 ## Safe redesign
 
 Pin the build image (or use an old-sysroot/manylinux-style toolchain) so
 released binaries target the oldest glibc you actually support, rather than
 whatever the CI runner happens to ship. Where that's impractical, declare
-the real deployment floor with `--env-matrix` so drift like this fails the
-build intentionally instead of surfacing as a support ticket after release.
+the real deployment floor in `.abicheck.yml`'s `deployment:` block so drift
+like this fails the build intentionally instead of surfacing as a support
+ticket after release.
 
 ## Cross-tool comparison
 
 `abidiff`/`abi-compliance-checker` diff DWARF-carrying compiled binaries
 for type/symbol changes; neither has a concept of a declared deployment
-runtime floor or an `--env-matrix`-style target declaration, so there is no
+runtime floor or a `deployment:`-style target declaration, so there is no
 equivalent reproduction of this finding with either tool.

@@ -126,9 +126,9 @@ an unknown-key error.
 
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
-`resource_limits:`, `policy:`, `version:`, `risk_rules:`, `crosschecks:`,
-`targets:`, `bundles:`, `profiles:`, and `baseline:` are the recognized
-top-level keys.
+`deployment:`, `resource_limits:`, `policy:`, `version:`, `risk_rules:`,
+`crosschecks:`, `targets:`, `bundles:`, `profiles:`, and `baseline:` are
+the recognized top-level keys.
 See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
 generated key/type list (`BuildConfig`'s own schema); the sections below
@@ -365,6 +365,38 @@ more**:
 - `include_private_dso:` (default `false`) — the former `compare
   --include-private-dso`: include private (non-public) shared objects from
   non-standard paths.
+
+---
+
+### `deployment:`
+
+The project's declared deployment constraints (ADR-020b), demoted off the
+CLI (ADR-068 D5) — **no CLI spelling exists any more**: the former `compare
+--env-matrix FILE` is now this key, embedding
+[`EnvironmentMatrix`](../learn/environment-drift.md)'s own YAML shape
+inline instead of a side file. When `runtime_floors` is set, a new
+symbol-version requirement is judged against the declared floor: at or
+below it → `COMPATIBLE`, above it → `BREAKING`, instead of the default
+`COMPATIBLE_WITH_RISK` verdict. Unlike `release:`'s two keys above, this
+one *does* apply to `compare`'s directory/package fan-out — a project-wide
+property, not a per-invocation one, so it reaches every library the fan-out
+compares.
+
+```yaml
+deployment:
+  target_os: linux
+  target_arch: x86_64
+  compilers: [gcc-13, clang-17]
+  runtime_floors:
+    GLIBC: "2.28"        # we ship to RHEL 8 / Ubuntu 20.04
+    GLIBCXX: "3.4.28"
+  sycl:
+    implementation: dpcpp
+    backends: [level_zero, opencl]
+```
+
+See [Environment & Toolchain Drift](../learn/environment-drift.md) for the
+full worked example, including CI/GitHub Action usage.
 
 ---
 

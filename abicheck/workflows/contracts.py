@@ -65,6 +65,7 @@ from typing import Any
 
 from ..change_registry_types import Verdict
 from ..checker_types import DiffResult
+from ..environment_matrix import EnvironmentMatrix
 from ..errors import ValidationError
 from ..model import AbiSnapshot
 from ..model.change_catalog.kinds import ChangeKind
@@ -156,11 +157,26 @@ class CompareRequest:
     # "c++", "clang", ...)`` shape (this file's own example, well short of
     # this boundary) is unaffected.
     _: KW_ONLY
-    # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML). When
-    # its ``runtime_floors`` are set, new symbol-version requirements classify
-    # against the declared floors (≤ floor → COMPATIBLE, > floor → BREAKING)
-    # instead of the default deployment-RISK verdict.
-    env_matrix_path: Path | None = None
+    # ADR-020b: declared deployment constraints (EnvironmentMatrix YAML).
+    # When its ``runtime_floors`` are set, new symbol-version requirements
+    # classify against the declared floors (≤ floor → COMPATIBLE, > floor →
+    # BREAKING) instead of the default deployment-RISK verdict. Demoted off
+    # the CLI (this PR, ADR-068 D5): the former ``--env-matrix FILE`` is now
+    # ``.abicheck.yml``'s ``deployment:`` config key, resolved once by
+    # ``resolve_compare_config`` into a real ``EnvironmentMatrix`` -- so this
+    # field now carries the already-*resolved* value, not a path to load,
+    # with no surviving CLI flag of its own. Kept as a genuine
+    # ``CompareRequest`` field (rather than dropped like
+    # ``bundle_system_providers``/``fail_on_removed_library``, which never
+    # reach ``classify_compare_pair`` at all) because it is a per-comparison
+    # classification input, not a release-level gating knob -- the same
+    # reasoning that keeps ``collapse_versioned_symbols``/
+    # ``public_header_dirs`` as real fields here: both need a genuine
+    # channel into the directory/package release fan-out's per-library
+    # ``compare_snapshots`` call (``service_compare_pipeline.run_compare`` /
+    # ``cli_compare_release_pairwise._run_compare_pair``), which a config-
+    # only value with no request field cannot reach.
+    env_matrix: EnvironmentMatrix | None = None
     # ADR-050 D2: force a tentative diff through a genuine comparability-
     # contract mismatch (scope/profile fingerprint drift) instead of the
     # default hard ``ProfileMismatchError``/``ScopeMismatchError``. Opt-in;
@@ -404,8 +420,6 @@ class CompareRequest:
             and not Path(self.policy_file_path).exists()
         ):
             errors.append(f"policy file not found: {self.policy_file_path}")
-        if self.env_matrix_path is not None and not Path(self.env_matrix_path).exists():
-            errors.append(f"environment matrix file not found: {self.env_matrix_path}")
         # ADR-049 Phase 6 (Codex review): the same two rules the CLI applies
         # to --contract, so a typed caller fails fast and with identical text
         # instead of having the mode silently ignored (contract_evaluation

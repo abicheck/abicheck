@@ -813,9 +813,9 @@ class TestMusllinuxGlibcDependency:
 
 class TestPlatformBaselineFloorCliEndToEnd:
     """G10: the check reaches exit code / JSON through the real ``compare``
-    CLI via ``--env-matrix``'s existing ``runtime_floors`` mechanism (no
-    dedicated flag — this reuses the same declared-constraint contract
-    ``apply_runtime_floor_contract`` already uses)."""
+    CLI via ``.abicheck.yml``'s ``deployment:`` block (ADR-020b / ADR-068
+    D5's existing ``runtime_floors`` mechanism, demoted off the CLI onto
+    this config key -- the former ``compare --env-matrix FILE``)."""
 
     @staticmethod
     def _write_snapshot(path, tag: str) -> None:
@@ -823,6 +823,13 @@ class TestPlatformBaselineFloorCliEndToEnd:
 
         elf = _elf(needed=["libc.so.6"], versions_required={"libc.so.6": [tag]})
         path.write_text(snapshot_to_json(_snap(elf)), encoding="utf-8")
+
+    @staticmethod
+    def _write_config(path, floor: str) -> None:
+        path.write_text(
+            f'deployment:\n  runtime_floors:\n    GLIBC: "{floor}"\n',
+            encoding="utf-8",
+        )
 
     def test_exceeding_floor_reaches_exit_code_and_json(self, tmp_path) -> None:
         from click.testing import CliRunner
@@ -833,13 +840,13 @@ class TestPlatformBaselineFloorCliEndToEnd:
         new_p = tmp_path / "new.json"
         self._write_snapshot(old_p, "GLIBC_2.34")
         self._write_snapshot(new_p, "GLIBC_2.34")
-        env_p = tmp_path / "env.yaml"
-        env_p.write_text('runtime_floors:\n  GLIBC: "2.27"\n')
+        cfg_p = tmp_path / ".abicheck.yml"
+        self._write_config(cfg_p, "2.27")
         result = CliRunner().invoke(
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--env-matrix", str(env_p), "--format", "json",
+                "--config", str(cfg_p), "--format", "json",
             ],
         )
         assert result.exit_code == 0, result.output  # COMPATIBLE_WITH_RISK
@@ -854,17 +861,38 @@ class TestPlatformBaselineFloorCliEndToEnd:
         new_p = tmp_path / "new.json"
         self._write_snapshot(old_p, "GLIBC_2.17")
         self._write_snapshot(new_p, "GLIBC_2.17")
-        env_p = tmp_path / "env.yaml"
-        env_p.write_text('runtime_floors:\n  GLIBC: "2.27"\n')
+        cfg_p = tmp_path / ".abicheck.yml"
+        self._write_config(cfg_p, "2.27")
         result = CliRunner().invoke(
             main,
             [
                 "compare", str(old_p), str(new_p),
-                "--env-matrix", str(env_p), "--format", "json",
+                "--config", str(cfg_p), "--format", "json",
             ],
         )
         assert result.exit_code == 0, result.output
         assert "platform_baseline_floor_raised" not in result.output
+
+    def test_env_matrix_flag_no_longer_exists(self, tmp_path) -> None:
+        """ADR-068 D5: the old ``--env-matrix`` spelling is gone outright --
+        no alias, no deprecation window -- and exits 64 (Click's own "no
+        such option"), never silently resolving to anything."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old_p = tmp_path / "old.json"
+        new_p = tmp_path / "new.json"
+        self._write_snapshot(old_p, "GLIBC_2.34")
+        self._write_snapshot(new_p, "GLIBC_2.34")
+        env_p = tmp_path / "env.yaml"
+        env_p.write_text('runtime_floors:\n  GLIBC: "2.27"\n', encoding="utf-8")
+        result = CliRunner().invoke(
+            main,
+            ["compare", str(old_p), str(new_p), "--env-matrix", str(env_p)],
+        )
+        assert result.exit_code == 64
+        assert "no such option" in result.output.lower()
 
 
 class TestEnvironmentMatrixRuntimeFloors:
@@ -1022,10 +1050,11 @@ class TestEnvironmentMatrixRuntimeFloors:
         result = compare(old, new, env_matrix=matrix)
         assert ChangeKind.WHEEL_TAG_ARCHITECTURE_MISMATCH in _kinds(result.changes)
 
-    def test_env_matrix_rejected_for_release_set_inputs(self, tmp_path) -> None:
-        # Directory/package comparisons fan out through the release path,
-        # which does not thread the runtime-floor contract; the flag must be
-        # rejected loudly, not silently ignored (Codex review #510, round 3).
+    def test_env_matrix_flag_gone_for_release_set_inputs(self, tmp_path) -> None:
+        # ADR-068 D5: --env-matrix no longer exists as a CLI flag at all
+        # (Click's own "no such option", exit 64) -- it is no longer
+        # rejected as an unsupported-for-release-inputs flag, since there
+        # is nothing left on the CLI to reject.
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -1038,8 +1067,60 @@ class TestEnvironmentMatrixRuntimeFloors:
             "compare", str(tmp_path / "old"), str(tmp_path / "new"),
             "--env-matrix", str(matrix),
         ])
-        assert result.exit_code != 0
-        assert "--env-matrix is not supported for directory/package" in result.output
+        assert result.exit_code == 64
+        assert "no such option" in result.output.lower()
+
+    def test_deployment_config_applies_across_release_fan_out(self, tmp_path) -> None:
+        """ADR-020b / ADR-068 D5: unlike the old `--env-matrix FILE` flag
+        (rejected outright for a directory/package compare), the config-only
+        `deployment:` key is a project-wide property and applies to every
+        library in the release fan-out -- the same way `gate.
+        fail_on_removed_library`/`release.*` already do. A declared floor
+        below a library's own new requirement turns the same
+        `runtime_floor_raised` finding this class already exercises for a
+        single pair into a `BREAKING` verdict (exit 4) for the whole
+        release, not a RISK one (exit 0)."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+        from abicheck.serialization import snapshot_to_json
+
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        old_elf = _elf(
+            needed=["libc.so.6"], versions_required={"libc.so.6": ["GLIBC_2.28"]}
+        )
+        new_elf = _elf(
+            needed=["libc.so.6"],
+            versions_required={"libc.so.6": ["GLIBC_2.28", "GLIBC_2.34"]},
+        )
+        (old_dir / "libfoo.json").write_text(
+            snapshot_to_json(_snap(old_elf)), encoding="utf-8"
+        )
+        (new_dir / "libfoo.json").write_text(
+            snapshot_to_json(_snap(new_elf)), encoding="utf-8"
+        )
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            'deployment:\n  runtime_floors:\n    GLIBC: "2.28"\n', encoding="utf-8"
+        )
+
+        # Baseline: no declared floor -- the default RISK verdict, exit 0.
+        result_default = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir)]
+        )
+        assert result_default.exit_code == 0, result_default.output
+
+        # With the project-wide `deployment:` floor declared, the same
+        # library's new requirement exceeds it -- BREAKING, exit 4.
+        result_declared = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+        )
+        assert result_declared.exit_code == 4, result_declared.output
 
 
 class TestLoadEnvMatrix:
@@ -1084,18 +1165,34 @@ class TestLoadEnvMatrix:
         with pytest.raises(ValidationError, match="Cannot read environment matrix"):
             load_env_matrix(tmp_path / "nope.yaml")
 
-    def test_compare_request_validates_path_exists(self, tmp_path) -> None:
+    def test_compare_request_carries_a_resolved_matrix_not_a_path(
+        self, tmp_path
+    ) -> None:
+        """ADR-020b / ADR-068 D5: `CompareRequest` no longer has an
+        `env_matrix_path` field to validate the existence of at all -- the
+        former `--env-matrix FILE` request-API field was demoted to
+        `.abicheck.yml`'s `deployment:` config key, and `CompareRequest.
+        env_matrix` now carries an already-*resolved* `EnvironmentMatrix`
+        (a genuine per-comparison classification input, unlike a fully
+        config-only key such as `bundle_system_providers`), not a path a
+        caller could typo. Round-trips through `validate()` cleanly since
+        there is no file to be missing any more."""
         from abicheck.api_types import CompareRequest, InputSpec
+        from abicheck.environment_matrix import EnvironmentMatrix
+
+        assert not hasattr(CompareRequest(
+            old=InputSpec(path=tmp_path / "old.so"),
+            new=InputSpec(path=tmp_path / "new.so"),
+        ), "env_matrix_path")
 
         req = CompareRequest(
             old=InputSpec(path=tmp_path / "old.so"),
             new=InputSpec(path=tmp_path / "new.so"),
-            env_matrix_path=tmp_path / "missing.yaml",
+            env_matrix=EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"}),
         )
-        assert any(
-            "environment matrix file not found" in e
-            for e in req.validation_errors()
-        )
+        assert req.env_matrix is not None
+        assert req.env_matrix.runtime_floors == {"GLIBC": "2.28"}
+        assert req.validation_errors() == []
 
 
 # ── DT_RELR drift ────────────────────────────────────────────────────────────

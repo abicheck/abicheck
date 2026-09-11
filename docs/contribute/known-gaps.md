@@ -7279,7 +7279,7 @@ therefore either wired or declared, never silent.
 The table's reasons fall in three families, so the error message tells the
 user which applies: the option *describes a comparison* this run never
 performs (`--used-by`, `--used-by-manifest`, `--required-symbol`,
-`--use-cases`, `--post-manifest`, `--env-matrix`, `--diagnostic-comparison`,
+`--use-cases`, `--post-manifest`, `--diagnostic-comparison`,
 `--old-variant`/`--new-variant`, `--bundle-facts-*`, `--since`/
 `--changed-path`); it is for the *directory/package fan-out*
 `--no-baseline` does not accept (`--select`, `--select-required`,

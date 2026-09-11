@@ -423,22 +423,6 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "verdict, gate or exit code."
     ),
     # ── Deferred: ruled demotable/removable, each with a named blocker ───
-    "--env-matrix": _deferred(
-        "ADR-020b runtime_floors: a project's declared deployment targets "
-        "are a stable property and §4.1 rules this CONFIG (`deployment:`). "
-        "It is also a real `scan` option today, and action/run.sh routes a "
-        "`mode: scan` request onto `compare` unless a predicate says it "
-        "must stay on the legacy CLI -- verified again for this audit: "
-        "--env-matrix is *not* in `_extra_args_has_scan_only_flag`, so "
-        "removing it from compare alone would silently break that "
-        "translation, and widening the predicate is a change to scan's own "
-        "routing. `scan` itself is now gone (ADR-068 Phase 6), which "
-        "resolves the routing hazard this blocker named -- but the CONFIG "
-        "demotion (a new `deployment:` config key + resolver wiring, no "
-        "config key exists today) is real, unimplemented feature work, "
-        "not landed in the Phase 6 PR itself; tracked as a followup.",
-        blocker="A `deployment:` config key + resolver -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
-    ),
     "--require-complete-analysis": _deferred(
         "P0.4's orthogonal assurance floor. §4.1 rules it CONFIG "
         "(`assurance.require_complete`) as a project's CI strictness. Same "

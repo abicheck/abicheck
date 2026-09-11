@@ -718,16 +718,16 @@ class DiffResult(ReportSideFacts):
     # Same shape as ``pattern_verdicts_enabled`` above.
     surface_metrics_enabled: bool = field(default=False, kw_only=True)
     # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence): a
-    # canonical content digest of the resolved ``--env-matrix`` (ADR-020b
-    # declared deployment constraints) this comparison ran with, when one
-    # was given. ``_env_matrix_contract_changes`` can reclassify a
-    # version-requirement finding against ``env_matrix.runtime_floors``
-    # (e.g. a GLIBC floor turning a RISK into BREAKING) and add deployment
-    # findings, so two runs against identical snapshots but different
-    # runtime-floor files must not collide on the digest. ``None`` when no
-    # ``--env-matrix`` was given at all -- distinct from one resolving to
-    # every constraint left unspecified, the same "selected vs. absent"
-    # distinction ``explicit_scope_source_sha256`` already draws.
+    # canonical content digest of the resolved deployment matrix (ADR-020b
+    # declared deployment constraints -- `.abicheck.yml`'s `deployment:`
+    # config key, ADR-068 D5, former `--env-matrix FILE`) this comparison
+    # ran with. ``_env_matrix_contract_changes`` can reclassify a version-
+    # requirement finding against ``env_matrix.runtime_floors``, so two runs
+    # against a differently-configured ``deployment:`` block must not
+    # collide on the digest. ``None`` when none was declared -- distinct
+    # from one resolving to every constraint unspecified, the same
+    # "selected vs. absent" distinction ``explicit_scope_source_sha256``
+    # already draws.
     env_matrix_source_sha256: str | None = field(default=None, kw_only=True)
     # CLI cleanup phase two, PR B (Codex review, PR #803, fresh evidence):
     # whether ``compare(..., reconcile_build_context=...)``

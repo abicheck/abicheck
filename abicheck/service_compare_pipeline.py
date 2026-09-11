@@ -77,6 +77,7 @@ from .workflows.request_inputs import InputSpec, required_path
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .environment_matrix import EnvironmentMatrix
     from .model import AbiSnapshot
     from .service_compare_evidence import SideEvidence
     from .workflows.artifact.execute import SideResolution
@@ -600,7 +601,9 @@ def classify_compare_pair(
         # front-end parity with the CLI, where the two flags are gone too.
         pattern_verdicts=request.pattern_verdicts,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
-        env_matrix=service.load_env_matrix(request.env_matrix_path),
+        # ADR-020b / ADR-068 D5: the already-resolved `EnvironmentMatrix`
+        # (former `--env-matrix FILE`, now `.abicheck.yml`'s `deployment:`).
+        env_matrix=request.env_matrix,
         diagnostic_comparison=request.diagnostic_comparison,
         contract_evaluation=request.contract_evaluation,
         contract_mode=request.contract_mode,
@@ -797,6 +800,7 @@ def run_compare(
     public_header_dirs: list[Path] | None = None,
     collapse_versioned_symbols: bool = False,
     project_policy_overrides: dict[Any, Any] | None = None,
+    env_matrix: EnvironmentMatrix | None = None,
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -851,6 +855,12 @@ def run_compare(
     this shim rather than ``cli_resolve._resolve_compare_snapshots``
     (which already threads this config key for a single-pair compare).
     ``None`` is a no-op, matching every pre-existing caller.
+
+    ``env_matrix`` (ADR-020b / ADR-068 D5): the already-resolved declared
+    deployment matrix (`.abicheck.yml`'s `deployment:`, former
+    `--env-matrix FILE`), forwarded onto `CompareRequest`'s identically-
+    named field so a release fan-out member gets the same declared-floor
+    reclassification a single-pair compare would. `None` is a no-op.
 
     ``collapse_versioned_symbols`` (Codex review, fresh evidence): forwards
     onto ``CompareRequest``'s identically-named field -- closes the release
@@ -927,5 +937,6 @@ def run_compare(
         depth=depth,
         severity_preset=severity_preset,
         collapse_versioned_symbols=collapse_versioned_symbols,
+        env_matrix=env_matrix,
     )
     return run_compare_request(request)

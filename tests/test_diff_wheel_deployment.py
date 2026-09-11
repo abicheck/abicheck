@@ -226,10 +226,13 @@ class TestMacosDeploymentTargetFloorUnit:
 
 
 class TestMacosDeploymentTargetFloorCliEndToEnd:
-    """The check reaches exit code / JSON through the real ``compare`` CLI
-    via ``--env-matrix``'s existing ``runtime_floors`` mechanism (no
-    dedicated flag — same declared-constraint contract G10/G27's GLIBC
-    checks already use)."""
+    """The check reaches a verdict via ``EnvironmentMatrix.runtime_floors``
+    (ADR-020b; now declared through ``.abicheck.yml``'s ``deployment:``
+    config key rather than the former ``compare --env-matrix FILE`` flag —
+    same declared-constraint contract G10/G27's GLIBC checks already use).
+    These tests drive ``checker.compare`` directly; see
+    ``test_environment_drift.py::TestPlatformBaselineFloorCliEndToEnd`` for
+    the real CLI-level ``deployment:`` coverage."""
 
     def test_raised_floor_surfaces_as_risk(self) -> None:
         old = _snap(_macho(min_os_version="12.3"))
@@ -245,7 +248,8 @@ class TestMacosDeploymentTargetFloorCliEndToEnd:
         assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
 
     def test_raised_floor_reaches_compare_via_from_dict(self) -> None:
-        # End-to-end through the documented --env-matrix/from_dict path,
+        # End-to-end through the documented EnvironmentMatrix.from_dict path
+        # (what BuildConfig.deployment now parses `deployment:` through),
         # not just the direct-constructor path the test above uses — the
         # same reachability gap WHEEL_ARCH previously had (Codex review
         # #583) before EnvironmentMatrix._parse_runtime_floors was fixed to
