@@ -425,9 +425,9 @@ LLVM 22.1.8 crashes with the identical stack (`deriveRootsFromIncludes` under
 `FactsAction::CreateASTConsumer`, SIGSEGV/exit 139) the moment it is loaded
 into real `icpx` on even a trivial smoke-test translation unit. The
 `abicheck-cc` wrapper path (`abicheck-cc icpx` → `abicheck dump --build-info`
-→ `abicheck compare --build-info --depth source`, formerly `abicheck scan
---build-info --depth source` before ADR-068 Phase 6 retired `scan`)
-completes end-to-end against
+→ `abicheck compare --no-baseline --build-info --depth source`, formerly
+`abicheck scan --build-info --depth source` before ADR-068 Phase 6 retired
+`scan`) completes end-to-end against
 the same real `icpx`, with L4 source-ABI replay matching 2/2 symbols and a
 present L5 source graph. This pass also fixed two things this
 re-verification surfaced directly in `collect-facts`'s own guardrail code

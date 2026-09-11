@@ -510,8 +510,8 @@ use_cases:
       `abicheck compare --abi3` audit (diff_python.audit_stable_abi_imports; the
       user supplies the target floor, which a bare .abi3.so does not carry),
       which audits a single module and surfaces a violation the export-table view
-      would call COMPATIBLE (advisory, or gated via
-      --crosscheck python_stable_abi_violation=error).
+      would call COMPATIBLE (advisory, or gated by moving the run onto the
+      severity scheme, e.g. --severity-preset strict).
 
   - id: UC-WF-audit
     axis: workflow
@@ -953,20 +953,32 @@ use_cases:
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow
     name: Single-release ABI-hygiene audit (no baseline compare)
-    status: by_design_excluded
+    status: complete
     gap: G19
     plan: docs/contribute/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/workflows/no_baseline_compare.py
+        - abicheck/policy/no_baseline_findings.py
+      tests:
+        - tests/test_no_baseline_compare.py
+        - tests/test_no_baseline_d3_properties.py
     note: >
       ADR-068 Phase 6 retired `scan --audit` (the D2 pattern facts + D4
       cross-checks hygiene catalog, run intra-version with no baseline)
       outright, along with `cli_scan.py`. `compare --no-baseline` is the
       surviving single-operand audit-only invocation shape (ADR-068's own
-      stated replacement for `scan`'s no-`--against` mode), but it does not
-      wire in `buildsource/cross_source_checks.py`'s intra-version hygiene
-      checks the way `scan --audit` did -- there is no live equivalent of
-      this use case today. `UC-CHANGE-crosscheck-hygiene` above still tracks
-      the underlying cross-source engine itself, which survives; only the
-      no-baseline single-release audit driver around it is gone.
+      stated replacement for `scan`'s no-`--against` mode): it self-compares
+      the candidate against itself through `checker.compare()` unmodified,
+      which runs `buildsource/cross_source_checks.py`'s intra-version
+      hygiene checks and the pattern/preprocessor pre-scan by default
+      (`cross_source_checks=True`, `pattern_preprocessor_scan=True`) --
+      exactly the D2/D4 catalog `scan --audit` used to drive. The identity
+      comparison guarantees an empty comparison-finding set by construction,
+      so `policy/no_baseline_findings.py` partitions and reports only the
+      candidate-side findings those checks produce. `UC-CHANGE-crosscheck-hygiene`
+      above tracks the underlying cross-source engine itself; this entry is
+      the no-baseline single-release audit driver around it, and it is live.
 
   - id: UC-WORKFLOW-evidence-directed-scope
     axis: workflow
