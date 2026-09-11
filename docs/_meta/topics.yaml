@@ -73,9 +73,6 @@ topics:
       - abicheck/change_registry.py
       - abicheck/checker_policy.py
       - abicheck/severity.py
-      - abicheck/cli_scan.py
-      - abicheck/cli_scan_baseline.py
-      - abicheck/scan_engine.py
       - abicheck/exit_decision.py
     reference_page: reference/exit-codes.md
     task_pages:
@@ -210,7 +207,6 @@ topics:
     canonical_page: use/cli-usage.md
     fact_sources:
       - abicheck/cli.py
-      - abicheck/cli_scan.py
       - abicheck/frontends/cli/options/secondary_output.py
       - abicheck/cli_options.py
       - abicheck/frontends/cli/help.py
@@ -226,7 +222,6 @@ topics:
       - abicheck/api_types.py
       - abicheck/service_dump_pipeline.py
       - abicheck/service_compare_pipeline.py
-      - abicheck/service_scan.py
     reference_page: reference/python-api-reference.md
 
   config-keys:
@@ -391,9 +386,6 @@ topics:
       - abicheck/sarif.py
       - abicheck/junit_report.py
       - abicheck/schemas/__init__.py
-      - abicheck/cli_scan.py
-      - abicheck/cli_scan_baseline.py
-      - abicheck/scan_engine.py
       - abicheck/frontends/cli/options/secondary_output.py
       - abicheck/finding_identity.py
       - abicheck/cli_compare_fold.py
@@ -696,10 +688,7 @@ topics:
       - abicheck/buildsource/l2_seed.py
       - abicheck/buildsource/adapters/bazel.py
       - abicheck/buildsource/build_evidence.py
-      - abicheck/cli_scan.py
       - abicheck/cli_dump_helpers.py
-      - abicheck/scan_engine.py
-      - abicheck/service_scan.py
       - action.yml
       - action/run.sh
       - action/validate-inputs.sh

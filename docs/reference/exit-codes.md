@@ -14,7 +14,7 @@ generated: false
 
 `abicheck` uses different exit codes for each command family.
 
-**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `scan` and `deps` have their own narrower contracts, documented below.
+**Why they differ:** `compare` is the native interface — `0/2/4` by verdict (or `0/1/2/4` severity-aware), with invalid invocations exiting `64` so a usage error is never mistaken for an ABI verdict. `compat` mirrors `abi-compliance-checker` exit codes (0/1/2) so existing ABICC CI scripts work without changes. `deps` has its own narrower contract, documented below.
 
 ## Contract relevance decides what the gate sees (ADR-049)
 
@@ -44,7 +44,7 @@ finding is scored exactly as before and every exit code below is unchanged.
 
 ## Contract-coverage contribution (ADR-049)
 
-`compare` and `scan --against` carry an **orthogonal contract-coverage axis**
+`compare` carries an **orthogonal contract-coverage axis**
 under `--contract`. Complete coverage of the mode-selected evidence
 domain contributes `0`; missing, partial, stale, failed, contradictory, or
 identity-incomplete **required domain evidence** is recorded as a
@@ -58,8 +58,7 @@ normally even while the ledger records incomplete evidence elsewhere.
 The axis is folded with `max`, so it raises a clean `0` to `1` and **never
 lowers** a gate's `2`/`4` — missing coverage cannot demote a real ABI break to
 "warnings only". It never rewrites a finding's compatibility decision or its
-gate contribution either; it is a floor on the exit status alone. Both
-commands fold it identically.
+gate contribution either; it is a floor on the exit status alone.
 
 A directory/package `compare` (the per-library release fan-out) applies the
 same flag per library, then `max`s every library's own contribution into the
@@ -96,18 +95,18 @@ behavior is as documented below.
 
 ## Analysis-assurance contribution (P0.4)
 
-`compare`, and `scan --against`, always compute and report
+`compare` always computes and reports
 `analysis_assurance` — a third, orthogonal axis alongside the compatibility
 verdict and the policy/severity gate, answering "how complete and
 trustworthy was the evidence behind this comparison" independently of
 whatever the verdict says. Its `status` field is one of `complete`,
 `partial`, `failed`, `not_comparable`, or `not_requested`, and it is always
-present in `--format json` output (`analysis_assurance` — a top-level key on
-`compare`'s report, nested under `diff` on `scan`'s), regardless of any flag.
+present in `--format json` output (`analysis_assurance`, a top-level key on
+`compare`'s report), regardless of any flag.
 
 By itself this changes **nothing** about any exit code — `analysis_assurance`
 is purely informational until a caller opts in. Passing
-`--require-complete-analysis` makes `compare`/`scan --against` additionally contribute exit `1`
+`--require-complete-analysis` makes `compare` additionally contribute exit `1`
 whenever `analysis_assurance.status` is not `complete`, folded with the same
 `max` discipline the contract-coverage axis above uses: it raises a clean `0`
 to `1` and **never lowers** a `2`/`4`/`5`/`6` — incomplete assurance cannot
@@ -116,9 +115,7 @@ compatibility verdict, any finding, or the severity gate's own contribution.
 
 `--require-complete-analysis` is single-pair only. A directory/package
 (release) `compare` rejects it (P0.6, run-plan-aware aggregation, is the
-tracked follow-up for extending this axis to the release fan-out); `scan
---against` rejects it without `--against`, alongside every other
-baseline-only flag — there is no comparison for it to gate on otherwise.
+tracked follow-up for extending this axis to the release fan-out).
 
 **Without `--require-complete-analysis` every pre-existing invocation's exit
 code is unchanged**, exactly as `--contract`'s own coverage axis
@@ -126,7 +123,7 @@ requires no opt-in flag change either.
 
 The composite GitHub Action folds this the same way it folds the
 contract-coverage axis: an assurance-gated exit `1` (via the dedicated
-`require-complete-analysis` input, on either command) maps to a dedicated
+`require-complete-analysis` input) maps to a dedicated
 `ANALYSIS_INCOMPLETE` verdict — never the compatibility verdict, and
 unconditional (no `fail-on-*` input disables it).
 
@@ -140,11 +137,7 @@ and later additive fields, e.g. `annotations` at 2.43) stating the
 already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
 `severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
-`analysis_assurance_exit_contribution` themselves. `scan --against
---format json` carries the identical object too (scan schema 1.18), nested
-at `diff.exit` rather than the report's top level — matching where its own
-constituent contribution fields already live, since `scan` and `compare`
-keep their own report shapes:
+`analysis_assurance_exit_contribution` themselves:
 
 ```json
 "exit": {
@@ -163,14 +156,11 @@ names every axis whose own contribution equals `code` (a lower,
 non-winning contribution is excluded, since it did not determine the
 result); `["clean"]` when `code` is `0`.
 
-`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a native
-`compare` report — it has no meaning outside `scan --against`'s own
-maintainer-promoted `--crosscheck KEY=error` finding
-(`scan_engine._promote_published_gate`), which reconstructs the whole
-`diff.exit` block through the same resolver whenever the crosscheck
-contributes anything positive, so `reasons` can carry `promoted_crosscheck`
-even when the crosscheck only *ties* — rather than exceeds — the baseline
-comparison's own exit code.
+`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a
+`compare` report: it was the slot for the removed `scan` command's
+maintainer-promoted `--crosscheck KEY=error` finding, and no `compare` axis
+produces one. The field is retained so the object's shape stays stable for
+readers written against schema 2.42.
 
 Under `--used-by`/`--required-symbol(s)` scoping, `compatibility_contribution`
 and `reasons` describe the **scoped** application/plugin-host gate (the one
@@ -181,8 +171,8 @@ informational full-library verdict/severity gate `full_verdict`/
 
 This field is additive and does not itself change any exit code — it is a
 persisted view of a resolution every axis above already performs. It does
-not yet cover `not_comparable`, `scan --against`'s own budget-overflow
-floor, or a release's removed-required-library policy, each raised through
+not yet cover `not_comparable` or a release's removed-required-library
+policy, each raised through
 a different code path today; see `abicheck/exit_decision.py`'s own module
 docstring for that scope boundary.
 
@@ -326,100 +316,9 @@ scheme-independent CI behaviour.
 
 ---
 
-## `abicheck scan`
-
-The one-shot source-intelligence scan has its own contract (it may compare
-`ARTIFACT` against `--against` and adds a budget guard). `--against` is the
-only thing that selects the mode: omit it and `scan` runs a one-build
-audit/hygiene/source-consistency scan only; pass it and `scan` also compares
-`ARTIFACT` against it — there is no separate `--audit` flag:
-
-| Exit code | Meaning |
-|-----------|---------|
-| `0` | Compatible (or advisory-only findings) |
-| `2` | Source-level / API break (incl. `API_BREAK` cross-source findings) |
-| `4` | ABI break (from the `--against` comparison) |
-| `5` | `--budget` overflow — the time guard tripped (scope is never silently shrunk) |
-| `6` | `NOT_COMPARABLE` (ADR-050 D2) — `ARTIFACT` and `--against` were not extracted under a comparable profile/scope contract, so the comparison never ran (`diff.reason` in `--format json`). Distinct from `compat check`'s `9` and native `compare`'s `16` — every command maintains an independent exit-code scheme. |
-| `7` | Evidence-contract error (ADR-037 D5) — a pinned `--depth`/`--source-method` whose required source evidence was never collected, or `--abi3` targeting a binary that isn't a recognisable CPython extension module. No comparison ever ran (`verdict: "EVIDENCE_CONTRACT_ERROR"` in `--format json`); this process's own dedicated exit code (`cli_scan.py`'s `_EXIT_EVIDENCE_CONTRACT_ERROR`), unambiguous regardless of format or whether a JSON report was written. |
-| `64` | Invalid invocation (bad arguments/options) |
-
-> Exit `5` is unique to `scan`: `--budget 15m` **fails** the run rather than
-> quietly dropping evidence. Use `--dry-run` to preview the audit checks and
-> (if `--against` is given) the comparison that would run, plus the projected
-> per-layer cost, without scanning — like every command's `--dry-run` it only
-> ever exits `0`/`1`/`64`, never a verdict code; see
-> [`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
-
-### `scan --against` and severity (mirrors `compare`)
-
-`scan --against` accepts the same severity surface as `compare` —
-`--severity-preset`, the hidden per-category `--severity-*` overrides, and
-`--exit-code-scheme` (plus `.abicheck.yml`'s `severity:`/`exit_code_scheme`
-keys) — and, like `compare`, uses them to compute the `0`/`2`/`4` portion of
-the exit code above from `severity.compute_exit_code` instead of the raw
-verdict when the resolved scheme is `severity`. A `BREAKING` verdict under
-`--severity-preset info-only` can therefore exit `0`, exactly as it can with
-`compare`.
-
-Under the `severity` scheme the JSON report's `diff` block also carries a
-`severity` gate object — the same `config`/`categories`/`exit_code`/
-`blocking`/`blocking_categories` shape `compare`'s own report uses (one
-shared builder, so the two are comparable field by field), added in
-`scan_schema_version` 1.9. It is what makes a non-zero exit on an otherwise
-*compatible* diff self-explanatory: `severity.addition: error` on an
-additions-only diff exits `1`, and `blocking_categories: ["addition"]` names
-the cause, distinguishing it from the orthogonal contract-coverage `1`
-above. The default **text** output states the same fact in its
-`Baseline comparison` block:
-
-```
-Baseline comparison
-  breaking=0 api_break=0 risk=0 compatible=1
-  severity gate: exit 1 — blocking: addition
-
-Verdict: COMPATIBLE
-```
-
-Both are absent under the default legacy scheme, which runs no severity
-gate.
-
-The block is the scan's **compatibility gate**, not the baseline diff's
-alone: a cross-check the maintainer promoted with `--crosscheck KEY=error`
-raises it too, adding a `promoted_crosscheck` entry to `blocking_categories`
-(deliberately outside the four severity categories, since no severity level
-produced it). The promotion is a floor — it can add a blocking reason but
-never clear one a severity category already raised.
-
-`aggregate` reads that `diff.severity` block as the target's compatibility
-gate when it is present, exactly as it reads a `compare` report's own
-`severity` block (and with the same fail-closed validation). This is what
-keeps the orthogonal axes separable for a scan target: a legacy-scheme scan
-has no native exit `1`, so a raw `1` can only be the contract-coverage
-and/or analysis-assurance contribution (both orthogonal, both readable from
-their own report fields regardless of scheme) — but a severity-scheme scan
-*also* has a native `1` (an error-level addition), and folding all of these
-to `1` would otherwise be indistinguishable. See
-[`abicheck aggregate`](#abicheck-aggregate).
-
-`scan --dry-run` previews whichever scheme the invocation resolves —
-the scheme label, the per-category severity levels, and that scheme's exit
-codes — so the preview matches the run it is predicting.
-
-A gate pack (`--pack`) folds a `gate.*` assignment into a scan's severity
-the same way it does for `compare`, and cannot override a value that was
-actually stated — by an explicit `--severity-*`/`--exit-code-scheme` flag,
-or by `.abicheck.yml`. Every flag in this family is a comparison-only flag (rejected as a
-usage error without `--against`, exit `64`) — see the table above. The
-budget (`5`), `NOT_COMPARABLE` (`6`), and evidence-contract-error exit codes
-are unaffected: they are returned before the baseline comparison — and
-therefore before any severity computation — ever runs.
-
----
-
 ## `abicheck aggregate`
 
-The multi-target fan-in gate folds the per-target `compare`/`scan` JSON reports
+The multi-target fan-in gate folds the per-target `compare` JSON reports
 a CI build matrix produces (one `abi-report-<target>.json` per leg) into one
 gate decision. Four axes stay **orthogonal** (ADR-042, extended by ADR-049
 Phase 7), and the exit code is the worst contribution across them:
@@ -428,11 +327,7 @@ Phase 7), and the exit code is the worst contribution across them:
   (`severity.{exit_code,blocking,blocking_categories}`); `aggregate` *combines*
   those, it never recomputes a gate from the compatibility verdict. So a
   `COMPATIBLE` report with an `addition=error` policy still contributes exit
-  `1`, and a `BREAKING` report under a demoted preset can contribute `0`. A
-  `scan` report is read via its own nested `diff.severity` gate block when it
-  has one (a severity-scheme `scan --against`, schema 1.9+ — read through the
-  identical validator a `compare` block goes through), and otherwise via its
-  top-level `exit_code` (keyed on `scan_schema_version`).
+  `1`, and a `BREAKING` report under a demoted preset can contribute `0`.
   Reports produced without any gate block fall back to
   the legacy verdict→exit mapping (`0`/`2`/`4`). Reading is **fail-closed**: a
   report whose gate block is *present but corrupt* (an out-of-range or
@@ -461,7 +356,7 @@ Phase 7), and the exit code is the worst contribution across them:
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Every required target analyzed, no blocking findings |
-| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here (e.g. a `scan` report's budget-overflow exit `5`) — these axes are independent and any one of them alone is enough to produce `1` |
+| `1` | A required target was unavailable while the effective `missing_required` policy was `fail` (the default; `warn` downgrades this to advisory and contributes nothing here); an analyzed target's gate blocks on an `addition`/`quality` finding only; a target's own contract-coverage evidence was incomplete under `--contract`; **or** a non-verdict per-report failure folds here — these axes are independent and any one of them alone is enough to produce `1` |
 | `2` | An analyzed target's gate is a source-level / API break |
 | `4` | An analyzed target's gate is an ABI break |
 | `64` | Invalid invocation (bad arguments/options, malformed manifest, duplicate target id, or no expected-target set given) |
@@ -577,7 +472,7 @@ because the application would fail to load.
 
 `--dry-run` shows the resolved binary path and search order without
 resolving the dependency tree — see
-[`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
+[`--dry-run`](#-dry-run-dump-compare-deps-tree-deps-compare) below.
 
 ---
 
@@ -596,7 +491,7 @@ renamed from the old `--baseline`/`--candidate`).
 
 `--dry-run` shows the old/new roots, resolved binary paths, and search order
 without running per-library ABI diffs — see
-[`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) below.
+[`--dry-run`](#-dry-run-dump-compare-deps-tree-deps-compare) below.
 
 ### CI gate patterns
 
@@ -654,12 +549,12 @@ In `abicheck compat`, non-verdict failures are further classified where possible
 
 ---
 
-## `--dry-run` (`dump`, `compare`, `scan`, `deps tree`, `deps compare`)
+## `--dry-run` (`dump`, `compare`, `deps tree`, `deps compare`)
 
-Every one of these five commands accepts `--dry-run`: it resolves and
+Every one of these four commands accepts `--dry-run`: it resolves and
 validates the invocation — classifies inputs, discovers config, and (per
-command) shows which data layers (L0–L5) are available, the audit checks and
-comparison that would run, or the resolved binary path/search order — and
+command) shows which data layers (L0–L5) are available, the comparison that
+would run, or the resolved binary path/search order — and
 prints a report **without** doing the real work. It is cheap and read-only:
 no compiler invocation, no build-system query, no network access, and it
 writes nothing — passing `-o`/`--output` together with `--dry-run` is a
@@ -679,28 +574,19 @@ one of those.
 
 ## Summary table
 
-| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `scan` exit | `deps tree` exit | `deps compare` exit | `compat` exit |
-|-----------------|------------------------|--------------------------|-------------|-------------------|----------------------|---------------|
-| `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` | `0` |
-| `COMPATIBLE` | `0` | `0` | `0`‡ | — | — | `0` |
-| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | `0` / `0`–`2`*‡ | — | — | `0` |
-| Additions only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
-| Quality issues only | `0` | `0`–`1`* | `0` / `0`–`1`*‡ | — | — | n/a |
-| `WARN` (ABI risk) | — | — | — | — | `1` | — |
-| `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — | `2` |
-| `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` | `1` |
-| `--budget` overflow | — | — | `5` | — | — | — |
-| Missing dependencies/symbols | — | — | — | `1` | — | — |
-| Load failure | — | — | — | — | `4` | — |
-| Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
-
-In the `scan` column, the value left of the `/` is the legacy (verdict-based)
-mapping — the default — and the value right of it applies once `scan
---against` resolves the `severity` scheme (any `--severity-preset`/
-`--severity-*`/`--exit-code-scheme severity`, or a config `severity:` block),
-where it follows the same `compare` exit (severity) column; see
-["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare)
-above.
+| Verdict / State | `compare` exit (legacy) | `compare` exit (severity) | `deps tree` exit | `deps compare` exit | `compat` exit |
+|-----------------|------------------------|--------------------------|-------------------|----------------------|---------------|
+| `NO_CHANGE` / `PASS` / compatible | `0` | `0` | `0` | `0` | `0` |
+| `COMPATIBLE` | `0` | `0` | — | — | `0` |
+| `COMPATIBLE_WITH_RISK` | `0` | `0`–`2`* | — | — | `0` |
+| Additions only | `0` | `0`–`1`* | — | — | n/a |
+| Quality issues only | `0` | `0`–`1`* | — | — | n/a |
+| `WARN` (ABI risk) | — | — | — | `1` | — |
+| `API_BREAK` | `2` | `0`–`2`* | — | — | `2` |
+| `BREAKING` / `FAIL` | `4` | `0`–`4`* | — | `4` | `1` |
+| Missing dependencies/symbols | — | — | `1` | — | — |
+| Load failure | — | — | — | `4` | — |
+| Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `3/4/5/6/7/8/10/11` |
 
 App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
 the `compare` columns above — see
@@ -708,9 +594,9 @@ the `compare` columns above — see
 `aggregate` combines each report's own severity gate (`0`/`1`/`2`/`4`) over its
 analyzed targets and adds a coverage gate (a required gap exits `1`, never `4`) —
 see [`abicheck aggregate`](#abicheck-aggregate).
-`--dry-run` (on `dump`/`compare`/`scan`/`deps tree`/`deps compare`) reuses
+`--dry-run` (on `dump`/`compare`/`deps tree`/`deps compare`) reuses
 none of these rows — it always exits `0`/`1`/`64`; see
-[`--dry-run`](#-dry-run-dump-compare-scan-deps-tree-deps-compare) above.
+[`--dry-run`](#-dry-run-dump-compare-deps-tree-deps-compare) above.
 
 \* Severity exit codes depend on the configuration, and the range covers the
 whole configuration space — **including demotion of a real break**. With
@@ -727,17 +613,6 @@ or an unreadable/unrecognised input — deliberately outside the verdict/result
 space so a usage error is never mistaken for a compatibility result. To
 reliably distinguish verdicts from errors in a script, use `--format json` and
 read the `verdict` field where available.
-
-‡ Two schemes, shown as `legacy / severity`. `scan`'s **legacy** scheme (the
-default) collapses every compatible/advisory-only state (no break,
-deployment risk, additions, quality signals) to exit `0` — read `--format
-json` if your pipeline needs to distinguish them. Under a resolved
-`severity` scheme (`scan --against` with any `--severity-*`/
-`--exit-code-scheme severity`, or a config `severity:` block) `scan` follows
-the `compare` exit (severity) column on the same `*` terms, in **both**
-directions: `severity.addition: error` exits `1` on an additions-only diff,
-and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
-["`scan --against` and severity"](#scan-against-and-severity-mirrors-compare).
 
 ---
 
