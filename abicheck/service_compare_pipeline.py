@@ -114,7 +114,8 @@ class ResolvedComparePair:
     threaded in separately by ``run_compare_request`` -- so every caller of
     :func:`resolve_compare_request` rejects a bad ``env_matrix_path`` before
     extraction, and :func:`classify_compare_pair` reads an immutable value
-    that travels with this frozen pair.
+    that travels with this frozen pair. Declared last, append-only, since
+    an earlier slot would repoint a positional caller's value (PR #1221).
     """
 
     old: AbiSnapshot
@@ -123,8 +124,8 @@ class ResolvedComparePair:
     new_fmt: str | None
     old_evidence: SideEvidence
     new_evidence: SideEvidence
-    resolved_env_matrix: EnvironmentMatrix | None = None
     resolved_execution_context: ResolvedExecutionContext | None = None
+    resolved_env_matrix: EnvironmentMatrix | None = None
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:

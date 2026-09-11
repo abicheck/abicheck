@@ -173,6 +173,7 @@ Both sides of a comparison, resolved and ready to classify.
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
 | `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
+| `resolved_env_matrix` | `EnvironmentMatrix \| None` | `None` |
 
 ## `classify_compare_pair`
 
@@ -182,8 +183,6 @@ Classify an already-resolved pair — the second half of ``run_compare_request``
 |---|---|---|
 | `request` | `CompareRequest` | *(required)* |
 | `pair` | `ResolvedComparePair` | *(required)* |
-| *(keyword-only below)* | | |
-| `resolved_env_matrix` | `EnvironmentMatrix \| None \| object` | `<object object at 0x7fb51a321e10>` |
 
 **Returns:** `CompareResult`
 
