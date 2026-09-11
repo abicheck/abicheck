@@ -141,11 +141,10 @@ abicheck compare libfoo.so.1.old libfoo.so.1.new --policy glibc_symbol_versioned
 The one-build audit checks the discipline's own hygiene: an export with no
 version node in a library that otherwise versions everything is a symbol
 no consumer can pin
-([case145](../reference/examples/case145_audit_unversioned_export.md)):
-
-```bash
-abicheck scan libfoo.so.1 -H include/
-```
+([case145](../reference/examples/case145_audit_unversioned_export.md)). The
+command that reported it has been removed; `abicheck dump libfoo.so.1
+-H include/` records the version-node evidence the check reads (see
+[Your ABI Surface](abi-surface.md)).
 
 Profile contents and the other ecosystem profiles are owned by
 [Policy Profiles](../use/policies.md#built-in-use-case-profiles).

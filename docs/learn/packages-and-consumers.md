@@ -88,11 +88,10 @@ table says nothing about compatibility. The surface that decides whether
 the module *loads* is the CPython C-API it imports, and the contract on
 that surface is the limited API: a module tagged `abi3` promises to import
 only the stable subset available since a stated Python version. The
-one-build audit checks the promise against the binary:
-
-```bash
-abicheck scan mymod.abi3.so --abi3 3.9
-```
+single-module audit of that promise had its own root command, which has been
+removed; comparing two releases still reports a violation the new build
+introduced — see
+[Python extension modules](../use/python-extensions.md).
 
 Two more surfaces follow. The Python-level API — the functions, classes
 and signatures a caller imports — is not in the binary at all, and a

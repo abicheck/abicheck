@@ -152,10 +152,11 @@ BREAKING, not risk). See
 
 ## Intra-Version Hygiene (audit — no baseline needed)
 
-`abicheck scan libfoo.so` (with no `--against`) lints a *single* build for bad
-ABI hygiene — problems you can see without a previous version. Absence of
-`--against` is already a one-build audit; there is no separate `--audit` flag.
-All 🟡 COMPATIBLE_WITH_RISK.
+These are bad-ABI-hygiene problems you can see in a *single* build, without a
+previous version. The root command that reported them has been removed, so
+there is no CLI that prints them today — `abicheck dump libfoo.so -H include/`
+records the evidence each one is read from (see
+[Your ABI Surface](abi-surface.md)). All 🟡 COMPATIBLE_WITH_RISK.
 
 | Finding | What it flags | Example |
 |---------|---------------|---------|

@@ -101,23 +101,19 @@ Which tier each break needs is defined by
 The one cost cliff in the evidence ladder is at the source tier, and it
 tracks template depth: a single template-heavy translation unit's AST dump
 can reach gigabytes, so a full-target replay of a large tree costs hours
-and memory, while a replay *seeded* by the changed translation units costs
-minutes. The replay caps its worker count by available memory, including a
+and memory. The replay caps its worker count by available memory, including a
 container's cgroup limit, rather than by CPU count alone. Ask before you
 spend:
 
 ```bash
-abicheck scan libfoo.so -H include/ --sources . --depth source \
-  --since origin/main --dry-run
+abicheck dump libfoo.so -H include/ --sources . --depth source --dry-run
 ```
 
-The dry run prints the translation units the seed selects and the
-projected per-layer cost without scanning. In CI, `--budget` fails loudly
-on overflow rather than shrinking scope, so a scan that finished is a scan
-that did what it claims. Numbers, knobs and the reasoning behind the
+The dry run resolves the invocation and reports what it would collect,
+without replaying anything. Numbers, knobs and the reasoning behind the
 memory cap are owned by
 [Performance § L4 source-replay performance](../contribute/performance.md#l4-source-replay-dump-side-performance);
-the moments to run the seeded versus the unseeded scan by
+the moments to pay for a full replay by
 [Where in the Pipeline](where-in-the-pipeline.md).
 
 ## Multi-TU surfaces and comparability
