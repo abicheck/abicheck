@@ -984,20 +984,22 @@ class TestModeScopedInputWarnings:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::warning::" not in result.stdout
 
-    @pytest.mark.parametrize("mode", ["compare", "deps-tree", "deps-compare"])
-    def test_build_target_warns_outside_dump_and_scan(self, mode: str) -> None:
+    @pytest.mark.parametrize(
+        "mode", ["compare", "dump", "scan", "deps-tree", "deps-compare"]
+    )
+    def test_build_target_fails_on_every_mode(self, mode: str) -> None:
+        """`build-target` is retired on every mode now (hard removal, no
+        deprecation window): `scan --build-target` was retired first
+        (ADR-068 (b), `TestScanRetiredInputsFailPreflight` pins its own
+        arm), and `dump --build-target` -- which this input mapped to for
+        `mode: dump` -- was retired next, once that removal resolved the
+        routing hazard that had deferred it. There is no longer a mode
+        where setting it merely warns."""
         result = _run_validate({"INPUT_MODE": mode, "INPUT_BUILD_TARGET": "//:math"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" in result.stdout
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "::error::" in result.stdout
         assert "build-target" in result.stdout
-
-    def test_build_target_silent_on_dump(self) -> None:
-        """`dump` is the only mode that still carries it: `scan
-        --build-target` is retired (ADR-068 (b)) and rejected outright by the
-        scan arm, which `TestScanRetiredInputsFailPreflight` pins."""
-        result = _run_validate({"INPUT_MODE": "dump", "INPUT_BUILD_TARGET": "//:math"})
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "::warning::" not in result.stdout
+        assert "build.targets" in result.stdout
 
     @pytest.mark.parametrize("env_name", ["INPUT_ESTIMATE", "INPUT_AUDIT"])
     def test_deprecated_scan_alias_warns_outside_scan(self, env_name: str) -> None:

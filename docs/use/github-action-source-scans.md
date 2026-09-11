@@ -39,8 +39,9 @@ this list are **retired** rather than translated (ADR-068's second
 2026-09-09 amendment, ruling (b)): `new-library-set` (the multi-library
 audit mode — blocked on ADR-065 S3's component inventories; run one `scan`
 per library meanwhile), `risk-rules` (and with it the risk-driven `auto`
-depth escalation — pin `depth:` explicitly instead) and `build-target` (use
-`mode: dump` to narrow a multi-target workspace). Setting any of them on a
+depth escalation — pin `depth:` explicitly instead) and `build-target`
+(`mode: scan`'s own retirement of it; `mode: dump`'s `build-target` input
+was later retired outright too — see below). Setting any of them on a
 `mode: scan` step is now an explicit `::error::`, not a silent downgrade. A
 `budget` wall-clock guard is different: `compare` itself now has `--budget`,
 and `mode: scan` with a baseline (`against:`) forwards it exactly as

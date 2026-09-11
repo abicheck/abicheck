@@ -111,7 +111,12 @@ class TestBuildQueryFlagsRemoved:
         )
         survivors: list[list[str]] = [
             [],
-            ["--build-target", "//:lib"],
+            # `--build-target` was itself removed after this list was
+            # written (a separate, later retirement -- see
+            # `tests/test_bazel_root_targets.py`'s own
+            # `test_dump_cli_build_target_flag_is_removed`); it is gone from
+            # this list rather than one more exit-64 "survivor", since it no
+            # longer survives at all.
             ["--depth", "build"],
             ["--depth", "source"],
         ]

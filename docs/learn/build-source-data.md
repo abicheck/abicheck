@@ -405,13 +405,16 @@ build:
     - //:math
 ```
 
-`dump --build-target TARGET` (repeatable) is the CLI equivalent (e.g. `dump
---sources <tree> --build-target //:math`) and overrides `build.targets` when
-both are given; several roots are unioned (`--build-target //:math
---build-target //:util`). The resulting scope is reported machine-readably on
-the `L3_build` evidence-coverage row (`requested_roots`/`resolved_roots`/
-`transitive_targets`), so a consumer can confirm the collection actually
-stayed scoped rather than silently falling back to a workspace-wide query.
+`.abicheck.yml`'s `build.targets` is the only way to set this (`dump`'s own
+`--build-target` CLI flag was retired — a hard usage error, exit 64, no
+alias — since a build-system root target is a property of the project's
+layout, not a per-run choice; put it in the config file and pass it with
+`--config` if it isn't auto-discovered from `--sources`). Several roots are
+unioned (`targets: ["//:math", "//:util"]`). The resulting scope is reported
+machine-readably on the `L3_build` evidence-coverage row
+(`requested_roots`/`resolved_roots`/`transitive_targets`), so a consumer can
+confirm the collection actually stayed scoped rather than silently falling
+back to a workspace-wide query.
 
 For setting up build/source evidence collection — the `.abicheck.yml` project-contract block, out-of-band packs, a full worked CMake example, and external CLI extractors — see [Build Evidence Setup](../use/build-evidence-setup.md).
 

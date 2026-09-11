@@ -124,19 +124,17 @@ inputs:
     required: false
   build-target:
     description: >
-      Explicit build-system root target(s) to scope L3 evidence collection
-      to, instead of a workspace-wide query (P0.2; Bazel only so far, e.g.
-      `//:math`). Space-separated, repeatable — each root's transitive
-      dependency closure is unioned. **dump mode only.** `scan
-      --build-target` is retired (ADR-068's second 2026-09-09 amendment,
-      ruling (b)): it narrowed which build target's evidence collection used
-      when a compile database names several, which is a precision knob, not
-      a correctness floor — omitting it never narrowed what was reported
-      below the ordinary all-targets default. A `mode: scan` step that sets
-      it gets an explicit `::error::` rather than a flag the command no
-      longer has; narrow a multi-target workspace with `mode: dump`, or
-      through `.abicheck.yml`'s `build.targets` once `dump`'s own
-      config-cleanup phase implements it. `compare` has no equivalent.
+      RETIRED (hard removal, no deprecation window). `scan --build-target`
+      was retired first (ADR-068's second 2026-09-09 amendment, ruling (b));
+      `dump --build-target`, which this input mapped to, was retired next,
+      once that removal resolved the routing hazard that had deferred it —
+      neither command has this flag any more. Still declared so a workflow
+      that sets it gets an explicit `::error::` naming the replacement
+      instead of a silently-ignored input: put the root target(s) in
+      `.abicheck.yml`'s `build.targets` (Bazel only so far, e.g.
+      `targets: ["//:math"]`) and pass the config with `mode: dump`'s
+      `config:` input, or let it auto-discover from `sources:`. `compare`
+      has no equivalent.
     required: false
 
   # ── Include directories ─────────────────────────────────────────────────────

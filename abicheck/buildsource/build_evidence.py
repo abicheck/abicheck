@@ -460,7 +460,8 @@ def _resolved_object(cu: CompileUnit) -> Path | None:
 class TargetScope:
     """Root-target scoping request/resolution for this build evidence (P0.2).
 
-    A caller (``dump --build-target``, ``.abicheck.yml``'s ``build.targets``)
+    A caller (``.abicheck.yml``'s ``build.targets`` -- the only front-end
+    route since the CLI's own ``dump --build-target`` flag was removed)
     can declare which specific build-system target(s) are the library under
     test instead of always collecting a workspace-wide query -- see
     ``BazelAdapter``/``build_query.run_inferred_build_query``. ``None`` on

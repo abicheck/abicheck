@@ -259,8 +259,9 @@ def resolve_dump_request(request: DumpRequest) -> ResolvedDumpRequest:
             or names a frontend with no extractor for its evidence.
         PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
             finds a requested evidence input no resolved collector/backend
-            combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
-            combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
+            combination can satisfy (ADR-063 Phase 4) — e.g. a
+            ``.abicheck.yml`` ``build.targets`` declaration combined with a
+            pre-captured Bazel ``aquery``/``cquery`` jsonproto.
     """
     from . import service, service_compare_evidence as _sce
     from .header_utils import split_public_header_inputs

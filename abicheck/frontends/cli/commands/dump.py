@@ -218,7 +218,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              provenance: tuple[str, ...],
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None,
-             build_targets: tuple[str, ...] = (),
              depth: str | None = None,
              # --gcc-options removed as a CLI flag (CLI audit PR 5/5); this
              # defaulted-None parameter stays only so the internal composition
@@ -530,7 +529,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         pdb_path=pdb_path, debug_roots=debug_roots,
         debuginfod=debuginfod, debuginfod_url=debuginfod_url,
         dump_manifest=parsed_dump_manifest,
-        sources=sources, build_info=build_info, build_targets=build_targets,
+        sources=sources, build_info=build_info,
         include_dependencies=include_dependencies,
         follow_deps=follow_deps, search_paths=search_paths,
         ld_library_path=ld_library_path,
@@ -647,7 +646,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 write_snapshot_output=_write_snapshot_output_fn,
                 git_tag=git_tag, build_id=build_id, no_git=no_git,
                 output=output, build_info=build_info, sources=sources,
-                build_targets=build_targets,
                 include_dependencies=include_dependencies,
                 headers=tuple(headers),
                 gcc_path=gcc_path, gcc_prefix=gcc_prefix,
@@ -689,7 +687,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 err=True,
             )
         from ....cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, git_tag, build_id, no_git, collect_mode, build_targets=build_targets, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
+        dump_source_only(sources, build_info, version, output, build_config, git_tag, build_id, no_git, collect_mode, extractor=header_backend, depth=depth, include_dependencies=include_dependencies, gcc_path=gcc_path, gcc_prefix=gcc_prefix, snapshot_compression=snapshot_compression)
         return
 
     effective_compile_db = compile_db_path
@@ -803,7 +801,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         git_tag=git_tag, build_id=build_id, no_git=no_git,
         output=output, build_info=build_info, sources=sources,
         collect_mode=_resolved.collect_mode,
-        build_targets=build_targets,
         header_backend=_resolved.header_backend,
         requested_depth=_resolved.requested_depth,
         include_dependencies=include_dependencies,

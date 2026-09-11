@@ -1565,7 +1565,7 @@ _reject_scan_build_info_compile_db_conflict() {
 _extra_args_is_value_option() {
   case "$1" in
     --abi3 | --against | --artifact-set | --ast-frontend | --budget | \
-    --build-info | --build-target | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
+    --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
     --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
     --crosscheck | --debug-format | --debug-info | --debug-root | --debuginfod-url | \
     --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
@@ -2654,14 +2654,25 @@ if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
   echo "::error::mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
   exit 1
 fi
-if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-  echo "::error::mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
-  exit 1
-fi
 if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
   echo "::error::mode: scan no longer supports crosscheck (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity; only the KEY=LEVEL syntax itself doesn't survive."
   exit 1
 fi
+fi
+
+# `build-target` is retired on *both* modes now, not just `scan`: `scan
+# --build-target` went first (ADR-068 (b), the block above), and `dump
+# --build-target` -- which this input mapped to for `mode: dump` -- was
+# retired next, once that removal resolved the routing hazard that had
+# deferred it (`frontends/cli/options/rulings.py`'s former deferred
+# ruling). So this check is unconditional rather than folded into the
+# scan-only block above. Put root target(s) in `.abicheck.yml`'s
+# `build.targets` instead (Bazel only so far) -- `mode: dump`'s own
+# `config`/`sources` inputs reach it exactly as they did before this
+# input existed.
+if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
+  echo "::error::build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's config: input (or let it auto-discover from sources:)."
+  exit 1
 fi
 
 # Same shape, but scoped to the audit-only shape only (Codex review, PR
@@ -2750,7 +2761,10 @@ if [[ "$MODE" == "dump" ]]; then
   if ! _cmd_has_config_flag; then
     add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   fi
-  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
+  # `--build-target` is retired (see the unconditional `INPUT_BUILD_TARGET`
+  # check above, which exits before this command-assembly code ever runs
+  # with a non-empty value) -- `.abicheck.yml`'s `build.targets` is the
+  # only route left.
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
   # deprecated no-op removed outright in CLI cleanup H1 -- the input stays

@@ -118,9 +118,14 @@ class InputSpec:
     sources: Path | None = None
     build_info: Path | None = None
     # P0.2: explicit build-system root target(s) to scope this side's L3
-    # evidence collection to, instead of a workspace-wide query -- mirrors
-    # `dump --build-target`/`.abicheck.yml`'s `build.targets`. Bazel only so
-    # far. Empty (the default) reproduces the historical unscoped behavior.
+    # evidence collection to, instead of a workspace-wide query -- a
+    # programmatic-API-only knob since the CLI's own `dump --build-target`
+    # flag was removed (`.abicheck.yml`'s `build.targets` is the only
+    # front-end-driven source now). Bazel only so far. Empty (the default)
+    # falls back to a discovered/explicit `.abicheck.yml`'s `build.targets`
+    # (`workflows.plan._discovered_config_build_targets`,
+    # `buildsource.embed.embed_build_source`'s own fallback), which also
+    # reproduces the historical unscoped behavior when no config declares any.
     build_targets: tuple[str, ...] = ()
     # ADR-055 D1 / ADR-050 D3: a parsed `--dump-manifest` document for this
     # side only, in place of a single header list -- forwarded directly to
