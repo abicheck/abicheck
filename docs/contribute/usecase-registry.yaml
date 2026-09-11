@@ -1000,9 +1000,18 @@ use_cases:
       `compare --no-baseline`, which is pinned to report at least as many
       findings of every kind the old `scan --audit` did (see
       `docs/start/choose-your-workflow.md`, "No baseline yet — single-build
-      hygiene audit" row, and its linked Scenario S5). Severity gating is now
-      via a `--policy` file's `overrides:` block rather than
-      `--crosscheck KEY=LEVEL`, which was removed with `scan`. REMAINS:
+      hygiene audit" row, and its linked Scenario S5). Severity
+      *reclassification* is now via a `--policy` file's `overrides:` block
+      rather than `--crosscheck KEY=LEVEL`, which was removed with `scan` —
+      but `--policy` alone does not *gate*: verified live,
+      `compare --no-baseline snapshot.abi.json --policy policy.yml`
+      reclassifying a finding to `break` still exits `0` unless
+      `--severity-preset` (e.g. `default`) is also given, per
+      `policy/audit_gate_exit.py`'s `audit_gate_enabled_for_severity_preset`
+      -- a no-baseline audit only gates when a severity preset opted it in;
+      `--policy`'s `overrides:` block only decides *what* a reclassified
+      finding gates as, once gating is already on. Both flags are required
+      together for CI gating, not `--policy` alone. REMAINS:
       `surface-report` reuse and the deeper one-time checks (ODR variants,
       visibility/versioning hygiene, RTTI-for-internal-types) once their
       ChangeKinds land (Phase 2 tail).
