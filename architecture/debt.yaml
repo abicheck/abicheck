@@ -1169,13 +1169,13 @@
     },
     {
       "path": "abicheck/reporter_markdown.py",
-      "baseline_lines": 1997,
+      "baseline_lines": 2000,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
       "category": "legacy_report_monolith",
       "owner": "abicheck maintainers",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice.",
+      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Raised 1997 -> 2000 (Codex review, fresh evidence on the env-matrix-to-deployment-config PR, right at the file-size hard cap): `to_stat` (the oneline/`--stat` short-circuit `service_render.render_output` takes before the shared `ReportEnvelope` projection point) never carried the `env_matrix_source_sha256` deployment-floor digest every other format (JSON/Markdown/SARIF/HTML/JUnit) already carries via `reporter_contract_blocks.add_env_matrix_digest` -- a clean `deployment:`-governed comparison read identically to one with no deployment contract at all in the one output most likely to be a CI log's only line. Calling that helper directly was tried first but creates a real `report.scoped_gate -> reporter_markdown -> reporter_contract_blocks -> report.scoped_gate` import cycle (a TYPE_CHECKING-only edge in the helper's own module that a runtime import here turns live), so this reads the same field inline via a two-line walrus-guarded conditional instead -- the minimum this file's own hard 2000-line ceiling left room for.",
       "review_by": "2026-11-30"
     },
     {

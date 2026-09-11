@@ -280,3 +280,16 @@
   raise. Passing both `env_matrix` and `env_matrix_path` together is a
   clear `ValidationError` (ambiguous which one should apply) rather than a
   silent, unstated precedence rule.
+- **`compare --format oneline` now also carries the declared-deployment-
+  floor digest.** The earlier fix in this same fragment projected
+  `env_matrix_source_sha256` into JSON/Markdown/SARIF/HTML/JUnit, but the
+  oneline/`--stat` path short-circuits in `service_render.render_output`
+  straight to `reporter_markdown.to_stat`, before the shared
+  `ReportEnvelope` projection point that fix was added at — so a clean
+  `deployment:`-governed comparison still read identically to one with no
+  deployment contract at all in the one format most likely to be a CI log's
+  only line. `to_stat` now carries the same field through its
+  `ReportDocument` mapping, and `report.render_text.render_stat_document`
+  renders it as the identical `; deployment floor <digest>` clause the
+  `--no-baseline` audit report's own oneline renderer already established
+  — omitted, never a placeholder, when no matrix was declared.

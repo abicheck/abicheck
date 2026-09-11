@@ -131,3 +131,33 @@ def test_every_format_omits_the_env_matrix_digest_when_absent(fmt: str) -> None:
         assert "Deployment floor digest" not in text
     else:  # markdown, review
         assert "Deployment floor digest" not in text
+
+
+class TestOnelineFormatDigest:
+    """Codex review, fresh evidence (P2 follow-up to the class above): the
+    public ``--format oneline`` path short-circuits in
+    ``service_render.render_output`` straight to ``reporter_markdown.
+    to_stat`` -- it never reaches the shared ``ReportEnvelope`` projection
+    point the digest fields above are added at, so it was never covered by
+    ``_COMPARE_SUPPORTED_FORMATS`` (which is exactly
+    ``service_render._SUPPORTED_FORMATS`` minus the ``md`` alias -- oneline
+    is a genuinely separate code path, not an omission from that set). A
+    clean ``deployment:``-governed comparison used to read identically to
+    one with no deployment contract at all in this format, unlike the
+    no-baseline audit report's own oneline renderer
+    (``report.no_baseline``), which already carries the same
+    ``; deployment floor <digest>`` clause this fixes ``compare``'s oneline
+    output to match.
+    """
+
+    def test_oneline_includes_deployment_floor_digest_when_present(self) -> None:
+        result, snap = _result_with_env_matrix()
+        assert result.env_matrix_source_sha256 is not None, "fixture precondition"
+        text = render_output("oneline", result, snap, snap)
+        assert f"; deployment floor {result.env_matrix_source_sha256}" in text
+
+    def test_oneline_omits_deployment_floor_digest_when_absent(self) -> None:
+        result, snap = _result_without_env_matrix()
+        assert result.env_matrix_source_sha256 is None, "fixture precondition"
+        text = render_output("oneline", result, snap, snap)
+        assert "deployment floor" not in text

@@ -126,6 +126,9 @@ def to_stat(
             compute_disposition_audit(result, severity_config)
         ),
     }
+    # Codex review: oneline/`--stat` lacked the deployment digest.
+    if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
+        d["env_matrix_source_sha256"] = _dig
     if severity_config is not None:
         from .severity import compute_exit_code
 
