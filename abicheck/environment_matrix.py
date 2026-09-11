@@ -84,18 +84,38 @@ class CudaConstraints:
 
 
 #: Top-level keys :meth:`EnvironmentMatrix.from_dict` understands; anything
-#: else is ignored with a warning.
+#: else is ignored with a warning in lenient mode, or rejected outright in
+#: ``strict=True`` mode.
 _KNOWN_KEYS = frozenset({
     "compilers", "abi_version", "libstdcxx_dual_abi",
     "sycl", "cuda", "target_os", "target_arch", "runtime_floors",
 })
 
+#: Nested ``sycl:``/``cuda:`` keys :meth:`EnvironmentMatrix.from_dict`
+#: understands -- same lenient-warn/strict-reject treatment as the top-level
+#: keys above, since a typo'd nested key (e.g. ``sycl.backend`` for
+#: ``sycl.backends``) silently drops that whole constraint the same way a
+#: mistyped top-level key would.
+_KNOWN_SYCL_KEYS = frozenset({"implementation", "backends", "min_pi_version"})
+_KNOWN_CUDA_KEYS = frozenset(
+    {"gpu_architectures", "driver_range", "toolkit_version", "require_ptx"}
+)
 
-def _warn_unknown_keys(data: dict[str, Any]) -> None:
-    """Log a warning for top-level keys ``from_dict`` does not understand."""
-    unknown = set(data) - _KNOWN_KEYS
-    if unknown:
-        log.warning("EnvironmentMatrix: unknown keys ignored: %s", unknown)
+
+def _check_unknown_keys(
+    data: dict[str, Any], known: frozenset[str], label: str, *, strict: bool
+) -> None:
+    """Handle keys of *data* outside *known*: raise in strict mode, warn otherwise.
+
+    *label* names the section for the warning/error text (e.g.
+    ``"EnvironmentMatrix"``, ``"EnvironmentMatrix.sycl"``).
+    """
+    unknown = set(data) - known
+    if not unknown:
+        return
+    if strict:
+        raise ValueError(f"{label}: unknown key(s) {sorted(unknown)}")
+    log.warning("%s: unknown keys ignored: %s", label, unknown)
 
 
 def _section_dict(data: dict[str, Any], key: str) -> dict[str, Any]:
@@ -106,8 +126,11 @@ def _section_dict(data: dict[str, Any], key: str) -> dict[str, Any]:
     return section
 
 
-def _parse_sycl_constraints(sycl_data: dict[str, Any]) -> SyclConstraints:
+def _parse_sycl_constraints(
+    sycl_data: dict[str, Any], *, strict: bool = False
+) -> SyclConstraints:
     """Parse the validated ``sycl`` section into :class:`SyclConstraints`."""
+    _check_unknown_keys(sycl_data, _KNOWN_SYCL_KEYS, "EnvironmentMatrix.sycl", strict=strict)
     backends = sycl_data.get("backends", [])
     if not isinstance(backends, list):
         raise ValueError(
@@ -120,8 +143,11 @@ def _parse_sycl_constraints(sycl_data: dict[str, Any]) -> SyclConstraints:
     )
 
 
-def _parse_cuda_constraints(cuda_data: dict[str, Any]) -> CudaConstraints:
+def _parse_cuda_constraints(
+    cuda_data: dict[str, Any], *, strict: bool = False
+) -> CudaConstraints:
     """Parse the validated ``cuda`` section into :class:`CudaConstraints`."""
+    _check_unknown_keys(cuda_data, _KNOWN_CUDA_KEYS, "EnvironmentMatrix.cuda", strict=strict)
     gpu_archs = cuda_data.get("gpu_architectures", [])
     if not isinstance(gpu_archs, list):
         raise ValueError(
@@ -259,19 +285,32 @@ class EnvironmentMatrix:
     target_arch: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> EnvironmentMatrix:
+    def from_dict(cls, data: dict[str, Any], *, strict: bool = False) -> EnvironmentMatrix:
         """Parse from a dictionary (e.g., loaded from YAML).
+
+        *strict* controls how an unrecognized top-level or nested
+        ``sycl``/``cuda`` key is handled: lenient (the default) logs a
+        warning and ignores it, preserving this method's original
+        forward-compat behavior for direct typed-API/``from_yaml`` callers.
+        ``strict=True`` raises :class:`ValueError` instead -- used by
+        ``.abicheck.yml``'s embedded ``deployment:`` block
+        (:mod:`abicheck.buildsource.build_config`), which enforces the same
+        hard-error-on-unknown-key contract every other ``.abicheck.yml``
+        block does (ADR-043): a typo there (e.g. ``runtime_floor`` for
+        ``runtime_floors``) would otherwise silently disable the whole
+        runtime-floor check rather than failing to load.
 
         Raises:
             TypeError: If *data* is not a dict.
-            ValueError: If field types are wrong.
+            ValueError: If field types are wrong, or (``strict=True``) an
+                unknown key is present.
         """
         if not isinstance(data, dict):
             raise TypeError(
                 f"EnvironmentMatrix expects a dict, got {type(data).__name__}"
             )
 
-        _warn_unknown_keys(data)
+        _check_unknown_keys(data, _KNOWN_KEYS, "EnvironmentMatrix", strict=strict)
 
         sycl_data = _section_dict(data, "sycl")
         cuda_data = _section_dict(data, "cuda")
@@ -280,8 +319,8 @@ class EnvironmentMatrix:
         if not isinstance(compilers, list):
             raise ValueError(f"'compilers' must be a list, got {type(compilers).__name__}")
 
-        sycl = _parse_sycl_constraints(sycl_data)
-        cuda = _parse_cuda_constraints(cuda_data)
+        sycl = _parse_sycl_constraints(sycl_data, strict=strict)
+        cuda = _parse_cuda_constraints(cuda_data, strict=strict)
         runtime_floors = _parse_runtime_floors(data.get("runtime_floors", {}))
 
         return cls(

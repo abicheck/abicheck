@@ -488,7 +488,7 @@ class BuildConfig:
                 f"deployment must be a mapping, got {type(value).__name__}: {value!r}"
             ]
         try:
-            EnvironmentMatrix.from_dict(value)
+            EnvironmentMatrix.from_dict(value, strict=True)
         except (TypeError, ValueError) as exc:
             return [f"deployment: {exc}"]
         return []
@@ -677,7 +677,7 @@ class BuildConfig:
             ),
             policy_overrides=_parse_policy_overrides(policy),
             deployment=(
-                EnvironmentMatrix.from_dict(deployment_raw)
+                EnvironmentMatrix.from_dict(deployment_raw, strict=True)
                 if isinstance(deployment_raw, dict)
                 else None
             ),
@@ -866,9 +866,9 @@ class BuildConfig:
             ("release", self._release_block()),
             ("resource_limits", {} if (n := self.resource_limits_max_bundle_facts_decode_nodes) is None else {"max_bundle_facts_decode_nodes": n}),
             ("policy", {"overrides": dict(self.policy_overrides)} if self.policy_overrides else {}),
-            ("deployment", self._deployment_block()),
+            ("deployment", self._deployment_block()),  # keys on is-not-None: empty != absent
         ):
-            if block:
+            if (self.deployment is not None) if key == "deployment" else block:
                 out[key] = block
 
         if self.version:
