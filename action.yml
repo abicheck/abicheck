@@ -464,6 +464,11 @@ inputs:
       origin/main). Maps to compare --since / scan --since. Not forwarded
       for a compare directory/package operand (the per-library release
       fan-out collects no build/source evidence for either side to scope).
+      Rejected outright (step fails before any dependency install) for an
+      audit-only scan (new-library with no against/abi-baseline):
+      compare --no-baseline, which that shape now routes through, does not
+      implement revision-range evidence scoping (ADR-068 D2) -- set
+      against: to use since with scan.
     required: false
   changed-path:
     description: >
@@ -471,13 +476,18 @@ inputs:
       focus the run's source-evidence scope on (space-separated; alternative
       to since). Maps to repeated compare --changed-path / scan
       --changed-path. Not forwarded for a compare directory/package operand,
-      same as since above.
+      same as since above. Rejected outright for an audit-only scan, same
+      as since above and for the same reason.
     required: false
   budget:
     description: >
       scan mode only. Time guard (e.g. 15m, 900s, 1h). The step FAILS on
       overflow (exit 5) — a budget never silently shrinks scope.
-      Maps to scan --budget.
+      Maps to scan --budget. Rejected outright (step fails before any
+      dependency install) for an audit-only scan (new-library with no
+      against/abi-baseline): compare --no-baseline, which that shape now
+      routes through, does not wire the wall-clock guard to this path yet
+      (ADR-068 D2) -- set against: to use budget with scan.
     required: false
   dry-run:
     description: >

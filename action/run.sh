@@ -2635,6 +2635,40 @@ if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
 fi
 fi
 
+# Same shape, but scoped to the audit-only shape only (Codex review, PR
+# #1210): `since`/`changed-path`/`budget` are NOT retired -- a baseline scan
+# (`_SCAN_HAS_BASELINE == true`) still forwards all three to `compare`'s own
+# two-sided pipeline exactly as before, which accepts them identically to
+# legacy `scan --against` (live-verified). The gap is narrower and specific
+# to `compare --no-baseline`: it hard-rejects all three as a CLI usage error
+# (ADR-068 D2 -- "is not available with --no-baseline" for since/
+# changed-path, "not wired to this path yet" for budget), where legacy
+# `scan`'s own audit mode (no --against) genuinely supported all three
+# (live-verified: `scan ARTIFACT --since ...`/`--budget ...` with no
+# --against both exit 0). Forwarding them anyway and letting `compare`
+# reject them would still be a real regression for an existing audit-only
+# workflow that set one of these inputs -- it worked before this migration
+# and would now hard-fail with a Click usage error deep in the run instead
+# of a clear, upfront explanation. So these three are rejected here, the
+# same way the four hard-retired inputs above are, rather than forwarded
+# and left to `compare`'s own error -- the difference from those four is
+# that this is a *capability gap of the --no-baseline route specifically*,
+# not a retired input: setting `against:` alongside them still works today.
+if [[ "$MODE" == "scan" && "$_SCAN_HAS_BASELINE" != "true" ]]; then
+if [[ -n "${INPUT_SINCE:-}" ]]; then
+  echo "::error::mode: scan without a baseline (against) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports since identically to legacy scan --against, or drop since for this audit-only run."
+  exit 1
+fi
+if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
+  echo "::error::mode: scan without a baseline (against) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports changed-path identically to legacy scan --against, or drop changed-path for this audit-only run."
+  exit 1
+fi
+if [[ -n "${INPUT_BUDGET:-}" ]]; then
+  echo "::error::mode: scan without a baseline (against) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports budget identically to legacy scan --against, or drop budget for this audit-only run."
+  exit 1
+fi
+fi
+
 if [[ "$MODE" == "dump" ]]; then
   # ── Dump mode ───────────────────────────────────────────────────────────
   CMD+=(dump)
@@ -3213,25 +3247,46 @@ elif [[ "$MODE" == "scan" ]]; then
   # the shared retired-input preflight block).
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   # `--since`/`--changed-path` localize a comparison to what a revision
-  # range touched -- meaningless with no baseline to localize against, and
-  # `compare --no-baseline` rejects both outright with a clear usage error
-  # of its own ("... is not available with --no-baseline") when forwarded
-  # anyway on an audit-only run, the same accepted "a flag compare
-  # genuinely lacks/rejects raises compare's own real, correct usage error"
-  # outcome this migration already gives an `extra-args`-forwarded flag.
+  # range touched. Forwarded unconditionally here because the one shape that
+  # cannot use them (audit-only, no baseline) is now rejected upfront, above
+  # this whole if/elif chain, with a clear, specific error naming the gap
+  # (Codex review, PR #1210) -- so by the time this line runs, either a
+  # baseline is present (`compare` accepts both identically to legacy
+  # `scan --against`), or neither input was set (forwarding an empty value
+  # is a no-op). `compare --no-baseline` itself still hard-rejects both
+  # (ADR-068 D2), but this branch never reaches that CLI call with one set.
   add_single_flag "--since" "${INPUT_SINCE:-}"
   add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
+  # `--budget`: same shape as since/changed-path above -- an audit-only run
+  # with `budget:` set is rejected upfront (`compare --no-baseline`'s
+  # wall-clock guard isn't wired to that path, per the same preflight
+  # block), so this is reached only with a baseline present (or no value to
+  # forward). `compare` accepts `--budget` identically to legacy
+  # `scan --against` (live-verified) -- unlike since/changed-path, this one
+  # was dropped entirely by this migration (Codex review, PR #1210: no
+  # `INPUT_BUDGET` reference existed anywhere in this file), silently
+  # removing the wall-clock guard from every baseline scan job that set it.
+  if [[ "$_SCAN_HAS_BASELINE" == "true" ]]; then
+    add_single_flag "--budget" "${INPUT_BUDGET:-}"
+  fi
 
   # `scan --against` took @policy_options the same as `compare`, and
-  # `compare --no-baseline` accepts all three identically (live-verified:
-  # --policy/--suppress/--require-complete-analysis all work under
-  # --no-baseline) -- forwarded unconditionally on both the baseline and
-  # audit-only shapes now, unlike the retired legacy-CLI branch's own
-  # baseline-only guard (cli_scan.py's own `_reject_comparison_only_flags()`
-  # rejection has no equivalent here).
+  # `compare --no-baseline` accepts --policy/--suppress identically --
+  # forwarded unconditionally on both the baseline and audit-only shapes.
   add_single_flag "--policy" "${INPUT_POLICY_FILE:-${INPUT_POLICY:-}}"
   add_single_flag "--suppress" "${INPUT_SUPPRESS:-}"
-  if [[ "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
+  # `--require-complete-analysis` is the one exception: action.yml has always
+  # documented "no effect for an audit-only scan... the CLI itself rejects
+  # this flag without a baseline, so run.sh never forwards it in that
+  # shape" -- true of legacy `scan`'s own audit mode, but NOT true of
+  # `compare --no-baseline`, which accepts the flag and gives it real
+  # teeth (an incomplete-assurance candidate-side finding now fails the
+  # step, live-verified) -- silently turning a previously-documented no-op
+  # input into a new source of red CI for any audit-only job that set it
+  # uniformly alongside baseline jobs (Codex review, PR #1210). Gated on
+  # `_SCAN_HAS_BASELINE` to keep the documented contract true rather than
+  # updating the contract to match an accidental capability gain.
+  if [[ "$_SCAN_HAS_BASELINE" == "true" && "${INPUT_REQUIRE_COMPLETE_ANALYSIS:-false}" == "true" ]]; then
     CMD+=(--require-complete-analysis)
   fi
 

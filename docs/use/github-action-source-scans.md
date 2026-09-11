@@ -42,10 +42,15 @@ per library meanwhile), `risk-rules` (and with it the risk-driven `auto`
 depth escalation — pin `depth:` explicitly instead) and `build-target` (use
 `mode: dump` to narrow a multi-target workspace). Setting any of them on a
 `mode: scan` step is now an explicit `::error::`, not a silent downgrade. A
-`budget` wall-clock guard is
-different: `compare` itself now has `--budget`, but the Action's `mode:
-compare` input still doesn't read it (a translation gap, not a missing CLI
-capability — see the table below).
+`budget` wall-clock guard is different: `compare` itself now has `--budget`,
+and `mode: scan` with a baseline (`against:`) forwards it exactly as
+before; but `mode: compare` doesn't read a `budget` input yet (a
+translation gap, not a missing CLI capability), and neither does an
+audit-only `mode: scan` (no `against:`) — `compare --no-baseline`'s own
+wall-clock guard isn't wired to that path (ADR-068 D2), so setting
+`budget:`/`since:`/`changed-path:` on an audit-only scan is rejected
+upfront with an explicit `::error::`, the same "reject, don't silently
+narrow" treatment as the four retired inputs above — see the table below.
 
 ### `mode: scan` is being retired — and is now fully translated
 
