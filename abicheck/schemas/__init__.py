@@ -468,9 +468,11 @@ _ARTIFACT_NAMES = frozenset(
 #:       above).
 #: 2.37 — each ``layer_coverage[]`` row (the L3_build row in particular)
 #:       gains five optional keys: ``requested_roots``/``resolved_roots``
-#:       (the P0.2 Bazel root-target(s) declared via ``dump --build-target``/
-#:       ``.abicheck.yml``'s ``build.targets``, and the subset a query
-#:       actually resolved), ``transitive_targets`` (the scoped dependency
+#:       (the P0.2 Bazel root-target(s) declared via ``.abicheck.yml``'s
+#:       ``build.targets`` -- or the typed-API ``InputSpec.build_targets``
+#:       parameter; the ``dump --build-target`` CLI flag that originally
+#:       populated this at 2.37's introduction was later removed -- and the
+#:       subset a query actually resolved), ``transitive_targets`` (the scoped dependency
 #:       closure size), and ``compile_units``/``link_units`` (machine-
 #:       readable counterparts to what ``detail`` already states in prose).
 #:       All five are present-but-empty/``null`` on every row unaffected by

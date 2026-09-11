@@ -1562,7 +1562,7 @@ _is_release_style_operand() {
 _extra_args_is_value_option() {
   case "$1" in
     --abi3 | --ast-frontend | --budget | \
-    --build-info | --build-target | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
+    --build-info | --bundle-facts-library-manifest | --bundle-facts-out | --changed-path | \
     --compiler | --compiler-option | --compiler-prefix | --config | --contract | \
     --debug-format | --debug-info | --debug-root | --debuginfod-url | \
     --depth | --devel-pkg | --dump-manifest | --env-matrix | --format | \
@@ -2080,6 +2080,23 @@ if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
   exit 1
 fi
 
+# `build-target` is retired on every mode now, not just the already fully
+# retired `scan`: `scan --build-target` went first (ADR-068 (b), the
+# now-removed mode: scan retirement above), and `dump --build-target` --
+# which this input mapped to for `mode: dump` -- was retired next, once
+# that removal resolved the routing hazard that had deferred it
+# (`frontends/cli/options/rulings.py`'s former deferred ruling). Checked
+# unconditionally, before any mode dispatch, the identical check
+# `action/validate-inputs.sh` already runs (this is the copy for anyone
+# invoking run.sh directly, e.g. tests). Put root target(s) in
+# `.abicheck.yml`'s `build.targets` instead (Bazel only so far) --
+# `mode: dump`'s own `config`/`sources` inputs reach it exactly as they did
+# before this input existed.
+if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
+  echo "::error::build-target is retired on every mode (ADR-068 (b) retired it for scan --build-target; dump --build-target, which this input mapped to for mode: dump, was retired next). Put the root target(s) in .abicheck.yml's build.targets instead, and pass the config with mode: dump's build-config: input (or let it auto-discover from sources:)."
+  exit 1
+fi
+
 # Replaces every literal (non-glob) occurrence of $2 in $1 with $3, via
 # prefix/suffix parameter-expansion pattern REMOVAL (`%%`/`#`) plus plain
 # string concatenation for the inserted text -- NOT
@@ -2570,7 +2587,10 @@ if [[ "$MODE" == "dump" ]]; then
   if ! _cmd_has_config_flag; then
     add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
   fi
-  add_flag "--build-target" "${INPUT_BUILD_TARGET:-}"
+  # `--build-target` is retired (see the unconditional `INPUT_BUILD_TARGET`
+  # check above, which exits before this command-assembly code ever runs
+  # with a non-empty value) -- `.abicheck.yml`'s `build.targets` is the
+  # only route left.
   add_single_flag "--depth" "${INPUT_DEPTH:-}"
   # `allow-build-query` (the `--allow-build-query` dump flag it fed) is a
   # deprecated no-op removed outright in CLI cleanup H1 -- the input stays

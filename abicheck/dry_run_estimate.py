@@ -191,12 +191,14 @@ class CostEstimate:
 
 
 # Codex review: TU counts here are workspace-wide (a pre-captured Bazel aquery/cquery jsonproto is never filtered
-# by `targets` -- BazelAdapter only scopes a *live* query), so a `--build-target` run's real count is typically
+# by `targets` -- BazelAdapter only scopes a *live* query), so a run scoped by
+# `.abicheck.yml`'s `build.targets` (the only front-end route since the CLI's
+# own `--build-target` flag was removed) has a real count that is typically
 # lower. Baked into each row's `note` so a Python-API caller sees it too.
 _UNSCOPED_TU_NOTE_SUFFIX = (
-    " [UNSCOPED: --build-target given, but this TU count is workspace-wide -- "
-    "the real run's Bazel collection scopes to the requested root target(s) "
-    "and typically touches fewer TUs]"
+    " [UNSCOPED: build_targets given (.abicheck.yml's build.targets), but "
+    "this TU count is workspace-wide -- the real run's Bazel collection "
+    "scopes to the requested root target(s) and typically touches fewer TUs]"
 )
 # L4/L5 derive their counts from L3's -- inherit its "[UNKNOWN" state too.
 _TU_UNKNOWN_NOTE_SUFFIX = (

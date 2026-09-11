@@ -637,7 +637,9 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " `compare --no-baseline DIR` to preserve its member-selection and"
         " coverage accounting), scan --risk-rules (and with it the"
         " risk-driven `auto` depth escalation -- pin `--depth` instead), and"
-        " scan --build-target (`dump --build-target` is unchanged)",
+        " scan --build-target (`dump --build-target` was later retired too,"
+        " separately -- see this file's own dedicated `--build-target` entry"
+        " below)",
         # Deliberately only the two spellings that are dead *everywhere*.
         # `--manifest` and `--build-target` are not listed: `aggregate
         # --manifest` and `dump --build-target` remain live flags, so a bare
@@ -679,6 +681,32 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "learn/evidence-and-detectability.md",
                 "reference/exit-codes.md",
                 "reference/config-file.md",
+            }
+        ),
+    ),
+    (
+        # `dump --build-target`'s own retirement, once `scan`'s removal
+        # above resolved the routing hazard that had deferred it
+        # (`frontends/cli/options/rulings.py`'s former `--build-target`
+        # deferred ruling). `.abicheck.yml`'s `build.targets` is now the
+        # only front-end-reachable source of root-target scoping for
+        # `dump`/`compare` -- there is no CLI override left to win over it.
+        "--build-target (dump's own CLI flag, retired once scan's removal"
+        " resolved the routing hazard that had deferred it; put root"
+        " target(s) in .abicheck.yml's build.targets instead)",
+        ("--build-target",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                # Names the retired spelling once, in a "was retired"/"used
+                # to be the CLI equivalent" sentence pointing a reader at
+                # `.abicheck.yml`'s `build.targets` instead.
+                "learn/build-source-data.md",
+                "use/evidence-depth.md",
+                "use/github-action-source-scans.md",
+                "reference/github-action-inputs.md",
             }
         ),
     ),

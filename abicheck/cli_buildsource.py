@@ -384,11 +384,16 @@ def _write_snapshot_output(
     ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
-    *build_query* / *build_compile_db* / *build_targets* are the CLI equivalents of
-    the ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` / ``build.targets``
-    keys — *build_targets* (P0.2) scopes Bazel evidence collection to the given
-    root target(s) and their transitive deps instead of a workspace-wide query.
-    *extractor* is the L4 source-ABI
+    *build_query* / *build_compile_db* / *build_targets* are programmatic-API-only
+    overrides of the ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` /
+    ``build.targets`` keys — none of the three has a CLI flag any more
+    (``--build-query``/``--build-compile-db`` were removed in PR 3C/3F,
+    ``--build-target`` later); every caller reaching this function from the
+    ``dump`` CLI passes none of them, so the effective value always comes from
+    a discovered or explicit ``.abicheck.yml``. *build_targets* (P0.2) scopes
+    Bazel evidence collection to the given root target(s) and their
+    transitive deps instead of a workspace-wide query. *extractor* is the L4
+    source-ABI
     frontend — the same ``--ast-frontend`` knob that drives the L2 header AST
     (ADR-037 D8): one frontend choice across both pipeline stages. *clang_bin* is
     the caller-resolved L4 replay compiler (forwarded to ``embed_build_source``).

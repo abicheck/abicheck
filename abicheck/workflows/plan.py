@@ -70,8 +70,10 @@ type it came from.
 
 **Two named silent-failure scenarios motivate this phase (ADR-063 D4); one
 check is implemented here.** ``docs/contribute/known-gaps.md``'s
-``--build-target`` + pre-captured Bazel ``aquery``/``cquery`` entry is a real,
-isolated, currently-unfixed silent no-op — :func:`_check_bazel_target_scoping`
+``build_targets`` (``.abicheck.yml``'s ``build.targets`` -- the CLI's own
+``dump --build-target`` flag was later removed) + pre-captured Bazel
+``aquery``/``cquery`` entry is a real, isolated, currently-unfixed silent
+no-op — :func:`_check_bazel_target_scoping`
 below closes it. D4's second illustrative scenario, "a ``-H`` flag accepted
 by a collect mode that cannot use it," does not correspond to any isolated,
 currently-open known-gap entry once checked against the real code: the one
@@ -347,7 +349,9 @@ def bazel_target_scoping_failure(
 
     *sources*/*build_config*, when given, close the dry-run/execution parity
     gap this module's own docstring names for the config-sourced (no
-    explicit ``--build-target``) case: an empty *build_targets* falls back
+    explicit ``build_targets`` -- the CLI's own ``dump --build-target`` flag
+    was later removed, so this is now the only front-end-reachable route)
+    case: an empty *build_targets* falls back
     to whatever root targets an auto-discovered (or explicitly named)
     ``.abicheck.yml``'s ``build.targets:`` declares (see
     :func:`_discovered_config_build_targets`), mirroring
@@ -422,7 +426,7 @@ def scan_bazel_scoping_failure(
 
     *sources*/*build_config* forward to :func:`bazel_target_scoping_failure`
     unchanged -- see that function's own docstring for the config-sourced
-    (no explicit ``--build-target``) fallback they enable, and for what
+    (no explicit ``build_targets``) fallback they enable, and for what
     *headers_present* (derived here, not accepted as a parameter) governs.
     Both default ``None``, reproducing the prior, request-level-flag-only
     behavior for any caller that doesn't pass them.

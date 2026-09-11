@@ -625,6 +625,14 @@ class TestRemovedConfigDuplicates:
         # in .abicheck.yml is the only source now, no CLI escape hatch --
         # same shape as the release/bundle topology knobs above.
         "--require-complete-analysis",
+        # `dump --build-target` (CLI cleanup, the build-target retirement):
+        # `.abicheck.yml`'s `build.targets` is its only source now. Unlike
+        # every entry above, this one was never a `compare` flag at all --
+        # it's here anyway, over the shared list rather than a `dump`-only
+        # one, per the generalization below: this class's own contract is
+        # "no *command's* param set carries this dead spelling", and a
+        # command that never had it trivially satisfies that already.
+        "--build-target",
     )
 
     @staticmethod
@@ -637,7 +645,17 @@ class TestRemovedConfigDuplicates:
             for opt in (*p.opts, *p.secondary_opts)
         }
 
-    @pytest.mark.parametrize("command", ["compare"])
+    # `scan` was removed outright (ADR-068 Phase 6) -- `main.commands` no
+    # longer has an entry for it at all, which made this parametrize's own
+    # `[scan]` case a `KeyError` rather than a real "flag absent" assertion
+    # (found while generalizing this class to also cover `dump`, the first
+    # `dump`-side removal it needs to track: a hardcoded `compare`/`scan`-only
+    # check here was itself a latent gap for exactly the same reason a
+    # missing bucket in `canonical_identity_contract.py` is one -- an
+    # omission that fails nothing, anywhere, until the exact case it misses
+    # shows up). `["compare", "dump"]` is every command this class's
+    # `REMOVED_CONFIG_DUPLICATES` entries can actually appear on today.
+    @pytest.mark.parametrize("command", ["compare", "dump"])
     def test_demoted_families_are_gone(self, command: str) -> None:
         # `scan` was itself retired outright (ADR-068) and is no longer a
         # registered command at all -- `main.commands["scan"]` would raise

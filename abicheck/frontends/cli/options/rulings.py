@@ -563,29 +563,6 @@ DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
         "(`snapshot-compression`) therefore stays too, with something real "
         "to drive."
     ),
-    "--build-target": _deferred(
-        "§4.2's CONFIG row, and the strongest remaining case on either "
-        "command: the flag's own help text calls itself the 'CLI equivalent "
-        "of .abicheck.yml build.targets', i.e. guard 2 stated by the option "
-        "itself, and `build.targets` already exists as a real key. Which "
-        "build-system root target is *this* library is a property of the "
-        "project's layout, not of a run. Phase 7i recorded the blocker as "
-        "'an Action input, pending an ADR-047 input-lifecycle decision'; "
-        "this audit re-verified it and the blocker is sharper than that. "
-        "Removing an Action input alongside its flag is ordinary front-end "
-        "parity and would be done in the same PR -- but `--build-target` is "
-        "a live `scan` option *and* is listed in action/run.sh's "
-        "`_extra_args_has_scan_only_flag`, so the shared `build-target` "
-        "input still drives a real flag on a command this workstream may "
-        "not touch yet. It was scan's lifetime that blocked this, not "
-        "ADR-047's -- `scan` itself is now gone (ADR-068 Phase 6), which "
-        "resolves that hazard, but actually removing `dump --build-target` "
-        "and rewiring its callers (`service_dump_pipeline.py`, "
-        "`cli_dump_request.py`, `errors.py`) onto `build.targets` alone is "
-        "real, unimplemented feature work, not landed in the Phase 6 PR "
-        "itself; tracked as a followup.",
-        blocker="Removing the flag and rewiring its dump-pipeline callers onto `build.targets` -- not yet implemented; scan's own routing hazard is resolved (ADR-068 Phase 6)",
-    ),
 }
 
 
