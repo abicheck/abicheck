@@ -80,13 +80,14 @@ break; a non-gating job needs no change. The four orthogonal axes still
 apply — see
 [exit codes](../../reference/exit-codes.md#compare-no-baseline-adr-068-d2-single-artifact).
 
-## The Action: `mode: scan`, no `against`
+## The Action: `mode: compare`, no baseline
 
-The GitHub Action does not yet expose `--no-baseline` as a `mode: compare`
-input, and `mode: compare` requires both `old-library`/`new-library`. So at
-the Action level, a no-baseline audit — including one that needs L3/L4
-evidence — still goes through `mode: scan` with no `against`/`abi-baseline`
-resolved:
+[ADR-068's Action-input-lifecycle amendment](../../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
+retired `mode: scan` outright — the root Action's `mode: compare` now
+exposes `--no-baseline` directly: omit both `old-library` and `abi-baseline`
+and it runs the audit-only shape. So at the Action level, a no-baseline
+audit — including one that needs L3/L4 evidence — goes through
+`mode: compare` with `old-library`/`abi-baseline` both left unset:
 
 ```yaml
 targets:
@@ -108,17 +109,18 @@ targets:
 ```
 
 Set `baseline-channel: none`. `check-target` detects this and skips
-[`resolve-baseline`](../../reference/resolve-baseline.md) entirely, routing
-to a plain `scan` (no `--against`) instead of `compare` — it never even
-attempts a baseline lookup, so this is not the same as an unresolved
-`required: true` channel hitting `not_found` (a hard failure). A `.abicheck.yml`
-`checks:` entry with `channel: none` defaults its own `gate_mode` to
-`advisory`, matching this semantic.
+[`resolve-baseline`](../../reference/resolve-baseline.md) entirely — it
+never even attempts a baseline lookup, so this is not the same as an
+unresolved `required: true` channel hitting `not_found` (a hard failure) —
+which leaves `old-library`/`abi-baseline` both unset on the nested
+`mode: compare` invocation, selecting its audit-only shape. A
+`.abicheck.yml` `checks:` entry with `channel: none` defaults its own
+`gate_mode` to `advisory`, matching this semantic.
 
 See the [`check-target` reference](../../reference/check-target.md) for the
 full bypass mechanics, and
 [GitHub Action: Source Scans § Single-release audit](../../use/github-action-source-scans.md#single-release-audit-no-baseline)
-for the equivalent one-step `mode: scan` (no `against:`) wiring.
+for the equivalent one-step `mode: compare` (no baseline) wiring.
 
 ## When to move past this scenario
 
@@ -128,12 +130,13 @@ for the equivalent one-step `mode: scan` (no `against:`) wiring.
   permanent choice for a project that will eventually publish a release or
   track `main`.
 - **`target-kind: app-consumer`/`plugin-contract`** — not supported with
-  `baseline-channel: none`: `scan` has no `--used-by`/`--required-symbol`
-  equivalent, so an app-consumer/plugin-contract audit with no baseline has
-  no scope to check against. Use `kind: library` for a no-baseline audit.
+  `baseline-channel: none`: `compare --no-baseline` has no `--used-by`/
+  `--required-symbol` equivalent, so an app-consumer/plugin-contract audit
+  with no baseline has no scope to check against. Use `kind: library` for a
+  no-baseline audit.
 
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
 - [`check-target` Action Reference](../../reference/check-target.md) — the full bypass mechanics and report shape.
-- [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the one-step `mode: scan` equivalent.
+- [GitHub Action: Source Scans](../../use/github-action-source-scans.md) — the one-step `mode: compare` (no baseline) equivalent.

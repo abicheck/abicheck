@@ -13,16 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Codex review, PR #1210, round 4: `run.sh`'s own since/changed-path/
-budget-on-audit-only-scan rejection (added round 2,
-``tests/test_action_run_sh_scan_no_baseline_capability_gap.py``) was never
-wired into ``action/validate-inputs.sh``, the earlier preflight copy that
-runs *before* Python setup, the pixi/toolchain provision and the abicheck
-install -- so a workflow setting one of these three on an audit-only
-``mode: scan`` paid the whole provisioning cost before `run.sh` finally
-rejected it. The same gap `TestScanRetiredInputsFailPreflight` in
-``test_action_validate_inputs.py`` already closed for the four hard-retired
-scan inputs (Codex review, PR #1186).
+"""``action/validate-inputs.sh``'s since/changed-path/budget-on-audit-only
+rejection -- originally added for legacy `mode: scan`'s own audit-only
+shape (Codex review, PR #1210), and now real, first-class validation of
+`mode: compare`'s audit-only shape (old-library and abi-baseline both
+omitted) since ADR-068's Action-input-lifecycle amendment retired
+`mode: scan` outright. `run.sh` keeps its own copy of this exact check,
+covered by ``tests/test_action_run_sh_compare_no_baseline_capability_gap.py``.
 
 Split into its own file (rather than added to `test_action_validate_inputs.py`
 directly) because that file is at its `architecture/debt.yaml` no-growth
@@ -37,7 +34,7 @@ import pytest
 from test_action_validate_inputs import _run_validate
 
 
-class TestScanNoBaselineCapabilityGapFailsPreflight:
+class TestCompareNoBaselineCapabilityGapFailsPreflight:
     @pytest.mark.parametrize(
         ("env", "expected"),
         [
@@ -50,45 +47,41 @@ class TestScanNoBaselineCapabilityGapFailsPreflight:
         self, env: dict[str, str], expected: str
     ) -> None:
         result = _run_validate(
-            {"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so", **env}
+            {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "new.so", **env}
         )
         assert result.returncode == 1, result.stdout + result.stderr
         assert "::error::" in result.stdout
         assert f"does not support {expected}" in result.stdout
-        assert "against:" in result.stdout
-
-    def test_forced_audit_with_a_baseline_still_rejects(self) -> None:
-        # audit: true forces audit-only even with against set -- mirrors
-        # run.sh's own _SCAN_HAS_BASELINE computation
-        # (FORCE_AUDIT_ONLY != "true" && -n INPUT_AGAINST).
-        result = _run_validate(
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AGAINST": "baseline.so",
-                "INPUT_AUDIT": "true",
-                "INPUT_SINCE": "origin/main",
-            }
-        )
-        assert result.returncode == 1, result.stdout + result.stderr
-        assert "since" in result.stdout
+        assert "old-library" in result.stdout
 
     @pytest.mark.parametrize(
         "env", [{"INPUT_SINCE": "origin/main"}, {"INPUT_BUDGET": "15m"}]
     )
-    def test_baseline_scan_is_unaffected(self, env: dict[str, str]) -> None:
+    def test_two_sided_compare_is_unaffected(self, env: dict[str, str]) -> None:
         result = _run_validate(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AGAINST": "baseline.so",
+                "INPUT_OLD_LIBRARY": "baseline.so",
                 **env,
             }
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::error::" not in result.stdout
 
-    def test_plain_audit_only_scan_unaffected(self) -> None:
-        result = _run_validate({"INPUT_MODE": "scan", "INPUT_NEW_LIBRARY": "new.so"})
+    def test_abi_baseline_also_counts_as_having_a_baseline(self) -> None:
+        result = _run_validate(
+            {
+                "INPUT_MODE": "compare",
+                "INPUT_NEW_LIBRARY": "new.so",
+                "INPUT_ABI_BASELINE": "latest-release",
+                "INPUT_SINCE": "origin/main",
+            }
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "::error::" not in result.stdout
+
+    def test_plain_audit_only_compare_unaffected(self) -> None:
+        result = _run_validate({"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "new.so"})
         assert result.returncode == 0, result.stdout + result.stderr
         assert "::error::" not in result.stdout

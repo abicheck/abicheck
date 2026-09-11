@@ -14,13 +14,14 @@
 # limitations under the License.
 
 """End-to-end coverage for ADR-068's 2026-09-10 amendment as wired into
-``action/run.sh``: an audit-only ``mode: scan`` request (no baseline) now
-routes unconditionally to ``compare --no-baseline`` (there is no legacy
-``scan`` CLI fallback left at all), and this Action injects
-``--severity-preset default`` on that translated invocation whenever the
-caller stated no preset of their own, so the audit-gate exit axis
-(``policy/audit_gate_exit.py``, exit code ``3``) reproduces legacy
-``scan``'s own default-gating behavior.
+``action/run.sh``: an audit-only ``mode: compare`` request (old-library and
+abi-baseline both omitted) routes to ``compare --no-baseline`` (the
+replacement for legacy ``mode: scan`` with no baseline, per ADR-068's
+Action-input-lifecycle amendment -- ``mode: scan`` itself is retired
+outright), and this Action injects ``--severity-preset default`` on that
+invocation whenever the caller stated no preset of their own, so the
+audit-gate exit axis (``policy/audit_gate_exit.py``, exit code ``3``)
+reproduces legacy ``mode: scan``'s own default-gating behavior.
 
 Driven through the *real* ``run.sh`` and the *real* ``abicheck`` binary
 against the committed G20 corpus fixtures
@@ -86,7 +87,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env = {
         **base_env,
-        "INPUT_MODE": "scan",
+        "INPUT_MODE": "compare",
         "INPUT_ADD_JOB_SUMMARY": "false",
         "INPUT_PR_COMMENT": "false",
         "GITHUB_OUTPUT": str(github_output),
@@ -324,15 +325,14 @@ class TestAuditOnlyScanExitZeroVerdictNeverClaimsCompatible:
         assert outputs.get("exit-code") == "3", outputs
 
 
-class TestBaselineScanBudgetOverflowMapsToExitFive:
-    """Codex review, PR #1210, round 10: a baseline `mode: scan` request's
-    own `--budget` forwarding reaches `compare` unchanged (`compare`'s own
-    `--budget` guard exits 5, `cli_compare_fold.py`'s `sys.exit(5)`), but
-    the shared `case $ABICHECK_EXIT` dispatch this Action routes both
-    `compare` and `mode: scan` through had no `5)` arm -- exit 5 fell into
-    the generic `*) VERDICT="ERROR"` case, publishing `ERROR` instead of
-    the documented `BUDGET_OVERFLOW` and skipping the budget-specific job-
-    summary/comment handling `mode: scan` has always used."""
+class TestBaselineCompareBudgetOverflowMapsToExitFive:
+    """Codex review, PR #1210, round 10: a baseline compare's own `--budget`
+    forwarding reaches the CLI unchanged (`compare`'s own `--budget` guard
+    exits 5, `cli_compare_fold.py`'s `sys.exit(5)`), and the shared
+    `case $ABICHECK_EXIT` dispatch this Action routes every compare
+    invocation through must map that to the documented `BUDGET_OVERFLOW`
+    verdict, not the generic `*) VERDICT="ERROR"` catch-all -- along with
+    the budget-specific job-summary/comment handling that verdict gets."""
 
     def test_budget_overflow_reports_budget_overflow_not_error(
         self, tmp_path: Path
@@ -341,7 +341,7 @@ class TestBaselineScanBudgetOverflowMapsToExitFive:
             tmp_path,
             {
                 "INPUT_NEW_LIBRARY": str(_snapshot_path(_GATING_CASE)),
-                "INPUT_AGAINST": str(_snapshot_path(_GATING_CASE)),
+                "INPUT_OLD_LIBRARY": str(_snapshot_path(_GATING_CASE)),
                 "INPUT_BUDGET": "0s",
             },
         )

@@ -476,9 +476,10 @@ jobs:
           fi
           echo "Correctly passed with additions at default severity (info)"
 
-  # ── Scan mode: source-intelligence orchestrator (snapshot inputs) ──────────
-  test-scan-baseline-breaking:
-    name: 'Scan: baseline comparison detects breaking change'
+  # ── mode: compare — the replacement wiring for the retired mode: scan
+  # (ADR-068's Action-input-lifecycle amendment) ──────────────────────────────
+  test-compare-baseline-breaking:
+    name: 'Compare: baseline comparison detects breaking change (replaces mode: scan + against)'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -486,13 +487,13 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Run abicheck scan against a baseline
+      - name: Run abicheck compare against a baseline
         id: abi
         uses: ./
         with:
-          mode: scan
+          mode: compare
+          old-library: tests/fixtures/action/action_test_v1.json
           new-library: tests/fixtures/action/action_test_v2.json
-          against: tests/fixtures/action/action_test_v1.json
           install-deps: false
           fail-on-breaking: false  # don't fail the test job
 
@@ -510,8 +511,8 @@ jobs:
             exit 1
           fi
 
-  test-scan-audit:
-    name: 'Scan: single-release audit (no baseline)'
+  test-compare-audit-only:
+    name: 'Compare: audit-only, no baseline (replaces mode: scan + audit: true)'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -519,13 +520,12 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Run abicheck scan in audit mode
+      - name: Run abicheck compare with old-library omitted (audit-only)
         id: abi
         uses: ./
         with:
-          mode: scan
+          mode: compare
           new-library: tests/fixtures/action/action_test_v2.json
-          audit: 'true'
           install-deps: false
 
       - name: Verify audit succeeds and is AUDIT_CLEAN
@@ -546,8 +546,8 @@ jobs:
             exit 1
           fi
 
-  test-scan-estimate:
-    name: 'Scan: --estimate dry run'
+  test-compare-audit-only-dry-run:
+    name: 'Compare: audit-only dry run (replaces mode: scan + estimate: true)'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -555,21 +555,72 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - name: Run abicheck scan --estimate
+      - name: Run abicheck compare --dry-run with old-library omitted
         id: abi
         uses: ./
         with:
-          mode: scan
+          mode: compare
           new-library: tests/fixtures/action/action_test_v2.json
-          estimate: 'true'
+          dry-run: 'true'
           install-deps: false
 
-      - name: Verify estimate exits 0
+      - name: Verify dry run exits 0
         shell: bash
         run: |
           echo "Verdict: ${{ steps.abi.outputs.verdict }}"
           if [[ "${{ steps.abi.outputs.exit-code }}" != "0" ]]; then
-            echo "::error::Expected estimate to exit 0, got ${{ steps.abi.outputs.exit-code }}"
+            echo "::error::Expected dry run to exit 0, got ${{ steps.abi.outputs.exit-code }}"
+            exit 1
+          fi
+
+  test-compare-audit-only-gates-with-severity-preset:
+    name: 'Compare: audit-only gating requires severity-preset (the audit-gate migration trap)'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Run abicheck compare audit-only WITHOUT severity-preset (must not gate)
+        id: abi-no-preset
+        uses: ./
+        with:
+          mode: compare
+          new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
+          install-deps: false
+
+      - name: Verify the no-preset run stays exit 0 (silently non-gating, as documented)
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi-no-preset.outputs.verdict }}"
+          echo "Exit code: ${{ steps.abi-no-preset.outputs.exit-code }}"
+          if [[ "${{ steps.abi-no-preset.outputs.exit-code }}" != "0" ]]; then
+            echo "::error::Expected exit 0 without severity-preset, got ${{ steps.abi-no-preset.outputs.exit-code }}"
+            exit 1
+          fi
+
+      - name: Run abicheck compare audit-only WITH severity-preset (must gate, exit 3)
+        id: abi-with-preset
+        uses: ./
+        with:
+          mode: compare
+          new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
+          severity-preset: default
+          install-deps: false
+          fail-on-breaking: false  # don't fail the test job on the expected AUDIT_GATE
+
+      - name: Verify the run gates at exit 3 (AUDIT_GATE) with severity-preset set
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi-with-preset.outputs.verdict }}"
+          echo "Exit code: ${{ steps.abi-with-preset.outputs.exit-code }}"
+          if [[ "${{ steps.abi-with-preset.outputs.verdict }}" != "AUDIT_GATE" ]]; then
+            echo "::error::Expected verdict AUDIT_GATE, got ${{ steps.abi-with-preset.outputs.verdict }}"
+            exit 1
+          fi
+          if [[ "${{ steps.abi-with-preset.outputs.exit-code }}" != "3" ]]; then
+            echo "::error::Expected exit code 3, got ${{ steps.abi-with-preset.outputs.exit-code }}"
             exit 1
           fi
 
@@ -705,9 +756,10 @@ jobs:
       - test-appcompat-full
       - test-appcompat-weak
       - test-additions-pass-by-default
-      - test-scan-baseline-breaking
-      - test-scan-audit
-      - test-scan-estimate
+      - test-compare-baseline-breaking
+      - test-compare-audit-only
+      - test-compare-audit-only-dry-run
+      - test-compare-audit-only-gates-with-severity-preset
       - test-dependency-source-conda-forge
       - test-dependency-source-none-and-legacy-alias
     runs-on: ubuntu-latest

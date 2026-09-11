@@ -286,8 +286,8 @@ extraction cleanup is unconditional now, with no config replacement.
 
 | Output | Description |
 |--------|-------------|
-| `verdict` | **compare** (single pair or directory/package operands, including `--used-by`/`--required-symbol`-scoped runs): `COMPATIBLE`, `COMPATIBLE_WITH_RISK` (a real, exit-0 tier for a compatible-but-risky change), `SEVERITY_ERROR`, `COVERAGE_INCOMPLETE`, `SCOPE_INCOMPLETE` (directory/package operands only, ADR-065: an unchecked selected member under `.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed at all — fails the step unconditionally), `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY` (directory/package operands with `fail-on-removed-library` set, which since ADR-065 requires a proven-complete NEW inventory), or `ERROR`. `AUDIT_GATE`/`AUDIT_CLEAN`/`AUDIT_RISK` (see below) are **scan**-only — this Action's own compare branch always supplies both `old-library` and `new-library` as positional operands, and `--no-baseline` takes exactly one, so a native compare request can never reach those three (Codex review, PR #1210, round 9). **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `COVERAGE_INCOMPLETE`, `API_BREAK`, `BREAKING`, `AUDIT_GATE` (audit-only — no `against`/`abi-baseline` resolved — with a `BREAKING`/`API_BREAK`-classified finding against the candidate's own public surface while a severity preset other than `info-only` was in effect; ADR-068's 2026-09-10 amendment. This Action injects `severity-preset: default` automatically on an audit-only step that states no preset of its own, so audit-only gating stays on by default the way `mode: scan` always documented — pass `severity-preset: info-only` to opt out. Not a two-sided compatibility verdict: an audit reports no additions/removals/compatibility verdict at all, only its own candidate-side findings; exit code `3`, fails the step unconditionally), `AUDIT_CLEAN` (same audit-only shape, exit `0`, no candidate-side finding at all), `AUDIT_RISK` (same audit-only shape, exit `0`, a candidate-side finding was detected but this run did not gate on it — distinct from `AUDIT_CLEAN` so a reviewer can tell "nothing found" apart from "something found, not gating"), `BUDGET_OVERFLOW`, `EVIDENCE_CONTRACT_ERROR` (ADR-037 D5 — the scan's evidence contract couldn't be satisfied; not a CLI usage error and not an ABI/API break), or `ERROR`. **deps-compare:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps-tree:** `PASS`, `FAIL`, or `ERROR`. |
-| `exit-code` | **compare:** `0` (compatible), `1` (severity error, incomplete contract coverage, incomplete analysis assurance, or — directory/package operands, ADR-065 — an incompletely checked comparison scope under `.abicheck.yml`'s `scope.on_incomplete: block` or no comparison completed at all; the four share the code and are told apart by the report's pre-fold `severity.exit_code`, `contract_coverage_exit_contribution`, `analysis_assurance.status`, and the `exit` block's scope contributions), `2` (API break), `4` (ABI break), `8` (library proven removed, with `fail-on-removed-library` and a proven-complete NEW inventory). Exit `3` (`AUDIT_GATE`) is scan-only, per the verdict row above. **scan:** `0` (compatible/advisory — `AUDIT_CLEAN`/`AUDIT_RISK` for an audit-only run), `1` (with `--against`: severity error, incomplete contract coverage, or incomplete analysis assurance under `require-complete-analysis` — the three share the code and are told apart under `diff` by the pre-fold `severity.exit_code`, `contract_coverage_exit_contribution` and `analysis_assurance.status`), `2` (API break), `3` (`AUDIT_GATE`, audit-only only), `4` (ABI break), `5` (budget overflow), `6` (`NOT_COMPARABLE` — candidate and baseline were not extracted under a comparable profile/scope contract, ADR-050 D2, so no comparison ran), `7` (evidence-contract error, dedicated code as of 2026-09-03). **deps-compare:** `0` (pass), `1` (warn), `4` (fail). **deps-tree:** `0` (ok), `1` (missing). |
+| `verdict` | **compare, two-sided** (single pair or directory/package operands, including `--used-by`/`--required-symbol`-scoped runs): `COMPATIBLE`, `COMPATIBLE_WITH_RISK` (a real, exit-0 tier for a compatible-but-risky change), `SEVERITY_ERROR`, `COVERAGE_INCOMPLETE`, `SCOPE_INCOMPLETE` (directory/package operands only, ADR-065: an unchecked selected member under `.abicheck.yml`'s `scope.on_incomplete: block`, or no comparison completed at all — fails the step unconditionally), `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY` (directory/package operands with `fail-on-removed-library` set, which since ADR-065 requires a proven-complete NEW inventory), or `ERROR`. **compare, audit-only shape** (`old-library`/`abi-baseline` both omitted, ADR-068 D2): `COMPATIBLE_WITH_RISK`/`COVERAGE_INCOMPLETE`/`ERROR` still apply, plus `AUDIT_GATE` (a `BREAKING`/`API_BREAK`-classified finding against the candidate's own public surface while a severity preset other than `info-only` was in effect; ADR-068's 2026-09-10 amendment. This Action injects `severity-preset: default` automatically on an audit-only step that states no preset of its own, so audit-only gating stays on by default the way legacy `mode: scan` always documented — pass `severity-preset: info-only` to opt out. Not a two-sided compatibility verdict: an audit reports no additions/removals/compatibility verdict at all, only its own candidate-side findings; exit code `3`, fails the step unconditionally), `AUDIT_CLEAN` (same audit-only shape, exit `0`, no candidate-side finding at all), `AUDIT_RISK` (same audit-only shape, exit `0`, a candidate-side finding was detected but this run did not gate on it — distinct from `AUDIT_CLEAN` so a reviewer can tell "nothing found" apart from "something found, not gating"). **dump:** `COMPATIBLE` or `ERROR`. **deps-compare:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps-tree:** `PASS`, `FAIL`, or `ERROR`. |
+| `exit-code` | **compare, two-sided:** `0` (compatible), `1` (severity error, incomplete contract coverage, incomplete analysis assurance, or — directory/package operands, ADR-065 — an incompletely checked comparison scope under `.abicheck.yml`'s `scope.on_incomplete: block` or no comparison completed at all; the four share the code and are told apart by the report's pre-fold `severity.exit_code`, `contract_coverage_exit_contribution`, `analysis_assurance.status`, and the `exit` block's scope contributions), `2` (API break), `4` (ABI break), `8` (library proven removed, with `fail-on-removed-library` and a proven-complete NEW inventory). **compare, audit-only shape:** `0` (`AUDIT_CLEAN`/`AUDIT_RISK`), `1` (incomplete contract coverage), `3` (`AUDIT_GATE`), `7` (evidence-contract error, ADR-037 D5). **deps-compare:** `0` (pass), `1` (warn), `4` (fail). **deps-tree:** `0` (ok), `1` (missing). |
 | `report-path` | Path to the generated report file (empty when no output file was produced) |
 
 ## Usage examples
@@ -369,16 +369,58 @@ jobs:
 
 ## Source scans (build & source evidence)
 
-`mode: scan` is the **one-step entry point** for source intelligence: it
+`mode: compare` is the **one-step entry point** for source intelligence: it
 classifies the PR's changed paths, runs the always-on pattern and cross-source
 checks plus the pinned evidence depth (L3 build context / L4 source-ABI replay
-/ L5 source graph), and — with an `against` baseline — compares against it. The full
-CI recipes — pinning `depth`, single-release audit, cost estimation,
-cross-check gating, and the ways to feed build/source evidence into a
-baseline (`dump --sources`, `build-info`, build-emitted packs) — live on
-their own page:
+/ L5 source graph), and — with `old-library`/`abi-baseline` set — compares
+against it. The full CI recipes — pinning `depth`, single-release audit, cost
+estimation, cross-check gating, and the ways to feed build/source evidence
+into a baseline (`dump --sources`, `build-info`, build-emitted packs) — live
+on their own page:
 
 ➡️ **[GitHub Action: Source Scans & Build Evidence](github-action-source-scans.md)**
+
+### Migrating from `mode: scan`
+
+[ADR-068's Action-input-lifecycle amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
+retired `mode: scan` outright — a step setting it now fails immediately,
+before Python setup or any toolchain install, with an `::error::` naming the
+replacement for your own shape. There is no deprecation window (ADR-068 D8).
+`mode: scan` never collapsed to one spelling, so it does not migrate to one
+either:
+
+- **A baseline scan** (`against`/`abi-baseline` was set). Replacement:
+  `mode: compare` with the identical value as `old-library` (or
+  `abi-baseline`, unchanged) and the same `new-library` — the ordinary
+  two-sided shape every example on this page already uses.
+- **An audit-only scan** (no baseline, or `audit: true`). Replacement:
+  `mode: compare` with **both** `old-library` and `abi-baseline` omitted.
+  Omission is the trigger, not a separate flag — this runs a first-class
+  `compare --no-baseline` against `new-library` alone. See
+  [Source Scans § Single-release audit](github-action-source-scans.md#single-release-audit-no-baseline).
+
+**The one required migration step: add `severity-preset` to keep an
+audit-only step gating.** Legacy `mode: scan` with no baseline gated a CI job
+on a `BREAKING`/`API_BREAK`-classified finding **by default, unconditionally,
+no flag needed**. `mode: compare`'s own audit-only shape reproduces the
+identical partition at its own orthogonal exit code, `3`, published as the
+`AUDIT_GATE` verdict — but that axis is **opt-in**, activated only by
+`severity-preset` (any value except `info-only`). If your audit-only
+`mode: scan` step relied on the default gating (i.e. you did not already pass
+`severity-preset: info-only` to opt out), add `severity-preset: default` (or
+`strict`) when you move it to `mode: compare` — without it, the migrated
+step always exits `0`/passes regardless of what the audit finds. A step that
+already set `severity-preset: info-only` needs no change. See the G20-corpus
+verification transcript in the ADR-068 amendment linked above.
+
+Three inputs have no `mode: compare` equivalent and are retired outright,
+with no replacement: `new-library-set` (multi-library audit — compare each
+library individually until ADR-065 S3's component inventories land),
+`risk-rules` (the risk-driven `auto` depth escalation — pin `depth`
+explicitly), and legacy `crosscheck`'s `KEY=error` promotion syntax (every
+cross-source check already reaches `compare` as an ordinary finding; use
+`.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` via `build-config`
+instead).
 
 ## More usage recipes
 

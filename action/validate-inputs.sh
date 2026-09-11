@@ -5,11 +5,11 @@
 # action/install-deps.sh), or `pip install abicheck`.
 #
 # Why this exists: a real integration passed a multi-library release
-# directory as `new-library` to `mode: scan` (and separately to `mode:
-# dump`), and requested `format: sarif` + `upload-sarif: true` on a scan
-# step. Neither combination is supported — scan/dump analyse exactly one
-# artifact (they have no per-library fan-out the way `compare`'s release
-# engine does), and scan only emits text/json — but previously nothing
+# directory as `new-library` to a single-artifact mode (`mode: dump`), and
+# requested `format: sarif` + `upload-sarif: true` on a non-compare step.
+# Neither combination is supported — dump analyses exactly one artifact (it
+# has no per-library fan-out the way `compare`'s release engine does), and
+# a non-compare mode never produces a SARIF report — but previously nothing
 # caught this until well after a multi-minute toolchain install and build,
 # and the unsupported format silently fell back to `text` with only a
 # `::warning::`, so a workflow that thought it was wiring up GitHub Code
@@ -111,6 +111,20 @@ _warn() {
 }
 
 case "$MODE" in
+  scan)
+    # ADR-068's Action-input-lifecycle amendment: `mode: scan` is removed
+    # outright (D8, hard removal, no deprecation window) -- there is no
+    # translation left to perform, only a clear error naming the
+    # replacement for the caller's own shape. Checked here, before Python
+    # setup/toolchain install, same fail-fast rationale as every other
+    # check in this script; run.sh has no `scan` case left at all to fall
+    # back on.
+    if [[ ( -n "${INPUT_AGAINST:-}" || -n "${INPUT_ABI_BASELINE:-}" ) && "${INPUT_AUDIT:-false}" != "true" ]]; then
+      _fail "mode: scan is no longer supported (ADR-068). Replacement for a baseline scan: mode: compare with old-library set to the same baseline (against/abi-baseline both map onto old-library/abi-baseline unchanged), and new-library unchanged."
+    else
+      _fail "mode: scan is no longer supported (ADR-068). Replacement for an audit-only scan (no baseline, or audit: true): mode: compare with old-library and abi-baseline both omitted -- new-library alone runs an audit-only compare --no-baseline. This candidate-side audit no longer gates a CI job on a BREAKING/API_BREAK-classified finding by default the way mode: scan did -- set severity-preset (e.g. 'default') to restore that gating; without it the step always exits 0/passes regardless of what the audit finds."
+    fi
+    ;;
   dump)
     if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
       _fail "mode: dump does not accept a directory or package for new-library ('$NEW_LIBRARY') — dump snapshots exactly one library, it has no per-library fan-out. Dump each library individually (one step per binary, or a matrix), or switch to mode: compare with a directory/package operand, which fans out to a per-library comparison automatically."
@@ -128,67 +142,6 @@ case "$MODE" in
       esac
     fi
     ;;
-  scan)
-    # ADR-068's second 2026-09-09 amendment ruling table, checked here (not
-    # only in run.sh) so a workflow setting a retired input fails before
-    # Python setup, the pixi/toolchain provision and the abicheck install --
-    # the same fail-fast rationale as every other check in this script, and
-    # the drift Codex review caught on PR #1186. run.sh keeps its own copies
-    # for anyone invoking it directly (e.g. tests), exactly like the
-    # operand checks below.
-    if [[ -n "$NEW_LIBRARY_SET" ]]; then
-      _fail "mode: scan no longer supports new-library-set (ADR-068 (b): scan --artifact-set is retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented -- routing it onto compare --no-baseline today would silently narrow those guarantees. Until that lands, run one scan per library."
-    fi
-    if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
-      _fail "mode: scan no longer supports risk-rules (ADR-068 (b): scan --risk-rules and the risk-driven 'auto' depth escalation it fed are retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level this profile used to escalate to."
-    fi
-    if [[ -n "${INPUT_BUILD_TARGET:-}" ]]; then
-      _fail "mode: scan no longer supports build-target (ADR-068 (b): scan --build-target is retired; dump --build-target is unchanged). Narrow a multi-target workspace with mode: dump, or wait for .abicheck.yml's build.targets, which dump's own config-cleanup phase owns."
-    fi
-    if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
-      _fail "mode: scan no longer supports crosscheck (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity; only the KEY=LEVEL syntax itself doesn't survive."
-    fi
-    # No-baseline capability gap (Codex review, PR #1210, round 4): audit-
-    # only mode: scan (no against, or audit: true forcing it regardless of
-    # against) now routes to `compare --no-baseline`, which doesn't
-    # implement revision-range evidence scoping or the wall-clock guard
-    # (ADR-068 D2) -- rejected here, before Python setup and the toolchain
-    # install, the same fail-fast treatment as the four retired inputs
-    # above. A baseline scan (against set, audit not forced) still supports
-    # all three -- see action.yml's own since/changed-path/budget
-    # descriptions for the full account. run.sh keeps its own copy of this
-    # exact check for anyone invoking it directly (e.g. tests).
-    #
-    # `abi-baseline` also counts as "has a baseline" here (Codex review, PR
-    # #1210, round 6): a job that names a release/file via abi-baseline
-    # instead of a direct against still ends up with a real baseline --
-    # run.sh's own later `INPUT_AGAINST="$BASELINE_FILE"` resolution proves
-    # it -- but that resolution runs well after this earlier preflight step
-    # (before the toolchain/dependency install), so `INPUT_AGAINST` alone
-    # reads empty here for that shape even though the job is not audit-only
-    # at all. Checking `INPUT_ABI_BASELINE` too avoids rejecting a
-    # perfectly valid baseline scan as if it were audit-only.
-    if [[ ( -z "${INPUT_AGAINST:-}" && -z "${INPUT_ABI_BASELINE:-}" ) || "${INPUT_AUDIT:-false}" == "true" ]]; then
-      if [[ -n "${INPUT_SINCE:-}" ]]; then
-        _fail "mode: scan without a baseline (against) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports since identically to legacy scan --against, or drop since for this audit-only run."
-      fi
-      if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
-        _fail "mode: scan without a baseline (against) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports changed-path identically to legacy scan --against, or drop changed-path for this audit-only run."
-      fi
-      if [[ -n "${INPUT_BUDGET:-}" ]]; then
-        _fail "mode: scan without a baseline (against) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set against: <baseline> to run a real two-sided comparison, which supports budget identically to legacy scan --against, or drop budget for this audit-only run."
-      fi
-    fi
-    if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
-      _fail "mode: scan does not accept a directory or package for new-library ('$NEW_LIBRARY') — scan analyses exactly one artifact (a binary or a JSON snapshot), it has no per-library fan-out. Point new-library at a single library, or use mode: compare against a directory/package for a multi-library binary comparison."
-    fi
-    # Allowlist, not a denylist: any value other than scan's two real
-    # formats (including a typo like 'xml', not just the known-bad
-    # sarif/html) must be caught here too, not just downstream in the CLI.
-    if [[ -n "$FORMAT" && "$FORMAT" != "text" && "$FORMAT" != "json" ]]; then
-      _fail "mode: scan does not support format: $FORMAT — only 'text' and 'json' are supported. (An unsupported format used to silently fall back to 'text', which is especially misleading paired with upload-sarif: you would get neither an error nor a SARIF report.) Set format to 'text' or 'json', or switch to mode: compare for SARIF output."
-    fi
-    ;;
   deps-tree | deps-compare)
     # `abicheck deps tree`/`deps compare` both take a single BINARY, not a
     # directory/package -- the same per-artifact contract dump/scan have,
@@ -202,6 +155,29 @@ case "$MODE" in
     fi
     ;;
   compare)
+    # Audit-only shape (ADR-068's Action-input-lifecycle amendment; the
+    # replacement for legacy `mode: scan` with no baseline): old-library and
+    # abi-baseline both omitted routes to `compare --no-baseline
+    # new-library`, a one-sided audit against the candidate's own public
+    # surface, reporting no old/new compatibility verdict at all. Checked
+    # here, before Python setup and the toolchain install, the same
+    # fail-fast rationale as every other check in this script -- run.sh
+    # keeps its own copy of this exact check for anyone invoking it
+    # directly (e.g. tests).
+    if [[ -z "$OLD_LIBRARY" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
+      if [[ -n "$NEW_LIBRARY" ]] && _is_release_style_operand "$NEW_LIBRARY"; then
+        _fail "mode: compare's audit-only shape (old-library/abi-baseline both omitted) does not accept a directory or package for new-library ('$NEW_LIBRARY') — an audit-only run analyses exactly one artifact, it has no per-library fan-out. Point new-library at a single library, or set old-library (or abi-baseline) to run a directory/package comparison instead."
+      fi
+      if [[ -n "${INPUT_SINCE:-}" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support since -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --since as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports since, or drop since for this audit-only run."
+      fi
+      if [[ -n "${INPUT_CHANGED_PATH:-}" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support changed-path -- compare --no-baseline does not implement revision-range evidence scoping (ADR-068 D2 rejects --changed-path as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports changed-path, or drop changed-path for this audit-only run."
+      fi
+      if [[ -n "${INPUT_BUDGET:-}" ]]; then
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support budget -- compare --no-baseline's wall-clock guard is not wired to this path yet (ADR-068 D2 rejects --budget as a usage error with no baseline). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports budget, or drop budget for this audit-only run."
+      fi
+    fi
     # compare's full --format choice set is json|markdown|sarif|html|junit|
     # review (`abicheck compare --help-all`); a directory/package operand
     # fans out through the release engine, which narrows that to
@@ -274,7 +250,7 @@ case "$MODE" in
     # install, and pip install would all still run before run.sh's own
     # "Unknown mode" check finally reports it. Mirrors run.sh's message
     # verbatim.
-    _fail "Unknown mode '$MODE'. Use 'compare', 'dump', 'scan', 'deps-tree', or 'deps-compare'."
+    _fail "Unknown mode '$MODE'. Use 'compare', 'dump', 'deps-tree', or 'deps-compare'."
     ;;
 esac
 
@@ -344,11 +320,11 @@ for _i in "${!_scoped_input_names[@]}"; do
   fi
 done
 
-# abi-baseline: compare mode (used as old-library) or scan mode (used as the
-# scan baseline) only.
+# abi-baseline: compare mode (used as old-library, including the audit-only
+# shape's own "have I got a baseline" check) only.
 _ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
-if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
-  _warn "abi-baseline is set but has no effect: it only applies to mode: compare or mode: scan (mode is '$MODE')."
+if [[ -n "$_ABI_BASELINE" && "$MODE" != "compare" ]]; then
+  _warn "abi-baseline is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
 fi
 
 # baseline-profile/baseline-target: the release-contract baseline-set
@@ -368,8 +344,8 @@ _BASELINE_ASSET_NAME_TEMPLATE="${INPUT_BASELINE_ASSET_NAME_TEMPLATE:-}"
 # asked for the baseline-set fallback at all -- including it here warned on
 # every ordinary dump/appcompat/deps-* run (Codex review).
 if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) \
-   && "$MODE" != "compare" && "$MODE" != "scan" ]]; then
-  _warn "baseline-profile/baseline-target/baseline-asset-name-template are set but have no effect: they only apply to mode: compare or mode: scan (mode is '$MODE')."
+   && "$MODE" != "compare" ]]; then
+  _warn "baseline-profile/baseline-target/baseline-asset-name-template are set but have no effect: they only apply to mode: compare (mode is '$MODE')."
 fi
 if [[ -n "$_BASELINE_PROFILE" && -z "$_BASELINE_TARGET" ]]; then
   _fail "baseline-profile is set ('$_BASELINE_PROFILE') but baseline-target is not -- both are required to resolve one target's snapshot from a release-contract baseline-set archive."
@@ -386,42 +362,55 @@ if [[ ( -n "$_BASELINE_PROFILE" || -n "$_BASELINE_TARGET" ) && -z "$_ABI_BASELIN
   _fail "baseline-profile/baseline-target are set but abi-baseline is not -- the release-contract baseline-set fallback is only reached while resolving abi-baseline (a release tag or 'latest-release'), so without it these inputs can never trigger a fetch."
 fi
 
-# public-header-dir: dump and scan modes only (the CLI's own
-# --public-header-dir flag exists on those two subcommands only; compare has
-# no equivalent). run.sh's compare/deps-tree/deps-compare branches never
-# forward it, so a caller setting it there would have the input silently
-# discarded without this warning (Codex review).
+# public-header-dir: dump mode, and compare mode's audit-only (no-baseline)
+# shape only -- the CLI's own --public-header-dir flag exists on `dump`
+# only; a two-sided `compare` has no equivalent (its own -H already derives
+# provenance AND extraction scope from a header root's directory semantics),
+# but the audit-only translation folds it into -H's own union, the same way
+# legacy `scan`'s identical audit-only shape did. run.sh's other branches
+# never forward it, so a caller setting it there would have the input
+# silently discarded without this warning (Codex review).
 _PUBLIC_HEADER_DIR="${INPUT_PUBLIC_HEADER_DIR:-}"
-if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" && "$MODE" != "scan" ]]; then
-  _warn "public-header-dir is set but has no effect: it only applies to mode: dump or mode: scan (mode is '$MODE')."
+_COMPARE_NO_BASELINE=false
+if [[ "$MODE" == "compare" && -z "$OLD_LIBRARY" && -z "${INPUT_ABI_BASELINE:-}" ]]; then
+  _COMPARE_NO_BASELINE=true
+fi
+if [[ -n "$_PUBLIC_HEADER_DIR" && "$MODE" != "dump" \
+   && ! ( "$MODE" == "compare" && "$_COMPARE_NO_BASELINE" == "true" ) ]]; then
+  _warn "public-header-dir is set but has no effect: it only applies to mode: dump, or mode: compare's audit-only (no old-library/abi-baseline) shape (mode is '$MODE')."
 fi
 
-# build-target: dump mode only, same restriction and reasoning as
-# public-header-dir directly above (the CLI's own --build-target flag exists
-# on that subcommand only; compare never had an equivalent, and `scan
-# --build-target` is retired -- ADR-068's second 2026-09-09 amendment, ruling
-# (b), which the scan-mode arm above rejects outright rather than warning
-# about). run.sh's compare/deps-tree/deps-compare branches never forward it
-# (Codex review).
+# build-target: dump mode only (the CLI's own --build-target flag exists on
+# that subcommand only; compare never had an equivalent). run.sh's
+# compare/deps-tree/deps-compare branches never forward it (Codex review).
 _BUILD_TARGET="${INPUT_BUILD_TARGET:-}"
-if [[ -n "$_BUILD_TARGET" && "$MODE" != "dump" && "$MODE" != "scan" ]]; then
+if [[ -n "$_BUILD_TARGET" && "$MODE" != "dump" ]]; then
   _warn "build-target is set but has no effect: it only applies to mode: dump (mode is '$MODE')."
 fi
 
-# new-library-set: retired (ADR-068 (b)). The scan-mode arm above rejects it
-# outright; on any other mode it was always inert, so it stays a warning
-# there rather than failing a workflow the input never affected.
-if [[ -n "$NEW_LIBRARY_SET" && "$MODE" != "scan" ]]; then
-  _warn "new-library-set is set but has no effect: it applied only to mode: scan, where it is now retired (ADR-068 (b): scan --artifact-set is gone, pending ADR-065 S3). Remove it."
+# new-library-set: retired outright (ADR-068 (b): scan --artifact-set is
+# gone, pending ADR-065 S3, and it applied only to the now-removed
+# mode: scan) -- fails on every mode now, not just a scan-mode arm, since
+# there is no longer a mode it could ever have affected.
+if [[ -n "$NEW_LIBRARY_SET" ]]; then
+  _fail "new-library-set is no longer supported (ADR-068 (b): scan --artifact-set, and mode: scan itself, are both retired). Preserving its per-member manifest/coverage accounting needs ADR-065 S3's package component inventories, which are not implemented. Remove new-library-set; compare each library individually, or wait for ADR-065 S3."
 fi
 
 # crosscheck: same shape as new-library-set directly above -- retired
-# (ADR-068 (b)), the scan-mode arm above rejects it outright, and on any
-# other mode it was always inert (crosscheck has never been a `compare`/
-# `dump`/`deps-tree`/`deps-compare` input), so it stays a warning there
-# rather than failing a workflow the input never affected.
-if [[ -n "${INPUT_CROSSCHECK:-}" && "$MODE" != "scan" ]]; then
-  _warn "crosscheck is set but has no effect: it applied only to mode: scan, where it is now retired (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax is retired -- use --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error instead). Remove it."
+# outright (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax, and
+# mode: scan itself, are both gone), and it applied only to the now-removed
+# mode: scan (crosscheck has never been a `compare`/`dump`/`deps-tree`/
+# `deps-compare` input) -- fails on every mode now.
+if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
+  _fail "crosscheck is no longer supported (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax, and mode: scan itself, are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
+fi
+
+# risk-rules: same shape -- retired outright (ADR-068 (b): scan
+# --risk-rules and the risk-driven 'auto' depth escalation it fed, and
+# mode: scan itself, are both gone), and it applied only to the now-removed
+# mode: scan -- fails on every mode now.
+if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
+  _fail "risk-rules is no longer supported (ADR-068 (b): scan --risk-rules, and mode: scan itself, are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
 fi
 
 # Removed inputs, kept registered in action.yml as tombstones and rejected
@@ -454,12 +443,19 @@ if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
 fi
 
-# estimate, audit: deprecated scan-mode-only aliases.
-if [[ "${INPUT_ESTIMATE:-false}" == "true" && "$MODE" != "scan" ]]; then
-  _warn "estimate is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
+# against, estimate, audit: retired outright -- each existed only for the
+# now-removed mode: scan, so none of them can ever do anything on any mode
+# any more. Failing rather than warning names the replacement, matching the
+# "hard removal, no deprecation window" treatment new-library-set/crosscheck/
+# risk-rules got above (ADR-068 D8).
+if [[ -n "${INPUT_AGAINST:-}" ]]; then
+  _fail "against is no longer supported (it applied only to the now-removed mode: scan). Set old-library (or abi-baseline) to the same value under mode: compare instead."
 fi
-if [[ "${INPUT_AUDIT:-false}" == "true" && "$MODE" != "scan" ]]; then
-  _warn "audit is set but has no effect: it only applies to mode: scan (mode is '$MODE')."
+if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+  _fail "estimate is no longer supported (it applied only to the now-removed mode: scan, as a dry-run alias). Set dry-run: 'true' instead, which applies to every mode."
+fi
+if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
+  _fail "audit is no longer supported (it applied only to the now-removed mode: scan, forcing an audit-only run). Under mode: compare, simply omit old-library and abi-baseline to run an audit-only compare --no-baseline; set severity-preset (e.g. 'default') if this job should still gate on a BREAKING/API_BREAK-classified finding the way mode: scan's own audit mode always did."
 fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$MODE" != "compare" ]]; then
@@ -468,15 +464,4 @@ fi
 
 if [[ "$UPLOAD_SARIF" == "true" && "$FORMAT" != "sarif" ]]; then
   _fail "upload-sarif requires format: sarif (got '${FORMAT:-markdown}') — without it there is no SARIF report for the upload-sarif step to find."
-fi
-
-# build-info + compile-db, scan mode: the same conflict `action/run.sh`
-# rejects when it assembles argv, checked here so it fails before Python
-# setup, dependency install and toolchain provisioning -- this script's whole
-# reason for existing (Codex review). Kept scan-only for the same reason
-# run.sh keeps it scan-only: scan is the mode whose behavior changed, having
-# forwarded both operands and preferred compile-db, while compare and dump
-# have always resolved this pair by the documented build-info-wins fallback.
-if [[ "$MODE" == "scan" && -n "${INPUT_BUILD_INFO:-}" && -n "${INPUT_COMPILE_DB:-}" ]]; then
-  _fail "build-info ('${INPUT_BUILD_INFO}') and compile-db ('${INPUT_COMPILE_DB}') are both set for mode: scan, but they now name the same operand -- abicheck's scan --compile-db flag was removed and --build-info accepts a build directory, a compile_commands.json, or a pre-captured pack. scan previously took both and preferred compile-db, so keeping only one silently would change which build context is analyzed. Set exactly one (a compile_commands.json path is a valid build-info value)."
 fi

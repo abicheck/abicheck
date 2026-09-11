@@ -763,6 +763,33 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "mode: scan (the composite GitHub Action input value -- ADR-068's"
+        " Action-input-lifecycle amendment, D8 hard removal: the CLI's own"
+        " `scan` command was already gone, Phase 6 above; setting mode: scan"
+        " on the Action now fails the step outright, naming"
+        " mode: compare/compare --no-baseline as the replacement for the"
+        " caller's own shape)",
+        ("mode: scan",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "contribute/adr/index.md",
+                # Migration guidance for the retired spelling lives on these
+                # pages in their own capacity -- each names "mode: scan"
+                # only to point a reader at its mode: compare replacement.
+                "use/github-action.md",
+                "use/github-action-recipes.md",
+                "use/github-action-source-scans.md",
+                "reference/exit-codes.md",
+                "integration/scenarios/source-replay.md",
+                "integration/scenarios/single-build-audit.md",
+            }
+        ),
+    ),
 )
 
 

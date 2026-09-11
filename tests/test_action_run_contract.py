@@ -306,71 +306,49 @@ def test_every_validate_inputs_var_is_set_by_its_own_step() -> None:
     )
 
 
-class TestRetiredScanInputsAreCheckedBeforeRouteSelection:
-    """A retired input is rejected on every route, not just the legacy one.
+class TestGloballyRetiredInputsAreRejectedBeforeAnyModeDispatch:
+    """A retired input is rejected unconditionally, before the mode
+    if/elif chain even starts, not buried inside one mode's own branch.
 
-    ADR-068's second 2026-09-09 amendment retires four `mode: scan` inputs:
-    three under ruling (b) hard removal (`new-library-set`/`risk-rules`/
-    `build-target`), plus `crosscheck` (also ruling (b), but dropped as
-    superseded -- `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error`
-    is its replacement, not a missing capability). `run.sh` first rejects
-    all four, then decides whether the run dispatches to the legacy `scan`
-    CLI or the translated `compare` one.
-
-    The order is the contract. The rejections originally sat *inside* the
-    routing predicate's own branch, so a scan that qualified for the compare
-    route skipped all of them and silently ignored the retired input instead
-    of erroring (CodeRabbit review, PR #1186). The retirement is a property
-    of the input, not of which CLI the run happens to route onto.
-
-    Stated positionally rather than by executing both routes: the defect was
-    a *placement* one, and a fragment-level behavioural test would have to
-    reconstruct enough of run.sh's routing state to pick a route, which
-    re-encodes the very logic under test. `TestScanRetiredInputsFailPreflight`
-    in `test_action_validate_inputs.py` covers the behaviour on the earlier
-    preflight copy.
+    `new-library-set`/`risk-rules`/`crosscheck` applied only to the now
+    fully-removed `mode: scan` (ADR-068's Action-input-lifecycle amendment,
+    D8 hard removal) -- with that mode gone, none of the three can ever do
+    anything on any mode any more, so `run.sh` rejects all three outright,
+    ahead of the mode dispatch chain. This mirrors the analogous ordering
+    contract from before `mode: scan` was removed (a retired input's
+    rejection must not sit behind a mode-specific branch a workflow might
+    not even reach, CodeRabbit review, PR #1186) -- the specific hazard
+    that motivated the rule has moved from "which internal route a scan
+    took" to "which mode's branch runs at all", but the underlying
+    principle (retirement is a property of the input, not of which branch
+    happens to run) is the same.
     """
 
     _RETIRED = (
         "INPUT_NEW_LIBRARY_SET",
         "INPUT_RISK_RULES",
-        "INPUT_BUILD_TARGET",
         "INPUT_CROSSCHECK",
     )
 
-    def test_each_rejection_precedes_the_route_decision(self) -> None:
-        # ADR-068's 2026-09-10 amendment removed the last routing predicate
-        # (`_SCAN_AUDIT_ONLY_NEEDS_LEGACY_CLI`) entirely -- `mode: scan` now
-        # has exactly one command-assembly branch, which itself decides
-        # between `compare AGAINST ARTIFACT` and `compare --no-baseline
-        # ARTIFACT` (`_SCAN_HAS_BASELINE`). That branch's own header is the
-        # "route decision" this test's contract is really about: a retired
-        # input's rejection must still precede it, so a scan reaching either
-        # shape of that one branch never silently ignores the retired input.
+    def test_each_rejection_precedes_the_mode_dispatch(self) -> None:
         text = RUN_SH.read_text(encoding="utf-8")
-        route = text.index(
-            'elif [[ "$MODE" == "scan" ]]; then\n  # ── Scan mode, routed through'
-        )
+        dispatch = text.index('if [[ "$MODE" == "dump" ]]; then\n  # ── Dump mode')
         for name in self._RETIRED:
             guard = text.find(f'if [[ -n "${{{name}:-}}" ]]; then\n  echo "::error::')
             assert guard != -1, f"{name} has no ::error:: rejection in run.sh at all"
-            assert guard < route, (
-                f"{name}'s rejection sits after run.sh's route selection, so a "
-                f"scan routed onto compare would ignore it -- the exact gap "
-                f"CodeRabbit found on PR #1186."
+            assert guard < dispatch, (
+                f"{name}'s rejection sits after run.sh's mode dispatch chain "
+                f"begins, so a request reaching some mode's own branch "
+                f"could ignore it."
             )
 
-    def test_the_route_decision_still_exists_to_be_ordered_against(self) -> None:
+    def test_the_mode_dispatch_still_exists_to_be_ordered_against(self) -> None:
         """Guard against the ordering assertion passing vacuously.
 
-        If the routing block were renamed or removed, `index` above would
-        raise rather than silently succeed -- but only while this marker is
-        the real one, so pin that it appears exactly once.
+        If the dispatch chain's own opening branch were renamed or moved,
+        `index` above would raise rather than silently succeed -- but only
+        while this marker is the real one, so pin that it appears exactly
+        once.
         """
         text = RUN_SH.read_text(encoding="utf-8")
-        assert (
-            text.count(
-                'elif [[ "$MODE" == "scan" ]]; then\n  # ── Scan mode, routed through'
-            )
-            == 1
-        )
+        assert text.count('if [[ "$MODE" == "dump" ]]; then\n  # ── Dump mode') == 1

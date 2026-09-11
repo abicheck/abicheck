@@ -527,9 +527,10 @@ scheme-independent CI behaviour.
     it: pin the equivalent `compare` invocation instead, and where none
     exists yet, see
     [known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
-    for what is still open. GitHub Action users are insulated — `mode: scan`
-    is translated inside the Action and retires on the Action's own input
-    lifecycle (D8, [ADR-047](../contribute/adr/047-github-actions-integration-model.md)).
+    for what is still open. The GitHub Action's own `mode: scan` input has
+    since been retired outright too — see
+    [ADR-068's Action-input-lifecycle amendment](../contribute/adr/068-one-comparison-product-and-scan-retirement.md#amendment-2026-09-11-the-action-input-lifecycle-mode-scan-retired-outright)
+    and the [migration guide](../use/github-action.md#migrating-from-mode-scan).
 
 The one-shot source-intelligence scan has its own contract (it may compare
 `ARTIFACT` against `--against` and adds a budget guard). `--against` is the

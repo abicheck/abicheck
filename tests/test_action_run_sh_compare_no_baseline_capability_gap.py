@@ -13,39 +13,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Codex review (PR #1210) found three real regressions in the audit-only
-``mode: scan`` -> ``compare --no-baseline`` migration, each a capability an
-existing legacy-``scan``-CLI-backed audit-only workflow relied on:
+"""Coverage for ``compare --no-baseline``'s own capability gaps as wired
+into ``action/run.sh`` -- originally found (Codex review, PR #1210) against
+the now-removed ``mode: scan``'s own translation to ``compare
+--no-baseline``, and now real, first-class behavior of ``mode: compare``'s
+audit-only shape (old-library and abi-baseline both omitted) since
+ADR-068's Action-input-lifecycle amendment retired ``mode: scan`` outright:
 
-- ``since``/``changed-path`` used to be forwarded and *worked* for an
-  audit-only scan (legacy ``scan``'s own audit mode genuinely supports
-  revision-range evidence scoping with no baseline). The migration forwarded
-  them unconditionally to ``compare --no-baseline``, which hard-rejects both
-  as a usage error (ADR-068 D2) -- turning a previously-working workflow
-  into an exit-64 failure.
-- ``budget`` was dropped from the merged command assembly entirely (no
-  ``INPUT_BUDGET`` reference existed anywhere in ``run.sh`` after the
-  merge), silently removing the wall-clock guard from *every* ``mode:
-  scan`` job that set it -- baseline scans included, not just audit-only
-  ones.
-- ``require-complete-analysis`` was forwarded unconditionally too, but
-  ``action.yml`` has always documented it as having "no effect" on an
-  audit-only scan (legacy ``scan``'s own CLI rejected the flag without a
-  baseline, so ``run.sh`` never forwarded it in that shape) -- ``compare
-  --no-baseline`` accepts the flag and gives it real teeth, so a caller
-  who set ``require-complete-analysis: true`` uniformly across baseline and
-  audit-only jobs, trusting the documented no-op, now gets new, undocumented
-  red CI on the audit-only ones.
+- ``since``/``changed-path`` work for a two-sided compare, but
+  ``compare --no-baseline`` hard-rejects both as a usage error (ADR-068 D2)
+  -- forwarding them unconditionally would turn a caller's request into an
+  exit-64 failure deep in the run instead of a clear, upfront explanation.
+- ``budget`` works for a two-sided compare (``compare``'s own ``--budget``
+  guard, exit 5) but is rejected upfront for the audit-only shape, since
+  ``compare --no-baseline``'s wall-clock guard is not wired to that path.
+- ``require-complete-analysis`` -- unlike the two gaps above -- is NOT
+  withheld from the audit-only shape: `compare --no-baseline` accepts the
+  flag and gives it real teeth (an incomplete analysis-assurance
+  candidate-side finding fails the step), so this Action forwards it
+  unconditionally for every single-pair shape, two-sided and audit-only
+  alike.
 
-This module locks down the fix: an audit-only scan (no ``against``) that
-sets ``since``/``changed-path``/``budget`` is rejected upfront with a clear
-``::error::`` (the same "reject, don't silently narrow" treatment as the
-four hard-retired inputs in ``TestRetiredScanInputsAreCheckedBeforeRouteSelection``,
-``test_action_run_contract.py``) instead of reaching ``compare``'s own
-usage error deep in the run; a baseline scan (``against`` set) still
-forwards all three, plus ``require-complete-analysis``, exactly as before;
-and an audit-only scan that does *not* set ``require-complete-analysis``
-is completely unaffected (the common case).
+This module locks down the fix: the audit-only shape (old-library and
+abi-baseline both omitted) setting since/changed-path/budget is rejected
+upfront with a clear ``::error::`` naming the actual gap and its
+replacement (the same "reject, don't silently narrow" treatment as the
+hard-retired inputs in ``test_action_run_contract.py``) instead of reaching
+``compare``'s own usage error deep in the run; a two-sided compare (either
+old-library or abi-baseline set) still forwards all three, plus
+require-complete-analysis; and the audit-only shape forwards
+require-complete-analysis too, since that one is a genuine, working
+capability rather than a documented no-op.
 """
 
 from __future__ import annotations
@@ -97,7 +95,7 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
     base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
     env = {
         **base_env,
-        "INPUT_MODE": "scan",
+        "INPUT_MODE": "compare",
         "INPUT_ADD_JOB_SUMMARY": "false",
         "INPUT_PR_COMMENT": "false",
         "GITHUB_OUTPUT": str(github_output),
@@ -124,9 +122,9 @@ def _run_action(tmp_path: Path, env_extra: dict[str, str]) -> dict[str, object]:
     return outputs
 
 
-class TestAuditOnlyScanRejectsSinceChangedPathBudgetUpfront:
-    """An audit-only scan (no ``against``) setting ``since``/
-    ``changed-path``/``budget`` fails fast with a clear, specific
+class TestAuditOnlyCompareRejectsSinceChangedPathBudgetUpfront:
+    """The audit-only shape (old-library and abi-baseline both omitted)
+    setting since/changed-path/budget fails fast with a clear, specific
     ``::error::`` naming the actual gap -- never a bare Click usage error
     surfaced deep in the run, and never a silent drop."""
 
@@ -140,7 +138,7 @@ class TestAuditOnlyScanRejectsSinceChangedPathBudgetUpfront:
         )
         assert outputs["_returncode"] == 1, outputs
         assert "does not support since" in outputs["_stdout"], outputs
-        assert "against:" in outputs["_stdout"], outputs
+        assert "old-library" in outputs["_stdout"], outputs
 
     def test_changed_path_is_rejected(self, tmp_path: Path) -> None:
         outputs = _run_action(
@@ -165,13 +163,12 @@ class TestAuditOnlyScanRejectsSinceChangedPathBudgetUpfront:
         assert "does not support budget" in outputs["_stdout"], outputs
 
 
-class TestAuditOnlyScanUnaffectedWhenTheseInputsAreUnset:
-    """The common case -- an audit-only scan that never touches since/
-    changed-path/budget/require-complete-analysis -- is unaffected by any
-    of the guards above: it still reaches `compare --no-baseline` and
-    completes normally."""
+class TestAuditOnlyCompareUnaffectedWhenTheseInputsAreUnset:
+    """The common case -- an audit-only compare that never touches since/
+    changed-path/budget -- is unaffected by any of the guards above: it
+    still reaches `compare --no-baseline` and completes normally."""
 
-    def test_plain_audit_only_scan_still_succeeds(self, tmp_path: Path) -> None:
+    def test_plain_audit_only_compare_still_succeeds(self, tmp_path: Path) -> None:
         outputs = _run_action(
             tmp_path,
             {"INPUT_NEW_LIBRARY": str(_snapshot_path(_NON_GATING_CASE))},
@@ -179,17 +176,19 @@ class TestAuditOnlyScanUnaffectedWhenTheseInputsAreUnset:
         assert outputs["_returncode"] == 0, outputs
 
 
-class TestAuditOnlyScanRequireCompleteAnalysisHasNoEffect:
-    """``action.yml`` has always documented ``require-complete-analysis`` as
-    having "no effect" on an audit-only scan. Before this fix, ``compare
-    --no-baseline`` silently gained real teeth for it (an incomplete
-    analysis-assurance candidate-side finding now fails the step) --
-    verified directly against the real CLI in this PR's own investigation.
-    This test proves the *documented* contract holds again: the flag is
-    simply never forwarded for an audit-only shape, so this run's outcome
-    is identical with or without it."""
+class TestAuditOnlyCompareRequireCompleteAnalysisIsForwarded:
+    """Unlike since/changed-path/budget, require-complete-analysis is NOT
+    withheld from the audit-only shape: `compare --no-baseline` accepts the
+    flag and gives it real teeth (an incomplete analysis-assurance
+    candidate-side finding fails the step). This fixture's own stored
+    snapshot carries complete assurance, so setting the flag does not
+    change its outcome here -- this test proves the flag reaches the CLI
+    without erroring (a CLI that rejected it outright would fail this run
+    at exit 64, not agree with the no-flag run), not that the flag is inert
+    in general (`TestAuditOnlyCompareForwardsRequireCompleteAnalysis`
+    below proves it reaches the assembled command line directly)."""
 
-    def test_require_complete_analysis_does_not_change_the_outcome(
+    def test_require_complete_analysis_does_not_error_and_does_not_change_this_fixtures_outcome(
         self, tmp_path: Path
     ) -> None:
         without_flag = _run_action(
@@ -208,12 +207,11 @@ class TestAuditOnlyScanRequireCompleteAnalysisHasNoEffect:
         assert with_flag.get("verdict") == without_flag.get("verdict")
 
 
-# --- Static CMD-assembly checks for the baseline-scan shape ---------------
+# --- Static CMD-assembly checks for the two-sided-compare shape -----------
 #
-# A real baseline-scan end-to-end run needs two real artifacts (a baseline
-# and a candidate) rather than one committed snapshot fixture; the static
-# harness below (mirrors `test_action_run_sh_scan_routing_edge_cases.py`'s
-# own `_run_cmd`) asserts directly on the assembled `CMD` array instead,
+# A real two-sided end-to-end run needs two real artifacts (a baseline and
+# a candidate) rather than one committed snapshot fixture; the static
+# harness below asserts directly on the assembled `CMD` array instead,
 # which needs no real binaries at all.
 
 
@@ -264,13 +262,13 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
 
 
 _BASELINE_INPUTS = {
-    "INPUT_MODE": "scan",
+    "INPUT_MODE": "compare",
     "INPUT_NEW_LIBRARY": "lib.so",
-    "INPUT_AGAINST": "baseline.so",
+    "INPUT_OLD_LIBRARY": "baseline.so",
 }
 
 
-class TestBaselineScanStillForwardsSinceChangedPathBudget:
+class TestTwoSidedCompareStillForwardsSinceChangedPathBudget:
     def test_since_reaches_compare(self) -> None:
         cmd = _run_cmd({**_BASELINE_INPUTS, "INPUT_SINCE": "origin/main"})
         assert "--since" in cmd, cmd
@@ -291,19 +289,24 @@ class TestBaselineScanStillForwardsSinceChangedPathBudget:
         assert "--require-complete-analysis" in cmd, cmd
 
 
-class TestAuditOnlyScanNeverForwardsRequireCompleteAnalysis:
-    def test_flag_is_absent_from_cmd_even_when_input_is_true(self) -> None:
+class TestAuditOnlyCompareForwardsRequireCompleteAnalysis:
+    """`compare --no-baseline` genuinely accepts require-complete-analysis
+    (live-verified against the real CLI), so unlike since/changed-path/
+    budget, this Action forwards it unconditionally for the audit-only
+    shape rather than withholding it."""
+
+    def test_flag_is_present_in_cmd_when_input_is_true(self) -> None:
         cmd = _run_cmd(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "lib.so",
                 "INPUT_REQUIRE_COMPLETE_ANALYSIS": "true",
             }
         )
-        assert "--require-complete-analysis" not in cmd, cmd
+        assert "--require-complete-analysis" in cmd, cmd
 
 
-class TestAuditOnlyScanNeverForwardsBudget:
+class TestAuditOnlyCompareNeverForwardsBudget:
     def test_budget_flag_is_absent_from_cmd(self) -> None:
         # The early-rejection preflight (tested via the real end-to-end
         # harness above) means an audit-only run reaching this point never
@@ -313,7 +316,7 @@ class TestAuditOnlyScanNeverForwardsBudget:
         # through the file, at the mode-branches region).
         cmd = _run_cmd(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "lib.so",
             }
         )
