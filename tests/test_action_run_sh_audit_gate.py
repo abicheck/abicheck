@@ -323,6 +323,31 @@ class TestAuditOnlyScanExitZeroVerdictNeverClaimsCompatible:
         assert outputs.get("verdict") == "AUDIT_GATE", outputs
         assert outputs.get("exit-code") == "3", outputs
 
+
+class TestBaselineScanBudgetOverflowMapsToExitFive:
+    """Codex review, PR #1210, round 10: a baseline `mode: scan` request's
+    own `--budget` forwarding reaches `compare` unchanged (`compare`'s own
+    `--budget` guard exits 5, `cli_compare_fold.py`'s `sys.exit(5)`), but
+    the shared `case $ABICHECK_EXIT` dispatch this Action routes both
+    `compare` and `mode: scan` through had no `5)` arm -- exit 5 fell into
+    the generic `*) VERDICT="ERROR"` case, publishing `ERROR` instead of
+    the documented `BUDGET_OVERFLOW` and skipping the budget-specific job-
+    summary/comment handling `mode: scan` has always used."""
+
+    def test_budget_overflow_reports_budget_overflow_not_error(
+        self, tmp_path: Path
+    ) -> None:
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(_snapshot_path(_GATING_CASE)),
+                "INPUT_AGAINST": str(_snapshot_path(_GATING_CASE)),
+                "INPUT_BUDGET": "0s",
+            },
+        )
+        assert outputs.get("verdict") == "BUDGET_OVERFLOW", outputs
+        assert outputs.get("exit-code") == "5", outputs
+
     def test_fully_suppressed_finding_reports_audit_risk_not_audit_clean(
         self, tmp_path: Path
     ) -> None:

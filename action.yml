@@ -980,7 +980,9 @@ outputs:
       the require-complete-analysis input -- as on compare, the three
       share the code and are told apart the same way, one level down
       under diff),
-      2 (API break), 4 (ABI break), 5 (budget overflow), 6 (not comparable --
+      2 (API break), 3 (AUDIT_GATE -- audit-only only, the audit-gate axis;
+      see the verdict output's own description above), 4 (ABI break),
+      5 (budget overflow), 6 (not comparable --
       candidate/baseline scope or profile mismatch, VERDICT=NOT_COMPARABLE),
       7 (evidence-contract error, ADR-037 D5, VERDICT=EVIDENCE_CONTRACT_ERROR
       -- either a pinned --depth/--source-method whose required source

@@ -4775,6 +4775,24 @@ else
         VERDICT="EVIDENCE_CONTRACT_ERROR"
         echo "::error::abicheck aborted: this run's evidence contract could not be satisfied (ADR-037 D5, exit code 7). This is NOT a CLI usage error and NOT an ABI/API break — see the command's own error message above for the exact cause (e.g. a pinned --depth/--source-method needing source evidence that was never collected)."
         ;;
+      5)
+        # ADR-068 §3 #19's budget-overflow abort (`--budget`,
+        # `cli_compare_fold.py`'s own `sys.exit(5)`): `compare` shares this
+        # exit code with legacy `scan`'s own `--budget` guard. Reachable
+        # here for a baseline `mode: scan` request, whose own `--budget`
+        # forwarding (this file's own compare-command assembly, gated on
+        # `_SCAN_HAS_BASELINE`) reaches `compare` unchanged -- before this
+        # arm existed, exit 5 fell into the generic `*) VERDICT="ERROR"`
+        # case below, publishing `ERROR` instead of the documented
+        # `BUDGET_OVERFLOW` and skipping the budget-specific summary/
+        # comment handling both `mode: scan` verdicts have always used
+        # (Codex review, PR #1210, round 10 -- an audit-only request never
+        # reaches this exit code at all: `compare --no-baseline` rejects
+        # `--budget` outright, and this Action's own preflight rejects the
+        # input upfront for that shape before ever invoking the CLI).
+        VERDICT="BUDGET_OVERFLOW"
+        echo "::warning::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
+        ;;
       8) VERDICT="REMOVED_LIBRARY" ;;
       16) VERDICT="NOT_COMPARABLE" ;;
       *) VERDICT="ERROR" ;;
