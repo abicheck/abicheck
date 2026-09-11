@@ -475,6 +475,65 @@ _ANALYSIS_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="storage.out_of_band_snapshot_reader_envelope_drift",
+        invariant=(
+            "A consumer outside `abicheck/` that hand-parses a snapshot "
+            "document written by `abicheck dump` must answer identically "
+            "for the sectioned envelope and the equivalent flat document. "
+            "Indexing a formerly-top-level key (`build_source`, "
+            "`dump_provenance`, `declarations`, ...) without unwrapping the "
+            "ADR-063 Phase 8 envelope first reads `None` for every real "
+            "dump output, and nothing distinguishes that from the field "
+            "genuinely being absent -- so the failure is silent wherever "
+            "absence is a legitimate answer. The in-tree readers go "
+            "through `snapshot_from_dict`, which accepts either shape; "
+            "only the out-of-band ones can drift, and they drift at the "
+            "moment the envelope changes, not at the moment they are "
+            "written."
+        ),
+        fixed_by=(1225,),
+        seed_tests=("tests/test_snapshot_envelope_out_of_band_readers.py",),
+        public_surfaces=("cli", "github-action"),
+        axes={
+            "encoding": ("flat", "sectioned"),
+            "embedded_layers": ("none", "L3", "L4", "L5", "combinations"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The behavioural half covers the three readers known "
+                    "today and only the `build_source` key in depth; the "
+                    "other keys the envelope moved (`dump_provenance`, "
+                    "`declarations`, `types`, `enums`) are covered by the "
+                    "structural AST scan alone, which proves an unwrap is "
+                    "*mentioned* in the reading function, not that it is "
+                    "applied to the right value on every path. A reader "
+                    "that unwraps one document and then indexes a second, "
+                    "un-unwrapped one in the same function passes the scan. "
+                    "The scan is also function-local: a reader that indexes "
+                    "a moved key on a dict some *other* helper loaded is not "
+                    "flagged, correctly when that helper unwraps (as "
+                    "`tests/_snapshot_document_reader.py` does) and silently "
+                    "when it does not."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+            KnownGap(
+                description=(
+                    "The scan covers `actions/`, `contrib/`, `scripts/`, "
+                    "`validation/` and `tests/` -- first-party trees only. "
+                    "A downstream consumer (a user's CI script, a "
+                    "third-party integration) reading `build_source` off a "
+                    "dump-written baseline has the identical bug and "
+                    "nothing here can see it; the durable fix for that "
+                    "population is a documented, supported reader entry "
+                    "point rather than a scan."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-7",
+            ),
+        ),
+    ),
+    BugClass(
         id="registry.kind_completeness",
         invariant=(
             "Every declared ChangeKind/evidence-kind/provider is accounted "

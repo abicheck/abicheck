@@ -970,33 +970,17 @@ def _collect_build_source_evidence(
     return results[0], results[1], None
 
 
-def _embedded_present_layers(snap_path: Path) -> set[str]:
-    """Short tags (``L3``/``L4``/``L5``) for layers the dumped snapshot's embedded
-    build_source actually carries with ``present`` coverage.
-
-    Directory/flag presence is not enough: ``dump --sources`` degrades to a
-    partial/empty surface (exit 0) when the source-replay front-end is missing or
-    no TU parses, so the inline opt-ins must be confirmed from the *real* embedded
-    coverage rather than assumed (Codex). Pure JSON parsing — no abicheck import —
-    so it stays unit-testable and robust to a hand-edited snapshot.
-    """
-    layer_tags = {"L3_build": "L3", "L4_source_abi": "L4", "L5_source_graph": "L5"}
-    try:
-        data = json.loads(snap_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
-    pack = data.get("build_source")
-    if not isinstance(pack, dict):
-        return set()
-    coverage = (pack.get("manifest") or {}).get("coverage") or []
-    present: set[str] = set()
-    for row in coverage:
-        if not isinstance(row, dict):
-            continue
-        tag = layer_tags.get(str(row.get("layer", "")))
-        if tag and str(row.get("status", "")) == "present":
-            present.add(tag)
-    return present
+# `_embedded_present_layers` moved to `tests/_snapshot_document_reader.py`
+# (architecture no-growth baseline; the responsibility moved, not the lines).
+# Re-exported under its original private name so existing callers and
+# `test_validate_examples_unit.py` keep importing it from here. The move is
+# load-bearing, not cosmetic: the extracted reader unwraps the ADR-063 Phase 8
+# sectioned envelope, which this function did not, so it read `None` for every
+# real dump-written snapshot. Bug class
+# `storage.out_of_band_snapshot_reader_envelope_drift`.
+from ._snapshot_document_reader import (  # noqa: E402
+    embedded_present_layers as _embedded_present_layers,
+)
 
 
 def _source_layers_for_result(
