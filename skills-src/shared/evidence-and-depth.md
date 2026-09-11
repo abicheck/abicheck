@@ -30,7 +30,7 @@ The full mental model, including what each transition buys in false-positive
 and false-negative terms, is owned by
 [the evidence and detectability page](../../docs/learn/evidence-and-detectability.md);
 the practical flag-choice guide is
-[scan levels](../../docs/use/scan-levels.md), and a level-by-level worked
+[evidence depth](../../docs/use/evidence-depth.md), and a level-by-level worked
 example is [what each level sees](../../docs/learn/what-each-level-sees.md).
 
 ## Reading the depth actually achieved

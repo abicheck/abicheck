@@ -37,8 +37,6 @@ Ways to obtain a baseline side:
 - a stored snapshot: `abicheck dump old/libfoo.so -o baseline.abi.json`,
   later `abicheck compare baseline.abi.json new/libfoo.so`
 - the released binary itself: `abicheck compare old/libfoo.so new/libfoo.so`
-- for a single artifact against a stored baseline:
-  `abicheck scan libfoo.so --against baseline.abi.json`
 
 Baseline storage, refresh cadence, and CI publication are owned by
 [the baseline management page](../../docs/use/baseline-management.md).
