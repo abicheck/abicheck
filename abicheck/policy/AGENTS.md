@@ -139,7 +139,6 @@ or a CLI flag directly is in the wrong layer.
   `--old/new-build-info` pack, not a snapshot's embedded payload) —
   `cli_compare_helpers.run_compare` is the one caller, since that pack never
   lives on the snapshot object `project_snapshot_to_depth` projects.
-
 ## Conventions
 
 - Every module starts with `from __future__ import annotations`.

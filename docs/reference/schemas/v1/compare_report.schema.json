@@ -1761,6 +1761,11 @@
         "l3_context_status": {
           "type": "string"
         },
+        "schema_staleness_status": {
+          "type": "string",
+          "enum": ["clean", "degraded"],
+          "description": "Schema 4.1: whether either compared snapshot carries a *_facts_reliable flag stale enough to matter for THIS pair, per policy.analysis_assurance_schema_staleness.schema_staleness_status -- pair-aware: a stale flag whose one real consumer's own gate (header confirmation and/or matching producer on the OTHER side) never actually runs for this pair is excluded rather than reported."
+        },
         "fact_set_comparability": {
           "type": "string"
         },

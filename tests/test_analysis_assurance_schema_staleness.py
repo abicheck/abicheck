@@ -1,0 +1,970 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""``analysis_assurance.schema_staleness_status`` -- split out of
+``test_analysis_assurance.py`` (which was already at the file-size hard cap;
+see root ``AGENTS.md``'s "Files that are large" / "add a sibling module"
+guidance) rather than folded into it.
+
+A snapshot carrying facts ``policy.analysis_assurance_degraded_facts.
+degraded_reliability_facts`` marks stale used to load with only a
+stderr-only ``UserWarning`` -- invisible to any JSON consumer of
+``run_outcome.analysis_assurance``, which still read ``status="complete"``
+for a comparison some detector had just declined to fully trust. See
+``policy/analysis_assurance_degraded_facts.py``'s and ``analysis_assurance.
+_schema_staleness_status``'s own docstrings for the full account.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from abicheck import checker
+from abicheck.analysis_assurance import AnalysisAssurance
+from abicheck.fact_provenance import func_fact_key
+from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.policy.analysis_assurance_degraded_facts import (
+    degraded_reliability_facts,
+)
+from abicheck.serialization import snapshot_from_dict
+
+
+def _fn(name: str, mangled: str) -> Function:
+    return Function(
+        name=name, mangled=mangled, return_type="int", visibility=Visibility.PUBLIC
+    )
+
+
+def _header_pair() -> tuple[AbiSnapshot, AbiSnapshot]:
+    """A real, header-scoped, unchanged pair -- mirrors
+    ``test_analysis_assurance.py``'s own helper of the same name/shape."""
+    common = {"library": "libfoo.so.1", "from_headers": True}
+    fns = [_fn("pub_a", "_Z5pub_av")]
+    return (
+        AbiSnapshot(version="1.0", functions=fns, **common),
+        AbiSnapshot(version="2.0", functions=fns, **common),
+    )
+
+
+class TestSchemaStalenessStatus:
+    #: Which extra ``AbiSnapshot`` kwargs make each flag's one real consumer
+    #: actually *consult* it, mirroring ``degraded_reliability_facts``'s own
+    #: consultation table (``policy/analysis_assurance_degraded_facts.py``)
+    #: -- three flags are consulted unconditionally, the rest need confirmed
+    #: header awareness (and, for two of them, one exact ``ast_producer``).
+    #: ``clang_deprecation_facts_reliable`` ALSO needs a real ``ast_producer``
+    #: here (round 8): this dict is shared verbatim by both ``old`` (with the
+    #: flag forced False) and ``new`` (this generalized test's minimal-diff
+    #: partner) below. The pair-aware gate
+    #: (``_other_side_supports_known_producer_comparison``) only requires
+    #: ``new`` to be confirmed header-aware -- plus, when ``new.ast_producer
+    #: == "hybrid"``, a recorded per-declaration deprecation provenance entry
+    #: (round 10 removed the earlier, stricter "known, non-degraded producer"
+    #: requirement as backwards). An unset ``ast_producer`` (this dict's
+    #: previous shape) makes ``new`` look like a legacy pre-provenance
+    #: snapshot -- still confirmed header-aware, so it still taints
+    #: (see ``test_deprecation_flag_still_taints_with_unknown_other_side_producer``).
+    _CONSULTED_KWARGS: dict[str, dict[str, object]] = {
+        "header_cv_facts_reliable": {},
+        "clang_deprecation_facts_reliable": {
+            "from_headers": True,
+            "ast_producer": "clang",
+        },
+        "clang_field_initializer_facts_reliable": {"from_headers": True},
+        "clang_vtable_facts_reliable": {},
+        "clang_restrict_facts_reliable": {"from_headers": True},
+        "clang_va_list_facts_reliable": {
+            "from_headers": True,
+            "ast_producer": "clang",
+        },
+        "castxml_var_access_facts_reliable": {
+            "from_headers": True,
+            "ast_producer": "castxml",
+        },
+        "param_kind_facts_reliable": {},
+    }
+
+    def test_v4_fixture_with_degraded_schema_reports_non_complete_status(
+        self,
+    ) -> None:
+        """Item 4's exact regression shape: round-trip-load a
+        schema-version-predating-current snapshot (mirrors
+        ``test_schema_compat.py``'s own fixture-degradation tests) through
+        ``compute_analysis_assurance`` and assert the reported status is no
+        longer honestly ``"complete"``, with the stale field named in
+        ``notes``."""
+        fixtures_dir = Path(__file__).parent / "fixtures" / "schema"
+        d = json.loads((fixtures_dir / "v4.json").read_text())
+        d["schema_version"] = 9
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        old = snapshot_from_dict(d)
+        new = snapshot_from_dict(d)
+        assert old.clang_restrict_facts_reliable is False
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert isinstance(aa, AnalysisAssurance)
+        assert aa.schema_staleness_status == "degraded"
+        assert aa.status != "complete"
+        # Named as clang_restrict_facts_reliable, not clang_deprecation_
+        # facts_reliable: both old and new are loaded from the SAME dict, so
+        # both are confirmed-header "clang" producers -- and round 10
+        # reversed the earlier (round 8) belief that a degraded producer on
+        # the OTHER side excludes deprecation too. Both flags ARE real,
+        # taintable degradations for this pair (see
+        # test_deprecation_flag_still_taints_when_other_side_is_itself_
+        # degraded_clang below); this assertion only pins that restrict is
+        # named among the notes, not that deprecation is absent from them.
+        assert any("clang_restrict_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_v4_fixture_roundtrip_reports_the_same_compatibility_result(
+        self,
+    ) -> None:
+        """Item 5: this fix must only change ``assurance.status``/
+        ``coverage_warnings``, never a verdict or finding (ADR-028 D3: L3+
+        evidence narrows confidence, never deletes/fabricates a
+        compatibility fact). The same v25-on-disk-vs-freshly-written v45
+        shape (self-comparison of an identical, schema-degraded snapshot)
+        must keep reporting 0 breaking / 0 ``func_params_changed`` changes."""
+        fixtures_dir = Path(__file__).parent / "fixtures" / "schema"
+        d = json.loads((fixtures_dir / "v4.json").read_text())
+        d["schema_version"] = 25
+        d["from_headers"] = True
+        d["ast_producer"] = "clang"
+        old = snapshot_from_dict(d)
+        new = snapshot_from_dict(d)
+        assert degraded_reliability_facts(old)  # this fixture is degraded
+
+        result = checker.compare(old, new)
+        assert result.analysis_assurance.schema_staleness_status == "degraded"
+        assert not result.changes, result.changes
+        assert not any(c.kind.value == "func_params_changed" for c in result.changes), (
+            result.changes
+        )
+
+    def test_clean_pair_reports_clean_schema_staleness(self) -> None:
+        old, new = _header_pair()
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert aa.status == "complete"
+
+    def test_one_sided_degraded_fact_is_enough_to_taint_the_pair(self) -> None:
+        """A single side's stale fact already means the affected
+        detector(s) declined to trust it for this comparison -- unlike the
+        other context-status axes, there is no "both sides must agree"
+        symmetry requirement here."""
+        old, new = _header_pair()
+        old.param_kind_facts_reliable = False
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert aa.status != "complete"
+        assert any(
+            "old snapshot" in n and "param_kind_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+
+    def test_new_side_alone_degraded_is_enough_to_taint_the_pair(self) -> None:
+        """The mirror of the case above: the *new* side being the one with
+        the stale fact (old clean) must taint the status too -- notes must
+        name it as the new snapshot's own, not silently fold into the old
+        snapshot's note or get skipped because old_degraded is empty."""
+        old, new = _header_pair()
+        new.param_kind_facts_reliable = False
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert aa.status != "complete"
+        assert any(
+            "new snapshot" in n and "param_kind_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+        assert not any("old snapshot" in n for n in aa.notes), aa.notes
+
+    def test_every_degraded_reliability_flag_taints_the_reported_status(self) -> None:
+        """Generalized regression, not just the one ``param_kind_facts_
+        reliable``/``clang_deprecation_facts_reliable`` fixtures above: ANY
+        ``AbiSnapshot`` with a consulted ``*_facts_reliable`` flag set False
+        -- current schema version, hand-constructed, no fixture load
+        involved at all -- must produce a non-``"complete"`` status and name
+        that exact flag in ``notes``. This is the shape the underlying bug
+        report named explicitly: a *mechanism*, not a single input, must
+        stay covered so a sibling flag/producer combination can't silently
+        reopen the same gap ``param_kind_facts_reliable`` closed."""
+        for flag_name, extra_kwargs in self._CONSULTED_KWARGS.items():
+            common = {"library": "libfoo.so.1", **extra_kwargs}
+            fns = [_fn("pub_a", "_Z5pub_av")]
+            old = AbiSnapshot(
+                version="1.0", functions=fns, **{flag_name: False}, **common
+            )
+            new = AbiSnapshot(version="2.0", functions=fns, **common)
+            assert degraded_reliability_facts(old) == [flag_name], flag_name
+
+            result = checker.compare(old, new)
+            aa = result.analysis_assurance
+            assert aa.schema_staleness_status == "degraded", flag_name
+            assert aa.status != "complete", flag_name
+            assert any(flag_name in n for n in aa.notes), (flag_name, aa.notes)
+
+    def test_hybrid_producer_exempt_flags_never_taint_status(self) -> None:
+        """The mirror case: ``clang_va_list_facts_reliable``/
+        ``castxml_var_access_facts_reliable`` are False for a "hybrid"
+        producer by construction (correct for the fact's own provenance),
+        but neither flag's one real consumer ever reads it for "hybrid" --
+        so it must not taint the reported status either, the same
+        ``test_older_version_silent_for_hybrid_producer_flags_no_detector_
+        reads`` shape ``test_schema_compat.py`` already covers for the
+        load-time warning."""
+        common = {
+            "library": "libfoo.so.1",
+            "from_headers": True,
+            "ast_producer": "hybrid",
+        }
+        fns = [_fn("pub_a", "_Z5pub_av")]
+        old = AbiSnapshot(
+            version="1.0",
+            functions=fns,
+            clang_va_list_facts_reliable=False,
+            castxml_var_access_facts_reliable=False,
+            **common,
+        )
+        new = AbiSnapshot(version="2.0", functions=fns, **common)
+        assert degraded_reliability_facts(old) == []
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+
+    def test_mixed_producer_pair_never_taints_on_the_pair_gated_flags(self) -> None:
+        """Codex review, PR #1209: ``clang_va_list_facts_reliable``/
+        ``castxml_var_access_facts_reliable``'s one real consumer
+        (``diff_symbols._diff_param_va_list``/``_diff_var_access``) exits at
+        its own both-sides-exact-producer gate -- so a degraded, confirmed-
+        header "clang" old side paired with a "castxml" new side means that
+        detector never even runs for this pair, and regenerating the stale
+        side could not enable it. The single-snapshot ``degraded_
+        reliability_facts(old)`` alone cannot see this (it only knows
+        old's own producer), so ``schema_staleness_status`` must narrow it
+        pair-aware rather than report a false ``"degraded"``."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_va_list_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="castxml",
+        )
+        # Single-snapshot: old alone still reports it (it doesn't know new's
+        # producer) -- the pair-aware narrowing lives in schema_staleness_
+        # status, not in degraded_reliability_facts itself.
+        assert degraded_reliability_facts(old) == ["clang_va_list_facts_reliable"]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_same_producer_pair_still_taints_the_pair_gated_flags(self) -> None:
+        """The mirror of the case above: when BOTH sides really are
+        "clang", the detector's gate is satisfied and a degraded flag on
+        either side must still taint the status -- the pair-aware
+        narrowing must not over-exempt."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_va_list_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_other_side_only_inferred_header_awareness_never_taints(self) -> None:
+        """Codex review, PR #1209 round 5: the other side matching the
+        exact producer is not enough on its own -- ``_diff_param_va_list``
+        also requires ``_both_header_aware`` (confirmed, non-inferred
+        header awareness on BOTH sides). An ``other`` side that is
+        ``ast_producer == "clang"`` but only ever had its ``from_headers``
+        *inferred* (``from_headers_inferred=True`` -- a legacy pre-explicit-
+        key snapshot) still fails that gate, so the detector never runs for
+        this pair either, the same as a producer mismatch."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_va_list_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        new.from_headers_inferred = True
+        assert degraded_reliability_facts(old) == ["clang_va_list_facts_reliable"]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
+
+    #: ``clang_restrict_facts_reliable``/``clang_deprecation_facts_
+    #: reliable`` -- unlike :data:`_PAIR_PRODUCER_GATED_FLAGS`'s two
+    #: members, each one's real consumer (``diff_symbols._diff_param_
+    #: restrict``/``_diff_func_deprecated``) requires BOTH sides confirmed
+    #: header-aware but places no further requirement on the OTHER side's
+    #: producer -- documented as cross-producer-safe once both sides are
+    #: header-confirmed. NOTE (round 8, reversed round 10): a producer-aware
+    #: narrowing was briefly added on top of this shared header-confirmation
+    #: shape for ``clang_deprecation_facts_reliable`` (excluding it whenever
+    #: the OTHER side's own producer was unknown or itself degraded) and
+    #: found backwards -- regenerating the OTHER side would fix that too, so
+    #: it isn't a permanent exclusion reason (see
+    #: ``test_deprecation_flag_still_taints_with_unknown_other_side_producer``/
+    #: ``test_deprecation_flag_still_taints_when_other_side_is_itself_
+    #: degraded_clang`` below). ``clang_deprecation_facts_reliable`` stays in
+    #: this list, gated only by ``_other_side_supports_known_producer_
+    #: comparison``'s header-confirmation (plus hybrid-provenance) check,
+    #: same as restrict. NOTE (round 11):
+    #: ``clang_field_initializer_facts_reliable`` moved OUT of this list --
+    #: unlike restrict/deprecation, its real consumers DO require a
+    #: producer MATCH (same shape as va_list/var_access) -- see
+    #: ``TestFieldInitializerSameProducerGating`` below.
+    _HEADER_ONLY_GATED_FLAGS: tuple[str, ...] = (
+        "clang_restrict_facts_reliable",
+        "clang_deprecation_facts_reliable",
+    )
+
+    def test_other_side_confirmed_header_aware_taints_header_only_gated_flags(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 7: the mirror of the producer-gated
+        flags' own "same producer still taints" case, generalized to both
+        header-only-gated flags. When ``other`` is confirmed header-
+        aware (any producer -- these two detectors are cross-producer-safe
+        once both sides clear ``_both_header_aware``), a degraded flag on
+        the OTHER side must still taint the reported status."""
+        for flag_name in self._HEADER_ONLY_GATED_FLAGS:
+            old = AbiSnapshot(
+                version="1.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="clang",
+                **{flag_name: False},
+            )
+            new = AbiSnapshot(
+                version="2.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="castxml",  # deliberately mismatched producer
+            )
+            assert degraded_reliability_facts(old) == [flag_name], flag_name
+
+            result = checker.compare(old, new)
+            aa = result.analysis_assurance
+            assert aa.schema_staleness_status == "degraded", flag_name
+            assert any(flag_name in n for n in aa.notes), (flag_name, aa.notes)
+
+    def test_other_side_only_inferred_header_awareness_never_taints_header_only_gated_flags(
+        self,
+    ) -> None:
+        """The other half of round 7's fresh evidence: an ``other`` side
+        that is confirmed header-aware on paper but only ever had its
+        ``from_headers`` *inferred* still fails ``_both_header_aware``, so
+        each of these two detectors never runs for this pair -- the
+        degraded flag must not taint the reported status, the identical
+        shape :func:`test_other_side_only_inferred_header_awareness_never_
+        taints` already covers for the producer-gated flags."""
+        for flag_name in self._HEADER_ONLY_GATED_FLAGS:
+            old = AbiSnapshot(
+                version="1.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="clang",
+                **{flag_name: False},
+            )
+            new = AbiSnapshot(
+                version="2.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer="clang",
+            )
+            new.from_headers_inferred = True
+            assert degraded_reliability_facts(old) == [flag_name], flag_name
+
+            result = checker.compare(old, new)
+            aa = result.analysis_assurance
+            assert aa.schema_staleness_status == "clean", flag_name
+            assert not any(flag_name in n for n in aa.notes), (flag_name, aa.notes)
+
+    def test_deprecation_flag_still_taints_with_unknown_other_side_producer(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 10, fresh evidence -- reverses this
+        module's own round-8 reply. ``fact_provenance.fact_producer(new,
+        ...)`` does resolve ``None`` when ``new``'s own ``ast_producer``
+        isn't positively known (a legacy snapshot that predates provenance
+        tracking, even though it's otherwise confirmed header-aware), so
+        THIS pair's deprecation detector can't run right now -- but that is
+        itself just another schema-vintage-degraded fact, not a permanent
+        incompatibility: regenerating ``new`` (not just ``old``) WOULD
+        restore detection. Reporting "clean" here would silently hide a
+        real, larger evidence gap (round 8's mistake) rather than surface
+        it, which is exactly backwards for what this status exists to do."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            # ast_producer left unset: confirmed header-aware, but no
+            # positively known producer -- fact_producer(new, ...) always
+            # resolves None regardless, so the detector never runs FOR
+            # THIS PAIR right now. Still a real, regeneratable gap.
+        )
+        assert degraded_reliability_facts(old) == ["clang_deprecation_facts_reliable"]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_deprecation_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_deprecation_flag_still_taints_when_other_side_is_itself_degraded_clang(
+        self,
+    ) -> None:
+        """The mirror case round 10 also corrects: a pair where BOTH sides
+        are degraded, confirmed-header "clang" producers must still report
+        "degraded" -- the round-8 reasoning ("no comparison can structurally
+        run for either side's sake, so this would be a spurious signal") was
+        wrong. It IS a real, larger evidence gap: regenerating EITHER (or
+        both) stale side(s) with the current abicheck would restore
+        detection, and silently reporting "clean" would let a genuine
+        deprecated-attribute change between two pre-v19 snapshots go
+        undetected while ``--require-complete-analysis`` still succeeds."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        assert degraded_reliability_facts(old) == ["clang_deprecation_facts_reliable"]
+        assert degraded_reliability_facts(new) == ["clang_deprecation_facts_reliable"]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any(
+            "old snapshot" in n and "clang_deprecation_facts_reliable" in n
+            for n in aa.notes
+        ), aa.notes
+        assert any(
+            "new snapshot" in n and "clang_deprecation_facts_reliable" in n
+            for n in aa.notes
+        ), aa.notes
+
+    def test_deprecation_flag_still_taints_with_known_other_side_producer(
+        self,
+    ) -> None:
+        """The positive mirror: an ``other`` side that IS confirmed
+        header-aware, with a castxml or clang producer (deprecated/
+        is_scoped are cross-comparable, so no producer MATCH is required --
+        round 10 further dropped the "and the producer must be KNOWN"
+        requirement entirely, see :func:`_other_side_supports_known_
+        producer_comparison`'s own docstring), must still taint the status
+        -- the narrowing above must not over-exempt a pair where the
+        detector genuinely does run. "hybrid" is covered separately (round
+        9: a hybrid producer alone is not enough -- see
+        ``test_deprecation_flag_still_taints_with_hybrid_other_side_when_
+        provenance_recorded``/``test_deprecation_flag_never_taints_with_
+        hybrid_other_side_when_no_provenance_recorded``)."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        for other_producer in ("castxml", "clang"):
+            new = AbiSnapshot(
+                version="2.0",
+                library="libfoo.so.1",
+                functions=[_fn("pub_a", "_Z5pub_av")],
+                from_headers=True,
+                ast_producer=other_producer,
+            )
+            result = checker.compare(old, new)
+            aa = result.analysis_assurance
+            assert aa.schema_staleness_status == "degraded", other_producer
+            assert any("clang_deprecation_facts_reliable" in n for n in aa.notes), (
+                other_producer,
+                aa.notes,
+            )
+
+    def test_deprecation_flag_still_taints_with_hybrid_other_side_when_provenance_recorded(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 9, fresh evidence: a "hybrid"
+        producer alone is not enough -- ``fact_provenance.fact_producer``'s
+        hybrid branch is a per-declaration ``fact_provenance.get(key)``
+        lookup, not a whole-snapshot guarantee. When the other side's
+        ``fact_provenance`` DOES carry a real entry for a ``:deprecated``/
+        ``:is_scoped`` key, the detector genuinely can run and the flag must
+        still taint."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+            fact_provenance={func_fact_key("_Z5pub_av", "deprecated"): "clang"},
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_deprecation_facts_reliable" in n for n in aa.notes), aa.notes
+
+    def test_deprecation_flag_never_taints_with_hybrid_other_side_when_no_provenance_recorded(
+        self,
+    ) -> None:
+        """The mirror: a "hybrid" other side whose ``fact_provenance`` never
+        recorded ANY ``:deprecated``/``:is_scoped`` entry means ``fact_
+        producer(other, ...)`` resolves ``None`` for every declaration, so
+        the detector never runs for this pair at all -- reporting
+        "degraded" here would be the same spurious-signal shape round 8's
+        both-sides-degraded-clang case already covers, not a merely
+        conservative one."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_deprecation_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+            # No fact_provenance entries at all -- unlike the case above.
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("clang_deprecation_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
+
+    def test_param_kind_flag_excluded_after_depth_projection_clears_params(
+        self,
+    ) -> None:
+        """Codex review, PR #1209 round 9, fresh evidence: disproves this
+        module's own earlier (round 4) reply, which claimed ``param_kind_
+        facts_reliable`` "stays fully relevant... intact, just demoted to
+        ELF_ONLY" after ``--depth binary`` projection. A non-DWARF-sourced
+        projection (``policy.depth_projection._strip_header_and_above_
+        evidence``) clears every surviving function's ``params`` to ``[]``
+        entirely and sets ``elf_only_mode`` -- exactly ``diff_symbols._is_
+        stripped_symbols_only``'s own trigger condition, which short-
+        circuits ``_check_params_change`` (the sole reader of ``Param.
+        kind_fact``) before it is ever reached. Goes through the real,
+        public ``policy.depth_projection.project_snapshot_to_depth`` entry
+        point rather than hand-simulating the projection."""
+        from abicheck.model import Param, ParamKind
+        from abicheck.policy.depth_projection import project_snapshot_to_depth
+
+        fn = Function(
+            name="pub_a",
+            mangled="_Z5pub_avPi",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            params=[
+                Param(name="p", type="int*", kind=ParamKind.POINTER, pointer_depth=1)
+            ],
+        )
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            from_headers=True,
+            ast_producer="clang",
+            param_kind_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            from_headers=True,
+            ast_producer="clang",
+        )
+
+        # Baseline, unprojected: the flag genuinely matters.
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("param_kind_facts_reliable" in n for n in aa.notes), aa.notes
+
+        # Projected to --depth binary (non-DWARF-sourced, confirmed by
+        # reading the real projected shape below): params cleared, the flag
+        # can no longer matter.
+        old_projected = project_snapshot_to_depth(old, "binary")
+        new_projected = project_snapshot_to_depth(new, "binary")
+        assert old_projected.functions[0].params == []
+        assert old_projected.elf_only_mode is True
+
+        result2 = checker.compare(old_projected, new_projected)
+        aa2 = result2.analysis_assurance
+        assert aa2.schema_staleness_status == "clean"
+        assert not any("param_kind_facts_reliable" in n for n in aa2.notes), aa2.notes
+
+    def test_param_kind_flag_still_taints_when_not_actually_stripped(self) -> None:
+        """The negative mirror of the fix above:
+        :func:`_side_is_stripped_symbols_only`'s own two early-return
+        branches (surviving ``types``/``enums``/``typedefs``, or raw
+        ``dwarf.structs``/``.enums``) must each keep the pair from being
+        misclassified as "stripped" -- a snapshot that still carries
+        type-level evidence never triggers ``diff_symbols._is_stripped_
+        symbols_only``'s own gate, so ``param_kind_facts_reliable`` must
+        still taint."""
+        from abicheck.model import Param, ParamKind, RecordType
+        from abicheck.model.dwarf_facts import DwarfMetadata, StructLayout
+
+        fn = Function(
+            name="pub_a",
+            mangled="_Z5pub_avPi",
+            return_type="void",
+            visibility=Visibility.PUBLIC,
+            params=[
+                Param(name="p", type="int*", kind=ParamKind.POINTER, pointer_depth=1)
+            ],
+        )
+
+        # Branch 1: elf_only_mode set, but the model `types` list survives
+        # -- diff_symbols._is_stripped_symbols_only's own FIRST early
+        # return.
+        old_types_leftover = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            param_kind_facts_reliable=False,
+            types=[RecordType(name="S", kind="struct")],
+        )
+        new_types_leftover = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            # `new` must ALSO clear _is_stripped_symbols_only's own OR
+            # condition (checked on both sides) -- otherwise `new` alone
+            # being genuinely stripped would make params_unconfirmed=True
+            # regardless of `old`'s own real type evidence.
+            types=[RecordType(name="S", kind="struct")],
+        )
+        result = checker.compare(old_types_leftover, new_types_leftover)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("param_kind_facts_reliable" in n for n in aa.notes), aa.notes
+
+        # Branch 2: elf_only_mode set, model `types` empty, but a real raw
+        # DWARF struct/enum survives -- the SECOND early return (checked
+        # via `dwarf.structs`/`.enums` directly).
+        old_dwarf_leftover = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            param_kind_facts_reliable=False,
+            dwarf=DwarfMetadata(structs={"S": StructLayout(name="S", byte_size=4)}),
+        )
+        new_dwarf_leftover = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[fn],
+            elf_only_mode=True,
+            dwarf=DwarfMetadata(structs={"S": StructLayout(name="S", byte_size=4)}),
+        )
+        result2 = checker.compare(old_dwarf_leftover, new_dwarf_leftover)
+        aa2 = result2.analysis_assurance
+        assert aa2.schema_staleness_status == "degraded"
+        assert any("param_kind_facts_reliable" in n for n in aa2.notes), aa2.notes
+
+    def test_self_diff_never_taints_the_no_baseline_audit(self) -> None:
+        """Codex review, PR #1209 round 6: ``workflows.no_baseline_compare``
+        audits a candidate with no real baseline by calling ``checker.
+        compare(new, new, ...)`` -- the literal same object as both sides --
+        to reuse the ordinary comparison machinery, then discards the
+        (asserted-empty) comparison half and keeps only the candidate-side
+        hygiene findings. A stale candidate's own degraded fact must not
+        make that audit read ``"partial"``/``"degraded"``: no real pairwise
+        comparison ever happens (comparing a value against itself can never
+        produce a false pairwise finding, reliable or not), so reporting it
+        as both a stale "old snapshot" and a stale "new snapshot" would be
+        double-counting the one candidate's own degradation as if it were
+        two distinct sides."""
+        _, new = _header_pair()
+        new.param_kind_facts_reliable = False
+        assert degraded_reliability_facts(new) == ["param_kind_facts_reliable"]
+
+        result = checker.compare(new, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any("param_kind_facts_reliable" in n for n in aa.notes), aa.notes
+        assert not any("old snapshot" in n or "new snapshot" in n for n in aa.notes), (
+            aa.notes
+        )
+
+        # The mirror: two independently-built (merely content-identical,
+        # not object-identical) snapshots must NOT take this shortcut --
+        # real object identity is what this checks, never equal content.
+        new_copy = AbiSnapshot(
+            version=new.version,
+            library=new.library,
+            functions=list(new.functions),
+            from_headers=new.from_headers,
+            param_kind_facts_reliable=False,
+        )
+        result2 = checker.compare(new, new_copy)
+        assert result2.analysis_assurance.schema_staleness_status == "degraded"
+
+
+class TestFieldInitializerSameProducerGating:
+    """``clang_field_initializer_facts_reliable`` (Codex review, PR #1209
+    round 11, fresh evidence): unlike ``clang_restrict_facts_reliable``/
+    ``clang_deprecation_facts_reliable`` (plain header confirmation is
+    enough -- see ``TestSchemaStalenessStatus._HEADER_ONLY_GATED_FLAGS``),
+    this flag's real consumers (``diff_symbols._diff_param_defaults``,
+    ``diff_types_field_facts._diff_field_default_initializer``) decline a
+    pair outright whenever both sides' producers are positively known and
+    DIFFER -- ``TypeField.default``/``Param.default``'s value
+    representations are not cross-comparable across backends, the same
+    shape :data:`_PAIR_PRODUCER_GATED_FLAGS` already guards for
+    va_list/var_access. Split into its own test class since this flag has
+    no single FIXED required producer (unlike va_list's "must be clang") --
+    the requirement is that *snap*'s own producer, whatever it is, matches
+    *other*'s."""
+
+    def test_known_producer_mismatch_never_taints(self) -> None:
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="castxml",  # a real, KNOWN, differing producer
+        )
+        assert degraded_reliability_facts(old) == [
+            "clang_field_initializer_facts_reliable"
+        ]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any(
+            "clang_field_initializer_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+
+    def test_hybrid_other_side_never_excluded_by_label_mismatch(self) -> None:
+        """Codex review, PR #1209 round 12, fresh evidence: a whole-
+        snapshot label mismatch against a "hybrid" ``other`` (e.g. hybrid
+        vs. pure "clang") does NOT prove the actually-matched declaration
+        disagrees too -- ``fact_provenance.fact_producer``'s hybrid branch
+        resolves producer PER DECLARATION, and a hybrid merge's per-entity
+        provenance can independently land on either backend regardless of
+        the snapshot's own top-level label. Excluding on the label alone
+        (this test class's own round-11 shape) risked silently hiding a
+        real suppressed finding -- the dangerous, under-tainting direction.
+        Must still taint, both directions (snap hybrid vs other clang, and
+        snap clang vs other hybrid)."""
+        old_hybrid = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new_clang = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        result = checker.compare(old_hybrid, new_clang)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
+
+        old_clang = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new_hybrid = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="hybrid",
+        )
+        result2 = checker.compare(old_clang, new_hybrid)
+        aa2 = result2.analysis_assurance
+        assert aa2.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa2.notes), (
+            aa2.notes
+        )
+
+    def test_matching_producer_still_taints(self) -> None:
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",  # matches old's own producer
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
+
+    def test_other_side_only_inferred_header_awareness_never_taints(self) -> None:
+        """Same shape as every other pair gate in this module: confirmed
+        header awareness is required regardless of producer match."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        new.from_headers_inferred = True
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any(
+            "clang_field_initializer_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+
+    def test_unknown_other_side_producer_still_taints(self) -> None:
+        """Round-10 principle applied to this new gate too: an unknown
+        (``None``) producer on the OTHER side is itself just another
+        regeneratable, schema-vintage gap, NOT a permanent mismatch -- it
+        must not be treated the same as a real, KNOWN producer difference."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            # ast_producer left unset.
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )

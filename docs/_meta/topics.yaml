@@ -371,7 +371,22 @@ topics:
     canonical_page: reference/exit-codes.md
     fact_sources:
       - abicheck/analysis_assurance.py
+      # schema_staleness_status's own pair-aware policy: whether either
+      # compared snapshot carries a *_facts_reliable flag stale enough to
+      # matter for this pair (PR #1209).
+      - abicheck/policy/analysis_assurance_schema_staleness.py
+      # The single-snapshot consultation table both that policy and
+      # serialization.decode_snapshot's own load-time warning read, so the
+      # two can never independently drift on what counts as "degraded".
+      - abicheck/policy/analysis_assurance_degraded_facts.py
       - abicheck/schemas/compare_report.schema.json
+      # AnalysisAssurance.to_dict() (this topic's fact source above) nests
+      # into both the no-baseline audit's run_outcome block and every scan
+      # --against JSON summary, so schema_staleness_status -- and every
+      # other analysis_assurance field -- reaches these report surfaces
+      # too, not just compare's own report.
+      - abicheck/schemas/audit_report.schema.json
+      - abicheck/report/no_baseline_document.py
       # The composite Action's own require-complete-analysis input (a
       # dedicated boolean mirroring the CLI flag, ADR-058-adjacent Action
       # gating) implements this axis's opt-in exit-code gate at the Action
