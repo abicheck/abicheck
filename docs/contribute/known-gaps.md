@@ -8180,3 +8180,53 @@ fix. It carries no `architecture/modules.yaml` entry at all, same as
 every other entry in this file. Tractable per-entry, not as one slice —
 `build_output.py`'s single `frontends` caller is independent of any other
 entry's fix.
+
+## The `compare --no-baseline` audit report carries no per-finding provider attribution, so `provider_assertions` is unvalidated
+
+Every G20 audit case in `catalog/ground_truth.json` declares
+`provider_assertions` — which providers must corroborate each finding
+(e.g. case151: `private_header_leak` from **both** `public_header_ast` and
+`source_index`; case148: `header_build_context_mismatch` from
+`build_config` + `public_header_ast`). Legacy `scan` published these as
+`crosscheck.providers`, and `validation/scripts/run_special_cli_examples.py`
+checked them. ADR-068 Phase 6 retired the whole-audit orchestrator
+(`scan_engine.py`) that built that block, and no replacement projection
+landed in `report/no_baseline.py`, so the assertion is now unchecked by
+anything.
+
+**Measured, not assumed:** the rich and thin fixtures of case151 —
+the case that exists purely to show corroboration growing with evidence —
+produce *byte-identical* public reports today. Both answer
+`evidence_tiers: ["elf", "header"]` and a single `private_header_leak`
+finding. There is no public signal to validate the assertion against, so
+the runner records `unvalidated_assertions: ["provider_assertions"]` and
+`collect_full_example_matrix.py` surfaces it on the row (the same
+mechanism as `kinds_strict`). That makes the gap visible in the matrix
+artifact; it does **not** detect a regression that drops a provider while
+still emitting the expected finding kind, and those rows still count as
+`COVERED` (Codex review, PR #1225, raised twice — the second time
+correctly pointing out that metadata alone changes no coverage
+accounting).
+
+**Why it was not closed in PR #1225.** The data already exists and the
+fix is small and precisely located: `CrosscheckResult.providers` is
+computed and serialized today, and
+`workflows/cross_source_evolution._run_one_side` already reads it
+(`evaluated = check in result.providers`) and discards the list — so
+closing this means stamping `result.providers[check]` onto the emitted
+`Change` and projecting it. What makes it a separate change is not
+size: it bumps a **published** report schema
+(`AUDIT_REPORT_SCHEMA_VERSION`, plus the two-sided compare report, since
+`compute_cross_source_evolution` runs on both paths) and adds a public
+`Change` field. This file's own root contract is explicit that a schema
+or public-interface change "still needs its ADR and migration" and is not
+something a repair PR folds in as a side effect.
+
+The alternative offered in review — mark rows with a non-empty
+`unvalidated_assertions` as `UNRESOLVED` — was declined for a stated
+reason, not skipped: `validation/CLAUDE.md`'s matrix contract requires one
+`COVERED` row per ground-truth entry and no `UNRESOLVED` rows, and *all
+ten* audit cases declare `provider_assertions`, so it turns a currently
+green required lane red for a capability removed upstream in PR #1211.
+That is a maintainer call about blocking on the follow-up, not a
+repair-PR decision.
