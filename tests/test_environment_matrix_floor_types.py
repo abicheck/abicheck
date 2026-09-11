@@ -96,6 +96,71 @@ class TestNonNumericRuntimeFloorKeysRejectWrongShapeValues:
             EnvironmentMatrix.from_dict({"runtime_floors": {key: bad_value}})
 
 
+class TestRuntimeFloorKeysRejectNonStringKeys:
+    """Codex P2 finding on PR #1221: ``_parse_runtime_floors`` coerced every
+    key with ``str(key).upper()`` unconditionally, before checking whether it
+    was already a string. A malformed ``runtime_floors: {123: "2.28"}`` (an
+    unquoted YAML int key -- or ``{true: "2.28"}``, which PyYAML parses as a
+    bool key) loaded successfully into a spelling (``"123"``/``"TRUE"``) no
+    named-prefix detector (``GLIBC``/``MUSLLINUX``/``WHEEL_ARCH``/...) ever
+    recognizes, so the declared floor was silently inert -- the same
+    "malformed config silently disables a hard check instead of raising the
+    config error `strict=True` promises" failure mode already guarded for
+    non-string *values* just above and for ``WHEEL_ARCH``'s value vocabulary
+    below. The fix validates the key's type before ``.upper()`` normalizes
+    it, raising the same kind of strict-config `ValueError` this whole
+    ``deployment:`` parsing path already raises for other malformed shapes.
+    """
+
+    @pytest.mark.parametrize(
+        "bad_key",
+        [123, 2.28, True, False, None, ("GLIBC",)],
+        ids=["int", "float", "bool_true", "bool_false", "none", "tuple"],
+    )
+    def test_non_string_key_rejected(self, bad_key: object) -> None:
+        with pytest.raises(ValueError, match="keys must be strings"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {bad_key: "2.28"}})
+
+    def test_non_string_key_rejected_strict(self) -> None:
+        # The finding's own reported scenario: the mode .abicheck.yml's
+        # `deployment:` block actually loads with.
+        with pytest.raises(ValueError, match="keys must be strings"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {123: "2.28"}}, strict=True)
+
+    def test_error_message_names_the_bad_key(self) -> None:
+        with pytest.raises(ValueError, match="123"):
+            EnvironmentMatrix.from_dict({"runtime_floors": {123: "2.28"}})
+
+    def test_legitimate_string_keys_still_parse(self) -> None:
+        matrix = EnvironmentMatrix.from_dict(
+            {"runtime_floors": {"GLIBC": "2.28", "musllinux": True}}
+        )
+        assert matrix.runtime_floors["GLIBC"] == "2.28"
+        assert matrix.runtime_floors["MUSLLINUX"] == "1"
+
+    def test_bool_key_end_to_end_config_error(self, tmp_path: Path) -> None:
+        """The YAML ``yes``/``true`` bool-key edge case, through the real
+        ``.abicheck.yml`` ``deployment:`` block -- the CLI's strict-mode
+        caller."""
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            'deployment:\n  runtime_floors:\n    true: "2.28"\n',
+            encoding="utf-8",
+        )
+        old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        result = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+        )
+        assert result.exit_code == 64, result.output
+        assert "keys must be strings" in result.output.lower()
+
+
 class TestWheelArchUnrecognizedTokenRejected:
     """Codex review, PR #1221, Finding 1: `WHEEL_ARCH`'s value passing the
     str-type check above is not sufficient -- it must also be a token

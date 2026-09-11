@@ -407,7 +407,21 @@ def _parse_runtime_floors(floors_raw: object) -> dict[str, str]:
         )
     runtime_floors: dict[str, str] = {}
     for key, value in floors_raw.items():
-        key_upper = str(key).upper()
+        if not isinstance(key, str):
+            # A non-string YAML key (`123: "2.28"`, `true: "2.28"`) would
+            # otherwise be silently coerced by `str(key).upper()` below into
+            # a spelling ("123", "TRUE") no named-prefix detector
+            # (GLIBC/MUSLLINUX/WHEEL_ARCH/...) ever recognizes -- the
+            # runtime floor is accepted, stored, and then permanently
+            # ignored, which is exactly the "malformed config silently
+            # disables a hard check instead of raising the config error
+            # `strict=True` promises" failure mode already guarded for
+            # values just below (Codex review, PR #1221, Finding 2).
+            raise ValueError(
+                f"'runtime_floors' keys must be strings (a version-node "
+                f"prefix like 'GLIBC'), got {type(key).__name__}: {key!r}"
+            )
+        key_upper = key.upper()
         if key_upper in _PRESENCE_FLAG_RUNTIME_FLOOR_KEYS and (
             isinstance(value, (bool, int, float)) or value is None
         ):
