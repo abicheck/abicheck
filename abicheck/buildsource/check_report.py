@@ -306,6 +306,26 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     run_outcome = report.get("run_outcome")
     if isinstance(run_outcome, dict):
         report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
+    # A `compare --no-baseline` audit's own AUDIT_GATE axis (ADR-068's
+    # 2026-09-10 amendment) is a THIRD way this report can drive a blocking
+    # gate, structurally invisible to both zeroings above: `run_outcome.
+    # gate` for this shape is always `PolicyGateDecision.NONE` regardless of
+    # AUDIT_GATE (`report/no_baseline.py::_run_outcome` -- that field
+    # tracks the two-sided compatibility gate, not this candidate-side
+    # one), and there is no `severity` block either. The signal lives only
+    # in `exit_axes.audit_gate`, which `aggregate.load._load_report_file`
+    # reads directly to build this shape's own `GateInfo` -- so leaving it
+    # unneutralized left an advisory audit's real gating finding still
+    # blocking the trailing aggregate job, exactly the failure mode every
+    # other axis in this function exists to prevent (Codex review, fresh
+    # evidence). `exit_axes.evidence_contract` is deliberately left
+    # untouched -- it is a comparison-never-completed-style failure, not a
+    # compatibility-style finding advisory mode neutralizes, the same
+    # distinction the exit-block loop below draws for its own five
+    # "never completed" contributions.
+    exit_axes = report.get("exit_axes")
+    if isinstance(exit_axes, dict) and "audit_gate" in exit_axes:
+        report["exit_axes"] = {**exit_axes, "audit_gate": 0}
     # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
     # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
     # *prefers* it over the top-level `exit_code` zeroed just above -- so

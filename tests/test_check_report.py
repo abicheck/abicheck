@@ -853,6 +853,46 @@ class TestAugmentReport:
             {"provider": "public_header"}
         ]
 
+    def test_advisory_neutralizes_a_no_baseline_audits_exit_axes_audit_gate(self):
+        """Codex review, fresh evidence: a no-baseline audit's AUDIT_GATE
+        axis is a THIRD way this report can drive a blocking gate,
+        structurally invisible to the `run_outcome.gate` zeroing above --
+        that field is always `PolicyGateDecision.NONE` for this shape
+        regardless of AUDIT_GATE (it tracks the two-sided compatibility
+        gate, not this candidate-side one). The signal lives only in
+        `exit_axes.audit_gate`, which `aggregate.load._load_report_file`
+        reads directly -- so an advisory check-target run with a real
+        gating finding still blocked the trailing aggregate job before
+        this fix. `evidence_contract` is deliberately NOT neutralized: it
+        is a comparison-never-completed-style failure, not a compatibility
+        finding, the same distinction the exit-block loop draws for its
+        own five "never completed" contributions."""
+        out = augment_report(
+            self._no_baseline_report(
+                exit_code=3,
+                findings=[{"kind": "symbol_removed", "severity": "breaking"}],
+            )
+            | {"exit_axes": {"audit_gate": 3, "evidence_contract": 0}},
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="headers",
+            gate_mode="advisory",
+        )
+        assert out["exit_axes"]["audit_gate"] == 0
+
+    def test_advisory_does_not_neutralize_the_evidence_contract_axis(self):
+        out = augment_report(
+            self._no_baseline_report(exit_code=7)
+            | {"exit_axes": {"audit_gate": 0, "evidence_contract": 7}},
+            name="libpvxs",
+            profile_id="p",
+            baseline_channel="c",
+            requested_depth="source",
+            gate_mode="advisory",
+        )
+        assert out["exit_axes"]["evidence_contract"] == 7
+
     def test_advisory_also_neutralizes_the_analysis_assurance_axis(self):
         """P0.4's analysis-assurance contribution is the exact sibling of
         the contract-coverage one above -- a second, independent way this
