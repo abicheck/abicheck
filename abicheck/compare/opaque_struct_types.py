@@ -253,6 +253,36 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # same bare-name presence check only once identity itself is silent is
     # not a new criterion, only a faithful re-check of the one already used
     # to decide this name belongs in ``truly_opaque`` at all.
+    def _unresolved_visible_duplicate(spellings: set[str]) -> bool:
+        """Whether either snapshot holds a *visible* declaration under one
+        of *spellings* that carries no resolvable stable identity at all
+        (Codex review, PR #1218, round 12).
+
+        A declaration that resolves to a *different*, positively-identified
+        id sharing one of these spellings is a real, ordinary bare-name
+        collision -- already an accepted risk at the local/spelling tier,
+        and not this check's concern. An identity-*less* visible
+        declaration is different: it may be an unresolved TU-merge
+        duplicate or mixed-producer occurrence of the very entity this id
+        names, and a producer simply failing to resolve identity for one
+        occurrence is missing *evidence*, not evidence of a distinct,
+        unrelated declaration. Confirming this id opaque while such a
+        declaration sits under one of its own spellings would let that
+        missing evidence silently upgrade the result to a clean
+        compatibility claim -- exactly the asymmetry AGENTS.md's "weaker
+        evidence narrows conclusions... never upgrades to a clean
+        compatibility claim" already rules out for the sibling
+        asymmetric-absence case below."""
+        for snap in (old, new):
+            for t in snap.types:
+                if t.is_opaque or stable_entity_id(t.entity_id) is not None:
+                    continue
+                if t.name in spellings or (
+                    t.qualified_name is not None and t.qualified_name in spellings
+                ):
+                    return True
+        return False
+
     # Per-id, not per-declaration: with lists on both sides, "confirmed
     # opaque on both sides" only means anything asked of *every*
     # declaration under an id, on each side that has one -- one opaque
@@ -267,17 +297,25 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
             # This id is unrelated to the coarse bare-name criterion above
             # -- out of scope for this function entirely.
             continue
+        id_spellings: set[str] = set()
+        for d in combined:
+            id_spellings.add(d.name)
+            if d.qualified_name is not None:
+                id_spellings.add(d.qualified_name)
         if old_group is not None and new_group is not None:
-            if all(d.is_opaque for d in old_group) and all(
-                d.is_opaque for d in new_group
+            if (
+                all(d.is_opaque for d in old_group)
+                and all(d.is_opaque for d in new_group)
+                and not _unresolved_visible_duplicate(id_spellings)
             ):
                 # The same entity (by id, regardless of spelling),
                 # confirmed opaque on both sides -- every declaration
-                # under this id, on each side, agrees.
+                # under this id, on each side, agrees, and no unresolved
+                # occurrence anywhere casts that agreement into doubt.
                 stable_ids.add(resolved)
-            # Otherwise: at least one declaration under this id is visible
-            # -- decline, regardless of what any other declaration's name
-            # looks like.
+            # Otherwise: at least one declaration under this id is visible,
+            # or an unresolved one might be -- decline, regardless of what
+            # any other declaration's name looks like.
             continue
         # Exactly one side carries this identity at all -- the
         # asymmetric-existence case. Check the stable counterpart BY ID
@@ -315,30 +353,32 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         other_all_spellings = (
             new_all_spellings if old_group is not None else old_all_spellings
         )
-        # Every spelling (``name`` *and*, when present, ``qualified_name``)
-        # any declaration under this id, on its present side, is known by
-        # (Codex review, PR #1218, round 10): a header-AST backend commonly
-        # stores the bare leaf in ``name`` and the real scoped spelling in
-        # ``qualified_name`` -- checking ``name`` alone would misread a
-        # genuinely-present but identity-less counterpart spelled only via
-        # ``qualified_name`` as absent, letting this id wrongly enter the
-        # index and then get borrowed by that same counterpart's own
-        # ``qualified_name``.
-        known_spellings: set[str] = set()
-        for d in present_group:
-            known_spellings.add(d.name)
-            if d.qualified_name is not None:
-                known_spellings.add(d.qualified_name)
-        if not (known_spellings & other_all_spellings):
-            # No entity anywhere on the other side resolves to this exact
-            # id, AND no declaration shares any of this entity's known
-            # spellings either -- genuinely absent by both identity and
-            # every known spelling, the asymmetric-existence criterion.
-            stable_ids.add(resolved)
-        # Otherwise: a declaration under one of this entity's spellings
-        # exists on the other side, but this exact entity's own identity
-        # either did not resolve there or resolved to a different entity
-        # entirely -- decline the stable-tier match. The always-safe
-        # spelling tier still applies via ``declarations``/``local`` above.
+        # ``id_spellings`` -- every spelling (``name`` *and*, when present,
+        # ``qualified_name``) any declaration under this id, on its present
+        # side, is known by (Codex review, PR #1218, round 10): a
+        # header-AST backend commonly stores the bare leaf in ``name`` and
+        # the real scoped spelling in ``qualified_name`` -- checking
+        # ``name`` alone would misread a genuinely-present but
+        # identity-less counterpart spelled only via ``qualified_name`` as
+        # absent, letting this id wrongly enter the index and then get
+        # borrowed by that same counterpart's own ``qualified_name``.
+        if (id_spellings & other_all_spellings) or _unresolved_visible_duplicate(
+            id_spellings
+        ):
+            # Either a declaration under one of this entity's spellings
+            # exists on the other side (but this exact entity's own
+            # identity either did not resolve there or resolved to a
+            # different entity entirely), or an unresolved, visible
+            # declaration under one of its spellings sits somewhere with no
+            # identity to rule it out as the same entity -- either way,
+            # decline the stable-tier match. The always-safe spelling tier
+            # still applies via ``declarations``/``local`` above.
+            continue
+        # No entity anywhere on the other side resolves to this exact id,
+        # no declaration shares any of this entity's known spellings
+        # either, and no unresolved occurrence casts doubt -- genuinely
+        # absent by both identity and every known spelling, the
+        # asymmetric-existence criterion.
+        stable_ids.add(resolved)
 
     return OpaqueTypeIndex.build(declarations, stable_ids=stable_ids)

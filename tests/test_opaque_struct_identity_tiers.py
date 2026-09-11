@@ -454,6 +454,65 @@ class TestStableIdRequiresEveryDeclarationOpaque:
         assert stable_entity_id(stable_id) in index.stable
 
 
+class TestUnresolvedVisibleDuplicateBlocksTheId:
+    """An identity-*less* visible declaration under one of a stable id's own
+    spellings must block that id, even when every declaration that *does*
+    resolve to the id is itself opaque (Codex review, PR #1218, round 12).
+
+    A declaration resolving to a different, positively-identified id is an
+    ordinary bare-name collision (already an accepted risk at the local
+    tier). An identity-less one is different: it may be an unresolved
+    TU-merge duplicate or mixed-producer occurrence of the very entity this
+    id names, and a producer simply failing to resolve identity for one
+    occurrence is missing *evidence*, not evidence of a distinct, unrelated
+    declaration -- confirming the id opaque anyway would let that missing
+    evidence silently upgrade the result to a clean compatibility claim."""
+
+    def test_a_coexisting_unresolved_visible_duplicate_on_both_sides_blocks_the_id(
+        self,
+    ) -> None:
+        stable_id = _STABLE_ID
+        opaque_old = _record("Handle", is_opaque=True, entity_id=stable_id)
+        visible_unresolved_old = _record("Handle", is_opaque=False, entity_id=None)
+        opaque_new = _record("Handle", is_opaque=True, entity_id=stable_id)
+        visible_unresolved_new = _record("Handle", is_opaque=False, entity_id=None)
+        old = _snap([opaque_old, visible_unresolved_old])
+        new = _snap([opaque_new, visible_unresolved_new])
+        index = find_opaque_struct_types(old, new)
+        assert stable_entity_id(stable_id) not in index.stable
+
+    def test_a_coexisting_unresolved_visible_duplicate_on_the_present_side_blocks_the_id(
+        self,
+    ) -> None:
+        """The asymmetric-absence branch: old carries the id plus an
+        unresolved visible duplicate under the same spelling, new is
+        genuinely empty. The duplicate on old's own side -- not the
+        other side -- is what must block the id here."""
+        stable_id = _STABLE_ID
+        opaque_old = _record("Handle", is_opaque=True, entity_id=stable_id)
+        visible_unresolved_old = _record("Handle", is_opaque=False, entity_id=None)
+        old = _snap([opaque_old, visible_unresolved_old])
+        new = _snap([])
+        index = find_opaque_struct_types(old, new)
+        assert stable_entity_id(stable_id) not in index.stable
+
+    def test_a_duplicate_resolving_to_a_different_id_does_not_block(self) -> None:
+        """An ordinary bare-name collision -- the coexisting declaration
+        resolves to its *own*, different, positively-identified id -- is
+        not this check's concern; it is a real, distinct entity, not
+        missing evidence about the same one."""
+        stable_id = _STABLE_ID
+        other_id = _OTHER_STABLE_ID
+        opaque_old = _record("Handle", is_opaque=True, entity_id=stable_id)
+        visible_other_old = _record("Handle", is_opaque=False, entity_id=other_id)
+        opaque_new = _record("Handle", is_opaque=True, entity_id=stable_id)
+        visible_other_new = _record("Handle", is_opaque=False, entity_id=other_id)
+        old = _snap([opaque_old, visible_other_old])
+        new = _snap([opaque_new, visible_other_new])
+        index = find_opaque_struct_types(old, new)
+        assert stable_entity_id(stable_id) in index.stable
+
+
 class TestDowngradeOpaqueStructChangesNeverFabricatesAnAddition:
     """A matched opaque change's *original* ``ChangeKind`` must survive --
     never silently mislabeled as ``TYPE_FIELD_ADDED_COMPATIBLE`` (Codex

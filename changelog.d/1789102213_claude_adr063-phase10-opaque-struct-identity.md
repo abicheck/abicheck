@@ -45,3 +45,12 @@
   that id depend on iteration/insertion order; every declaration under an
   id, on each side that has one, is now required to agree before the id
   is treated as opaque.
+- **`find_opaque_struct_types`'s stable tier no longer confirms an id
+  opaque while an unresolved, visible duplicate sits under one of its own
+  spellings.** A declaration that carries no resolvable stable identity at
+  all may be an unreconciled TU-merge duplicate or mixed-producer
+  occurrence of the very entity a stable id names -- missing identity
+  *evidence*, not evidence of an unrelated declaration. Such an
+  identity-less visible declaration, on either snapshot, now blocks
+  confirming that id opaque (an ordinary bare-name collision with a
+  *different*, positively-identified id is unaffected).
