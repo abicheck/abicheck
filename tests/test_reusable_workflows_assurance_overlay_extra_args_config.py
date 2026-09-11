@@ -260,6 +260,88 @@ class TestAssuranceOverlayRejectsValuelessConfigOccurrence:
         assert written["targets"] == {}
 
 
+class TestAssuranceOverlayHonorsEndOfOptionsMarker:
+    """Codex review (P2), fresh evidence, PR #1222, commit 46e1a64c9c: a
+    bare ``--`` end-of-options marker in ``extra-args`` ends option
+    parsing for any Click-based CLI (including this repo's own ``compare``
+    command) -- everything after it is a positional operand, never an
+    option, no matter what it looks like. Confirmed directly against the
+    installed CLI's own Click parser: a ``--config`` occurring after ``--``
+    is not recognized as the ``--config`` option at all, so
+    ``compare -- --config custom.yml`` fails with a REAL usage error
+    (``Error: Got unexpected extra arguments (--config custom.yml)``,
+    exit 64) -- not the option's own "requires an argument"/"Invalid
+    value" errors the earlier valueless-``--config`` fixes above defend.
+
+    Before this fix, this tokenizer's scan didn't track ``--`` at all, so
+    it kept recognizing and extracting a ``--config``/``--config=...``
+    occurrence appearing AFTER a literal ``--`` token exactly as if the
+    marker weren't there -- reconstructing the remaining args as just
+    ``--`` and silently removing the two malformed operands. That let
+    ``analysis-assurance-complete: true`` turn a real exit-64 usage error
+    into a successful run, the same "malformed input quietly becomes
+    success" gap the earlier trailing-``--config``/``--config=`` fixes in
+    this file close for the OTHER malformed shapes."""
+
+    def test_config_after_end_of_options_marker_is_not_extracted(
+        self, tmp_path: Path
+    ) -> None:
+        """``-- --config custom.yml``: the ``--config custom.yml`` pair is
+        NOT a real option occurrence -- it's two positional operands after
+        ``--``. No config may be extracted, and the entire remaining
+        sequence (the marker and everything after it) must pass through
+        unchanged so the nested CLI sees the identical malformed input and
+        produces the identical real exit-64 error."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "custom.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "-- --config custom.yml"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        # No real --config token was recognized, so no merge base beyond
+        # the overlay's own field.
+        assert written == {"assurance": {"require_complete": True}}
+        assert result.outputs["effective-extra-args"] == "-- --config custom.yml"
+
+    def test_equals_form_after_end_of_options_marker_is_not_extracted(
+        self, tmp_path: Path
+    ) -> None:
+        """Same shape, ``=``-form: ``-- --config=custom.yml``."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "custom.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "-- --config=custom.yml"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written == {"assurance": {"require_complete": True}}
+        assert result.outputs["effective-extra-args"] == "-- --config=custom.yml"
+
+    def test_config_before_end_of_options_marker_is_still_extracted(
+        self, tmp_path: Path
+    ) -> None:
+        """Positive/negative control: the marker's POSITION matters, not
+        merely its presence somewhere in ``extra-args``. A real
+        ``--config`` occurring BEFORE ``--`` is still a genuine option and
+        must still be extracted exactly as the earlier tests in this file
+        establish -- only tokens AFTER the marker become immune to
+        recognition. Everything from ``--`` onward (the marker plus the
+        unrelated trailing operand) is passed through unchanged."""
+        workspace = make_workspace(tmp_path)
+        (workspace / "good.yml").write_text("targets: {}\n", encoding="utf-8")
+        result = _run_overlay(
+            workspace,
+            {"BASE_CONFIG": "", "EXTRA_ARGS": "--config good.yml -- something"},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["targets"] == {}
+        assert result.outputs["effective-extra-args"] == "-- something"
+
+
 class TestAssuranceOverlayLeavesExtraArgsAloneWhenUnaffected:
     def test_extra_args_without_config_is_forwarded_unchanged(
         self, tmp_path: Path

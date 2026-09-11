@@ -922,6 +922,28 @@ runs:
         _extra_args_without_config=()
         if [[ -n "${EXTRA_ARGS:-}" ]]; then
           _ct_pending=""
+          # Codex review (P2), fresh evidence, PR #1222: once a bare `--`
+          # end-of-options marker is seen (outside of being consumed as some
+          # OTHER option's own value below -- see the `_ct_pending` branch
+          # immediately below, which pops the very next token unconditionally
+          # as that option's value, exactly mirroring Click's own parser, so
+          # a `--` consumed there is genuinely just data and never flips this
+          # flag), every token from that point on -- including tokens that
+          # otherwise look exactly like `--config`/`--config=...` -- is a
+          # POSITIONAL OPERAND, not an option, to any Click-based CLI
+          # (including this repo's own `compare` command). Before this fix,
+          # this tokenizer kept recognizing `--config` after `--` anyway,
+          # extracting it as if it were a real flag and reconstructing the
+          # remaining args as just `--` -- silently curing a malformed
+          # `extra-args: '-- --config custom.yml'` invocation that the real
+          # CLI itself rejects (`--` ends option parsing, so the following
+          # `--config custom.yml` is two unexpected operands, exit 64).
+          # Track that state and stop all option recognition once seen, so
+          # this step passes the identical malformed sequence through
+          # unchanged and the nested CLI produces the same real exit-64
+          # error the caller's own malformed input earns, rather than this
+          # step fixing it for them.
+          _ct_seen_end_of_options=""
           # shellcheck disable=SC2086  # word-splitting is the point; mirrors
           # run.sh's own identical `set -- ${INPUT_EXTRA_ARGS:-}` in
           # `_extra_args_options`.
@@ -938,6 +960,17 @@ runs:
                 _extra_args_without_config+=("$_ct_pending" "$_ct_arg")
               fi
               _ct_pending=""
+              continue
+            fi
+            if [[ -n "$_ct_seen_end_of_options" ]]; then
+              # Past `--`: every remaining token, `--config`-shaped or not,
+              # is a positional operand -- pass it through unchanged.
+              _extra_args_without_config+=("$_ct_arg")
+              continue
+            fi
+            if [[ "$_ct_arg" == "--" ]]; then
+              _ct_seen_end_of_options=1
+              _extra_args_without_config+=("$_ct_arg")
               continue
             fi
             if [[ "$_ct_arg" == "--config=" ]]; then
