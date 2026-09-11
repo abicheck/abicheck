@@ -152,6 +152,23 @@ class TestSchemaStalenessStatus:
             "old snapshot" in n and "param_kind_facts_reliable" in n for n in aa.notes
         ), aa.notes
 
+    def test_new_side_alone_degraded_is_enough_to_taint_the_pair(self) -> None:
+        """The mirror of the case above: the *new* side being the one with
+        the stale fact (old clean) must taint the status too -- notes must
+        name it as the new snapshot's own, not silently fold into the old
+        snapshot's note or get skipped because old_degraded is empty."""
+        old, new = _header_pair()
+        new.param_kind_facts_reliable = False
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert aa.status != "complete"
+        assert any(
+            "new snapshot" in n and "param_kind_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+        assert not any("old snapshot" in n for n in aa.notes), aa.notes
+
     def test_every_degraded_reliability_flag_taints_the_reported_status(self) -> None:
         """Generalized regression, not just the one ``param_kind_facts_
         reliable``/``clang_deprecation_facts_reliable`` fixtures above: ANY
