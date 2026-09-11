@@ -174,6 +174,38 @@ NamespaceSuffixSpellings = Callable[[str], "list[str]"]
 _DECLINE_STATUSES = (FactStatus.UNSUPPORTED, FactStatus.PARTIAL)
 
 
+def vtable_fact_declined(t_old: RecordType, t_new: RecordType) -> bool:
+    """Whether either side's ``vtable_fact`` status is one of
+    ``_DECLINE_STATUSES`` (``UNSUPPORTED``/``PARTIAL``) -- the exact
+    top-level check :func:`vtable_transition_is_evidenced` gates on, split
+    out so a caller other than that function's own ``TYPE_VTABLE_CHANGED``
+    consumer can ask the identical question.
+
+    ``diff_cxx_rules.virtual_method_addition`` needs this directly (Codex
+    review finding on this PR): its own fallthrough path assumed "when
+    :func:`vtable_transition_is_evidenced` returns ``False``, either the
+    raw arrays genuinely don't evidence anything, or a *genuinely new*
+    mangled symbol would always have been caught by that function's own
+    'class's own virtual functions' branch regardless" -- an invariant
+    this module's own ``PARTIAL``/``UNSUPPORTED`` top-level short-circuit
+    now breaks by construction: it returns ``False`` *before* the
+    owned-virtual-signature branch ever runs, even for a class that
+    genuinely gained a new virtual method. Without its own explicit check
+    here, ``virtual_method_addition`` would fall through to its
+    override-signature check and -- finding no matching override, since
+    bases/virtual_bases can be completely evidenced even while vtable
+    itself is PARTIAL -- emit a BREAKING ``VIRTUAL_METHOD_ADDED`` for
+    exactly the capture-gap artifact this whole T9 closure exists to
+    suppress, just through the sibling detector instead of the primary
+    one.
+    """
+    return (
+        t_old.vtable_fact is not None and t_old.vtable_fact.status in _DECLINE_STATUSES
+    ) or (
+        t_new.vtable_fact is not None and t_new.vtable_fact.status in _DECLINE_STATUSES
+    )
+
+
 def _owned_virtual_signatures(
     name: str,
     funcs: Mapping[str, Function],
@@ -298,25 +330,33 @@ def vtable_transition_is_evidenced(
     even called for it (nothing for ``_diff_functions``'s own loop to
     iterate over); the first bullet, when it involves a real, linkable
     virtual method, is *evidenced* by this predicate's own "class's own
-    virtual functions" branch (a genuinely new mangled symbol is always
-    present in the new side's owned-signature set and absent from the old
-    side's), so ``virtual_method_addition`` correctly defers to this
-    predicate rather than needing its own fallthrough -- it is this
-    predicate's own remaining gap to close, not a gap in the symbol-level
-    caller's own coupling to it. Leaning on a sibling detector is not a
-    comfortable place to be, and a previous revision tried to close the
-    second case here directly by reading ``vptr_offset_bits`` -- see the
+    virtual functions" branch **when this function's own top-level decline
+    check above did not already short-circuit before reaching it** -- a
+    genuinely new mangled symbol is always present in the new side's
+    owned-signature set and absent from the old side's, so this predicate
+    returns ``True`` for it whenever it gets that far. It does NOT always
+    get that far: the T9 ``PARTIAL`` addition to the top-level decline
+    check (unlike the original ``UNSUPPORTED``-only gate, which only ever
+    fires for PDB, where ``Function.is_virtual`` is never set at all, so
+    ``virtual_method_addition`` returns at its very first line before
+    reaching any of this) is reachable for DWARF records where a genuinely
+    new virtual method's own symbol legitimately exists -- so
+    ``virtual_method_addition`` can no longer simply defer to this
+    predicate's own ``False`` meaning "not evidenced, safe to fall through
+    to my own override check": ``False`` can now also mean "declined
+    without ever consulting the owned-signature evidence at all." See
+    :func:`vtable_fact_declined` (Codex review finding on this PR) for the
+    caller-side fix -- ``virtual_method_addition`` now checks it directly,
+    rather than relying on this predicate's return value alone to imply
+    it. A previous revision tried to close the pure-virtual accepted false
+    negative here directly by reading ``vptr_offset_bits`` -- see the
     body for why that witness is circular and made this guard inert.
-    Closing it for real needs evidence the model does not carry (a
+    Closing that one for real needs evidence the model does not carry (a
     per-finding provider record, or a polymorphism walk over both base
     chains) -- see AGENTS.md's evidence-provider entry -- not a cleverer
     reading of the fields already here.
     """
-    if (
-        t_old.vtable_fact is not None and t_old.vtable_fact.status in _DECLINE_STATUSES
-    ) or (
-        t_new.vtable_fact is not None and t_new.vtable_fact.status in _DECLINE_STATUSES
-    ):
+    if vtable_fact_declined(t_old, t_new):
         # ADR-063 Track 4 5B final closure / T9: `UNSUPPORTED` is not the
         # generic "not is_present" pre-check round 2 landed and round 3
         # reverted (see the module docstring's "5B final closure" note) --
