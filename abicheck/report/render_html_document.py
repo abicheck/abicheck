@@ -535,11 +535,16 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
     # key/value convention `Library Name`/`Version #1`/`Version #2` already
     # use -- and omitted entirely (not an empty row) when no `deployment:`
     # contract governed this run.
+    # The newline belongs to the row, not to the template: interpolating an
+    # empty row into a line of its own still emitted that line's newline, so
+    # a run with no `deployment:` contract grew a stray blank line inside the
+    # table -- which is not "omitted entirely" as stated above, and is what
+    # drifted `tests/golden/main_report_compat.html`.
     env_matrix_digest = d.get("env_matrix_source_sha256")
     env_matrix_row = (
         ""
         if env_matrix_digest is None
-        else f"<tr><th>Deployment Floor Digest</th><td>{h(env_matrix_digest)}</td></tr>"
+        else f"\n<tr><th>Deployment Floor Digest</th><td>{h(env_matrix_digest)}</td></tr>"
     )
 
     sections_html = []
@@ -550,8 +555,7 @@ def _render_compat_html_document(d: Mapping[str, Any]) -> str:
 <table class='summary'>
 <tr><th>Library Name</th><td>{lib_display}</td></tr>
 <tr><th>Version #1</th><td>{old_display}</td></tr>
-<tr><th>Version #2</th><td>{new_display}</td></tr>
-{env_matrix_row}
+<tr><th>Version #2</th><td>{new_display}</td></tr>{env_matrix_row}
 </table>
 {render_file_metadata(_file_metadata_from_mapping(d["file_metadata"]))}
 

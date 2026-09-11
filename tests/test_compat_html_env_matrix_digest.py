@@ -33,6 +33,10 @@ fixture/assertions, calling ``generate_html_report`` directly with
 
 from __future__ import annotations
 
+import re
+
+import pytest
+
 from abicheck.checker import compare
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.environment_matrix import EnvironmentMatrix
@@ -97,3 +101,44 @@ def test_native_and_compat_html_agree_on_digest_presence() -> None:
 
     assert result.env_matrix_source_sha256 in native_html
     assert result.env_matrix_source_sha256 in compat_html_text
+
+
+@pytest.mark.parametrize("compat_html", [True, False], ids=["compat", "native"])
+@pytest.mark.parametrize("with_matrix", [True, False], ids=["digest", "no-digest"])
+def test_no_rendered_table_contains_a_blank_row_line(
+    compat_html: bool, with_matrix: bool
+) -> None:
+    """An optional row contributes nothing at all when it is absent.
+
+    The three tests above are substring assertions, and a substring assertion
+    cannot see what an empty optional branch leaks *around* itself: the
+    compat layout interpolated an empty row onto a line of its own, so a run
+    with no ``deployment:`` contract still emitted that line's newline and
+    grew a stray blank line inside the "Test Info" table. ``"Deployment Floor
+    Digest" not in html`` stayed true the whole time; only
+    ``tests/golden/main_report_compat.html`` noticed, and only for that one
+    layout and that one fixture.
+
+    Stated structurally instead: no ``<table>`` a report renders may contain
+    a blank or whitespace-only line between its rows. That holds for *any*
+    conditionally-emitted row in *any* table in either layout -- it needs no
+    golden file, no fixture pair, and it does not care which optional field
+    grew the gap -- so the next optional row added this way fails here rather
+    than silently drifting a golden.
+    """
+    result = _result_with_env_matrix() if with_matrix else _result_without_env_matrix()
+
+    html = generate_html_report(result, compat_html=compat_html)
+
+    offenders: list[tuple[int, str]] = []
+    depth = 0
+    for number, line in enumerate(html.splitlines(), start=1):
+        opens = len(re.findall(r"<table\b", line))
+        closes = line.count("</table>")
+        if depth > 0 and opens == 0 and closes == 0 and not line.strip():
+            offenders.append((number, line))
+        depth += opens - closes
+    assert offenders == [], (
+        f"blank line(s) inside a rendered <table> at {offenders!r} -- an "
+        "optional row is emitting its newline when it emits no row"
+    )
