@@ -199,10 +199,12 @@ def _report(*, coverage: int, severity_exit: int) -> dict:
     }
 
 
-class TestScanMapsTheCoverageExit:
-    """`scan`'s own verdict codes are 0/2/4/5, so exit 1 could only ever have
-    been the coverage axis -- but it fell through to the catch-all and
-    published ERROR."""
+class TestAuditOnlyCompareMapsTheCoverageExit:
+    """Exit 1 on an audit-only compare (old-library/abi-baseline both
+    omitted) could only ever be the coverage axis (there is no bare
+    severity-gate exit 1 source on this shape, `docs/reference/exit-codes.
+    md`'s `compare --no-baseline` section) -- but before this mapping
+    existed it fell through to the generic catch-all and published ERROR."""
 
     def test_a_coverage_gated_scan_is_not_an_operational_error(
         self, tmp_path: Path
@@ -219,7 +221,7 @@ class TestScanMapsTheCoverageExit:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -231,40 +233,6 @@ class TestScanMapsTheCoverageExit:
         assert "COVERAGE_INCOMPLETE" in outputs["_summary"], outputs["_summary"]
         # The provider is named, since "old/export_table" is the actionable
         # part and a bare "coverage incomplete" is not.
-        assert "old/export_table" in outputs["_summary"], outputs["_summary"]
-
-    def test_the_scan_report_nests_the_ledger_under_diff(self, tmp_path: Path) -> None:
-        """`ScanOutcome.to_dict()` puts the comparison summary under `diff`,
-        so the ledger is not where a compare report keeps it.
-
-        With `format: json` the stderr notice is suppressed too -- the report
-        carries the ledger, so the CLI does not repeat it -- leaving the
-        mapping with neither signal and publishing ERROR (Codex review).
-        """
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {
-                    "contract_coverage_exit_contribution": 1,
-                    "contract_coverage_failures": [COVERAGE_FAILURE],
-                },
-            },
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "COVERAGE_INCOMPLETE", outputs
-        # ...and the summary names the provider from the same nested place.
         assert "old/export_table" in outputs["_summary"], outputs["_summary"]
 
     def test_the_report_is_read_without_jq(self, tmp_path: Path) -> None:
@@ -292,7 +260,7 @@ class TestScanMapsTheCoverageExit:
             tmp_path,
             {
                 "PATH": f"{bindir}{os.pathsep}{jqless}",
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -315,7 +283,7 @@ class TestScanMapsTheCoverageExit:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -349,7 +317,7 @@ class TestCompareTellsTheTwoAxesApart:
         return _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -454,7 +422,7 @@ class TestCompareTellsTheTwoAxesApart:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
             },  # no INPUT_FORMAT -> the documented text default
             bindir,
@@ -496,7 +464,7 @@ class TestCompareTellsTheTwoAxesApart:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "text",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.txt"),
@@ -551,7 +519,7 @@ class TestCompareTellsTheTwoAxesApart:
         text_outputs = _run_action(
             text_only,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(text_only, "libnew.so"),
                 "INPUT_FORMAT": "text",
             },
@@ -574,7 +542,7 @@ class TestCompareTellsTheTwoAxesApart:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -583,11 +551,12 @@ class TestCompareTellsTheTwoAxesApart:
         )
         assert outputs["verdict"] == "API_BREAK", outputs
         assert "Also blocked by severity policy" in outputs["_summary"]
-        # Unlike compare, scan's final branch sets FINAL_EXIT=1 on a configured
-        # severity category at *every* tier, so the note must not tell the
-        # reader that fail-on-api-break still decides (Codex review).
-        assert "independently of" in outputs["_summary"], outputs["_summary"]
-        assert "still follows" not in outputs["_summary"], outputs["_summary"]
+        # Only the SEVERITY_ERROR tier bypasses the fail-on-* flags
+        # unconditionally -- at the API_BREAK/BREAKING tiers (this case),
+        # the severity policy produced the exit, but whether the *step*
+        # fails still follows those flags (mode: scan's own now-removed
+        # unconditional-at-every-tier behavior no longer exists anywhere).
+        assert "still follows" in outputs["_summary"], outputs["_summary"]
 
     def test_a_scan_exit_one_with_neither_signal_stays_an_error(
         self, tmp_path: Path
@@ -794,7 +763,7 @@ class TestADemotedBreakStaysVisible:
             },
         }
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     @pytest.mark.parametrize("verdict", ["BREAKING", "API_BREAK"])
     def test_the_verdict_follows_the_report_not_the_exit_code(
         self, tmp_path: Path, mode: str, verdict: str
@@ -803,7 +772,7 @@ class TestADemotedBreakStaysVisible:
         assert outputs["verdict"] == verdict, outputs
         assert outputs["exit-code"] == "0", outputs
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_the_step_still_passes_because_the_policy_said_so(
         self, tmp_path: Path, mode: str
     ) -> None:
@@ -820,7 +789,7 @@ class TestADemotedBreakStaysVisible:
         # than leaving a green check next to a BREAKING verdict unexplained.
         assert "Reported, not gated" in outputs["_summary"], outputs["_summary"]
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_api_break_is_not_gated_either(self, tmp_path: Path, mode: str) -> None:
         """`fail-on-api-break` is off by default, so this passes either way --
         pinned explicitly on, so the guard is what is being tested."""
@@ -833,7 +802,7 @@ class TestADemotedBreakStaysVisible:
         assert outputs["verdict"] == "API_BREAK", outputs
         assert outputs["_exit"] == 0, outputs["_stdout"]
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_a_genuinely_clean_run_is_unchanged(
         self, tmp_path: Path, mode: str
     ) -> None:
@@ -851,7 +820,7 @@ class TestADemotedBreakStaysVisible:
     ) -> None:
         """No report to read is not evidence of a break. Exit 0 with nothing
         to contradict it stays COMPATIBLE, as it always has."""
-        outputs = self._outputs(tmp_path, "scan", _MALFORMED)  # type: ignore[arg-type]
+        outputs = self._outputs(tmp_path, "compare", _MALFORMED)  # type: ignore[arg-type]
         assert outputs["verdict"] == "COMPATIBLE", outputs
         assert outputs["_exit"] == 0, outputs["_stdout"]
 
@@ -863,7 +832,7 @@ class TestADemotedBreakStaysVisible:
         """
         outputs = self._outputs(
             tmp_path,
-            "scan",
+            "compare",
             fmt="text",
             text=(
                 "abicheck scan\n"
@@ -882,7 +851,7 @@ class TestADemotedBreakStaysVisible:
         """
         outputs = self._outputs(
             tmp_path,
-            "scan",
+            "compare",
             fmt="text",
             text="Verdict: COMPATIBLE — no BREAKING changes detected\n",
         )
@@ -939,7 +908,7 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
             env["INPUT_OLD_LIBRARY"] = _lib(tmp_path, "libold.so")
         return _run_action(tmp_path, env, bindir)
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_the_published_verdict_follows_the_report(
         self, tmp_path: Path, mode: str
     ) -> None:
@@ -955,7 +924,7 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
         The exit gated at the API tier, and `fail-on-api-break` is false."""
         outputs = self._outputs(
             tmp_path,
-            "scan",
+            "compare",
             INPUT_FAIL_ON_API_BREAK="false",
             INPUT_FAIL_ON_BREAKING="true",
         )
@@ -964,10 +933,10 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
     def test_the_tier_the_exit_gated_at_still_gates(self, tmp_path: Path) -> None:
         """The mirror: turning the *API* flag on must still fail the step,
         even though the published verdict now reads BREAKING."""
-        outputs = self._outputs(tmp_path, "scan", INPUT_FAIL_ON_API_BREAK="true")
+        outputs = self._outputs(tmp_path, "compare", INPUT_FAIL_ON_API_BREAK="true")
         assert outputs["_exit"] == 1, outputs["_stdout"]
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_an_agreeing_report_is_left_alone(self, tmp_path: Path, mode: str) -> None:
         """No escalation when the report agrees with the exit -- the ordinary
         case, which must keep gating through `fail-on-api-break` unchanged."""
@@ -1048,7 +1017,7 @@ class TestExitOneAlsoReconcilesWithTheReport:
             env["INPUT_OLD_LIBRARY"] = _lib(tmp_path, "libold.so")
         return _run_action(tmp_path, env, bindir)
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     @pytest.mark.parametrize("verdict", ["BREAKING", "API_BREAK"])
     def test_the_demoted_break_is_published(
         self, tmp_path: Path, mode: str, verdict: str
@@ -1057,7 +1026,7 @@ class TestExitOneAlsoReconcilesWithTheReport:
         assert outputs["verdict"] == verdict, outputs
         assert outputs["exit-code"] == "1", outputs
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_the_severity_gate_still_fails_the_step(
         self, tmp_path: Path, mode: str
     ) -> None:
@@ -1067,7 +1036,7 @@ class TestExitOneAlsoReconcilesWithTheReport:
         outputs = self._outputs(tmp_path, mode, self._report("BREAKING"))
         assert outputs["_exit"] == 1, outputs["_stdout"]
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_a_compatible_report_does_not_displace_the_severity_verdict(
         self, tmp_path: Path, mode: str
     ) -> None:
@@ -1076,7 +1045,7 @@ class TestExitOneAlsoReconcilesWithTheReport:
         outputs = self._outputs(tmp_path, mode, self._report("COMPATIBLE"))
         assert outputs["verdict"] == "SEVERITY_ERROR", outputs
 
-    @pytest.mark.parametrize("mode", ["scan", "compare"])
+    @pytest.mark.parametrize("mode", ["compare"])
     def test_a_coverage_only_exit_is_not_displaced_by_a_compatible_report(
         self, tmp_path: Path, mode: str
     ) -> None:
@@ -1402,9 +1371,9 @@ class TestThePromotedCrosscheckNoteNamesItsOwnMechanism:
         return _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
             },
@@ -1476,9 +1445,7 @@ class TestCoverageGatedTrustsAReadableZero:
         assert outputs["_exit"] == 0, outputs["_stdout"]
         assert outputs["verdict"] == "COMPATIBLE", outputs
 
-    def test_a_warn_accepted_scan_does_not_fail_the_step(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_warn_accepted_scan_does_not_fail_the_step(self, tmp_path: Path) -> None:
         report = {
             "verdict": "COMPATIBLE",
             "exit_code": 0,
@@ -1495,9 +1462,9 @@ class TestCoverageGatedTrustsAReadableZero:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_AGAINST": _lib(tmp_path, "libold.so"),
+                "INPUT_OLD_LIBRARY": _lib(tmp_path, "libold.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
             },
@@ -1555,9 +1522,7 @@ class TestNoJsonMeansThisAxisIsNotGated:
     format/PR-context, so this needs a real directory operand.
     """
 
-    def _release_outputs(
-        self, tmp_path: Path, *, exit_code: int, stderr: str
-    ) -> dict:
+    def _release_outputs(self, tmp_path: Path, *, exit_code: int, stderr: str) -> dict:
         bindir = tmp_path / "bin"
         bindir.mkdir()
         stub = bindir / "abicheck"

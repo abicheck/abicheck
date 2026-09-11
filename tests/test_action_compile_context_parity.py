@@ -61,9 +61,6 @@ RUN_SH = Path(__file__).resolve().parents[1] / "action" / "run.sh"
 
 _DUMP_MODE_MARKER = 'if [[ "$MODE" == "dump" ]]; then'
 _COMPARE_MODE_MARKER = 'elif [[ "$MODE" == "compare" ]]; then'
-# ADR-068's 2026-09-10 amendment deleted the legacy raw-flag `scan` branch
-# -- one `mode: scan` branch is left, calling `add_compile_context_flags`.
-_SCAN_MODE_MARKER = 'elif [[ "$MODE" == "scan" ]]; then'
 
 _COMPILE_CONTEXT_START = 'add_single_flag "--ast-frontend" "${INPUT_AST_FRONTEND:-}"'
 # No longer used for `mode: scan` itself; kept for `_run_add_flag_shlex_split`.
@@ -356,7 +353,6 @@ def _mode_value_for_marker(mode_marker: str) -> str:
     return {
         _DUMP_MODE_MARKER: "dump",
         _COMPARE_MODE_MARKER: "compare",
-        _SCAN_MODE_MARKER: "scan",
     }[mode_marker]
 
 
@@ -716,18 +712,6 @@ class TestCompileContextForwardingParity:
         compile_blk = _read_compile_config_overlay(cmd)
         assert compile_blk["options"] == ["-DMSG=hello world", "-DOK=1"]
 
-    def test_scan_forwards_all_six_flags(self) -> None:
-        """`mode: scan` now forwards these via a synthesized `--config`
-        overlay too (ADR-068's 2026-09-10 amendment removed the legacy
-        raw-flag branch) -- mirrors the dump/compare tests above exactly."""
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, _FULL_ENV, _DUMP_COMPILE_CONTEXT_START)
-        compile_blk = _read_compile_config_overlay(cmd)
-        assert compile_blk["frontend"] == "clang"
-        assert compile_blk["compiler"] == "/opt/gcc-14/bin/g++"
-        assert compile_blk["options"] == ["-DFOO=1"]
-        assert compile_blk["sysroot"] == "/opt/sysroot"
-        assert compile_blk["nostdinc"] is True
-
     def test_gcc_options_quoted_value_stays_one_token(self) -> None:
         """Regression (Codex review, PR #757): routing gcc-options through
         add_flag()'s plain bash word-splitting broke a shell-quoted value
@@ -1009,13 +993,6 @@ class TestCompileContextForwardingParity:
             {"INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
             _COMPARE_COMPILE_CONTEXT_START,
         )
-        assert "--config" not in cmd
-        assert "--compiler" not in cmd
-        assert "--sysroot" not in cmd
-        assert "--nostdinc" not in cmd
-
-    def test_scan_omits_unset_flags(self) -> None:
-        cmd, _ = _run_region(_SCAN_MODE_MARKER, {}, _DUMP_COMPILE_CONTEXT_START)
         assert "--config" not in cmd
         assert "--compiler" not in cmd
         assert "--sysroot" not in cmd

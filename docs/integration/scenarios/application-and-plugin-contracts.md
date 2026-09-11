@@ -71,7 +71,9 @@ targets:
 
 ## Neither works with `channel: none`
 
-`scan` mode has no `--used-by`/`--required-symbol` equivalent — an
+`compare`'s audit-only shape (`--no-baseline`) has no `--used-by`/
+`--required-symbol` equivalent — it rejects both outright, since consumer/
+entrypoint scoping needs two versions to compare and an audit has none. An
 app-consumer/plugin-contract check has no scope to audit without a baseline
 to compare against. Give it a real channel, or use `kind: library` for a
 no-baseline audit ([S5](single-build-audit.md)) instead.

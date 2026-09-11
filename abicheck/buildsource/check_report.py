@@ -64,6 +64,7 @@ from ..checker_types import validate_check_id, validate_evidence_depth
 from ..evidence_depth import DEPTH_RANK, weaker_depth
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, TargetLifecycle
 from ..schemas import REPORT_SCHEMA_VERSION
+from . import check_report_no_baseline as _no_baseline
 from .baseline_set import ALL_OUTCOMES, ResolveOutcome
 from .check_report_exit_backfill import backfill_exit_block_fields
 from .check_report_run_outcome import backfill_run_outcome, synthetic_run_outcome
@@ -220,6 +221,8 @@ def derive_effective_depth(
         if isinstance(scan_depth, str) and scan_depth in _DEPTH_RANK:
             achieved = scan_depth
             source = "scan"
+        elif (audit_result := _no_baseline.no_baseline_effective_depth(report)) and audit_result[0] in _DEPTH_RANK:
+            achieved, source = audit_result
     if achieved is None:
         # Neither signal is present -- shouldn't happen for real compare/scan
         # --format json output, but trust the request rather than silently
@@ -278,15 +281,12 @@ def _neutralize_gate(report: dict[str, Any]) -> None:
     run_outcome = report.get("run_outcome")
     if isinstance(run_outcome, dict):
         report["run_outcome"] = {**run_outcome, "gate": PolicyGateDecision.NONE.value}
-    # A severity-scheme `scan --against` (scan schema 1.9+) publishes a real
-    # gate at `diff.severity`, and `aggregate.GateInfo.from_scan_report`
-    # *prefers* it over the top-level `exit_code` zeroed just above -- so
-    # zeroing only that left an explicitly advisory check blocking the
-    # trailing aggregate anyway (Codex review). Same shape, same remedy, and
-    # deliberately the same shared-path discipline as the coverage axis
-    # below: the traversal is imported, never re-derived here, because a
-    # local copy is precisely what let the scan-shaped block slip through
-    # once already.
+    _no_baseline.neutralize_no_baseline_axes(report)
+    # A severity-scheme `scan --against` (schema 1.9+) publishes a real gate
+    # at `diff.severity`, preferred by `GateInfo.from_scan_report` over the
+    # top-level `exit_code` zeroed above -- zeroing only that left an
+    # advisory check blocking the aggregate anyway (Codex review). Shared
+    # traversal, imported not re-derived, per the coverage axis below.
     _zero_nested_severity_gates(report)
     # ADR-049 Phase 7's contract-coverage axis is a *second* way this report
     # can raise an exit code, orthogonal to the compatibility gate above and
@@ -459,7 +459,7 @@ def _stamp_schema_version(out: dict[str, Any], report: dict[str, Any]) -> None:
     downstream validator would wrongly select the compare schema by the
     newly-added key's mere presence (Codex review).
     """
-    if "scan_schema_version" in report:
+    if "scan_schema_version" in report or _no_baseline.has_own_no_baseline_schema_version(report):
         return
     if not ("libraries" in report and "old_dir" in report):
         out["report_schema_version"] = REPORT_SCHEMA_VERSION
@@ -528,6 +528,8 @@ def _classify_verdict(
             out["compatibility_verdict"] = run_outcome["compatibility"]
         msg = report.get("error") or "no comparison completed: zero library-name pairs matched between OLD and NEW"
         out["operational_errors"] = [{"kind": "no_comparison_completed", "message": str(msg)}]
+        return
+    if _no_baseline.classify_no_baseline_verdict(out, report, run_outcome):
         return
     if raw_verdict in LEGACY_VERDICT_VALUES:
         out["compatibility_verdict"] = raw_verdict

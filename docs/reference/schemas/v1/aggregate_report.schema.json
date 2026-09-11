@@ -225,6 +225,10 @@
           "anyOf": [{"type": "null"}, {"$ref": "#/$defs/gate"}]
         },
         "unexpected": {"type": "boolean"},
+        "completed_without_compatibility_verdict": {
+          "type": "boolean",
+          "description": "Added in schema 1.11. Present only when true: this target's `state: \"analyzed\"` reflects a completed `compare --no-baseline` audit (ADR-068 D2), not a real compatibility comparison -- that shape's compatibility_verdict is always null by design, which state: analyzed alone cannot tell apart from a report that never arrived. Absent for every other target shape."
+        },
         "profile_id": {
           "type": "string",
           "description": "Added in schema 1.1: the profile component of a check_id-shaped target_id — absent when target_id doesn't follow that shape."
@@ -311,6 +315,11 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "Added in schema 1.8. The third sibling, for ADR-065's scope-completeness axis -- the profile-level view of the top-level scope_completeness.incomplete_targets, using the same predicate (a profile that accepted the gap under scope.on_incomplete: warn is listed too, with a contribution of 0). A profile can appear here and in the other lists at once."
+        },
+        "audit_only_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Added in schema 1.10. Subset of profiles whose only reports are completed-but-verdict-less `compare --no-baseline` audits (ADR-068 D2: such an audit's verdict is always null, so it makes no compatibility claim at all, clean or otherwise). Distinct from unanalyzed_profiles (nothing ran) and from a profile absent from every list (a real compatibility verdict was checked and found clean) -- folding an audit-only profile into either of those would misrepresent what happened. A profile can appear here and in affected_profiles at once: a gating audit is both affected (its gate blocked) and made no compatibility claim."
         },
         "verdict_by_profile": {
           "type": "object",
