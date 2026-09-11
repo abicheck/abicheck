@@ -342,7 +342,6 @@
         "abicheck/effective_config_digest.py",
         "abicheck/environment_matrix.py",
         "abicheck/impact/consumer_graph.py",
-        "abicheck/impact/use_case_impact.py",
         "abicheck/l0_export_delta.py",
         "abicheck/post_manifest.py",
         "abicheck/resolver.py",
@@ -466,7 +465,9 @@
     "abicheck.contract_coverage_ledger",
     "abicheck.contract_gating",
     "abicheck.qualified_name_segments",
-    "abicheck.reclassify"
+    "abicheck.reclassify",
+    "abicheck.buildsource.entity_identity",
+    "abicheck.buildsource.entity_resolver"
   ],
   "frozen_root_families": {
     "cli_": [

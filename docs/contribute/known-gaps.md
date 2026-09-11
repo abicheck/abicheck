@@ -7893,7 +7893,7 @@ Registered as `test_fixture.host_artifact_assumed_capability` in
 detector half above has no registry entry yet, deliberately — it is a real
 open defect, not a closed class.
 
-### ADR-061 gap F: eleven nested `buildsource`/`compat`/`impact` modules still carry no disposition
+### ADR-061 gap F: twelve nested `buildsource`/`compat`/`impact` modules still carry no disposition
 
 [ADR-061](adr/061-responsibility-package-architecture.md)'s gap F requires
 every unclassified first-party module under `abicheck/` to carry one of
@@ -7908,12 +7908,16 @@ this gap (enumerating every `.py` file under `abicheck/` not already
 covered by a canonical layer directory, a layer's `legacy_paths`, or an
 existing `debt.yaml` entry) found 44 such nested modules, all under
 `abicheck/buildsource/`, `abicheck/compat/`, `abicheck/impact/`, and
-`abicheck/schemas/`. 33 of them were classified by adding them to the
+`abicheck/schemas/`. 32 of them were classified by adding them to the
 appropriate layer's `legacy_paths` in `architecture/modules.yaml` (the
 "migrate through a named responsibility slice" disposition — verified,
 not merely asserted, by a full `scripts/check_architecture.py` run showing
 no new `dependency-direction`/`dependency-cycle`/`unclassified-import`
-findings after the change). The remaining eleven could not be classified
+findings after the change; two of the thirty-two, `entity_identity.py`/
+`entity_resolver.py`, are pure re-export facades and are additionally
+registered in `architecture/modules.yaml`'s `facades` list so
+`_check_facade`'s delegation-only rules apply to them too). The remaining
+twelve could not be classified
 the same way without breaking that verification, and are recorded here
 instead, following the same "trial classification measured N new
 violations, blocked" pattern this ADR's other gaps already use for
@@ -7936,12 +7940,12 @@ violations, blocked" pattern this ADR's other gaps already use for
   what blocks its target classification. The caller-side remedy above
   (wrap or decouple the caller) does not apply here — the fix is to move
   or decouple the blocking dependency inside the module itself.
-- *Mixed-responsibility* (`fact_set.py`, the one exception below): the
-  module itself bundles two structurally different responsibilities whose
-  real callers are already split across incompatible layers. Neither the
-  caller-side nor the self-dependency remedy applies — no single target
-  layer is even the right answer until the module is split along its own
-  seam.
+- *Mixed-responsibility* (`fact_set.py` and `impact/use_case_impact.py`,
+  the two exceptions below): the module itself bundles two structurally
+  different responsibilities whose real callers are already split across
+  incompatible layers. Neither the caller-side nor the self-dependency
+  remedy applies — no single target layer is even the right answer until
+  the module is split along its own seam.
 
 - `abicheck/buildsource/build_evidence.py` (target: `model` — its own
   docstring is literally "Build-system-neutral build evidence model", and
@@ -7954,10 +7958,13 @@ violations, blocked" pattern this ADR's other gaps already use for
 - `abicheck/buildsource/graph_impact.py` (target: `compare` — its own
   docstring: "Structured graph impact/proof-path data attached to
   findings"; it deliberately *enriches an existing `Change` finding*
-  rather than extracting a fact, the same shape as its
-  `compare`-classified `source_graph_findings.py`/`graph_reconcile.py`
-  siblings — not `extract`, which its previous classification in this
-  change wrongly assigned it, laundering a real boundary issue instead of
+  rather than extracting a fact, the same shape as its already-`compare`
+  -classified `graph_reconcile.py` sibling — `source_graph_findings.py` is
+  *not* a `compare`-classified precedent despite a similar-sounding role:
+  `architecture/debt.yaml` records it with target `extract/build-or-source`,
+  and it carries no `modules.yaml` classification of its own today — not
+  `extract`, which this module's previous classification in this change
+  wrongly assigned it, laundering a real boundary issue instead of
   recording it) — a *self-dependency* block, verified empirically by trial
   classification: it itself imports `.call_graph` (`extract`-classified),
   producing four new `compare -> extract` findings the moment it is
@@ -8006,6 +8013,17 @@ violations, blocked" pattern this ADR's other gaps already use for
   entries already use) — a combination neither the caller-forced nor the
   self-dependency shape above covers on its own, and not a single
   blocked-migrate target either; recorded here as its own third shape.
+- `abicheck/impact/use_case_impact.py` — the identical mixed-responsibility
+  shape as `fact_set.py`: `build_use_case_impact()` is comparison-time
+  orchestration (`workflows`-shaped, its own current classification), but
+  the same file also defines `render_use_case_impact_lines()` (text/
+  markdown rendering) and `add_use_case_impact()` (mutates a serialized
+  JSON report dict) — both report-shaping, not orchestration. Classifying
+  the whole file `workflows` blesses report construction as workflow logic
+  and would let a future workflow-only dependency reach those two
+  functions unchecked. No single classification is correct while all
+  three stay in one file; the real fix is the same shape as `fact_set.py`'s
+  — split the report-shaping functions out to a `report`-owned sibling.
 - `abicheck/compat/descriptor.py` (target: `extract` — ABICC XML
   descriptor parsing, the same shape as the already-`extract`-classified
   `compat/abicc_dump_import.py`) — blocked because `abicheck/compat/cli.py`
@@ -8090,10 +8108,17 @@ names the specific caller that would need to route through a
 header_conditionals.py` precedent) before its target classification
 becomes safe; each *self-dependency* entry (`build_evidence.py`,
 `graph_impact.py`) instead needs its own blocking import moved or
-decoupled, with no caller-side fix at all; `fact_set.py`'s
-*mixed-responsibility* case needs an internal split before either half
-gets a target; and the two *retained* facades (`source_graph.py`,
-`impact/model.py`) have no offending caller to fix in the first place —
-they are deliberately not migration targets. Tractable per-entry, not as
-one slice — `build_output.py`'s single `frontends` caller is independent
-of any other entry's fix.
+decoupled, with no caller-side fix at all; each *mixed-responsibility*
+entry (`fact_set.py`, `impact/use_case_impact.py`) needs an internal split
+before either half gets a target. The two *retained* entries are not
+migration targets at all, but for two different reasons, not one:
+`source_graph.py` is a pure facade with no offending caller in the first
+place (it exists purely for external/legacy call sites); `impact/model.py`
+is the opposite — it has a real, named offending edge
+(`checker_types.py -> impact.model -> policy.evidence_status`), the same
+"no single ADR-061 layer admits both directions" conflict gap B's own
+worked example describes, and stays `model`-classified because that
+conflict has no caller-side or self-dependency fix available today, not
+because there's no caller to fix. Tractable per-entry, not as one slice —
+`build_output.py`'s single `frontends` caller is independent of any other
+entry's fix.
