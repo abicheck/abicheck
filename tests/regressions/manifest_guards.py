@@ -82,11 +82,18 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
                     "tests, not swept mechanically: another outcome "
                     "elsewhere in the codebase that a later guard made "
                     "unproducible would still be found by hand. The "
-                    "residual on the first instance is narrower: a pair "
-                    "with no positive evidence on EITHER axis still falls "
-                    "through to OUTCOME_RECONCILED's overstated prose "
-                    "(ADR-048's accepted case197 'no clean split'), which "
-                    "a fifth outcome, not this fix, would close."
+                    "residuals on the first instance are narrower and "
+                    "both stated rather than hidden: a pair with no "
+                    "positive evidence on EITHER axis still falls through "
+                    "to OUTCOME_RECONCILED's overstated prose (ADR-048's "
+                    "accepted case197 'no clean split'), and a "
+                    "coordinate-only pair resting on qualified-name "
+                    "evidence alone cannot rule out a move that kept the "
+                    "same file basename -- recorded as "
+                    "`ReconciledPair.coordinate_evidence` and disclosed in "
+                    "the finding's own text, since separating that from a "
+                    "declaring-file-confirmed shift at the *kind* level "
+                    "would need a fifth outcome and a new ChangeKind."
                 ),
                 reference="docs/contribute/plans/bug-class-regression-testing.md",
             ),
