@@ -58,7 +58,13 @@ def _read(p: Path) -> str:
 # ADR-068 Phase 6) used to demonstrate. A frontend (`cli*.py`,
 # `compat/cli.py`) is on the *other* side of this boundary and is
 # deliberately not covered here — it may import engine modules freely.
-_ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset()
+# `dry_run_estimate.py` (the dry-run cost model / header-expansion module
+# `service_scan.py` was renamed to when its own scan half was deleted,
+# ADR-068 Phase 6) doesn't match the `service*`/`artifact_*` prefix rules
+# below under its new name, so it needs the same explicit basename
+# inclusion `scan_engine.py` used to have -- it is still a Tier-2-adjacent
+# engine-layer module (called from `workflows`/`frontends`), not a CLI one.
+_ENGINE_MODULE_BASENAMES: frozenset[str] = frozenset({"dry_run_estimate.py"})
 
 #: Package-rooted engine-layer trees, matched as a ``tail.startswith(...)``
 #: prefix. ``workflows/artifact/`` is ADR-061 Phase 3's migrated home for

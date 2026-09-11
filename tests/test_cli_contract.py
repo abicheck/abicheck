@@ -954,16 +954,12 @@ def test_gate_tables_mirror_cli_options() -> None:
 
 
 # ── D8: --ast-frontend (legacy --header-backend aliases removed) ─────────────
-
-
-def test_ast_frontend_is_the_only_frontend_spelling() -> None:
-    """``--ast-frontend`` is the frontend flag on ``scan``; the removed
-    ``--header-backend`` alias is gone (clean removal, ADR-037 D7/D8)."""
-    cmd = _registered_commands()["scan"]
-    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
-    param = by_dest["header_backend"]
-    assert "--ast-frontend" in param.opts
-    assert "--header-backend" not in param.opts
+#
+# test_ast_frontend_is_the_only_frontend_spelling used to pin this for
+# `scan`'s own `--ast-frontend` flag here; `scan` was deleted outright
+# (ADR-068 Phase 6) and neither `compare` nor `dump` carries this flag at
+# all (Phase 7b, ADR-037 D8.1) -- see test_ast_frontend_deleted_outright_
+# on_compare_and_dump below, which is this section's surviving coverage.
 
 
 @pytest.mark.parametrize("cmd_name", ["compare", "dump"])
@@ -1059,11 +1055,13 @@ def test_ast_frontend_threads_to_l4_extractor(
     assert captured.get("extractor") == "clang"
 
 
-@pytest.mark.parametrize("name", ["dump", "scan"])
+@pytest.mark.parametrize("name", ["dump"])
 def test_project_config_flag_is_config_not_build_config(name: str) -> None:
     """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
     and reflect that it loads the whole project .abicheck.yml. No back-compat
-    window is kept, so the old spelling must be gone on dump/scan."""
+    window is kept, so the old spelling must be gone on dump. (`scan` used to
+    be checked here too; deleted outright with the command itself, ADR-068
+    Phase 6.)"""
     commands = _registered_commands()
     flags = _command_flags(commands[name])
     assert "--config" in flags, name
@@ -1107,9 +1105,12 @@ def test_header_graph_flags_are_removed(cmd_name: str) -> None:
     assert "--header-graph-includes" not in flags
 
 
-@pytest.mark.parametrize("cmd_name", ["compare", "dump", "scan"])
+@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
 def test_removed_gcc_spellings_are_gone_entirely(cmd_name: str) -> None:
     """--gcc-path/--gcc-prefix/--gcc-option are removed, not hidden.
+
+    (`scan` used to be checked here too; deleted outright with the command
+    itself, ADR-068 Phase 6.)
 
     They were briefly kept as hidden-but-functional aliases for
     --compiler/--compiler-prefix/--compiler-option. Carrying two spellings
@@ -1134,18 +1135,16 @@ def test_removed_gcc_spellings_are_gone_entirely(cmd_name: str) -> None:
         assert "--gcc-path" not in result.output, (cmd_name, help_flag)
         assert "--gcc-prefix" not in result.output, (cmd_name, help_flag)
         assert "--gcc-option" not in result.output, (cmd_name, help_flag)
-    # --compiler is an advanced/toolchain-tier flag (the same disclosure tier
-    # the old --gcc-path occupied), so it's only guaranteed on --help-all --
-    # except on compare/dump, where Phase 7 (one-comparison-product.md
-    # §4.1/§4.2, ADR-037 D8.1) removed it (and --compiler-prefix/
-    # --compiler-option/--sysroot/--nostdinc/--ast-frontend) from the CLI
-    # entirely: compile.compiler is their only spelling now. `scan` keeps
-    # the unreduced compile_context_options() family.
+    # --compiler used to be an advanced/toolchain-tier flag (the same
+    # disclosure tier the old --gcc-path occupied), guaranteed only on
+    # --help-all -- but Phase 7 (one-comparison-product.md §4.1/§4.2,
+    # ADR-037 D8.1) removed it (and --compiler-prefix/--compiler-option/
+    # --sysroot/--nostdinc/--ast-frontend) from compare/dump's CLI
+    # entirely: compile.compiler is their only spelling now. `scan` used
+    # to keep the unreduced compile_context_options() family; deleted
+    # outright with the command itself (ADR-068 Phase 6).
     help_all_output = CliRunner().invoke(main, [cmd_name, "--help-all"]).output
-    if cmd_name == "scan":
-        assert "--compiler" in help_all_output, cmd_name
-    else:
-        assert "--compiler" not in help_all_output, cmd_name
+    assert "--compiler" not in help_all_output, cmd_name
 
 
 def _all_leaf_commands() -> list[tuple[str, object]]:
@@ -1330,60 +1329,15 @@ def test_run_compare_request_normalizes_lang(
 
 # ── D1: dry_run_estimate must not depend on the CLI frontend ────────────────────
 #
-# dry_run_estimate.run_scan historically imported its shared scan-engine core
+# dry_run_estimate.run_scan used to import its shared scan-engine core
 # (run_scan_core / _BudgetOverflow / _EvidenceContractError) from cli_scan.py —
 # a Click command module — the reverse of the intended frontend → service →
-# engine dependency direction (ADR-037 D1). That engine core now lives in
-# scan_engine.py (no @click.option decorators, not registered as a command);
-# cli_scan.py (the CLI) and dry_run_estimate.py (the typed service API) both
-# import from it instead of dry_run_estimate reaching into the CLI module.
-
-
-def _imported_modules(path: Path) -> set[str]:
-    """Return every module name imported anywhere in *path* (module-level,
-    function-local, or under ``TYPE_CHECKING`` — all are real coupling, just
-    with different init-time consequences)."""
-    import ast
-
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    out: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module:
-                out.add(module)
-            for alias in node.names:
-                out.add(f"{module}.{alias.name}" if module else alias.name)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                out.add(alias.name)
-    return out
-
-
-def test_service_scan_does_not_import_cli_scan() -> None:
-    """dry_run_estimate.py must never import from cli_scan.py (the Click ``scan``
-    command module) — the shared engine core lives in scan_engine.py, which
-    both cli_scan.py and dry_run_estimate.py depend on independently."""
-    import abicheck.dry_run_estimate as service_scan_mod
-
-    path = Path(service_scan_mod.__file__)
-    imported = _imported_modules(path)
-    assert not {"cli_scan", "abicheck.cli_scan"} & imported, (
-        "dry_run_estimate.py imports from cli_scan.py — this reintroduces the "
-        "service→CLI dependency inversion ADR-037 D1 / the scan_engine split "
-        "fixed. Import the needed symbols from abicheck.scan_engine instead."
-    )
-
-
-def test_cli_scan_reexports_the_real_scan_engine_functions() -> None:
-    """cli_scan.py's re-exported run_scan_core (etc.) are the *same objects*
-    as scan_engine's, not divergent copies — the CLI and the typed service API
-    both call one engine (ADR-037 D1)."""
-    from abicheck import cli_scan, scan_engine
-
-    assert cli_scan.run_scan_core is scan_engine.run_scan_core
-    assert cli_scan._BudgetOverflow is scan_engine._BudgetOverflow
-    assert cli_scan._EvidenceContractError is scan_engine._EvidenceContractError
+# engine dependency direction (ADR-037 D1). That engine core moved to
+# scan_engine.py, then scan_engine.py/cli_scan.py were both deleted outright
+# with the `scan` command itself (ADR-068 Phase 6); the two scan-specific
+# tests this section used to also carry (`test_cli_scan_reexports_the_real_
+# scan_engine_functions`, proving the two modules shared one object, and this
+# module's own module-level import check) went with them.
 
 
 def test_contract_alone_implies_contract_evaluation(tmp_path: Path) -> None:
