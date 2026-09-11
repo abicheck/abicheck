@@ -460,7 +460,12 @@ only_mutate = [
     "abicheck/policy/selectors.py",  # ADR-063 D10: shared selector-matching grammar (moved out of suppression.py)
     "abicheck/policy/selectors_namespace_glob.py",  # namespace-glob compile/match (moved out of suppression.py)
     "abicheck/snapshot_io.py",  # ADR-059 storage envelope (gzip/zstd)
-    "abicheck/serialization.py",  # snapshot (de)serialization
+    "abicheck/serialization.py",  # snapshot (de)serialization facade (orchestration/warning logic)
+    "abicheck/storage/snapshot_codec.py",  # ADR-061 gap E closure package 6: the real codec's decode orchestration/platform-block decode, moved out of serialization.py
+    "abicheck/storage/snapshot_schema_versions.py",  # SCHEMA_VERSION history/thresholds, moved out of serialization.py
+    "abicheck/storage/snapshot_encode.py",  # AbiSnapshot -> dict/JSON encode direction, moved out of serialization.py
+    "abicheck/storage/snapshot_decode_declarations.py",  # functions/variables/types/enums/typedefs decode, moved out of serialization.py
+    "abicheck/storage/snapshot_reliability_flags.py",  # the seven *_facts_reliable flag computations, moved out of serialization.py
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = [
@@ -534,6 +539,41 @@ pytest_add_cli_args = [
     # and aborts with "Could not figure out where the code to mutate is."
     # before the compare command ever runs — failing the whole `-x` lane.
     "--ignore=tests/test_action_run_sh_annotate_renderer.py",
+    # Same "subprocess re-enters the mutated tree with no mutmut config"
+    # failure class as the entry immediately above, discovered via the
+    # ADR-061 gap E storage/snapshot_codec split PR (#1214) once it touched
+    # serialization.py, mutation-scoped, for real: this test file's
+    # TestAuditOnlyScanRoutesThroughCompareNoBaseline class shells out to
+    # `action/run.sh`, which execs the real `abicheck` console script from a
+    # scratch `cwd` via `_run_action` -- mutmut's PYTHONPATH-based
+    # redirection into `mutants/` follows that subprocess, but the mutated
+    # tree's import machinery then calls mutmut's own config loader fresh in
+    # that process, which can't find `pyproject.toml`'s `[tool.mutmut]`
+    # section from a temp directory and aborts with "Could not figure out
+    # where the code to mutate is." before `compare` ever runs -- failing
+    # the whole `-x` lane before it can even generate mutants. Not caused
+    # by anything this PR's own diff changed: `test_stderr_names_no_such_
+    # option_for_a_scan_only_flag` exercises unrelated ADR-068 `scan`
+    # CLI-flag behavior, and every other recently-completed `mutmut
+    # (detector core)` PR job in this same window whose diff did not touch
+    # a mutation-scoped module was `skipped` outright (never exercised
+    # `mutmut run` for real) -- this PR's `serialization.py` change is what
+    # first put this test file in scope.
+    "--ignore=tests/test_action_run_sh_audit_gate.py",
+    # Same "subprocess re-enters the mutated tree with no mutmut config"
+    # failure class as the entry immediately above, tripped by this same
+    # ADR-061 gap E storage/snapshot_codec split PR (#1214) once its Round 5
+    # fix widened `only_mutate` to the new storage/snapshot_* modules:
+    # TestAuditOnlyScanUnaffectedWhenTheseInputsAreUnset::
+    # test_plain_audit_only_scan_still_succeeds shells out to a real
+    # `action/run.sh` + real `abicheck` binary subprocess the identical way,
+    # and the mutant tree's re-entrant subprocess can't find
+    # `pyproject.toml`'s `[tool.mutmut]` section from its scratch cwd either
+    # -- aborting `mutmut run`'s baseline stats collection before any mutant
+    # is generated. Not caused by this PR's own diff logic: the test passes
+    # cleanly outside mutmut (`pytest tests/test_action_run_sh_scan_no_
+    # baseline_capability_gap.py` -- 11/11).
+    "--ignore=tests/test_action_run_sh_scan_no_baseline_capability_gap.py",
     # Same failure class as the entry immediately above, one more real
     # `action/run.sh` + real `abicheck` binary subprocess test tripped by
     # this same G38 bundle-facts PR once it touched a second

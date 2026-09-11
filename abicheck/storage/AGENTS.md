@@ -8,7 +8,7 @@ management, per ADR-061 D1. It answers "how is a fact stored, identified,
 versioned, and read back" — never "what that fact means" or "whether a
 comparison is valid". This layer's product invariant (the local consequence of root `AGENTS.md`'s "Product decisions and change routing") is stated once in `abicheck/AGENTS.md` "Product invariants by layer"; it is not restated here.
 
-Three bodies of work live here and are deliberately independent:
+Several bodies of work live here and are deliberately independent:
 
 - **G40's bundle archive** — a content-addressed zip container for
   already-computed `BundleFacts`.
@@ -16,8 +16,8 @@ Three bodies of work live here and are deliberately independent:
   Phase 0 primitives** — the availability, identity, canonical-encoding and
   versioning vocabulary a project-scale format is built on.
 - **ADR-063 Phase 0's `Fact[T]` snapshot codec** — `fact_codec.py`/
-  `enum_codec.py`, `serialization.py`'s codec helpers; excluded from the
-  ADR-062 sweeps (`adr062_scope.py`'s `NON_ADR062_MODULES`), not re-exported.
+  `enum_codec.py`, plus `snapshot_codec.py` and its siblings (ADR-061 gap E
+  closure package 6); excluded from the ADR-062 sweeps (`NON_ADR062_MODULES`).
 
 [ADR-059](../../docs/contribute/adr/059-compressed-snapshot-storage.md)'s
 physical envelope (compression detection, atomic writes, decompression-bomb

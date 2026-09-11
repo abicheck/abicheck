@@ -6088,15 +6088,32 @@ looked like the obvious fix and wasn't.
   may legitimately import both `compare` (for the dataclasses) and
   `serialization`. `probe_harness.py` no longer calls
   `serialization.snapshot_to_dict`/`snapshot_from_dict` at all. Neither
-  latent violation this entry named is still open; `serialization.py`
-  itself stays unclassified (`public_root_surfaces`) since its own
-  ~1500-line `snapshot_to_dict`/`snapshot_from_dict` codec proper was not
-  part of either slice -- that remains a separate, not-yet-attempted
-  classification, verified against the full
-  architecture gate, before `serialization.py` itself can be classified
-  `storage`. Left `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
+  latent violation this entry named is still open. `serialization.py`'s own
+  ~1500-line `snapshot_to_dict`/`snapshot_from_dict` codec proper has since
+  been given a real owner too (ADR-061 gap E closure package 6): it moved to
+  `storage/snapshot_codec.py` and four siblings
+  (`snapshot_schema_versions.py`, `snapshot_encode.py`,
+  `snapshot_decode_declarations.py`, `snapshot_reliability_flags.py`), each
+  kept under the ADR-061 new-file production line ceiling since a brand-new
+  file gets no adoption-debt baseline exemption. `serialization.py` itself
+  is confirmed (not just documented) to stay `public_root_surfaces`-listed
+  permanently, for the same "no single layer" reason ADR-061 gap B's own
+  closure status already established for `checker_policy`/`contract_gating`/
+  `reclassify`: it is the one legal route through which
+  `workflows.snapshot_load.backfill_python_ext_from_evidence` and
+  `policy.analysis_assurance_degraded_facts.degraded_reliability_facts` run
+  between `storage.snapshot_codec.decode_snapshot` and
+  `storage.snapshot_codec.finalize_snapshot` -- neither call is legal from a
+  `storage`-classified module (`may_import: [model]` only), and
+  `dependency-direction` resolves a dynamic `importlib.import_module` call
+  against a classified target the identical way it resolves a static import
+  (only an *unclassified* target, like this facade, is skipped by design),
+  so there is no bridge-module trick available for either. Verified against
+  the full architecture gate (`scripts/check_architecture.py`) with zero new
+  findings. Left `scan_abi3_resolve.py` in its current, self-documenting flat-legacy
   placement (its own docstring already states the reason and the
-  precedent it follows) as accepted debt until that slice is done.
+  precedent it follows) as accepted debt -- that placement was never about
+  `serialization.py`'s own classification, so this closure does not change it.
 
 - **[Superseded 2026-09-01 for `surface.py`'s own half — see the correction
   below; the node-id-namespace half is still accurate.] ADR-063 Phase 3

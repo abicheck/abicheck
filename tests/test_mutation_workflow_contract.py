@@ -532,22 +532,39 @@ _ACCEPTED_KILL_LOSS = {
     # checker_policy/diff_symbols/finding_identity/policy.selectors chain
     # transitively. `name_classification`/`serialization`/`snapshot_io`
     # were already reached independently of that chain and still are.
+    # Widened (ADR-061 gap E closure package 6): `serialization.py`'s real
+    # codec moved into `storage/snapshot_codec.py` and four siblings, all
+    # newly `only_mutate`-scoped, and `serialization.py` itself still
+    # imports every one of them at module scope -- so this file's existing
+    # `abicheck.serialization` reachability now transitively reaches all
+    # five too.
     "tests/test_action_run_sh_annotate_renderer.py": frozenset(
         {
             "abicheck.name_classification",
             "abicheck.serialization",
             "abicheck.snapshot_io",
+            "abicheck.storage.snapshot_codec",
+            "abicheck.storage.snapshot_decode_declarations",
+            "abicheck.storage.snapshot_encode",
+            "abicheck.storage.snapshot_reliability_flags",
+            "abicheck.storage.snapshot_schema_versions",
         }
     ),
     # Same subprocess re-entry as the entry immediately above, tripped by
     # this same G38 bundle-facts PR once it touched a second mutation-scoped
     # module (bundle_signature_evidence.py). Narrowed the same way and for
-    # the same reason as that entry (ADR-061 gap E).
+    # the same reason as that entry (ADR-061 gap E); widened the same way as
+    # the entry immediately above for gap E closure package 6.
     "tests/test_action_run_sh_compare_pr_json_write.py": frozenset(
         {
             "abicheck.name_classification",
             "abicheck.serialization",
             "abicheck.snapshot_io",
+            "abicheck.storage.snapshot_codec",
+            "abicheck.storage.snapshot_decode_declarations",
+            "abicheck.storage.snapshot_encode",
+            "abicheck.storage.snapshot_reliability_flags",
+            "abicheck.storage.snapshot_schema_versions",
         }
     ),
     # The same subprocess re-entry once more, and the first instance reached
@@ -563,6 +580,9 @@ _ACCEPTED_KILL_LOSS = {
     # `serialization.py`'s `BundleFacts` reference) still reach
     # checker_policy/finding_identity/policy.selectors/suppression, but no
     # longer reach diff_symbols now that the `BundleFacts` chain is gone.
+    # Widened (ADR-061 gap E closure package 6), same reason as the two
+    # entries above: this file's own `abicheck.serialization` reachability
+    # now transitively reaches the five storage codec modules too.
     "tests/test_reusable_workflows_project_evidence.py": frozenset(
         {
             "abicheck.policy.classification",
@@ -573,6 +593,11 @@ _ACCEPTED_KILL_LOSS = {
             "abicheck.policy.selectors_namespace_glob",
             "abicheck.serialization",
             "abicheck.snapshot_io",
+            "abicheck.storage.snapshot_codec",
+            "abicheck.storage.snapshot_decode_declarations",
+            "abicheck.storage.snapshot_encode",
+            "abicheck.storage.snapshot_reliability_flags",
+            "abicheck.storage.snapshot_schema_versions",
         }
     ),
 }
