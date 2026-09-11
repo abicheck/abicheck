@@ -434,15 +434,29 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     if not opaque_types:
         return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
 
-    non_opaque_old = {t.name: t for t in old.types if not t.is_opaque}
-    non_opaque_new = {t.name: t for t in new.types if not t.is_opaque}
+    # Matched via :func:`_type_is_by_value_referenced` (the same
+    # qualification-robust helper :func:`find_by_value_types` already uses
+    # for function/variable signatures), not a bare
+    # ``f.type.rstrip(" *&") in opaque_types`` string comparison -- a field
+    # rendered as ``ns::Handle`` against a candidate whose own
+    # ``RecordType.name`` is bare ``"Handle"`` (or vice versa) would
+    # otherwise miss the embedding exclusion entirely (Codex review, PR
+    # #1218, round 3): "Handle" would stay in ``truly_opaque`` despite being
+    # embedded by value, and the stable tier -- which does not depend on
+    # this same spelling coincidence the way the pre-migration bare
+    # ``c.symbol`` comparison did -- would then downgrade a real, qualified
+    # layout-change finding for the embedded type.
+    non_opaque_old = [t for t in old.types if not t.is_opaque]
+    non_opaque_new = [t for t in new.types if not t.is_opaque]
     embedded_types: set[str] = set()
-    for type_map in (non_opaque_old, non_opaque_new):
-        for t in type_map.values():
+    for records in (non_opaque_old, non_opaque_new):
+        for t in records:
             for f in t.fields:
-                ftype = f.type.rstrip(" *&")
-                if ftype in opaque_types and "*" not in f.type:
-                    embedded_types.add(ftype)
+                if "*" in f.type:
+                    continue
+                for tname in opaque_types - embedded_types:
+                    if _type_is_by_value_referenced(tname, f.type):
+                        embedded_types.add(tname)
 
     truly_opaque = opaque_types - embedded_types
     if not truly_opaque:
@@ -494,17 +508,44 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         if resolved is not None:
             new_by_stable_id[resolved] = t
 
+    # A resolved id absent from ``other_by_id`` is not, by itself, proof the
+    # entity is absent from the other snapshot -- a mixed-producer or
+    # pre-identity-baseline comparison can leave the other side's matching
+    # declaration present but carrying no resolvable ``entity_id`` at all
+    # (Codex review, PR #1218, round 3): missing identity *evidence* is not
+    # evidence of *absence*. The asymmetric-existence criterion this
+    # function implements is a NAME-level one in the first place (see
+    # ``opaque_types`` above, built from ``old_type_names``/
+    # ``new_type_names``) -- so verifying it here by that same bare-name
+    # presence check, rather than by "did an id happen to resolve", is not
+    # a new criterion, only a faithful re-check of the one already used to
+    # decide this name belongs in ``truly_opaque`` at all.
     stable_ids: set[StableEntityId] = set()
-    for snap, other_by_id in ((old, new_by_stable_id), (new, old_by_stable_id)):
+    for snap, other_type_names, other_by_id in (
+        (old, new_type_names, new_by_stable_id),
+        (new, old_type_names, old_by_stable_id),
+    ):
         for t in snap.types:
             if t.name not in truly_opaque or not t.is_opaque:
                 continue
             resolved = stable_entity_id(t.entity_id)
             if resolved is None:
                 continue
-            other_t = other_by_id.get(resolved)
-            if other_t is None or other_t.is_opaque:
+            if t.name not in other_type_names:
+                # Genuinely absent by name from the other snapshot -- the
+                # asymmetric-existence criterion, verified the same way
+                # ``opaque_types`` itself was.
                 stable_ids.add(resolved)
+                continue
+            other_t = other_by_id.get(resolved)
+            if other_t is not None and other_t.is_opaque:
+                # The same entity, confirmed opaque on both sides.
+                stable_ids.add(resolved)
+            # Otherwise: a declaration under this name exists on the other
+            # side, but this exact entity's own identity either did not
+            # resolve there or resolved to a non-opaque declaration --
+            # decline the stable-tier match. The always-safe spelling tier
+            # still applies via ``declarations``/``local`` above.
 
     return OpaqueTypeIndex.build(declarations, stable_ids=stable_ids)
 

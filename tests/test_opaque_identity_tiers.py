@@ -790,6 +790,62 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         out = _downgrade_opaque_struct_changes([change], old, new)
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
+    def test_missing_identity_evidence_on_the_other_side_is_not_treated_as_absence(
+        self,
+    ) -> None:
+        """A third false positive (Codex review round 3, PR #1218): the
+        now-visible ``ns::Handle`` in ``new`` carries no resolvable
+        ``entity_id`` at all (a mixed-producer or pre-identity-baseline
+        comparison), while an unrelated ``other::Handle`` is opaque only in
+        ``new``. "Handle" is present by NAME on both sides, so this is not
+        the genuine asymmetric-absence case -- but a naive
+        ``other_by_id.get(resolved) is None`` check cannot distinguish
+        "this entity is genuinely absent from the other snapshot" from
+        "a same-named declaration exists there, but this producer simply
+        did not resolve an id for it". Treating the latter as absence would
+        wrongly add ``ns::Handle``'s own old-side stable id to the index and
+        suppress its own, genuinely-observable visibility change."""
+        stable_id = _STABLE_ID
+        other_id = _OTHER_STABLE_ID
+        old = _snap([_record("Handle", is_opaque=True, entity_id=stable_id)])
+        new = _snap(
+            [
+                _record("Handle", is_opaque=False, entity_id=None),
+                _record("Handle", is_opaque=True, entity_id=other_id),
+            ]
+        )
+        change = _struct_size_change("ns::Handle", entity_id=stable_id)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
+    def test_embedded_by_value_exclusion_matches_across_a_qualification_mismatch(
+        self,
+    ) -> None:
+        """A fourth false positive (Codex review round 3, PR #1218): the
+        opaque candidate's own ``RecordType.name`` is bare ("Handle"), but
+        the containing, non-opaque record's by-value field renders its type
+        qualified ("ns::Handle") -- the exact same qualification mismatch
+        :func:`_type_is_by_value_referenced`'s own docstring already
+        documents for :func:`find_by_value_types`. A naive
+        ``f.type.rstrip(" *&") in opaque_types`` string comparison misses
+        this field reference entirely, wrongly leaving "Handle" in
+        ``truly_opaque`` despite being embedded by value -- and the stable
+        tier then downgrades a real, qualified ``TYPE_SIZE_CHANGED``
+        finding for it, something the pre-migration bare ``c.symbol``
+        comparison would never have matched in the first place (the
+        embedding exclusion's own qualification-mismatch bug is
+        pre-existing, but the stable tier gives it new, larger
+        consequences)."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record(
+            "Wrapper", fields=[TypeField(name="inner", type="ns::Handle")]
+        )
+        old = _snap([opaque_handle, wrapper])
+        new = _snap([opaque_handle, wrapper])
+        change = _struct_size_change("ns::Handle", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
 
 # -- Primitive-level property tests: OpaqueTypeIndex.build ------------------
 
