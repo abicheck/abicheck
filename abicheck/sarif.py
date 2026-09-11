@@ -1205,6 +1205,9 @@ def to_sarif(
                         if result.reconciled_changes
                         else {}
                     ),
+                    # Mirrors no_baseline_render.py's envMatrixSourceSha256.
+                    **({"envMatrixSourceSha256": result.env_matrix_source_sha256}
+                       if result.env_matrix_source_sha256 is not None else {}),
                 },
             }
         ],

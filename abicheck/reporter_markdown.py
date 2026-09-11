@@ -1778,6 +1778,7 @@ def compute_review_digest(
             else compute_disposition_audit(result, severity_config)
         ),
         surface_changes=compute_surface_changes(result, findings),
+        env_matrix_source_sha256=result.env_matrix_source_sha256,
     )
 
 
