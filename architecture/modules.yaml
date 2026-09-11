@@ -466,7 +466,8 @@
     "abicheck.qualified_name_segments",
     "abicheck.reclassify",
     "abicheck.buildsource.entity_identity",
-    "abicheck.buildsource.entity_resolver"
+    "abicheck.buildsource.entity_resolver",
+    "abicheck.buildsource.source_graph_query"
   ],
   "frozen_root_families": {
     "cli_": [

@@ -7913,10 +7913,11 @@ appropriate layer's `legacy_paths` in `architecture/modules.yaml` (the
 "migrate through a named responsibility slice" disposition — verified,
 not merely asserted, by a full `scripts/check_architecture.py` run showing
 no new `dependency-direction`/`dependency-cycle`/`unclassified-import`
-findings after the change; two of the thirty-one, `entity_identity.py`/
-`entity_resolver.py`, are pure re-export facades and are additionally
-registered in `architecture/modules.yaml`'s `facades` list so
-`_check_facade`'s delegation-only rules apply to them too). The remaining
+findings after the change; three of the thirty-one — `entity_identity.py`/
+`entity_resolver.py`/`source_graph_query.py` — are pure re-export facades
+and are additionally registered in `architecture/modules.yaml`'s `facades`
+list so `_check_facade`'s delegation-only rules apply to them too). The
+remaining
 thirteen could not be classified
 the same way without breaking that verification, and are recorded here
 instead, following the same "trial classification measured N new
