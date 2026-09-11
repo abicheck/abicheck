@@ -804,3 +804,89 @@ class TestAssuranceOverlayValidatesBaseConfigBeforeStripping:
         assert written["build"] == {"system": "cmake"}
         assert written["compile"] == {"std": "c++17"}
         assert written["assurance"] == {"require_complete": True}
+
+
+class TestAssuranceOverlayCopiesAliasedAssuranceMapping:
+    """P2 finding (PR #1222 Codex review, this commit): ``yaml.safe_load()``
+    resolves a YAML anchor/alias pair (``assurance: &shared {}`` /
+    ``gate: *shared``) to the SAME dict object for both keys. The step's own
+    merge used to do ``assurance["require_complete"] = True`` directly on
+    whatever object ``data.get("assurance")`` returned -- when that object
+    was shared via an alias, this ALSO inserted ``require_complete`` into
+    the other key's mapping, and ``yaml.safe_dump()`` then preserved the
+    alias relationship, writing ``require_complete`` under BOTH
+    ``assurance`` and the unrelated aliased key in the generated overlay.
+    The nested CLI then rejected the overlay outright (``gate.
+    require_complete`` is not a recognized field there) even though the
+    original, unmodified config was perfectly valid.
+
+    Fixed by copying ``assurance`` (``dict(assurance)``) before adding
+    ``require_complete`` to it, so the step never mutates an object the
+    parsed document's OTHER top-level keys might still reference.
+    """
+
+    def test_aliased_gate_mapping_is_unaffected_by_the_overlay(
+        self, tmp_path: Path
+    ) -> None:
+        """The exact scenario the finding names: `assurance` and `gate`
+        share one aliased mapping in the base document."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "assurance: &shared {}\ngate: *shared\n", encoding="utf-8"
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["assurance"] == {"require_complete": True}
+        # The bug this finding names: `gate` must NOT pick up
+        # `require_complete` just because it was aliased to the same
+        # object `assurance` started out as.
+        assert written["gate"] == {}
+
+    def test_aliased_mapping_with_preexisting_content_is_also_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """A stronger variant: the shared mapping already carries a real
+        field (`require_complete: false`) -- `require_complete` is the
+        ONLY key `assurance:` recognizes, so the other end of the alias is
+        `baseline:` here (a top-level block `BuildConfig`'s own structure
+        check does not inspect at all, unlike `gate:`, which only
+        recognizes `fail_on_removed_library` and would reject
+        `baseline.require_complete` as an unrelated schema error having
+        nothing to do with this finding). A naive fix that merely swaps in
+        a *fresh* `{}` instead of a genuine `dict(assurance)` copy (losing
+        the base document's own `assurance` content) would be caught here."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "assurance: &shared\n  require_complete: false\nbaseline: *shared\n",
+            encoding="utf-8",
+        )
+        result = run_step(_overlay_step(), workspace=workspace, env={"BASE_CONFIG": ""})
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["assurance"] == {"require_complete": True}
+        # The bug this finding names: `baseline` must keep the base
+        # document's own (pre-overlay) value, not pick up the overlay's
+        # `True` just because it was aliased to the same object.
+        assert written["baseline"] == {"require_complete": False}
+
+    def test_explicit_build_config_aliased_gate_mapping_is_also_unaffected(
+        self, tmp_path: Path
+    ) -> None:
+        """Same hazard, explicit build-config branch -- the aliasing risk is
+        in the shared merge code past the discovered/explicit fork, not
+        specific to either loading path."""
+        workspace = make_workspace(tmp_path)
+        explicit_config = workspace / "explicit.yml"
+        explicit_config.write_text(
+            "assurance: &shared {}\ngate: *shared\n", encoding="utf-8"
+        )
+        result = run_step(
+            _overlay_step(),
+            workspace=workspace,
+            env={"BASE_CONFIG": str(explicit_config)},
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["assurance"] == {"require_complete": True}
+        assert written["gate"] == {}

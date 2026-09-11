@@ -684,6 +684,36 @@ runs:
         # startup. Fails loud if a private directory can't be created,
         # rather than silently falling back to a shared one.
         _real_pwd="$PWD"
+        # Windows path qualification (Codex review, P1): on a Windows/
+        # Git-Bash runner an explicit `build-config` commonly arrives as a
+        # Windows-style absolute path (`C:/...`, `C:\...`, or a UNC
+        # `\\server\share\...`), none of which start with `/`. A POSIX-only
+        # leading-slash test below would misclassify every one of those as
+        # RELATIVE and prefix it with `$_real_pwd`, producing a malformed,
+        # doubled path. `_is_path_already_qualified` mirrors
+        # `action/run.sh`'s own function of the same name EXACTLY (see its
+        # docstring there for the `?:*` drive-relative caveat and why the
+        # Windows-only patterns are gated on `$_RUNNING_ON_WINDOWS`) --
+        # this step doesn't source `run.sh` (each composite-action step
+        # here already duplicates run.sh's small shell snippets, tagged
+        # with a "Mirrors action/run.sh's own ..." comment, rather than
+        # sharing a sourced library file), so the exact logic is
+        # duplicated here too rather than re-implemented from intent.
+        case "$OSTYPE" in
+          msys* | cygwin* | win32*) _RUNNING_ON_WINDOWS=true ;;
+          *) _RUNNING_ON_WINDOWS=false ;;
+        esac
+        _is_path_already_qualified() {
+          case "$1" in
+            /*) return 0 ;;
+          esac
+          if [[ "$_RUNNING_ON_WINDOWS" == "true" ]]; then
+            case "$1" in
+              ?:* | \\*) return 0 ;;
+            esac
+          fi
+          return 1
+        }
         if ! _py_safe_dir="$(mktemp -d)"; then
           echo "::error::failed to create a private temporary directory (mktemp -d) -- required to safely run abicheck's own inline Python helper without risking the checked-out repository shadowing the installed package."
           exit 1
@@ -722,10 +752,11 @@ runs:
         esac
         _base_config_abs=""
         if [[ -n "${BASE_CONFIG:-}" ]]; then
-          case "$BASE_CONFIG" in
-            /*) _base_config_abs="$BASE_CONFIG" ;;
-            *) _base_config_abs="$_real_pwd/$BASE_CONFIG" ;;
-          esac
+          if _is_path_already_qualified "$BASE_CONFIG"; then
+            _base_config_abs="$BASE_CONFIG"
+          else
+            _base_config_abs="$_real_pwd/$BASE_CONFIG"
+          fi
         fi
         (cd "$_py_safe_dir" \
          && ABICHECK_BASE_CONFIG="$_base_config_abs" \
@@ -904,6 +935,21 @@ runs:
                 f"{type(assurance).__name__} ({assurance!r}) -- cannot merge "
                 "an assurance.require_complete overlay into it."
             )
+        else:
+            # Codex review (P2): `yaml.safe_load()` resolves a YAML anchor/
+            # alias pair (e.g. `assurance: &shared {}` / `gate: *shared`)
+            # to the SAME dict object for both keys. Mutating `assurance`
+            # in place below would therefore also mutate whatever OTHER
+            # top-level key shares this object -- `yaml.safe_dump()`
+            # preserves the alias relationship, so the written overlay
+            # would carry `require_complete` under that unrelated key too
+            # (e.g. `gate.require_complete`, which the nested CLI then
+            # rejects as an unknown field on an otherwise perfectly valid
+            # config). A shallow copy is enough here: only a scalar key is
+            # being added, and this block never mutates one of
+            # `assurance`'s own nested values in place, so nothing deeper
+            # in the object graph is at risk of this same aliasing hazard.
+            assurance = dict(assurance)
         # Additive over whatever the base config already declared under
         # assurance: -- only require_complete is forced to true, exactly the
         # one field this overlay exists to set.

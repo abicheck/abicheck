@@ -50,3 +50,23 @@
   `--require-complete-analysis` CLI flag.** They now name the live
   `.abicheck.yml` `assurance.require_complete: true` config key, matching
   the earlier fix to the no-baseline notice text above.
+- **The assurance-overlay step no longer mangles an explicit Windows-style
+  `build-config` path.** On a Windows/Git-Bash runner, `C:/...`, `C:\...`,
+  and a UNC `\\server\share\...` path all start with something other than
+  `/`, so the step's POSIX-only `case "$BASE_CONFIG" in /*) ... esac`
+  qualification test misclassified every one of them as relative and
+  prefixed it with `$PWD`, producing a malformed, doubled path. Fixed by
+  duplicating `action/run.sh`'s own `_is_path_already_qualified()` helper
+  logic exactly (the established convention this Action step already
+  follows for shared shell snippets, rather than sourcing `run.sh`).
+- **The assurance-overlay step no longer leaks `require_complete` into an
+  unrelated top-level config key when the base document uses a YAML
+  anchor/alias.** `yaml.safe_load()` resolves an anchor/alias pair (e.g.
+  `assurance: &shared {}` / `gate: *shared`) to the SAME dict object for
+  both keys; the step used to mutate that object in place
+  (`assurance["require_complete"] = True`), which also mutated the
+  aliased sibling key, and `yaml.safe_dump()` then preserved the alias,
+  writing `require_complete` under both keys in the generated overlay —
+  the nested CLI then rejected the overlay outright for the unrelated key
+  even though the original config was valid. Fixed by copying the
+  `assurance` mapping before adding `require_complete` to it.

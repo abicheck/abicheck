@@ -128,6 +128,45 @@ class TestStripUntrustedExecutionKeys:
         assert out["resource_limits"]["max_bundle_facts_decode_nodes"] < 999999999
         assert isinstance(out["resource_limits"]["max_bundle_facts_decode_nodes"], int)
 
+    def test_aliased_build_block_stripping_does_not_leak_into_sibling_key(
+        self,
+    ) -> None:
+        """PR #1222 Codex review P2 finding's own root cause, checked against
+        the sibling call site named in that finding: `yaml.safe_load()`
+        resolves a YAML anchor/alias pair to the SAME dict object for both
+        keys it's assigned to -- constructed directly here (rather than via
+        `yaml.safe_load`) since that's exactly what an alias resolves to.
+        `build.query` gets deleted from a COPY (`build_blk = dict(build_blk)`
+        before the `del`), so the aliased sibling key's own object must be
+        completely unaffected."""
+        shared = {"query": "cmake --build .", "system": "cmake"}
+        base = {"build": shared, "targets": shared}
+        out = strip_untrusted_execution_keys(base)
+        assert out["build"] == {"system": "cmake"}
+        # The sibling key aliased to the same original object must still
+        # carry `query` -- it was never the thing being stripped.
+        assert out["targets"] == {"query": "cmake --build .", "system": "cmake"}
+        assert "query" in shared  # the original object itself is untouched
+
+    def test_aliased_compile_block_stripping_does_not_leak_into_sibling_key(
+        self,
+    ) -> None:
+        shared = {"compiler": "/tmp/evil.sh", "std": "c++17"}
+        base = {"compile": shared, "baseline": shared}
+        out = strip_untrusted_execution_keys(base)
+        assert out["compile"] == {"std": "c++17"}
+        assert out["baseline"] == {"compiler": "/tmp/evil.sh", "std": "c++17"}
+
+    def test_aliased_resource_limits_capping_does_not_leak_into_sibling_key(
+        self,
+    ) -> None:
+        shared = {"max_bundle_facts_decode_nodes": 999999999}
+        base = {"resource_limits": shared, "baseline": shared}
+        out = strip_untrusted_execution_keys(base)
+        assert out["resource_limits"]["max_bundle_facts_decode_nodes"] < 999999999
+        # The aliased sibling must keep the ORIGINAL, uncapped value.
+        assert out["baseline"]["max_bundle_facts_decode_nodes"] == 999999999
+
 
 class TestRebaseRelativeConfigPaths:
     def test_relative_include_dir_resolves_against_project_root(
@@ -182,6 +221,24 @@ class TestRebaseRelativeConfigPaths:
         original = {"compile": {"include_dirs": ["include"]}}
         rebase_relative_config_paths(base, found_path=cfg)
         assert base == original
+
+    def test_aliased_compile_block_rebasing_does_not_leak_into_sibling_key(
+        self, tmp_path: Path
+    ) -> None:
+        """Same YAML-alias hazard as TestStripUntrustedExecutionKeys's own
+        aliased-block tests, checked here too since this function performs
+        an independent in-place-shaped mutation
+        (`compile_blk["include_dirs"] = ...`) on whatever object
+        `base.get("compile")` returns. `compile_blk = dict(compile_blk)`
+        before that assignment means an aliased sibling key must keep its
+        own (relative, unrebased) value."""
+        cfg = tmp_path / ".abicheck.yml"
+        shared = {"include_dirs": ["include"], "std": "c++17"}
+        base = {"compile": shared, "baseline": shared}
+        out = rebase_relative_config_paths(base, found_path=cfg)
+        assert out["compile"]["include_dirs"] == [str((tmp_path / "include").resolve())]
+        # The aliased sibling must keep the ORIGINAL, unrebased value.
+        assert out["baseline"]["include_dirs"] == ["include"]
 
     def test_github_dir_discovered_config_resolves_against_its_own_project_root(
         self, tmp_path: Path
