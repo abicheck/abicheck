@@ -770,7 +770,7 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " on the Action now fails the step outright, naming"
         " mode: compare/compare --no-baseline as the replacement for the"
         " caller's own shape)",
-        ("mode: scan",),
+        ("mode: scan", "scan mode", "`scan` mode"),
         frozenset(
             {
                 "AGENTS.md",

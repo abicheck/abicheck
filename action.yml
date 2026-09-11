@@ -850,7 +850,12 @@ outputs:
       operands with fail-on-removed-library set), or ERROR.
       For compare's audit-only shape (old-library and abi-baseline both
       omitted -- the replacement for a baseline-less mode: scan/audit: true
-      request, ADR-068): AUDIT_GATE (a real, BREAKING/API_BREAK-classified
+      request, ADR-068): COVERAGE_INCOMPLETE (with --contract via
+      extra-args, when the selected contract domain cannot be closed on the
+      available evidence -- the same orthogonal coverage axis as the
+      two-sided shape above; on this shape it is exit 1's only source, since
+      there is no bare severity-gate exit 1 here), AUDIT_GATE (a real,
+      BREAKING/API_BREAK-classified
       finding was detected against the candidate's own public surface while
       a severity preset other than `info-only` was in effect. Gating is
       opt-in: this Action never injects a preset on your behalf, so you
@@ -881,12 +886,14 @@ outputs:
       here since require-complete-analysis applies to both compare shapes;
       not a two-sided compatibility verdict either, since no baseline was
       compared -- fails the step unconditionally),
-      NOT_COMPARABLE (when the candidate and baseline were not extracted
-      under a comparable profile/scope contract -- ADR-050 D2 -- so no
-      comparison could run at all; this verdict fails the step
+      NOT_COMPARABLE (two-sided shape only, with the against/old-library or
+      abi-baseline input: when the candidate and baseline were not
+      extracted under a comparable profile/scope contract -- ADR-050 D2 --
+      so no comparison could run at all; this verdict fails the step
       unconditionally, since no fail-on-* input governs a run in which no
-      comparison happened), BUDGET_OVERFLOW (two-sided shape only, with
-      the budget input), EVIDENCE_CONTRACT_ERROR
+      comparison happened. Never reachable on the audit-only shape, which
+      has no baseline to mismatch against), BUDGET_OVERFLOW (two-sided
+      shape only, with the budget input), EVIDENCE_CONTRACT_ERROR
       (this run's evidence contract could not be satisfied -- ADR-037 D5
       -- so no comparison could run at all; two independent causes share
       this one verdict: a pinned --depth/--source-method whose required

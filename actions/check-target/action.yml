@@ -662,11 +662,11 @@ runs:
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
         # surfaces that resolved value as an output -- it only prints a
         # notice telling the caller to "pass sources: $SOURCES directly to
-        # dump/scan/compare". Forwarding the raw (still-empty) inputs.sources
+        # dump/compare". Forwarding the raw (still-empty) inputs.sources
         # here instead left action/run.sh's add_single_flag skipping --sources
         # entirely (it omits the flag for an empty value), so a replay check
         # with sources: left unset would pass the collect-facts step but then
-        # run compare/scan with NO source evidence at all -- silently missing
+        # run compare with NO source evidence at all -- silently missing
         # source-only findings at requested-depth: build/source (Codex
         # review). Mirror collect-facts' own default here so the analysis
         # step sees the same directory replay validated.
