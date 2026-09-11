@@ -143,15 +143,6 @@
       "review_by": "2027-03-01"
     },
     {
-      "path": "abicheck/scan_engine.py",
-      "disposition": "migrate",
-      "target_layer": "workflows",
-      "slice": "No permanent workflows/scan package per ADR-068 D7 -- scan's surviving capabilities move onto the compare workflow when that retirement lands, not into an interim scan-shaped slice.",
-      "rationale": "This module's own body already imports frontends directly (workflows may not import frontends) -- the exact same shape as gap A's now-closed service.py -> service_render.py edge. Trial classification into `workflows` measured 13 new workflows -> frontends violations. ADR-061's own closure-sequence ordering states 'scan-related surfaces retire only after capability migration' (package 6) and 'Package 6 must not race ahead of ADR-068' -- so this is deliberately left for that retirement rather than given its own interim workflows slice.",
-      "owner": "abicheck maintainers",
-      "review_by": "2027-03-01"
-    },
-    {
       "path": "abicheck/serialization.py",
       "disposition": "migrate",
       "target_layer": "storage",
