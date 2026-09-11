@@ -419,10 +419,25 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     if not truly_opaque:
         return OpaqueTypeIndex(stable=frozenset(), local=frozenset())
 
+    # Only a declaration that itself satisfies ``is_opaque`` may contribute
+    # its stable EntityId here -- a bare-name collision between this opaque
+    # declaration and an unrelated *visible* record sharing the same
+    # rendered ``RecordType.name`` (e.g. two differently-namespaced
+    # ``Handle`` types) must not smuggle the visible record's own stable id
+    # into the opaque index just because the two share a spelling (Codex
+    # review, PR #1218): that would let a qualified, identity-carrying
+    # Change for the *visible* type match the stable tier and be wrongly
+    # downgraded, a strictly worse outcome than the pre-migration bare
+    # string comparison for that same collision. This does not narrow the
+    # bare-spelling local tier: `OpaqueTypeIndex.build`'s `local` entries
+    # compare equal by spelling alone (`SnapshotLocalIdentity.entity_id` is
+    # `compare=False`), so "Handle" still lands in `local` from the
+    # qualifying opaque declaration alone -- the pre-migration
+    # `c.symbol in truly_opaque` fallback is unaffected either way.
     declarations: dict[str, list[RecordType]] = {}
     for snap in (old, new):
         for t in snap.types:
-            if t.name in truly_opaque:
+            if t.name in truly_opaque and t.is_opaque:
                 declarations.setdefault(t.name, []).append(t)
     return OpaqueTypeIndex.build(declarations)
 

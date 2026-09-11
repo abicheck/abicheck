@@ -719,6 +719,48 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         out = _downgrade_opaque_struct_changes([change], old, new)
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
+    def test_a_visible_types_stable_id_never_enters_the_index_via_a_name_collision(
+        self,
+    ) -> None:
+        """A real false positive a first revision of this migration
+        introduced (Codex review, PR #1218): ``ns::Handle`` is opaque on
+        both sides, and an unrelated, *visible* ``other::Handle`` happens to
+        render the identical bare ``RecordType.name`` ("Handle") -- a real,
+        pre-existing collision this module has always had to tolerate at
+        the spelling tier. Populating the stable tier from *every*
+        same-named declaration regardless of its own ``is_opaque`` would
+        smuggle ``other::Handle``'s own stable id into the opaque index
+        merely because it shares a spelling with the genuinely opaque
+        declaration -- a strictly worse outcome than the pre-migration bare
+        string comparison, which a qualified ``other::Handle`` symbol would
+        never have matched. A qualified, identity-carrying change for the
+        visible type must not be suppressed."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        visible_handle = _record("Handle", is_opaque=False, entity_id=_OTHER_STABLE_ID)
+        old = _snap([opaque_handle, visible_handle])
+        new = _snap([opaque_handle, visible_handle])
+        change = _struct_size_change("other::Handle", entity_id=_OTHER_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
+    def test_a_visible_types_bare_name_fallback_is_unaffected_by_the_is_opaque_filter(
+        self,
+    ) -> None:
+        """The local (bare-spelling) tier must still match on the shared
+        spelling "Handle" alone when the change carries no identity of its
+        own -- the ``is_opaque`` filter added for the collision fix above
+        only narrows which declaration's *stable* id enters the index, not
+        the local tier's membership (``SnapshotLocalIdentity`` compares by
+        spelling only, per its own docstring), so this reproduces the
+        pre-migration bare ``c.symbol in truly_opaque`` behavior exactly."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        visible_handle = _record("Handle", is_opaque=False, entity_id=_OTHER_STABLE_ID)
+        old = _snap([opaque_handle, visible_handle])
+        new = _snap([opaque_handle, visible_handle])
+        change = _struct_size_change("Handle")
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
 
 # -- Primitive-level property tests: OpaqueTypeIndex.build ------------------
 
