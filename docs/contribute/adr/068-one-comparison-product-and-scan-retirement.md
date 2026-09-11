@@ -711,10 +711,19 @@ previously-published `CompareRequest(..., env_matrix_path=Path(...))` shape
 (credited in `CHANGELOG.md`'s 0.4.0 entry) hit an immediate `TypeError` at
 construction, not a graceful fallback. Fixed in the same review round:
 `CompareRequest.env_matrix_path` is kept as a genuine, still-accepted
-constructor parameter that `__post_init__` resolves into `env_matrix` (via
-`workflows.input_resolution.load_env_matrix`, the same loader the retired
-CLI flag itself used), so both spellings now construct an equivalent
-request — see `abicheck/workflows/contracts.py`'s own field docstring and
+constructor parameter, but resolution into an `EnvironmentMatrix` is lazy
+rather than immediate — `__post_init__` only checks the structural
+"not both `env_matrix` and `env_matrix_path`" invariant (no file I/O), and
+the actual load (via `workflows.input_resolution.load_env_matrix`, the same
+loader the retired CLI flag itself used) happens later, at the
+plan/execution boundary, through `CompareRequest.effective_env_matrix()` —
+called from `resolve_compare_request()` and cached on
+`ResolvedComparePair.resolved_env_matrix` for `classify_compare_pair()` to
+read. So constructing a `CompareRequest(..., env_matrix_path=...)` succeeds
+even if the file doesn't exist yet (and does not cache stale contents from
+before a later edit); the two spellings become equivalent only once the
+request is resolved, not at construction — see
+`abicheck/workflows/contracts.py`'s own field docstring and
 `tests/test_environment_drift.py::TestCompareRequestEnvMatrixPathCompat`.
 Only the CLI flag surface and its
 `--support-promise`-shaped strict-schema enforcement moved.
