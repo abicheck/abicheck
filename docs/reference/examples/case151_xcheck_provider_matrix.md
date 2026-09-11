@@ -19,7 +19,7 @@ baseline. abicheck's verdict is `COMPATIBLE` on both fixtures below — the
 ABI hasn't broken — but the audit's `private_header_leak` finding (public
 function `make_widget()` returns a private-header type, same shape as
 case144) is the fixed point of this case; what varies is **how much
-evidence corroborates it**. `abicheck scan`'s cross-check machinery records
+evidence corroborates it**. The cross-check machinery records
 which providers (evidence sources) contributed to each finding, and this
 case demonstrates that the list grows — without the finding itself
 changing — as more evidence becomes available.
@@ -36,9 +36,17 @@ evidence is attached:
 
 ## abicheck command
 
-```bash
-abicheck scan thin.abi.json                 # 1 provider
-abicheck scan snapshot.abi.json             # + source_index corroboration
+No CLI command runs this check any more: the intra-version cross-source
+checks were only ever exposed by the `scan` command, which has been removed,
+and neither `dump` nor `compare` reproduces them. The check still runs in the
+engine, over the snapshots `abicheck dump` produces:
+
+```python
+from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.serialization import load_snapshot
+
+run_crosschecks(load_snapshot("thin.abi.json"))      # 1 provider
+run_crosschecks(load_snapshot("snapshot.abi.json"))  # + source_index corroboration
 ```
 
 ## Expected abicheck finding
@@ -56,8 +64,8 @@ Verdict: COMPATIBLE (exit 0)
 ```
 
 The provider list — not shown in the text renderer's coverage line above,
-but recorded in the `crosscheck.providers` field of `--format json` output
-and asserted directly by `run_crosschecks()` — is where the two fixtures
+but recorded in the `providers` mapping `run_crosschecks()` returns — is
+where the two fixtures
 diverge:
 
 ```text
@@ -93,7 +101,7 @@ provider rather than a stronger verdict.
 
 A finding backed by one provider and a finding backed by two independent
 providers are not equally trustworthy, even though both fire the same
-`ChangeKind`. A CI pipeline that only ran a header scan (thin evidence) and
+`ChangeKind`. A CI pipeline that only collected header evidence (thin) and
 one that also replayed the source tree (rich evidence) should both catch
 this leak — and do — but only the richer pipeline can tell a reviewer "two
 independent sources agree," which matters when deciding whether a finding

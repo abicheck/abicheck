@@ -42,8 +42,16 @@ source graph for one build:
 
 ## abicheck command
 
-```bash
-abicheck scan snapshot.abi.json
+No CLI command runs this check any more: the intra-version cross-source
+checks were only ever exposed by the `scan` command, which has been removed,
+and neither `dump` nor `compare` reproduces them. The check still runs in the
+engine, over a snapshot `abicheck dump` produces:
+
+```python
+from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.serialization import load_snapshot
+
+result = run_crosschecks(load_snapshot("snapshot.abi.json"))
 ```
 
 ## Expected abicheck finding
@@ -100,8 +108,9 @@ the source graph's call edges do, supplied by the `source_index` provider.
 When the internal declaration's own file is among the revision's changed
 paths (`CrosscheckConfig.changed_paths`), the same finding is reported at
 higher confidence — "this call reaches a file that changed this revision"
-is a stronger signal than "this call reaches *something* internal" — and
-`abicheck scan --since` wires the changed-path set through automatically.
+is a stronger signal than "this call reaches *something* internal". No CLI
+command supplies that set any more — the caller passes it directly, as
+`run_crosschecks(snapshot, CrosscheckConfig(changed_paths=...))`.
 
 ## Why this matters for a real release
 

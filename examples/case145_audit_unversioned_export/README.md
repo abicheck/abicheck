@@ -28,8 +28,16 @@ ELF export table's own version metadata, nothing from DWARF or headers:
 
 ## abicheck command
 
-```bash
-abicheck scan snapshot.abi.json
+No CLI command runs this check any more: the intra-version cross-source
+checks were only ever exposed by the `scan` command, which has been removed,
+and neither `dump` nor `compare` reproduces them. The check still runs in the
+engine, over a snapshot `abicheck dump` produces:
+
+```python
+from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.serialization import load_snapshot
+
+result = run_crosschecks(load_snapshot("snapshot.abi.json"))
 ```
 
 ## Expected abicheck finding

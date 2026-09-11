@@ -29,8 +29,16 @@ compile context:
 
 ## abicheck command
 
-```bash
-abicheck scan snapshot.abi.json
+No CLI command runs this check any more: the intra-version cross-source
+checks were only ever exposed by the `scan` command, which has been removed,
+and neither `dump` nor `compare` reproduces them. The check still runs in the
+engine, over a snapshot `abicheck dump` produces:
+
+```python
+from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.serialization import load_snapshot
+
+result = run_crosschecks(load_snapshot("snapshot.abi.json"))
 ```
 
 ## Expected abicheck finding
@@ -73,12 +81,12 @@ header parse assumed.
 ## Why this matters for a real release
 
 A context-free header parse is the common case for any ABI tool run without
-build integration — most CI pipelines run the header scan once, separately
-from the actual build. If that scan silently reports a layout that
+build integration — most CI pipelines parse the headers once, separately
+from the actual build. If that parse silently reports a layout that
 disagrees with what the compiler produces, every downstream layout-based
 finding (struct sizes, member offsets, vtable slots) inherits the error
 with full confidence and no warning. Catching the mismatch here means the
-project fixes its scan invocation (or its build) before a consumer trusts
+project fixes its header-parse context (or its build) before a consumer trusts
 a wrong layout report.
 
 ## Safe redesign

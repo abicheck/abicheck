@@ -10,7 +10,7 @@ advisory finding: `connect()` is a public function that takes
 `detail::SessionState&`, a type declared only in a private header — the same
 `private_header_leak` shape as case144, but this case exists to demonstrate
 *how much evidence abicheck needed to prove it*. ADR-035's honest-coverage
-promise is that a scan says exactly what each depth proved and what it
+promise is that a report says exactly what each depth proved and what it
 could not, rather than silently upgrading a hint into a confirmed finding.
 This case is the legibility anchor for that promise: the same input, read at
 increasing evidence depth.
@@ -20,7 +20,7 @@ increasing evidence depth.
 `snapshot.abi.json` is a single, hand-built `AbiSnapshot` for one build of
 `libdemo.so`. Unlike case144/146, it carries **both** the L2 header
 provenance and a baked-in L5 source graph, so it represents what a live
-`--depth source` scan would have already collected:
+`--depth source` dump would have already collected:
 
 | Source in the snapshot | What it records |
 |---|---|
@@ -30,8 +30,16 @@ provenance and a baked-in L5 source graph, so it represents what a live
 
 ## abicheck command
 
-```bash
-abicheck scan snapshot.abi.json
+No CLI command runs this check any more: the intra-version cross-source
+checks were only ever exposed by the `scan` command, which has been removed,
+and neither `dump` nor `compare` reproduces them. The check still runs in the
+engine, over a snapshot `abicheck dump` produces:
+
+```python
+from abicheck.buildsource.crosscheck import run_crosschecks
+from abicheck.serialization import load_snapshot
+
+result = run_crosschecks(load_snapshot("snapshot.abi.json"))
 ```
 
 ## Expected abicheck finding
@@ -64,32 +72,28 @@ lexical pattern hints at it without AST confirmation).
 ## Why abicheck catches it — and what depth actually changes here
 
 Because this is a **committed snapshot fixture**, not a live binary/source
-tree, the `--depth` flag controls how much *new* evidence abicheck would
-collect from `--sources`/`--build-info` — evidence this fixture doesn't need
-collected because it's already baked in. Verified directly against this
-file:
+tree, every layer the ladder would collect is already baked in — the
+`--depth` dial on `dump`/`compare` decides how much *new* evidence to collect
+from `--sources`/`--build-info`, and there is nothing here to collect it
+from. So the ladder is read off the fixture rather than run:
 
-```bash
-abicheck scan snapshot.abi.json --depth headers   # exit 0, same finding
-abicheck scan snapshot.abi.json --depth binary    # exit 0, same finding
-abicheck scan snapshot.abi.json                   # exit 0, same finding (auto -> depth=source)
-abicheck scan snapshot.abi.json --depth source    # errors: needs --sources/--build-info
-```
+- **L0 alone** (the export table) sees `connect` exported and nothing more —
+  no signature, so no leak is visible.
+- **L2** (the public-header AST) is already sufficient: it carries both
+  `connect(detail::SessionState &)` and `detail::SessionState`'s
+  `origin: private_header`, which is the whole finding. That is why
+  `min_evidence` is `L2`, not `L5`.
+- **L5** (the source graph) adds a resolved reference edge, recorded as the
+  second provider (`source_index`) rather than as a stronger verdict.
 
-The first three all report `crosscheck:private_header_leak present` with the
-identical detail line — because the L2 header AST alone already carries the
-`detail::SessionState` → private-header fact, pinning a shallower `--depth`
-doesn't hide it here. Pinning `--depth source` explicitly *fails* against
-this fixture, since that pin means "collect fresh L3–L5 evidence" and there
-is no real source tree to collect it from — `--sources <tree>` is required.
-Against a **live** binary + real source tree (not a committed fixture), the
-ladder plays out as designed: `--depth headers` gives only the AST-level
-hint, and `--depth source` is what adds the resolved source-graph
-corroboration that upgrades it to a confirmed cross-check.
+Against a **live** binary plus a real source tree, that is exactly what a
+`dump --depth headers` versus `dump --depth source` snapshot would carry:
+the shallower dump proves the leak from the AST alone; the deeper one adds
+the corroborating source-graph edge.
 
 ## Why this matters for a real release
 
-A scan that silently reports "no leak found" because it only had shallow
+A report that silently says "no leak found" because it only had shallow
 evidence would be worse than one that says "not checked at this depth" —
 the honest-coverage contract is what lets a CI policy decide how much
 evidence to require before trusting a `COMPATIBLE` result. Here, L2 already
