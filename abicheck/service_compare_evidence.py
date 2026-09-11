@@ -584,6 +584,59 @@ def reject_compile_db_filter_scope_mismatch(
             raise ValidationError(f"{label}: {error}")
 
 
+def dump_cli_compile_db_path(
+    build_info: Path | None, headers: tuple[Path, ...]
+) -> Path | None:
+    """The native ``dump`` CLI's own thin ``workflows``-owned wrapper around
+    ``header_conditionals.compile_db_from_build_info``.
+
+    ``header_conditionals.py`` is ``extract``-classified (ADR-061) and
+    ``frontends/cli/commands/dump.py`` is ``frontends``-classified, which may
+    reach ``extract`` only through ``workflows`` — this module already owns
+    ``reject_compile_db_filter_scope_mismatch`` immediately above, the typed
+    pipeline's counterpart to the same scope check, so it is the natural home
+    for the CLI's own two direct ``header_conditionals`` calls too (ADR-061
+    gap A's second `dependency_direction_exceptions` entry; see
+    ``architecture/debt.yaml``). Behavior is unchanged — a straight
+    passthrough — only the caller's import path moves off the previously
+    invisible ``cli_dump_helpers`` -> ``header_conditionals`` bridge.
+    """
+    from .header_conditionals import compile_db_from_build_info
+
+    return compile_db_from_build_info(build_info, headers)
+
+
+def dump_cli_compile_db_filter_scope_error(
+    compile_db_filter: str | None,
+    build_info: Path | None,
+    sources: Path | None,
+    headers: tuple[Path, ...],
+    collect_mode: str,
+) -> str | None:
+    """The native ``dump`` CLI's own thin ``workflows``-owned wrapper around
+    ``header_conditionals.compile_db_filter_scope_error``/
+    ``compile_db_for_filter_scope_check``.
+
+    Mirrors :func:`dump_cli_compile_db_path`'s own rationale: computes the
+    same ``compile_db_for_filter_scope_check`` -> ``compile_db_filter_scope_error``
+    pair :func:`reject_compile_db_filter_scope_mismatch` already runs for the
+    typed pipeline, but returns the raw error string (or ``None``) instead of
+    raising, since the CLI's own ``dump_cmd`` turns a non-``None`` result into
+    a ``click.UsageError`` itself rather than the typed pipeline's
+    ``ValidationError``.
+    """
+    from .header_conditionals import (
+        compile_db_filter_scope_error,
+        compile_db_for_filter_scope_check,
+    )
+
+    return compile_db_filter_scope_error(
+        compile_db_filter,
+        compile_db_for_filter_scope_check(build_info, sources, headers),
+        collect_mode,
+    )
+
+
 def normalized_debug_format(request: CompareRequest | DumpRequest) -> str | None:
     """A request's ``debug_format`` in the form the extraction layer takes.
 

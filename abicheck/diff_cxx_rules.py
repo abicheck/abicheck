@@ -24,7 +24,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 
 from .checker_types import Change
-from .compare.vtable_evidence import vtable_transition_is_evidenced
+from .compare.vtable_evidence import (
+    vtable_fact_declined,
+    vtable_transition_is_evidenced,
+)
 from .diff_helpers import make_change
 from .model import Fact, Function, RecordType
 from .model.availability import FactStatus
@@ -1199,15 +1202,27 @@ def virtual_method_addition(
     predicate — see ``_diff_type_vtable``), this function falls through to
     its own signature-based override check below instead of silently
     dropping the finding. For a genuinely *new* mangled symbol this branch
-    is reached only when ``vtable_facts_reliable`` is ``False`` — the shared
-    predicate's own "class's own virtual functions" evidence branch always
-    sees a real difference for a brand-new symbol (it is present in
-    ``new_funcs``'s owned set and, by construction, absent from
-    ``old_funcs``'s), so it is always evidenced when reliable. The one way a
-    *reliable* comparison reaches "not evidenced" at all is the shape the
-    already-existed guard above now intercepts explicitly — this function no
-    longer relies on that being merely implied by the evidence predicate's
-    absence of a positive signal (Codex review, fresh evidence: an earlier
+    used to be reached only when ``vtable_facts_reliable`` was ``False`` —
+    the shared predicate's own "class's own virtual functions" evidence
+    branch always sees a real difference for a brand-new symbol (it is
+    present in ``new_funcs``'s owned set and, by construction, absent from
+    ``old_funcs``'s), so it was always evidenced when reliable... under the
+    predicate's *original* shape. That stopped being true once the shared
+    predicate gained its own ``PARTIAL``/``UNSUPPORTED`` top-level
+    short-circuit (ADR-063 T9): it can now return ``False`` *before* ever
+    reaching that owned-signature branch, for an owner whose vtable
+    evidence is known incomplete rather than genuinely unevidenced --
+    including for a class that genuinely did gain a new virtual method
+    (Codex review finding on this PR). This function no longer relies on
+    "not evidenced" implying "safe to fall through to my own override
+    check" at all: the explicit ``vtable_fact_declined(...)`` check just
+    above the fallthrough below returns ``None`` outright whenever either
+    side's vtable evidence is declared incomplete, before this function's
+    own override-signature logic ever runs. The already-existed guard
+    above catches a separate, narrower shape (a compatible hidden-to-public
+    visibility promotion where the symbol reads as "new" only because it
+    was previously non-public) -- unrelated to, and still needed alongside,
+    the vtable-evidence guard (Codex review, fresh evidence, an earlier
     revision let exactly that shape fall through here uncaught, fabricating
     a BREAKING ``VIRTUAL_METHOD_ADDED`` for a compatible hidden-to-public
     visibility promotion).
@@ -1237,6 +1252,25 @@ def virtual_method_addition(
     t_new = _resolve_owner_type(owner, new_types, old_owner_classes)
     if t_old is None or t_new is None:
         return None  # no pre-existing record on both sides → compatible / out of scope
+    if vtable_fact_declined(t_old, t_new):
+        # Codex review finding on this PR: `vtable_transition_is_evidenced`'s
+        # own `PARTIAL`/`UNSUPPORTED` top-level decline (T9) returns `False`
+        # *before* it ever reaches its "class's own virtual functions"
+        # branch -- the one branch that would otherwise always evidence a
+        # genuinely new mangled symbol. Without this explicit check, the
+        # fallthrough below (added for the ADR-063 5B closure) would still
+        # reach its own override-signature check on an owner whose vtable
+        # evidence is known incomplete, and -- finding no matching override,
+        # since bases/virtual_bases can be fully evidenced even while
+        # vtable itself is PARTIAL -- fabricate a BREAKING
+        # `VIRTUAL_METHOD_ADDED` for exactly the capture-gap artifact this
+        # whole closure exists to suppress, just through this function
+        # instead of `TYPE_VTABLE_CHANGED`. See `vtable_fact_declined`'s
+        # own docstring for the full account. Checked unconditionally
+        # (regardless of `vtable_facts_reliable`/whether the raw arrays
+        # differ) since a declared-incomplete vtable is never trustworthy
+        # evidence for this function's own purpose either way.
+        return None
     old_vtable = _fact_str_list(t_old.vtable_fact)
     new_vtable = _fact_str_list(t_new.vtable_fact)
     if old_vtable != new_vtable and vtable_facts_reliable:

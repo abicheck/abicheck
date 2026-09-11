@@ -746,6 +746,211 @@ and the cross-source checks are among the findings users act on most.
 in kind, and forcing them together to reduce a command count is the sort of
 argument-count-dependent semantics this work is meant to eliminate.
 
+## Amendment (2026-09-11): the Action input lifecycle — `mode: scan` retired outright
+
+The CLI's own `scan` command was already deleted (Phase 6, above) — `abicheck
+scan` has exited 64 for a while, naming `compare`/`compare --no-baseline` as
+the replacement. Until now, `mode: scan` survived as a composite-Action
+*input value* only: `action/run.sh` translated it internally to `compare`/
+`compare --no-baseline`, matching the CLI's own retirement one layer up but
+never actually removing the Action-level spelling. This amendment closes
+that gap, per D8's own hard-removal rule (no deprecation window): setting
+`mode: scan` on the Action now fails the step outright, at the earliest
+possible point (`action/validate-inputs.sh`, before Python setup or any
+toolchain install), naming the exact replacement for the caller's own shape.
+The Action's three scan-only inputs (`against`, `estimate`, `audit`) are
+retired the same way — each becomes a hard `::error::`, not a silently
+inert no-op, since GitHub Actions drops an undeclared input with only a
+warning and this input family used to change what actually ran.
+
+### The two `mode: scan` shapes, and what replaces each
+
+`mode: scan` never collapsed to one spelling — a baseline scan and an
+audit-only scan were two different requests, and they get two different
+replacements:
+
+**(a) `mode: scan` with `against`/`abi-baseline` set (a baseline scan).**
+Replacement: `mode: compare` with the identical baseline value passed as
+`old-library` (or `abi-baseline`, unchanged) and the same `new-library`.
+This was already exactly what the Action's own internal translation did
+for this shape (`INPUT_AGAINST` → `INPUT_OLD_LIBRARY`) — the only change is
+that the caller now states `compare` directly instead of `scan` being
+translated for them.
+
+**(b) `mode: scan` with no baseline (or `audit: true`, which forced this
+shape regardless of an `against`/`abi-baseline` also being configured).**
+Replacement: `mode: compare` with **both** `old-library` and `abi-baseline`
+omitted — omission is the trigger, not a dedicated flag. This routes to a
+first-class `compare --no-baseline` invocation against `new-library` alone,
+reporting no old/new compatibility verdict at all (D2). `compare` did not
+previously expose this shape as a *native* Action request at all — before
+this amendment, `old-library` was a required Action operand for `mode:
+compare` in every practical sense (the CLI's own `--no-baseline` flag had
+no Action-level way to reach it for a native `compare` request), and the
+shape was reachable only through `mode: scan`'s own internal translation.
+This amendment makes it native: `action/validate-inputs.sh` and
+`action/run.sh` now both treat "old-library and abi-baseline both absent"
+as a first-class, documented compare shape, not an implicit fallback. See
+"What changed to make (b) native" below for the mechanics.
+
+### The audit-gate trap, restated as a migration requirement
+
+Legacy `mode: scan` with no baseline gated a CI job on a `BREAKING`/
+`API_BREAK`-classified candidate-side finding **by default, unconditionally,
+no flag needed**. `compare --no-baseline`'s own audit-gate axis
+(ADR-068's 2026-09-10 amendment, above) reproduces the identical gating
+partition at exit code `3` — but it is **opt-in**, activated only by
+`--severity-preset` (any value except `info-only`). A caller migrating an
+audit-only `mode: scan` job to `mode: compare` (shape (b) above) who does
+not also set `severity-preset` gets a job that always exits 0/passes,
+silently converting what used to gate CI into a step that never fails
+regardless of what the audit finds. This is exactly the risk `vision.md`'s
+"record before disposing" principle warns about, on the exit code rather
+than a finding.
+
+**This is a required migration step, not an optional hardening.** Every
+audit-only `mode: scan` job that relied on the default gating (i.e., did not
+already pass `severity-preset: info-only` to opt out) must add
+`severity-preset: default` (or `strict`) when migrating to `mode: compare`'s
+audit-only shape, or the job silently stops gating. A job that already
+passed `severity-preset: info-only` — an explicit "don't gate" request —
+needs no change; the same value keeps the same meaning.
+
+Verified live against the G20 corpus fixtures this ADR's 2026-09-10
+amendment already established as the reproduction set
+(`catalog/cases/case148_xcheck_header_build_mismatch`,
+`case149_xcheck_odr_variant`, `case143_audit_accidental_export`):
+
+```console
+$ abicheck compare --no-baseline catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json \
+    --format json --severity-preset default
+exit=3
+$ abicheck compare --no-baseline catalog/cases/case149_xcheck_odr_variant/snapshot.abi.json \
+    --format json --severity-preset default
+exit=3
+$ abicheck compare --no-baseline catalog/cases/case143_audit_accidental_export/snapshot.abi.json \
+    --format json --severity-preset default
+exit=0
+```
+
+case148/case149 carry `API_BREAK`-classified findings and gate (exit 3,
+matching legacy `scan`'s own exit 2 on the identical fixtures); case143
+carries only a `RISK`-classified finding and does not gate (exit 0),
+matching legacy `scan`'s own exit 0 there too — the replacement wiring
+reproduces the exact gate/no-gate partition legacy `scan` had, provided the
+caller adds `--severity-preset`.
+
+### What changed to make (b) native
+
+Before this amendment, `action/run.sh`'s `compare` branch unconditionally
+required `old-library` (`${INPUT_OLD_LIBRARY:?old-library is required for
+compare mode}`) — the audit-only shape was reachable only via `mode: scan`'s
+own separate command-assembly branch. That branch is now deleted outright,
+and the compare branch itself gained the audit-only case: `old-library` and
+`abi-baseline` both empty routes to `compare --no-baseline new-library`
+instead of failing the bash parameter expansion. Everything scan's own
+audit-only translation used to do for this shape now lives in the one
+`compare` branch, keyed on this same presence check (`_NO_BASELINE` in
+`action/run.sh`):
+
+- `-H`/`-I`: no OLD side exists in this shape (old-header/old-include would
+  be a CLI usage error — "the OLD side is declared absent"), so they are
+  never forwarded; `public-header-dir` folds into a bare `-H` root the same
+  way `dump` derives provenance-and-extraction scope from `-H` (legacy
+  `scan`'s own `--public-header-dir` CLI flag is gone, so there is no
+  separate flag to fold from any more).
+- `since`/`changed-path`/`budget`: rejected upfront (before any dependency
+  install) as usage errors for this shape, matching `compare --no-baseline`'s
+  own CLI-level rejection (D2) — unchanged from the previous `mode: scan`
+  behavior for this shape.
+- `require-complete-analysis`: **now forwarded**, unlike legacy `scan`'s own
+  audit mode (which never accepted the flag at all, so this Action
+  documented it as a no-op for that shape). `compare --no-baseline` genuinely
+  accepts the flag and gives it real teeth (live-verified: an incomplete
+  analysis-assurance candidate-side finding fails the step under it). This
+  is a real, accepted capability gain from unifying onto `compare`'s own CLI
+  surface rather than preserving a narrower historical accident.
+- `budget`: the two-sided (baseline) shape gains the dedicated `budget`
+  Action input's forwarding too — previously `compare`'s own branch had no
+  `--budget` forwarding at all (the input was documented scan-only); now any
+  `mode: compare` baseline request can set it.
+- The `-H`/`-I` shared-root-plus-override union behavior legacy `scan`'s own
+  CLI documented as additive (`_add_unioned_sided_flag` in the pre-amendment
+  `action/run.sh`) is **not** carried forward for a two-sided compare: a
+  two-sided `compare`'s own native per-side resolution (which OVERRIDES a
+  bare shared root with a side-specific one, not unions them) now applies
+  uniformly, since there is no longer a `scan`-flavored CLI to reproduce.
+  This is a deliberate, accepted behavior change of this migration — it
+  restores `compare`'s own always-documented semantics rather than
+  preserving `scan`'s divergent one for a route that no longer exists.
+- One `run.sh`-internal bug was caught and fixed while implementing this:
+  `_compile_context_sources_pairwise()` (decides whether a `--sources`
+  tree's own `compile:`/`source:`/`debug:` blocks promote pair-wide or
+  single-sided) keyed only on `$MODE == "compare"` plus whether `old-library`
+  looked like a stored snapshot — it had no way to tell "old-library
+  genuinely omitted" apart from "old-library happens to test as a live
+  binary" (an empty string is not a stored-snapshot magic-byte match
+  either), so it would have misclassified the new audit-only shape as
+  pairwise. Fixed to also require `old-library` be non-empty before
+  classifying pairwise.
+
+### Consequences for this repo's own callers
+
+- `.github/workflows/test-action.yml`'s three `mode: scan` acceptance lanes
+  (`test-scan-baseline-breaking`, `test-scan-audit`, `test-scan-estimate`)
+  are migrated to the shape (a)/(b) replacements above, asserting the
+  identical exit code and verdict as before — these lanes are this
+  migration's own acceptance evidence, not just coverage that happened to
+  need updating.
+- `tests/test_action_run_sh_scan_no_baseline_capability_gap.py` and
+  `tests/test_action_run_sh_scan_routing_edge_cases.py` (both named for a
+  scan-vs-legacy-CLI routing predicate that no longer exists — there is
+  only one CLI, `compare`, and no routing decision left to make) are
+  retired: the former is renamed to
+  `tests/test_action_run_sh_compare_no_baseline_capability_gap.py` and its
+  real invariant (since/changed-path/budget rejected upfront for the
+  audit-only shape; require-complete-analysis forwarded, not withheld) kept
+  and restated for `mode: compare`; the latter's entire subject (does input
+  X affect which of two CLIs a scan request routes to) has no meaning once
+  there is only one CLI, and its coverage of `compare`'s own real behavior
+  (header/include unions, depth values, JSON-snapshot detection, extra-args
+  passthrough) was already independently covered by this directory's other
+  `compare`-focused test modules, so the file is deleted rather than kept
+  as a hollow renamed shell. `tests/test_action_validate_inputs_no_baseline_
+  capability_gap.py` is renamed to `tests/test_action_validate_inputs_
+  compare_no_baseline_capability_gap.py` on the same basis as its `run_sh`
+  sibling. A number of other, pre-existing test modules that happened to
+  exercise `mode: scan` as one parametrized case alongside `compare`
+  (`test_action_analysis_assurance_verdict.py`,
+  `test_action_compile_context_old_library_liveness.py`,
+  `test_action_compile_context_parity.py`, `test_action_coverage_verdict.py`,
+  `test_action_run_contract.py`) are updated in place: a `scan`-parametrized
+  case is either dropped (a `compare`-only invariant now) or ported directly
+  to the `compare` shape it was implicitly already testing, with no loss of
+  the underlying invariant.
+- `docs/use/github-action.md` gains a migration section covering both
+  shapes, including the `severity-preset` requirement above.
+  `docs/integration/scenarios/source-replay.md` and `single-build-audit.md`
+  (built around `mode: scan` examples) are rewritten for the `mode: compare`
+  replacement wiring. `docs/use/github-action-source-scans.md` — described
+  elsewhere as the canonical `mode: scan` Action reference — is retired per
+  `docs/AGENTS.md`'s ownership rules, folded into `github-action.md`'s own
+  migration section and `use/dump-compare-flags.md` rather than kept as a
+  page about a retired mode.
+- `scripts/retired_surfaces.py` gains a `mode: scan` (Action input value)
+  entry, so no future documentation page can reintroduce the retired
+  spelling without the `check_docs_contract.py` sweep catching it.
+
+### Status
+
+Implemented: `action.yml`, `action/validate-inputs.sh`, `action/run.sh`,
+this repository's own callers, and the docs above. Verified live against
+the G20 corpus (audit-gate reproduction, above) and via
+`tests/test_action_run_sh_*.py`/`tests/test_action_validate_inputs*.py`
+(the full directory, not just the files this amendment specifically
+touched — every test in both directories passes against the new
+behavior).
+
 ## Relationship to existing ADRs
 
 | ADR | Effect |

@@ -32,6 +32,7 @@ Extracts the full mode-branch region of ``run.sh`` verbatim -- same
 sets the relevant ``INPUT_*`` env vars, capturing the resulting ``CMD``
 array.
 """
+
 from __future__ import annotations
 
 import os
@@ -64,12 +65,13 @@ def _bash_executable() -> str:
 
 
 def _run_cmd(env_extra: dict[str, str]) -> list[str]:
-    script = (
-        _mode_branches_region()
-        + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
-    )
+    script = _mode_branches_region() + "\nprintf '%s\\x1f' ${CMD[@]+\"${CMD[@]}\"}\n"
     with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
+        "w",
+        suffix=".sh",
+        delete=False,
+        encoding="utf-8",
+        newline="\n",
     ) as f:
         f.write(script)
         script_path = f.name
@@ -78,7 +80,10 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
     try:
         result = subprocess.run(
             [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
         )
     finally:
         os.unlink(script_path)
@@ -88,27 +93,6 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
             f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
         )
     return [item for item in result.stdout.split("\x1f") if item]
-
-
-def _run_mode_branches(env_extra: dict[str, str]) -> subprocess.CompletedProcess:
-    """Run the mode-branch region and return the raw result, so a rejected
-    input's own nonzero exit and `::error::` line can be asserted (`_run_cmd`
-    treats a nonzero exit as a harness failure)."""
-    script = _mode_branches_region() + '\nprintf \'%s\\x1f\' ${CMD[@]+"${CMD[@]}"}\n'
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False, encoding="utf-8", newline="\n",
-    ) as f:
-        f.write(script)
-        script_path = f.name
-    env = dict(os.environ)
-    env.update(env_extra)
-    try:
-        return subprocess.run(
-            [_bash_executable(), script_path],
-            capture_output=True, text=True, encoding="utf-8", env=env,
-        )
-    finally:
-        os.unlink(script_path)
 
 
 def _build_target_pairs(cmd: list[str]) -> list[str]:
@@ -134,31 +118,30 @@ class TestDumpBuildTarget:
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
-class TestScanBuildTargetIsRetired:
-    """ADR-068's second 2026-09-09 amendment rules `scan --build-target` (b)
-    -- retired; `dump --build-target` (above) is unchanged. The Action
-    rejects the input for `mode: scan` with an explicit `::error::` instead
-    of forwarding a flag the command no longer has."""
+class TestCompareNeverForwardsBuildTarget:
+    """`compare` has no `--build-target` flag at all (`dump`-only); setting
+    build-target on mode: compare (either shape) is simply never forwarded
+    -- there is no dedicated rejection for it (unlike the now-removed
+    mode: scan, ADR-068's Action-input-lifecycle amendment), since it was
+    never a documented compare capability to silently narrow."""
 
-    def test_rejected_with_an_error_naming_dump(self) -> None:
-        result = _run_mode_branches(
+    def test_absent_from_two_sided_compare(self) -> None:
+        cmd = _run_cmd(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
+                "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.json",
                 "INPUT_BUILD_TARGET": "//:math",
             }
         )
-        assert result.returncode != 0
-        assert "no longer supports build-target" in result.stdout
-        assert "mode: dump" in result.stdout
+        assert "--build-target" not in cmd
 
-    def test_absent_forwards_none(self) -> None:
+    def test_absent_from_audit_only_compare(self) -> None:
         cmd = _run_cmd(
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "lib.so",
-                "INPUT_AGAINST": "baseline.json",
+                "INPUT_BUILD_TARGET": "//:math",
             }
         )
         assert "--build-target" not in cmd

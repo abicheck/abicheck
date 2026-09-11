@@ -117,6 +117,16 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "Added in 1.4 (Codex review, P2): a SHA-256 content digest of the resolved declared-deployment-floor contract (NoBaselineDocument.env_matrix_source_sha256), mirroring compare_report.schema.json's identically-named field for the same reason. Present only when this audit actually resolved an EnvironmentMatrix (.abicheck.yml's deployment: config key); omitted entirely (never null) for a run with no declared deployment contract."
+    },
+    "disposition_audit": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "ADR-067 C-S2's raw-versus-effective disposition ledger, at the same root key every two-sided compare report carries it under (see compare_report.schema.json's own disposition_audit for the full field-by-field account). Added in 1.4, so an aggregate fan-in reading this shape's generic disposition_audit block sees the same rule-attributed suppression counts an audit's own `suppressed_findings` list already carries.",
+      "required": [
+        "detected_total",
+        "effective_total",
+        "counts"
+      ]
     }
   }
 }

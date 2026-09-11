@@ -48,3 +48,16 @@ from ..model.source_graph_query import (
     is_public_dependency_node as is_public_dependency_node,
     looks_like_system_name as looks_like_system_name,
 )
+
+__all__ = [
+    "DECL_NODE_KINDS",
+    "INTERNAL_VISIBILITIES",
+    "PUBLIC_VISIBILITIES",
+    "UNANNOTATED_VISIBILITIES",
+    "decl_declaring_files",
+    "is_consumer_compiled_node",
+    "is_consumer_compiled_public_entry",
+    "is_internal_dependency_node",
+    "is_public_dependency_node",
+    "looks_like_system_name",
+]

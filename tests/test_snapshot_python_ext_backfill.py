@@ -53,7 +53,8 @@ from abicheck.elf_metadata import (
 from abicheck.macho_metadata import MachoMetadata
 from abicheck.model import AbiSnapshot
 from abicheck.python_ext import detect_python_extension
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
+from abicheck.storage.sectioned_document import to_sectioned_document
 
 
 def _extension_snapshot() -> AbiSnapshot:
@@ -165,3 +166,48 @@ def test_macho_with_imported_symbols_key_present_backfills_normally() -> None:
     reloaded = snapshot_from_dict(d)
 
     assert reloaded.python_ext is not None
+
+
+# ADR-061 gap E regression (Codex review, PR #1214): `snapshot_from_dict`'s
+# split into `storage.snapshot_codec.decode_snapshot` (which unwraps a
+# sectioned document *locally*, never propagating the flat shape back to its
+# caller) plus the facade's own `backfill_python_ext_from_evidence` call
+# briefly passed the *sectioned* envelope to that backfill instead of the
+# flat document it requires -- silently defeating both of its own dict-shape
+# checks (`"python_ext" not in d`, `d.get("macho")`) for every snapshot
+# written since the sectioned shape became the on-disk default
+# (ADR-062/063 Phase 8). These two tests are the sectioned-document
+# counterparts of `test_explicit_null_is_never_re_derived` and
+# `test_macho_missing_imported_symbols_key_suppresses_backfill` above --
+# same assertions, but routed through `to_sectioned_document` first so a
+# reader that skips the unwrap-before-backfill step fails here even though
+# the flat-document tests above cannot see the bug at all.
+def _sectioned(d: dict) -> dict:
+    return to_sectioned_document(d, max_known_schema_version=SCHEMA_VERSION)
+
+
+def test_explicit_null_is_never_re_derived_from_a_sectioned_document() -> None:
+    snap = _extension_snapshot()
+    d = snapshot_to_dict(snap)
+    d["python_ext"] = None
+
+    reloaded = snapshot_from_dict(_sectioned(d))
+
+    assert reloaded.python_ext is None
+
+
+def test_macho_missing_imported_symbols_key_suppresses_backfill_from_a_sectioned_document() -> (
+    None
+):
+    snap = _extension_snapshot()
+    snap.elf = None
+    snap.macho = MachoMetadata(install_name="@rpath/foo.so")
+    snap.python_ext = detect_python_extension(snap)
+    d = snapshot_to_dict(snap)
+    del d["python_ext"]
+    assert isinstance(d["macho"], dict)
+    del d["macho"]["imported_symbols"]
+
+    reloaded = snapshot_from_dict(_sectioned(d))
+
+    assert reloaded.python_ext is None

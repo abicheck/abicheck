@@ -45,7 +45,20 @@ MAX_ENTRIES: int = 100
 #: key invalidates all previously-cached entries on upgrade rather than risk
 #: serving a stale snapshot computed by an older, behaviorally-different
 #: abicheck version.
-_SNAPSHOT_CACHE_VERSION: str = "30"
+_SNAPSHOT_CACHE_VERSION: str = "31"
+# v31: DWARF snapshots now carry a per-translation-unit vtable-evidence
+# completeness signal (ADR-063 Phase 5B / T9 third slice,
+# extract/dwarf_vtable_completeness.py) -- a record whose retained
+# definition disagreed with an ODR-duplicate DIE from another CU has its
+# bases_fact/virtual_bases_fact/vtable_fact downgraded from PRESENT to
+# PARTIAL, which compare/vtable_evidence.py's vtable_transition_is_
+# evidenced now declines on. This changes a DWARF snapshot's content for
+# affected records without changing any cache-key input (headers/includes/
+# version/lang/extra), so a snapshot cached by an older abicheck build
+# would otherwise keep serving the old, over-confident PRESENT facts
+# forever for identical cache-key inputs -- exactly the false
+# TYPE_VTABLE_CHANGED/VIRTUAL_METHOD_ADDED fabrication this slice exists
+# to close (Codex review, PR #1213).
 # v30: a BTF/CTF-sourced, headerless ELF snapshot now also populates
 # AbiSnapshot.semantic_ir for its struct/enum types (ADR-063 Phase 6,
 # BTF/CTF slice). An auto-detected BTF/CTF dump's cache-key inputs

@@ -27,6 +27,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `enable_debuginfod` | `bool` | `False` |
 | `debuginfod_url` | `str \| None` | `None` |
 | `env_matrix` | `EnvironmentMatrix \| None` | `None` |
+| `env_matrix_path` | `Path \| None` | `None` |
 | `diagnostic_comparison` | `bool` | `False` |
 | `contract_evaluation` | `bool` | `False` |
 | `contract_mode` | `str \| None` | `None` |
@@ -181,6 +182,8 @@ Classify an already-resolved pair — the second half of ``run_compare_request``
 |---|---|---|
 | `request` | `CompareRequest` | *(required)* |
 | `pair` | `ResolvedComparePair` | *(required)* |
+| *(keyword-only below)* | | |
+| `resolved_env_matrix` | `EnvironmentMatrix \| None \| object` | `<object object at 0x7fb51a321e10>` |
 
 **Returns:** `CompareResult`
 

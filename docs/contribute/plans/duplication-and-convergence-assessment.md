@@ -2184,7 +2184,7 @@ track, the steps are ordered.
 | **T6 — Effective gate/policy convergence** ✅ *(landed 2026-09-05; the shared fold and the derived scheme are done, the two runtime shapes remain P0's own job)* | Collapse `apply_release_gate_pack`'s raw-string mirror of `pack_application.apply_to_compare_config` onto one shared fold **without inverting the dependency direction** — `policy/release_gate_options.py` deliberately consumes a `_GatePackApplication` `Protocol` rather than importing the flat-root `pack_application`, since `policy` may not import it (ADR-061; `policy/AGENTS.md`'s "Permitted imports"), so the shared fold belongs in an inward module both may import, or an outer layer invokes both halves — never a `policy → legacy root` call. Also make `GateOptions.exit_code_scheme` derived rather than independently constructible | `policy/release_gate_options.py`, `pack_application.py`, a new inward fold owner, `tests/test_release_gate_pack_fold_parity.py` | nothing |
 | **T7 — Canonical export index** | One raw export index plus named projections (versioned ELF / default versions / Mach-O normalization / named PE / ordinal imports / missing-vs-empty); delete the five sibling implementations | `policy/depth_projection.py`, `buildsource/cross_source_checks_base.py`, `buildsource/snapshot_exports.py`, `post_manifest.py`, `diff_unnamed_types.py` | nothing |
 | **T8 — Action boundary** | Remove the residual raw-exit/stderr verdict reconstruction; keep only a transport-level no-result fallback; keep `fail-on-*` as step policy that never rewrites the verdict | `action/run.sh`, `action/` tests | nothing |
-| **T9 — Fact provenance and scope** (first and second slices landed 2026-09-05 — see notes below the table) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, `storage/fact_backfill.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
+| **T9 — Fact provenance and scope** (first, second, and third slices landed 2026-09-05/2026-09-11 — see notes below the table; only the shared declined-comparison accounting remains) | Extend the fact model with observation-vs-inference, producer/scope, and positive-observation-vs-completeness; fix the PDB `vtable` and legacy-hybrid backfill blockers at the model/import boundary; add shared analysis accounting for declined comparisons | `model/fact*.py`, `diff_types_vtable.py`, `diff_cxx_rules.py`, `storage/fact_backfill.py`, `dwarf_snapshot.py`, `compare/vtable_evidence.py`, the import adapter | ~~T2~~ — satisfied (T2 landed 2026-09-05, so the ladder and `investigated_declined` are available to record this work's status); otherwise independent |
 | ~~**T10 — Shared report preparation**~~ ✅ **done (2026-09-06)** | Compute evaluated findings/outcomes once ahead of format-specific construction; remove **both** runtime cycle escape hatches, which are distinct sites with distinct fixes: `render_markdown_document._reporter_markdown()`'s `..reporter_markdown` load (the Markdown cycle) and `report/scoped_gate.py`'s `..reporter` load (scoped-JSON construction, whose cycle exists only because `apply_scoped_gate` mutates an already-built payload); give consumer scoping an explicit finalization boundary instead of mutating shared changes | `report/render_markdown_document.py`, `report/render_markdown_alternate.py`, `report/scoped_gate.py`, `reporter_markdown.py`, `report/dispatch_markdown.py` (new), `appcompat.py`'s `scope_diff_to_app` | ~~T5's appcompat half for the scoping item~~ — satisfied (T5 landed 2026-09-05) |
 
 **T4 status note (2026-09-05, stated precisely rather than as a blanket
@@ -2395,6 +2395,93 @@ ambiguous), mangled-name-keyed, value-preserving, and non-hybrid-producer-
 unaffected shapes directly. Still open, unchanged by this slice: the DWARF
 per-TU completeness gap and the shared declined-comparison accounting
 named above.
+
+**T9's third slice (2026-09-11): the DWARF per-translation-unit
+completeness gap is closed.** Unlike PDB's producer-wide `UNSUPPORTED`
+claim, DWARF genuinely *can* capture bases/virtual_bases/vtable — the gap
+is per-*record* scope, not per-producer capability, so it needed its own
+signal rather than reusing `producer`. `dwarf_snapshot.py`'s own "first
+definition wins" ODR handling (`_check_and_register_type_name`) already
+discards every non-retained CU's own copy of a record type; this slice
+makes that discarded copy's own bases/virtual_bases/vtable membership
+useful one last time before it's thrown away, purely as a comparison
+witness: the new leaf module `extract/dwarf_vtable_completeness.py`'s
+`note_duplicate_record_evidence` (called from `_process_record_type_named`'s
+existing ODR-duplicate branch) compares each non-retained, non-declaration
+duplicate DIE's own membership sets against the retained definition's, and
+`finalize_vtable_evidence_completeness` (a new post-CU-walk pass, run
+alongside the existing `_finalize_vptr_offsets`) downgrades exactly the
+sibling fact(s) among `bases_fact`/`virtual_bases_fact`/`vtable_fact` that
+actually disagreed to `Fact.partial(...)` — the *existing* `FactStatus`
+member whose own docstring ("covered only part of the requested scope...
+the uncovered part is unknown, not absent") already states exactly this
+claim. A record where all three genuinely disagree still gets all three
+downgraded; a record confined to one field (e.g. `vtable` only) leaves the
+other two `PRESENT` — a Codex review round found the first landed version
+of this slice downgraded all three as a blanket per-record decision
+whenever any one disagreed, which could suppress a genuinely evidenced
+`TYPE_BASE_CHANGED`/`BASE_CLASS_VIRTUAL_CHANGED` finding for a reason
+unconnected to bases/virtual_bases evidence at all; `builder._vtable_
+evidence_conflicts` is `dict[str, set[str]]` (qualified record name -> the
+disagreeing field subset), not `set[str]`, to track this. Both functions
+take the builder itself
+(duck-typed `Any`, no import of it) rather than several pieces of state
+individually, since `dwarf_snapshot.py` is already at its own
+`architecture/debt.yaml` `no_growth` line-count ceiling and needed its two
+call sites to stay one line each (that ceiling was raised in two small,
+rationale-carrying steps, 1994 -> 1998 for the genuinely irreducible
+wiring -- one import, one per-instance conflict-tracking set, and the two
+one-line call sites -- then 1998 -> 1999 for the `set[str]` ->
+`dict[str, set[str]]` annotation-type change the per-field fix above
+needed) — for every record where a disagreement was observed.
+`vptr_offset_bits_fact` is deliberately untouched (see
+`compare/vtable_evidence.py`'s own "NOT consulted here" note: that field
+carries a different, DWARF-partially-circular meaning already and
+touching it here would be a drive-by extension of a status
+`diff_layout._check_vptr_introduced` already relies on meaning something
+else for the direct-clang backend).
+
+`compare/vtable_evidence.vtable_transition_is_evidenced`'s own decline
+check — previously gated on `FactStatus.UNSUPPORTED` only, for
+`vtable_fact` only — now also declines on `FactStatus.PARTIAL`, for
+`vtable_fact` at its own top-level gate (the whole function declines when
+either side's `vtable_fact` is `PARTIAL`/`UNSUPPORTED`) and for
+`virtual_bases_fact` at that field's own point of use (the final
+size/virtual-bases fallback branch, gated there rather than over the
+whole function). `bases_fact` is not part of this function's decline
+logic at all — this function never reads `bases`/`bases_fact` in the
+first place (only `diff_cxx_rules._transitive_bases` does, via the next
+sentence). A second Codex review round caught the first landed version of
+this consumer-side fix still gating the *whole* function on
+`bases_fact`/`virtual_bases_fact` alongside `vtable_fact` — reasoning
+(true of the pre-per-field producer, no longer true after the fix above)
+that a disagreement on any one sibling cast doubt on all three since the
+producer downgraded them together; once the producer stopped doing that,
+the consumer's own blanket gate started rejecting direct, non-empty
+vtable evidence for a record whose only disagreement was on `bases`.
+`diff_cxx_rules._transitive_bases` needed no code change: it already
+reads `bases_fact`/`virtual_bases_fact` through `_fact_str_list_confirmed`,
+which already treats any non-`PRESENT` status (`PARTIAL` included) as
+"not confirmed complete" — producing `PARTIAL` is what activates a gate
+that was already there.
+
+Verified with a dedicated bug-class test suite (AGENTS.md's "regression
+test targets the bug class" rule), not a single fixed reproducer:
+`tests/test_dwarf_vtable_completeness.py` drives `_DwarfSnapshotBuilder`'s
+new methods directly with fake DIE/CU objects (agreement, disagreement on
+each of the three sibling fields independently, order-independence,
+declaration-only stubs never compared, a conflict never un-flagged by a
+later agreeing CU, two unrelated types tracked independently), and
+`tests/test_vtable_evidence_guard.py::TestPartialProducerClosesTheDwarfPerTuGap`
+exhaustively parametrizes over (field × side × several independently-
+shaped record pairs, each of which would otherwise evidence a transition
+through a *different* internal branch of the guard) so a fix that only
+closed one branch would still be caught. Re-verified against
+`scripts/check_fp_rate.py` and `scripts/check_tier_accuracy.py` (both
+still at their 0/0 and top-tier-correct baselines) before landing. Closes
+this item's real, scoped remainder; still open, unchanged by this slice:
+the shared declined-comparison accounting named above (a separate,
+unrelated piece of this item's original stated scope).
 
 **T10 (2026-09-06):** all three named items landed, scoped exactly to this
 track's own "Touches" column (no SARIF/JUnit/HTML change — those formats

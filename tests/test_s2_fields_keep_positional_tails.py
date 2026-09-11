@@ -46,6 +46,11 @@ _S2_TARGET_FIELDS = (
     # a positional caller written before this field existed keeps binding
     # the older tail rather than silently feeding it into this one.
     "disposition_audit",
+    # ADR-068 D2's no-baseline audit shape: appended after `disposition_audit`
+    # for the identical reason -- a positional caller written before this
+    # field existed keeps binding the older tail rather than silently
+    # feeding it into this one.
+    "completed_without_compatibility_verdict",
 )
 
 

@@ -394,7 +394,7 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.service.detect_binary_format", lambda _path: None
+            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: None
         )
 
         assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
@@ -412,16 +412,16 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.service.detect_binary_format", lambda _path: "elf"
+            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: "elf"
         )
         monkeypatch.setattr(
-            "abicheck.service.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
+            "abicheck.service_dump_native.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
         )
 
         def _raise(*_a, **_kw):
             raise ProfileMismatchError("profile drift")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr("abicheck.workflows.compare_policy.compare_snapshots", _raise)
 
         with pytest.raises(ProfileMismatchError):
             _run_abi_diff(old_lib, new_lib, "libfoo.so")
@@ -437,16 +437,16 @@ class TestRunAbiDiff:
         new_lib.write_bytes(b"new")
 
         monkeypatch.setattr(
-            "abicheck.service.detect_binary_format", lambda _path: "elf"
+            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: "elf"
         )
         monkeypatch.setattr(
-            "abicheck.service.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
+            "abicheck.service_dump_native.run_dump", lambda *_a, **_kw: MagicMock(name="snapshot")
         )
 
         def _raise(*_a, **_kw):
             raise RuntimeError("unrelated failure")
 
-        monkeypatch.setattr("abicheck.service.compare_snapshots", _raise)
+        monkeypatch.setattr("abicheck.workflows.compare_policy.compare_snapshots", _raise)
 
         assert _run_abi_diff(old_lib, new_lib, "libfoo.so") is None
 
@@ -487,11 +487,11 @@ class TestRunAbiDiff:
             return sentinel_diff
 
         monkeypatch.setattr(
-            "abicheck.service.detect_binary_format", lambda _path: "elf"
+            "abicheck.workflows.input_resolution.detect_binary_format", lambda _path: "elf"
         )
-        monkeypatch.setattr("abicheck.service.run_dump", _fake_run_dump)
+        monkeypatch.setattr("abicheck.service_dump_native.run_dump", _fake_run_dump)
         monkeypatch.setattr(
-            "abicheck.service.compare_snapshots", _fake_compare_snapshots
+            "abicheck.workflows.compare_policy.compare_snapshots", _fake_compare_snapshots
         )
 
         result = _run_abi_diff(old_lib, new_lib, "libfoo.so")

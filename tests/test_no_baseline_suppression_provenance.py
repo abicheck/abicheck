@@ -603,6 +603,14 @@ def test_a_document_holding_plain_findings_still_renders(fmt: str) -> None:
             )
             for entry in doc.suppressed
         ),
+        # `disposition_audit` (schema 1.4) is ADR-067 C-S2's own ledger
+        # rollup, computed once from `diff` and independent of `.suppressed`
+        # -- `dataclasses.replace` above leaves it untouched, so without
+        # clearing it here too the *real* ledger's own rule provenance
+        # (this fixture's `waivers.yaml`) would still legitimately appear in
+        # the rendered document, even though this test's whole premise is a
+        # document that carries no ledger connection at all.
+        disposition_audit=None,
     )
     assert not any(isinstance(e, SuppressedFinding) for e in downgraded.suppressed), (
         "the point of this test is entries that are NOT the paired type"

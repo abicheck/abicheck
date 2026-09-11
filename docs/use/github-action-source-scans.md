@@ -20,86 +20,79 @@ the underlying CLI flags, see [Evidence Depth](evidence-depth.md).
 
 ## Source-aware comparisons (build & source evidence)
 
-`mode: compare` (the default) is the **recommended entry point** for source
-intelligence against a real baseline. It always runs the compiler-free
-pattern pre-scan and every intra-version cross-source check
-(`CROSS_SOURCE_EVOLUTION_CHECKS`), and takes the identical
-`depth`/`since`/`changed-path`/`sources`/`build-info` inputs
-`mode: scan` does — running the pinned evidence level (L3 build context / L4
-source-ABI replay / L5 source graph) and comparing against `old-library`. It
-emits a single coverage-annotated report saying, per layer, what ran versus
-what was skipped.
+`mode: compare` (the default) is the **only entry point** for source
+intelligence against a real baseline — `mode: scan` is retired outright
+(see below). It always runs the compiler-free pattern pre-scan and every
+intra-version cross-source check (`CROSS_SOURCE_EVOLUTION_CHECKS`), and
+takes `depth`/`since`/`changed-path`/`sources`/`build-info` inputs —
+running the pinned evidence level (L3 build context / L4 source-ABI replay
+/ L5 source graph) and comparing against `old-library`. It emits a single
+coverage-annotated report saying, per layer, what ran versus what was
+skipped.
 
-**`mode: scan` remains the one to reach for** when this step also needs: a
-single-release audit with no baseline at all (see [Single-release
-audit](#single-release-audit-no-baseline) below — `mode: compare` has no
-no-baseline input yet) or `crosscheck`'s `KEY=error` promotion syntax —
-neither has a `compare` equivalent at all. Three inputs that used to be on
-this list are **retired** rather than translated (ADR-068's second
-2026-09-09 amendment, ruling (b)): `new-library-set` (the multi-library
-audit mode — blocked on ADR-065 S3's component inventories; run one `scan`
-per library meanwhile), `risk-rules` (and with it the risk-driven `auto`
-depth escalation — pin `depth:` explicitly instead) and `build-target` (use
-`mode: dump` to narrow a multi-target workspace). Setting any of them on a
-`mode: scan` step is now an explicit `::error::`, not a silent downgrade. A
-`budget` wall-clock guard is different: `compare` itself now has `--budget`,
-and `mode: scan` with a baseline (`against:`) forwards it exactly as
-before; but `mode: compare` doesn't read a `budget` input yet (a
-translation gap, not a missing CLI capability), and neither does an
-audit-only `mode: scan` (no `against:`) — `compare --no-baseline`'s own
-wall-clock guard isn't wired to that path (ADR-068 D2), so setting
-`budget:`/`since:`/`changed-path:` on an audit-only scan is rejected
-upfront with an explicit `::error::`, the same "reject, don't silently
-narrow" treatment as the four retired inputs above — see the table below.
+Omitting both `old-library` and `abi-baseline` runs a single-release audit
+with no baseline at all instead (see [Single-release
+audit](#single-release-audit-no-baseline) below); `.abicheck.yml`'s
+`policy.overrides.<CHANGE_KIND>: error` (passed via `build-config`) is the
+replacement for legacy `crosscheck`'s promotion syntax (see [Gate CI on a
+specific cross-source check](#gate-ci-on-a-specific-cross-source-check)
+below). `new-library-set` (the multi-library audit mode) and `risk-rules`
+(the risk-driven `auto` depth escalation) are retired outright with no
+replacement input — see the depth table below for `risk-rules`'
+replacement, and compare each library individually for `new-library-set`
+until ADR-065 S3's component inventories land. `budget` (a wall-clock
+guard, `BUDGET_OVERFLOW` rather than overrun) now applies to `mode:
+compare`'s two-sided shape.
 
-### `mode: scan` is being retired — and is now fully translated
+### `mode: scan` is retired — use `mode: compare`
 
 [ADR-068](../contribute/adr/068-one-comparison-product-and-scan-retirement.md)
-retires `scan` as a second analysis product. The CLI command is removed
-outright, with **no deprecation window** (D8). Your workflow YAML is the one
-thing the ADR protects: the Action absorbs the change, so `mode: scan` keeps
-working across the CLI's removal and is itself dropped only in the Action's
-own next major, per [ADR-047](../contribute/adr/047-github-actions-integration-model.md)'s
-input lifecycle.
+retired `scan` as a second analysis product. The CLI command was removed
+outright first (no deprecation window, D8); its Action-input-lifecycle
+amendment then closed the last gap: **`mode: scan` itself is now retired on
+the composite Action too.** Setting `mode: scan` on a step fails it
+immediately (before Python setup or any toolchain install) with an
+`::error::` naming the replacement for your own shape.
 
-Concretely, `action/run.sh` re-issues **every** `mode: scan` step as
-`abicheck compare` internally — a step with a real baseline
-(`against`/`abi-baseline`) becomes a plain two-sided `compare AGAINST
-ARTIFACT`; a step with none (audit-only) becomes `compare --no-baseline
-ARTIFACT`. There is no legacy `scan` CLI fallback left at all: ADR-068's
-second 2026-09-09 amendment closed every routing divergence but one
-(the audit-only shape's own exit-code behavior), and its 2026-09-10
-amendment closed that last one too (`policy/audit_gate_exit.py`'s
-orthogonal audit-gate exit axis). See
-[known gaps](../contribute/known-gaps.md#the-actions-mode-scan-still-routes-several-request-shapes-to-the-legacy-scan-cli)
-for the full closure history, including the two behavior changes this
-migration carries:
+`mode: scan` never collapsed to one spelling, and it does not migrate to one
+either:
 
-!!! warning "Two behavior changes landed with this migration"
-    - ADR-068's second 2026-09-09 amendment stopped `scan --against` from
-      stripping cross-source findings to advisory-only. A baseline scan of a
-      library with an accidental export, an unversioned exported symbol, or
-      any other cross-source-only issue now reports that finding as a real,
-      policy-gated result — the same way `compare` always did. It can raise
-      the step's verdict, and under a severity preset that treats
-      `RISK`/`API_BREAK` as error-level, its exit code.
-    - ADR-068's 2026-09-10 amendment changed how an **audit-only** step
-      (no `against`/`abi-baseline`) gates. Legacy `scan`'s own audit mode
-      gated unconditionally, no flag needed, whenever a candidate-side
-      finding was `BREAKING`/`API_BREAK`-classified. The translated
-      `compare --no-baseline` path reproduces that gating at its own
-      orthogonal exit code, `3` (published as the `AUDIT_GATE` verdict
-      output), but the axis itself is **opt-in**: this Action injects
-      `severity-preset: default` automatically whenever an audit-only step
-      states no preset of its own, which is what keeps the *default*
-      behavior identical to legacy `scan`. If your workflow already sets
-      `severity-preset` on an audit-only step (`info-only` included), that
-      value is honored exactly as given — the injection never overrides an
-      explicit choice. Pass `severity-preset: info-only` if you want an
-      audit-only step to report findings without ever gating on them.
+- **A baseline scan (`against`/`abi-baseline` set).** Replacement:
+  `mode: compare` with the identical value passed as `old-library` (or
+  `abi-baseline`, unchanged) and the same `new-library`. This is the
+  ordinary two-sided `mode: compare` shape the rest of this page already
+  describes.
+- **An audit-only scan (no baseline, or `audit: true`).** Replacement:
+  `mode: compare` with **both** `old-library` and `abi-baseline` omitted.
+  Omission is the trigger — there is no separate audit flag. This runs a
+  first-class `compare --no-baseline` against `new-library` alone,
+  reporting no old/new compatibility verdict at all — see
+  [Single-release audit](#single-release-audit-no-baseline) below.
 
-    Both are documented breaking changes to the `mode: scan` contract, not
-    regressions.
+!!! warning "The audit-gate migration trap: add `severity-preset` or lose your gate"
+    Legacy `mode: scan` with no baseline gated a CI job on a
+    `BREAKING`/`API_BREAK`-classified finding **by default, unconditionally,
+    no flag needed**. `mode: compare`'s own audit-only shape reproduces the
+    identical gating partition at its own orthogonal exit code, `3`
+    (published as the `AUDIT_GATE` verdict output) — but the axis is
+    **opt-in**, activated only by `severity-preset` (any value except
+    `info-only`).
+
+    **If your audit-only `mode: scan` step relied on the default gating
+    (i.e. you did not already pass `severity-preset: info-only` to opt
+    out), you must add `severity-preset: default` (or `strict`) when you
+    migrate it to `mode: compare`.** Without it, the migrated step always
+    exits `0`/passes regardless of what the audit finds — a silent loss of
+    the gate, not a loud one. A step that already set
+    `severity-preset: info-only` needs no change; that value keeps the
+    same meaning.
+
+    Live-verified against the G20 corpus: `case148_xcheck_header_build_
+    mismatch`/`case149_xcheck_odr_variant` (`API_BREAK`-classified findings)
+    exit `3` under `compare --no-baseline --severity-preset default`, the
+    same as legacy `scan`'s own exit `2` on the identical fixtures;
+    `case143_audit_accidental_export` (`RISK`-classified) stays exit `0`
+    either way.
 
 > **New to what these layers see?** The concept-track
 > [level-by-level walk-through](../learn/what-each-level-sees.md)
@@ -142,31 +135,25 @@ base ref is available.
 
 ### Pin the depth
 
-`depth` is the single evidence-depth dial, and `mode: compare` reads the same
-values `mode: scan` does. **Pin it** — neither command escalates on its own
-any more (ADR-068's second 2026-09-09 amendment retired `scan`'s risk-driven
-`auto`, ruling (b), so a `mode: scan` step that relied on it now gets
-`headers` and must pin the rung it needs). Omitting `depth` is not risk-based
-selection either way: `compare` infers `source`/`build` from whichever of
-`sources`/`build-info` is supplied, and bottoms out at `headers` when neither
-is given; `scan` always resolves to `headers`.
+`depth` is the single evidence-depth dial. **Pin it** — `compare` never
+escalates on its own (the risk-driven `auto` selection legacy `scan` once
+had is retired outright, along with `scan` itself). Omitting `depth` is not
+risk-based selection either way: `compare` infers `source`/`build` from
+whichever of `sources`/`build-info` is supplied, and bottoms out at
+`headers` when neither is given.
 
-**A pinned depth is a contract on `compare` too.** `scan --depth source`
-with no `--sources`/`--build-info` given hard-fails before comparing (exit 7,
-"pinned depth 'source' ... needs source evidence, but no --sources/--build-info
-was given") — a pinned depth without the evidence to back it is an error, not
-a silent downgrade. `compare --depth build|source` now enforces the same floor
-and reports it through the same axis: an operand this run extracts live that
-cannot reach the pinned rung records `evidence_contract_error` and exits `7`
-(`policy/depth_evidence_contract.py`; the full per-command account is in
-[`docs/use/evidence-depth.md`](evidence-depth.md)).
+**A pinned depth is a contract.** `compare --depth build|source` enforces a
+floor and reports it through a dedicated axis: an operand this run extracts
+live that cannot reach the pinned rung records `evidence_contract_error`
+and exits `7` (`policy/depth_evidence_contract.py`; the full per-command
+account is in [`docs/use/evidence-depth.md`](evidence-depth.md)).
 
 The one carve-out is a side that is *already* a serialized snapshot
-(`old-library: abi-baseline.json`): that operand was not extracted by this run
-at all, so there is no "reached a shallower rung than requested" failure to
-report for it, and such a pair still exits `0`/`2`/`4` on its own contents.
-So `sources:`/`build-info:` stay load-bearing under `mode: compare` in exactly
-that case — a stored-snapshot operand pinned to `depth: build`/`source` is not
+(`old-library: abi-baseline.json`): that operand was not extracted by this
+run at all, so there is no "reached a shallower rung than requested"
+failure to report for it, and such a pair still exits `0`/`2`/`4` on its own
+contents. So `sources:`/`build-info:` stay load-bearing in exactly that
+case — a stored-snapshot operand pinned to `depth: build`/`source` is not
 checked against the pin, while a live one is.
 
 ```yaml
@@ -185,8 +172,8 @@ checked against the pin, while a live one is.
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs (+ L5 graph) | `depth: source` + `since:` |
 | Full source-ABI replay of the whole library | `depth: source` with no `since:`/`changed-path` (an unseeded `depth: source` already analyses the whole current target — ADR-043) |
-| Risk-driven depth selection (`auto`) | *Retired* (ADR-068's second 2026-09-09 amendment, ruling (b)). Under `mode: scan` an omitted `depth` now resolves to a fixed `headers`; under `mode: compare` it still infers from `sources`/`build-info` as the table above describes. Either way nothing is risk-scored — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
-| A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: scan` only — `mode: compare` reads no `budget` input yet |
+| Risk-driven depth selection (`auto`) | *Retired*, along with `mode: scan` itself. An omitted `depth` infers from `sources`/`build-info` as the table above describes; nothing is risk-scored any more — pin `depth: build`/`source` for the rung the risk score used to escalate to. |
+| A `budget:` wall-clock guard (`BUDGET_OVERFLOW` rather than overrun) | `mode: compare`'s two-sided shape only — the audit-only shape (old-library/abi-baseline both omitted) rejects `budget:` upfront, since `compare --no-baseline`'s wall-clock guard isn't wired to that path (ADR-068 D2) |
 
 !!! note "The old `scan-mode`/`source-method` inputs and the `full` depth are gone"
     Earlier releases exposed `scan-mode` (`pr`/`pr-deep`/`baseline`/`audit`) and
@@ -194,7 +181,7 @@ checked against the pin, while a live one is.
     As of the ADR-043 pre-1.0 CLI reset all three are removed outright, not
     deprecated — the CLI's `--depth` no longer accepts `full`/`--mode`/
     `--source-method`/`--max` at all (a plain usage error). Use `depth`
-    (omitting `old-library`/`abi-baseline` for an audit-only `scan` run);
+    (omitting `old-library`/`abi-baseline` for an audit-only run);
     `full` collapsed into `source`, since the two only ever differed in
     replay *scope*, and an unseeded `depth: source` already resolves to the
     whole target. The mapping from the old axes is in the
@@ -202,31 +189,45 @@ checked against the pin, while a live one is.
 
 ### Single-release audit (no baseline)
 
-Run the intra-version hygiene checks against one build — no old version needed.
-Useful as a standing lint on the default branch. `mode: compare` has no
-no-baseline input at the Action level yet, and the CLI's own
-`compare --no-baseline` does not report these findings ([known
-gap](../contribute/known-gaps.md#compare-no-baseline-does-not-yet-reproduce-scans-audit-mode-findings);
-see [Scenario S5](../integration/scenarios/single-build-audit.md)), so this
-stays `mode: scan` — and, per the routing table above, runs the legacy CLI:
+Run the intra-version hygiene checks against one build — no old version
+needed. Useful as a standing lint on the default branch. Omit both
+`old-library` and `abi-baseline` on a `mode: compare` step — this is the
+replacement for legacy `mode: scan` with no baseline (see
+[Scenario S5](../integration/scenarios/single-build-audit.md)):
+
+> `compare`'s own audit-only shape (this whole recipe) was added after the
+> `v0.5.0` release, alongside `mode: scan`'s retirement (ADR-068) — pin a
+> commit SHA newer than `v0.5.0` to run this example as written; on
+> `v0.5.0` itself, the equivalent is legacy `mode: scan` with no baseline
+> (see [Migrating from mode: scan](github-action.md#migrating-from-mode-scan)
+> for what changed and why).
 
 ```yaml
-      - uses: abicheck/abicheck@v0.5.0
+      - uses: abicheck/abicheck@<commit-sha>  # newer than v0.5.0 -- see the note above
         with:
-          mode: scan
+          mode: compare
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          # No `against`/`abi-baseline` on this step -- scan already runs
-          # audit-only whenever no baseline is given.
+          severity-preset: default
+          # No `old-library`/`abi-baseline` on this step -- omitting both is
+          # what selects the audit-only shape. `severity-preset` is what
+          # keeps this step gating on a BREAKING/API_BREAK-classified
+          # finding the way legacy `mode: scan`'s own audit mode always
+          # did by default -- see the warning above.
 ```
 
 ### Estimate cost before committing to a depth
 
-`dry-run: 'true'` prints the resolved depth/scope and the projected
-per-layer cost (TU count, seconds) — without comparing anything, always
-exiting 0. Works the same on `mode: compare` as on `mode: scan`. Handy when
-sizing a budget for a large repo:
+`dry-run: 'true'` prints the resolved depth/scope — without comparing
+anything. A resolvable preview exits 0, but an invalid input combination or
+an unsatisfiable requested depth/evidence contract still exits nonzero (a
+live-candidate request pinning `depth: build`/`source` via `extra-args`
+with no `sources`/`build-info` given previews the same blocker the real run
+would hit, at exit 1) — a dry run validates what it can see, it does not
+turn every outcome into success. Applies to `mode: compare` equally for
+both the two-sided and audit-only shapes. Handy when sizing a job for a
+large repo:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
@@ -241,22 +242,32 @@ sizing a budget for a large repo:
 
 ### Gate CI on a specific cross-source check
 
-Cross-source findings are advisory by default. Promoting one to `error` makes a
-finding for it exit `2` (the API_BREAK tier); add `fail-on-api-break: true` so
-that exit turns the step red. `crosscheck`'s `KEY=error` promotion syntax has
-no `compare`-mode equivalent yet (it's the `--crosscheck` CLI flag, still
-`scan`-only), so this stays `mode: scan`:
+Cross-source findings are advisory by default. Promoting one to `error` makes
+a finding for it exit `2` (the API_BREAK tier); add `fail-on-api-break: true`
+so that exit turns the step red. Legacy `scan --crosscheck`'s `KEY=error`
+promotion syntax is retired along with `mode: scan` itself — every
+cross-source check already reaches `compare` as an ordinary finding, so its
+replacement is `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error`,
+passed as `build-config`:
 
 ```yaml
       - uses: abicheck/abicheck@v0.5.0
         with:
-          mode: scan
+          mode: compare
+          old-library: abi-baseline.json
           new-library: build/libfoo.so
           new-header: include/
           sources: .
-          against: abi-baseline.json
-          crosscheck: 'private_header_leak=error odr_type_variant=error'
+          build-config: .abicheck.yml   # policy.overrides.private_header_leak: error, etc.
           fail-on-api-break: true   # gate on the exit-2 (API_BREAK) tier
+```
+
+```yaml
+# .abicheck.yml
+policy:
+  overrides:
+    private_header_leak: error
+    odr_type_variant: error
 ```
 
 `fail-on-api-break` gates the whole API_BREAK tier (baseline/source breaks and

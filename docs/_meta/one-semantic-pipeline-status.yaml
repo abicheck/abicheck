@@ -207,6 +207,29 @@ concepts:
       remains open (the DWARF per-TU completeness gap and the seven
       case-(a) fields are unaffected by this correction -- those remain
       exactly as open as stated above).
+      **2026-09-11 T9 third-slice correction (supersedes the "DWARF per-TU
+      completeness gap" claim above):** that gap is now closed too. DWARF
+      genuinely can capture bases/virtual_bases/vtable per translation
+      unit, unlike PDB -- dwarf_snapshot.py now cross-checks each
+      non-retained ODR-duplicate DIE's own membership against the retained
+      definition's before discarding it, and downgrades exactly the
+      sibling fact(s) among bases_fact/virtual_bases_fact/vtable_fact that
+      actually disagreed to Fact.partial(...) -- per field, not a blanket
+      per-record decision. vtable_transition_is_evidenced's decline check
+      now includes FactStatus.PARTIAL alongside UNSUPPORTED, gated per
+      field at each field's own point of use: vtable_fact at the
+      function's top-level gate (both sides), virtual_bases_fact at the
+      final size/virtual-bases fallback branch that actually reads it --
+      bases_fact is not part of this function's decline logic at all,
+      since it never reads bases/bases_fact. diff_cxx_rules.
+      virtual_method_addition also gained its own explicit
+      vtable_fact_declined(...) check, since the top-level PARTIAL decline
+      can now return False before its owned-signature branch runs even for
+      a genuinely new virtual method -- an invariant that function's own
+      fallthrough logic used to rely on. See this concept's own
+      `investigated_declined` entry below for the full account. Only the
+      seven case-(a) fields and the shared declined-comparison accounting
+      remain open.
     investigated_declined:
       - item: >-
           FactStatus gating for the vtable/TYPE_VTABLE_CHANGED cluster
@@ -225,18 +248,50 @@ concepts:
           evidenced declines outright on either side's vtable_fact.status
           is FactStatus.UNSUPPORTED, never on NOT_COLLECTED/FAILED, so the
           leaf-class regression this decline also protects is unaffected).
-          What remains open: the DWARF per-translation-unit completeness
-          gap (a producer-capability signal cannot express a per-TU scope
-          gap -- DWARF genuinely can capture this family, unlike PDB), and
-          the seven case-(a) fields still on the fact_provenance mechanism
-          (a separate, blocked item -- no safe conversion without a
-          legacy-hybrid load-path fix, not a decline).
+          Narrowed further by T9's third slice (2026-09-11): the DWARF
+          per-translation-unit completeness gap is now closed too. DWARF
+          genuinely can capture bases/virtual_bases/vtable (unlike PDB),
+          so the signal is per-record scope, not per-producer capability --
+          dwarf_snapshot.py's own "first definition wins" ODR handling
+          already discards every non-retained CU's own copy of a record
+          type; the new extract/dwarf_vtable_completeness.py leaf module
+          now compares that discarded copy's own bases/virtual_bases/vtable
+          membership against the retained definition's before discarding
+          it, and downgrades exactly the sibling fact(s) that actually
+          disagreed to Fact.partial(...) (the existing FactStatus member,
+          not a new one) -- per-field, not a blanket per-record decision
+          (a Codex review round found the first landed version downgraded
+          all three whenever any one disagreed; builder._vtable_evidence_
+          conflicts is dict[str, set[str]], not set[str], to track which
+          field(s) per record). vtable_transition_is_evidenced's own
+          decline check now includes FactStatus.PARTIAL alongside
+          UNSUPPORTED, gated per field at each field's own point of use:
+          vtable_fact at the function's top-level gate (both sides),
+          virtual_bases_fact at the final size/virtual-bases fallback
+          branch that actually reads it -- bases_fact is not part of this
+          function's decline logic at all, since this function never reads
+          bases/bases_fact (a second Codex round caught the first version
+          of this consumer-side fix still gating the whole function on
+          bases_fact/virtual_bases_fact together, which would suppress a
+          fully-evidenced vtable change whenever only bases disagreed).
+          diff_cxx_rules._transitive_bases needed no code change -- it
+          already treats any non-PRESENT status as incomplete via
+          _fact_str_list_confirmed. vptr_offset_bits_fact is deliberately
+          left untouched (see compare/vtable_evidence.py's own "NOT
+          consulted here" note). What remains open: the seven case-(a)
+          fields still on the fact_provenance mechanism (a separate,
+          blocked item -- no safe conversion without a legacy-hybrid
+          load-path fix, not a decline), and the shared declined-comparison
+          accounting this item's text also calls for.
         tracked_as: >-
           duplication-and-convergence-assessment.md Phase 6 item 4 / track
           T9; the full three-round reasoning lives once, canonically, in
-          diff_types_vtable.py's own module docstring, and the T9 first
-          slice's own reasoning lives in compare/vtable_evidence.py's "T9
-          closure" docstring note.
+          diff_types_vtable.py's own module docstring, the T9 first slice's
+          own reasoning lives in compare/vtable_evidence.py's "T9 closure"
+          docstring note, and the T9 third slice's own reasoning lives in
+          that same module's "T9 second slice" docstring note (numbered
+          relative to that module's own history) plus
+          extract/dwarf_vtable_completeness.py's own module docstring.
   identity:
     primitive: complete
     producers: partial
@@ -338,6 +393,41 @@ concepts:
       extract/pdb_scope.py's 4th limitation, not expected to close
       without new evidence of a CodeView record this module does not
       parse today.
+      Phase 10 (2026-09-11): a third, previously-unaudited
+      diff_filtering.py opaque-suppression path --
+      _downgrade_opaque_struct_changes, the DWARF-oriented asymmetric-
+      existence sibling of the already-migrated
+      _downgrade_opaque_type_changes -- was found still using a bare
+      set[str] of RecordType.name for its final Change membership test
+      (c.symbol in truly_opaque), missed by every prior Phase 2 slice
+      because those slices' own audit only named _find_opaque_types/
+      _downgrade_opaque_type_changes. Migrated onto the same
+      compare/opaque_types.OpaqueTypeIndex primitive via a new
+      OpaqueTypeIndex.build(declarations) classmethod (stable EntityId
+      first, RecordType.name spelling second, strict=False always --
+      this index is not the product of a paired intersect() and so
+      carries no completeness proof to license narrowing). The
+      function's own opaque_types/embedded_types/truly_opaque set
+      construction stays plain set[str] on purpose: both are genuine
+      rendered-text spelling questions (asymmetric type-list existence;
+      a field's own type string), not identity ones -- mirroring why
+      find_by_value_types/_type_is_by_value_referenced in
+      compare/opaque_types.py stay spelling-based too. Re-audited
+      type_reachability.py in the same pass and found nothing further to
+      migrate: its own remaining string-based machinery
+      (_spelling_index/_stripped_signature_spelling/
+      _typedef_spelling_targets/_namespace_suffix_spellings) was already
+      investigated and deliberately left on raw strings across three
+      prior slices (ninth, twelfth, fourteenth) for the reason already
+      recorded above -- those strings must appear inside rendered
+      signature text, not stand for an entity, and the module performs
+      no cross-snapshot pairing at all (each call analyzes one
+      snapshot), so there is no old/new identity comparison for a
+      stable tier to improve. Property tests added for
+      OpaqueTypeIndex.build itself (order-independence, no stable-tier
+      contribution without an entity_id, stable tier restricted to
+      cross-snapshot-stable ids) -- see
+      tests/test_opaque_identity_tiers.py.
     investigated_declined:
       - item: >-
           Promoting the `entity:` alias into a real match tier in
@@ -470,6 +560,53 @@ concepts:
       AbiSnapshot.types/.enums for a BTF/CTF-sourced snapshot;
       function/variable/typedef identity remains unimplemented for both
       formats.
+
+      Third-cohort investigation (functions, 2026-09-11): revisits, but
+      does not contradict, the "declined for now" finding recorded just
+      above -- that finding was about the SIGNATURE/matching-key problem
+      specifically (canonical_spelling's cross-backend agreement,
+      bare-name-collision matching), which correctly found no bug there to
+      close. This investigation found something else worth attempting: the
+      ARCHITECTURAL invariant every other migrated cohort already
+      satisfies (a migrated module never reads the legacy flat collection
+      directly), applied to the one part of _diff_functions that might be
+      migrated without inventing new normalizer output -- the old/new
+      matching INDEX itself (SymbolIdentityIndex.for_functions). A first
+      draft (abicheck/compare/functions.py's function_identity_index)
+      built a SemanticIRIndex from the real IR when present and looked up
+      each function's entity_id in it -- but discarded the lookup's
+      result, since finding_identity.resolve_function_identity still
+      computed each identity from the flat Function object regardless (a
+      function's identity has no legacy-vs-IR duality to adjudicate the
+      way a typedef's or constant's does: Function.entity_id is resolved
+      once, at parse time, by every producer, and
+      extract/semantic_normalizer.py's own third slice copies that exact
+      value into SemanticIR rather than recomputing it -- there is no
+      second, independently-derived representation to prefer). Review
+      (Codex, PR #1224) correctly flagged that a lookup whose result
+      influences nothing is not a migration -- registering it as a closed
+      MIGRATED_COHORTS entry would make the cutover gate pass while
+      SemanticIR content still cannot affect function matching, giving
+      future work false assurance. **Not registered as a closed cohort**:
+      function_identity_index is now an intentionally thin wrapper,
+      behaviorally identical to SymbolIdentityIndex.for_functions, with no
+      SemanticIR/adapter consumption to gate on. What landed and stays:
+      abicheck/model/semantic_ir_legacy_adapter.py's legacy_function_ir (a
+      real, tested SemanticIR projection of the flat function map, shaped
+      like legacy_typedef_ir/legacy_constant_ir but unconsumed by any
+      caller today) and the compare/functions.py module boundary itself --
+      landed with no live caller yet, the precedent SemanticIRIndex itself
+      was accepted under. Registering `functions` in MIGRATED_COHORTS is
+      deferred until a genuine consumer exists: CanonicalEntity growing
+      real per-function payload facts (a separately-addressable
+      return-type spelling, ref_qualifier, variadic status --
+      canonical_spelling today combines a whole signature into one opaque
+      string, and extract/semantic_normalizer.py's own normalizer does not
+      carry ref_qualifier/variadic status at all) would let a genuine
+      signature-level comparison read through the IR, at which point the
+      cohort can close for real. See abicheck/compare/functions.py's own
+      module docstring for the full account.
+
       **2026-09-05 re-assessment correction:** both landed cohorts were
       *fidelity gates*, not authority transfers. typedef_index_pair and
       constant_index_pair used to construct the IR-backed AND the
@@ -1165,8 +1302,79 @@ concepts:
       None outstanding for the shipped design (a deterministic closure
       walk over snapshot declarations). D5's own literal "traversal over
       one authoritative mergeable graph" text remains unfulfilled by
-      design (see Phase 3 (D5) amendment) rather than by an open gap;
-      AbiSnapshot.surface_graph itself still has no production reader.
+      design (see Phase 3 (D5) amendment) rather than by an open gap.
+      **Phase 10 checklist row landed:** AbiSnapshot.surface_graph now has
+      five real production readers -- internal_leak.py,
+      buildsource/cross_source_checks.py (two call sites),
+      buildsource/evidence_report.py, evidence_depth.py, and
+      cli_graph.py. **Preference order security-corrected in PR #1216
+      review** (two rounds): each reader prefers build_source.source_graph,
+      falling back to surface_graph only when the former is absent -- NOT
+      surface_graph-first as this row's plan text originally specified. A
+      real --sources/--build-info embed can leave build_source.source_graph
+      a strictly richer, real L3-L5 evidence graph than the always-on,
+      header-only-only surface_graph; preferring the weaker graph silently
+      dropped real call-graph/dependency edges, letting a
+      genuinely-reachable internal removal be misjudged unreachable and
+      suppressed (a BREAKING->COMPATIBLE false negative under a
+      reachability: proven-unreachable-only policy). surface_graph is still
+      the correct fallback for a depth-projected snapshot (build_source.
+      source_graph clears at the "source" depth floor; surface_graph, an L2
+      fact, clears lower, at "binary") and for a pre-Phase-3 document. A
+      second review round separately found cli_graph.py's first pass missed
+      the current single-file sectioned wire format (schema v42+) every
+      real dump --sources -o snapshot actually uses; fixed by decoding
+      through serialization.snapshot_from_dict rather than hand-walking a
+      third JSON shape. A third review round found two more issues: an
+      isinstance-based narrow of the deliberately-structural
+      SurfaceGraphLike protocol would reject a valid typed-API
+      implementation for no reason (switched to a type-only cast), and the
+      surface_graph fallback did not check the pack's own L5 coverage row
+      -- policy/depth_projection.py deliberately clears build_source.
+      source_graph while stamping an explicit NOT_COLLECTED row for a
+      --depth build comparison, and falling back to the retained
+      surface_graph there resurrected L5-labeled findings/depth claims for
+      a comparison whose own report said L5 was excluded. Both readers now
+      only fall back when the pack records no L5 coverage row at all.
+      tests/test_surface_graph_reader_migration.py pins output parity
+      between the pre/post-Phase-3 shapes per reader, a dedicated "prefers
+      the richer build_source.source_graph" regression test per reader, and
+      a depth-projection-exclusion regression test. A fourth review round
+      found the depth-projection guard had only been applied to two of the
+      five readers (internal_leak.py and cross_source_checks.py's two
+      checks still used the unguarded fallback) and a deeper root cause:
+      depth_projection._mark_layers_not_collected only rewrote an existing
+      L5 coverage row, never inserted one for a pack that started with
+      none at all, defeating the "no row at all" signal the guard relies
+      on. Fixed _mark_layers_not_collected itself (inserts a missing row
+      now) rather than special-casing every caller again, and consolidated
+      all five readers onto one shared evidence_depth.
+      resolve_l5_source_graph(snap, pack) resolver so the fallback rule
+      cannot independently drift per call site as it already had three
+      times. That consolidation also fixed a third finding: the third
+      round's cast(...) for _side_source_graph was unsound there
+      specifically (diff_source_graph_findings reads concrete-only
+      SourceGraphSummary attributes the SurfaceGraphLike protocol doesn't
+      declare) -- the shared resolver now requires isinstance(...,
+      SourceGraphSummary) uniformly. **Not closed by this row:**
+      deleting the L5 builder's own in-memory identity-aliasing
+      (service_header_graph_attach.py's _attach_header_graph, which
+      threads one shared SourceGraphSummary instance into both
+      AbiSnapshot.surface_graph and a synthesized snap.build_source.
+      source_graph purely so a legacy build_source.source_graph reader
+      still sees the header-only graph). Investigation during this row
+      found strictly more readers of that synthesized pack than the five
+      named above -- coverage reporting (evidence_report.optional_coverage/
+      layer_presence), cli_buildsource.py's own _layer_payload_empty/
+      build_source_already_satisfies, and embed.py's own backfill logic
+      all depend on snap.build_source being populated for a plain
+      (--sources-less) dump -- so removing the synthesized pack outright is
+      a wider, separately-scoped change than "the five named readers",
+      not something this row's own audit covers. Recorded as an explicit
+      open gap per AGENTS.md's decision-making principles rather than
+      forced through unverified; tracked as a follow-up sub-item of this
+      same Phase 10 checklist row in
+      docs/contribute/plans/one-semantic-pipeline.md.
 
   analysis_plan:
     primitive: complete

@@ -1304,12 +1304,19 @@ def check_appcompat(
     inside ``compare``'s own pipeline), call :func:`scope_diff_to_app` directly
     instead of re-dumping/re-comparing through this wrapper.
     """
-    # Run standard library comparison, routed through the Tier-2 `service`
-    # module (T5 direct-bypass migration; ADR-037 D1/D10.1) rather than
-    # `dumper.dump()`/`checker.compare()` directly. Lazy import avoids a
-    # service→cli→appcompat import cycle.
-    from . import service
+    # Run standard library comparison, routed through the real workflows-
+    # package owners (ADR-037 D1/D10.1's original T5 direct-bypass migration
+    # target) rather than `dumper.dump()`/`checker.compare()` directly, and
+    # rather than the flat `abicheck.service` facade: `service.py` also
+    # re-exports frontends-classified `service_render.render_output`, and
+    # this module is workflows-classified, so importing `service.py` itself
+    # here would widen that workflows -> frontends edge instead of letting
+    # it close (ADR-061 gap A). Lazy import avoids a
+    # workflows.input_resolution→cli→appcompat import cycle.
     from .errors import ValidationError
+    from .service_dump_native import run_dump
+    from .workflows.compare_policy import compare_snapshots
+    from .workflows.input_resolution import detect_binary_format
 
     # Resolve per-side headers: old_headers/new_headers override shared headers
     _old_h = old_headers if old_headers is not None else (headers or [])
@@ -1317,8 +1324,8 @@ def check_appcompat(
     _old_inc = old_includes if old_includes is not None else (includes or [])
     _new_inc = new_includes if new_includes is not None else (includes or [])
 
-    old_fmt = service.detect_binary_format(old_lib_path)
-    new_fmt = service.detect_binary_format(new_lib_path)
+    old_fmt = detect_binary_format(old_lib_path)
+    new_fmt = detect_binary_format(new_lib_path)
     if old_fmt is None or new_fmt is None:
         bad = old_lib_path if old_fmt is None else new_lib_path
         raise ValidationError(f"Unrecognised binary format for {bad}")
@@ -1330,19 +1337,19 @@ def check_appcompat(
     # caller's own genuine, explicit -I list (never auto-derived), same as
     # `_dump_elf`'s own wiring, so an explicit include root promotes its
     # declarations to PUBLIC_HEADER here too.
-    old_snap = service.run_dump(
+    old_snap = run_dump(
         old_lib_path, old_fmt, _old_h, _old_inc, old_version, lang,
         public_headers=list(_old_h),
         public_include_search_dirs=list(_old_inc),
     )
-    new_snap = service.run_dump(
+    new_snap = run_dump(
         new_lib_path, new_fmt, _new_h, _new_inc, new_version, lang,
         public_headers=list(_new_h),
         public_include_search_dirs=list(_new_inc),
     )
 
-    # Route through the Tier-2 service; ADR-037 D1.
-    diff = service.compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
+    # Route through the real workflows owner; ADR-037 D1.
+    diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
     scoped = scope_diff_to_app(
         diff, app_path, old_lib_path, new_lib_path,
@@ -1584,9 +1591,10 @@ def check_plugin_host_contract(
     comparison itself; when a diff already exists, call
     :func:`scope_diff_to_required_symbols` directly instead.
     """
-    # Route through the Tier-2 service (lazy import avoids a
-    # service→cli→appcompat import cycle); ADR-037 D1.
-    from .service import compare_snapshots
+    # Route through the real workflows owner, not the flat `abicheck.service`
+    # facade (ADR-061 gap A; see `check_appcompat`'s own comment above for
+    # why). Lazy import avoids an import cycle.
+    from .workflows.compare_policy import compare_snapshots
     diff = compare_snapshots(
         old_plugin, new_plugin,
         suppression=suppression, policy=policy, policy_file=policy_file,

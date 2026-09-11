@@ -35,3 +35,17 @@ from ..model.entity_identity import (
     resolve_identity_for_node as resolve_identity_for_node,
     source_relative_identity as source_relative_identity,
 )
+
+__all__ = [
+    "IDENTITY_TIER_CANONICAL",
+    "IDENTITY_TIER_NORMALIZED",
+    "IDENTITY_TIER_REDUCED",
+    "CanonicalIdentity",
+    "candidate_lookup_keys",
+    "is_real_mangled_name",
+    "normalize_mangled_name",
+    "normalized_signature",
+    "resolve_canonical_identity",
+    "resolve_identity_for_node",
+    "source_relative_identity",
+]

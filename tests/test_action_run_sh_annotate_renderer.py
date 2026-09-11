@@ -95,12 +95,37 @@ _REPORT_WITH_ANNOTATIONS = {
 
 
 def _emitted_lines(result: subprocess.CompletedProcess[str]) -> list[str]:
-    """Every exact stdout/stderr line starting with a workflow-command
-    sigil (``::error``/``::warning``/``::notice``) -- what the renderer
-    itself printed, as opposed to a byte range of the raw JSON dump that
-    happens to contain the same text."""
+    """Every exact stdout/stderr line starting with a *titled*
+    workflow-command sigil (``::error title=...``/``::warning title=...``/
+    ``::notice title=...``) -- what the annotate renderer itself prints
+    (every annotation it emits carries a title), as opposed to a byte
+    range of the raw JSON dump that happens to contain the same text, or
+    an untitled ``::error::``/``::warning::``/``::notice::`` line emitted
+    by a wholly different part of run.sh (e.g. its own severity-gate
+    error) that happens to share the sigil. Several tests below rely on
+    this file-scoped meaning: `test_annotate_false_emits_nothing` and
+    siblings assert an empty list specifically to prove the *renderer*
+    stayed silent, even on a run whose real severity gate legitimately
+    emits its own untitled ``::error::`` -- widening this filter to match
+    every sigil unconditionally would make those assertions fail on
+    unrelated, correct output."""
     lines = (result.stdout + result.stderr).splitlines()
     return [ln for ln in lines if ln.startswith(("::error ", "::warning ", "::notice "))]
+
+
+def _has_any_error_command(result: subprocess.CompletedProcess[str]) -> bool:
+    """Whether stdout/stderr carries a real ``::error`` workflow command,
+    titled or untitled -- unlike :func:`_emitted_lines`, not scoped to the
+    annotate renderer's own titled output. Matches both GitHub
+    workflow-command spellings: titled (``::error title=...::message``, a
+    space after the sigil before the ``title=`` parameter) and untitled
+    (``::error::message``, the sigil followed directly by ``::``) --
+    CodeRabbit review, fresh evidence. A caller checking "no error at all
+    occurred" (as opposed to "the renderer stayed silent") wants this, not
+    `_emitted_lines`, whose titled-only filter would silently let an
+    untitled ``::error::`` line through unnoticed."""
+    lines = (result.stdout + result.stderr).splitlines()
+    return any(ln.startswith(("::error ", "::error::")) for ln in lines)
 
 
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
@@ -514,3 +539,50 @@ class TestRealAbicheckAnnotationsReachTheActionLog:
         combined = result.stdout + result.stderr
         assert "::error" in combined, combined
         assert "bar" in combined, combined
+
+
+@pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
+class TestAnnotateNotSupportedOnAuditOnlyShape:
+    """compare's audit-only shape (old-library/abi-baseline both omitted)
+    has no `annotations` array in its own report schema at all -- Codex
+    review, PR #1223, round 11: `annotate: true` on this shape previously
+    rendered nothing with no explanation, which reads as "requested but
+    nothing found" rather than "not supported on this shape". A dedicated
+    ::notice:: now says so explicitly instead."""
+
+    def test_annotate_on_audit_only_emits_a_not_supported_notice(
+        self, tmp_path: Path
+    ) -> None:
+        new_json = tmp_path / "new.json"
+        new_json.write_text("{}", encoding="utf-8")
+
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        stub = fake_bin / "abicheck"
+        payload = json.dumps({"findings": []})
+        stub.write_text(
+            "#!/usr/bin/env bash\n" f"cat <<'STUBJSON'\n{payload}\nSTUBJSON\n" "exit 0\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+
+        base_env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+        env = {
+            **base_env,
+            "PATH": f"{fake_bin}{os.pathsep}{base_env.get('PATH', '')}",
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": str(new_json),
+            "INPUT_FORMAT": "json",
+            "INPUT_ANNOTATE": "true",
+            "INPUT_ADD_JOB_SUMMARY": "false",
+            "INPUT_PR_COMMENT": "false",
+            "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "gh_summary"),
+        }
+        result = subprocess.run(
+            [bash_executable(), str(RUN_SH)],
+            capture_output=True, text=True, env=env, cwd=tmp_path, check=False,
+        )
+        combined = result.stdout + result.stderr
+        assert "annotate is not supported for compare's audit-only shape" in combined, combined
+        assert not _has_any_error_command(result), combined
