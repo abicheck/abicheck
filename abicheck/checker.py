@@ -863,6 +863,24 @@ def _env_matrix_contract_changes(
     return produced
 
 
+def env_matrix_content_digest(env_matrix: EnvironmentMatrix | None) -> str | None:
+    """The canonical ``sha256:<hex>`` content digest of *env_matrix*'s
+    resolved configuration, or ``None`` when none was declared (Codex
+    review, PR #1221 follow-up). The one place this is computed: reused by
+    :func:`~abicheck.workflows.no_baseline_compare.run_no_baseline_compare`
+    and a release fan-out at release scope (no per-library ``DiffResult``
+    to read it off of when zero pairs complete). Uses ``EnvironmentMatrix.
+    to_dict()``, not ``dataclasses.asdict()``: the latter cannot traverse
+    the ``MappingProxyType``-typed ``runtime_floors`` field (frozen for the
+    hash-invariant fix, same follow-up).
+    """
+    if env_matrix is None:
+        return None
+    from .contract_evidence_collect import content_digest
+
+    return "sha256:" + content_digest(env_matrix.to_dict())
+
+
 def compare(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1356,18 +1374,9 @@ def compare(
     )
 
     # Canonical content digest of the resolved deployment matrix (Codex
-    # review, PR #803; source: `.abicheck.yml`'s `deployment:` config key,
-    # ADR-068 D5, former `--env-matrix FILE`): `dataclasses.asdict`
-    # recursively serializes `EnvironmentMatrix`'s own nested
-    # `SyclConstraints`/`CudaConstraints` into a plain dict for
-    # `content_digest`. `None` when no matrix was declared at all.
-    import dataclasses as _dataclasses
-
-    env_matrix_source_sha256 = (
-        "sha256:" + content_digest(_dataclasses.asdict(env_matrix))
-        if env_matrix is not None
-        else None
-    )
+    # review, PR #803; `.abicheck.yml`'s `deployment:` key, ADR-068 D5) --
+    # see `env_matrix_content_digest`'s own docstring above.
+    env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
     result = DiffResult(
         old_version=old.version,

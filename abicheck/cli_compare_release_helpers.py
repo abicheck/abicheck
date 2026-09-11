@@ -1058,8 +1058,16 @@ def _format_release_summary(
     scope_terms: ComparisonScopeTerms | None = None,
     demangle: bool = False,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML.
+
+    *env_matrix_source_sha256* (Codex review, P2 follow-up) is the release-
+    wide deployment-floor digest computed once, at release scope, by the
+    caller directly from the resolved ``EnvironmentMatrix`` -- forwarded to
+    the JSON branch's envelope field and effective-config-fields block only
+    (markdown/JUnit render no such field today). ``None`` when this
+    release's candidate declared no ``deployment:`` contract at all.
     *scope_terms* (ADR-065 S2): the one resolved scope every format reads.
 
     *demangle* (Codex review, PR #1154 follow-up: `compare --view demangle`/
@@ -1102,6 +1110,7 @@ def _format_release_summary(
             scope_public_headers=scope_public_headers,
             scope_terms=scope_terms,
             show_only=show_only,
+            env_matrix_source_sha256=env_matrix_source_sha256,
         )
     md = _format_release_markdown(
         worst_verdict, old_dir, new_dir, library_results, removed_keys, added_keys,
@@ -1318,6 +1327,7 @@ def _format_release_json(
     scope_public_headers: bool = True,
     scope_terms: ComparisonScopeTerms | None = None,
     show_only: str | None = None,
+    env_matrix_source_sha256: str | None = None,
 ) -> str:
     """Render the release summary as a JSON document (``release_schema_
     version``: :data:`~abicheck.schemas.RELEASE_SCHEMA_VERSION`).
@@ -1445,30 +1455,26 @@ def _format_release_json(
         # indistinguishable from a genuinely clean run anywhere this JSON is
         # read from. Same "present only when active" gate as the field above.
         summary["contract_coverage_failure_count"] = contract_coverage_failure_count
-    # Codex review, P2: the declared-deployment-floor contract's content
-    # digest, promoted once to the release envelope -- `env_matrix` is
-    # threaded identically to every library's comparison in one release
-    # fan-out (`cli_compare_release_pairwise.py`'s own `env_matrix`
-    # parameter), so every per-library entry that carries this key in one
-    # release run carries the identical digest; reading it off the first
-    # entry that has it (rather than re-deriving it from a live
-    # `EnvironmentMatrix` this function never receives) keeps this the one
-    # place the digest is computed, matching the scalar `compare` report's
-    # own `env_matrix_source_sha256` field name/placement so a consumer
-    # need not special-case a release-shaped report. Omitted, not `null`,
-    # when this release's candidate declared no `deployment:` contract at
-    # all -- same additive convention as every other "present only when
-    # active" key in this function.
-    _env_matrix_digest = next(
-        (
-            lib["env_matrix_source_sha256"]
-            for lib in library_results
-            if "env_matrix_source_sha256" in lib
-        ),
-        None,
-    )
-    if _env_matrix_digest is not None:
-        summary["env_matrix_source_sha256"] = _env_matrix_digest
+    # Codex review, P2 follow-up: the declared-deployment-floor contract's
+    # content digest, promoted once to the release envelope. Previously
+    # inferred by reading it off the first per-library entry that carried
+    # the key (`env_matrix` is threaded identically to every library's
+    # comparison in one release fan-out, `cli_compare_release_pairwise.py`'s
+    # own `env_matrix` parameter, so every entry that has it carries the
+    # identical digest) -- but a release with no matched pairs, or every
+    # pair failing before producing a `DiffResult`, then had *no* entry to
+    # read it off of at all, making a genuinely-configured `deployment:`
+    # contract indistinguishable from none. Now passed in directly by the
+    # caller, computed once at release scope from the resolved
+    # `EnvironmentMatrix` before any per-library compare even runs
+    # (`checker.env_matrix_content_digest`), so this envelope field (and
+    # `effective_config_fields["policy.env_matrix"]` below) is correct
+    # regardless of how many library comparisons actually completed.
+    # Omitted, not `null`, when this release's candidate declared no
+    # `deployment:` contract at all -- same additive convention as every
+    # other "present only when active" key in this function.
+    if env_matrix_source_sha256 is not None:
+        summary["env_matrix_source_sha256"] = env_matrix_source_sha256
     # Release-level public-surface scoping rollup (ADR-024, issue #235).
     # Present only when --scope-public-headers was active (per-library
     # entries then carry a "scope_resolved" key).
@@ -1560,6 +1566,7 @@ def _format_release_json(
         suppress=suppress, pack_application=pack_application,
         scope_public_headers=scope_public_headers, on_incomplete_scope=terms.policy,
         fail_on_removed_library=fail_on_removed,
+        env_matrix_source_sha256=env_matrix_source_sha256,
     )
     summary["effective_config_digest"] = digest
     summary["effective_config_fields"] = fields

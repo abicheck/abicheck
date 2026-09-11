@@ -117,3 +117,117 @@ class TestReleaseJsonEnvMatrixDigest:
         assert "env_matrix_source_sha256" not in data
         for lib in data["libraries"]:
             assert "env_matrix_source_sha256" not in lib
+
+
+class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
+    """Codex review, P2 follow-up: the envelope digest must not be inferred
+    from a per-library entry -- a release with a real declared
+    ``deployment:`` contract but zero matched/completed library pairs
+    previously carried *no* entry to read the digest off of at all, making
+    a genuinely-configured contract indistinguishable from none. It is now
+    computed directly from the resolved ``EnvironmentMatrix`` at release
+    scope, before any per-library compare even runs."""
+
+    def test_carries_the_digest_with_zero_matched_pairs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        work = tmp_path / "project"
+        work.mkdir()
+        old_dir = work / "old"
+        old_dir.mkdir()
+        new_dir = work / "new"
+        new_dir.mkdir()
+        # Deliberately disjoint library names -- OLD and NEW share no
+        # matched pair, so `library_results` (and therefore `libraries`)
+        # is empty, while OLD/NEW discovery itself still succeeds.
+        _write_snap(old_dir / "libfoo.json", _snap(library="libfoo.so"))
+        _write_snap(new_dir / "libbar.json", _snap(library="libbar.so"))
+        (work / ".abicheck.yml").write_text(
+            'deployment:\n  runtime_floors:\n    GLIBC: "2.28"\n'
+        )
+        monkeypatch.chdir(work)
+
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
+        data = json.loads(out)
+
+        assert data["libraries"] == [], "fixture precondition: zero matched pairs"
+        digest = data["env_matrix_source_sha256"]
+        assert isinstance(digest, str) and digest.startswith("sha256:")
+        assert data["effective_config_fields"]["policy.env_matrix"] == digest
+
+    def test_matches_the_digest_from_a_run_with_a_completed_pair(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The digest is a pure function of the resolved matrix, not of how
+        many comparisons happened to complete -- so a zero-pair run and a
+        normal run under the identical ``deployment:`` config must agree."""
+        deployment_yaml = 'deployment:\n  runtime_floors:\n    GLIBC: "2.28"\n'
+
+        zero_pair_work = tmp_path / "zero_pair"
+        zero_pair_work.mkdir()
+        zp_old = zero_pair_work / "old"
+        zp_old.mkdir()
+        zp_new = zero_pair_work / "new"
+        zp_new.mkdir()
+        _write_snap(zp_old / "libfoo.json", _snap(library="libfoo.so"))
+        _write_snap(zp_new / "libbar.json", _snap(library="libbar.so"))
+        (zero_pair_work / ".abicheck.yml").write_text(deployment_yaml)
+        monkeypatch.chdir(zero_pair_work)
+        _, zero_pair_out = _invoke(
+            "compare", str(zp_old), str(zp_new), "--format", "json"
+        )
+        zero_pair_digest = json.loads(zero_pair_out)["env_matrix_source_sha256"]
+
+        matched_work = tmp_path / "matched"
+        matched_work.mkdir()
+        m_old = matched_work / "old"
+        m_old.mkdir()
+        m_new = matched_work / "new"
+        m_new.mkdir()
+        snap = _snap()
+        _write_snap(m_old / "libfoo.json", snap)
+        _write_snap(m_new / "libfoo.json", snap)
+        (matched_work / ".abicheck.yml").write_text(deployment_yaml)
+        monkeypatch.chdir(matched_work)
+        matched_code, matched_out = _invoke(
+            "compare", str(m_old), str(m_new), "--format", "json"
+        )
+        assert matched_code == 0, matched_out
+        matched_digest = json.loads(matched_out)["env_matrix_source_sha256"]
+
+        assert zero_pair_digest == matched_digest
+
+    def test_output_dir_summary_also_carries_the_digest_with_zero_matched_pairs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ``--output-dir`` sidecar (``summary.json``) shares the same
+        gap this fix closes for the primary JSON report -- it must carry
+        the digest too, and for the same zero-matched-pairs case."""
+        work = tmp_path / "project"
+        work.mkdir()
+        old_dir = work / "old"
+        old_dir.mkdir()
+        new_dir = work / "new"
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap(library="libfoo.so"))
+        _write_snap(new_dir / "libbar.json", _snap(library="libbar.so"))
+        (work / ".abicheck.yml").write_text(
+            'deployment:\n  runtime_floors:\n    GLIBC: "2.28"\n'
+        )
+        monkeypatch.chdir(work)
+        output_dir = work / "out"
+        output_dir.mkdir()
+
+        _invoke(
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--format",
+            "json",
+            "--output-dir",
+            str(output_dir),
+        )
+        summary = json.loads((output_dir / "summary.json").read_text())
+        digest = summary["env_matrix_source_sha256"]
+        assert isinstance(digest, str) and digest.startswith("sha256:")
+        assert summary["effective_config_fields"]["policy.env_matrix"] == digest

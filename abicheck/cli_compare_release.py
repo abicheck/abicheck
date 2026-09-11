@@ -1242,7 +1242,21 @@ def compare_release_cmd(
                     gate,
                 )
 
+            # Codex review, P2 follow-up: the release-wide deployment-floor
+            # digest, computed once here directly from the resolved
+            # `env_matrix` this function already has -- not inferred after
+            # the fact from whichever per-library entry happens to carry
+            # `env_matrix_source_sha256`. The earlier round's per-library
+            # inference is indistinguishable from "no deployment contract
+            # at all" whenever a release has no matched pairs, or every
+            # pair fails before producing a `DiffResult`; computing it here
+            # means the envelope-level field and `effective_config_fields
+            # ["policy.env_matrix"]` are correct regardless of how many
+            # library comparisons actually completed.
+            from .checker import env_matrix_content_digest
             from .cli_compare_options import _resolve_demangle
+
+            env_matrix_source_sha256 = env_matrix_content_digest(env_matrix)
 
             if secondary_output is not None:
                 # CLI cleanup phase two, PR E: --write, now supported for a
@@ -1288,6 +1302,7 @@ def compare_release_cmd(
                     scope_public_headers=scope_public_headers,
                     scope_terms=scope_terms,
                     demangle=_resolve_demangle(secondary_fmt, demangle),
+                    env_matrix_source_sha256=env_matrix_source_sha256,
                 )
                 _write_or_echo(secondary_output, secondary_text)
 
@@ -1320,6 +1335,7 @@ def compare_release_cmd(
                 scope_terms=scope_terms,
                 demangle=_resolve_demangle(fmt, demangle),
                 show_only=show_only,
+                env_matrix_source_sha256=env_matrix_source_sha256,
             )
         finally:
             _cleanup_temp_dirs(_temp_dir_paths)
