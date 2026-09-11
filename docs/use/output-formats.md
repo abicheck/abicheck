@@ -127,8 +127,8 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
 
 The `private-header` / `system-header` reasons are provenance-derived: they
 only appear when the snapshots were produced with a `-H`/`--header`
-public-header set (ADR-015) -- `dump` derives provenance from it directly, and
-`scan` additionally accepts `--public-header-dir`. Provenance is supported for
+public-header set (ADR-015) -- `dump` derives provenance from it directly.
+Provenance is supported for
 ELF, PE (provenance from PDB `LF_UDT_SRC_LINE`), and Mach-O inputs. Without a
 public-header set, every declaration's origin is `unknown` and only the
 linkage/reachability reasons above are emitted.
@@ -640,8 +640,8 @@ from abicheck.schemas import (
 Every JSON report carries a top-level `report_schema_version` field
 (`MAJOR.MINOR`) so consumers can detect the contract version they are reading.
 
-> **`run_outcome`.** Every JSON report (`compare`/release, schema 2.48;
-> `scan`, schema 1.24; and the not-comparable refusal document alike)
+> **`run_outcome`.** Every JSON report (`compare`/release, schema 2.48,
+> and the not-comparable refusal document alike)
 > carries an additive top-level `run_outcome` block —
 > `compatibility`/`assurance`/`gate`/`operational`/`lifecycle`, the
 > report's independent-axis outcome (ADR-063 D6) — alongside the unchanged
@@ -653,7 +653,7 @@ Every JSON report carries a top-level `report_schema_version` field
 > other value (`budget_overflow`/`not_comparable`/`evidence_contract_error`/
 > `extraction_error`) flags an incomplete part of the run — but `compatibility`
 > can still be non-`null` alongside it, e.g. a late budget/evidence abort
-> that retains an already-completed verdict, or a release/scan set whose
+> that retains an already-completed verdict, or a release set whose
 > reported `compatibility` is one member's real result while a *different*
 > member independently failed operationally. `compatibility` is `null`
 > only when no real comparison ran at all: a resolve-baseline failure, a
@@ -670,25 +670,6 @@ Every JSON report carries a top-level `report_schema_version` field
 > not a report, so it has no `report_schema_version`. A report and a snapshot can
 > carry different version numbers at the same time; consumers should read
 > whichever field belongs to the file they loaded.
->
-> `scan --format json` is a **third, separate shape**: it emits a `ScanOutcome`
-> object (`mode`, `level`, `risk`, `verdict`, `exit_code`, …). It carries its
-> own top-level `scan_schema_version` field (`MAJOR.MINOR`, importable as
-> `abicheck.schemas.SCAN_SCHEMA_VERSION`) — independent of, and not
-> interchangeable with, `report_schema_version`. The typed Python
-> `ScanResult.to_dict()` envelope (`abicheck.service`) stamps the same value at
-> its own top level, in addition to nesting the `ScanOutcome` dict (with its
-> own `scan_schema_version`) under its `report` key. There is currently no
-> packaged `.schema.json` for scan output (unlike `compare`'s
-> `compare_report.schema.json`); the version field is honored the same way
-> (accept a shared `MAJOR`, ignore unknown keys) until one exists.
->
-> `scan --against`'s baseline summary carries an optional `coverage_warnings`
-> list (`scan_schema_version` 1.21), mirroring `compare`'s own top-level
-> field of the same name and shape — e.g. a warning that the two compared
-> binaries are byte-identical (a possible mistaken input, not a real
-> "no ABI differences" result). Omitted when there is nothing to warn about.
-
 ```json
 {
   "report_schema_version": "2.49",
@@ -699,9 +680,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 > **`effective_config_digest`/`effective_config_fields` (schema 2.45; the
 > field set itself grew again in 2.46 -- see below).**
-> Every `compare`/`compare-release` JSON report, and every `scan --against`
-> report's `diff` block (`scan_schema_version` 1.19, field-set update 1.20),
-> carries a
+> Every `compare`/`compare-release` JSON report carries a
 > `sha256:...` fingerprint of the resolved gate/policy/surface/contract
 > configuration the comparison actually ran under, alongside the named
 > field dict it was hashed from — so two reports (or a report replayed
@@ -715,100 +694,6 @@ Every JSON report carries a top-level `report_schema_version` field
 > the two tiers are not cross-comparable. See
 > `abicheck.effective_config_digest`'s own module docstring for the full
 > field set and precedence.
-
-#### `scan --against`: the report cap and truncation (`--max-findings`)
-
-`scan --against`'s `diff` block itemizes the comparison's gating findings
-(`findings`) and any `--suppress`-silenced ones (`suppressed`), each capped at
-20 entries by default so a large diff can't blow up the always-on scan output
-— `compare --format json` remains the way to see every finding
-unconditionally. Raise or lower the cap per run with `scan --max-findings N`
-(`ScanRequest.max_findings` in the typed Python API), or globally via the
-`ABICHECK_MAX_BASELINE_FINDINGS` environment variable when neither passes an
-explicit value; either configures the same cap, and it only changes how much
-of the diff a run itemizes — never the verdict or exit code.
-
-When either list is actually truncated, the block sets the existing
-`findings_truncated`/`suppressed_truncated` booleans (schema 1.8+) and, since
-schema 1.10, also `findings_truncated_kinds`/`suppressed_truncated_kinds` — a
-`ChangeKind -> count` map of what was cut from that list, so the shape of a
-truncated diff (which kinds dominate) is visible without rerunning at a
-higher cap. Both maps are absent when nothing was truncated.
-
-Each entry in `suppressed` also carries `suppression_rule` (which
-`--suppress` rule matched it) and `pre_suppression_bucket` (the
-`breaking`/`api_break`/`risk`/`compatible` bucket the finding would have
-counted as had `--suppress` not withheld it) — a suppressed finding's report
-entry always says more than "suppressed", so a reader can tell a suppressed
-ABI break apart from a suppressed cosmetic note. `scan --against --format
-text` prints the same information: an always-present `suppressed=N` count in
-the "Baseline comparison" line, and `--show-suppressed` itemizes each one.
-
-Since schema 1.11, any `findings`/`suppressed` entry for a removal whose ELF
-symbol linkage was captured also carries `symbol_binding`
-(`global`/`weak`/`local`/`unique`/`other`) — the same field
-`compare --format json`/SARIF emit (see `binding:` under
-[Suppressions](suppressions.md)), so a `binding:`-scoped suppression's
-match/no-match is auditable from `scan --against` too.
-
-Since schema 1.13, the block also carries an always-on `additions` array —
-the addition-shaped subset of the `compatible` bucket (new public-API
-surface, `ChangeKind`'s `ADDITION_KINDS`), itemized the same shape as
-`findings` (`"bucket": "compatible"`) regardless of whether severity policy
-made any of them the run's blocking cause. Capped independently of
-`findings`' own budget (the same `--max-findings`/
-`ABICHECK_MAX_BASELINE_FINDINGS` cap), with `additions_truncated` set when
-that cap was hit, alongside `additions_total` (the exact, untruncated
-addition count — `compatible`'s own scalar mixes additions and quality
-findings, so it can't answer "how many additions, exactly" on its own). All
-three keys are omitted when `compatible` has no addition-shaped entry. This
-is what lets a `scan --against` PR comment (see the Action's own
-`pr-comment`/`pr-comment-on` inputs, [GitHub Action usage](github-action.md))
-render a green "public API additions" section the same way `compare`'s own
-JSON report already does via its full `changes` list.
-
-The block also carries `quality` (plus optional `quality_truncated`/
-`quality_total`) — `additions`'s exact complement, itemizing the
-compatible-but-non-addition subset of `compatible` (a quality-category
-change like `func_noexcept_added`, or a policy-demoted removal reclassified
-compatible) the same shape and under the same cap as `additions`, so the
-comment's "safe" total (which reads the full `compatible` scalar) always has
-a matching set of itemized rows to show a reviewer, whichever shape those
-findings take.
-
-The block also carries `policy` — the resolved compatibility policy name
-(e.g. `"strict_abi"`) that actually classified these buckets, the same fact
-`compare`'s own top-level JSON report has always carried. Present on any
-real comparison (absent only for the `NOT_COMPARABLE`/audit-only `diff`
-shapes, which never reach policy classification).
-
-Since schema 1.14, the block also discloses the active `--policy`
-audit trail — previously a `scan --format json` reader could see a
-downgraded verdict with no way to tell which rule produced it, unlike the
-`compare`/report path. `policy_overrides` (a `ChangeKind -> verdict` map)
-and `policy_reclassify` (the active, non-expired selector-scoped
-`reclassify:` rule set — see [Suppressions](suppressions.md)) mirror
-`compare`'s own JSON report byte-for-byte, and `policy_file` names the
-source path when either is present. Each `findings`/`additions`/`quality`/
-`suppressed` entry also gains an optional `reclassified_by` key naming
-which rule actually decided that finding's verdict. All four keys are
-omitted when no policy file (or no active rule) applies.
-
-```json
-{
-  "scan_schema_version": "1.14",
-  "diff": {
-    "breaking": 25,
-    "findings": ["... 20 entries ..."],
-    "findings_truncated": true,
-    "findings_truncated_kinds": {"func_removed": 5},
-    "additions": ["... up to 20 entries ..."],
-    "policy_overrides": {"func_removed": "COMPATIBLE_WITH_RISK"},
-    "policy_reclassify": [{"to": "COMPATIBLE_WITH_RISK", "binding": "weak"}],
-    "policy_file": "policy.yml"
-  }
-}
-```
 
 ### Scoped vs. full-library results (`full_verdict`/`full_severity`/`full_summary`)
 
@@ -850,7 +735,7 @@ jsonschema.validate(report, load_compare_report_schema())
 ### `aggregate`'s own report shape
 
 `abicheck aggregate --format json` is a **separate document**, not a
-`compare`/`scan` report — it's versioned by its own
+`compare` report — it's versioned by its own
 `aggregate_schema_version` and describes a fan-in over already-produced
 reports rather than one comparison. Its five independent axes
 (`compatibility`/`coverage`/`gate`/`contract_coverage`/`analysis_assurance`)
@@ -1192,7 +1077,7 @@ stage('ABI Check') {
 
 ## Evidence coverage and metrics (build/source pack)
 
-A compare or scan that carries build/source evidence reports what each
+A compare that carries build/source evidence reports what each
 layer covered, alongside the findings (moved here from
 [Source & Build Data](../learn/build-source-data.md), which keeps the
 narrative).

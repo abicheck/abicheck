@@ -43,13 +43,13 @@ breaking changes before they ship.
 > addressing/integrity layer (`library:version:platform` keys,
 > checksum-on-pull) has no direct equivalent. For a one-off "compare against
 > a previous build" without managing a baseline file yourself, see
-> [`scan --against`](create-baseline.md#scan-against-for-a-one-off-comparison).
+> [`compare` against a previous build](create-baseline.md#compare-against-a-previous-build-with-no-stored-baseline).
 
 > **A whole-product (multi-library) baseline is a separate, library-only
 > module, not a CLI feature.** Everything above is per-library. A product
 > shipping several interdependent shared libraries — where a symbol one
 > library imports from a sibling disappearing is a real cross-DSO ABI
-> break no single-library `scan --against` can see — has its own storage
+> break no single-library `compare` can see — has its own storage
 > format and comparison entry point in
 > `abicheck.product_baseline`: `pack_product_baseline`/
 > `unpack_product_baseline` archive/restore an entire product directory
@@ -228,7 +228,7 @@ dropped — an ordinary `required: true` check against `accepted-main`/
 `release-contract` resolves it the same as any other library from then on.
 
 A library that is *removed* from a release is the converse case, already
-covered on the compatibility-evaluation side by `compare`/`scan`'s
+covered on the compatibility-evaluation side by `compare`'s
 `--fail-on-removed-library` (see the [exit-codes
 reference](../reference/exit-codes.md)) rather than by the
 baseline-resolution layer this section covers.
