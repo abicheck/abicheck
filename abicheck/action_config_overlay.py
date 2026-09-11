@@ -434,6 +434,35 @@ _COMPILE_SOURCES_WINS_KEYS = frozenset({"frontend_context"})
 #: earlier" precedence above.
 _COMPILE_OR_KEYS = frozenset({"nostdinc"})
 
+#: ``compile:`` sub-keys whose value is a *semantic default sentinel*, not a
+#: real "unset" marker -- ``merge_compile_config`` checks for the literal
+#: string ``"auto"`` explicitly (Codex review, PR #1222 sixth round: a
+#: checkout ``compile.frontend: auto`` was treated as "checkout already set
+#: this key" by mere key presence, permanently blocking a sources-root
+#: ``compile.frontend: clang``/``castxml`` from ever applying -- the real
+#: pipeline treats a checkout-side ``"auto"`` exactly like an absent key).
+#: ``frontend``'s real two-call shape is ``cli_options.merge_compile_
+#: config``'s ``frontend = cli_ctx.frontend if (frontend_explicit or cli_ctx.
+#: frontend != "auto") else (bc.compile_frontend or "auto")``, where
+#: ``frontend_explicit`` is always ``False`` for a config-only (no
+#: ``--ast-frontend`` on the command line) fold, ``cli_ctx`` is the
+#: already-resolved checkout-stage context, and ``bc`` is the document being
+#: folded on top. Enumerating checkout/sources against that exact
+#: expression, for the second (sources-root) fold: checkout-stage result is
+#: ``"auto"`` (whether the checkout document set ``frontend: auto``
+#: explicitly, set nothing, or set a value that itself resolved to
+#: ``"auto"``) -> ``cli_ctx.frontend != "auto"`` is ``False`` -> the
+#: sources-root value wins outright, defaulting to ``"auto"`` when sources
+#: sets nothing either. Checkout-stage result is any concrete value (e.g.
+#: ``"clang"``) -> ``cli_ctx.frontend != "auto"`` is ``True`` -> the
+#: checkout value wins outright, and the sources-root document's own value
+#: (concrete or ``"auto"``) is never even consulted. So the full rule is:
+#: a checkout value of exactly ``"auto"`` (or an absent key, which resolves
+#: to the same ``"auto"`` through the ordinary "key not in checkout_blk"
+#: branch below) never blocks the sources-root value; any other checkout
+#: value always wins over the sources-root value, concrete or not.
+_COMPILE_AUTO_DEFAULT_KEYS = frozenset({"frontend"})
+
 #: ``compile:`` list-valued sub-keys ``merge_compile_config`` always
 #: CONCATENATES across the two folded documents rather than letting either
 #: replace the other -- never a plain override in either direction. Each
@@ -477,17 +506,18 @@ def _merge_compile_block(
     the nested "Run analysis" invocation's own ``load_build_config`` re-parses
     this synthesized document exactly like any other project config).
 
-    For every scalar key not covered by one of the buckets above
-    (``frontend``, ``std``, ``sysroot``, ``compiler``) ``merge_compile_
-    config`` only consults the later-folded (sources-root) document's value
-    when the earlier-folded (checkout) one left the field unset/default --
-    an explicit checkout value blocks the sources-root one from applying at
-    all (``frontend``: ``cli_ctx.frontend if (... or cli_ctx.frontend !=
-    "auto") else ...``; ``sysroot``/``compiler``: ``cli_ctx.<field> if
-    cli_ctx.<field> is not None else bc.<field>``). So the default rule
-    here is: the checkout document's own value wins when it sets one; the
-    sources-root document's value fills the field only when checkout leaves
-    it unset.
+    For every scalar key not covered by one of the buckets above (``std``,
+    ``sysroot``, ``compiler``) ``merge_compile_config`` only consults the
+    later-folded (sources-root) document's value when the earlier-folded
+    (checkout) one left the field unset/default -- an explicit checkout
+    value blocks the sources-root one from applying at all (``sysroot``/
+    ``compiler``: ``cli_ctx.<field> if cli_ctx.<field> is not None else
+    bc.<field>``). So the default rule here is: the checkout document's own
+    value wins when it sets one; the sources-root document's value fills
+    the field only when checkout leaves it unset. ``frontend`` is the one
+    exception to "checkout sets one" meaning "checkout blocks sources": its
+    own semantic-default value ``"auto"`` counts as unset too, per
+    :data:`_COMPILE_AUTO_DEFAULT_KEYS`'s own docstring.
     """
 
     def _as_list(value: object) -> list[object]:
@@ -521,13 +551,16 @@ def _merge_compile_block(
             merged[key] = bool(checkout_blk.get(key)) or bool(value)
         elif key in _COMPILE_SOURCES_WINS_KEYS:
             merged[key] = value
-        elif key not in checkout_blk:
+        elif key not in checkout_blk or (
+            key in _COMPILE_AUTO_DEFAULT_KEYS and checkout_blk.get(key) == "auto"
+        ):
             merged[key] = value
-        # else: checkout already set this key and it isn't one of the
-        # "sources wins" keys above -- checkout's own value stays, matching
-        # merge_compile_config's real precedence for frontend/sysroot/
-        # compiler/std (the last of which is checkout-wins via the argv-
-        # ordering trick the list-key handling above already reproduces).
+        # else: checkout already set this key to something other than its
+        # semantic-default sentinel and it isn't one of the "sources wins"
+        # keys above -- checkout's own value stays, matching merge_compile_
+        # config's real precedence for frontend/sysroot/compiler/std (the
+        # last of which is checkout-wins via the argv-ordering trick the
+        # list-key handling above already reproduces).
     return merged
 
 

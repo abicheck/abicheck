@@ -660,6 +660,65 @@ class TestApplySourcesRootConfigBlocksCompileMerge:
         )
         assert out["compile"]["frontend_context"] == "device"
 
+    @pytest.mark.parametrize(
+        ("checkout_frontend", "sources_frontend", "expected"),
+        [
+            # Checkout explicitly "auto" -- the semantic-default sentinel --
+            # never blocks a concrete sources-root value.
+            ("auto", "clang", "clang"),
+            ("auto", "castxml", "castxml"),
+            # Checkout absent (unset) behaves identically to explicit "auto".
+            (None, "clang", "clang"),
+            # Checkout concrete always wins a genuine conflict, regardless
+            # of what the sources-root document sets (even another concrete
+            # value) -- `merge_compile_config` never even consults the
+            # sources-root value once `cli_ctx.frontend != "auto"`.
+            ("clang", "castxml", "clang"),
+            ("clang", "auto", "clang"),
+            # Both "auto" (explicitly or by omission on the sources side)
+            # stays "auto" -- the fix must not invent a concrete frontend
+            # neither document asked for.
+            ("auto", "auto", "auto"),
+            ("auto", None, "auto"),
+        ],
+    )
+    def test_frontend_auto_sentinel_merges_like_merge_compile_config(
+        self,
+        checkout_frontend: str | None,
+        sources_frontend: str | None,
+        expected: str,
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 sixth round):
+        ``_merge_compile_block`` classified ``frontend`` under the plain
+        "checkout already set this key blocks sources" default rule, which
+        is right for a genuinely *unset* checkout value but wrong for
+        ``frontend``'s own semantic-default sentinel ``"auto"`` -- the real
+        ``cli_options.merge_compile_config`` checks for the literal string
+        ``"auto"`` explicitly (``cli_ctx.frontend != "auto"``), so a
+        checkout ``compile.frontend: auto`` must be treated exactly like an
+        absent key: the sources-root document's value should win. This
+        parametrization is the full truth table verified directly against
+        ``merge_compile_config``'s real two-call expression (see
+        ``action_config_overlay.py``'s ``_COMPILE_AUTO_DEFAULT_KEYS``
+        docstring for the exact enumeration this test mirrors) -- checkout
+        ``"auto"``/absent lets sources win outright, any concrete checkout
+        value wins outright over sources (even a differing concrete sources
+        value), and both-``"auto"``/both-absent stays ``"auto"``."""
+        base: dict[str, object] = (
+            {"compile": {"frontend": checkout_frontend}}
+            if checkout_frontend is not None
+            else {"compile": {}}
+        )
+        sources_doc: dict[str, object] = (
+            {"compile": {"frontend": sources_frontend}}
+            if sources_frontend is not None
+            else {"compile": {}}
+        )
+        out = apply_sources_root_config_blocks(
+            base, sources_doc, blocks=("compile",), merge_compile=True
+        )
+        assert out["compile"].get("frontend") == expected
+
     def test_checkout_only_fields_are_never_promoted_from_sources_root(self) -> None:
         """``ast_frontend_fallback``/``allow_unsupported_castxml``/``lang``
         are read from a SINGLE, already-resolved project config in the real

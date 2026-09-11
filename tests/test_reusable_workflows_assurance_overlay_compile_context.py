@@ -397,6 +397,108 @@ class TestAssuranceOverlayPromotesSourcesRootCompileSourceDebugBlocks:
         written = _written_overlay(result)
         assert written["compile"]["nostdinc"] is False
 
+    def test_single_sided_mode_merge_checkout_auto_frontend_lets_sources_win(
+        self, tmp_path: Path
+    ) -> None:
+        """P1 finding (Codex review, fresh evidence, PR #1222 sixth round):
+        ``_merge_compile_block`` treated a checkout ``compile.frontend:
+        auto`` as "checkout already set this key", permanently blocking a
+        sources-root ``compile.frontend: clang``/``castxml`` from ever
+        applying, purely because the sentinel string was present under the
+        key. The real two-call shape
+        (``cli_options.merge_compile_config``'s ``frontend = cli_ctx.
+        frontend if (frontend_explicit or cli_ctx.frontend != "auto") else
+        (bc.compile_frontend or "auto")``) treats a checkout-stage result of
+        literal ``"auto"`` exactly like an absent key: the sources-root
+        document's value wins outright. Before this fix the merged overlay
+        kept ``"auto"`` instead of promoting the sources-root's concrete
+        ``clang``, silently changing which AST backend the assurance-overlay
+        run's ``compile.frontend`` selects back to the default instead of
+        the sources tree's own explicit choice."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  frontend: auto\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  frontend: clang\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["frontend"] == "clang"
+
+    def test_single_sided_mode_merge_checkout_concrete_frontend_wins(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion positive control for the sentinel-handling fix above:
+        a checkout ``compile.frontend`` that is a real, non-``"auto"``
+        value must still win over a DIFFERING sources-root value -- the fix
+        must only exempt the literal ``"auto"`` sentinel, not blanket-flip
+        the whole field to sources-wins. Matches ``merge_compile_config``'s
+        own truth table: ``cli_ctx.frontend != "auto"`` is ``True`` once the
+        checkout stage resolved to a concrete value, so the sources-root
+        document's own value is never even consulted."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  frontend: clang\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  frontend: castxml\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["frontend"] == "clang"
+
+    def test_single_sided_mode_merge_both_auto_frontend_stays_auto(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion negative control: when both documents leave
+        ``frontend`` at the ``"auto"`` sentinel (explicitly or by omission),
+        the merged overlay must stay ``"auto"`` -- the fix must not
+        accidentally invent a concrete frontend neither side asked for."""
+        workspace = make_workspace(tmp_path)
+        (workspace / ".abicheck.yml").write_text(
+            "compile:\n  frontend: auto\n", encoding="utf-8"
+        )
+        src_dir = workspace / "src"
+        src_dir.mkdir()
+        (src_dir / ".abicheck.yml").write_text(
+            "compile:\n  frontend: auto\n", encoding="utf-8"
+        )
+        result = _run_overlay(
+            workspace,
+            {
+                "BASE_CONFIG": "",
+                "SOURCES_ROOT": str(src_dir),
+                "SOURCES_PAIRWISE": "",
+                "SOURCES_MERGE_COMPILE": "true",
+            },
+        )
+        assert result.returncode == 0, result.stderr
+        written = _written_overlay(result)
+        assert written["compile"]["frontend"] == "auto"
+
     def test_ambiguous_sources_root_promotion_still_subject_to_stripping(
         self, tmp_path: Path
     ) -> None:
