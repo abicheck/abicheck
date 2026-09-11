@@ -106,8 +106,13 @@ minutes. The replay caps its worker count by available memory, including a
 container's cgroup limit, rather than by CPU count alone. Ask before you
 spend:
 
+`--since` is not wired to `--no-baseline`'s one-sided audit path yet (it
+exits 64 there today) — changed-path seeding is inherently a two-sided
+concept anyway (narrowing to what a revision range touched *relative to*
+a baseline), so this is a two-sided `compare`:
+
 ```bash
-abicheck compare --no-baseline libfoo.so -H include/ --sources . --depth source \
+abicheck compare old.so new.so -H include/ --sources . --depth source \
   --since origin/main --dry-run
 ```
 

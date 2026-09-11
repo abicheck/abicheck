@@ -120,8 +120,12 @@ also where `--budget` belongs — it fails loudly on overflow rather than
 shrinking scope — and where `--dry-run` tells you what a depth would cost
 before you spend it.
 
+`--budget` is not wired to `--no-baseline`'s one-sided audit path yet (it
+exits 64 there today) — a nightly deep scan compares against a real
+baseline anyway, so this is a two-sided `compare`:
+
 ```bash
-abicheck compare --no-baseline libfoo.so -H include/ --sources . --depth source --budget 15m
+abicheck compare old.so new.so -H include/ --sources . --depth source --budget 15m
 ```
 
 ## Release cut

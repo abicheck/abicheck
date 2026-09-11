@@ -48,16 +48,19 @@ the imported CPython C-API symbols plus whether the module is a stable-ABI
     the undefined-symbol table carries no per-symbol provider — those names don't
     appear as imports anyway.)
 
-### 1. Audit a single module — `compare --no-baseline --abi3`
+### 1. Audit a single module — `compare --abi3`
+
+`--abi3` is not yet wired to `--no-baseline`'s one-sided audit path (it
+exits 64 there today) — self-compare the module against itself with plain
+`compare` instead, which reaches the same candidate-side `--abi3` audit:
 
 ```console
-$ abicheck compare --no-baseline foo.abi3.so --abi3 3.9
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3 3.9
 …
-  abi3_audit         ran           118 CPython import(s) audited against
-                                   Py_LIMITED_API 3.9; 1 violation finding(s)
+Modifications (1)
 
-Cross-source findings (advisory)
-  [warning] python_stable_abi_violation: 1
+- python:foo — abi3 extension 'foo' imports non-stable CPython symbol:
+  stable symbols newer than the abi3 floor 3.9: PyType_GetName (added 3.11)
 ```
 
 `--abi3 <floor>` classifies every imported CPython symbol against the
@@ -114,7 +117,7 @@ overrides:
 ```
 
 ```console
-$ abicheck compare --no-baseline foo.abi3.so --abi3 3.9 --policy policy.yml
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3 3.9 --policy policy.yml
 ```
 
 `warn` raises the exit code to the source-break tier (`2`), failing the
