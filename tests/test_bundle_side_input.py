@@ -1176,11 +1176,7 @@ class TestCompareReleaseAgainstBundleFactsEnvMatrix:
             lambda d, include_private=False: [new_so],
         )
         new_elf = self._new_elf_requiring("2.34")
-        # ADR-061 gap A (merged from origin/main after this test was
-        # written): bundle_side_input.py now imports resolve_input straight
-        # from its real owner, abicheck.workflows.input_resolution, instead
-        # of through the flat abicheck.service facade -- so the monkeypatch
-        # target follows suit, matching every other test in this file.
+        # ADR-061 gap A: real owner is workflows.input_resolution now.
         monkeypatch.setattr(
             input_resolution_mod,
             "resolve_input",
@@ -1188,9 +1184,7 @@ class TestCompareReleaseAgainstBundleFactsEnvMatrix:
                 library="libcore.so", version="new", elf=new_elf
             ),
         )
-        # workflows.compare_policy.compare_snapshots is deliberately left
-        # real -- it's the function whose env_matrix-forwarding is under
-        # test.
+        # compare_snapshots is deliberately left real (env_matrix forwarding is under test).
 
         # Baseline: no declared floor -- the version-requirement raise
         # stays at its default (non-BREAKING) verdict.
