@@ -405,11 +405,16 @@ build:
     - //:math
 ```
 
-`.abicheck.yml`'s `build.targets` is the only way to set this (`dump`'s own
-`--build-target` CLI flag was retired — a hard usage error, exit 64, no
-alias — since a build-system root target is a property of the project's
-layout, not a per-run choice; put it in the config file and pass it with
-`--config` if it isn't auto-discovered from `--sources`). Several roots are
+`.abicheck.yml`'s `build.targets` is the only way to set this from the CLI
+or the composite Action (`dump`'s own `--build-target` CLI flag was retired
+— a hard usage error, exit 64, no alias — since a build-system root target
+is a property of the project's layout, not a per-run choice; put it in the
+config file and pass it with `--config` if it isn't auto-discovered from
+`--sources`). A typed-API caller not going through `.abicheck.yml` still has
+a real override: `InputSpec.build_targets` (see the
+[Python API reference](../reference/python-api-reference.md#inputspec))
+survived that removal as a first-class per-request field — only the CLI
+flag is gone, not the capability. Several roots are
 unioned (`targets: ["//:math", "//:util"]`). The resulting scope is reported
 machine-readably on the `L3_build` evidence-coverage row
 (`requested_roots`/`resolved_roots`/`transitive_targets`), so a consumer can
