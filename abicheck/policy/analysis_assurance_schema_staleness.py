@@ -41,22 +41,29 @@ missing signal, computed from the exact same table the load-time warning
 uses (via ``degraded_reliability_facts``) so the two can never
 independently drift on what counts as "degraded".
 
-**Known, accepted limitation (Codex review, PR #1209):**
+**Known, accepted limitation (Codex review, PR #1209, narrowed round 11):**
 ``clang_field_initializer_facts_reliable``'s True downstream cost is
 per-declaration and value-shape-dependent
 (``diff_default_value_reliability._fingerprint_comparison_unreliable``
 only actually suppresses a comparison when the two sides' fingerprint
 *generations* differ AND the specific field's own value is fingerprint-
 shaped -- two same-vintage legacy snapshots compare their fingerprints
-just fine). Modeling that accurately would mean walking every field's own
+just fine). Modeling THAT accurately would mean walking every field's own
 resolved value/producer here, which conflicts with this module's (and the
 pre-existing load-time warning's) deliberate "rollup over already-computed
 snapshot-level fields, never a new per-declaration probe" contract -- see
 ``analysis_assurance.py``'s own module docstring. Left conservative (a
-False flag always taints, whichever the pair) rather than attempting an
-incomplete pair-aware model: the failure direction is safe (a spurious
-``"degraded"`` under-claims confidence; it can never fabricate a
-``"complete"`` claim the P1 bug this module exists to fix was about).
+False flag always taints within a pair that clears the coarser producer-
+match gate below) rather than attempting an incomplete pair-aware model:
+the failure direction is safe (a spurious ``"degraded"`` under-claims
+confidence; it can never fabricate a ``"complete"`` claim the P1 bug this
+module exists to fix was about). The COARSER, whole-snapshot-level half of
+this flag's real gate -- a genuine cross-backend producer MISMATCH, which
+``diff_symbols._diff_param_defaults``/``diff_types_field_facts._diff_
+field_default_initializer`` both decline on regardless of this flag's own
+value -- IS pair-gated as of round 11 (see :data:`_PAIR_SAME_PRODUCER_AS_
+SNAP_GATED_FLAGS`); only the deeper, per-value-shape nuance above remains
+unmodeled.
 
 **Second known, accepted limitation (Codex review, PR #1209 round 4, revised
 round 9):** this module reads *whatever* ``old``/``new`` it is given -- it
@@ -120,24 +127,21 @@ _PAIR_PRODUCER_GATED_FLAGS: dict[str, str] = {
     "castxml_var_access_facts_reliable": "castxml",
 }
 
-#: The two flags whose one real consumer requires BOTH sides confirmed
+#: The one flag whose real consumer requires BOTH sides confirmed
 #: (non-inferred) header-aware -- ``_both_header_aware`` -- but, unlike
 #: :data:`_PAIR_PRODUCER_GATED_FLAGS`, places no further requirement on the
 #: *other* side's producer (Codex review, PR #1209 round 7, fresh evidence):
 #: ``diff_symbols._diff_param_restrict`` exits at ``_both_header_aware``
-#: before ever reading ``clang_restrict_facts_reliable``, and ``diff_types_
-#: field_facts._diff_field_default_initializer`` does the same before its
-#: own per-field ``fact_same_producer_qualified`` gate for ``clang_field_
-#: initializer_facts_reliable`` -- both documented as cross-producer-safe
-#: (restrict) or handled by a separate, deliberately conservative per-
-#: declaration limitation (field initializer -- see this module's own
-#: docstring) once both sides are confirmed header-aware. ``clang_
-#: deprecation_facts_reliable`` moved OUT of this set in round 8 -- see
-#: :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS` below, its own real
-#: consumer needs more than header confirmation alone.
+#: before ever reading ``clang_restrict_facts_reliable``, and (unlike
+#: ``TypeField.default``/``Param.default``) a restrict-qualification bool is
+#: directly cross-comparable once both backends populate it (v22+), so no
+#: producer match is needed. ``clang_deprecation_facts_reliable`` moved OUT
+#: of this set in round 8 -- see :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_
+#: GATED_FLAGS` below. ``clang_field_initializer_facts_reliable`` moved OUT
+#: in round 11 -- see :data:`_PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS` below,
+#: its real consumers need a producer MATCH, not just header confirmation.
 _PAIR_HEADER_ONLY_GATED_FLAGS: frozenset[str] = frozenset(
     {
-        "clang_field_initializer_facts_reliable",
         "clang_restrict_facts_reliable",
     }
 )
@@ -162,6 +166,35 @@ _PAIR_HEADER_ONLY_GATED_FLAGS: frozenset[str] = frozenset(
 #: silently turned "both sides are stale" into a false "clean".
 _PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS: frozenset[str] = frozenset(
     {"clang_deprecation_facts_reliable"}
+)
+
+#: ``clang_field_initializer_facts_reliable`` (Codex review, PR #1209 round
+#: 11, fresh evidence). Unlike ``clang_deprecation_facts_reliable``
+#: (values ARE cross-comparable once both producers are known, any
+#: combination), ``TypeField.default``/``Param.default``'s VALUE
+#: REPRESENTATIONS are NOT cross-comparable across backends (castxml keeps
+#: the verbatim source expression; clang falls back to a literal/structural
+#: fingerprint) -- exactly the same shape :data:`_PAIR_PRODUCER_GATED_FLAGS`
+#: already guards for va_list/var_access. ``diff_symbols._diff_param_
+#: defaults`` skips a function pair outright when both sides' PER-
+#: DECLARATION producers are positively known and DIFFER (unrelated to this
+#: flag's own value); ``diff_types_field_facts._diff_field_default_
+#: initializer`` gates per-field on ``fact_same_producer_qualified``, the
+#: identical same-known-producer requirement. So a degraded, confirmed-
+#: header "clang" side paired with a confirmed "castxml" side means these
+#: detectors decline the comparison regardless of what this flag says --
+#: a REAL, permanent incompatibility (unless a frontend choice changes),
+#: not a regeneratable gap. Unlike :data:`_PAIR_PRODUCER_GATED_FLAGS`'s two
+#: fixed-string members, this flag has no single required producer (it can
+#: be False for a "clang" OR a legacy unset-producer snapshot) -- the
+#: requirement is that *snap*'s own producer, whatever it is, MATCHES
+#: *other*'s, so :func:`_other_side_matches_snap_producer` takes *snap* as
+#: well as *other*. An unknown producer on EITHER side is deliberately NOT
+#: treated as a permanent mismatch (round-10 principle,
+#: ``_other_side_supports_known_producer_comparison``'s own docstring): it
+#: is itself just another regeneratable, schema-vintage gap.
+_PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS: frozenset[str] = frozenset(
+    {"clang_field_initializer_facts_reliable"}
 )
 
 
@@ -274,6 +307,29 @@ def _other_side_supports_known_producer_comparison(other: AbiSnapshot) -> bool:
     return True
 
 
+def _other_side_matches_snap_producer(snap: AbiSnapshot, other: AbiSnapshot) -> bool:
+    """Whether *other* alone would satisfy ``diff_symbols._diff_param_
+    defaults``'s/``diff_types_field_facts._diff_field_default_initializer``'s
+    own same-KNOWN-producer gate against *snap* -- confirmed header
+    awareness AND (when both sides' producers are positively known) an
+    EXACT match.
+
+    Deliberately NOT excluded when either side's ``ast_producer`` is
+    unknown (``None``): unlike a real, KNOWN mismatch (the permanent,
+    cross-backend value-representation incompatibility this gate exists to
+    guard against -- castxml's verbatim source expression vs. clang's
+    fingerprint), an unknown producer on either side is itself just another
+    regeneratable, schema-vintage gap (the exact round-10 principle
+    :func:`_other_side_supports_known_producer_comparison` documents) --
+    excluding on that basis would repeat that same bug in a new spot.
+    """
+    if not _other_side_is_header_confirmed(other):
+        return False
+    if snap.ast_producer is None or other.ast_producer is None:
+        return True
+    return snap.ast_producer == other.ast_producer
+
+
 #: ``param_kind_facts_reliable`` (Codex review, PR #1209 round 9, fresh
 #: evidence -- disproves this module's own round-4/6 reply, which claimed
 #: this flag "stays fully relevant" post-projection; see the corrected
@@ -329,11 +385,13 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
     """*snap*'s own :func:`degraded_reliability_facts`, narrowed to drop a
     :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`/
     :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS`/
+    :data:`_PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS`/
     :data:`_DEPTH_PROJECTION_PARAMS_CLEARED_FLAGS` entry whose one real
     consumer never ran for this pair because *other* doesn't also clear the
     detector's own both-sides gate (see :func:`_other_side_confirms_pair_
     gate`/:func:`_other_side_is_header_confirmed`/:func:`_other_side_
-    supports_known_producer_comparison`/:func:`_pair_params_unconfirmed`).
+    supports_known_producer_comparison`/:func:`_other_side_matches_snap_
+    producer`/:func:`_pair_params_unconfirmed`).
     """
     kept = []
     for name in degraded_reliability_facts(snap):
@@ -348,6 +406,10 @@ def _pair_aware_degraded_facts(snap: AbiSnapshot, other: AbiSnapshot) -> list[st
             continue
         if name in _PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS:
             if _other_side_supports_known_producer_comparison(other):
+                kept.append(name)
+            continue
+        if name in _PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS:
+            if _other_side_matches_snap_producer(snap, other):
                 kept.append(name)
             continue
         if name in _DEPTH_PROJECTION_PARAMS_CLEARED_FLAGS:
@@ -372,7 +434,8 @@ def schema_staleness_status(
     fact already means the affected detector(s) declined to trust it for
     THIS comparison, whether or not the other side is current -- except the
     :data:`_PAIR_PRODUCER_GATED_FLAGS`/:data:`_PAIR_HEADER_ONLY_GATED_FLAGS`/
-    :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS` flags, which
+    :data:`_PAIR_KNOWN_DEPRECATION_PRODUCER_GATED_FLAGS`/
+    :data:`_PAIR_SAME_PRODUCER_AS_SNAP_GATED_FLAGS` flags, which
     :func:`_pair_aware_degraded_facts` narrows first.
 
     ``old is new`` (real Python object identity, not merely equal content)

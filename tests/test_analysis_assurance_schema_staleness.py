@@ -341,23 +341,24 @@ class TestSchemaStalenessStatus:
         assert not any("clang_va_list_facts_reliable" in n for n in aa.notes), aa.notes
 
     #: ``clang_restrict_facts_reliable``/``clang_deprecation_facts_
-    #: reliable``/``clang_field_initializer_facts_reliable`` -- unlike
-    #: :data:`_PAIR_PRODUCER_GATED_FLAGS`'s two members, each one's real
-    #: consumer (``diff_symbols._diff_param_restrict``/``_diff_func_
-    #: deprecated``, ``diff_types_field_facts._diff_field_default_
-    #: initializer``) requires BOTH sides confirmed header-aware but places
-    #: no further requirement on the OTHER side's producer -- documented as
-    #: cross-producer-safe once both sides are header-confirmed. NOTE
-    #: (round 8): ``clang_deprecation_facts_reliable`` picked up a further,
-    #: producer-aware narrowing on top of this shared header-confirmation
-    #: shape (see ``test_deprecation_flag_needs_a_known_other_side_
-    #: producer_too`` below) -- kept in this list too since a KNOWN,
-    #: mismatched producer (what this list's own tests use) still taints it
-    #: exactly as it does the other two.
+    #: reliable`` -- unlike :data:`_PAIR_PRODUCER_GATED_FLAGS`'s two
+    #: members, each one's real consumer (``diff_symbols._diff_param_
+    #: restrict``/``_diff_func_deprecated``) requires BOTH sides confirmed
+    #: header-aware but places no further requirement on the OTHER side's
+    #: producer -- documented as cross-producer-safe once both sides are
+    #: header-confirmed. NOTE (round 8): ``clang_deprecation_facts_
+    #: reliable`` picked up a further, producer-aware narrowing on top of
+    #: this shared header-confirmation shape (see ``test_deprecation_flag_
+    #: needs_a_known_other_side_producer_too`` below) -- kept in this list
+    #: too since a KNOWN, mismatched producer (what this list's own tests
+    #: use) still taints it exactly as it does restrict. NOTE (round 11):
+    #: ``clang_field_initializer_facts_reliable`` moved OUT of this list --
+    #: unlike restrict/deprecation, its real consumers DO require a
+    #: producer MATCH (same shape as va_list/var_access) -- see
+    #: ``TestFieldInitializerSameProducerGating`` below.
     _HEADER_ONLY_GATED_FLAGS: tuple[str, ...] = (
         "clang_restrict_facts_reliable",
         "clang_deprecation_facts_reliable",
-        "clang_field_initializer_facts_reliable",
     )
 
     def test_other_side_confirmed_header_aware_taints_header_only_gated_flags(
@@ -710,3 +711,123 @@ class TestSchemaStalenessStatus:
         )
         result2 = checker.compare(new, new_copy)
         assert result2.analysis_assurance.schema_staleness_status == "degraded"
+
+
+class TestFieldInitializerSameProducerGating:
+    """``clang_field_initializer_facts_reliable`` (Codex review, PR #1209
+    round 11, fresh evidence): unlike ``clang_restrict_facts_reliable``/
+    ``clang_deprecation_facts_reliable`` (plain header confirmation is
+    enough -- see ``TestSchemaStalenessStatus._HEADER_ONLY_GATED_FLAGS``),
+    this flag's real consumers (``diff_symbols._diff_param_defaults``,
+    ``diff_types_field_facts._diff_field_default_initializer``) decline a
+    pair outright whenever both sides' producers are positively known and
+    DIFFER -- ``TypeField.default``/``Param.default``'s value
+    representations are not cross-comparable across backends, the same
+    shape :data:`_PAIR_PRODUCER_GATED_FLAGS` already guards for
+    va_list/var_access. Split into its own test class since this flag has
+    no single FIXED required producer (unlike va_list's "must be clang") --
+    the requirement is that *snap*'s own producer, whatever it is, matches
+    *other*'s."""
+
+    def test_known_producer_mismatch_never_taints(self) -> None:
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="castxml",  # a real, KNOWN, differing producer
+        )
+        assert degraded_reliability_facts(old) == [
+            "clang_field_initializer_facts_reliable"
+        ]
+
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any(
+            "clang_field_initializer_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+
+    def test_matching_producer_still_taints(self) -> None:
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",  # matches old's own producer
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
+
+    def test_other_side_only_inferred_header_awareness_never_taints(self) -> None:
+        """Same shape as every other pair gate in this module: confirmed
+        header awareness is required regardless of producer match."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+        )
+        new.from_headers_inferred = True
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "clean"
+        assert not any(
+            "clang_field_initializer_facts_reliable" in n for n in aa.notes
+        ), aa.notes
+
+    def test_unknown_other_side_producer_still_taints(self) -> None:
+        """Round-10 principle applied to this new gate too: an unknown
+        (``None``) producer on the OTHER side is itself just another
+        regeneratable, schema-vintage gap, NOT a permanent mismatch -- it
+        must not be treated the same as a real, KNOWN producer difference."""
+        old = AbiSnapshot(
+            version="1.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            ast_producer="clang",
+            clang_field_initializer_facts_reliable=False,
+        )
+        new = AbiSnapshot(
+            version="2.0",
+            library="libfoo.so.1",
+            functions=[_fn("pub_a", "_Z5pub_av")],
+            from_headers=True,
+            # ast_producer left unset.
+        )
+        result = checker.compare(old, new)
+        aa = result.analysis_assurance
+        assert aa.schema_staleness_status == "degraded"
+        assert any("clang_field_initializer_facts_reliable" in n for n in aa.notes), (
+            aa.notes
+        )
