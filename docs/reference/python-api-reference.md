@@ -173,7 +173,7 @@ Both sides of a comparison, resolved and ready to classify.
 | `old_evidence` | `SideEvidence` | *(required)* |
 | `new_evidence` | `SideEvidence` | *(required)* |
 | `resolved_execution_context` | `ResolvedExecutionContext \| None` | `None` |
-| `resolved_env_matrix` | `EnvironmentMatrix \| None` | `None` |
+| `resolved_env_matrix` | `EnvironmentMatrix \| None \| _UnresolvedEnvMatrixType` | `<unresolved env matrix>` |
 
 ## `classify_compare_pair`
 

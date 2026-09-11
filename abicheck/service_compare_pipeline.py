@@ -94,6 +94,22 @@ __all__ = [
 ]
 
 
+class _UnresolvedEnvMatrixType:
+    """Sentinel default for ``resolved_env_matrix`` (Codex review, PR #1221
+    fourth round): a bare ``EnvironmentMatrix | None`` default cannot tell
+    "resolved, confirmed no matrix" apart from "never resolved at all",
+    which let a caller-built :class:`ResolvedComparePair` silently drop a
+    request's real ``env_matrix``/``env_matrix_path`` intent. See
+    :class:`ResolvedComparePair`'s own docstring.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return "<unresolved env matrix>"
+
+
+_UNRESOLVED_ENV_MATRIX = _UnresolvedEnvMatrixType()  # the one instance; `is`-compared
+
+
 @dataclasses.dataclass(frozen=True)
 class ResolvedComparePair:
     """Both sides of a comparison, resolved and ready to classify.
@@ -116,6 +132,14 @@ class ResolvedComparePair:
     extraction, and :func:`classify_compare_pair` reads an immutable value
     that travels with this frozen pair. Declared last, append-only, since
     an earlier slot would repoint a positional caller's value (PR #1221).
+
+    Defaults to the :data:`_UNRESOLVED_ENV_MATRIX` sentinel, not ``None``
+    (Codex review, PR #1221 fourth round): a caller-built pair that never
+    adopted this field stays at that sentinel, which
+    :func:`classify_compare_pair` reads as "not resolved yet" and falls back
+    to ``request.effective_env_matrix()`` for -- distinct from
+    :func:`resolve_compare_request` storing a real ``None`` to mean
+    "resolved, and there genuinely is no matrix".
     """
 
     old: AbiSnapshot
@@ -125,7 +149,9 @@ class ResolvedComparePair:
     old_evidence: SideEvidence
     new_evidence: SideEvidence
     resolved_execution_context: ResolvedExecutionContext | None = None
-    resolved_env_matrix: EnvironmentMatrix | None = None
+    resolved_env_matrix: EnvironmentMatrix | None | _UnresolvedEnvMatrixType = (
+        _UNRESOLVED_ENV_MATRIX
+    )
 
 
 def resolve_sides_sequentially(request: CompareRequest) -> bool:
@@ -511,7 +537,11 @@ def classify_compare_pair(
     :func:`resolve_compare_request` already resolved ``env_matrix_path``,
     before side acquisition, so this reads that immutable value instead of
     re-reading a possibly-since-edited file (Codex review, PR #1221 third
-    round).
+    round). When still the ``_UNRESOLVED_ENV_MATRIX`` sentinel -- a
+    caller-built ``pair`` that never went through :func:`resolve_compare_request`
+    -- this falls back to ``request.effective_env_matrix()`` instead of
+    silently dropping the request's own matrix intent (Codex review, PR
+    #1221 fourth round).
     """
     from . import deadline
     from .buildsource.evidence_report import (
@@ -529,10 +559,16 @@ def classify_compare_pair(
     # complete with no subprocess/extraction work at all.
     deadline.check()
 
-    # ADR-020b / ADR-068 D5: the environment matrix was already resolved by
-    # `resolve_compare_request` (see its own and `ResolvedComparePair`'s
-    # docstrings) -- read it from the pair rather than re-resolving here.
-    env_matrix: EnvironmentMatrix | None = pair.resolved_env_matrix
+    # ADR-020b / ADR-068 D5: read the already-resolved matrix from the pair
+    # rather than re-resolving here -- except a caller-built pair still at
+    # the `_UNRESOLVED_ENV_MATRIX` sentinel, which falls back to the
+    # request's own intent instead of silently dropping it (Codex review,
+    # PR #1221 fourth round; see `ResolvedComparePair`'s own docstring).
+    env_matrix: EnvironmentMatrix | None = (
+        request.effective_env_matrix()
+        if isinstance(pair.resolved_env_matrix, _UnresolvedEnvMatrixType)
+        else pair.resolved_env_matrix
+    )
 
     # ADR-063 Phase 8's "--depth floor vs ceiling" gap: the *ceiling* half,
     # narrowing what this classification may see to the requested rung. The

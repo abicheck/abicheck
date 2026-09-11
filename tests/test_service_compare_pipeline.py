@@ -712,3 +712,166 @@ class TestEnvMatrixPathValidatedBeforeExtraction:
         with pytest.raises(DeadlineExceeded):
             run_compare_request(request)
         assert load_calls == []
+
+
+class TestCallerBuiltResolvedPairPreservesEnvMatrixIntent:
+    """Codex review, P2, fourth round on this exact issue.
+
+    Round 3 (``TestEnvMatrixPathValidatedBeforeExtraction`` above) moved
+    ``env_matrix`` resolution onto ``ResolvedComparePair.resolved_env_matrix``
+    with a bare ``EnvironmentMatrix | None = None`` default. That default
+    collapsed two different situations onto the same ``None``: "resolution
+    ran and there genuinely is no matrix" and "this pair was constructed
+    directly by a Tier-2 caller that never adopted the field at all" —
+    ``classify_compare_pair`` could not tell them apart, so a caller-built
+    ``ResolvedComparePair`` silently dropped any ``env_matrix``/
+    ``env_matrix_path`` intent still carried on the ``CompareRequest``, and a
+    runtime-floor violation that should have been ``BREAKING`` could regress
+    to whatever verdict the pair carries with no matrix at all.
+
+    This class proves all three required behaviors directly against
+    ``classify_compare_pair``, bypassing ``resolve_compare_request`` entirely
+    so a caller-built pair is exactly what each test constructs — through the
+    real, user-facing classification path (``compare_snapshots`` via
+    ``classify_compare_pair``), not a unit test on the fallback value alone.
+    """
+
+    _FLOOR = {"GLIBC": "2.28"}
+
+    def _snapshot(self, *, version: str, glibc: str | None) -> AbiSnapshot:
+        from abicheck.model.elf_facts import ElfMetadata
+
+        elf = ElfMetadata(
+            versions_required=(
+                {"libc.so.6": [f"GLIBC_{glibc}"]} if glibc is not None else {}
+            )
+        )
+        return AbiSnapshot(library="libtest.so", version=version, elf=elf)
+
+    def _request(self, tmp_path, old: AbiSnapshot, new: AbiSnapshot, **kwargs):
+        """A real ``CompareRequest`` pointing at real snapshot files on disk
+        -- ``classify_compare_pair`` reads each side's own path for
+        library-identity metadata even when the snapshots themselves are
+        supplied out of band via the caller-built pair below."""
+        from abicheck.serialization import snapshot_to_json
+
+        old_p = tmp_path / "old.abi.json"
+        new_p = tmp_path / "new.abi.json"
+        old_p.write_text(snapshot_to_json(old), encoding="utf-8")
+        new_p.write_text(snapshot_to_json(new), encoding="utf-8")
+        return CompareRequest(
+            old=InputSpec.of(str(old_p)), new=InputSpec.of(str(new_p)), **kwargs
+        )
+
+    def _pair(self, old: AbiSnapshot, new: AbiSnapshot):
+        """A caller-built ``ResolvedComparePair`` -- direct construction,
+        never through ``resolve_compare_request`` -- leaving
+        ``resolved_env_matrix`` at its dataclass default (the sentinel)."""
+        from abicheck.service_compare_evidence import SideEvidence
+        from abicheck.service_compare_pipeline import ResolvedComparePair
+
+        evidence = SideEvidence(
+            headers=[], compile=None, collect_mode="off", dump_manifest=None
+        )
+        return ResolvedComparePair(
+            old=old,
+            new=new,
+            old_fmt="elf",
+            new_fmt="elf",
+            old_evidence=evidence,
+            new_evidence=evidence,
+        )
+
+    def test_default_is_the_unresolved_sentinel_not_none(self) -> None:
+        """The dataclass default itself must be distinguishable from a real,
+        resolved ``None`` -- otherwise there is nothing for
+        ``classify_compare_pair`` to branch on."""
+        from abicheck.service_compare_pipeline import _UNRESOLVED_ENV_MATRIX
+
+        old = self._snapshot(version="1.0", glibc=None)
+        pair = self._pair(old, old)
+        assert pair.resolved_env_matrix is _UNRESOLVED_ENV_MATRIX
+        assert pair.resolved_env_matrix is not None
+
+    def test_caller_built_pair_falls_back_to_request_env_matrix_and_flags_breaking(
+        self, tmp_path
+    ) -> None:
+        """(b): a caller-built pair with ``resolved_env_matrix`` unset but
+        ``request.env_matrix_path`` set must NOT silently drop the matrix --
+        the resulting comparison must actually flag the runtime-floor
+        violation as ``BREAKING``, proving the fallback reaches real
+        classification, not just a non-``None`` intermediate value."""
+        from abicheck.model.change_catalog.registry import Verdict
+        from abicheck.service_compare_pipeline import classify_compare_pair
+
+        good = tmp_path / "env.yaml"
+        good.write_text('runtime_floors:\n  GLIBC: "2.28"\n', encoding="utf-8")
+        old = self._snapshot(version="1.0", glibc="2.28")
+        # The new binary requires a strictly newer GLIBC symbol version than
+        # the declared 2.28 floor allows -- a genuine platform-baseline-floor
+        # violation (`check_platform_baseline_floor`), unconditionally
+        # promoted to BREAKING regardless of any old/new delta.
+        new = self._snapshot(version="1.1", glibc="2.34")
+        request = self._request(tmp_path, old, new, env_matrix_path=good)
+        pair = self._pair(old, new)
+
+        result = classify_compare_pair(request, pair)
+
+        assert result.diff is not None
+        assert result.diff.verdict == Verdict.BREAKING
+        kinds = {c.kind for c in result.diff.changes}
+        assert "platform_baseline_floor_raised" in kinds
+
+    def test_caller_built_pair_with_no_request_matrix_intent_is_unaffected(
+        self, tmp_path
+    ) -> None:
+        """(c): a caller-built pair with ``resolved_env_matrix`` unset AND no
+        request matrix intent at all must classify exactly as it would
+        without this fix -- the same GLIBC delta must NOT be flagged as a
+        runtime-floor violation when no floor was ever declared."""
+        from abicheck.model.change_catalog.registry import Verdict
+        from abicheck.service_compare_pipeline import classify_compare_pair
+
+        old = self._snapshot(version="1.0", glibc="2.28")
+        new = self._snapshot(version="1.1", glibc="2.34")
+        request = self._request(tmp_path, old, new)
+        pair = self._pair(old, new)
+
+        result = classify_compare_pair(request, pair)
+
+        assert result.diff is not None
+        assert result.diff.verdict != Verdict.BREAKING
+        kinds = {c.kind for c in result.diff.changes}
+        assert "platform_baseline_floor_raised" not in kinds
+
+    def test_resolve_compare_request_path_still_flags_the_same_violation(
+        self, tmp_path
+    ) -> None:
+        """(a): the normal two-phase path (``resolve_compare_request`` then
+        ``classify_compare_pair``) must keep working -- a pair genuinely
+        resolved through it must flag the identical violation the fallback
+        path (b) does, proving this fix did not disturb the already-correct
+        case."""
+        from abicheck.model.change_catalog.registry import Verdict
+        from abicheck.service_compare_pipeline import (
+            classify_compare_pair,
+            resolve_compare_request,
+        )
+
+        good = tmp_path / "env.yaml"
+        good.write_text('runtime_floors:\n  GLIBC: "2.28"\n', encoding="utf-8")
+        old = self._snapshot(version="1.0", glibc="2.28")
+        new = self._snapshot(version="1.1", glibc="2.34")
+        request = self._request(tmp_path, old, new, env_matrix_path=good)
+
+        pair = resolve_compare_request(request)
+        # The normal path resolves eagerly to a real EnvironmentMatrix, never
+        # the sentinel -- this is the "explicitly resolved" case the fallback
+        # must not disturb.
+        assert pair.resolved_env_matrix is not None
+
+        result = classify_compare_pair(request, pair)
+        assert result.diff is not None
+        assert result.diff.verdict == Verdict.BREAKING
+        kinds = {c.kind for c in result.diff.changes}
+        assert "platform_baseline_floor_raised" in kinds
