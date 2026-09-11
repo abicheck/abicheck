@@ -206,3 +206,23 @@
   the future is validated automatically instead of needing its own
   dedicated fix next time. Raises `ValueError` in both lenient and
   `strict=True` `from_dict` modes; a well-typed matrix still hashes cleanly.
+- **`FrozenStrDict` (`runtime_floors`'s concrete type) now also blocks the
+  `|=` in-place-union operator.** `dict.__ior__` mutates the receiver at the
+  C level and returns it, bypassing every mutator override the earlier
+  rounds above added (`__setitem__`, `update`, `pop`, `popitem`, `clear`,
+  `setdefault`) entirely -- `matrix.runtime_floors |= {"GLIBC": "2.34"}`
+  previously mutated the dict in place undetected, changing the hash of any
+  `EnvironmentMatrix`/`CompareRequest` already holding it out from under a
+  set/dict container, the exact same hash-invariant violation the earlier
+  rounds fixed for every other angle. `__ior__` is now overridden to raise
+  `TypeError` like its siblings. Auditing the rest of CPython's `dict`
+  mutation surface found every other mutator already correctly blocked
+  (`__setitem__`, `__delitem__`, `update`, `pop`, `popitem`, `clear`,
+  `setdefault`); `copy()` is intentionally left alone, since it returns a
+  fresh plain `dict` rather than mutating `self`.
+  `TestFrozenStrDictContract` gained a `dir(dict)`-driven completeness
+  sweep (`test_dict_mutator_probes_cover_every_mutating_dict_method`) that
+  probes every callable `dict` exposes and fails if a future Python release
+  adds a new in-place mutator this module hasn't audited, plus a
+  belt-and-suspenders check that every probed name is an override
+  `FrozenStrDict` actually defines, not one it merely inherits.

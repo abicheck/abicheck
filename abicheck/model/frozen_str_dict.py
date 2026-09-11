@@ -66,12 +66,31 @@ class FrozenStrDict(dict[str, str]):
     through that same safe constructor path (``self.__class__(dict(self))``)
     rather than ``copy``'s generic item-by-item ``_reconstruct``, which
     would otherwise call the disabled ``__setitem__`` and raise.
+
+    Every entry point CPython's ``dict`` uses to mutate contents in place is
+    overridden below: ``__setitem__``, ``__delitem__``, ``__ior__`` (the
+    ``|=`` in-place-union operator -- easy to miss since it neither calls
+    ``__setitem__`` nor ``update()``, and inheriting it unblocked would let
+    ``matrix.runtime_floors |= {...}`` silently mutate a shared instance in
+    place, Codex review round 8), ``update``, ``pop``, ``popitem``,
+    ``clear``, and ``setdefault``. ``copy()`` is deliberately left alone: it
+    returns a fresh plain ``dict``, not a mutation of ``self``.
     """
 
     def __setitem__(self, key: str, value: str) -> None:
         raise TypeError("FrozenStrDict is immutable")
 
     def __delitem__(self, key: str) -> None:
+        raise TypeError("FrozenStrDict is immutable")
+
+    def __ior__(self, other: Any) -> FrozenStrDict:  # type: ignore[override, misc]
+        # ``matrix.runtime_floors |= {...}`` calls this, not ``__setitem__``/
+        # ``update`` -- ``dict.__ior__`` mutates the receiver in place at the
+        # C level and returns it, bypassing every other override above
+        # entirely. Left unblocked, it would silently mutate a
+        # ``FrozenStrDict`` already embedded in a hashed container (Codex
+        # review, PR #1221) exactly like the mutators below, just via a
+        # different bytecode op (``BINARY_OP`` inplace-or, not ``STORE_SUBSCR``).
         raise TypeError("FrozenStrDict is immutable")
 
     def update(self, *args: Any, **kwargs: Any) -> None:

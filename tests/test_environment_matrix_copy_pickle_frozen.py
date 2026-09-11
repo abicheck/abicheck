@@ -50,6 +50,7 @@ import copy
 import dataclasses
 import json
 import pickle
+from collections.abc import Callable
 
 import pytest
 from hypothesis import given, strategies as st
@@ -341,28 +342,94 @@ def test_property_deepcopy_hash_matches_original(matrix: EnvironmentMatrix) -> N
 
 _str_dicts = st.dictionaries(_short_text, _short_text, max_size=5)
 
+# The full, explicitly-verified set of `dict`-mutation entry points
+# `FrozenStrDict` must block (Codex review, PR #1221, round 8: `__ior__` --
+# the `|=` in-place-union operator -- was the one initially missing, since it
+# mutates the receiver at the C level without going through `__setitem__` or
+# `update()`). Kept as one shared table so the exhaustive `dir(dict)` sweep
+# below (`test_dict_mutator_probes_cover_every_mutating_dict_method`) and the
+# per-method `test_every_mutator_raises` parametrization can't drift apart.
+_DICT_MUTATOR_PROBES: dict[str, Callable[[dict[str, str]], object]] = {
+    "setitem": lambda d: d.__setitem__("x", "y"),
+    "delitem": lambda d: d.__delitem__(next(iter(d))),
+    "ior": lambda d: d.__ior__({"x": "y"}),
+    "update": lambda d: d.update({"x": "y"}),
+    "pop": lambda d: d.pop(next(iter(d))),
+    "popitem": lambda d: d.popitem(),
+    "clear": lambda d: d.clear(),
+    "setdefault": lambda d: d.setdefault("x", "y"),
+}
+
 
 class TestFrozenStrDictContract:
     def test_construction_preserves_contents(self) -> None:
         assert dict(FrozenStrDict({"a": "1", "b": "2"})) == {"a": "1", "b": "2"}
 
     @pytest.mark.parametrize(
-        "mutate",
-        [
-            lambda d: d.__setitem__("x", "y"),
-            lambda d: d.__delitem__("a"),
-            lambda d: d.update({"x": "y"}),
-            lambda d: d.pop("a"),
-            lambda d: d.popitem(),
-            lambda d: d.clear(),
-            lambda d: d.setdefault("x", "y"),
-        ],
-        ids=["setitem", "delitem", "update", "pop", "popitem", "clear", "setdefault"],
+        "mutate", list(_DICT_MUTATOR_PROBES.values()), ids=list(_DICT_MUTATOR_PROBES)
     )
     def test_every_mutator_raises(self, mutate) -> None:  # type: ignore[no-untyped-def]
         d = FrozenStrDict({"a": "1"})
         with pytest.raises(TypeError):
             mutate(d)
+
+    def test_every_probed_mutator_is_actually_overridden(self) -> None:
+        """Belt-and-suspenders over the parametrized test above: each probed
+        name must correspond to a method `FrozenStrDict` itself defines (not
+        merely inherits), so a probe that happens to raise `TypeError` for an
+        unrelated reason (e.g. a missing key) can't mask a missing override."""
+        dunder_names = {
+            "setitem": "__setitem__",
+            "delitem": "__delitem__",
+            "ior": "__ior__",
+        }
+        for probe_name in _DICT_MUTATOR_PROBES:
+            attr_name = dunder_names.get(probe_name, probe_name)
+            assert attr_name in vars(FrozenStrDict), (
+                f"FrozenStrDict does not define its own {attr_name!r} override"
+            )
+
+    def test_dict_mutator_probes_cover_every_mutating_dict_method(self) -> None:
+        """The probe table above must itself be exhaustive against this
+        Python's real ``dict`` mutation surface, not just the set
+        ``FrozenStrDict`` happens to override today -- otherwise a future
+        Python release adding a new in-place ``dict`` mutator could go
+        unnoticed by both this test file and ``FrozenStrDict`` alike, the
+        same way ``__ior__`` did (Codex review round 8). For every callable
+        name in ``dir(dict)`` not already in the probe table, invoke it (with
+        a zero-argument call, the only generic signature that plausibly
+        mutates in place) on a fresh plain ``dict`` and check whether it
+        actually changed -- a name that mutates and isn't in the table is a
+        real, unaudited gap.
+        """
+        probed_attr_names = {
+            "setitem": "__setitem__",
+            "delitem": "__delitem__",
+            "ior": "__ior__",
+        }
+        already_covered = {
+            probed_attr_names.get(name, name) for name in _DICT_MUTATOR_PROBES
+        }
+        discovered_unaudited: list[str] = []
+        for name in dir(dict):
+            if name in already_covered:
+                continue
+            attr = getattr(dict, name, None)
+            if not callable(attr):
+                continue
+            probe: dict[str, str] = {"a": "1"}
+            try:
+                getattr(probe, name)()
+            except TypeError:
+                continue  # wrong arity for a zero-arg call -- not a signal
+            except Exception:
+                continue
+            if probe != {"a": "1"}:
+                discovered_unaudited.append(name)
+        assert not discovered_unaudited, (
+            "dict grew (or this Python version has) a mutating method the "
+            f"probe table above does not cover: {sorted(discovered_unaudited)}"
+        )
 
     def test_json_serializable_directly(self) -> None:
         d = FrozenStrDict({"a": "1", "b": "2"})
