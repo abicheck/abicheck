@@ -900,6 +900,14 @@ outputs:
       tell "nothing found" apart from "something found, not gating" --
       both exit 0, neither fails the step, but only one has something
       worth reading in the JSON report's findings[]),
+      DRY_RUN (exit 0, dry-run input true or an effective --dry-run via
+      extra-args: `compare --dry-run` performs no analysis and writes no
+      report at all, so there is no candidate-side finding -- or absence
+      of one -- to claim either way. Distinct from AUDIT_CLEAN, which
+      asserts a real audit ran and found nothing; see the command preview
+      in the job log for what a real run would do. Two-sided dry-run is a
+      separate, pre-existing gap this value does not cover -- only the
+      audit-only shape's dry-run behavior is documented here),
       ANALYSIS_INCOMPLETE (with the require-complete-analysis input, when
       analysis_assurance.status is not "complete" -- the same P0.4
       orthogonal assurance axis as the two-sided shape above, reachable
@@ -983,7 +991,8 @@ outputs:
       with fail-on-removed-library set and a proven-complete NEW
       inventory).
       compare, audit-only shape (old-library/abi-baseline both omitted):
-      0 (compatible/advisory), 1 (incomplete contract coverage, or
+      0 (compatible/advisory, or DRY_RUN under dry-run: true -- see the
+      verdict output's own description), 1 (incomplete contract coverage, or
       incomplete analysis assurance with
       the require-complete-analysis input -- unlike the two-sided shape,
       there is no bare severity-gate exit-1 source here (severity-based

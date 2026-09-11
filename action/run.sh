@@ -3960,6 +3960,25 @@ GATE_TIER=""
 _resolve_clean_exit_verdict() {
   local _v _no_baseline_audit
   VERDICT="COMPATIBLE"
+  # An audit-only (no-baseline) dry run writes no JSON report at all --
+  # `compare --dry-run` performs no analysis and only previews the command
+  # it would have run (Codex review, fresh evidence): the `no_baseline_audit`
+  # query below reads that (absent) report and prints nothing, so without
+  # this check the fallthrough below would silently default to
+  # VERDICT=COMPATIBLE -- "No binary ABI break detected" for a preview that
+  # never compared anything, let alone the candidate's own public surface.
+  # Checked first and returns early, before the no-baseline-audit report
+  # query (which would find no report to read) and before
+  # `_report_compat_verdict` (same reason). Two-sided dry-run is a
+  # pre-existing, out-of-scope gap this fix does not touch -- see the
+  # verdict output's own description, which documents only the audit-only
+  # shape's dry-run behavior.
+  if [[ "${_NO_BASELINE:-false}" == "true" ]] \
+    && { [[ "${INPUT_DRY_RUN:-false}" == "true" ]] || _extra_args_has_dry_run_flag; }; then
+    VERDICT="DRY_RUN"
+    echo "::notice::--dry-run: this is a preview of the command that would run -- no analysis was performed and there is no candidate-side finding to report. Drop --dry-run to run the audit for real."
+    return
+  fi
   # A no-baseline audit's own `verdict` field is always null (no comparison
   # ran at all), so `_report_compat_verdict` below prints nothing for it and
   # this function would otherwise silently default to VERDICT=COMPATIBLE --
@@ -4515,6 +4534,13 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # additions/removals/compatibility verdict are ever reported by an
         # audit (ADR-068 D2) -- only the candidate-side findings themselves.
         echo "> **Verdict: AUDIT_GATE** 🛑 — A gating audit finding was detected against the candidate's own public surface (no baseline was compared). This is not a two-sided compatibility verdict; see the JSON report's \`findings[]\` for what gated. Pass \`severity-preset: info-only\` to stop gating on audit findings."
+        ;;
+      DRY_RUN)
+        # An audit-only (no-baseline) dry run: `compare --dry-run` performs
+        # no analysis and writes no report, so there is no candidate-side
+        # finding (or absence of one) to claim either way -- distinct from
+        # AUDIT_CLEAN, which asserts a real audit ran and found nothing.
+        echo "> **Verdict: DRY_RUN** ℹ️ — This was a preview of the command that would run (\`--dry-run\`); no analysis was performed. This is not a compatibility verdict, and not AUDIT_CLEAN/AUDIT_RISK — see the command preview above for what a real run would do."
         ;;
       AUDIT_CLEAN)
         # Codex review, PR #1210, round 6: exit 0 on a no-baseline audit
