@@ -626,7 +626,11 @@ inputs:
       — a directory/package compare rejects it with an error. html is
       supported by compare (same single-pair restriction as sarif) and by
       deps-tree/deps-compare (a dependency-stack report). scan supports
-      text (its default) and json only. dump ignores this input; it always
+      text (its default) and json only -- text is rendered through
+      compare's own markdown renderer (scan has no CLI of its own left at
+      all, ADR-068), for both a baseline scan and an audit-only one; it is
+      NOT a separate plain-text report format (Codex review, PR #1210,
+      round 7). dump ignores this input; it always
       writes a JSON snapshot. Requesting an
       unsupported format for the mode is a hard error raised before any
       dependency install (it used to silently fall back to a supported
@@ -851,12 +855,16 @@ outputs:
       assurance axis, which likewise leaves the compatibility verdict
       unchanged; rejected outright for a directory/package operand, so
       this verdict never applies there), API_BREAK,
-      BREAKING, AUDIT_GATE/AUDIT_CLEAN/AUDIT_RISK (reachable here only when
-      extra-args explicitly combines --no-baseline with a native mode:
-      compare request -- see mode: scan's own entries below for the full
-      axis description of all three; the underlying CLI axis means the
-      same thing either way), REMOVED_LIBRARY (directory/package
+      BREAKING, REMOVED_LIBRARY (directory/package
       operands with fail-on-removed-library set), or ERROR.
+      AUDIT_GATE/AUDIT_CLEAN/AUDIT_RISK (see mode: scan's own entries below)
+      are NOT reachable for a native mode: compare request through this
+      Action (Codex review, PR #1210, round 7): this Action's own compare
+      branch always supplies both old-library and new-library as positional
+      operands, and --no-baseline itself takes exactly one -- combining it
+      via extra-args with a native compare request fails with a CLI usage
+      error (exit 64), never one of the three audit verdicts. Those three
+      are reachable only through mode: scan's own audit-only translation.
       For dump: COMPATIBLE or ERROR.
       For scan: COMPATIBLE, COMPATIBLE_WITH_RISK (same exit-0 risk tier as
       compare's, above), SEVERITY_ERROR (with --against and a

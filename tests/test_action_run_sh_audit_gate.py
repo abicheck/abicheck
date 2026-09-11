@@ -322,3 +322,34 @@ class TestAuditOnlyScanExitZeroVerdictNeverClaimsCompatible:
         )
         assert outputs.get("verdict") == "AUDIT_GATE", outputs
         assert outputs.get("exit-code") == "3", outputs
+
+    def test_fully_suppressed_finding_reports_audit_risk_not_audit_clean(
+        self, tmp_path: Path
+    ) -> None:
+        # Codex review, PR #1210, round 7: a --suppress rule matching
+        # case143's own finding empties `findings` but leaves
+        # `suppressed_findings`/`suppressed_count` nonzero -- a suppressed
+        # finding is a disposition, not an absence ("record before
+        # disposing"), so this must still report AUDIT_RISK, not the
+        # AUDIT_CLEAN "no candidate-side finding was detected" claim.
+        suppress_file = tmp_path / "suppress.yml"
+        suppress_file.write_text(
+            "version: 1\n"
+            "suppressions:\n"
+            '  - symbol: "_Z11debug_dumpv"\n'
+            '    change_kind: "exported_not_public"\n'
+            '    reason: "test suppress"\n',
+            encoding="utf-8",
+        )
+        outputs = _run_action(
+            tmp_path,
+            {
+                "INPUT_NEW_LIBRARY": str(
+                    _snapshot_path("case143_audit_accidental_export")
+                ),
+                "INPUT_SUPPRESS": str(suppress_file),
+            },
+        )
+        assert outputs["_returncode"] == 0, outputs
+        assert outputs.get("verdict") == "AUDIT_RISK", outputs
+        assert outputs.get("exit-code") == "0", outputs

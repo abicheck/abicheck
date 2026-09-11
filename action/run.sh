@@ -3713,9 +3713,21 @@ if query == "no_baseline_audit":
     # findings), "findings" (candidate-side findings present, none gated --
     # this branch is only reached for a real exit-0 run), or nothing (not a
     # no-baseline audit report at all).
+    #
+    # A suppressed finding counts as "findings" too, not "clean" (Codex
+    # review, PR #1210, round 7): `findings` alone omits anything a
+    # `--suppress` rule matched -- those move to `suppressed_findings`,
+    # not away entirely (ADR-067 "record before disposing") -- so a fully
+    # suppressed audit was reporting AUDIT_CLEAN ("no candidate-side
+    # finding was detected") when the run actually recorded one, just
+    # disposed of by policy rather than absent.
     if report.get("no_baseline") is True:
         findings = report.get("findings")
-        print("findings" if isinstance(findings, list) and findings else "clean")
+        suppressed = report.get("suppressed_findings")
+        has_findings = (isinstance(findings, list) and findings) or (
+            isinstance(suppressed, list) and suppressed
+        )
+        print("findings" if has_findings else "clean")
 elif query == "coverage_contribution":
     print(_either("contract_coverage_exit_contribution", 0))
 elif query == "severity_exit":
@@ -4680,13 +4692,16 @@ else
         # (never folded together with another axis's own contribution the
         # way exit `1` is shared between severity/coverage/assurance/scope
         # above), so no report-based disambiguation is needed here. This
-        # arm is reached in exactly two ways: an audit-only `mode: scan`
-        # request the routing above translated into `compare --no-baseline
-        # ... --severity-preset ...` (the mainline case -- see that
-        # translation's own comment), or a native `mode: compare` request
-        # whose own `extra-args` happened to combine `--no-baseline` with a
-        # gating `--severity-preset` by hand; either way the underlying CLI
-        # exit code means the same thing, so both are labeled identically.
+        # arm is reached only through an audit-only `mode: scan` request the
+        # routing above translated into `compare --no-baseline ...
+        # --severity-preset ...` (see that translation's own comment) -- NOT
+        # through a native `mode: compare` request with `--no-baseline` in
+        # `extra-args`: this Action's own compare branch always supplies
+        # both old-library and new-library as positional operands, and
+        # `--no-baseline` itself takes exactly one, so combining them fails
+        # with a CLI usage error (exit 64) before ever reaching this case
+        # (Codex review, PR #1210, round 7 -- corrects this comment's own
+        # earlier, wrong claim that both routes reach here).
         # This is NOT a two-sided compatibility verdict: an audit reports no
         # `changes`/compatibility verdict at all (ADR-068 D2) -- the axis
         # only says a real, BREAKING/API_BREAK-classified candidate-side
@@ -5615,14 +5630,17 @@ else
     FINAL_EXIT=1
   fi
 
-  # AUDIT_GATE (exit 3, ADR-068 2026-09-10 amendment) unconditionally fails
-  # the step too, same as the scan-mode branch's own check above and for the
-  # same reason -- see that comment. Reached here only for a native `mode:
-  # compare` request whose own `extra-args` combined `--no-baseline` with a
-  # gating `--severity-preset` by hand (a translated `mode: scan` audit-only
-  # request is dispatched through the `scan`-mode branch above instead,
-  # keyed on the raw `$MODE` input); the underlying CLI axis means the same
-  # thing either way.
+  # AUDIT_GATE (exit 3, ADR-068 2026-09-10 amendment): in practice never
+  # actually fires on this native `mode: compare` branch (a translated
+  # `mode: scan` audit-only request is dispatched through the scan-mode
+  # branch above instead, keyed on the raw `$MODE` input) -- this Action's
+  # own compare branch always supplies both old-library and new-library as
+  # positional operands, and `--no-baseline` itself takes exactly one, so
+  # an `extra-args` attempt to combine them fails with a CLI usage error
+  # (exit 64) long before `$VERDICT` could ever become AUDIT_GATE here
+  # (Codex review, PR #1210, round 7 -- corrects this comment's own
+  # earlier, wrong reachability claim). Kept as defense-in-depth alongside
+  # the scan-mode branch's own identical check, in case that ever changes.
   if [[ "$VERDICT" == "AUDIT_GATE" ]]; then
     echo "::error::abicheck --no-baseline reports a gating audit finding (exit code 3): see the JSON report's findings[] for what gated. This is NOT a compatibility break -- no baseline was compared."
     FINAL_EXIT=1
