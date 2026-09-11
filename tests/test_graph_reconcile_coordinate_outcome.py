@@ -181,12 +181,20 @@ _FILE_CASES: dict[str, tuple[str, str, bool, bool]] = {
     "no_file_evidence": ("", "", False, False),
 }
 
-_SIG_CASES: dict[str, tuple[str, str]] = {"same_sig": ("s", "s"), "sig_change": ("s0", "s1")}
+_SIG_CASES: dict[str, tuple[str, str]] = {
+    "same_sig": ("s", "s"),
+    "sig_change": ("s0", "s1"),
+}
 _KIND_CASES = ("record_type", "enum_type", "typedef", "source_decl")
 
 
 def _expected_outcome(
-    *, name_changed: bool, has_coord: bool, file_changed: bool, same_sig: bool, kind: str
+    *,
+    name_changed: bool,
+    has_coord: bool,
+    file_changed: bool,
+    same_sig: bool,
+    kind: str,
 ) -> str:
     """Oracle stated from the four input DIMENSIONS, not from the
     implementation's own predicate expressions."""

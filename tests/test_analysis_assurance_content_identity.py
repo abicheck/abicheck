@@ -62,7 +62,9 @@ def _load(fixture: str, **overrides: Any):
 
 @pytest.mark.parametrize("vintage", _VINTAGES)
 @pytest.mark.parametrize("fixture", ["v4.json", "v5.json"])
-def test_content_identical_reload_matches_self_pairing(fixture: str, vintage: int) -> None:
+def test_content_identical_reload_matches_self_pairing(
+    fixture: str, vintage: int
+) -> None:
     """The invariant: for any snapshot ``s``, the status of two
     *independently loaded, content-equal* copies of ``s`` equals the status
     of ``(s, s)``. Holds for clean and degraded inputs alike -- the
@@ -83,7 +85,9 @@ def test_reload_invariant_is_exercised_on_genuinely_degraded_inputs(
     """Guard against the invariant above passing vacuously: at least the
     stale vintages must really carry degraded facts, or the parametrization
     only ever tested the clean path."""
-    a = _load("v4.json", schema_version=vintage, from_headers=True, ast_producer="clang")
+    a = _load(
+        "v4.json", schema_version=vintage, from_headers=True, ast_producer="clang"
+    )
     if vintage >= 45:
         assert not degraded_reliability_facts(a)
     else:
@@ -150,7 +154,12 @@ def test_two_distinct_stored_snapshots_still_taint_end_to_end(tmp_path: Path) ->
     from abicheck.cli import main
 
     base = json.loads((_FIXTURES / "v4.json").read_text())
-    old_d = {**base, "schema_version": 25, "from_headers": True, "ast_producer": "clang"}
+    old_d = {
+        **base,
+        "schema_version": 25,
+        "from_headers": True,
+        "ast_producer": "clang",
+    }
     new_d = {**old_d, "schema_version": 45}
     old_p, new_p = tmp_path / "old.abi.json", tmp_path / "new.abi.json"
     old_p.write_text(json.dumps(old_d))

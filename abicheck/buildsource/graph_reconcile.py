@@ -137,6 +137,7 @@ _RECONCILABLE_KINDS: frozenset[str] = frozenset(
     {"source_decl", "record_type", "enum_type", "typedef"}
 )
 
+
 @dataclass(frozen=True)
 class ReconciledPair:
     """One old/new node pair the reconciliation matched as the same entity."""
