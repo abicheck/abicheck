@@ -338,8 +338,10 @@ class PlanningError(AbicheckError, ValueError):
     cannot use is rejected up front, with a named reason, instead of silently
     accepted and then dropped somewhere inside extraction with no diagnostic
     at all (the failure mode this decision exists to close; see
-    ``docs/contribute/known-gaps.md``'s ``--build-target`` + pre-captured
-    Bazel ``aquery``/``cquery`` entry for the motivating case).
+    ``docs/contribute/known-gaps.md``'s ``build_targets`` (``.abicheck.yml``'s
+    ``build.targets`` -- the CLI's own ``dump --build-target`` flag was
+    later removed) + pre-captured Bazel ``aquery``/``cquery`` entry for the
+    motivating case).
 
     Carries every failed requirement found for the request, not only the
     first — :attr:`failures` is a non-empty tuple of

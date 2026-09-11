@@ -37,13 +37,11 @@ the same resolution the typed path uses instead of a second copy.
 
 Two mechanical notes:
 
-* Everything this module needs from ``service`` is looked up through the
-  module object at call time (``from . import service`` inside the function),
-  never bound at import time — keeps ``monkeypatch.setattr`` affecting this
-  code exactly as when the body lived in ``service.py``. Helpers ``service``
-  only *re-exports* are imported straight from their defining module instead
-  (mypy's ``no_implicit_reexport``); function-local so this module does not
-  join ``service``'s import cycle.
+* Everything this module needs is imported function-local, straight from its
+  real owner (``workflows.input_resolution``/``workflows.compare_policy``,
+  not the flat ``service`` facade re-export -- ADR-061 gap A), so
+  ``monkeypatch.setattr`` on the owner module keeps working and this module
+  does not join ``service``'s import cycle.
 * This module holds no state and makes no policy decisions of its own; every
   behavioural rule in it moved here verbatim from ``service.run_compare_request``.
 """
@@ -309,11 +307,12 @@ def resolve_compare_request(
             on ``DiffResult.evidence_contract_error``).
         PlanningError: If :class:`~abicheck.workflows.plan.AnalysisPlanner`
             finds a requested evidence input no resolved collector/backend
-            combination can satisfy (ADR-063 Phase 4) — e.g. ``--build-target``
-            combined with a pre-captured Bazel ``aquery``/``cquery`` jsonproto.
+            combination can satisfy (ADR-063 Phase 4) — e.g. a ``.abicheck.yml`` ``build.targets`` declaration combined with a
+            pre-captured Bazel ``aquery``/``cquery`` jsonproto.
         SnapshotError: If either input cannot be loaded.
     """
-    from . import deadline, service, service_compare_evidence as _sce
+    from . import deadline, service_compare_evidence as _sce
+    from .workflows.input_resolution import detect_binary_format
     from .workflows.plan import AnalysisPlanner
 
     request.validate()
@@ -343,8 +342,8 @@ def resolve_compare_request(
     # `validate()` above already rejected a `None` path on either side of a
     # comparison (`_path_required_errors(..., source_only_allowed=False)`);
     # `required_path` is the one place that narrowing is spelled.
-    old_fmt = service.detect_binary_format(required_path(request.old, "old"))
-    new_fmt = service.detect_binary_format(required_path(request.new, "new"))
+    old_fmt = detect_binary_format(required_path(request.old, "old"))
+    new_fmt = detect_binary_format(required_path(request.new, "new"))
     debug_format = _sce.normalized_debug_format(request)
     _sce.reject_debug_format_for_non_elf(debug_format, old_fmt, new_fmt)
 
@@ -490,10 +489,16 @@ def classify_compare_pair(
     instead of calling this; everything else composes the two through
     :func:`abicheck.service.run_compare_request`.
     """
-    from . import deadline, service
+    from . import deadline
     from .buildsource.evidence_report import (
         attach_evidence_metrics,
         prepare_embedded_build_source,
+    )
+    from .workflows.compare_policy import compare_snapshots, load_suppression_and_policy
+    from .workflows.input_resolution import (
+        collect_metadata,
+        load_env_matrix,
+        sniff_text_format,
     )
 
     # Same classify-stage boundary check as `resolve_compare_request`'s own
@@ -508,7 +513,7 @@ def classify_compare_pair(
     # `pair.old`/`pair.new` (see `project_pair_to_depth`'s own docstring) --
     # `pair` may still be read elsewhere for its unprojected snapshots.
     old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
-    suppression, pf = service.load_suppression_and_policy(
+    suppression, pf = load_suppression_and_policy(
         request.suppress, request.policy, request.policy_file_path
     )
     # CLI cleanup phase two, PR B slice 1: fold an already-resolved pack's
@@ -560,7 +565,7 @@ def classify_compare_pair(
         policy_file=pf,
     )
     extra_changes, _fail = abi3_audit.fold(extra_changes, new, request.abi3_floor)
-    result = service.compare_snapshots(
+    result = compare_snapshots(
         old,
         new,
         suppression=suppression,
@@ -600,7 +605,7 @@ def classify_compare_pair(
         # front-end parity with the CLI, where the two flags are gone too.
         pattern_verdicts=request.pattern_verdicts,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
-        env_matrix=service.load_env_matrix(request.env_matrix_path),
+        env_matrix=load_env_matrix(request.env_matrix_path),
         diagnostic_comparison=request.diagnostic_comparison,
         contract_evaluation=request.contract_evaluation,
         contract_mode=request.contract_mode,
@@ -627,14 +632,14 @@ def classify_compare_pair(
     def _hashable_path(p: Path) -> Path:
         return (
             p
-            if service.sniff_text_format(p) in ("json", "perl", "symvers")
+            if sniff_text_format(p) in ("json", "perl", "symvers")
             else resolve_linker_script_chain(p)
         )
 
-    result.old_metadata = service.collect_metadata(
+    result.old_metadata = collect_metadata(
         _hashable_path(required_path(request.old, "old"))
     )
-    result.new_metadata = service.collect_metadata(
+    result.new_metadata = collect_metadata(
         _hashable_path(required_path(request.new, "new"))
     )
     # Item 4 fix: collect_metadata() is a no-op for a JSON/text snapshot

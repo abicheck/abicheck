@@ -67,8 +67,14 @@ def collect_l0_export_delta(
     than raising -- this is an enrichment on top of an already-succeeded
     compare, not something that should ever abort it.
     """
+    # Imported from their real workflows-package owners, not the flat
+    # abicheck.service facade -- ADR-061 gap A: service.py also re-exports
+    # frontends-classified service_render.render_output, and this module is
+    # workflows-classified, so importing service.py directly here would
+    # widen that workflows -> frontends edge instead of letting it close.
     from .errors import AbicheckError
-    from .service import compare_snapshots, resolve_input
+    from .workflows.compare_policy import compare_snapshots
+    from .workflows.input_resolution import resolve_input
 
     # This deliberately re-resolves both sides with no headers -- the point
     # is to see what ELF/DWARF alone exports -- so the "no headers provided"

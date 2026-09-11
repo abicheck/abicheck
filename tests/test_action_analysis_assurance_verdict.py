@@ -161,93 +161,6 @@ def _lib(tmp_path: Path, name: str) -> str:
     return str(path)
 
 
-class TestScanMapsTheAssuranceExit:
-    def test_an_assurance_gated_scan_is_not_an_operational_error(
-        self, tmp_path: Path
-    ) -> None:
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ANALYSIS_INCOMPLETE", outputs
-        assert outputs["exit-code"] == "1", outputs
-        assert "ANALYSIS_INCOMPLETE" in outputs["_summary"], outputs["_summary"]
-        assert "header context asymmetric" in outputs["_summary"], outputs["_summary"]
-
-    def test_the_step_fails_unconditionally_even_with_fail_on_breaking_false(
-        self, tmp_path: Path
-    ) -> None:
-        """No ``fail-on-*`` flag disables this axis, matching the
-        contract-coverage axis's own unconditional gate."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-            stderr=ASSURANCE_STDERR,
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-                "INPUT_FAIL_ON_BREAKING": "false",
-                "INPUT_FAIL_ON_API_BREAK": "false",
-                **REQUIRE_COMPLETE_ANALYSIS_INPUT,
-            },
-            bindir,
-        )
-        assert outputs["_exit"] == 1, outputs
-
-    def test_a_run_without_the_flag_is_unaffected(self, tmp_path: Path) -> None:
-        """`require-complete-analysis` is unset -> exit 1 with neither
-        coverage nor assurance signal stays a plain ERROR, exactly as it
-        always did -- regardless of the stderr diagnostic being absent too
-        in this particular fixture."""
-        bindir = _stub_abicheck(
-            tmp_path,
-            exit_code=1,
-            report={
-                "verdict": "COMPATIBLE",
-                "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
-            },
-        )
-        outputs = _run_action(
-            tmp_path,
-            {
-                "INPUT_MODE": "scan",
-                "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
-                "INPUT_FORMAT": "json",
-                "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
-            },
-            bindir,
-        )
-        assert outputs["verdict"] == "ERROR", outputs
-
-
 class TestCompareMapsTheAssuranceExit:
     def test_an_assurance_gated_compare_is_not_a_severity_failure(
         self, tmp_path: Path
@@ -442,7 +355,7 @@ class TestHostileReportContentCannotExecute:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -479,14 +392,14 @@ class TestHostileReportContentCannotExecute:
             report={
                 "verdict": "COMPATIBLE",
                 "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+                "analysis_assurance": ASSURANCE_BLOCK,
             },
             stderr=ASSURANCE_STDERR,
         )
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -534,7 +447,7 @@ class TestHostileReportContentCannotExecute:
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 **REQUIRE_COMPLETE_ANALYSIS_INPUT,
             },
@@ -557,14 +470,14 @@ class TestHostileReportContentCannotExecute:
             report={
                 "verdict": "COMPATIBLE",
                 "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+                "analysis_assurance": ASSURANCE_BLOCK,
             },
             stderr=hostile_stderr,
         )
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -611,14 +524,14 @@ class TestOptionValueDoesNotSpoofTheFlag:
             report={
                 "verdict": "COMPATIBLE",
                 "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+                "analysis_assurance": ASSURANCE_BLOCK,
             },
             stderr=ASSURANCE_STDERR,
         )
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 # The collision Codex described: this is a plain path value
@@ -649,14 +562,14 @@ class TestOptionValueDoesNotSpoofTheFlag:
             report={
                 "verdict": "COMPATIBLE",
                 "exit_code": 0,
-                "diff": {"analysis_assurance": ASSURANCE_BLOCK},
+                "analysis_assurance": ASSURANCE_BLOCK,
             },
             stderr=ASSURANCE_STDERR,
         )
         outputs = _run_action(
             tmp_path,
             {
-                "INPUT_MODE": "scan",
+                "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": _lib(tmp_path, "libnew.so"),
                 "INPUT_FORMAT": "json",
                 "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
@@ -716,9 +629,9 @@ class TestEscalatedAssuranceGateIsNamedCorrectly:
         )
         assert outputs["verdict"] == "BREAKING", outputs
         assert "analysis-assurance axis" in outputs["_summary"], outputs["_summary"]
-        assert (
-            "severity policy gated this run" not in outputs["_summary"]
-        ), outputs["_summary"]
+        assert "severity policy gated this run" not in outputs["_summary"], outputs[
+            "_summary"
+        ]
 
 
 class TestReleaseStyleCompareRejectsTheAssuranceInput:

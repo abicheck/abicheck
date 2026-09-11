@@ -606,7 +606,9 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " `compare --no-baseline DIR` to preserve its member-selection and"
         " coverage accounting), scan --risk-rules (and with it the"
         " risk-driven `auto` depth escalation -- pin `--depth` instead), and"
-        " scan --build-target (`dump --build-target` is unchanged)",
+        " scan --build-target (`dump --build-target` was later retired too,"
+        " separately -- see this file's own dedicated `--build-target` entry"
+        " below)",
         # Deliberately only the two spellings that are dead *everywhere*.
         # `--manifest` and `--build-target` are not listed: `aggregate
         # --manifest` and `dump --build-target` remain live flags, so a bare
@@ -648,6 +650,32 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
                 "learn/evidence-and-detectability.md",
                 "reference/exit-codes.md",
                 "reference/config-file.md",
+            }
+        ),
+    ),
+    (
+        # `dump --build-target`'s own retirement, once `scan`'s removal
+        # above resolved the routing hazard that had deferred it
+        # (`frontends/cli/options/rulings.py`'s former `--build-target`
+        # deferred ruling). `.abicheck.yml`'s `build.targets` is now the
+        # only front-end-reachable source of root-target scoping for
+        # `dump`/`compare` -- there is no CLI override left to win over it.
+        "--build-target (dump's own CLI flag, retired once scan's removal"
+        " resolved the routing hazard that had deferred it; put root"
+        " target(s) in .abicheck.yml's build.targets instead)",
+        ("--build-target",),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                # Names the retired spelling once, in a "was retired"/"used
+                # to be the CLI equivalent" sentence pointing a reader at
+                # `.abicheck.yml`'s `build.targets` instead.
+                "learn/build-source-data.md",
+                "use/evidence-depth.md",
+                "use/github-action-source-scans.md",
+                "reference/github-action-inputs.md",
             }
         ),
     ),
@@ -763,6 +791,52 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             }
         ),
     ),
+    (
+        "mode: scan (the composite GitHub Action input value -- ADR-068's"
+        " Action-input-lifecycle amendment, D8 hard removal: the CLI's own"
+        " `scan` command was already gone, Phase 6 above; setting mode: scan"
+        " on the Action now fails the step outright, naming"
+        " mode: compare/compare --no-baseline as the replacement for the"
+        " caller's own shape)",
+        (
+            "mode: scan",
+            "scan mode",
+            "`scan` mode",
+            # A parenthesized mode-list form ("in every mode
+            # (`compare`/`scan`/`dump`)") names the same retired input value
+            # without ever spelling "mode: scan"/"scan mode" -- a real
+            # occurrence escaped this sweep entirely until this pattern was
+            # added (Codex review, fresh evidence:
+            # docs/integration/scenarios/cross-compilation.md). Anchored to
+            # this codebase's own established mode-listing convention
+            # (`compare`/`scan`/... order, right after "mode (") rather than
+            # a bare "/`scan`/" substring -- the latter also matches many
+            # unrelated, still-live mentions of the CLI's separately-retired
+            # `scan` command listed alongside `dump`/`compare` (ADR-068
+            # Phase 6, entry above), which would have made this pattern
+            # false-positive across a dozen historical/ADR pages that never
+            # mention the Action's mode: scan input at all.
+            "mode (`compare`/`scan`",
+        ),
+        frozenset(
+            {
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "contribute/plans/one-comparison-product.md",
+                "contribute/adr/068-one-comparison-product-and-scan-retirement.md",
+                "contribute/adr/index.md",
+                # Migration guidance for the retired spelling lives on these
+                # pages in their own capacity -- each names "mode: scan"
+                # only to point a reader at its mode: compare replacement.
+                "use/github-action.md",
+                "use/github-action-recipes.md",
+                "use/github-action-source-scans.md",
+                "reference/exit-codes.md",
+                "integration/scenarios/source-replay.md",
+                "integration/scenarios/single-build-audit.md",
+            }
+        ),
+    ),
 )
 
 
@@ -821,11 +895,22 @@ def retired_surface_scan_targets(
     the same way every other one-directory-further-out gap in this
     function's own history was (Codex review, fresh evidence).
 
+    `examples/workflows/**/*.md` is here for the same class of gap one
+    more directory over: `examples/CLAUDE.md`'s curated, task-oriented
+    workflow tree (`compare-release`, `audit-release`, `github-actions`,
+    ...) is a small set of hand-written READMEs a new user runs end to
+    end, distinct from both `docs/` and the `catalog/cases/case*/README.md`
+    calibration-fixture sources already covered above -- one cross-linked
+    a retired `mode: scan` spelling while this sweep stayed green because
+    neither `docs.rglob` nor the `cases.glob` pattern above ever walks
+    `examples/` at all (Codex review, fresh evidence).
+
     Keyed repo-relative (`catalog/cases/caseNN.../README.md`,
     `tests/scenarios/x.yaml`, `docs/contribute/usecase-registry.yaml`,
     `catalog/ground_truth.json`, `README.md`, `AGENTS.md`,
-    `tools/<tool>/README.md`), which cannot collide with a docs-relative
-    key, so an allowlist entry stays unambiguous.
+    `tools/<tool>/README.md`, `examples/workflows/<name>/README.md`), which
+    cannot collide with a docs-relative key, so an allowlist entry stays
+    unambiguous.
     """
     targets = [(p, p.relative_to(docs).as_posix()) for p in sorted(docs.rglob("*.md"))]
     targets += [
@@ -849,6 +934,12 @@ def retired_surface_scan_targets(
         targets += [
             (p, f"tools/{p.relative_to(tools_dir).as_posix()}")
             for p in sorted(tools_dir.rglob("*.md"))
+        ]
+    workflows_dir = root / "examples" / "workflows"
+    if workflows_dir.is_dir():
+        targets += [
+            (p, f"examples/workflows/{p.relative_to(workflows_dir).as_posix()}")
+            for p in sorted(workflows_dir.rglob("*.md"))
         ]
     return targets
 

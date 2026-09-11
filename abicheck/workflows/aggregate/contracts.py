@@ -57,6 +57,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from abicheck.change_registry_types import Verdict
@@ -153,7 +154,31 @@ from .resolve import (
 #: from ``scan``, which carries none), and a ``disposition_audit`` field on
 #: every target entry that has one. Additive and inert like ``1.4``/``1.6``/
 #: ``1.7``: no *_contribution field, so it never changes ``gate.exit_code``.
-AGGREGATE_SCHEMA_VERSION = "1.9"
+#:
+#: ``1.10`` (Codex review, ADR-068 no-baseline audit fan-in) adds
+#: ``audit_only_profiles`` to every ``profile_matrix`` entry -- the subset of
+#: ``profiles`` whose only reports are completed-but-verdict-less
+#: ``compare --no-baseline`` audits (ADR-068 D2: such an audit's ``verdict``
+#: is always ``null``, so it makes no compatibility claim at all, clean or
+#: otherwise). Additive and inert like ``1.4``/``1.6``/``1.7``/``1.9``: no
+#: *_contribution field, so it never changes ``gate.exit_code`` -- it exists
+#: purely so a consumer can distinguish "checked and clean" from "completed
+#: an audit with no compatibility result" instead of the latter silently
+#: reading as the former.
+#:
+#: ``1.11`` (Codex review, third round, fresh evidence) adds
+#: ``completed_without_compatibility_verdict`` to a target entry, present
+#: only when true. `TargetReport.to_dict()`'s `state: "analyzed"` alone
+#: conflates two different facts for the no-baseline audit shape -- a real
+#: compatibility comparison occurred, or an audit completed with no
+#: compatibility axis to report at all (ADR-068 D2) -- and before that
+#: shape existed, `state: "analyzed"` implied a non-null
+#: `compatibility_verdict`; a same-MAJOR consumer relying on that
+#: implication could misread the null verdict as unreported rather than
+#: structurally absent. Additive and inert like ``1.10``: adds a predicate
+#: a consumer can check, never changes ``gate.exit_code`` or ``state``
+#: itself.
+AGGREGATE_SCHEMA_VERSION = "1.11"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -335,6 +360,93 @@ _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
 
 
 @dataclass(frozen=True)
+class _LoadedReport:
+    """``load.py``'s own per-report-file result, before ``execute.py``
+    folds it (plus the expected-target contract) into a :class:`TargetReport`.
+
+    Lives here, not in ``load.py`` itself, so a report-shape-specific loader
+    split out of ``load.py`` (e.g. ``no_baseline_load.py``, the
+    ``compare --no-baseline`` audit-document shape) can build one without an
+    import cycle back into ``load.py`` — the same reason ``GateInfo``/
+    ``ReportFindings`` already live in their own leaf modules this one
+    imports. ``load.py`` re-exports this name (``from .contracts import
+    _LoadedReport``) so every existing ``from .load import _LoadedReport``
+    call site (e.g. ``execute.py``) is unaffected by the move.
+    """
+
+    target_id: str
+    verdict: Verdict | None
+    gate: GateInfo | None
+    library: str | None
+    head_sha: str | None
+    reason: str | None
+    path: Path
+    #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
+    #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26);
+    #: ``0`` for a report that carries none (no ``--contract`` domain).
+    contract_coverage_exit: int = 0
+    #: Whether the report listed any coverage failure at all -- true even
+    #: when ``contract.unresolved=warn`` zeroed the contribution above.
+    contract_coverage_incomplete: bool = False
+    #: Whether the report stated a usable contribution at all -- see
+    #: :func:`~abicheck.workflows.aggregate.gate._contract_coverage_declared`.
+    contract_coverage_declared: bool = False
+    #: ``None`` on every failure branch below (none establishes what the
+    #: comparison found); otherwise ``parse_report_findings``'s result.
+    findings: ReportFindings | None = None
+    #: P0.4's orthogonal analysis-assurance contribution, read off the
+    #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
+    #: without ``--require-complete-analysis``.
+    analysis_assurance_exit: int = 0
+    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
+    #: recomputed; ``None`` when it carries none (fail-open like the above).
+    effective_config_digest: str | None = None
+    #: ADR-065's scope-completeness contribution (``scope_axis``); ``0`` for
+    #: every scalar comparison and every complete release.
+    scope_completeness_exit: int = 0
+    #: Whether the report recorded an incomplete scope, gating or accepted.
+    scope_completeness_incomplete: bool = False
+    #: ADR-067 C-S2: the report's own ``disposition_audit`` block, read
+    #: verbatim (``disposition_axis.disposition_audit_block``), never
+    #: recomputed here -- ``None`` for a report that carries none (every
+    #: `scan` report today, and an unreadable/malformed one).
+    disposition_audit: Mapping[str, Any] | None = None
+    #: See :attr:`TargetReport.completed_without_compatibility_verdict` --
+    #: threaded through unchanged by ``execute.py``. ``False`` everywhere
+    #: except the ``no_baseline`` branch of ``load.py``/``no_baseline_load.py``.
+    completed_without_compatibility_verdict: bool = False
+
+
+def _malformed_gate_report(
+    target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
+) -> _LoadedReport:
+    """The shared "gate decision is malformed" unavailable shape every
+    fail-closed branch in ``load.py``/``no_baseline_load.py`` returns, apart
+    from *reason*.
+
+    Lives here, next to :class:`_LoadedReport` itself, rather than in
+    ``load.py`` (its original home) — ``no_baseline_load.py`` needs the
+    identical fail-closed shape for its own ``run_outcome`` schema check
+    (Codex review, fresh evidence: it previously read only
+    ``run_outcome.operational`` and ignored every other required key, so a
+    missing or schema-invalid ``run_outcome`` block on an otherwise
+    ``no_baseline: true`` document was still marked
+    ``completed_without_compatibility_verdict=True``), and ``load.py``
+    already imports from ``no_baseline_load.py`` — a shared helper can only
+    live in a module neither one imports the other through.
+    """
+    return _LoadedReport(
+        target_id=target_id,
+        verdict=None,
+        gate=None,
+        library=library,
+        head_sha=head_sha,
+        reason=reason,
+        path=path,
+    )
+
+
+@dataclass(frozen=True)
 class TargetReport:
     """One target's contribution to the aggregate.
 
@@ -433,10 +545,27 @@ class TargetReport:
     #: (every `scan` report today). Declared last for the same positional-
     #: construction-safety reason as the fields above.
     disposition_audit: Mapping[str, Any] | None = None
+    #: True only for a `compare --no-baseline` audit that completed
+    #: (ADR-068 D2). That shape's `compatibility_verdict` is *always*
+    #: `None` by design -- an audit has no baseline to compare against, so
+    #: it has no compatibility verdict, gating or not -- which the
+    #: `compatibility_verdict is not None` test :attr:`analyzed` used alone
+    #: cannot tell apart from a report that never arrived at all. Without
+    #: this, a clean, completed, *required* audit read as
+    #: `CoverageStatus.EMPTY` and failed the aggregate at exit 1 even though
+    #: it ran successfully and found nothing to gate on (Codex review,
+    #: fresh evidence). Declared last for the same positional-construction-
+    #: safety reason as the fields above; `False` for every other report
+    #: shape, so this widens :attr:`analyzed` only for the one shape that
+    #: needs it and changes nothing else.
+    completed_without_compatibility_verdict: bool = False
 
     @property
     def analyzed(self) -> bool:
-        return self.compatibility_verdict is not None
+        return (
+            self.compatibility_verdict is not None
+            or self.completed_without_compatibility_verdict
+        )
 
     @property
     def profile_id(self) -> str | None:
@@ -474,6 +603,22 @@ class TargetReport:
         }
         if self.unexpected:
             d["unexpected"] = True
+        if self.completed_without_compatibility_verdict:
+            # Codex review, fresh evidence: `state: "analyzed"` alone
+            # conflates two different facts for this one shape -- a real
+            # compatibility comparison occurred, or a `compare
+            # --no-baseline` audit completed with no compatibility axis to
+            # report at all (ADR-068 D2). Before this shape existed,
+            # `state: "analyzed"` implied a non-null `compatibility_
+            # verdict`; a same-MAJOR consumer relying on that implication
+            # could misread the null verdict as unreported rather than
+            # structurally absent. Exposed as its own additive, present-
+            # only-when-true predicate (matching `unexpected`'s own
+            # pattern) rather than changing `state`'s existing two-value
+            # enum, so coverage/rendering can keep using the wider
+            # `analyzed` meaning while a consumer that cares about the
+            # distinction has a real field to check.
+            d["completed_without_compatibility_verdict"] = True
         profile_id = self.profile_id
         if profile_id is not None:
             d["profile_id"] = profile_id
@@ -571,6 +716,18 @@ class ProfileMatrixEntry:
     #: ADR-065's own axis (schema 1.8): profiles with at least one check
     #: whose scope-completeness contribution is nonzero.
     scope_incomplete_profiles: tuple[str, ...] = ()
+    #: Subset of ``profiles`` whose only reports are *completed*
+    #: `compare --no-baseline` audits (ADR-068 D2:
+    #: ``TargetReport.completed_without_compatibility_verdict``) -- distinct
+    #: from both ``unanalyzed_profiles`` (nothing ran) and a profile absent
+    #: from every list (a real compatibility verdict was checked and found
+    #: clean). Without this, such a profile fell through every list here and
+    #: rendered as "clean on all checked profiles" -- a genuine compatibility
+    #: claim this shape never makes at all (Codex review, fresh evidence): an
+    #: audit reports no additions/removals/compatibility verdict, so nothing
+    #: was actually checked to *be* clean. Declared last, with a default, for
+    #: the same positional-construction-safety reason as the fields above.
+    audit_only_profiles: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -582,6 +739,7 @@ class ProfileMatrixEntry:
             "contract_incomplete_profiles": list(self.contract_incomplete_profiles),
             "analysis_incomplete_profiles": list(self.analysis_incomplete_profiles),
             "scope_incomplete_profiles": list(self.scope_incomplete_profiles),
+            "audit_only_profiles": list(self.audit_only_profiles),
             "verdict_by_profile": dict(self.verdict_by_profile),
         }
 

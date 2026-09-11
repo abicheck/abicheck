@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -43,11 +43,14 @@ from .contracts import (
     _SCAN_NOT_COMPARABLE_VERDICT,
     DEFAULT_REPORT_PREFIX,
     GateInfo,
+    _LoadedReport,
+    _malformed_gate_report,
 )
 from .disposition_axis import disposition_audit_block
 from .gate import (
     _VALID_GATE_EXIT,
     COVERAGE_INCOMPLETE_EXIT,
+    _analysis_assurance_exit,
     _contract_coverage_declared,
     _contract_coverage_exit,
     _contract_coverage_incomplete,
@@ -60,6 +63,7 @@ from .gate import (
     _run_outcome_gate_exit_and_category,
     contract_coverage_blocks,
 )
+from .no_baseline_load import load_no_baseline_report
 from .reconcile import ReportFindings, parse_report_findings
 from .scope_axis import (
     declares_null_compatibility,
@@ -87,63 +91,6 @@ def target_id_from_path(path: Path, *, prefix: str = DEFAULT_REPORT_PREFIX) -> s
     return stem
 
 
-@dataclass(frozen=True)
-class _LoadedReport:
-    target_id: str
-    verdict: Verdict | None
-    gate: GateInfo | None
-    library: str | None
-    head_sha: str | None
-    reason: str | None
-    path: Path
-    #: ADR-049 Phase 7's orthogonal contract-coverage contribution, read off
-    #: the report's own ``contract_coverage_exit_contribution`` (schema 2.26);
-    #: ``0`` for a report that carries none (no ``--contract`` domain).
-    contract_coverage_exit: int = 0
-    #: Whether the report listed any coverage failure at all -- true even
-    #: when ``contract.unresolved=warn`` zeroed the contribution above.
-    contract_coverage_incomplete: bool = False
-    #: Whether the report stated a usable contribution at all -- see
-    #: :func:`_contract_coverage_declared`.
-    contract_coverage_declared: bool = False
-    #: ``None`` on every failure branch below (none establishes what the
-    #: comparison found); otherwise ``parse_report_findings``'s result.
-    findings: ReportFindings | None = None
-    #: P0.4's orthogonal analysis-assurance contribution, read off the
-    #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
-    #: without ``--require-complete-analysis``.
-    analysis_assurance_exit: int = 0
-    #: Phase 0 item 6: the report's own ``effective_config_digest``, never
-    #: recomputed; ``None`` when it carries none (fail-open like the above).
-    effective_config_digest: str | None = None
-    #: ADR-065's scope-completeness contribution (``scope_axis``); ``0`` for
-    #: every scalar comparison and every complete release.
-    scope_completeness_exit: int = 0
-    #: Whether the report recorded an incomplete scope, gating or accepted.
-    scope_completeness_incomplete: bool = False
-    #: ADR-067 C-S2: the report's own ``disposition_audit`` block, read
-    #: verbatim (``disposition_axis.disposition_audit_block``), never
-    #: recomputed here -- ``None`` for a report that carries none (every
-    #: `scan` report today, and an unreadable/malformed one).
-    disposition_audit: Mapping[str, Any] | None = None
-
-
-def _malformed_gate_report(
-    target_id: str, library: str | None, head_sha: str | None, path: Path, reason: str
-) -> _LoadedReport:
-    """The shared "gate decision is malformed" unavailable shape every
-    fail-closed branch here returns, apart from *reason*."""
-    return _LoadedReport(
-        target_id=target_id,
-        verdict=None,
-        gate=None,
-        library=library,
-        head_sha=head_sha,
-        reason=reason,
-        path=path,
-    )
-
-
 def _not_comparable_contradiction_reason(
     run_outcome_pair: tuple[PolicyGateDecision, OperationalStatus] | None,
 ) -> str | None:
@@ -163,18 +110,6 @@ def _not_comparable_contradiction_reason(
         f"({run_outcome_pair[1].value!r}) contradicts the report's own "
         "not-comparable refusal"
     )
-
-
-def _analysis_assurance_exit(data: Mapping[str, Any]) -> int:
-    """The report's own P0.4 analysis-assurance contribution (``0``/``1``):
-    read, not recomputed (``GateInfo.from_scan_report`` reads only the
-    nested compatibility gate -- Codex review); fails open like its sibling
-    :func:`_contract_coverage_exit`, over the same block traversal."""
-    for block in contract_coverage_blocks(data):
-        raw = block.get("analysis_assurance_exit_contribution")
-        if _is_valid_contribution(raw):
-            return raw
-    return 0
 
 
 #: Same shape ``effective_config_digest()``/the aggregate schema's own
@@ -627,6 +562,34 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             effective_config_digest=(
                 effective_config_digest if compat_verdict is not None else None
             ),
+        )
+    # `compare --no-baseline`'s own audit document (ADR-068 D2) always
+    # carries `verdict: null` too, but for a wholly different reason than
+    # every null-verdict branch above and below: it isn't unresolved or
+    # refused, it *completed*, and by design reports no compatibility
+    # verdict at all -- there is no baseline to compare against. Checked
+    # here, before the native ADR-050 D2 `reason.kind` branch below (an
+    # audit document carries no `reason` key at all, so that branch's own
+    # `isinstance(reason_obj, dict)` guard silently falls through) and
+    # before the generic `parse_report_verdict` fallback further down --
+    # without this branch a completed, gating audit (`--severity-preset`
+    # opted it into the AUDIT_GATE axis, exit 3) loaded as `gate=None`, the
+    # same "report carried no ABI verdict" shape an unavailable/missing
+    # report gets. That silently discarded a real gating finding for an
+    # optional/`on_missing_required: warn` target, and misclassified a
+    # required one as EMPTY coverage rather than a completed, gate-worthy
+    # result (Codex review, fresh evidence). The report-shape-specific
+    # loading itself lives in the sibling `no_baseline_load` module --
+    # see `load_no_baseline_report`'s own docstring for the full account
+    # (`exit_axes`, the operational-failure check, the assurance-axis
+    # max()) -- this call site owns only the ordering decision above.
+    if data.get("no_baseline") is True:
+        return load_no_baseline_report(
+            data,
+            target_id=target_id,
+            head_sha=head_sha,
+            path=path,
+            effective_config_digest=effective_config_digest,
         )
     # ADR-050 D2: a native compare/compare-release not_comparable report
     # carries a real ``verdict: null`` (JSON null, not a missing key) plus a

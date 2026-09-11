@@ -902,7 +902,7 @@ _EXTRA_ARGS_CONFIG_GUARD_START = "# Append extra-args (pass-through CLI argument
 # Anchored on the next block's own distinctive comment instead, which is
 # unique in the file and immediately follows this block's real end.
 _EXTRA_ARGS_CONFIG_GUARD_END = (
-    "# Recomputed here (idempotently -- compare/scan mode already computed it"
+    "# Recomputed here (idempotently -- the compare branch already computed it"
 )
 
 

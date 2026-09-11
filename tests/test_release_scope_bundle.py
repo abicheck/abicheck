@@ -188,7 +188,7 @@ class TestBundleAnalysisScope:
         provider must leave the graph with it -- never read as deleted while
         its consumer survives (Codex review, fifth round)."""
         import abicheck.package as package
-        import abicheck.service as service
+        import abicheck.workflows.input_resolution as input_resolution
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
         monkeypatch.setattr(
@@ -196,14 +196,17 @@ class TestBundleAnalysisScope:
             "discover_shared_libraries",
             lambda d, include_private=False: sorted(Path(d).glob("*.json")),
         )
-        real_resolve = service.resolve_input
+        real_resolve = input_resolution.resolve_input
 
         def _resolve(path: Path, **kwargs: object) -> AbiSnapshot:
             if Path(path).name.startswith("libcore"):
                 raise UnsupportedArtifactError("Unsupported binary format: wasm")
             return real_resolve(path, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(service, "resolve_input", _resolve)
+        # bundle_side_input.py imports resolve_input from its real owner
+        # (workflows.input_resolution, ADR-061 gap A) rather than the flat
+        # abicheck.service facade, so the patch target follows it.
+        monkeypatch.setattr(input_resolution, "resolve_input", _resolve)
         libs = _provider_and_consumer()
         old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
         new_dir = tmp_path / "new"
@@ -334,7 +337,7 @@ class TestStoredLiveUnsupportedMember:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc: Exception
     ) -> None:
         import abicheck.package as package
-        import abicheck.service as service
+        import abicheck.workflows.input_resolution as input_resolution
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
         monkeypatch.setattr(
@@ -342,14 +345,17 @@ class TestStoredLiveUnsupportedMember:
             "discover_shared_libraries",
             lambda d, include_private=False: sorted(Path(d).glob("*.json")),
         )
-        real_resolve = service.resolve_input
+        real_resolve = input_resolution.resolve_input
 
         def _resolve(path: Path, **kwargs: object) -> AbiSnapshot:
             if Path(path).name.startswith("libbad"):
                 raise exc
             return real_resolve(path, **kwargs)  # type: ignore[arg-type]
 
-        monkeypatch.setattr(service, "resolve_input", _resolve)
+        # bundle_side_input.py imports resolve_input from its real owner
+        # (workflows.input_resolution, ADR-061 gap A) rather than the flat
+        # abicheck.service facade, so the patch target follows it.
+        monkeypatch.setattr(input_resolution, "resolve_input", _resolve)
         libs = {
             "libok.so": _lib("libok.so", exports=("fn",)),
             "libbad.so": _lib("libbad.so"),
@@ -379,7 +385,7 @@ class TestStoredLiveUnsupportedMember:
         members *did* match -- and the report carries the `unsupported`
         members and D7's `no_comparison_completed` outcome (Codex review)."""
         import abicheck.package as package
-        import abicheck.service as service
+        import abicheck.workflows.input_resolution as input_resolution
 
         monkeypatch.setattr(
             package,
@@ -390,7 +396,10 @@ class TestStoredLiveUnsupportedMember:
         def _resolve(path: Path, **kwargs: object) -> AbiSnapshot:
             raise UnsupportedArtifactError("Unsupported binary format: wasm")
 
-        monkeypatch.setattr(service, "resolve_input", _resolve)
+        # bundle_side_input.py imports resolve_input from its real owner
+        # (workflows.input_resolution, ADR-061 gap A) rather than the flat
+        # abicheck.service facade, so the patch target follows it.
+        monkeypatch.setattr(input_resolution, "resolve_input", _resolve)
         libs = {"libbad.so": _lib("libbad.so")}
         old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
         new_dir = tmp_path / "new"

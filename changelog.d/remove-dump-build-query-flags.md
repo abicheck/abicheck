@@ -12,8 +12,11 @@
   ```
 
   The old spellings are a hard usage error (`No such option`, exit 64) — there
-  is no hidden alias. `--build-info`, `--build-target` and `--compile-db-filter`
-  are unaffected: they are genuine per-run inputs, not project build settings.
+  is no hidden alias. `--build-info` and `--compile-db-filter` are unaffected:
+  they are genuine per-run inputs, not project build settings. (`--build-target`
+  was unaffected at the time of this change too, but was itself removed in a
+  later change in this same release — see the `dump --build-target` removal
+  entry below/above for its own replacement.)
 
 ### Changed
 

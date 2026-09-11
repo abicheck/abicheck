@@ -14,7 +14,8 @@
 
 """P0.2: Bazel root-target scoping.
 
-A caller (``dump --build-target``, ``.abicheck.yml``'s ``build.targets``, or
+A caller (``.abicheck.yml``'s ``build.targets`` -- the only front-end
+route since the CLI's own ``dump --build-target`` flag was retired -- or
 the typed ``InputSpec.build_targets``) can declare which specific Bazel
 target(s) are the library under test, instead of always collecting a
 workspace-wide ``deps(//...)`` query -- the motivating report is a Bazel
@@ -37,7 +38,9 @@ Covers, bottom-up:
 * The typed API -- :class:`InputSpec.build_targets` reaching
   ``embed_build_source`` through ``service_input_resolution.
   embed_side_build_source``.
-* The CLI -- ``dump --build-target`` reaching ``embed_build_source``.
+* The CLI -- ``dump --build-target`` is retired outright (exit 64, no
+  alias); ``.abicheck.yml``'s ``build.targets`` alone reaching
+  ``embed_build_source`` end to end (no CLI flag involved).
 * The report block -- ``_build_coverage``'s L3_build row surfaces
   ``requested_roots``/``resolved_roots``/``transitive_targets``/
   ``compile_units``/``link_units``, unpopulated for an unscoped run.
@@ -464,29 +467,53 @@ def test_embed_side_build_source_forwards_build_targets(monkeypatch, tmp_path: P
     assert captured["build_targets"] == ("//:math",)
 
 
-# ── CLI: `dump --build-target` ─────────────────────────────────────────────
+# ── CLI: `dump --build-target` (retired) ────────────────────────────────────
 
 
-def test_dump_cli_build_target_flag_reaches_embed_build_source(
-    monkeypatch, tmp_path: Path
+def test_dump_source_only_succeeds_with_no_build_target_flag_or_config(
+    tmp_path: Path,
 ):
+    """A plain `dump --sources` run (no `--build-target` -- gone -- and no
+    `.abicheck.yml` `build.targets` either) must still reach the real
+    `dump_source_only()` call cleanly now that `build_targets` is no longer
+    threaded through `dump_cmd`'s parameter list at all: this is the direct,
+    environment-independent regression check for that call-site edit (no
+    Bazel workspace, no config file, no subprocess mocking needed -- nothing
+    here selects a build system, so `dump_source_only` never has any
+    root-target scoping to apply either way). `.abicheck.yml`'s
+    `build.targets` case (with a real Bazel workspace and a mocked
+    subprocess) is `test_dot_abicheck_yml_build_targets_flow_into_dump_with_
+    no_cli_flag` below."""
     from click.testing import CliRunner
 
     from abicheck.cli import main
 
-    # ADR-061 Phase 4: the CLI write path reaches `embed_build_source` through
-    # `workflows.extraction` (a frontend may not import the `extract` ring
-    # directly), and a re-export binds the name there at import time -- so that
-    # module is where this call resolves. The typed-API test above still patches
-    # `buildsource.embed`, which is what *its* caller reads.
-    from abicheck.workflows import extraction as embed_mod
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
+    out = tmp_path / "out.json"
 
-    captured: dict = {}
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["dump", "--sources", str(src), "-o", str(out)],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
 
-    def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
-        captured["build_targets"] = build_targets
 
-    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
+def test_dump_cli_build_target_flag_is_removed(tmp_path: Path):
+    """`dump --build-target` is retired outright (hard removal, no
+    deprecation window, no alias) once `scan`'s removal resolved the routing
+    hazard that had deferred it (`frontends/cli/options/rulings.py`'s former
+    deferred ruling). `.abicheck.yml`'s `build.targets` is the only
+    front-end-reachable source of root-target scoping left --
+    `test_dot_abicheck_yml_build_targets_flow_into_dump_with_no_cli_flag`
+    below is the end-to-end proof that path still drives the identical
+    Bazel-scoping behavior the flag used to."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
 
     src = tmp_path / "src"
     src.mkdir()
@@ -501,58 +528,13 @@ def test_dump_cli_build_target_flag_reaches_embed_build_source(
             str(src),
             "--build-target",
             "//:math",
-            "--build-target",
-            "//:util",
             "-o",
             str(tmp_path / "out.json"),
         ],
     )
-    assert result.exit_code == 0, result.output
-    assert captured["build_targets"] == ("//:math", "//:util")
-
-
-def test_dump_cli_build_target_overrides_config(monkeypatch, tmp_path: Path):
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    # ADR-061 Phase 4: the CLI write path reaches `embed_build_source` through
-    # `workflows.extraction` (a frontend may not import the `extract` ring
-    # directly), and a re-export binds the name there at import time -- so that
-    # module is where this call resolves. The typed-API test above still patches
-    # `buildsource.embed`, which is what *its* caller reads.
-    from abicheck.workflows import extraction as embed_mod
-
-    captured: dict = {}
-
-    def _fake_embed(snap, build_info, sources, *, build_targets=(), **kwargs):
-        captured["build_targets"] = build_targets
-
-    monkeypatch.setattr(embed_mod, "embed_build_source", _fake_embed)
-
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "a.cpp").write_text("int f() { return 0; }\n", encoding="utf-8")
-    (src / ".abicheck.yml").write_text(
-        "build:\n  system: bazel\n  targets:\n    - //:from_config\n",
-        encoding="utf-8",
-    )
-
-    runner = CliRunner()
-    result = runner.invoke(
-        main,
-        [
-            "dump",
-            "--sources",
-            str(src),
-            "--build-target",
-            "//:from_cli",
-            "-o",
-            str(tmp_path / "out.json"),
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    assert captured["build_targets"] == ("//:from_cli",)
+    assert result.exit_code == 64, result.output
+    assert "no such option" in result.output.lower()
+    assert "--build-target" in result.output
 
 
 def test_dot_abicheck_yml_build_targets_flow_into_dump_with_no_cli_flag(

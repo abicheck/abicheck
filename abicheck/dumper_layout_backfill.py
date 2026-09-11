@@ -386,6 +386,20 @@ def _backfilled_record(header: RecordType, dwarf: RecordType) -> RecordType:
         alignment_bits=dwarf.alignment_bits,
         fields=_merged_fields(header, dwarf),
         vtable=header.vtable or dwarf.vtable,
+        # Whichever side's *value* wins above must also supply its own Fact
+        # status -- the same rule the vptr_offset_bits_fact/data_size_bits_
+        # fact/is_standard_layout_fact/is_trivially_copyable_fact kwargs
+        # below already apply, extended to vtable now that a producer can
+        # emit something other than Fact.present(...) for it (ADR-063 Phase
+        # 5B / T9 DWARF per-TU completeness slice: dwarf.vtable_fact can be
+        # Fact.partial(...)). Without this, replace_with_fact_sync's default
+        # derivation would stamp Fact.present(final_value) unconditionally,
+        # silently promoting a known-incomplete dwarf.vtable_fact to
+        # confirmed-complete the instant it survives this backfill -- Codex
+        # review, PR #1213, reproducing the exact fabrication that slice
+        # exists to close, for any ELF dump combining the clang header
+        # frontend with DWARF layout backfill.
+        vtable_fact=(header.vtable_fact if header.vtable else dwarf.vtable_fact),
         vptr_offset_bits=(
             header.vptr_offset_bits
             if header.vptr_offset_bits is not None

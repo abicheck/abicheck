@@ -27,6 +27,7 @@ import json
 from pathlib import Path
 
 from abicheck.header_conditionals import (
+    attach_build_context,
     collect_build_context,
     defines_from_compile_db,
     defines_from_flags,
@@ -34,6 +35,7 @@ from abicheck.header_conditionals import (
     pass_through_flags_from_tokens,
     resolve_pass_through_paths,
     scan_conditional_fields,
+    user_define_flags,
 )
 
 
@@ -918,19 +920,17 @@ def test_user_define_flags_combines_tokens_and_gcc_options():
     applies them**: the ``--gcc-options`` string first, then the repeatable
     ``--compiler-option`` tokens (``dumper._castxml_cmd`` order), so ``-D``/``-U`` of the
     same macro resolve identically on both sides (Codex review #498)."""
-    from abicheck.cli_dump_helpers import _user_define_flags
-
-    assert _user_define_flags((), None) == []
-    assert _user_define_flags(("-DA",), None) == ["-DA"]
+    assert user_define_flags((), None) == []
+    assert user_define_flags(("-DA",), None) == ["-DA"]
     # --gcc-options (-UKEEP -DB) is applied before the --compiler-option token (-DA).
-    assert _user_define_flags(("-DA",), "-UKEEP -DB") == ["-UKEEP", "-DB", "-DA"]
+    assert user_define_flags(("-DA",), "-UKEEP -DB") == ["-UKEEP", "-DB", "-DA"]
     # Order-sensitivity: --gcc-options=-DKEEP then --compiler-option=-UKEEP must leave
     # KEEP inactive (token last wins), matching dumper.py.
     from abicheck.header_conditionals import defines_from_flags
 
-    assert defines_from_flags(_user_define_flags(("-UKEEP",), "-DKEEP")) == set()
+    assert defines_from_flags(user_define_flags(("-UKEEP",), "-DKEEP")) == set()
     # a malformed --gcc-options (unbalanced quote) is skipped, not fatal
-    assert _user_define_flags(("-DA",), '"oops') == ["-DA"]
+    assert user_define_flags(("-DA",), '"oops') == ["-DA"]
 
 
 def test_user_define_flags_uses_the_shared_platform_tokenizer(monkeypatch):
@@ -941,10 +941,9 @@ def test_user_define_flags_uses_the_shared_platform_tokenizer(monkeypatch):
     ``-IC:\\sdk\\ -UKEEP`` into one corrupted token instead of two -- letting
     the harvested define set diverge from what the real parse actually saw."""
     from abicheck import _compiler_options
-    from abicheck.cli_dump_helpers import _user_define_flags
 
     monkeypatch.setattr(_compiler_options.os, "name", "nt")
-    assert _user_define_flags((), r"-IC:\sdk\ -UKEEP") == [
+    assert user_define_flags((), r"-IC:\sdk\ -UKEEP") == [
         "-IC:\\sdk\\",
         "-UKEEP",
     ]
@@ -953,7 +952,6 @@ def test_user_define_flags_uses_the_shared_platform_tokenizer(monkeypatch):
 def test_user_gcc_options_override_db_define_end_to_end(tmp_path):
     """A user ``--gcc-options=-UKEEP`` reaches the collector and overrides a
     compile-DB ``-DKEEP``, so KEEP is inactive in ``build_context_defines``."""
-    from abicheck.cli_dump_helpers import _attach_build_context, _user_define_flags
     from abicheck.model import AbiSnapshot
 
     h = tmp_path / "config.h"
@@ -962,15 +960,14 @@ def test_user_gcc_options_override_db_define_end_to_end(tmp_path):
     db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
 
     snap = AbiSnapshot(library="lib", version="1")
-    flags = _user_define_flags((), "-UKEEP")
-    _attach_build_context(snap, db, [h], flags)
+    flags = user_define_flags((), "-UKEEP")
+    attach_build_context(snap, db, [h], flags)
     assert "KEEP" not in snap.build_context_defines
 
 
 def test_attach_build_context_populates_snapshot(tmp_path):
     """The dump-path helper harvests defines + scans headers and attaches both to
     the snapshot; an empty harvest leaves the defaults untouched."""
-    from abicheck.cli_dump_helpers import _attach_build_context
     from abicheck.model import AbiSnapshot
 
     h = tmp_path / "config.h"
@@ -981,13 +978,13 @@ def test_attach_build_context_populates_snapshot(tmp_path):
     db.write_text(json.dumps([{"command": "cc -DKEEP -c config.c"}]))
 
     snap = AbiSnapshot(library="lib", version="1")
-    _attach_build_context(snap, db, [h], ["-DEXTRA"])
+    attach_build_context(snap, db, [h], ["-DEXTRA"])
     assert snap.build_context_defines == {"KEEP", "EXTRA"}
     assert snap.conditional_fields["Config"]["legacy"]["guard"] == "KEEP"
 
     # No build evidence → snapshot defaults are left untouched.
     empty = AbiSnapshot(library="lib", version="1")
-    _attach_build_context(empty, tmp_path / "missing.json", [tmp_path / "gone.h"], [])
+    attach_build_context(empty, tmp_path / "missing.json", [tmp_path / "gone.h"], [])
     assert empty.build_context_defines == set()
     assert empty.conditional_fields == {}
 

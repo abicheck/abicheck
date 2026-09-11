@@ -168,7 +168,6 @@ class TestDeriveEffectiveDepth:
         with pytest.raises(ValueError):
             derive_effective_depth({}, "bogus")
 
-
 class TestAugmentReport:
     def _base_compare_report(
         self, verdict="BREAKING", exit_code=4, old_depth="headers", new_depth="headers"

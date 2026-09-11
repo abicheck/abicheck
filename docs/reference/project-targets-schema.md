@@ -15,7 +15,7 @@ checks run against each target (G30/ADR-047 §3).
 > G30 P1.4 — see the [run-plan schema](run-plan-schema.md) and the
 > [reusable workflows reference](reusable-workflows.md). A project not using
 > G30's CI-integration primitives sees no behavior change at all from adding
-> (or omitting) this block: nothing in `dump`/`compare`/`scan` reads it
+> (or omitting) this block: nothing in `dump`/`compare` reads it
 > today.
 
 ## Example
@@ -114,7 +114,7 @@ channel/depth/policy a given target actually runs.
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbol` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which the root Action's `scan` mode rejects outright). |
+| `channel` | string | — (required) | A `baseline.channels` id, or the literal `"none"` for a no-baseline audit check (ADR-047 §6 S5 — `check-target` must skip `resolve-baseline` entirely for this sentinel, never look it up as a declared channel). `channel: "none"` is only supported for a `kind: library` target — rejected at validation time for `app-consumer`/`plugin-contract` (no `--used-by`/`--required-symbol` equivalent for a one-build audit) and for any [`bundles:` check](#bundles) (a bundle's candidate is always a staged directory of member binaries, which `compare`'s audit-only shape rejects outright). |
 | `depth` | string | — (required) | One of `binary`, `headers`, `build`, `source` — the same four rungs `--depth`/the report envelope's `requested_depth` accept. |
 | `required` | boolean | `true` | Whether this check gates `aggregate`'s coverage requirement. |
 | `gate_mode` | string | `local` (`advisory` when `channel: "none"`) | One of `local`, `deferred`, `advisory` (ADR-047 §4/§7). A `channel: "none"` no-baseline audit check defaults to `advisory`, not `local` — it has no baseline-drift verdict to gate CI on, so a minimal `{channel: none, depth: ...}` entry must not unexpectedly block CI (ADR-047 §8's S5 row: "Advisory by default"). Set `gate_mode` explicitly to override either default. |
@@ -165,7 +165,7 @@ unsafe because a bundle's baseline is always raw binaries with no
 historical header snapshot, so both sides would be parsed against the
 same current checkout's headers, silently missing a header-only change),
 and `channel` may not be `"none"` (a bundle's candidate is always a staged
-directory of member binaries, which the root Action's `scan` mode — the
+directory of member binaries, which `compare`'s audit-only shape — the
 no-baseline routing — rejects outright). Both are rejected at validation
 time.
 
@@ -323,8 +323,8 @@ fingerprint that `compare`'s own comparability gate refuses the pair as
 `NOT_COMPARABLE`/`ProfileMismatchError` rather than silently comparing
 mismatched contexts — so `consumer_compile:` combined with a real baseline
 channel does not yet work end to end. It is unaffected when
-`baseline-channel: none` (an audit-only scan has no baseline snapshot to
-mismatch against). See `abicheck/buildsource/run_plan.py`'s own docstring
+`baseline-channel: none` (an audit-only `compare --no-baseline` run has no
+baseline snapshot to mismatch against). See `abicheck/buildsource/run_plan.py`'s own docstring
 and the G34 plan doc's Phase 0 for what closing this needs.
 
 ### `os:` and `dependency_source:` — how a profile schedules its own check cell (G34 Phase C)

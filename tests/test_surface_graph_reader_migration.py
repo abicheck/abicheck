@@ -1,0 +1,697 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""ADR-063 Phase 10: the five ``BuildSourcePack.source_graph`` live-alias
+readers (``internal_leak.py``, ``buildsource/cross_source_checks.py``,
+``buildsource/evidence_report.py``, ``evidence_depth.py``, ``cli_graph.py``)
+now read the L5 evidence graph from ``AbiSnapshot`` directly rather than only
+through the legacy ``build_source.source_graph`` nested field, so a snapshot
+carrying only the canonical ``surface_graph`` (no ``build_source`` at all) is
+no longer silently invisible to them.
+
+**Preference order, security-corrected (PR #1216 review):** each reader
+prefers ``build_source.source_graph``, falling back to ``surface_graph`` only
+when the former is absent -- NOT the reverse order this phase's plan text
+originally specified. A real ``--sources``/``--build-info`` embed can leave
+``build_source.source_graph`` a strictly richer, real L3-L5 evidence graph
+than the always-on, header-only-only ``surface_graph`` (`_attach_header_graph`
+builds the latter from headers alone, and `buildsource/embed.py`'s backfill
+only ever adopts it into an *empty* `build_source.source_graph`, never
+displacing a real one) -- preferring the weaker graph would silently drop
+real call-graph/dependency edges, letting a genuinely-reachable internal
+removal be misjudged unreachable and suppressed. ``surface_graph`` is still
+needed as the fallback: `policy/depth_projection.py` clears
+`build_source.source_graph` at the "source" depth floor while retaining
+`surface_graph` (an L2 fact) down to the "binary" floor, and a pre-Phase-3
+document may carry ``build_source.source_graph`` with no ``surface_graph`` at
+all.
+
+Each "unchanged by migration" test below builds a pre-Phase-3-shaped fixture
+(``surface_graph`` absent, ``build_source.source_graph`` present) and asserts
+output parity against the same fixture shaped as a fresh, post-Phase-3
+snapshot (``surface_graph`` populated too, as the *same* object -- the
+Phase 3 assembly step's one-object guarantee, so this pair says nothing about
+ordering on its own). ``test_*_prefers_the_richer_build_source_graph`` pins
+the ordering itself: ``build_source.source_graph`` and ``surface_graph`` are
+two *different* objects, and the richer one must win.
+"""
+
+from __future__ import annotations
+
+import json
+
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
+from abicheck.model import AbiSnapshot, Function, ScopeOrigin
+
+
+def _decl(node_id: str, label: str, visibility: str) -> GraphNode:
+    return GraphNode(
+        id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+    )
+
+
+def _pre_and_post_phase3_snaps(
+    graph: SourceGraphSummary,
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """One snapshot shaped like a pre-Phase-3 document (``surface_graph``
+    absent) and one shaped like a fresh, post-Phase-3 one (``surface_graph``
+    is the identical object ``build_source.source_graph`` holds -- the
+    Phase 3 assembly step's own one-object guarantee)."""
+    pre = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=graph),
+    )
+    post = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=graph),
+        surface_graph=graph,
+    )
+    return pre, post
+
+
+def _diverged_snap(
+    richer_graph: SourceGraphSummary, weaker_graph: SourceGraphSummary
+) -> AbiSnapshot:
+    """A snapshot with two genuinely *different* graph objects -- the shape a
+    real ``--sources``/``--build-info`` embed leaves behind: ``build_source.
+    source_graph`` is the richer, real L3-L5 evidence graph, ``surface_graph``
+    is the weaker, always-on header-only one `_attach_header_graph` built
+    first and never updates."""
+    return AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=richer_graph),
+        surface_graph=weaker_graph,
+    )
+
+
+def _depth_excluded_snap(retained_surface_graph: SourceGraphSummary) -> AbiSnapshot:
+    """The shape ``policy/depth_projection.py`` leaves behind for a
+    ``--depth build`` (or shallower) comparison: ``build_source.
+    source_graph`` cleared to ``None`` with an explicit L5 "not collected"
+    coverage row stamped (``_mark_layers_not_collected``), while
+    ``surface_graph`` (an L2 fact, cleared at a lower depth floor) is
+    retained untouched."""
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=retained_surface_graph,
+    )
+    snap.build_source.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
+    ]
+    return snap
+
+
+# --------------------------------------------------------------------------- #
+# evidence_depth.resolve_l5_source_graph -- the shared resolver every reader
+# above goes through (fourth review round: consolidated so the fallback rule
+# can't independently drift per call site again)
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_l5_source_graph_rejects_a_non_concrete_surface_graph() -> None:
+    """Third review-round regression: a merely structurally-conforming
+    ``SurfaceGraphLike`` implementation (not a real ``SourceGraphSummary``)
+    must not be returned as a fallback -- every caller of this function
+    eventually reads concrete-only attributes downstream (e.g.
+    ``diff_source_graph_findings`` reads ``narrowed_scope``/
+    ``extractor_passes``/``degraded_passes``, none of which the protocol
+    declares)."""
+    from abicheck.evidence_depth import resolve_l5_source_graph
+
+    class _FakeGraph:
+        nodes: list = []
+        edges: list = []
+
+        def has_node(self, node_id: str) -> bool:
+            return False
+
+        def add_node(self, node: object) -> None:
+            pass
+
+        def add_edge(self, edge: object) -> None:
+            pass
+
+        def to_dict(self) -> dict:
+            return {}
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=_FakeGraph(),
+    )
+
+    assert resolve_l5_source_graph(snap, snap.build_source) is None
+
+
+# --------------------------------------------------------------------------- #
+# internal_leak.compute_call_graph_leak_paths
+# --------------------------------------------------------------------------- #
+
+
+def test_internal_leak_call_graph_leak_paths_unchanged_by_migration() -> None:
+    from abicheck.internal_leak import compute_call_graph_leak_paths
+
+    graph = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "ns::detail::helper", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    pre, post = _pre_and_post_phase3_snaps(graph)
+
+    pre_result = compute_call_graph_leak_paths(pre)
+    post_result = compute_call_graph_leak_paths(post)
+
+    assert pre_result == post_result
+    assert "ns::detail::helper" in pre_result
+    assert "pubFn" in pre_result["ns::detail::helper"][0]
+
+
+def test_internal_leak_prefers_the_richer_build_source_graph() -> None:
+    """Security regression (PR #1216 review): a weaker, header-only
+    ``surface_graph`` with none of the real call-graph edges must never hide
+    a leak path that only ``build_source.source_graph`` (the richer, real
+    L3-L5 evidence) carries."""
+    from abicheck.internal_leak import compute_call_graph_leak_paths
+
+    richer = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "ns::detail::helper", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    weaker = SourceGraphSummary(nodes=[_decl("decl://pub", "pubFn", "public_header")])
+    snap = _diverged_snap(richer, weaker)
+
+    result = compute_call_graph_leak_paths(snap)
+
+    assert "ns::detail::helper" in result
+
+
+def test_internal_leak_honors_a_depth_projected_l5_exclusion() -> None:
+    """Fourth review-round regression: this reader must go through the same
+    projection-aware coverage guard as ``_side_source_graph``/
+    ``_l5_payload_empty`` -- a ``--depth build`` comparison's retained,
+    header-only ``surface_graph`` must not resurrect a leak path the
+    excluded, richer L5 graph would have shown."""
+    from abicheck.internal_leak import compute_call_graph_leak_paths
+
+    retained = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "ns::detail::helper", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    snap = _depth_excluded_snap(retained)
+
+    assert compute_call_graph_leak_paths(snap) == {}
+
+
+# --------------------------------------------------------------------------- #
+# buildsource/cross_source_checks.py: _check_public_to_internal_dependency
+# --------------------------------------------------------------------------- #
+
+
+def test_public_to_internal_dependency_unchanged_by_migration() -> None:
+    from abicheck.buildsource.cross_source_checks import (
+        CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+        run_crosschecks,
+    )
+    from abicheck.checker_policy import ChangeKind
+
+    graph = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    pre, post = _pre_and_post_phase3_snaps(graph)
+    pre.from_headers = True
+    post.from_headers = True
+
+    pre_res = run_crosschecks(pre)
+    post_res = run_crosschecks(post)
+
+    def _hits(res):
+        return [
+            (c.symbol, c.new_value)
+            for c in res.findings
+            if c.kind == ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY
+        ]
+
+    assert _hits(pre_res) == _hits(post_res) == [("pubFn", "internalImpl")]
+    assert (
+        pre_res.providers[CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY]
+        == post_res.providers[CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY]
+    )
+
+
+def test_public_to_internal_dependency_prefers_the_richer_build_source_graph() -> None:
+    """Security regression (PR #1216 review): a weaker ``surface_graph`` with
+    no dependency edges must never hide a public-to-internal dependency that
+    only the richer ``build_source.source_graph`` carries."""
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
+    from abicheck.checker_policy import ChangeKind
+
+    richer = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    weaker = SourceGraphSummary(nodes=[_decl("decl://pub", "pubFn", "public_header")])
+    snap = _diverged_snap(richer, weaker)
+    snap.from_headers = True
+
+    res = run_crosschecks(snap)
+    hits = [
+        c.symbol
+        for c in res.findings
+        if c.kind == ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY
+    ]
+
+    assert hits == ["pubFn"]
+
+
+def test_public_to_internal_dependency_honors_a_depth_projected_l5_exclusion() -> None:
+    """Fourth review-round regression: a ``--depth build`` comparison's
+    retained, header-only ``surface_graph`` must not resurrect a
+    ``PUBLIC_TO_INTERNAL_DEPENDENCY`` finding the excluded, richer L5 graph
+    would have produced."""
+    from abicheck.buildsource.cross_source_checks import run_crosschecks
+    from abicheck.checker_policy import ChangeKind
+
+    retained = SourceGraphSummary(
+        nodes=[
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+        ],
+        edges=[GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    snap = _depth_excluded_snap(retained)
+    snap.from_headers = True
+
+    res = run_crosschecks(snap)
+    hits = [
+        c.symbol
+        for c in res.findings
+        if c.kind == ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY
+    ]
+
+    assert hits == []
+
+
+# --------------------------------------------------------------------------- #
+# buildsource/cross_source_checks.py: _check_private_header_leak
+# --------------------------------------------------------------------------- #
+
+
+def test_private_header_leak_source_index_provider_unchanged_by_migration() -> None:
+    from abicheck.buildsource.cross_source_checks import (
+        CHECK_PRIVATE_HEADER_LEAK,
+        PROVIDER_SOURCE_INDEX,
+        run_crosschecks,
+    )
+    from abicheck.model import RecordType
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(id="decl://use", kind="source_decl", label="use"),
+            GraphNode(id="type://Impl", kind="record_type", label="Impl"),
+        ]
+    )
+    pre, post = _pre_and_post_phase3_snaps(graph)
+    for snap in (pre, post):
+        snap.from_headers = True
+        snap.functions = [
+            Function(
+                name="use",
+                mangled="_Z3usev",
+                return_type="Impl *",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+        ]
+        snap.types = [
+            RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER),
+        ]
+
+    pre_res = run_crosschecks(pre)
+    post_res = run_crosschecks(post)
+
+    assert (
+        pre_res.providers[CHECK_PRIVATE_HEADER_LEAK]
+        == post_res.providers[CHECK_PRIVATE_HEADER_LEAK]
+    )
+    assert PROVIDER_SOURCE_INDEX in pre_res.providers[CHECK_PRIVATE_HEADER_LEAK]
+
+
+# --------------------------------------------------------------------------- #
+# buildsource/evidence_report.py: diff_embedded_build_source's L5 graph diff
+# --------------------------------------------------------------------------- #
+
+
+def test_side_source_graph_unchanged_by_migration() -> None:
+    """:func:`_side_source_graph` (the helper ``diff_embedded_build_source``'s
+    L5 diff now goes through) resolves the identical graph whether it comes
+    via the fallback (pre-Phase-3 shape) or the canonical field (post-Phase-3
+    shape) -- and, per the module's own out-of-band-pack contract, never
+    substitutes ``surface_graph`` for an explicit ``--old/new-sources`` pack
+    unrelated to the snapshot."""
+    from abicheck.buildsource.evidence_report import _side_source_graph
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    pre, post = _pre_and_post_phase3_snaps(graph)
+
+    assert _side_source_graph(pre, pre.build_source) is graph
+    assert _side_source_graph(post, post.build_source) is graph
+
+    unrelated_graph = SourceGraphSummary(
+        nodes=[_decl("decl://b", "b", "public_header")]
+    )
+    out_of_band_pack = BuildSourcePack(root="", source_graph=unrelated_graph)
+    assert _side_source_graph(post, out_of_band_pack) is unrelated_graph
+
+
+def test_side_source_graph_prefers_the_richer_build_source_graph() -> None:
+    """Security regression (PR #1216 review): when ``build_source.
+    source_graph`` and ``surface_graph`` are two different objects, the
+    richer one (``build_source.source_graph``) must win."""
+    from abicheck.buildsource.evidence_report import _side_source_graph
+
+    richer = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    weaker = SourceGraphSummary(nodes=[])
+    snap = _diverged_snap(richer, weaker)
+
+    assert _side_source_graph(snap, snap.build_source) is richer
+
+
+def test_side_source_graph_honors_a_depth_projected_l5_exclusion() -> None:
+    """Second review-round regression: ``policy/depth_projection.py`` clears
+    ``build_source.source_graph`` to ``None`` for a ``--depth build``
+    comparison while stamping an explicit L5 "not collected" coverage row
+    and *retaining* ``surface_graph`` untouched (an L2 fact). The fallback
+    must not resurrect L5-labeled findings from that retained graph -- a
+    pack whose manifest already recorded an L5 coverage row (regardless of
+    status) is never treated as "never collected"."""
+    from abicheck.buildsource.evidence_report import _side_source_graph
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+
+    weaker = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=weaker,
+    )
+    snap.build_source.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
+    ]
+
+    assert _side_source_graph(snap, snap.build_source) is None
+
+
+def test_evidence_report_graph_diff_unchanged_by_migration() -> None:
+    from abicheck.buildsource.evidence_report import diff_embedded_build_source
+
+    old_graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(id="binary_symbol://_Z1av", kind="binary_symbol", label="_Z1av"),
+            GraphNode(
+                id="decl://a",
+                kind="source_decl",
+                label="a",
+                attrs={"visibility": "public_header"},
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://a",
+                dst="binary_symbol://_Z1av",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+        ],
+    )
+    new_graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(id="binary_symbol://_Z1av", kind="binary_symbol", label="_Z1av"),
+            GraphNode(
+                id="decl://a",
+                kind="source_decl",
+                label="a",
+                attrs={"visibility": "public_header"},
+            ),
+        ],
+        edges=[],
+    )
+
+    def _snap(graph: SourceGraphSummary, with_surface_graph: bool) -> AbiSnapshot:
+        kw = dict(
+            library="libfoo.so",
+            version="1.0",
+            build_source=BuildSourcePack(root="", source_graph=graph),
+        )
+        if with_surface_graph:
+            kw["surface_graph"] = graph
+        return AbiSnapshot(**kw)
+
+    def _run(with_surface_graph: bool):
+        old_snap = _snap(old_graph, with_surface_graph)
+        new_snap = _snap(new_graph, with_surface_graph)
+        changes, _coverage_rows, _metrics = diff_embedded_build_source(
+            None,
+            None,
+            None,
+            None,
+            "source",
+            new_snap,
+            old_snapshot=old_snap,
+        )
+        return changes
+
+    pre_changes = _run(with_surface_graph=False)
+    post_changes = _run(with_surface_graph=True)
+
+    assert [(c.kind, c.symbol) for c in pre_changes] == [
+        (c.kind, c.symbol) for c in post_changes
+    ]
+    assert pre_changes, "dropping the mapping edge must produce an L5 graph finding"
+
+
+# --------------------------------------------------------------------------- #
+# evidence_depth.depth_label_for
+# --------------------------------------------------------------------------- #
+
+
+def test_depth_label_for_unchanged_by_migration() -> None:
+    from abicheck.evidence_depth import depth_label_for
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    pre, post = _pre_and_post_phase3_snaps(graph)
+
+    assert depth_label_for(pre, pre.build_source) == "source"
+    assert depth_label_for(post, post.build_source) == "source"
+
+
+def test_depth_label_for_out_of_band_pack_ignores_unrelated_surface_graph() -> None:
+    """An explicit out-of-band pack (never attached to *snap*) must not have
+    its emptiness judged by an unrelated ``snap.surface_graph`` -- the
+    ``evidence_depth`` module's own long-standing "never default *pack* to
+    ``snap.build_source``" contract (docstring at the top of the module),
+    unaffected by this migration."""
+    from abicheck.evidence_depth import depth_label_for
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    unrelated_pack = BuildSourcePack(root="", source_graph=None)
+    snap = AbiSnapshot(library="libfoo.so", version="1.0", surface_graph=graph)
+
+    # snap.surface_graph is populated, but *pack* is an unrelated, empty
+    # out-of-band pack -- the answer must come from *pack*, not *snap*.
+    assert depth_label_for(snap, unrelated_pack) != "source"
+
+
+def test_depth_label_for_prefers_the_richer_build_source_graph() -> None:
+    """Security regression (PR #1216 review): a non-empty
+    ``build_source.source_graph`` must report ``"source"`` even when
+    ``surface_graph`` is a different, empty graph object."""
+    from abicheck.evidence_depth import depth_label_for
+
+    richer = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    weaker = SourceGraphSummary(nodes=[])
+    snap = _diverged_snap(richer, weaker)
+
+    assert depth_label_for(snap, snap.build_source) == "source"
+
+
+def test_depth_label_for_falls_back_to_surface_graph_when_never_collected() -> None:
+    """A pack that simply never recorded any L5 coverage at all (e.g. a bare
+    typed-API-constructed snapshot) -- as opposed to one a depth projection
+    deliberately excluded L5 from, see the test below -- still falls back to
+    ``surface_graph``."""
+    from abicheck.evidence_depth import depth_label_for
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=graph,
+    )
+
+    assert depth_label_for(snap, snap.build_source) == "source"
+
+
+def test_depth_label_for_honors_a_depth_projected_l5_exclusion() -> None:
+    """Second review-round regression: a ``--depth build`` projection clears
+    ``build_source.source_graph`` while stamping an explicit L5 "not
+    collected" coverage row and retaining ``surface_graph`` (an L2 fact) --
+    the fallback must not then report ``"source"`` depth for a comparison
+    whose own report says L5 was excluded."""
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.evidence_depth import depth_label_for
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        build_source=BuildSourcePack(root="", source_graph=None),
+        surface_graph=graph,
+    )
+    snap.build_source.manifest.coverage = [
+        LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
+    ]
+
+    assert depth_label_for(snap, snap.build_source) != "source"
+
+
+# --------------------------------------------------------------------------- #
+# cli_graph._load_source_graph
+# --------------------------------------------------------------------------- #
+
+
+def test_load_source_graph_from_embedded_snapshot_unchanged_by_migration(
+    tmp_path,
+) -> None:
+    """A pre-Phase-3 **flat** document (``surface_graph`` absent, no
+    ``sections`` envelope, ``build_source.source_graph`` present) yields the
+    identical graph as a real, current **sectioned** document written by
+    ``serialization.snapshot_to_json`` for the same evidence (``surface_graph``
+    populated) -- proving ``_load_source_graph`` handles both wire shapes,
+    including the sectioned one this module's own reader didn't originally
+    account for (``sections.graph.payload.surface_graph``, schema v42+)."""
+    from abicheck import serialization
+    from abicheck.cli_graph import _load_source_graph
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+
+    pre_path = tmp_path / "pre_phase3.abi.json"
+    pre_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 20,
+                "library": "libfoo.so",
+                "version": "1.0",
+                "build_source": {"source_graph": graph.to_dict()},
+            }
+        )
+    )
+
+    post_path = tmp_path / "post_phase3.abi.json"
+    pre, post = _pre_and_post_phase3_snaps(graph)
+    post_path.write_text(serialization.snapshot_to_json(post))
+
+    pre_graph = _load_source_graph(pre_path)
+    post_graph = _load_source_graph(post_path)
+
+    assert pre_graph.to_dict() == post_graph.to_dict()
+    assert [n.id for n in pre_graph.nodes] == ["decl://a"]
+
+
+def test_embedded_source_graph_prefers_the_richer_build_source_graph() -> None:
+    """Security regression (PR #1216 review): when both keys are present and
+    differ, ``build_source.source_graph`` wins -- NOT the top-level
+    ``surface_graph`` key, since a real ``--sources``/``--build-info`` embed
+    leaves the former the richer, real L3-L5 evidence graph."""
+    from abicheck.cli_graph import _embedded_source_graph
+
+    richer = SourceGraphSummary(
+        nodes=[_decl("decl://richer", "richer", "public_header")]
+    )
+    weaker = SourceGraphSummary(
+        nodes=[_decl("decl://weaker", "weaker", "public_header")]
+    )
+    data = {
+        "schema_version": 45,
+        "library": "libfoo.so",
+        "version": "1.0",
+        "surface_graph": weaker.to_dict(),
+        "build_source": {"source_graph": richer.to_dict()},
+    }
+
+    result = _embedded_source_graph(data)
+    assert result is not None
+    assert [n.id for n in result.nodes] == ["decl://richer"]
+
+
+def test_embedded_source_graph_falls_back_to_surface_graph_when_build_source_absent() -> (
+    None
+):
+    """No ``build_source`` at all -- the top-level ``surface_graph`` key is
+    still read as the fallback."""
+    from abicheck.cli_graph import _embedded_source_graph
+
+    graph = SourceGraphSummary(nodes=[_decl("decl://a", "a", "public_header")])
+    data = {
+        "schema_version": 45,
+        "library": "libfoo.so",
+        "version": "1.0",
+        "surface_graph": graph.to_dict(),
+    }
+
+    result = _embedded_source_graph(data)
+    assert result is not None
+    assert [n.id for n in result.nodes] == ["decl://a"]
+
+
+def test_embedded_source_graph_ignores_non_snapshot_documents() -> None:
+    """A bare graph JSON or an unrelated JSON object (no ``schema_version``,
+    no ``sections``) is not a snapshot document at all -- returns ``None``
+    so the caller falls through to its own bare-graph-JSON contract."""
+    from abicheck.cli_graph import _embedded_source_graph
+
+    bare_graph = {"nodes": [{"id": "decl://a", "kind": "source_decl"}], "edges": []}
+    assert _embedded_source_graph(bare_graph) is None
+
+    pack_manifest = {"build_source_pack_version": 1, "coverage": []}
+    assert _embedded_source_graph(pack_manifest) is None

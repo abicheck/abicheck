@@ -60,8 +60,10 @@ inputs:
       Baseline channel name (release-contract, accepted-main, explicit, or a
       project-defined custom channel), or the literal 'none' for a
       single-build audit with no baseline (ADR-047 §8 S5) -- when 'none',
-      resolve-baseline is skipped entirely and this check runs the existing
-      scan audit path directly (no --against) instead of compare.
+      resolve-baseline is skipped entirely and this check runs mode: compare
+      with old-library/abi-baseline both omitted (ADR-068 D2's audit-only
+      shape -- the root Action's retired mode: scan, no --against, used to
+      be this path) instead of a two-sided compare.
     required: true
   baseline-path:
     description: >
@@ -286,8 +288,11 @@ inputs:
       gate-mode: advisory, and aggregate.py's own GateInfo.from_report_data
       falls back to legacy_from_verdict(verdict) instead, which would still
       see the real BREAKING/API_BREAK verdict and derive a blocking gate
-      regardless of gate-mode. Ignored for a scan-mode audit (baseline-
-      channel: none), which always carries its own top-level exit_code.
+      regardless of gate-mode. For a baseline-channel: none audit, this now
+      also selects whether the audit-only compare's own AUDIT_GATE axis
+      gates on a BREAKING/API_BREAK-classified finding (ADR-068's
+      2026-09-10 amendment) -- the default 'default' preserves the exit
+      behavior the retired mode: scan audit path always had.
     required: false
     default: 'default'
   require-complete-analysis:
@@ -592,7 +597,8 @@ runs:
         dependency-source: ${{ inputs.dependency-source }}
 
     # ── Analysis: compare against the resolved baseline, or (baseline: ─────
-    # none) a scan audit with no --against -- continue-on-error so the ─────
+    # none) mode: compare's audit-only shape (old-library/abi-baseline both
+    # omitted, ADR-068 D2) -- continue-on-error so the ─────
     # report-envelope step below always runs, per ADR-047 §7's required ─────
     # "internal analysis step must run with continue-on-error: true" rule. ──
     # Also skipped when a required collect-facts step failed: without this,
@@ -630,7 +636,14 @@ runs:
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
-        mode: ${{ inputs.baseline-channel == 'none' && 'scan' || 'compare' }}
+        # mode is always compare (ADR-068's Action-input-lifecycle amendment
+        # -- mode: scan is retired outright). A baseline-channel: none run
+        # never executes the resolve-baseline step above, so
+        # steps.resolve.outputs.* below all resolve empty -- old-library
+        # therefore comes out empty in exactly that case, which is what
+        # selects mode: compare's audit-only shape (old-library/abi-baseline
+        # both omitted, ADR-068 D2). No separate mode selector is needed.
+        mode: compare
         old-library: ${{ inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir || steps.resolve.outputs.snapshot-path }}
         new-library: ${{ steps.consumer_context.outcome == 'success' && 'check-target-consumer.abi.json' || inputs.new-library }}
         header: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.header }}
@@ -649,11 +662,11 @@ runs:
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
         # surfaces that resolved value as an output -- it only prints a
         # notice telling the caller to "pass sources: $SOURCES directly to
-        # dump/scan/compare". Forwarding the raw (still-empty) inputs.sources
+        # dump/compare". Forwarding the raw (still-empty) inputs.sources
         # here instead left action/run.sh's add_single_flag skipping --sources
         # entirely (it omits the flag for an empty value), so a replay check
         # with sources: left unset would pass the collect-facts step but then
-        # run compare/scan with NO source evidence at all -- silently missing
+        # run compare with NO source evidence at all -- silently missing
         # source-only findings at requested-depth: build/source (Codex
         # review). Mirror collect-facts' own default here so the analysis
         # step sees the same directory replay validated.

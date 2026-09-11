@@ -61,6 +61,7 @@ from .pack import BuildSourcePack
 if TYPE_CHECKING:
     from ..checker_types import Change, DiffResult
     from ..model import AbiSnapshot
+    from ..model.source_graph import SourceGraphSummary
     from ..policy_file import PolicyFile
 
 #: Sink for this module's human-readable report lines. ``None`` means "produce
@@ -169,6 +170,24 @@ def resolve_side_pack(
     # preference would otherwise break by falling through to stale embedded
     # facts (Codex review).
     return _combine_packs(bi_pack, src_pack, embedded, prefer_nonempty=False)
+
+
+def _side_source_graph(
+    snap: AbiSnapshot | None, pack: BuildSourcePack | None
+) -> SourceGraphSummary | None:
+    """The L5 evidence graph for one compare side (ADR-063 Phase 10) --
+    a thin wrapper over the shared :func:`~abicheck.evidence_depth.
+    resolve_l5_source_graph` resolver (see its own docstring for the full
+    fallback contract), needed only because *snap* is optional here (a
+    caller with no snapshot for this side at all has no ``surface_graph``
+    to consult, but *pack* may still carry a real ``source_graph`` on its
+    own, e.g. an out-of-band pack resolved with no matching embedded side).
+    """
+    if snap is None:
+        return pack.source_graph if pack is not None else None
+    from ..evidence_depth import resolve_l5_source_graph
+
+    return resolve_l5_source_graph(snap, pack)
 
 
 def intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
@@ -517,8 +536,16 @@ def diff_embedded_build_source(
     # L5 source graph diff (ADR-031 D6): both packs must carry a graph summary.
     # Per ADR-028 D3 / ADR-031 D6 these are ordinary RISK findings folded into
     # the verdict pipeline — they explain and prioritize, never sole authority.
-    old_graph = old_pack.source_graph if old_pack else None
-    new_graph = new_pack.source_graph if new_pack else None
+    # ADR-063 Phase 10: prefer the canonical `AbiSnapshot.surface_graph` when
+    # *_pack is the snapshot's own embedded pack (unchanged identity with
+    # `build_source.source_graph` per the Phase 3 assembly step), falling
+    # back to `build_source.source_graph` when `surface_graph` is absent (a
+    # pre-Phase-3 snapshot never populates it). A `--old/new-build-info`/
+    # `--old/new-sources` override resolves an out-of-band pack unrelated to
+    # the snapshot, so `surface_graph` never applies there -- see
+    # `docs/contribute/plans/one-semantic-pipeline.md`'s Phase 10 checklist.
+    old_graph = _side_source_graph(old_snapshot, old_pack)
+    new_graph = _side_source_graph(new_snapshot, new_pack)
     if old_graph is not None and new_graph is not None:
         from .source_graph_findings import diff_source_graph_findings
 

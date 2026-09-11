@@ -385,7 +385,7 @@ def _snap(source_path=None):
 def test_fold_l0_hard_removals_no_source_path_is_noop(monkeypatch):
     """Neither snapshot remembers a real binary — nothing to re-probe, returned as-is."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
@@ -396,7 +396,7 @@ def test_fold_l0_hard_removals_no_source_path_is_noop(monkeypatch):
 def test_fold_l0_hard_removals_one_sided_source_path_is_noop(monkeypatch, tmp_path):
     """Only one side has a source_path — still can't do a meaningful re-probe."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     extra = []
@@ -413,7 +413,7 @@ def test_fold_l0_hard_removals_stat_failure_after_recorded_mtime_is_noop(
     is gone by compare time (deleted, moved) — the re-stat itself raises,
     which must be swallowed the same as any other unresolvable probe."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -429,7 +429,7 @@ def test_fold_l0_hard_removals_mtime_mismatch_is_noop(monkeypatch, tmp_path):
     (rebuilt in place) — folding in a probe of *that* binary would make a
     pre-dumped-snapshot compare non-reproducible, so it's declined."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -446,7 +446,7 @@ def test_fold_l0_hard_removals_missing_recorded_mtime_is_noop(monkeypatch, tmp_p
     """A snapshot predating the source_mtime field (or one hand-authored
     without it) can't be identity-checked — decline rather than trust it."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -462,7 +462,7 @@ def test_fold_l0_hard_removals_size_mismatch_is_noop(monkeypatch, tmp_path):
     catch every rebuild (e.g. a mtime-preserving copy), so size is checked
     too."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -477,7 +477,7 @@ def test_fold_l0_hard_removals_missing_recorded_size_is_noop(monkeypatch, tmp_pa
     """A snapshot predating the source_size field can't be identity-checked
     — decline rather than trust it."""
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -499,7 +499,9 @@ def test_fold_l0_hard_removals_mtime_mismatch_ignored_when_dump_time_epoch_recor
     second round). No SOURCE_DATE_EPOCH is set here at all — only the
     persisted per-snapshot flag drives the carve-out. Size still applies."""
     monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     old_snap = _snap(str(tmp_path / "old.so"))
     new_snap = _snap(str(tmp_path / "new.so"))
     # Simulate the epoch substitution recorded at dump time: the snapshot
@@ -520,7 +522,9 @@ def test_fold_l0_hard_removals_mtime_mismatch_ignored_when_dump_time_epoch_recor
         changes=[removal],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
     result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
     assert result == extra + [removal]
@@ -534,7 +538,7 @@ def test_fold_l0_hard_removals_size_mismatch_still_noop_with_dump_time_epoch(
     fold-in."""
     monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -560,7 +564,7 @@ def test_fold_l0_hard_removals_mixed_epoch_still_checks_non_epoch_side(
     global gate)."""
     monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -584,7 +588,9 @@ def test_fold_l0_hard_removals_mixed_epoch_folds_when_non_epoch_side_matches(
     side's real mtime genuinely matches, the mixed compare should still
     proceed — the per-side gating isn't overly strict either."""
     monkeypatch.delenv("SOURCE_DATE_EPOCH", raising=False)
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     old_snap = _snap(str(tmp_path / "old.so"))
     new_snap = _snap(str(tmp_path / "new.so"))
     old_snap.source_mtime = 1609459200.0
@@ -602,7 +608,9 @@ def test_fold_l0_hard_removals_mixed_epoch_folds_when_non_epoch_side_matches(
         changes=[removal],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
     result = fold_l0_hard_removals(old_snap, new_snap, "c++", extra)
     assert result == extra + [removal]
@@ -617,7 +625,7 @@ def test_fold_l0_hard_removals_mtime_mismatch_still_noop_without_epoch_flag(
     compare-time environment (Codex review, second round)."""
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1609459200")
     monkeypatch.setattr(
-        "abicheck.service.resolve_input",
+        "abicheck.workflows.input_resolution.resolve_input",
         lambda *a, **kw: pytest.fail("should not be called"),
     )
     old_snap = _snap(str(tmp_path / "old.so"))
@@ -636,7 +644,7 @@ def test_fold_l0_hard_removals_resolve_failure_returns_unchanged(monkeypatch, tm
     def _raise(*_a, **_kw):
         raise AbicheckError("no such file")
 
-    monkeypatch.setattr("abicheck.service.resolve_input", _raise)
+    monkeypatch.setattr("abicheck.workflows.input_resolution.resolve_input", _raise)
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
     result = fold_l0_hard_removals(
         _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", extra
@@ -647,7 +655,9 @@ def test_fold_l0_hard_removals_resolve_failure_returns_unchanged(monkeypatch, tm
 def test_fold_l0_hard_removals_folds_elf_only_removal(monkeypatch, tmp_path):
     """The symbols-only re-probe finds a hard ELF-only removal (case97's exact
     shape) — it's folded into extra_changes."""
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     removal = Change(
         kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
         symbol="_ZN3lib8extendedEv",
@@ -663,7 +673,9 @@ def test_fold_l0_hard_removals_folds_elf_only_removal(monkeypatch, tmp_path):
         changes=[removal, unrelated],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     extra = [Change(kind=ChangeKind.FUNC_ADDED, symbol="x", description="")]
     result = fold_l0_hard_removals(
         _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", extra
@@ -676,7 +688,9 @@ def test_fold_l0_hard_removals_folds_elf_only_removal(monkeypatch, tmp_path):
 def test_fold_l0_hard_removals_ignores_non_elf_only_findings(monkeypatch, tmp_path):
     """A breaking finding that isn't func_removed_elf_only is never folded in —
     this probe restores exactly one specific fact, never a general advisory dump."""
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     diff = DiffResult(
         old_version="1.0",
         new_version="2.0",
@@ -684,7 +698,9 @@ def test_fold_l0_hard_removals_ignores_non_elf_only_findings(monkeypatch, tmp_pa
         changes=[Change(kind=ChangeKind.FUNC_REMOVED, symbol="other", description="")],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     result = fold_l0_hard_removals(
         _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", None
     )
@@ -695,7 +711,9 @@ def test_fold_l0_hard_removals_none_extra_changes_defaults_to_empty(
     monkeypatch, tmp_path
 ):
     """extra_changes=None (compare's default) is treated as an empty list, not a crash."""
-    monkeypatch.setattr("abicheck.service.resolve_input", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        "abicheck.workflows.input_resolution.resolve_input", lambda *a, **kw: object()
+    )
     removal = Change(
         kind=ChangeKind.FUNC_REMOVED_ELF_ONLY,
         symbol="gone",
@@ -708,7 +726,9 @@ def test_fold_l0_hard_removals_none_extra_changes_defaults_to_empty(
         changes=[removal],
         verdict=Verdict.BREAKING,
     )
-    monkeypatch.setattr("abicheck.service.compare_snapshots", lambda *a, **kw: diff)
+    monkeypatch.setattr(
+        "abicheck.workflows.compare_policy.compare_snapshots", lambda *a, **kw: diff
+    )
     result = fold_l0_hard_removals(
         _snap(str(tmp_path / "old.so")), _snap(str(tmp_path / "new.so")), "c++", None
     )

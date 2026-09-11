@@ -477,8 +477,14 @@ class TestStoreErrorPaths:
         def _raise_type_error(*args, **kwargs):
             raise TypeError("Object of type MagicMock is not JSON serializable")
 
+        # ADR-061 gap E: write_snapshot's real implementation (and the
+        # snapshot_to_json name it calls) now lives in
+        # abicheck.storage.snapshot_codec -- abicheck.serialization is a
+        # thin re-export of the same function object, so patching the
+        # facade's own attribute no longer changes what write_snapshot
+        # calls.
         monkeypatch.setattr(
-            "abicheck.serialization.snapshot_to_json", _raise_type_error
+            "abicheck.storage.snapshot_codec.snapshot_to_json", _raise_type_error
         )
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
