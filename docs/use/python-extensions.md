@@ -190,8 +190,10 @@ def transform(data, codec): ...   # renamed kwarg, dropped default
 ```
 
 The export table is still one `PyInit_` symbol and the imported C-API is
-unchanged, so `compare` (with or without `--abi3`) sees nothing. The break lives entirely in
-the Python signatures, which are not in the binary's ABI surface at all.
+unchanged, so `compare` (with or without `--abi3`) sees nothing **when no
+matching Python API type stub is available** — see the next section for how
+`compare` catches exactly this break once one is. The break lives entirely
+in the Python signatures, which are not in the binary's ABI surface at all.
 
 ### Where the surface comes from
 

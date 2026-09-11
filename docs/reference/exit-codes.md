@@ -530,11 +530,14 @@ scheme-independent CI behaviour.
     is translated inside the Action and retires on the Action's own input
     lifecycle (D8, [ADR-047](../contribute/adr/047-github-actions-integration-model.md)).
 
-The one-shot source-intelligence scan has its own contract (it may compare
-`ARTIFACT` against `--against` and adds a budget guard). `--against` is the
-only thing that selects the mode: omit it and `scan` runs a one-build
-audit/hygiene/source-consistency scan only; pass it and `scan` also compares
-`ARTIFACT` against it — there is no separate `--audit` flag:
+**Everything below this point, to the end of this section, is historical —
+`scan` no longer exists and none of it is a live invocation to copy.** While
+it existed, the one-shot source-intelligence scan had its own contract (it
+could compare `ARTIFACT` against `--against` and added a budget guard).
+`--against` was the only thing that selected the mode: omit it and `scan`
+ran a one-build audit/hygiene/source-consistency scan only; pass it and
+`scan` also compared `ARTIFACT` against it — there was no separate
+`--audit` flag:
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -562,9 +565,9 @@ audit/hygiene/source-consistency scan only; pass it and `scan` also compares
 > not abandoned: plan §3 #16 retires the *mode*, and it returns as
 > `compare --no-baseline DIR` over ADR-065 S3's package component
 > inventories, which are the prerequisite for preserving its per-member
-> selection and coverage accounting. Until then, run one `scan` per library.
-> Exit `1` on a `scan` is unchanged and means a genuine CLI/operational
-> error.
+> selection and coverage accounting. Until then, run `compare --no-baseline`
+> once per library. Exit `1` on a `scan` was unchanged there and meant a
+> genuine CLI/operational error.
 
 ### `scan --against` and severity (mirrors `compare`)
 

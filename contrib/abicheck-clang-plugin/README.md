@@ -408,11 +408,14 @@ work as designed and narrows what "experimental" means in practice:
   not "an incompatible artifact silently ships."
 - **The `abicheck-cc` wrapper path is the one confirmed working end-to-end
   against real `icpx`** in this same re-run: `abicheck-cc icpx` observing a
-  real compile, through `abicheck dump --build-info`, to a `scan
-  --build-info --depth source` producing L4 source-ABI replay and an L5
-  source graph. Prefer it (or full source scan) for `icpx`/`icx` today; the
-  plugin remains an optional optimization with no certified path yet, not a
-  regression from the state described above.
+  real compile, through `abicheck dump libfoo.so --build-info
+  ./abicheck_inputs/`, to `scan libfoo.so --build-info ./abicheck_inputs/
+  --depth source` (historical — `scan` was retired by ADR-068 Phase 6; the
+  live equivalent is `abicheck compare --no-baseline libfoo.so --build-info
+  ./abicheck_inputs/ --depth source`) producing L4 source-ABI replay and an
+  L5 source graph. Prefer it (or full source scan) for `icpx`/`icx` today;
+  the plugin remains an optional optimization with no certified path yet,
+  not a regression from the state described above.
 
 **Independently re-verified** (a later pass, real Intel(R) oneAPI DPC++/C++
 Compiler 2026.1.1, build 20260724, installed from `apt.repos.intel.com`, and
@@ -424,10 +427,11 @@ code, unmodified, against real `icpx`. A full plugin built with
 LLVM 22.1.8 crashes with the identical stack (`deriveRootsFromIncludes` under
 `FactsAction::CreateASTConsumer`, SIGSEGV/exit 139) the moment it is loaded
 into real `icpx` on even a trivial smoke-test translation unit. The
-`abicheck-cc` wrapper path (`abicheck-cc icpx` → `abicheck dump --build-info`
-→ `abicheck compare --no-baseline --build-info --depth source`, formerly
-`abicheck scan --build-info --depth source` before ADR-068 Phase 6 retired
-`scan`) completes end-to-end against
+`abicheck-cc` wrapper path (`abicheck-cc icpx` → `abicheck dump libfoo.so
+--build-info ./abicheck_inputs/` → `abicheck compare --no-baseline libfoo.so
+--build-info ./abicheck_inputs/ --depth source`, formerly `abicheck scan
+libfoo.so --build-info ./abicheck_inputs/ --depth source` before ADR-068
+Phase 6 retired `scan`) completes end-to-end against
 the same real `icpx`, with L4 source-ABI replay matching 2/2 symbols and a
 present L5 source graph. This pass also fixed two things this
 re-verification surfaced directly in `collect-facts`'s own guardrail code
