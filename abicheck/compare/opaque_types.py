@@ -452,8 +452,6 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     for records in (non_opaque_old, non_opaque_new):
         for t in records:
             for f in t.fields:
-                if "*" in f.type:
-                    continue
                 for tname in opaque_types - embedded_types:
                     if _type_is_by_value_referenced(tname, f.type):
                         embedded_types.add(tname)
@@ -508,18 +506,28 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
         if resolved is not None:
             new_by_stable_id[resolved] = t
 
-    # A resolved id absent from ``other_by_id`` is not, by itself, proof the
-    # entity is absent from the other snapshot -- a mixed-producer or
-    # pre-identity-baseline comparison can leave the other side's matching
-    # declaration present but carrying no resolvable ``entity_id`` at all
-    # (Codex review, PR #1218, round 3): missing identity *evidence* is not
-    # evidence of *absence*. The asymmetric-existence criterion this
-    # function implements is a NAME-level one in the first place (see
-    # ``opaque_types`` above, built from ``old_type_names``/
-    # ``new_type_names``) -- so verifying it here by that same bare-name
-    # presence check, rather than by "did an id happen to resolve", is not
-    # a new criterion, only a faithful re-check of the one already used to
-    # decide this name belongs in ``truly_opaque`` at all.
+    # Check the stable counterpart BY ID first, before ever consulting bare
+    # names -- two producers can render the identical entity under two
+    # different spellings (this whole module's own premise: "the header
+    # backends key RecordType.name bare while DWARF bakes the namespace
+    # into name"), so a name-level absence check run first would misread a
+    # same-entity, differently-spelled counterpart as genuinely absent
+    # (Codex review, PR #1218, round 4): old's opaque bare "Handle" and
+    # new's now-visible "ns::Handle" can share one stable id despite never
+    # sharing a name at all. Only once the id itself is confirmed absent
+    # from ``other_by_id`` does bare-name presence decide anything -- and
+    # even then, a resolved id absent from ``other_by_id`` is not, by
+    # itself, proof the entity is absent from the other snapshot: a
+    # mixed-producer or pre-identity-baseline comparison can leave the
+    # other side's matching declaration present but carrying no resolvable
+    # ``entity_id`` at all (Codex review, PR #1218, round 3) -- missing
+    # identity *evidence* is not evidence of *absence*. The
+    # asymmetric-existence criterion this function implements is a
+    # NAME-level one in the first place (see ``opaque_types`` above, built
+    # from ``old_type_names``/``new_type_names``), so falling back to that
+    # same bare-name presence check only once identity itself is silent is
+    # not a new criterion, only a faithful re-check of the one already used
+    # to decide this name belongs in ``truly_opaque`` at all.
     stable_ids: set[StableEntityId] = set()
     for snap, other_type_names, other_by_id in (
         (old, new_type_names, new_by_stable_id),
@@ -531,19 +539,24 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
             resolved = stable_entity_id(t.entity_id)
             if resolved is None:
                 continue
-            if t.name not in other_type_names:
-                # Genuinely absent by name from the other snapshot -- the
-                # asymmetric-existence criterion, verified the same way
-                # ``opaque_types`` itself was.
-                stable_ids.add(resolved)
-                continue
             other_t = other_by_id.get(resolved)
-            if other_t is not None and other_t.is_opaque:
-                # The same entity, confirmed opaque on both sides.
+            if other_t is not None:
+                if other_t.is_opaque:
+                    # The same entity (by id, regardless of spelling),
+                    # confirmed opaque on both sides.
+                    stable_ids.add(resolved)
+                # Otherwise: the same entity is visible on the other side
+                # -- decline, regardless of what its name looks like there.
+                continue
+            if t.name not in other_type_names:
+                # No entity anywhere on the other side resolves to this
+                # exact id, AND no declaration shares this bare name either
+                # -- genuinely absent by both identity and name, the
+                # asymmetric-existence criterion.
                 stable_ids.add(resolved)
             # Otherwise: a declaration under this name exists on the other
             # side, but this exact entity's own identity either did not
-            # resolve there or resolved to a non-opaque declaration --
+            # resolve there or resolved to a different entity entirely --
             # decline the stable-tier match. The always-safe spelling tier
             # still applies via ``declarations``/``local`` above.
 

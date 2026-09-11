@@ -846,6 +846,52 @@ class TestDowngradeOpaqueStructChangesIdentityTiers:
         out = _downgrade_opaque_struct_changes([change], old, new)
         assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
 
+    def test_a_stable_counterpart_under_a_different_spelling_is_checked_before_name_absence(
+        self,
+    ) -> None:
+        """A fifth false positive (Codex review round 4, PR #1218): old's
+        opaque declaration is bare-named ("Handle") while new's now-visible
+        counterpart is qualified ("ns::Handle") -- two producers rendering
+        the identical entity under two different spellings, this whole
+        module's own long-standing premise. A name-level absence check run
+        *before* consulting the stable counterpart by id would misread
+        this as the genuine asymmetric-absence case (the two names never
+        literally match), when the two declarations in fact share one
+        stable id and the entity is visible, not absent, on the other
+        side. The id-first check must win."""
+        stable_id = _STABLE_ID
+        old = _record("Handle", is_opaque=True, entity_id=stable_id)
+        new = _record("ns::Handle", is_opaque=False, entity_id=stable_id)
+        old_snap = _snap([old])
+        new_snap = _snap([new])
+        change = _struct_size_change("ns::Handle", entity_id=stable_id)
+        out = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
+    def test_embedded_by_value_exclusion_ignores_an_unrelated_pointer_elsewhere_in_the_field(
+        self,
+    ) -> None:
+        """A sixth false positive (Codex review round 4, PR #1218): the
+        field type text carries an unrelated pointer alongside a genuine
+        by-value reference to the opaque candidate (e.g. a template
+        argument list like ``Pair<ns::Handle, int *>``) -- a naive
+        whole-string ``"*" in f.type`` pre-check would skip the entire
+        field just because *a* pointer appears in it somewhere, even though
+        the matched ``ns::Handle`` occurrence itself is by value. This must
+        be decided per occurrence (:func:`_type_is_by_value_referenced`
+        already does this correctly on its own), not by a blanket
+        string-level pointer check before ever calling it."""
+        opaque_handle = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record(
+            "Wrapper",
+            fields=[TypeField(name="inner", type="Pair<ns::Handle, int *>")],
+        )
+        old = _snap([opaque_handle, wrapper])
+        new = _snap([opaque_handle, wrapper])
+        change = _struct_size_change("ns::Handle", entity_id=_STABLE_ID)
+        out = _downgrade_opaque_struct_changes([change], old, new)
+        assert out[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
+
 
 # -- Primitive-level property tests: OpaqueTypeIndex.build ------------------
 
