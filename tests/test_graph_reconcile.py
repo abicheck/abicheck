@@ -22,8 +22,6 @@ reconciliation never deletes or downgrades an artifact-proven finding.
 
 from __future__ import annotations
 
-import itertools
-
 import pytest
 
 from abicheck.buildsource.entity_identity import (
@@ -395,10 +393,13 @@ def test_different_checkout_roots_not_misclassified_as_moved() -> None:
     new_g = _graph([new_node], [])
     result = reconcile_added_removed([old_node], [new_node], old_g, new_g)
     assert len(result.reconciled) == 1
-    # Same qualified name, same project-relative file -- neither renamed nor
-    # moved once the checkout root is stripped, so this is coordinate-only,
-    # not OUTCOME_RECONCILED (that outcome requires BOTH to have changed).
-    assert result.reconciled[0].outcome == OUTCOME_COORDINATES_ONLY
+    # Same qualified name (raw-identical, nothing to normalize away), same
+    # project-relative file -- neither renamed nor moved once the checkout
+    # root is stripped. Not OUTCOME_COORDINATES_ONLY: that outcome requires
+    # the raw qualified name to have actually differed (positive evidence
+    # of coordinate churn) -- an already-identical name proves nothing
+    # about whatever else (e.g. a mangled-name change) might differ.
+    assert result.reconciled[0].outcome == OUTCOME_RECONCILED
 
 
 def test_real_move_still_detected_across_different_checkout_roots() -> None:
@@ -623,8 +624,9 @@ def test_multi_file_common_root_stripped_preserves_real_subdirectory_move() -> N
     outcomes = {p.old_node.id: p.outcome for p in result.reconciled}
     assert len(result.reconciled) == 2
     # Same project-relative file across checkout roots -- not moved, and the
-    # name didn't change either, so this is coordinate-only.
-    assert outcomes["type://old_stable"] == OUTCOME_COORDINATES_ONLY
+    # raw qualified name never differed either, so there's no positive
+    # coordinate-churn evidence: stays OUTCOME_RECONCILED.
+    assert outcomes["type://old_stable"] == OUTCOME_RECONCILED
     # Genuinely moved to a different project subdirectory (detail/ -> public/).
     assert outcomes["type://old_moved"] == OUTCOME_MOVED
 
@@ -796,13 +798,15 @@ def test_diff_graph_reconciliation_findings_emits_each_change_kind() -> None:
     assert ChangeKind.DECLARATION_RENAMED in kinds
     assert ChangeKind.DECLARATION_MOVED in kinds
     # recon_old/recon_new share every alias (same mangled/qualified name,
-    # same file/scope: both empty) -- classified OUTCOME_COORDINATES_ONLY
-    # since neither name nor file differs between the pair (a same-shape,
-    # non-rename/non-move alias match, e.g. an attribute-only change a
-    # future producer might reconcile on) -- this is deliberately NOT
-    # DECLARATION_IDENTITY_RECONCILED, which is reserved for the opposite
-    # case where both name and file evidence changed together.
-    assert ChangeKind.DECLARATION_COORDINATES_SHIFTED in kinds
+    # same file/scope: both empty) -- classified OUTCOME_RECONCILED since
+    # neither name nor file differs between the pair, and the raw qualified
+    # name is already identical (nothing to normalize away), so there's no
+    # positive coordinate-churn evidence -- a same-shape, non-rename/
+    # non-move alias match (e.g. an attribute-only change a future producer
+    # might reconcile on) stays DECLARATION_IDENTITY_RECONCILED, ADR-048's
+    # original intent for "match came from alias evidence with no clean
+    # rename/move split."
+    assert ChangeKind.DECLARATION_IDENTITY_RECONCILED in kinds
 
 
 def test_diff_graph_reconciliation_findings_emits_expected_kind() -> None:
@@ -1021,7 +1025,7 @@ def test_reconciliation_never_deletes_or_downgrades_artifact_finding() -> None:
     # A reconciled pair in the L5 graph, independent of the artifact-level
     # change above -- exercises the exact production merge path
     # (extra_changes). Same qualified name/declaring file on both sides, so
-    # it classifies OUTCOME_COORDINATES_ONLY -- the specific outcome doesn't
+    # it classifies OUTCOME_RECONCILED -- the specific outcome doesn't
     # matter for this test, only that reconciliation findings are additive.
     old_type = GraphNode(
         id="type://old",
@@ -1155,43 +1159,42 @@ def _identity(qualified_name: str, declaring_file: str) -> CanonicalIdentity:
 
 
 def test_classify_outcome_prose_is_truthful_about_what_changed() -> None:
-    """Bug-class regression: fix/declaration-renamed-fp-item2 (PR #1204)
-    taught renamed/moved to ignore coordinate churn, but the fallthrough
-    then lumped "neither changed" in with the opposite "both changed" case,
-    whose prose hard-codes "both ... changed". Invariant: for ANY (old,
-    new) pair, the returned outcome's prose must never claim a name change
-    when the name didn't change, nor a location change when the file
-    didn't -- exhaustive over name/file same-or-different, not just the two
-    known repro shapes, so it's a property of _classify_outcome itself."""
-    names = ("ns::Widget", "ns::WidgetV2")
-    files = ("a.h", "b.h")
-    name_claim_words = ("renamed", "name")
-    location_claim_words = ("moved", "location", "declaring file")
-    for old_name, new_name, old_file, new_file in itertools.product(
-        names, names, files, files
-    ):
-        name_changed = old_name != new_name
-        file_changed = old_file != new_file
-        outcome = _classify_outcome(
-            _identity(old_name, old_file), _identity(new_name, new_file)
-        )
-        prose = _OUTCOME_PROSE[outcome]
-        claims_name_change = any(w in prose for w in name_claim_words)
-        claims_location_change = any(w in prose for w in location_claim_words)
-        if not name_changed:
-            assert not claims_name_change, (
-                f"outcome {outcome!r} prose {prose!r} claims a name change "
-                f"for identical qualified names {old_name!r}"
-            )
-        if not file_changed:
-            assert not claims_location_change, (
-                f"outcome {outcome!r} prose {prose!r} claims a location "
-                f"change for identical declaring files {old_file!r}"
-            )
-        # And the positive side: the one case both predicates agree on
-        # (neither changed) must land on the dedicated outcome, never on
-        # OUTCOME_RECONCILED (this is the exact bug this test guards).
-        if not name_changed and not file_changed:
-            assert outcome == OUTCOME_COORDINATES_ONLY
-        if name_changed and file_changed:
-            assert outcome == OUTCOME_RECONCILED
+    """Bug-class regression: PR #1204 taught renamed/moved to ignore
+    coordinate churn, but the fallthrough lumped it with the opposite
+    "both changed" outcome (RECONCILED). Second bug (Codex review):
+    COORDINATES_ONLY fires only on POSITIVE churn evidence (raw name
+    differed, normalized away) -- an already-identical name/file (case197:
+    a mangled-name change neither axis observes) stays RECONCILED
+    (ADR-048's intent). Oracle table, independent of the branches under
+    test."""
+    # name: (old_qn, new_qn, name_changed_for_real, has_coord_evidence)
+    names = {
+        "identical": ("ns::Widget", "ns::Widget", False, False),
+        "real_rename": ("ns::Widget", "ns::WidgetV2", True, False),
+        "coord_shift": ("(lambda at f.h:1:2)", "(lambda at f.h:9:9)", False, True),
+    }
+    files = {"same": ("a.h", "a.h", False), "real_move": ("a.h", "b.h", True)}
+    name_words, loc_words = ("renamed", "name"), ("moved", "location", "declaring")
+    for nk, (old_qn, new_qn, name_ch, has_coord) in names.items():
+        for fk, (old_f, new_f, file_ch) in files.items():
+            old_id, new_id = _identity(old_qn, old_f), _identity(new_qn, new_f)
+            outcome = _classify_outcome(old_id, new_id)
+            if name_ch and not file_ch:
+                expected = OUTCOME_RENAMED
+            elif file_ch and not name_ch:
+                expected = OUTCOME_MOVED
+            elif name_ch and file_ch:
+                expected = OUTCOME_RECONCILED
+            else:
+                expected = OUTCOME_COORDINATES_ONLY if has_coord else OUTCOME_RECONCILED
+            assert outcome == expected, f"{nk}/{fk}: {expected!r} != {outcome!r}"
+            prose = _OUTCOME_PROSE[outcome]
+            # RECONCILED is exempt when neither axis changed -- ADR-048
+            # also covers "no clean split" there (case197), an accepted
+            # prose overstatement, not a bug.
+            if outcome == OUTCOME_RECONCILED and not (name_ch and file_ch):
+                continue
+            if not name_ch:
+                assert not any(w in prose for w in name_words), (nk, fk, outcome, prose)
+            if not file_ch:
+                assert not any(w in prose for w in loc_words), (nk, fk, outcome, prose)

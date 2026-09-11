@@ -21,5 +21,5 @@ _The same rule demonstrated under a different condition._
 - [case194_header_graph_rename_reconciled](../case194_header_graph_rename_reconciled.md) — Internal Dependency Target Renamed, Safely Reconciled
 - [case195_header_graph_ambiguous_rename_not_reconciled](../case195_header_graph_ambiguous_rename_not_reconciled.md) — Ambiguous Simultaneous Rename, Correctly Not Reconciled
 - [case196_header_graph_move_reconciled](../case196_header_graph_move_reconciled.md) — Declaration Reconciled as Moved Across a Compound Edit
-- [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) — Declaration Coordinates Shifted (Header Unchanged)
+- [case197_header_graph_identity_reconciled](../case197_header_graph_identity_reconciled.md) — Declaration Reconciled as Identity-Reconciled (Header Unchanged)
 

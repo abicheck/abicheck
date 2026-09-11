@@ -566,9 +566,9 @@ rules:
   header-build-context-mismatch:
     title: Header and build context disagree
     definition: The headers a release ships and the flags its binary was built with imply different ABI, so neither alone describes what consumers get.
-  internal-declaration-coordinates-shifted:
-    title: Internal declaration coordinates shifted
-    definition: An internal declaration is matched across releases with neither its name nor its declaring file actually changed, so the reconciliation reports a compatible coordinate-only shift rather than a break or a real rename/move.
+  internal-declaration-identity-reconciled:
+    title: Internal declaration identity reconciled
+    definition: An internal declaration is matched across releases despite a changed spelling, so the reconciliation reports no public break.
   internal-declaration-moved-reconciled:
     title: Internal declaration moved
     definition: An internal declaration moves between headers or scopes and is reconciled to its old identity rather than reported as a removal plus an addition.

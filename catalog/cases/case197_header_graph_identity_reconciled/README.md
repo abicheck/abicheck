@@ -1,4 +1,4 @@
-# Case 197: Declaration Coordinates Shifted (Header Unchanged)
+# Case 197: Declaration Reconciled as Identity-Reconciled (Header Unchanged)
 
 **Category:** Risk (Source Graph / Reconciliation) | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -15,15 +15,9 @@ Itanium mangled name (`_ZN4demo6detail6helperEi` →
 `_ZN4demo6detail6helperEl`) and therefore the L5 graph node's own id. Because
 the qualified name is unchanged, the alias tier still pairs the two nodes —
 but because the declaring file did *not* change this time,
-`graph_reconcile._classify_outcome` reports `declaration_coordinates_shifted`
-rather than `declaration_moved`: neither the `renamed` predicate (name
-changed) nor the `moved` predicate (file changed) fired, so from the
-model's own normalized-identity point of view `demo::detail::helper` did
-not change at all — only its coordinates (here, its mangled name) shifted.
-This is deliberately a **COMPATIBLE**, not RISK, finding; it must never be
-confused with `declaration_identity_reconciled`, which is reserved for the
-structurally opposite case where *both* the name and the declaring-file
-evidence changed together (see case196's sibling coverage note below).
+`graph_reconcile._classify_outcome` falls to its residual branch (neither
+`renamed` nor `moved` individually fired) and classifies the outcome as
+`declaration_identity_reconciled` rather than `declaration_moved`.
 
 This is the identical fixture design as case196 — same private+inline
 helper, same public inline caller, same new-side-only dependency edge, same
@@ -31,7 +25,7 @@ real `source_graph.mark_source_edges_extractor_coverage()` certification —
 with exactly one variable held constant: the declaring header path. Case196
 varies both the signature *and* the header path to reach `declaration_moved`;
 this case varies only the signature, holding the header path fixed, to reach
-`declaration_coordinates_shifted` — the two cases together cover both
+`declaration_identity_reconciled` — the two cases together cover both
 non-"pure-rename" outcomes `_classify_outcome` can produce for a
 signature-perturbed node.
 
@@ -63,8 +57,8 @@ zero and the new side's one call is a **genuinely new** dependency.
 `source_graph_findings._internal_dependency_findings` (the
 `public_api_internal_dependency_added` producer, demonstrated in
 [case160](../case160_public_api_internal_dep_added/README.md)) therefore
-correctly fires here, alongside `graph_reconcile`'s own (COMPATIBLE)
-`declaration_coordinates_shifted` on the helper.
+correctly fires here, alongside `graph_reconcile`'s own
+`declaration_identity_reconciled` on the helper.
 
 The helper is deliberately **private**, for the same reason case196's is: a
 *public* function's mangled-name-moving signature change is itself a real,
@@ -115,18 +109,15 @@ for c in diff_source_graph_findings(old, new):
 
 ```text
 public_api_internal_dependency_added demo::process no internal dependency -> reaches 1 internal decl(s)/type(s)
-declaration_coordinates_shifted demo::detail::helper demo::detail::helper -> demo::detail::helper
+declaration_identity_reconciled demo::detail::helper demo::detail::helper -> demo::detail::helper
 ```
 
-Verdict: COMPATIBLE_WITH_RISK — the RISK-tier verdict is carried entirely by
-`public_api_internal_dependency_added`; `declaration_coordinates_shifted` is a
-COMPATIBLE, pure L5-evidence informational annotation (the reconciled pair's
-own name and declaring-file evidence are both unchanged, so it does not by
-itself indicate risk). Because the identity-perturbing edit lands on a
-`private_header`-visibility declaration, a real binary comparison of this
-exact scenario has no BREAKING/API_BREAK finding to sit alongside them;
-reconciliation only explains/localizes, it never suppresses or replaces
-another finding (ADR-028 D3).
+Verdict: COMPATIBLE_WITH_RISK — both are pure L5-evidence risk annotations.
+Because the identity-perturbing edit lands on a `private_header`-visibility
+declaration, a real binary comparison of this exact scenario has no
+BREAKING/API_BREAK finding to sit alongside them; reconciliation only
+explains/localizes, it never suppresses or replaces another finding
+(ADR-028 D3).
 
 ## Minimum evidence
 
@@ -145,10 +136,9 @@ the match directly. `graph_reconcile._classify_outcome` then compares each
 side's declaring file, recovered from the real `SOURCE_DECLARES` edge
 `build_source_graph` creates from each function's `SourceLocation`: unlike
 case196, the file is *also* unchanged here — neither the `renamed`
-condition (name changed) nor the `moved` condition (file changed) holds, so
-the outcome is classified `declaration_coordinates_shifted` (COMPATIBLE),
-not `declaration_identity_reconciled` (which requires both to have
-changed). The `demo::process` →
+condition (name changed) nor the `moved` condition (file changed) holds
+individually, so the outcome falls to the residual branch and is classified
+`declaration_identity_reconciled`. The `demo::process` →
 `demo::detail::helper` `DECL_CALLS_DECL` edge exists only in the new graph,
 and both graphs mark their call-graph pass as confirmed (so the old side's
 absence is a proven zero, not missing evidence): this satisfies

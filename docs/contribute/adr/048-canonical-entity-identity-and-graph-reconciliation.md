@@ -121,12 +121,47 @@ full graphs, and classifies each removed/added declaration/type node
 - **true add / true remove** — no candidate at all; passes through
   unchanged.
 
-A matched pair is classified into one of three outcomes by comparing the two
+A matched pair is classified into one of four outcomes by comparing the two
 identities' qualified name and declaring-file prefix:
 `declaration_renamed` (qualified name changed, file did not),
-`declaration_moved` (file changed, qualified name did not), or
+`declaration_moved` (file changed, qualified name did not),
 `declaration_identity_reconciled` (both changed, or the match came from
-canonical-id/alias evidence with no clean rename/move split).
+canonical-id/alias evidence with no clean rename/move split — e.g. the raw
+qualified name and declaring file are already identical, but the match
+still rests on the mangled/canonical identity or a differing weaker alias,
+as when a private inline function's signature changes its mangled name
+while its qualified name and header stay fixed), or `declaration_coordinates_shifted`
+(2026-09 amendment, below — neither changed AND the raw qualified name
+provably did differ before normalization, i.e. genuine coordinate-only
+churn, never merely an already-identical name/file).
+
+**2026-09 amendment — `declaration_coordinates_shifted` split out of
+`declaration_identity_reconciled`.** The "neither renamed nor moved"
+fallthrough above originally always produced `declaration_identity_reconciled`
+at `COMPATIBLE_WITH_RISK`, conflating two different situations: a genuine
+"no clean split" match (case197-shaped, still RISK, unchanged by this
+amendment) and a *closure/anonymous-tag's own coordinates shifting* —
+`model.graph_identity.closure_location_free_identity`'s normalized qualified
+name matches on both sides, but the raw text differed only in an embedded
+`:line:col` an unrelated edit elsewhere in the same header perturbed (an
+oneTBB-shaped corpus produced 139 such `declaration_renamed`-mislabeled-as-
+`declaration_identity_reconciled` findings against oneDNN's 3 for a
+comparable corpus size). The prose for `declaration_identity_reconciled`
+("both name and location evidence changed") is simply false for that
+closure-coordinate case, and inflated `risk_changes` for entities that, from
+the model's own normalized-identity point of view, did not change at all.
+`declaration_coordinates_shifted` is `COMPATIBLE` (not RISK): it fires only
+on positive coordinate-churn evidence (the raw qualified name provably
+differed and normalized away) — an already-identical raw name/file is
+*not* sufficient (that stays `declaration_identity_reconciled`, since an
+identical qualified name/file proves nothing about whatever else, like a
+mangled name, might have changed). See `graph_reconcile._classify_outcome`
+and `tests/test_graph_reconcile_closure_rename.py`. This does narrow which
+comparisons emit `declaration_identity_reconciled` for the closure-shaped
+subset specifically — a consumer with a suppression/policy rule keyed to
+`declaration_identity_reconciled` for that subset now sees
+`declaration_coordinates_shifted` instead (`changelog.d/`, this repo's
+standard mechanism for such changes, records it).
 
 **Concrete example that correctly stays unreconciled** (mirrors
 `examples/case195_header_graph_ambiguous_rename_not_reconciled/`): a public
@@ -142,7 +177,7 @@ both pairs stay a true add + true remove, at no loss of soundness (the
 alternative — picking a pairing anyway — would be exactly the "swap when
 ambiguous" false positive ADR-045's own Context section describes).
 
-### D3. New `ChangeKind`s (RISK-tier, non-authoritative)
+### D3. New `ChangeKind`s (RISK-tier except one, non-authoritative)
 
 `declaration_renamed`, `declaration_moved`, `declaration_identity_reconciled`
 — added via the standard four-step procedure (`checker_policy.ChangeKind`,
@@ -152,6 +187,9 @@ detector in `graph_reconcile.diff_graph_reconciliation_findings` wired into
 `tests/test_graph_reconcile.py`). All default to `COMPATIBLE_WITH_RISK` —
 pure enrichment/classification metadata, never `BREAKING`/`API_BREAK`, per
 the scope doc's explicit instruction and ADR-028 D3's authority rule.
+`declaration_coordinates_shifted` (2026-09 amendment above) is the one
+exception: `COMPATIBLE`, since it fires only when the reconciliation itself
+proves the declaration did not materially change.
 
 **The authority rule is structurally unaffected, not just documented**:
 `diff_graph_reconciliation_findings` only *appends* new `Change` objects to

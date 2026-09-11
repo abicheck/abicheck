@@ -4576,7 +4576,7 @@
   "artifact_shape": "fixture-pair",
   "validation_owner": "evidence-cases",
   "related_rules": [
-   "internal-declaration-coordinates-shifted",
+   "internal-declaration-identity-reconciled",
    "public-api-gains-internal-dependency"
   ],
   "rule_slug": null,

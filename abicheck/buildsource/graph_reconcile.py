@@ -415,7 +415,12 @@ def _classify_outcome(
         return OUTCOME_RENAMED
     if moved and not renamed:
         return OUTCOME_MOVED
-    return OUTCOME_RECONCILED if renamed and moved else OUTCOME_COORDINATES_ONLY
+    if renamed and moved:
+        return OUTCOME_RECONCILED
+    # Neither fired: only real churn (raw name differed, normalized equal)
+    # proves nothing else changed -- an already-identical raw name (e.g. an
+    # alias/canonical match where only the mangled id differs) does not.
+    return OUTCOME_COORDINATES_ONLY if old_qn != new_qn else OUTCOME_RECONCILED
 
 
 #: One node kind's structural-context index: context -> the new-side node ids

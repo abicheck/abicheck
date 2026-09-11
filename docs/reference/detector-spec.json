@@ -495,7 +495,7 @@
       "severity": "warning",
       "min_evidence": "L5",
       "doc_slug": "declaration_coordinates_shifted",
-      "examples": "case197_header_graph_identity_reconciled"
+      "examples": ""
     },
     {
       "kind": "declaration_identity_reconciled",
@@ -504,7 +504,7 @@
       "severity": "warning",
       "min_evidence": "L5",
       "doc_slug": "declaration_identity_reconciled",
-      "examples": ""
+      "examples": "case197_header_graph_identity_reconciled"
     },
     {
       "kind": "declaration_moved",
