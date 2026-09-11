@@ -7,7 +7,7 @@ outputs, and the everyday compare recipes. This page is the
 the three ways to feed L3/L4/L5 build/source evidence into a baseline. For
 what the evidence layers *are*, see
 [Evidence & Detectability](../learn/evidence-and-detectability.md); for the
-underlying CLI flags, see [Source-Scan Depth](evidence-depth.md).
+underlying CLI flags, see [Evidence depth](evidence-depth.md).
 
 > **See also.** If this check is one of several a project-wide
 > `.abicheck.yml` `targets:`/`profiles:` block declares (not a standalone

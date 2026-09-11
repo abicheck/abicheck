@@ -31,7 +31,7 @@ CLI/root Action) and point at your header root:
 
 `headers` is one rung on abicheck's evidence-depth ladder
 (`binary` → `headers` → `build` → `source`) — see
-[Source-Scan Depth](../../use/evidence-depth.md#what-each-depth-reaches)
+[Evidence depth](../../use/evidence-depth.md#what-each-depth-reaches)
 for exactly what each rung adds and what it needs, and
 [Evidence & Detectability](../../learn/evidence-and-detectability.md) for
 the underlying model.
@@ -51,7 +51,7 @@ exact field.
 - **You also have a compile database and want build-flag drift detected, or
   full sources and want body-level (inline/template/macro) changes caught**
   → step up to `build`/`source` depth — see
-  [Source-Scan Depth](../../use/evidence-depth.md) and
+  [Evidence depth](../../use/evidence-depth.md) and
   [S7: Source Scan via Compile-DB Replay](source-replay.md).
 - **Your headers include generated (codegen) content that must be present
   for the parse to be meaningful** → S10,
@@ -61,5 +61,5 @@ exact field.
 ## See also
 
 - [Which Scenario Am I?](../index.md) — the full scenario index.
-- [Source-Scan Depth](../../use/evidence-depth.md) — the canonical depth-ladder reference.
+- [Evidence depth](../../use/evidence-depth.md) — the canonical depth-ladder reference.
 - [`check-target` Action Reference](../../reference/check-target.md) — the full report envelope.

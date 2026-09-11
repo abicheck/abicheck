@@ -23,8 +23,8 @@ levels correlate, and exactly where each one goes blind.**
     dial that collects them.
     **Worked example** — this page: one tiny library walked up every level,
     with the actual data.
-    **Flags** — [Source-Scan Depth](../use/evidence-depth.md): the `scan`
-    command reference with recipes.
+    **Flags** — [Evidence depth](../use/evidence-depth.md): the `--depth`
+    flag reference, with recipes.
 
 > For the *framing* (why a change is only a "break" if it breaks a promise)
 > read [ABI/API Compatibility](abi-api-handling.md). **This page is the worked
@@ -508,7 +508,7 @@ and the [`--depth` dial](evidence-and-detectability.md#the-depth-dial-how-much-e
 
 ---
 
-Ready to run it? [Source-Scan Depth](../use/evidence-depth.md) owns the `--depth`
+Ready to run it? [Evidence depth](../use/evidence-depth.md) owns the `--depth`
 choice.
 
 ---
