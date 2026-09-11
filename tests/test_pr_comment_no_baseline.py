@@ -329,6 +329,26 @@ class TestFullySuppressedAuditStillPosts:
         assert should_post(model, "changes") is False
 
 
+class TestFindingFreeBlockedAuditStillPosts:
+    """Codex review, PR #1210, round 8: a no-baseline audit blocked solely
+    on an axis with no itemizable finding at all (e.g. evidence_contract=7
+    -- a pinned --depth whose required evidence never materialized) leaves
+    total_changes/scope_notice/suppressed_count all empty, same as a
+    genuinely clean run -- but the run's own overall exit_code recorded a
+    real block, which --on=changes must surface (the same headline this
+    shape already renders as 🛑, per
+    TestBlockedWithNoItemizableFindingStillGetsABlockingHeadline above)
+    rather than silently producing no comment."""
+
+    def test_should_post_true_on_blocking_alone(self) -> None:
+        report = _audit_report(exit_axes={"evidence_contract": 7}, exit_code=7)
+        model = build_model(report)
+        assert model.total_changes == 0
+        assert model.suppressed_count == 0
+        assert model.no_baseline_audit_blocking is True
+        assert should_post(model, "changes") is True
+
+
 class TestPolicyReflectsTheReportsOwnResolvedValue:
     """Codex review, PR #1210, round 5: the no-baseline report previously
     carried no top-level `policy` key at all, so the comment always

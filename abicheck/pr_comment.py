@@ -1093,4 +1093,16 @@ def should_post(model: CommentModel, on: str) -> bool:
         # previous sticky comment the moment every finding it once showed
         # became suppressed.
         or model.suppressed_count > 0
+        # Codex review, PR #1210, round 8: a no-baseline audit blocked
+        # solely on an axis with no itemizable finding at all (e.g.
+        # evidence_contract=7, a requested evidence depth that could not be
+        # reached) leaves every bucket above empty -- `total_changes`,
+        # `scope_notice`, and `suppressed_count` all read as "nothing
+        # happened" even though the run's own overall `exit_code` recorded
+        # a real block. `no_baseline_audit_blocking` is exactly the signal
+        # `_header()` already uses to render the 🛑 blocking headline
+        # instead of a green one for this shape -- read it here too, so
+        # `--on=changes` can't produce no comment (or delete a previous
+        # sticky one) for a run the headline itself calls blocking.
+        or model.no_baseline_audit_blocking
     )
