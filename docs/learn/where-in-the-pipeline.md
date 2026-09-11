@@ -114,11 +114,19 @@ in [Rollout and Governance](rollout-and-governance.md).
 
 The nightly is where the expensive evidence goes: the *unseeded* deep scan
 (`--depth source` with no `--since`, which replays the whole target), and
-the one-build audit (no `--against`) that lints a single build for
+the one-build audit (`--no-baseline`) that lints a single build for
 accidental exports, private-header leaks and unversioned symbols. This is
 also where `--budget` belongs — it fails loudly on overflow rather than
 shrinking scope — and where `--dry-run` tells you what a depth would cost
 before you spend it.
+
+The one-build audit (verified live against `catalog/cases/
+case145_audit_unversioned_export`'s snapshot — exit 0, one advisory
+`unversioned_exported_symbol` finding):
+
+```bash
+abicheck compare --no-baseline build/libfoo.so -H include/
+```
 
 `--budget` is not wired to `--no-baseline`'s one-sided audit path yet (it
 exits 64 there today) — a nightly deep scan compares against a real

@@ -85,8 +85,10 @@ from CPython's `Misc/stable_abi.toml`) for the target `Py_LIMITED_API` floor:
     by **membership** in the vendored set, not by the name prefix, so these
     clean Limited-API imports are correctly classified as stable.
 
-The `--binary` must be a CPython extension module (or a saved snapshot of one);
-`--abi3` on a plain library is a usage error. The floor is **required** — it is
+Each of `compare`'s two positional inputs (`OLD_INPUT`/`NEW_INPUT` — the same
+self-compared module in the single-module audit above) must be a CPython
+extension module (or a saved snapshot of one); `--abi3` on a plain library is
+a usage error. The floor is **required** — it is
 the target `Py_LIMITED_API` version you supply, so there is no ambiguity about
 what the module is certified against. If the artifact's own SOABI tag says it is
 **version-specific** (`foo.cpython-311-…so`, or a free-threaded `cpython-313t`),
