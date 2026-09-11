@@ -55,6 +55,15 @@ it should read in CHANGELOG.md. Delete the other sections.
   an opt-in `strict=True` parameter for the new config-loading check;
   existing typed-API/YAML-file callers keep the original lenient (warn, not
   raise) behavior.
+- **`compare --no-baseline` now stamps `env_matrix_source_sha256` when a
+  `deployment.runtime_floors` matrix is declared.** Previously this field
+  stayed `None` on a `--no-baseline` audit even when the declared matrix
+  changed the run's findings and verdict, since that path deliberately never
+  passes `env_matrix=` into its own self-diff (to avoid re-running the
+  candidate checks and tripping the ADR-068 D3 identity invariant). The
+  digest is now computed separately, with the identical helper `compare()`
+  uses, so a typed caller can tell an audit governed by a deployment contract
+  apart from one with none.
 
 <!--
 ### Performance

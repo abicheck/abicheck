@@ -243,6 +243,42 @@ class TestRunNoBaselineCompareEnvMatrix:
         no_baseline = run_no_baseline_compare(candidate)
         assert no_baseline.diff.verdict == two_sided.verdict
 
+    def test_env_matrix_declared_floor_stamps_source_sha256(self) -> None:
+        """Codex review (P2): a declared ``deployment.runtime_floors``
+        matrix changes this run's findings/verdict, so a typed caller must
+        be able to tell this audit apart from one with no deployment
+        contract at all. ``run_no_baseline_compare`` deliberately never
+        passes ``env_matrix=`` into its own ``_diff_pair`` call (see that
+        function's docstring), so ``DiffResult.env_matrix_source_sha256``
+        must be stamped separately, using the identical digest a two-sided
+        ``compare(candidate, candidate, env_matrix=...)`` self-compare would
+        produce for the same matrix -- not merely "some non-None value"."""
+        from abicheck.checker import compare
+        from abicheck.environment_matrix import EnvironmentMatrix
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        candidate = self._candidate_requiring("2.34")
+        matrix = EnvironmentMatrix(runtime_floors={"GLIBC": "2.28"})
+
+        two_sided = compare(candidate, candidate, env_matrix=matrix)
+        assert two_sided.env_matrix_source_sha256 is not None
+
+        no_baseline = run_no_baseline_compare(candidate, env_matrix=matrix)
+        assert (
+            no_baseline.diff.env_matrix_source_sha256
+            == two_sided.env_matrix_source_sha256
+        )
+
+    def test_env_matrix_omitted_leaves_source_sha256_none(self) -> None:
+        """Control case for the test above: with no declared floor at all,
+        the digest stays ``None`` -- same as a two-sided ``compare`` given no
+        ``env_matrix``."""
+        from abicheck.workflows.no_baseline_compare import run_no_baseline_compare
+
+        candidate = self._candidate_requiring("2.34")
+        no_baseline = run_no_baseline_compare(candidate)
+        assert no_baseline.diff.env_matrix_source_sha256 is None
+
 
 class TestNoBaselineReport:
     """The report shape: no verdict, no compatibility contribution."""

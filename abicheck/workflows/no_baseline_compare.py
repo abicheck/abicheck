@@ -451,7 +451,23 @@ def run_no_baseline_compare(
     declared ``deployment.runtime_floors`` config was silently ignored for
     a no-baseline audit of a candidate that violates it). Omitted (the
     default): behavior is unchanged from before this parameter existed.
+
+    *env_matrix* is also, separately, stamped onto the returned
+    :class:`~abicheck.checker_types.DiffResult` as
+    ``env_matrix_source_sha256`` -- the same digest ``checker.compare()``
+    would stamp had *env_matrix* been passed to it directly. It cannot be:
+    see above for why this path never runs ``_diff_pair(..., env_matrix=
+    ...)``. Without this, a typed caller reading the result back cannot tell
+    a run governed by a declared ``deployment.runtime_floors`` contract from
+    one with no deployment contract at all, even though the matrix changed
+    this run's findings and verdict (Codex review, P2). Computed with the
+    identical helper ``compare()`` uses (``contract_evidence_collect.
+    content_digest`` over ``dataclasses.asdict(env_matrix)``), as a plain
+    post-hoc field replacement -- not a second comparison.
     """
+    import dataclasses as _dataclasses
+
+    from ..contract_evidence_collect import content_digest
     from .env_matrix_audit import fold as _fold_env_matrix
 
     extra_changes = _fold_env_matrix(None, new, env_matrix)
@@ -469,6 +485,13 @@ def run_no_baseline_compare(
         contract_evaluation=contract_evaluation,
         contract_mode=contract_mode,
     )
+    if env_matrix is not None:
+        diff = _dataclasses.replace(
+            diff,
+            env_matrix_source_sha256=(
+                "sha256:" + content_digest(_dataclasses.asdict(env_matrix))
+            ),
+        )
     record_no_baseline_depth_evidence_contract_error(
         diff, depth, new, is_live=candidate_is_live
     )
