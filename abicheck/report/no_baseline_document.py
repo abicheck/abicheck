@@ -117,7 +117,13 @@ __all__ = [
 #: marking an always-present field optional describes the format less
 #: accurately. Once a release ships an audit document, the rule above
 #: applies with no such escape.
-AUDIT_REPORT_SCHEMA_VERSION = "1.1"
+#:
+#: ``1.2`` -- mirrors ``REPORT_SCHEMA_VERSION``'s ``4.1``/``SCAN_SCHEMA_
+#: VERSION``'s ``1.33`` entries (Codex review, PR #1209): ``run_outcome``
+#: nests the same ``AnalysisAssurance.to_dict()`` compare's report does, so
+#: this always-present block also gains the additive ``schema_staleness_
+#: status`` key.
+AUDIT_REPORT_SCHEMA_VERSION = "1.2"
 
 #: Deprecated alias kept for one release so an in-flight import does not
 #: break; it names the same string. Prefer the name above.
