@@ -153,7 +153,18 @@ from .resolve import (
 #: from ``scan``, which carries none), and a ``disposition_audit`` field on
 #: every target entry that has one. Additive and inert like ``1.4``/``1.6``/
 #: ``1.7``: no *_contribution field, so it never changes ``gate.exit_code``.
-AGGREGATE_SCHEMA_VERSION = "1.9"
+#:
+#: ``1.10`` (Codex review, ADR-068 no-baseline audit fan-in) adds
+#: ``audit_only_profiles`` to every ``profile_matrix`` entry -- the subset of
+#: ``profiles`` whose only reports are completed-but-verdict-less
+#: ``compare --no-baseline`` audits (ADR-068 D2: such an audit's ``verdict``
+#: is always ``null``, so it makes no compatibility claim at all, clean or
+#: otherwise). Additive and inert like ``1.4``/``1.6``/``1.7``/``1.9``: no
+#: *_contribution field, so it never changes ``gate.exit_code`` -- it exists
+#: purely so a consumer can distinguish "checked and clean" from "completed
+#: an audit with no compatibility result" instead of the latter silently
+#: reading as the former.
+AGGREGATE_SCHEMA_VERSION = "1.10"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by

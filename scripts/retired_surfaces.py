@@ -770,7 +770,26 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " on the Action now fails the step outright, naming"
         " mode: compare/compare --no-baseline as the replacement for the"
         " caller's own shape)",
-        ("mode: scan", "scan mode", "`scan` mode"),
+        (
+            "mode: scan",
+            "scan mode",
+            "`scan` mode",
+            # A parenthesized mode-list form ("in every mode
+            # (`compare`/`scan`/`dump`)") names the same retired input value
+            # without ever spelling "mode: scan"/"scan mode" -- a real
+            # occurrence escaped this sweep entirely until this pattern was
+            # added (Codex review, fresh evidence:
+            # docs/integration/scenarios/cross-compilation.md). Anchored to
+            # this codebase's own established mode-listing convention
+            # (`compare`/`scan`/... order, right after "mode (") rather than
+            # a bare "/`scan`/" substring -- the latter also matches many
+            # unrelated, still-live mentions of the CLI's separately-retired
+            # `scan` command listed alongside `dump`/`compare` (ADR-068
+            # Phase 6, entry above), which would have made this pattern
+            # false-positive across a dozen historical/ADR pages that never
+            # mention the Action's mode: scan input at all.
+            "mode (`compare`/`scan`",
+        ),
         frozenset(
             {
                 "AGENTS.md",

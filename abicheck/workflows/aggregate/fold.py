@@ -853,7 +853,22 @@ class AggregateResult:
             "status": "pass" if self.passed else "fail",
             "compatibility": {
                 "verdict": verdict.value if verdict is not None else None,
-                "analyzed_targets": len(self._compat_targets),
+                # Not `len(self._compat_targets)` -- that set is scoped for
+                # *gate* participation (it also includes gated unexpected
+                # targets) and, since the no-baseline audit fan-in widened
+                # `TargetReport.analyzed`, can include a completed audit
+                # whose own `compatibility_verdict` is always `None`
+                # (ADR-068 D2). Counting it here would report
+                # `{"verdict": null, "analyzed_targets": 1}` -- a completed
+                # audit dressed up as an analyzed-but-somehow-verdictless
+                # compatibility result (Codex review, fresh evidence). Only
+                # targets that actually produced a compatibility verdict
+                # belong in this axis's own count.
+                "analyzed_targets": sum(
+                    1
+                    for t in self._compat_targets
+                    if t.compatibility_verdict is not None
+                ),
             },
             "coverage": {
                 "status": self.coverage.value,

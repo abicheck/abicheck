@@ -274,7 +274,7 @@
     "profile_matrix_entry": {
       "type": "object",
       "description": "Added in schema 1.1. One logical target's outcome across every profile that checked it.",
-      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "analysis_incomplete_profiles", "scope_incomplete_profiles", "verdict_by_profile"],
+      "required": ["base_target", "profiles", "affected_profiles", "incomplete_profiles", "unanalyzed_profiles", "contract_incomplete_profiles", "analysis_incomplete_profiles", "scope_incomplete_profiles", "audit_only_profiles", "verdict_by_profile"],
       "properties": {
         "base_target": {"type": "string"},
         "profiles": {
@@ -311,6 +311,11 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "Added in schema 1.8. The third sibling, for ADR-065's scope-completeness axis -- the profile-level view of the top-level scope_completeness.incomplete_targets, using the same predicate (a profile that accepted the gap under scope.on_incomplete: warn is listed too, with a contribution of 0). A profile can appear here and in the other lists at once."
+        },
+        "audit_only_profiles": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Added in schema 1.10. Subset of profiles whose only reports are completed-but-verdict-less `compare --no-baseline` audits (ADR-068 D2: such an audit's verdict is always null, so it makes no compatibility claim at all, clean or otherwise). Distinct from unanalyzed_profiles (nothing ran) and from a profile absent from every list (a real compatibility verdict was checked and found clean) -- folding an audit-only profile into either of those would misrepresent what happened. A profile can appear here and in affected_profiles at once: a gating audit is both affected (its gate blocked) and made no compatibility claim."
         },
         "verdict_by_profile": {
           "type": "object",

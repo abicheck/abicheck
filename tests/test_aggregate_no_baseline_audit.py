@@ -421,3 +421,39 @@ class TestNoBaselineAuditOnlyProfileMatrix:
         r = aggregate_reports_dir(tmp_path, expected=_expect(tid))
         entry_dict = r.profile_matrix[0].to_dict()
         assert entry_dict["audit_only_profiles"] == ["profileA"]
+
+
+class TestNoBaselineAuditCompatibilityAnalyzedCount:
+    """Codex review, fifth round, fresh evidence: `AggregateResult.to_dict()`
+    counted a completed-but-verdict-less audit toward
+    `compatibility.analyzed_targets`, via `len(self._compat_targets)` --
+    that set is scoped for *gate* participation and widened to include such
+    audits when `TargetReport.analyzed` was widened. The public JSON then
+    read `{"verdict": null, "analyzed_targets": 1}`, a completed audit
+    dressed up as an analyzed-but-verdictless compatibility result. Only a
+    target that actually produced a `compatibility_verdict` belongs in this
+    axis's own count."""
+
+    def test_a_clean_audit_alone_reports_zero_analyzed_compatibility_targets(
+        self, tmp_path: Path
+    ):
+        _write_no_baseline_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        d = r.to_dict()
+        assert d["compatibility"]["verdict"] is None
+        assert d["compatibility"]["analyzed_targets"] == 0
+
+    def test_a_real_verdict_still_counts_alongside_an_audit(self, tmp_path: Path):
+        macos_tid = f"{MACOS}@profileA#release@headers"
+        linux_tid = f"{LINUX}@profileA#release@headers"
+        _write_no_baseline_report(
+            tmp_path,
+            MACOS,
+            prefix=f"abi-report-{MACOS}-",
+            report_target_id=macos_tid,
+        )
+        _write_report(tmp_path, linux_tid, "COMPATIBLE")
+        r = aggregate_reports_dir(tmp_path, expected=_expect(macos_tid, linux_tid))
+        d = r.to_dict()
+        # The one real verdict counts; the audit-only completion does not.
+        assert d["compatibility"]["analyzed_targets"] == 1
