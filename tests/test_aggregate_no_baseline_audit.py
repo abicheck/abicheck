@@ -484,9 +484,7 @@ class TestNoBaselineAuditTargetDictExposesCompletionSeparateFromVerdict:
     `completed_without_compatibility_verdict` (schema 1.11) exposes the
     distinction directly, present only when true."""
 
-    def test_a_completed_audit_marks_the_target_dict_explicitly(
-        self, tmp_path: Path
-    ):
+    def test_a_completed_audit_marks_the_target_dict_explicitly(self, tmp_path: Path):
         _write_no_baseline_report(tmp_path, LINUX)
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         d = r.targets[0].to_dict()
@@ -494,9 +492,7 @@ class TestNoBaselineAuditTargetDictExposesCompletionSeparateFromVerdict:
         assert d["compatibility_verdict"] is None
         assert d["completed_without_compatibility_verdict"] is True
 
-    def test_a_real_compatibility_verdict_does_not_set_the_flag(
-        self, tmp_path: Path
-    ):
+    def test_a_real_compatibility_verdict_does_not_set_the_flag(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         d = r.targets[0].to_dict()
@@ -564,21 +560,15 @@ class TestNoBaselineAuditRejectsAMalformedRunOutcome:
             payload["run_outcome"] = run_outcome
         return payload
 
-    def test_a_missing_run_outcome_is_unavailable_not_analyzed(
-        self, tmp_path: Path
-    ):
-        _write_raw_no_baseline_report(
-            tmp_path, LINUX, self._payload(_ABSENT)
-        )
+    def test_a_missing_run_outcome_is_unavailable_not_analyzed(self, tmp_path: Path):
+        _write_raw_no_baseline_report(tmp_path, LINUX, self._payload(_ABSENT))
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert r.targets[0].analyzed is False
         assert r.targets[0].completed_without_compatibility_verdict is False
         assert r.targets[0].reason is not None
         assert "run_outcome" in r.targets[0].reason
 
-    def test_a_run_outcome_missing_required_keys_is_unavailable(
-        self, tmp_path: Path
-    ):
+    def test_a_run_outcome_missing_required_keys_is_unavailable(self, tmp_path: Path):
         # Only `operational` -- the one field the old, insufficient check
         # actually read -- is present; every other required key is absent.
         _write_raw_no_baseline_report(
@@ -588,12 +578,8 @@ class TestNoBaselineAuditRejectsAMalformedRunOutcome:
         assert r.targets[0].analyzed is False
         assert r.targets[0].completed_without_compatibility_verdict is False
 
-    def test_a_run_outcome_that_is_not_an_object_is_unavailable(
-        self, tmp_path: Path
-    ):
-        _write_raw_no_baseline_report(
-            tmp_path, LINUX, self._payload("not-a-mapping")
-        )
+    def test_a_run_outcome_that_is_not_an_object_is_unavailable(self, tmp_path: Path):
+        _write_raw_no_baseline_report(tmp_path, LINUX, self._payload("not-a-mapping"))
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert r.targets[0].analyzed is False
         assert r.targets[0].completed_without_compatibility_verdict is False
@@ -620,3 +606,92 @@ class TestNoBaselineAuditRejectsAMalformedRunOutcome:
         r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
         assert r.targets[0].analyzed is True
         assert r.targets[0].completed_without_compatibility_verdict is True
+
+
+class TestNoBaselineAuditDispositionAuditFoldsIntoAggregate:
+    """Codex review, fresh evidence: a no-baseline audit's own
+    ``suppressed_findings`` (with full rule provenance) was already real,
+    but nothing on this report shape fed the generic root-level
+    ``disposition_audit`` block `workflows.aggregate.disposition_axis.
+    disposition_audit_block` reads for every report shape -- so a project
+    audit that suppressed every one of its findings still folded into
+    `abicheck aggregate`'s own ledger as `detected_total: 0`/
+    `suppressed: 0`, losing the rule provenance the source report actually
+    recorded. `report/no_baseline.py::compute_no_baseline_document` (schema
+    1.4) now attaches a real `disposition_audit` block."""
+
+    _RUN_OUTCOME = {
+        "schema_version": RUN_OUTCOME_SCHEMA_VERSION,
+        "compatibility": None,
+        "assurance": None,
+        "gate": "none",
+        "operational": "none",
+        "lifecycle": "existing",
+        "scope": "complete",
+    }
+
+    def test_a_fully_suppressed_audit_is_counted_not_zeroed(self, tmp_path: Path):
+        _write_raw_no_baseline_report(
+            tmp_path,
+            LINUX,
+            {
+                "audit_report_schema_version": "1.4",
+                "no_baseline": True,
+                "library": "libfoo.so",
+                "verdict": None,
+                "changes": [],
+                "findings": [],
+                "suppressed_findings": [
+                    {"kind": "unversioned_exported_symbol", "symbol": "foo"}
+                ],
+                "exit_axes": {
+                    "audit_gate": 0,
+                    "contract_coverage": 0,
+                    "analysis_assurance": 0,
+                    "evidence_contract": 0,
+                    "incomplete_scope": 0,
+                    "no_comparison_completed": 0,
+                },
+                "exit_code": 0,
+                "contract_coverage_exit_contribution": 0,
+                "policy": "strict_abi",
+                "run_outcome": self._RUN_OUTCOME,
+                "disposition_audit": {
+                    "detected_total": 1,
+                    "effective_total": 0,
+                    "counts": {
+                        "gating": 0,
+                        "non_gating": 0,
+                        "suppressed": 1,
+                        "out_of_contract": 0,
+                        "unresolved_relevance": 0,
+                        "deduplicated": 0,
+                    },
+                    "rules": [
+                        {
+                            "rule": {"reason": "suppress-everything test rule"},
+                            "matched_count": 1,
+                        }
+                    ],
+                },
+            },
+        )
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].disposition_audit is not None
+        audit = r.targets[0].disposition_audit
+        assert audit["detected_total"] == 1
+        assert audit["counts"]["suppressed"] == 1
+        # The honest "no disposition_audit at all" counterpart must NOT
+        # list this target -- it carried a real block.
+        assert LINUX not in r.disposition_audit_missing_targets
+
+    def test_an_audit_with_no_disposition_audit_at_all_is_named_missing(
+        self, tmp_path: Path
+    ):
+        # A pre-1.4 audit document (or any report shape that never emits
+        # this block) must be honestly named in
+        # `disposition_audit_missing_targets`, not silently folded as zero.
+        _write_no_baseline_report(tmp_path, LINUX)
+        r = aggregate_reports_dir(tmp_path, expected=_expect(LINUX))
+        assert r.targets[0].disposition_audit is None
+        assert LINUX in r.disposition_audit_missing_targets
