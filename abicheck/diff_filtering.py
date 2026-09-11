@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections import deque
 
@@ -38,6 +39,7 @@ from .diff_symbols import _PUBLIC_VIS, _public_functions
 from .finding_identity import resolve_change_identity
 from .model import AbiSnapshot, Function
 from .model.change_catalog.kinds import ChangeKind
+from .model.identity import EntityId
 
 # Back-compat aliases: the ADR-063 Phase 2/10 migrations moved the
 # opaque-type indices and their construction into their `compare/` owner,
@@ -348,8 +350,12 @@ def _enrich_source_locations(
     """Fill in source_location and qualified_name on Changes from the model data."""
     type_loc, func_loc, var_loc = _build_location_index(old, new)
 
-    old_qualified = _qualified_functions_by_mangled(old) | _qualified_variables_by_mangled(old)
-    new_qualified = _qualified_functions_by_mangled(new) | _qualified_variables_by_mangled(new)
+    old_qualified = _qualified_functions_by_mangled(
+        old
+    ) | _qualified_variables_by_mangled(old)
+    new_qualified = _qualified_functions_by_mangled(
+        new
+    ) | _qualified_variables_by_mangled(new)
     old_enum_names = _enum_canonical_names(old)
     new_enum_names = _enum_canonical_names(new)
 
@@ -586,7 +592,9 @@ def _enrich_affected_symbols(
     matcher = _SubstringMatcher(affected_types)
 
     # Build type→functions mapping from old snapshot, storing both demangled (display) and mangled (appcompat matching) names (FIX-A Part 3).
-    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub, matcher)
+    type_to_funcs, type_to_mangled = _build_type_to_funcs(
+        affected_types, old_pub, matcher
+    )
 
     # Also check if types are embedded in struct fields used by functions (Container has a Leaf field → functions taking Container* are affected).
     type_embeds = _build_type_embed_index(affected_types, old, matcher)
@@ -1533,7 +1541,9 @@ def _dedup_cross_kind(
 
 
 def _deduplicate_ast_dwarf(
-    changes: list[Change], old: AbiSnapshot | None = None, new: AbiSnapshot | None = None
+    changes: list[Change],
+    old: AbiSnapshot | None = None,
+    new: AbiSnapshot | None = None,
 ) -> list[Change]:
     """Remove DWARF findings that duplicate an AST finding for the same symbol.
 
@@ -1753,6 +1763,41 @@ _OPAQUE_DOWNGRADEABLE: frozenset[ChangeKind] = frozenset(
 )
 
 
+def _resolve_struct_change_entity_id(
+    c: Change, old: AbiSnapshot, new: AbiSnapshot
+) -> Change:
+    """Borrow a stable identity for *c* from header-AST ``RecordType`` data,
+    when *c* itself carries none.
+
+    ``diff_platform``'s DWARF struct-layout diff (the production source of
+    the ``STRUCT_*`` changes :func:`_downgrade_opaque_struct_changes` acts
+    on) builds its ``Change``s from ``StructLayout`` -- a DWARF-only model
+    with no ``entity_id`` field -- so those changes never carry one
+    (Codex review, PR #1218, round 5). Real identity for the *same* symbol
+    can still be available on the header-AST side: ``AbiSnapshot.types``
+    is populated by the header-AST backend independently of DWARF's own
+    struct-layout facts, so a hybrid/mixed-evidence dump commonly has both.
+
+    Only ever narrows to a *single, unambiguous* candidate: if more than
+    one distinct ``entity_id`` resolves for *c*'s own symbol (its exact
+    spelling or its depth-aware bare name) across ``old.types``/
+    ``new.types`` combined, or none at all, *c* is returned unchanged --
+    this never guesses under ambiguity, leaving the always-safe spelling
+    tier as the fallback exactly as before this bridge existed."""
+    if c.entity_id is not None:
+        return c
+    bare = depth_aware_bare_name(c.symbol)
+    candidate_names = {c.symbol} if bare == c.symbol else {c.symbol, bare}
+    candidates: set[EntityId] = set()
+    for snap in (old, new):
+        for t in snap.types:
+            if t.name in candidate_names and t.entity_id is not None:
+                candidates.add(t.entity_id)
+    if len(candidates) == 1:
+        return dataclasses.replace(c, entity_id=next(iter(candidates)))
+    return c
+
+
 def _downgrade_opaque_struct_changes(
     changes: list[Change],
     old: AbiSnapshot,
@@ -1782,6 +1827,28 @@ def _downgrade_opaque_struct_changes(
     — this index is not the product of a paired old/new ``intersect()``, so
     it carries no proof of completeness that would license narrowing a miss
     into "not opaque").
+
+    **The stable tier needs a real ``Change.entity_id`` to fire at all**
+    (Codex review, PR #1218, round 5): the production DWARF struct-layout
+    diff (``diff_platform._struct_size_and_alignment_changes``/
+    ``_removed_field_changes``/``_existing_field_changes``) builds its
+    ``Change``s from ``StructLayout`` — a DWARF-only model with no
+    ``entity_id`` field at all — so those changes never carry one when they
+    reach this function. Populating DWARF's own layout parser with real
+    identity is a separate, much larger undertaking (this is the same,
+    already-documented "DWARF identity unimplemented" producer gap
+    ``docs/_meta/one-semantic-pipeline-status.yaml``'s ``identity`` concept
+    already records), out of this migration's scope. What *is* in scope:
+    when the SAME snapshot pair also carries header-AST ``RecordType``
+    data for the changed symbol (a hybrid/mixed-evidence dump — the common
+    case, since ``dumper.py`` populates ``AbiSnapshot.types`` from the
+    header-AST backend independently of DWARF's own struct-layout facts),
+    that data already carries real identity. ``_resolve_struct_change_
+    entity_id`` bridges the two: an identity-less ``Change`` borrows the
+    unique stable id its own bare or qualified symbol unambiguously
+    resolves to among ``old.types``/``new.types`` — never guessing under
+    ambiguity (more than one distinct id resolves, or none at all), which
+    leaves the always-safe spelling tier as the fallback exactly as before.
     """
     index = _find_opaque_struct_types(old, new)
     if not index:
@@ -1789,7 +1856,8 @@ def _downgrade_opaque_struct_changes(
 
     result: list[Change] = []
     for c in changes:
-        if c.kind in _OPAQUE_DOWNGRADEABLE and index.contains(c, c.symbol):
+        lookup_c = _resolve_struct_change_entity_id(c, old, new)
+        if c.kind in _OPAQUE_DOWNGRADEABLE and index.contains(lookup_c, c.symbol):
             # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
             result.append(
                 make_change(

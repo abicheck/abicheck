@@ -37,6 +37,7 @@ from abicheck.diff_filtering import (
     _downgrade_opaque_type_changes,
     _find_by_value_types,
     _find_opaque_types,
+    _resolve_struct_change_entity_id,
 )
 from abicheck.model import AbiSnapshot, Function, Param, RecordType, TypeField, Variable
 from abicheck.model.identity import (
@@ -1093,3 +1094,87 @@ class TestFindOpaqueStructTypesStableTierSoundness:
             find_opaque_struct_types(old, new).stable
             == find_opaque_struct_types(old_shuffled, new_shuffled).stable
         )
+
+
+# -- _resolve_struct_change_entity_id: bridging DWARF changes to identity ---
+
+
+class TestResolveStructChangeEntityId:
+    """The production DWARF struct-layout diff builds its own ``Change``s
+    with no ``entity_id`` at all (``StructLayout`` has no such field) --
+    Codex review round 5 on PR #1218 found that without this bridge, the
+    stable tier this migration adds never actually fires for that real
+    caller; only the hand-constructed test changes carrying an explicit
+    ``entity_id`` exercised it."""
+
+    def test_borrows_the_unambiguous_id_for_an_identity_less_change(self) -> None:
+        old = _snap([_record("Handle", is_opaque=True, entity_id=_STABLE_ID)])
+        new = _snap([_record("Handle", is_opaque=True, entity_id=_STABLE_ID)])
+        change = _struct_size_change("Handle")  # no entity_id -- the DWARF shape
+        resolved = _resolve_struct_change_entity_id(change, old, new)
+        assert resolved.entity_id == _STABLE_ID
+
+    def test_the_bridge_is_what_lets_the_qualification_mismatch_actually_suppress(
+        self,
+    ) -> None:
+        """The PR's own headline scenario, but with a *production-shaped*
+        change carrying no ``entity_id`` of its own (as a real DWARF-derived
+        ``Change`` would) -- the bridge must resolve identity from the
+        header-AST ``RecordType`` data for the qualification mismatch to
+        close at all."""
+        old = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        new = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        # A DWARF-only change: no entity_id, and its own symbol happens to
+        # be rendered qualified (a real producer-spelling difference) even
+        # though RecordType.name is bare.
+        change = _struct_size_change("ns::Handle")
+        out = _downgrade_opaque_struct_changes([change], _snap([old]), _snap([new]))
+        assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
+
+    def test_declines_to_guess_under_ambiguity(self) -> None:
+        """Two declarations named "Handle" resolve two different ids --
+        the bridge must not guess either one; the change is returned
+        unchanged, leaving the always-safe spelling tier as the only
+        path to a match."""
+        old = _snap(
+            [
+                _record("Handle", is_opaque=True, entity_id=_STABLE_ID),
+                _record("Handle", is_opaque=True, entity_id=_OTHER_STABLE_ID),
+            ]
+        )
+        new = _snap(
+            [
+                _record("Handle", is_opaque=True, entity_id=_STABLE_ID),
+                _record("Handle", is_opaque=True, entity_id=_OTHER_STABLE_ID),
+            ]
+        )
+        change = _struct_size_change("Handle")
+        resolved = _resolve_struct_change_entity_id(change, old, new)
+        assert resolved.entity_id is None
+        assert resolved is change
+
+    def test_a_change_with_its_own_entity_id_is_returned_unchanged(self) -> None:
+        """A change that already carries an identity (a header-AST-sourced
+        producer, or an already-bridged copy) is passed through verbatim --
+        never overwritten by a lookup result."""
+        old = _snap([_record("Handle", is_opaque=True, entity_id=_STABLE_ID)])
+        new = _snap([_record("Handle", is_opaque=True, entity_id=_STABLE_ID)])
+        change = _struct_size_change("Handle", entity_id=_OTHER_STABLE_ID)
+        resolved = _resolve_struct_change_entity_id(change, old, new)
+        assert resolved is change
+
+    def test_an_unmatched_changes_own_identity_is_never_leaked_into_the_result(
+        self,
+    ) -> None:
+        """The bridge is only ever consulted for the membership *check* --
+        a change that does not qualify for downgrading must come back out
+        of :func:`_downgrade_opaque_struct_changes` as the exact same
+        object, not a copy carrying a borrowed ``entity_id`` it never had."""
+        old = _record("Handle", is_opaque=True, entity_id=_STABLE_ID)
+        wrapper = _record("Wrapper", fields=[TypeField(name="inner", type="Handle")])
+        old_snap = _snap([old, wrapper])
+        new_snap = _snap([old, wrapper])
+        change = _struct_size_change("Handle")  # embedded by value -- not downgraded
+        out = _downgrade_opaque_struct_changes([change], old_snap, new_snap)
+        assert out[0] is change
+        assert out[0].entity_id is None

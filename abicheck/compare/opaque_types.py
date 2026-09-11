@@ -446,6 +446,24 @@ def find_opaque_struct_types(old: AbiSnapshot, new: AbiSnapshot) -> OpaqueTypeIn
     # this same spelling coincidence the way the pre-migration bare
     # ``c.symbol`` comparison did -- would then downgrade a real, qualified
     # layout-change finding for the embedded type.
+    #
+    # A round-5 review comment proposed narrowing a *bare* candidate's own
+    # match to the ``::``-excluding matcher (rejecting a match immediately
+    # preceded by ``::``), to stop an unrelated ``other::Handle`` field from
+    # wrongly excluding a bare ``"Handle"`` candidate as embedded. That
+    # narrowing was tried and reverted: it is textually indistinguishable
+    # from the round-3 case it would break -- a field rendered ``ns::Handle``
+    # against the *same* bare-named opaque candidate is not distinguishable,
+    # by string matching alone, from an unrelated ``other::Handle`` -- and
+    # the two failure directions are not symmetric. Under-matching here
+    # (round 5's direction) risks *silently suppressing* a genuine,
+    # consumer-visible layout break (the round-3 false negative this
+    # migration exists to close); over-matching (today's behavior) risks
+    # only an extra, spurious non-suppression -- a struct-size finding a
+    # human can still see and dismiss. AGENTS.md's "weaker evidence narrows
+    # conclusions... never upgrades to a clean compatibility claim" already
+    # states the correct default for this exact ambiguity: prefer not
+    # suppressing when the two directions cannot be told apart.
     non_opaque_old = [t for t in old.types if not t.is_opaque]
     non_opaque_new = [t for t in new.types if not t.is_opaque]
     embedded_types: set[str] = set()
