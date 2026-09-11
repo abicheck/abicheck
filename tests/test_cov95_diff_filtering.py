@@ -936,9 +936,9 @@ def test_determine_confidence_level_binary_only_low():
 
 def test_downgrade_opaque_struct_changes_rewrites_to_compatible():
     # Opaque in both snapshots, a genuine addition → rewritten to a
-    # compatible add (the one kind ``_downgrade_opaque_struct_changes``
-    # still relabels; see the size-change sibling test below for the
-    # non-addition case).
+    # compatible add. Non-addition kinds are excluded, not relabelled --
+    # see TestDowngradeOpaqueStructChangesNeverFabricatesAnAddition in
+    # test_opaque_struct_identity_tiers.py for that (parametrized) coverage.
     old = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
     new = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
     changes = [
@@ -957,29 +957,6 @@ def test_downgrade_opaque_struct_changes_rewrites_to_compatible():
     assert out[0].kind == ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE
     assert out[0].description.startswith("(opaque struct)")
     assert out[0].old_value == "8"
-
-
-def test_downgrade_opaque_struct_changes_size_change_excluded_not_relabelled():
-    # Opaque in both snapshots, a non-addition structural change (size) →
-    # excluded outright (not rewritten into a fabricated addition; Codex
-    # review, PR #1218, round 10).
-    old = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
-    new = _snap(types=[RecordType(name="Op", kind="struct", is_opaque=True)])
-    changes = [
-        Change(
-            kind=ChangeKind.STRUCT_SIZE_CHANGED,
-            symbol="Op",
-            description="grew",
-            old_value="8",
-            new_value="16",
-            source_location="x.h:1",
-        )
-    ]
-    out, filtered = _downgrade_opaque_struct_changes(changes, old, new)
-    assert not out
-    assert len(filtered) == 1
-    assert filtered[0].kind == ChangeKind.STRUCT_SIZE_CHANGED
-    assert filtered[0] is changes[0]
 
 
 def test_downgrade_opaque_struct_changes_embedded_by_value_kept():

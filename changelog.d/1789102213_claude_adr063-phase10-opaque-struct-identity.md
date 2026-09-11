@@ -34,3 +34,14 @@
   misclassified as absent from the other snapshot, letting an opaque
   declaration's stable id enter the index and then get borrowed by that
   same counterpart, suppressing a real layout break.
+- **`find_opaque_struct_types`'s stable tier no longer lets one visible
+  duplicate declaration under an id be silently discarded by another,
+  order-dependently.** A snapshot can legitimately carry more than one
+  declaration resolving to the same `StableEntityId` (an ODR-duplicate
+  pair `SemanticIR.occurrences` deliberately never collapses, or an
+  unreconciled header-AST TU-merge pair), and such a pair can disagree on
+  `is_opaque`. A last-write-wins `dict[StableEntityId, RecordType]` kept
+  whichever declaration was iterated last, making the opacity verdict for
+  that id depend on iteration/insertion order; every declaration under an
+  id, on each side that has one, is now required to agree before the id
+  is treated as opaque.
